@@ -12,11 +12,15 @@ use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
 use crate::db::model::SshKey;
 use crate::external_api::params;
+use crate::external_api::shared;
+use anyhow::Context;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
+use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::UpdateResult;
 use uuid::Uuid;
 
 impl super::Nexus {
@@ -70,6 +74,53 @@ impl super::Nexus {
                 .fetch_for(authz::Action::Delete)
                 .await?;
         self.db_datastore.silo_delete(opctx, &authz_silo, &db_silo).await
+    }
+
+    // Role assignments
+
+    pub async fn silo_fetch_policy(
+        &self,
+        opctx: &OpContext,
+        silo_name: &Name,
+    ) -> LookupResult<shared::Policy<authz::SiloRoles>> {
+        let (.., authz_silo) = LookupPath::new(opctx, &self.db_datastore)
+            .silo_name(silo_name)
+            .lookup_for(authz::Action::ReadPolicy)
+            .await?;
+        let role_assignments = self
+            .db_datastore
+            .role_assignment_fetch_all(opctx, &authz_silo)
+            .await?
+            .into_iter()
+            .map(|r| r.try_into().context("parsing database role assignment"))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| Error::internal_error(&format!("{:#}", error)))?;
+        Ok(shared::Policy { role_assignments })
+    }
+
+    pub async fn silo_update_policy(
+        &self,
+        opctx: &OpContext,
+        silo_name: &Name,
+        policy: &shared::Policy<authz::SiloRoles>,
+    ) -> UpdateResult<shared::Policy<authz::SiloRoles>> {
+        let (.., authz_silo) = LookupPath::new(opctx, &self.db_datastore)
+            .silo_name(silo_name)
+            .lookup_for(authz::Action::ModifyPolicy)
+            .await?;
+
+        let role_assignments = self
+            .db_datastore
+            .role_assignment_replace_all(
+                opctx,
+                &authz_silo,
+                &policy.role_assignments,
+            )
+            .await?
+            .into_iter()
+            .map(|r| r.try_into())
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(shared::Policy { role_assignments })
     }
 
     // Users

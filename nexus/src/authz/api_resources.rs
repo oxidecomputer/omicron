@@ -361,6 +361,29 @@ authz_resource! {
     polar_snippet = Custom,
 }
 
+impl ApiResourceWithRolesType for Project {
+    type AllowedRoles = ProjectRoles;
+}
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    DeserializeFromStr,
+    Display,
+    Eq,
+    FromStr,
+    PartialEq,
+    SerializeDisplay,
+    JsonSchema,
+)]
+#[display(style = "kebab-case")]
+pub enum ProjectRoles {
+    Admin,
+    Collaborator,
+    Viewer,
+}
+
 authz_resource! {
     name = "Disk",
     parent = "Project",
@@ -457,6 +480,29 @@ authz_resource! {
     primary_key = Uuid,
     roles_allowed = true,
     polar_snippet = Custom,
+}
+
+impl ApiResourceWithRolesType for Silo {
+    type AllowedRoles = SiloRoles;
+}
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    DeserializeFromStr,
+    Display,
+    Eq,
+    FromStr,
+    PartialEq,
+    SerializeDisplay,
+    JsonSchema,
+)]
+#[display(style = "kebab-case")]
+pub enum SiloRoles {
+    Admin,
+    Collaborator,
+    Viewer,
 }
 
 authz_resource! {

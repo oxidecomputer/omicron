@@ -11,9 +11,12 @@ use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
 use crate::defaults;
 use crate::external_api::params;
+use crate::external_api::shared;
+use anyhow::Context;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
+use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
@@ -144,5 +147,56 @@ impl super::Nexus {
             .lookup_for(authz::Action::Delete)
             .await?;
         self.db_datastore.project_delete(opctx, &authz_project).await
+    }
+
+    // Role assignments
+
+    pub async fn project_fetch_policy(
+        &self,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
+    ) -> LookupResult<shared::Policy<authz::ProjectRoles>> {
+        let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .lookup_for(authz::Action::ReadPolicy)
+            .await?;
+        let role_assignments = self
+            .db_datastore
+            .role_assignment_fetch_all(opctx, &authz_project)
+            .await?
+            .into_iter()
+            .map(|r| r.try_into().context("parsing database role assignment"))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| Error::internal_error(&format!("{:#}", error)))?;
+        Ok(shared::Policy { role_assignments })
+    }
+
+    pub async fn project_update_policy(
+        &self,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
+        policy: &shared::Policy<authz::ProjectRoles>,
+    ) -> UpdateResult<shared::Policy<authz::ProjectRoles>> {
+        let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .lookup_for(authz::Action::ModifyPolicy)
+            .await?;
+
+        let role_assignments = self
+            .db_datastore
+            .role_assignment_replace_all(
+                opctx,
+                &authz_project,
+                &policy.role_assignments,
+            )
+            .await?
+            .into_iter()
+            .map(|r| r.try_into())
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(shared::Policy { role_assignments })
     }
 }

@@ -27,11 +27,11 @@ hyper = "0.14"
 internal-dns-client = { path = "../internal-dns-client" }
 ipnetwork = "0.18"
 lazy_static = "1.4.0"
-libc = "0.2.123"
+libc = "0.2.125"
 macaddr = { version = "1.0.1", features = [ "serde_std" ]}
 mime_guess = "2.0.4"
 newtype_derive = "0.1.6"
-num-integer = "0.1.44"
+num-integer = "0.1.45"
 oso = "0.26"
 oximeter-client = { path = "../oximeter-client" }
 oximeter-db = { path = "../oximeter/db/" }
@@ -44,7 +44,7 @@ reqwest = { version = "0.11.8", features = [ "json" ] }
 ring = "0.16"
 serde_json = "1.0"
 serde_urlencoded = "0.7.1"
-serde_with = "1.12.1"
+serde_with = "1.13.0"
 sled-agent-client = { path = "../sled-agent-client" }
 slog-dtrace = "0.2"
 structopt = "0.3"

@@ -23,7 +23,7 @@ use omicron_common::api::external::RouterRouteCreateParams;
 use omicron_common::api::external::RouterRouteUpdateParams;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_nexus::authn;
-use omicron_nexus::authz::OrganizationRoles;
+use omicron_nexus::authz;
 use omicron_nexus::external_api::params;
 use omicron_nexus::external_api::shared;
 use std::net::IpAddr;
@@ -39,6 +39,8 @@ lazy_static! {
     pub static ref DEMO_SILO_NAME: Name = "demo-silo".parse().unwrap();
     pub static ref DEMO_SILO_URL: String =
         format!("/silos/{}", *DEMO_SILO_NAME);
+    pub static ref DEMO_SILO_POLICY_URL: String =
+        format!("/silos/{}/policy", *DEMO_SILO_NAME);
     pub static ref DEMO_SILO_CREATE: params::SiloCreate =
         params::SiloCreate {
             identity: IdentityMetadataCreateParams {
@@ -68,6 +70,8 @@ lazy_static! {
     pub static ref DEMO_PROJECT_NAME: Name = "demo-project".parse().unwrap();
     pub static ref DEMO_PROJECT_URL: String =
         format!("{}/{}", *DEMO_ORG_PROJECTS_URL, *DEMO_PROJECT_NAME);
+    pub static ref DEMO_PROJECT_POLICY_URL: String =
+        format!("{}/policy", *DEMO_PROJECT_URL);
     pub static ref DEMO_PROJECT_URL_DISKS: String =
         format!("{}/disks", *DEMO_PROJECT_URL);
     pub static ref DEMO_PROJECT_URL_IMAGES: String =
@@ -386,6 +390,20 @@ lazy_static! {
                 AllowedMethod::Delete,
             ],
         },
+        VerifyEndpoint {
+            url: &*DEMO_SILO_POLICY_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Put(
+                    serde_json::to_value(
+                        &shared::Policy::<authz::SiloRoles> {
+                            role_assignments: vec![]
+                        }
+                    ).unwrap()
+                ),
+            ],
+        },
 
 
         /* Organizations */
@@ -422,9 +440,11 @@ lazy_static! {
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Put(
-                    serde_json::to_value(&shared::Policy::<OrganizationRoles> {
-                        role_assignments: vec![]
-                    }).unwrap()
+                    serde_json::to_value(
+                        &shared::Policy::<authz::OrganizationRoles> {
+                            role_assignments: vec![]
+                        }
+                    ).unwrap()
                 ),
             ],
         },
@@ -462,6 +482,20 @@ lazy_static! {
                             description: Some("different".to_string())
                         },
                     }).unwrap()
+                ),
+            ],
+        },
+        VerifyEndpoint {
+            url: &*DEMO_PROJECT_POLICY_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Put(
+                    serde_json::to_value(
+                        &shared::Policy::<authz::ProjectRoles> {
+                            role_assignments: vec![]
+                        }
+                    ).unwrap()
                 ),
             ],
         },
