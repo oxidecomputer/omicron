@@ -62,7 +62,7 @@ async fn test_update_end_to_end() {
     let mut api = ApiDescription::new();
     api.register(static_content).unwrap();
     let context = FileServerContext { base: tuf_repo.path().to_owned() };
-    let logctx = LogContext::new("test_update_end_to_end", &config.log);
+    let logctx = LogContext::new("test_update_end_to_end", &config.pkg.log);
     let server =
         HttpServerStarter::new(&dropshot_config, api, context, &logctx.log)
             .unwrap()
@@ -70,7 +70,7 @@ async fn test_update_end_to_end() {
     let local_addr = server.local_addr();
 
     // stand up the test environment
-    config.updates = Some(UpdatesConfig {
+    config.pkg.updates = Some(UpdatesConfig {
         trusted_root: tuf_repo.path().join("metadata").join("1.root.json"),
         default_base_url: format!("http://{}/", local_addr),
     });

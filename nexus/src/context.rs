@@ -20,6 +20,7 @@ use authn::external::HttpAuthnScheme;
 use chrono::{DateTime, Duration, Utc};
 use omicron_common::api::external::Error;
 use omicron_common::address::{Ipv6Subnet, AZ_PREFIX, COCKROACH_PORT};
+use omicron_common::nexus_config;
 use omicron_common::postgres_config::PostgresConfigWithUrl;
 use oximeter::types::ProducerRegistry;
 use oximeter_instruments::http::{HttpService, LatencyTracker};
@@ -27,7 +28,6 @@ use slog::Logger;
 use std::collections::BTreeMap;
 use std::env;
 use std::fmt::Debug;
-use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -142,22 +142,22 @@ impl ServerContext {
             .map_err(|e| format!("Failed to create DNS resolver: {}", e.to_string()))?;
 
         // Set up DB pool
-        let address = if let Some(address) = config.runtime.database_address {
-            address
-        } else {
-            let response = resolver.lookup_ip("cockroachdb.")
-                .await
-                .map_err(|e| format!("Failed to lookup IP: {}", e.to_string()))?;
-            let address = response
-                .iter()
-                .next()
-                .ok_or_else(|| "no addresses returned from DNS resolver".to_string())?;
-            SocketAddr::new(address, COCKROACH_PORT)
+        let url = match &config.runtime.database {
+            nexus_config::Database::FromUrl { url } => url.clone(),
+            nexus_config::Database::FromDns => {
+                let response = resolver.lookup_ip("cockroachdb.")
+                    .await
+                    .map_err(|e| format!("Failed to lookup IP: {}", e.to_string()))?;
+                let address = response
+                    .iter()
+                    .next()
+                    .ok_or_else(|| "no addresses returned from DNS resolver".to_string())?;
+                PostgresConfigWithUrl::from_str(
+                        &format!("postgresql://root@[{}]:{}/omicron?sslmode=disable", address, COCKROACH_PORT)
+                    )
+                    .map_err(|e| format!("Cannot parse Postgres URL: {}", e.to_string()))?
+            },
         };
-        let url = PostgresConfigWithUrl::from_str(
-                &format!("postgresql://root@{}/omicron?sslmode=disable", address)
-            )
-            .map_err(|e| format!("Cannot parse Postgres URL: {}", e.to_string()))?;
         let pool = db::Pool::new(&db::Config {
             url
         });

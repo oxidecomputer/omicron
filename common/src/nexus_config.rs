@@ -6,17 +6,19 @@
 //! at runtime.
 
 use super::address::{Ipv6Subnet, RACK_PREFIX};
+use super::postgres_config::PostgresConfigWithUrl;
 use dropshot::ConfigDropshot;
 use serde::{Deserialize, Serialize};
+use serde_with::serde_as;
+use serde_with::DisplayFromStr;
 use std::fmt;
-use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 #[derive(Debug)]
 pub struct LoadError {
-    path: PathBuf,
-    kind: LoadErrorKind,
+    pub path: PathBuf,
+    pub kind: LoadErrorKind,
 }
 
 #[derive(Debug)]
@@ -62,6 +64,17 @@ impl std::cmp::PartialEq<std::io::Error> for LoadError {
     }
 }
 
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Database {
+    FromDns,
+    FromUrl {
+        #[serde_as(as = "DisplayFromStr")]
+        url: PostgresConfigWithUrl
+    },
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct RuntimeConfig {
     /// Uuid of the Nexus instance
@@ -72,15 +85,8 @@ pub struct RuntimeConfig {
     pub dropshot_internal: ConfigDropshot,
     /// Portion of the IP space to be managed by the Rack.
     pub subnet: Ipv6Subnet<RACK_PREFIX>,
-
-    /// An optional database address.
-    ///
-    /// If `None`, Nexus will use DNS to infer this value.
-    pub database_address: Option<SocketAddr>,
-
-//    /// Database parameters
-//    #[serde_as(as = "DisplayFromStr")]
-//    pub database_url: PostgresConfigWithUrl,
+    /// DB configuration.
+    pub database: Database,
 }
 
 impl RuntimeConfig {

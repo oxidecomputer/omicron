@@ -67,7 +67,16 @@ pub struct PackageConfig {
     pub updates: Option<UpdatesConfig>,
 }
 
-impl PackageConfig {
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct Config {
+    /// A variety of configuration parameters only known at runtime.
+    #[serde(flatten)]
+    pub runtime: RuntimeConfig,
+    #[serde(flatten)]
+    pub pkg: PackageConfig,
+}
+
+impl Config {
     /// Load a `PackageConfig` from the given TOML file
     ///
     /// This config object can then be used to create a new `Nexus`.
@@ -80,13 +89,6 @@ impl PackageConfig {
             .map_err(|e| (path.to_path_buf(), e))?;
         Ok(config_parsed)
     }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Config {
-    /// A variety of configuration parameters only known at runtime.
-    pub runtime: RuntimeConfig,
-    pub pkg: PackageConfig,
 }
 
 /// List of supported external authn schemes
@@ -126,17 +128,18 @@ impl std::fmt::Display for SchemeName {
 #[cfg(test)]
 mod test {
     use super::{
-        AuthnConfig, Config, ConsoleConfig, LoadError, LoadErrorKind,
-        SchemeName, TimeseriesDbConfig, UpdatesConfig,
+        AuthnConfig, Config, ConsoleConfig, LoadError,
+        PackageConfig, SchemeName, TimeseriesDbConfig, UpdatesConfig,
     };
-    use crate::db;
+    use omicron_common::address::{Ipv6Subnet, RACK_PREFIX};
+    use omicron_common::nexus_config::{LoadErrorKind, Database, RuntimeConfig};
     use dropshot::ConfigDropshot;
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingIfExists;
     use dropshot::ConfigLoggingLevel;
     use libc;
+    use std::net::{SocketAddr, Ipv6Addr};
     use std::fs;
-    use std::net::SocketAddr;
     use std::path::Path;
     use std::path::PathBuf;
 
@@ -207,7 +210,7 @@ mod test {
         let error = read_config("empty", "").expect_err("expected failure");
         if let LoadErrorKind::Parse(error) = &error.kind {
             assert_eq!(error.line_col(), None);
-            assert_eq!(error.to_string(), "missing field `dropshot_external`");
+            assert_eq!(error.to_string(), "missing field `id`");
         } else {
             panic!(
                 "Got an unexpected error, expected Parse but got {:?}",
@@ -239,8 +242,10 @@ mod test {
             [dropshot_internal]
             bind_address = "10.1.2.3:4568"
             request_body_max_bytes = 1024
+            [subnet]
+            net = "::/56"
             [database]
-            url = "postgresql://127.0.0.1?sslmode=disable"
+            type = "from_dns"
             [log]
             mode = "file"
             level = "debug"
@@ -258,43 +263,44 @@ mod test {
         assert_eq!(
             config,
             Config {
-                id: "28b90dc4-c22a-65ba-f49a-f051fe01208f".parse().unwrap(),
-                console: ConsoleConfig {
-                    static_dir: "tests/static".parse().unwrap(),
-                    cache_control_max_age_minutes: 10,
-                    session_idle_timeout_minutes: 60,
-                    session_absolute_timeout_minutes: 480
+                runtime: RuntimeConfig {
+                    id: "28b90dc4-c22a-65ba-f49a-f051fe01208f".parse().unwrap(),
+                    dropshot_external: ConfigDropshot {
+                        bind_address: "10.1.2.3:4567"
+                            .parse::<SocketAddr>()
+                            .unwrap(),
+                        ..Default::default()
+                    },
+                    dropshot_internal: ConfigDropshot {
+                        bind_address: "10.1.2.3:4568"
+                            .parse::<SocketAddr>()
+                            .unwrap(),
+                        ..Default::default()
+                    },
+                    subnet: Ipv6Subnet::<RACK_PREFIX>::new(Ipv6Addr::LOCALHOST),
+                    database: Database::FromDns,
                 },
-                authn: AuthnConfig { schemes_external: Vec::new() },
-                dropshot_external: ConfigDropshot {
-                    bind_address: "10.1.2.3:4567"
-                        .parse::<SocketAddr>()
-                        .unwrap(),
-                    ..Default::default()
+                pkg: PackageConfig {
+                    console: ConsoleConfig {
+                        static_dir: "tests/static".parse().unwrap(),
+                        cache_control_max_age_minutes: 10,
+                        session_idle_timeout_minutes: 60,
+                        session_absolute_timeout_minutes: 480
+                    },
+                    authn: AuthnConfig { schemes_external: Vec::new() },
+                    log: ConfigLogging::File {
+                        level: ConfigLoggingLevel::Debug,
+                        if_exists: ConfigLoggingIfExists::Fail,
+                        path: "/nonexistent/path".to_string()
+                    },
+                    timeseries_db: TimeseriesDbConfig {
+                        address: "[::1]:8123".parse().unwrap()
+                    },
+                    updates: Some(UpdatesConfig {
+                        trusted_root: PathBuf::from("/path/to/root.json"),
+                        default_base_url: "http://example.invalid/".into(),
+                    }),
                 },
-                dropshot_internal: ConfigDropshot {
-                    bind_address: "10.1.2.3:4568"
-                        .parse::<SocketAddr>()
-                        .unwrap(),
-                    ..Default::default()
-                },
-                log: ConfigLogging::File {
-                    level: ConfigLoggingLevel::Debug,
-                    if_exists: ConfigLoggingIfExists::Fail,
-                    path: "/nonexistent/path".to_string()
-                },
-                database: db::Config {
-                    url: "postgresql://127.0.0.1?sslmode=disable"
-                        .parse()
-                        .unwrap()
-                },
-                timeseries_db: TimeseriesDbConfig {
-                    address: "[::1]:8123".parse().unwrap()
-                },
-                updates: Some(UpdatesConfig {
-                    trusted_root: PathBuf::from("/path/to/root.json"),
-                    default_base_url: "http://example.invalid/".into(),
-                }),
             }
         );
 
@@ -315,8 +321,10 @@ mod test {
             [dropshot_internal]
             bind_address = "10.1.2.3:4568"
             request_body_max_bytes = 1024
+            [subnet]
+            net = "::/56"
             [database]
-            url = "postgresql://127.0.0.1?sslmode=disable"
+            type = "from_dns"
             [log]
             mode = "file"
             level = "debug"
@@ -329,7 +337,7 @@ mod test {
         .unwrap();
 
         assert_eq!(
-            config.authn.schemes_external,
+            config.pkg.authn.schemes_external,
             vec![SchemeName::Spoof, SchemeName::SessionCookie],
         );
     }
@@ -353,8 +361,10 @@ mod test {
             [dropshot_internal]
             bind_address = "10.1.2.3:4568"
             request_body_max_bytes = 1024
+            [subnet]
+            net = "::/56"
             [database]
-            url = "postgresql://127.0.0.1?sslmode=disable"
+            type = "from_dns"
             [log]
             mode = "file"
             level = "debug"
@@ -367,9 +377,8 @@ mod test {
         .expect_err("expected failure");
         if let LoadErrorKind::Parse(error) = &error.kind {
             assert!(error.to_string().starts_with(
-                "unsupported authn scheme: \"trust-me\" \
-                for key `authn.schemes_external`"
-            ));
+                "unsupported authn scheme: \"trust-me\""
+            ), "error = {}", error.to_string());
         } else {
             panic!(
                 "Got an unexpected error, expected Parse but got {:?}",

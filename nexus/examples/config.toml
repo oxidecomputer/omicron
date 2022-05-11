@@ -23,6 +23,7 @@ schemes_external = ["spoof", "session_cookie"]
 
 [database]
 # URL for connecting to the database
+type = "from_url"
 url = "postgresql://root@127.0.0.1:32221/omicron?sslmode=disable"
 
 [dropshot_external]
@@ -35,6 +36,9 @@ request_body_max_bytes = 1048576
 [dropshot_internal]
 # IP address and TCP port on which to listen for the internal API
 bind_address = "127.0.0.1:12221"
+
+[subnet]
+net = "fd00:1122:3344:0100::/56"
 
 [log]
 # Show log messages of this level and more severe

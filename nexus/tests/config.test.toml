@@ -22,6 +22,7 @@ schemes_external = [ "spoof", "session_cookie" ]
 # appropriate for the database that's started by the test runner.
 #
 [database]
+type = "from_url"
 url = "postgresql://root@127.0.0.1:0/omicron?sslmode=disable"
 
 #
@@ -37,6 +38,9 @@ request_body_max_bytes = 1048576
 [dropshot_internal]
 bind_address = "127.0.0.1:0"
 request_body_max_bytes = 1048576
+
+[subnet]
+net = "fd00:1122:3344:0100::/56"
 
 #
 # NOTE: for the test suite, if mode = "file", the file path MUST be the sentinel

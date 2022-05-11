@@ -12,12 +12,13 @@ use crate::illumos::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use crate::params::{ServiceEnsureBody, ServiceRequest, ServiceType};
 use dropshot::ConfigDropshot;
 use omicron_common::address::{Ipv6Subnet, SLED_PREFIX, RACK_PREFIX};
-use omicron_common::nexus_config::RuntimeConfig as NexusRuntimeConfig;
+use omicron_common::nexus_config::{self, RuntimeConfig as NexusRuntimeConfig};
 use slog::Logger;
 use std::collections::HashSet;
 use std::iter::FromIterator;
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
+use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
 
 #[derive(thiserror::Error, Debug)]
@@ -272,38 +273,36 @@ impl ServiceManager {
                             ..Default::default()
                         },
                         subnet: Ipv6Subnet::<RACK_PREFIX>::new(self.sled_subnet.net().ip()),
-                        database_address: None,
+                        database: nexus_config::Database::FromDns,
                     };
 
-                    // Construct a temporary file within the zone.
-                    let output = running_zone
-                        .run_cmd(&[
-                            "/usr/bin/mktemp",
-                            "nexus-config.toml.XXXXXX",
-                        ])
-                        .map_err(|err| Error::ZoneCommand {
-                            intent: "creating temporary file for nexus configuration".to_string(),
-                            err,
-                        })?;
-                    let runtime_config_path = PathBuf::from(output);
+                    // Copy the partial config file
+                    let partial_config_path = PathBuf::from(ZONE_ZFS_DATASET_MOUNTPOINT)
+                        .join(PathBuf::from(running_zone.name()))
+                        .join("root")
+                        .join("var/svc/manifest/site/nexus/config-partial.toml");
+                    let mut config_path = partial_config_path.clone();
+                    config_path.set_file_name("config.toml");
 
-                    // Serialize the configuration and write it into the file.
+                    tokio::fs::copy(partial_config_path, &config_path)
+                        .await
+                        .map_err(|err| Error::Io { path: config_path.clone(), err })?;
+
+                    // Serialize the configuration and append it into the file.
                     let serialized_cfg = toml::Value::try_from(&runtime_config)
                         .expect("Cannot serialize config");
                     let config_str =
                         toml::to_string(&serialized_cfg).map_err(|err| {
-                            Error::TomlSerialize { path: runtime_config_path.clone(), err }
+                            Error::TomlSerialize { path: config_path.clone(), err }
                         })?;
-                    // Inject the path directly into the non-global Zone, based
-                    // on the result of the mktempcommand.
-                    let path_from_gz = PathBuf::from(ZONE_ZFS_DATASET_MOUNTPOINT)
-                        .join(PathBuf::from(running_zone.name()))
-                        .join("root")
-                        .join(runtime_config_path.strip_prefix("/").unwrap());
-                    tokio::fs::write(&path_from_gz, config_str)
+                    let mut file = tokio::fs::OpenOptions::new().append(true).open(&config_path)
                         .await
-                        .map_err(|err| Error::Io { path: path_from_gz.clone(), err })?;
+                        .map_err(|err| Error::Io { path: config_path.clone(), err })?;
+                    file.write_all(config_str.as_bytes())
+                        .await
+                        .map_err(|err| Error::Io { path: config_path.clone(), err })?;
 
+                    /*
                     running_zone
                         .run_cmd(&[
                             crate::illumos::zone::SVCCFG,
@@ -319,7 +318,7 @@ impl ServiceManager {
                             intent: "setting runtime config path".to_string(),
                             err,
                         })?;
-
+                    */
                 },
                 ServiceType::InternalDns {
                     server_address,
@@ -472,6 +471,7 @@ mod test {
     use crate::illumos::{
         dladm::MockDladm, dladm::PhysicalLink, svc, zone::MockZones,
     };
+    use std::net::{SocketAddrV6, Ipv6Addr};
     use std::os::unix::process::ExitStatusExt;
     use uuid::Uuid;
 
@@ -534,6 +534,10 @@ mod test {
                 name: SVC_NAME.to_string(),
                 addresses: vec![],
                 gz_addresses: vec![],
+                service_type: ServiceType::Nexus {
+                    internal_address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
+                    external_address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
+                },
             }],
         })
         .await
@@ -549,6 +553,10 @@ mod test {
                 name: SVC_NAME.to_string(),
                 addresses: vec![],
                 gz_addresses: vec![],
+                service_type: ServiceType::Nexus {
+                    internal_address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
+                    external_address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
+                },
             }],
         })
         .await
@@ -584,6 +592,7 @@ mod test {
         let mgr = ServiceManager::new(
             log,
             PhysicalLink(EXPECTED_LINK_NAME.to_string()),
+            Ipv6Subnet::<SLED_PREFIX>::new(Ipv6Addr::LOCALHOST),
             Some(config),
         )
         .await
@@ -609,6 +618,7 @@ mod test {
         let mgr = ServiceManager::new(
             log,
             PhysicalLink(EXPECTED_LINK_NAME.to_string()),
+            Ipv6Subnet::<SLED_PREFIX>::new(Ipv6Addr::LOCALHOST),
             Some(config),
         )
         .await
@@ -637,6 +647,7 @@ mod test {
         let mgr = ServiceManager::new(
             logctx.log.clone(),
             PhysicalLink(EXPECTED_LINK_NAME.to_string()),
+            Ipv6Subnet::<SLED_PREFIX>::new(Ipv6Addr::LOCALHOST),
             Some(config.clone()),
         )
         .await
@@ -652,6 +663,7 @@ mod test {
         let mgr = ServiceManager::new(
             logctx.log.clone(),
             PhysicalLink(EXPECTED_LINK_NAME.to_string()),
+            Ipv6Subnet::<SLED_PREFIX>::new(Ipv6Addr::LOCALHOST),
             Some(config.clone()),
         )
         .await
@@ -676,6 +688,7 @@ mod test {
         let mgr = ServiceManager::new(
             logctx.log.clone(),
             PhysicalLink(EXPECTED_LINK_NAME.to_string()),
+            Ipv6Subnet::<SLED_PREFIX>::new(Ipv6Addr::LOCALHOST),
             Some(config.clone()),
         )
         .await
@@ -692,6 +705,7 @@ mod test {
         let mgr = ServiceManager::new(
             logctx.log.clone(),
             PhysicalLink(EXPECTED_LINK_NAME.to_string()),
+            Ipv6Subnet::<SLED_PREFIX>::new(Ipv6Addr::LOCALHOST),
             Some(config.clone()),
         )
         .await

@@ -15,11 +15,10 @@
 
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
-use omicron_common::nexus_config::RuntimeConfig;
 use omicron_nexus::run_openapi_external;
 use omicron_nexus::run_openapi_internal;
 use omicron_nexus::run_server;
-use omicron_nexus::{Config, PackageConfig};
+use omicron_nexus::Config;
 use std::path::PathBuf;
 use structopt::StructOpt;
 
@@ -40,11 +39,8 @@ struct Args {
     )]
     openapi_internal: bool,
 
-    #[structopt(name = "PACKAGE_CONFIG_FILE_PATH", parse(from_os_str))]
-    pkg_config_file_path: PathBuf,
-
-    #[structopt(name = "RUNTIME_CONFIG_FILE_PATH", parse(from_os_str))]
-    rt_config_file_path: PathBuf,
+    #[structopt(name = "CONFIG_FILE_PATH", parse(from_os_str))]
+    config_file_path: PathBuf,
 }
 
 #[tokio::main]
@@ -59,16 +55,8 @@ async fn do_run() -> Result<(), CmdError> {
         CmdError::Usage(format!("parsing arguments: {}", err.message))
     })?;
 
-    let rt_config = RuntimeConfig::from_file(args.rt_config_file_path)
+    let config = Config::from_file(args.config_file_path)
         .map_err(|e| CmdError::Failure(e.to_string()))?;
-
-    let pkg_config = PackageConfig::from_file(args.pkg_config_file_path)
-        .map_err(|e| CmdError::Failure(e.to_string()))?;
-
-    let config = Config {
-        runtime: rt_config,
-        pkg: pkg_config,
-    };
 
     if args.openapi {
         run_openapi_external().map_err(CmdError::Failure)
