@@ -383,14 +383,6 @@ async fn test_create_a_saml_idp_invalid_descriptor_truncated(
     //let silo: Silo = create_silo(&client, SILO_NAME, true).await;
 
     const SILO_NAME: &str = "default-silo";
-    let silo: Silo =
-        NexusRequest::object_get(&client, &format!("/silos/{}", SILO_NAME,))
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .expect("failed to make request")
-            .parsed_body()
-            .unwrap();
 
     let saml_idp_descriptor = {
         let mut saml_idp_descriptor = SAML_IDP_DESCRIPTOR.to_string();
@@ -449,14 +441,6 @@ async fn test_create_a_saml_idp_invalid_descriptor_no_redirect_binding(
     //let silo: Silo = create_silo(&client, SILO_NAME, true).await;
 
     const SILO_NAME: &str = "default-silo";
-    let silo: Silo =
-        NexusRequest::object_get(&client, &format!("/silos/{}", SILO_NAME,))
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .expect("failed to make request")
-            .parsed_body()
-            .unwrap();
 
     let saml_idp_descriptor = {
         let saml_idp_descriptor = SAML_IDP_DESCRIPTOR.to_string();
@@ -592,14 +576,6 @@ async fn test_saml_idp_metadata_url_404(cptestctx: &ControlPlaneTestContext) {
     //let silo: Silo = create_silo(&client, SILO_NAME, true).await;
 
     const SILO_NAME: &str = "default-silo";
-    let silo: Silo =
-        NexusRequest::object_get(&client, &format!("/silos/{}", SILO_NAME,))
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .expect("failed to make request")
-            .parsed_body()
-            .unwrap();
 
     let server = Server::run();
     server.expect(
@@ -652,14 +628,6 @@ async fn test_saml_idp_metadata_url_invalid(
     //let silo: Silo = create_silo(&client, SILO_NAME, true).await;
 
     const SILO_NAME: &str = "default-silo";
-    let silo: Silo =
-        NexusRequest::object_get(&client, &format!("/silos/{}", SILO_NAME,))
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .expect("failed to make request")
-            .parsed_body()
-            .unwrap();
 
     NexusRequest::new(
         RequestBuilder::new(
@@ -701,9 +669,7 @@ const RSA_KEY_2_PUBLIC: &str = include_str!("data/rsa-key-2-public.b64");
 const RSA_KEY_2_PRIVATE: &str = include_str!("data/rsa-key-2-private.b64");
 
 #[nexus_test]
-async fn test_saml_idp_reject_keypair(
-    cptestctx: &ControlPlaneTestContext,
-) {
+async fn test_saml_idp_reject_keypair(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     let saml_idp_descriptor = SAML_IDP_DESCRIPTOR;
@@ -721,14 +687,6 @@ async fn test_saml_idp_reject_keypair(
     //let silo: Silo = create_silo(&client, SILO_NAME, true).await;
 
     const SILO_NAME: &str = "default-silo";
-    let silo: Silo =
-        NexusRequest::object_get(&client, &format!("/silos/{}", SILO_NAME,))
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .expect("failed to make request")
-            .parsed_body()
-            .unwrap();
 
     let test_cases = vec![
         // Reject signing keypair if the certificate or key is not base64
@@ -741,7 +699,6 @@ async fn test_saml_idp_reject_keypair(
             public_cert: RSA_KEY_1_PUBLIC.to_string(),
             private_key: "regular string".to_string(),
         },
-
         // Reject signing keypair if the certificate or key is base64 encoded
         // but not valid
         params::DerEncodedKeyPair {
@@ -752,13 +709,11 @@ async fn test_saml_idp_reject_keypair(
             public_cert: RSA_KEY_1_PUBLIC.to_string(),
             private_key: base64::encode("not a cert"),
         },
-
         // Reject signing keypair if cert and key are swapped
         params::DerEncodedKeyPair {
             public_cert: RSA_KEY_1_PRIVATE.to_string(),
             private_key: RSA_KEY_1_PUBLIC.to_string(),
         },
-
         // Reject signing keypair if the keys do not match
         params::DerEncodedKeyPair {
             public_cert: RSA_KEY_1_PUBLIC.to_string(),
@@ -807,9 +762,7 @@ async fn test_saml_idp_reject_keypair(
 
 // Test that a RSA keypair works
 #[nexus_test]
-async fn test_saml_idp_rsa_keypair_ok(
-    cptestctx: &ControlPlaneTestContext,
-) {
+async fn test_saml_idp_rsa_keypair_ok(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     let saml_idp_descriptor = SAML_IDP_DESCRIPTOR;
@@ -827,14 +780,6 @@ async fn test_saml_idp_rsa_keypair_ok(
     //let silo: Silo = create_silo(&client, SILO_NAME, true).await;
 
     const SILO_NAME: &str = "default-silo";
-    let silo: Silo =
-        NexusRequest::object_get(&client, &format!("/silos/{}", SILO_NAME,))
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .expect("failed to make request")
-            .parsed_body()
-            .unwrap();
 
     NexusRequest::new(
         RequestBuilder::new(
@@ -859,12 +804,10 @@ async fn test_saml_idp_rsa_keypair_ok(
             slo_url: "http://slo".to_string(),
             technical_contact_email: "technical@fake".to_string(),
 
-            signing_keypair: Some(
-                params::DerEncodedKeyPair {
-                    public_cert: RSA_KEY_1_PUBLIC.to_string(),
-                    private_key: RSA_KEY_1_PRIVATE.to_string(),
-                }
-            ),
+            signing_keypair: Some(params::DerEncodedKeyPair {
+                public_cert: RSA_KEY_1_PUBLIC.to_string(),
+                private_key: RSA_KEY_1_PRIVATE.to_string(),
+            }),
         }))
         .expect_status(Some(StatusCode::CREATED)),
     )
@@ -873,4 +816,3 @@ async fn test_saml_idp_rsa_keypair_ok(
     .await
     .expect("unexpected failure");
 }
-

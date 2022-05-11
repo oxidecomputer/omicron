@@ -7,6 +7,7 @@
 //! This is used for various authz-related tests.
 //! THERE ARE NO TESTS IN THIS FILE.
 
+use crate::integration_tests::unauthorized::HTTP_SERVER;
 use http::method::Method;
 use lazy_static::lazy_static;
 use nexus_test_utils::RACK_UUID;
@@ -28,7 +29,6 @@ use omicron_nexus::external_api::params;
 use omicron_nexus::external_api::shared;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
-use crate::integration_tests::unauthorized::HTTP_SERVER;
 
 lazy_static! {
     pub static ref HARDWARE_RACK_URL: String =

@@ -1152,15 +1152,19 @@ impl Nexus {
                     .connect_timeout(dur)
                     .timeout(dur)
                     .build()
-                    .map_err(|e| Error::internal_error(&format!("failed to build reqwest client: {}", e)))?;
+                    .map_err(|e| {
+                        Error::internal_error(&format!(
+                            "failed to build reqwest client: {}",
+                            e
+                        ))
+                    })?;
 
-                let response =
-                    client.head(url).send().await.map_err(
-                        |e| Error::InvalidValue {
-                            label: String::from("url"),
-                            message: format!("error querying url: {}", e),
-                        },
-                    )?;
+                let response = client.head(url).send().await.map_err(|e| {
+                    Error::InvalidValue {
+                        label: String::from("url"),
+                        message: format!("error querying url: {}", e),
+                    }
+                })?;
 
                 if !response.status().is_success() {
                     return Err(Error::InvalidValue {
@@ -3854,15 +3858,20 @@ impl Nexus {
             .connect_timeout(dur)
             .timeout(dur)
             .build()
-            .map_err(|e| Error::internal_error(&format!("failed to build reqwest client: {}", e)))?;
+            .map_err(|e| {
+                Error::internal_error(&format!(
+                    "failed to build reqwest client: {}",
+                    e
+                ))
+            })?;
 
         let response =
-            client.get(&params.idp_metadata_url).send().await.map_err(
-                |e| Error::InvalidValue {
+            client.get(&params.idp_metadata_url).send().await.map_err(|e| {
+                Error::InvalidValue {
                     label: String::from("url"),
                     message: format!("error querying url: {}", e),
-                },
-            )?;
+                }
+            })?;
 
         if !response.status().is_success() {
             return Err(Error::InvalidValue {
@@ -3874,12 +3883,11 @@ impl Nexus {
             });
         }
 
-        let idp_metadata_document_string = response.text().await.map_err(|e|
-            Error::InvalidValue {
+        let idp_metadata_document_string =
+            response.text().await.map_err(|e| Error::InvalidValue {
                 label: String::from("url"),
                 message: format!("error getting text from url: {}", e),
-            },
-        )?;
+            })?;
 
         let provider = db::model::SiloSamlIdentityProvider {
             identity: db::model::SiloSamlIdentityProviderIdentity::new(
@@ -3896,8 +3904,14 @@ impl Nexus {
             acs_url: params.acs_url,
             slo_url: params.slo_url,
             technical_contact_email: params.technical_contact_email,
-            public_cert: params.signing_keypair.as_ref().map(|x| x.public_cert.clone()),
-            private_key: params.signing_keypair.as_ref().map(|x| x.private_key.clone()),
+            public_cert: params
+                .signing_keypair
+                .as_ref()
+                .map(|x| x.public_cert.clone()),
+            private_key: params
+                .signing_keypair
+                .as_ref()
+                .map(|x| x.private_key.clone()),
         };
 
         provider

@@ -9,7 +9,10 @@ use omicron_common::api::external::{
     InstanceCpuCount, Ipv4Net, Ipv6Net, Name,
 };
 use schemars::JsonSchema;
-use serde::{de::{self, Visitor}, Deserialize, Deserializer, Serialize};
+use serde::{
+    de::{self, Visitor},
+    Deserialize, Deserializer, Serialize,
+};
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 use uuid::Uuid;
@@ -43,7 +46,10 @@ struct X509CertVisitor;
 impl<'de> Visitor<'de> for X509CertVisitor {
     type Value = String;
 
-    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+    fn expecting(
+        &self,
+        formatter: &mut std::fmt::Formatter,
+    ) -> std::fmt::Result {
         formatter.write_str("a DER formatted X509 certificate as a string of base64 encoded bytes")
     }
 
@@ -51,16 +57,27 @@ impl<'de> Visitor<'de> for X509CertVisitor {
     where
         E: de::Error,
     {
-        let raw_bytes = base64::decode(&value.as_bytes())
-            .map_err(|e| de::Error::custom(format!("could not base64 decode public_cert: {}", e)))?;
-        let _parsed = openssl::x509::X509::from_der(&raw_bytes)
-            .map_err(|e| de::Error::custom(format!("public_cert is not recognized as a X509 certificate: {}", e)))?;
+        let raw_bytes = base64::decode(&value.as_bytes()).map_err(|e| {
+            de::Error::custom(format!(
+                "could not base64 decode public_cert: {}",
+                e
+            ))
+        })?;
+        let _parsed =
+            openssl::x509::X509::from_der(&raw_bytes).map_err(|e| {
+                de::Error::custom(format!(
+                    "public_cert is not recognized as a X509 certificate: {}",
+                    e
+                ))
+            })?;
 
         Ok(value.to_string())
     }
 }
 
-fn x509_cert_from_base64_encoded_der<'de, D>(deserializer: D) -> Result<String, D::Error>
+fn x509_cert_from_base64_encoded_der<'de, D>(
+    deserializer: D,
+) -> Result<String, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -72,31 +89,51 @@ struct KeyVisitor;
 impl<'de> Visitor<'de> for KeyVisitor {
     type Value = String;
 
-    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-        formatter.write_str("a DER formatted key as a string of base64 encoded bytes")
+    fn expecting(
+        &self,
+        formatter: &mut std::fmt::Formatter,
+    ) -> std::fmt::Result {
+        formatter.write_str(
+            "a DER formatted key as a string of base64 encoded bytes",
+        )
     }
 
     fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
     where
         E: de::Error,
     {
-        let raw_bytes = base64::decode(&value)
-            .map_err(|e| de::Error::custom(format!("could not base64 decode private_key: {}", e)))?;
+        let raw_bytes = base64::decode(&value).map_err(|e| {
+            de::Error::custom(format!(
+                "could not base64 decode private_key: {}",
+                e
+            ))
+        })?;
 
         // TODO: samael does not support ECDSA, update to generic PKey type when it does
         //let _parsed = openssl::pkey::PKey::private_key_from_der(&raw_bytes)
         //    .map_err(|e| de::Error::custom(format!("could not base64 decode private_key: {}", e)))?;
 
         let parsed = openssl::rsa::Rsa::private_key_from_der(&raw_bytes)
-            .map_err(|e| de::Error::custom(format!("private_key is not recognized as a RSA private key: {}", e)))?;
-        let _parsed = openssl::pkey::PKey::from_rsa(parsed)
-            .map_err(|e| de::Error::custom(format!("private_key is not recognized as a RSA private key: {}", e)))?;
+            .map_err(|e| {
+                de::Error::custom(format!(
+                    "private_key is not recognized as a RSA private key: {}",
+                    e
+                ))
+            })?;
+        let _parsed = openssl::pkey::PKey::from_rsa(parsed).map_err(|e| {
+            de::Error::custom(format!(
+                "private_key is not recognized as a RSA private key: {}",
+                e
+            ))
+        })?;
 
         Ok(value.to_string())
     }
 }
 
-fn key_from_base64_encoded_der<'de, D>(deserializer: D) -> Result<String, D::Error>
+fn key_from_base64_encoded_der<'de, D>(
+    deserializer: D,
+) -> Result<String, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -149,7 +186,8 @@ fn sign_junk_data(key_pair: &DerEncodedKeyPair) -> Result<(), anyhow::Error> {
     };
 
     let mut signer = openssl::sign::Signer::new(
-        openssl::hash::MessageDigest::sha256(), &private_key.as_ref(),
+        openssl::hash::MessageDigest::sha256(),
+        &private_key.as_ref(),
     )?;
 
     let some_junk_data = b"this is some junk data";
@@ -171,16 +209,20 @@ fn sign_junk_data(key_pair: &DerEncodedKeyPair) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-fn validate_key_pair<'de, D>(deserializer: D) -> Result<Option<DerEncodedKeyPair>, D::Error>
-where D: Deserializer<'de>
+fn validate_key_pair<'de, D>(
+    deserializer: D,
+) -> Result<Option<DerEncodedKeyPair>, D::Error>
+where
+    D: Deserializer<'de>,
 {
     let v = Option::<DerEncodedKeyPair>::deserialize(deserializer)?;
 
     if let Some(ref key_pair) = v {
         if let Err(e) = sign_junk_data(&key_pair) {
-            return Err(de::Error::custom(
-                format!("data signed with key not verified with certificate! {}", e)
-            ));
+            return Err(de::Error::custom(format!(
+                "data signed with key not verified with certificate! {}",
+                e
+            )));
         }
     }
 

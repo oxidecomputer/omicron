@@ -79,9 +79,9 @@ impl From<model::SiloSamlIdentityProvider> for SiloSamlIdentityProvider {
             acs_url: saml_idp.acs_url,
             slo_url: saml_idp.slo_url,
             technical_contact_email: saml_idp.technical_contact_email,
-            signing_keypair: saml_idp.public_cert.map(|x| DerEncodedKeyPair {
-                    public_cert: x.clone(),
-            }),
+            signing_keypair: saml_idp
+                .public_cert
+                .map(|x| DerEncodedKeyPair { public_cert: x }),
         }
     }
 }

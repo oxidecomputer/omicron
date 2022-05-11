@@ -6,7 +6,7 @@
 
 use crate::db::model::SiloSamlIdentityProvider;
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, Result};
 use samael::metadata::ContactPerson;
 use samael::metadata::ContactType;
 use samael::metadata::EntityDescriptor;
@@ -74,15 +74,14 @@ impl SiloSamlIdentityProvider {
             "".to_string()
         };
 
-        let authn_request_url =
-            if let Some(key) = self.private_key_bytes()? {
-                // sign authn request if keys were supplied
-                authn_request.signed_redirect(&encoded_relay_state, &key)
-            } else {
-                authn_request.redirect(&encoded_relay_state)
-            }
-            .map_err(|e| anyhow!(e.to_string()))?
-            .ok_or_else(|| anyhow!("request url was none!".to_string()))?;
+        let authn_request_url = if let Some(key) = self.private_key_bytes()? {
+            // sign authn request if keys were supplied
+            authn_request.signed_redirect(&encoded_relay_state, &key)
+        } else {
+            authn_request.redirect(&encoded_relay_state)
+        }
+        .map_err(|e| anyhow!(e.to_string()))?
+        .ok_or_else(|| anyhow!("request url was none!".to_string()))?;
 
         Ok(authn_request_url.to_string())
     }
@@ -111,11 +110,9 @@ impl SiloSamlIdentityProvider {
         sp_builder.acs_url(self.acs_url.clone());
         sp_builder.slo_url(self.slo_url.clone());
 
-        if let Some(cert) = &self.public_cert {
-            if let Ok(decoded) = base64::decode(cert.as_bytes()) {
-                if let Ok(parsed) = openssl::x509::X509::from_der(&decoded) {
-                    sp_builder.certificate(Some(parsed));
-                }
+        if let Some(cert) = &self.public_cert_bytes()? {
+            if let Ok(parsed) = openssl::x509::X509::from_der(&cert) {
+                sp_builder.certificate(Some(parsed));
             }
         }
 

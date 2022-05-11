@@ -5,8 +5,7 @@
 //! Handler functions (entrypoints) for external HTTP APIs
 
 use super::{
-    console_api, params,
-    views,
+    console_api, params, views,
     views::{
         GlobalImage, Image, Organization, Project, Rack, Role, Silo, Sled,
         Snapshot, SshKey, User, Vpc, VpcRouter, VpcSubnet,
