@@ -10,14 +10,16 @@ use internal_dns_client::{
     types::{DnsKv, DnsRecord, DnsRecordKey, Srv},
     Client,
 };
+use trust_dns_proto::op::response_code::ResponseCode;
 use trust_dns_resolver::config::{
     NameServerConfig, Protocol, ResolverConfig, ResolverOpts,
 };
+use trust_dns_resolver::error::ResolveErrorKind;
 use trust_dns_resolver::TokioAsyncResolver;
 
 #[tokio::test]
 pub async fn aaaa_crud() -> Result<(), anyhow::Error> {
-    let test_ctx = init_client_server().await?;
+    let test_ctx = init_client_server("oxide.internal".into()).await?;
     let client = &test_ctx.client;
     let resolver = &test_ctx.resolver;
 
@@ -26,7 +28,7 @@ pub async fn aaaa_crud() -> Result<(), anyhow::Error> {
     assert!(records.is_empty());
 
     // add an aaaa record
-    let name = DnsRecordKey { name: "devron.system".into() };
+    let name = DnsRecordKey { name: "devron.oxide.internal".into() };
     let addr = Ipv6Addr::new(0xfd, 0, 0, 0, 0, 0, 0, 0x1);
     let aaaa = DnsRecord::Aaaa(addr);
     client
@@ -60,7 +62,7 @@ pub async fn aaaa_crud() -> Result<(), anyhow::Error> {
 
 #[tokio::test]
 pub async fn srv_crud() -> Result<(), anyhow::Error> {
-    let test_ctx = init_client_server().await?;
+    let test_ctx = init_client_server("oxide.internal".into()).await?;
     let client = &test_ctx.client;
     let resolver = &test_ctx.resolver;
 
@@ -69,7 +71,7 @@ pub async fn srv_crud() -> Result<(), anyhow::Error> {
     assert!(records.is_empty());
 
     // add a srv record
-    let name = DnsRecordKey { name: "hromi.cluster".into() };
+    let name = DnsRecordKey { name: "hromi.oxide.internal".into() };
     let srv =
         Srv { prio: 47, weight: 74, port: 99, target: "outpost47".into() };
     let rec = DnsRecord::Srv(srv.clone());
@@ -108,6 +110,78 @@ pub async fn srv_crud() -> Result<(), anyhow::Error> {
     Ok(())
 }
 
+#[tokio::test]
+pub async fn nxdomain() -> Result<(), anyhow::Error> {
+    let test_ctx = init_client_server("oxide.internal".into()).await?;
+    let resolver = &test_ctx.resolver;
+
+    // asking for a nonexistent record within the domain of the internal DNS
+    // server should result in an NXDOMAIN
+    match resolver.lookup_ip("unicorn.oxide.internal").await {
+        Ok(unexpected) => {
+            panic!("Expected NXDOMAIN, got record {:?}", unexpected);
+        }
+        Err(e) => match e.kind() {
+            ResolveErrorKind::NoRecordsFound {
+                response_code,
+                query: _,
+                soa: _,
+                negative_ttl: _,
+                trusted: _,
+            } => match response_code {
+                ResponseCode::NXDomain => {}
+                unexpected => {
+                    panic!(
+                        "Expected NXDOMAIN, got response code {:?}",
+                        unexpected
+                    );
+                }
+            },
+            unexpected => {
+                panic!("Expected NXDOMAIN, got error {:?}", unexpected);
+            }
+        },
+    };
+
+    Ok(())
+}
+
+#[tokio::test]
+pub async fn servfail() -> Result<(), anyhow::Error> {
+    let test_ctx = init_client_server("oxide.internal".into()).await?;
+    let resolver = &test_ctx.resolver;
+
+    // asking for a record outside the domain of the internal DNS
+    // server should result in a SERVFAIL.
+    match resolver.lookup_ip("oxide.computer").await {
+        Ok(unexpected) => {
+            panic!("Expected SERVFAIL, got record {:?}", unexpected);
+        }
+        Err(e) => match e.kind() {
+            ResolveErrorKind::NoRecordsFound {
+                response_code,
+                query: _,
+                soa: _,
+                negative_ttl: _,
+                trusted: _,
+            } => match response_code {
+                ResponseCode::ServFail => {}
+                unexpected => {
+                    panic!(
+                        "Expected SERVFAIL, got response code {:?}",
+                        unexpected
+                    );
+                }
+            },
+            unexpected => {
+                panic!("Expected SERVFAIL, got error {:?}", unexpected);
+            }
+        },
+    };
+
+    Ok(())
+}
+
 struct TestContext {
     client: Client,
     resolver: TokioAsyncResolver,
@@ -122,7 +196,9 @@ impl TestContext {
     }
 }
 
-async fn init_client_server() -> Result<TestContext, anyhow::Error> {
+async fn init_client_server(
+    zone: String,
+) -> Result<TestContext, anyhow::Error> {
     // initialize dns server config
     let (tmp, config, dropshot_port, dns_port) = test_config()?;
     let log = config
@@ -160,6 +236,7 @@ async fn init_client_server() -> Result<TestContext, anyhow::Error> {
         let log = log.clone();
         let dns_config = internal_dns::dns_server::Config {
             bind_address: format!("[::1]:{}", dns_port),
+            zone,
         };
 
         tokio::spawn(async move {

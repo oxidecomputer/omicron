@@ -7,7 +7,7 @@ use internal_dns::dropshot_server::api;
 use std::fs::File;
 use std::io;
 
-fn usage(args: &Vec<String>) -> String {
+fn usage(args: &[String]) -> String {
     format!("{} [output path]", args[0])
 }
 

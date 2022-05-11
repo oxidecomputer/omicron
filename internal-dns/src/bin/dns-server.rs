@@ -27,6 +27,9 @@ struct Args {
 
     #[clap(long)]
     dns_address: SocketAddrV6,
+
+    #[clap(long)]
+    dns_zone: String,
 }
 
 #[tokio::main]
@@ -34,6 +37,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let args = Args::parse();
     let config_file = &args.config_file;
     let dns_address = &args.dns_address;
+    let zone = &args.dns_zone;
     let config_file_contents = std::fs::read_to_string(config_file)
         .with_context(|| format!("read config file {:?}", config_file))?;
     let mut config: internal_dns::Config =
@@ -55,6 +59,7 @@ async fn main() -> Result<(), anyhow::Error> {
         let log = log.clone();
         let dns_config = internal_dns::dns_server::Config {
             bind_address: dns_address.to_string(),
+            zone: zone.to_string(),
         };
         tokio::spawn(async move {
             internal_dns::dns_server::run(log, db, dns_config).await
