@@ -693,3 +693,184 @@ async fn test_saml_idp_metadata_url_invalid(
     .await
     .expect("unexpected success");
 }
+
+// TODO samael does not support ECDSA yet, add tests when it does
+const RSA_KEY_1_PUBLIC: &str = include_str!("data/rsa-key-1-public.b64");
+const RSA_KEY_1_PRIVATE: &str = include_str!("data/rsa-key-1-private.b64");
+const RSA_KEY_2_PUBLIC: &str = include_str!("data/rsa-key-2-public.b64");
+const RSA_KEY_2_PRIVATE: &str = include_str!("data/rsa-key-2-private.b64");
+
+#[nexus_test]
+async fn test_saml_idp_reject_keypair(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let saml_idp_descriptor = SAML_IDP_DESCRIPTOR;
+
+    // Spin up a server but expect it never to be accessed
+    let server = Server::run();
+    server.expect(
+        Expectation::matching(request::method_path("GET", "/descriptor"))
+            .times(0)
+            .respond_with(status_code(200).body(saml_idp_descriptor)),
+    );
+
+    // TODO when different external-authenticator works with multiple silos
+    //const SILO_NAME: &str = "saml-silo";
+    //let silo: Silo = create_silo(&client, SILO_NAME, true).await;
+
+    const SILO_NAME: &str = "default-silo";
+    let silo: Silo =
+        NexusRequest::object_get(&client, &format!("/silos/{}", SILO_NAME,))
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .expect("failed to make request")
+            .parsed_body()
+            .unwrap();
+
+    let test_cases = vec![
+        // Reject signing keypair if the certificate or key is not base64
+        // encoded
+        params::DerEncodedKeyPair {
+            public_cert: "regular string".to_string(),
+            private_key: RSA_KEY_1_PRIVATE.to_string(),
+        },
+        params::DerEncodedKeyPair {
+            public_cert: RSA_KEY_1_PUBLIC.to_string(),
+            private_key: "regular string".to_string(),
+        },
+
+        // Reject signing keypair if the certificate or key is base64 encoded
+        // but not valid
+        params::DerEncodedKeyPair {
+            public_cert: base64::encode("not a cert"),
+            private_key: RSA_KEY_1_PRIVATE.to_string(),
+        },
+        params::DerEncodedKeyPair {
+            public_cert: RSA_KEY_1_PUBLIC.to_string(),
+            private_key: base64::encode("not a cert"),
+        },
+
+        // Reject signing keypair if cert and key are swapped
+        params::DerEncodedKeyPair {
+            public_cert: RSA_KEY_1_PRIVATE.to_string(),
+            private_key: RSA_KEY_1_PUBLIC.to_string(),
+        },
+
+        // Reject signing keypair if the keys do not match
+        params::DerEncodedKeyPair {
+            public_cert: RSA_KEY_1_PUBLIC.to_string(),
+            private_key: RSA_KEY_2_PRIVATE.to_string(),
+        },
+        params::DerEncodedKeyPair {
+            public_cert: RSA_KEY_2_PUBLIC.to_string(),
+            private_key: RSA_KEY_1_PRIVATE.to_string(),
+        },
+    ];
+
+    for test_case in test_cases {
+        NexusRequest::new(
+            RequestBuilder::new(
+                client,
+                Method::POST,
+                &format!("/silos/{}/saml_identity_providers", SILO_NAME),
+            )
+            .body(Some(&params::SiloSamlIdentityProviderCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "some-totally-real-saml-provider"
+                        .to_string()
+                        .parse()
+                        .unwrap(),
+                    description: "a demo provider".to_string(),
+                },
+
+                idp_metadata_url: server.url("/descriptor").to_string(),
+
+                idp_entity_id: "entity_id".to_string(),
+                sp_client_id: "client_id".to_string(),
+                acs_url: "http://acs".to_string(),
+                slo_url: "http://slo".to_string(),
+                technical_contact_email: "technical@fake".to_string(),
+
+                signing_keypair: Some(test_case),
+            }))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+        )
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("unexpected success");
+    }
+}
+
+// Test that a RSA keypair works
+#[nexus_test]
+async fn test_saml_idp_rsa_keypair_ok(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let saml_idp_descriptor = SAML_IDP_DESCRIPTOR;
+
+    // Spin up a server but expect it never to be accessed
+    let server = Server::run();
+    server.expect(
+        Expectation::matching(request::method_path("GET", "/descriptor"))
+            .times(1)
+            .respond_with(status_code(200).body(saml_idp_descriptor)),
+    );
+
+    // TODO when different external-authenticator works with multiple silos
+    //const SILO_NAME: &str = "saml-silo";
+    //let silo: Silo = create_silo(&client, SILO_NAME, true).await;
+
+    const SILO_NAME: &str = "default-silo";
+    let silo: Silo =
+        NexusRequest::object_get(&client, &format!("/silos/{}", SILO_NAME,))
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .expect("failed to make request")
+            .parsed_body()
+            .unwrap();
+
+    NexusRequest::new(
+        RequestBuilder::new(
+            client,
+            Method::POST,
+            &format!("/silos/{}/saml_identity_providers", SILO_NAME),
+        )
+        .body(Some(&params::SiloSamlIdentityProviderCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "some-totally-real-saml-provider"
+                    .to_string()
+                    .parse()
+                    .unwrap(),
+                description: "a demo provider".to_string(),
+            },
+
+            idp_metadata_url: server.url("/descriptor").to_string(),
+
+            idp_entity_id: "entity_id".to_string(),
+            sp_client_id: "client_id".to_string(),
+            acs_url: "http://acs".to_string(),
+            slo_url: "http://slo".to_string(),
+            technical_contact_email: "technical@fake".to_string(),
+
+            signing_keypair: Some(
+                params::DerEncodedKeyPair {
+                    public_cert: RSA_KEY_1_PUBLIC.to_string(),
+                    private_key: RSA_KEY_1_PRIVATE.to_string(),
+                }
+            ),
+        }))
+        .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("unexpected failure");
+}
+

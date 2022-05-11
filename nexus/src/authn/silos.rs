@@ -29,32 +29,6 @@ impl SiloSamlIdentityProvider {
         // check that there is a valid sign in url
         let _sign_in_url = self.sign_in_url(None)?;
 
-        // if keys were supplied, check that both public and private are here
-        if self.public_cert_bytes()?.is_some()
-            && self.private_key_bytes()?.is_none()
-        {
-            bail!("public and private key must be supplied together");
-        }
-        if self.public_cert_bytes()?.is_none()
-            && self.private_key_bytes()?.is_some()
-        {
-            bail!("public and private key must be supplied together");
-        }
-
-        // If supplied, validate that the cert and key pair of [u8] is actually
-        // DER formatted X509 keys
-        if let Some(public_cert) = self.public_cert_bytes()? {
-            if openssl::x509::X509::from_der(&public_cert).is_err() {
-                bail!("public certificate must be DER formatted X509");
-            }
-        }
-
-        if let Some(private_key) = self.private_key_bytes()? {
-            if openssl::pkey::PKey::private_key_from_der(&private_key).is_err() {
-                bail!("private key must be DER formatted");
-            }
-        }
-
         Ok(())
     }
 
