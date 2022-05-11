@@ -34,7 +34,7 @@ pub async fn aaaa_crud() -> Result<(), anyhow::Error> {
     client
         .dns_records_set(&vec![DnsKv {
             key: name.clone(),
-            record: aaaa.clone(),
+            records: vec![aaaa.clone()],
         }])
         .await?;
 
@@ -42,7 +42,9 @@ pub async fn aaaa_crud() -> Result<(), anyhow::Error> {
     let records = client.dns_records_get().await?;
     assert_eq!(1, records.len());
     assert_eq!(records[0].key.name, name.name);
-    match records[0].record {
+
+    assert_eq!(1, records[0].records.len());
+    match records[0].records[0] {
         DnsRecord::Aaaa(ra) => {
             assert_eq!(ra, addr);
         }
@@ -78,7 +80,7 @@ pub async fn srv_crud() -> Result<(), anyhow::Error> {
     client
         .dns_records_set(&vec![DnsKv {
             key: name.clone(),
-            record: rec.clone(),
+            records: vec![rec.clone()],
         }])
         .await?;
 
@@ -86,7 +88,9 @@ pub async fn srv_crud() -> Result<(), anyhow::Error> {
     let records = client.dns_records_get().await?;
     assert_eq!(1, records.len());
     assert_eq!(records[0].key.name, name.name);
-    match records[0].record {
+
+    assert_eq!(1, records[0].records.len());
+    match records[0].records[0] {
         DnsRecord::Srv(ref rs) => {
             assert_eq!(rs.prio, srv.prio);
             assert_eq!(rs.weight, srv.weight);

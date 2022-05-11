@@ -124,7 +124,7 @@ async fn handle_req<'a, 'b, 'c>(
         }
     };
 
-    let record: crate::dns_data::DnsRecord =
+    let records: Vec<crate::dns_data::DnsRecord> =
         match serde_json::from_slice(bits.as_ref()) {
             Ok(r) => r,
             Err(e) => {
@@ -134,12 +134,19 @@ async fn handle_req<'a, 'b, 'c>(
             }
         };
 
-    match record {
+    if records.is_empty() {
+        error!(log, "No records found for {}", key);
+        nack(&log, &mr, &socket, &header, &src).await;
+        return;
+    }
+
+    // TODO: Pick something other than the first record?
+    match &records[0] {
         DnsRecord::AAAA(addr) => {
             let mut aaaa = Record::new();
             aaaa.set_name(name)
                 .set_rr_type(RecordType::AAAA)
-                .set_data(Some(RData::AAAA(addr)));
+                .set_data(Some(RData::AAAA(*addr)));
 
             let mresp = rb.build(header, vec![&aaaa], vec![], vec![], vec![]);
 
@@ -170,9 +177,9 @@ async fn handle_req<'a, 'b, 'c>(
                     return;
                 }
             };
-            srv.set_name(name)
-                .set_rr_type(RecordType::SRV)
-                .set_data(Some(RData::SRV(SRV::new(prio, weight, port, tgt))));
+            srv.set_name(name).set_rr_type(RecordType::SRV).set_data(Some(
+                RData::SRV(SRV::new(*prio, *weight, *port, tgt)),
+            ));
 
             let mresp = rb.build(header, vec![&srv], vec![], vec![], vec![]);
 
