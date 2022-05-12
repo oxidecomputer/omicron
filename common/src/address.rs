@@ -39,6 +39,8 @@ pub const CRUCIBLE_PORT: u16 = 32345;
 pub const NEXUS_EXTERNAL_PORT: u16 = 12220;
 pub const NEXUS_INTERNAL_PORT: u16 = 12221;
 
+pub const COCKROACH_DNS_NAME: &str = "_cockroachdb._tcp.control-plane.oxide.internal";
+
 // Anycast is a mechanism in which a single IP address is shared by multiple
 // devices, and the destination is located based on routing distance.
 //

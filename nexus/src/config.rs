@@ -69,11 +69,12 @@ pub struct PackageConfig {
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct Config {
-    /// A variety of configuration parameters only known at runtime.
-    #[serde(flatten)]
-    pub runtime: RuntimeConfig,
+    /// Configuration parameters known at compile-time.
     #[serde(flatten)]
     pub pkg: PackageConfig,
+
+    /// A variety of configuration parameters only known at runtime.
+    pub runtime: RuntimeConfig,
 }
 
 impl Config {

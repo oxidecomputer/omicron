@@ -18,7 +18,7 @@ use authn::external::session_cookie::HttpAuthnSessionCookie;
 use authn::external::spoof::HttpAuthnSpoof;
 use authn::external::HttpAuthnScheme;
 use chrono::{DateTime, Duration, Utc};
-use omicron_common::address::{Ipv6Subnet, AZ_PREFIX, COCKROACH_PORT};
+use omicron_common::address::{Ipv6Subnet, AZ_PREFIX, COCKROACH_PORT, COCKROACH_DNS_NAME};
 use omicron_common::api::external::Error;
 use omicron_common::nexus_config;
 use omicron_common::postgres_config::PostgresConfigWithUrl;
@@ -140,6 +140,7 @@ impl ServerContext {
         // Set up DNS Client
         let az_subnet =
             Ipv6Subnet::<AZ_PREFIX>::new(config.runtime.subnet.net().ip());
+        info!(log, "Setting up resolver on subnet: {:?}", az_subnet);
         let resolver =
             internal_dns_client::multiclient::create_resolver(az_subnet)
                 .map_err(|e| format!("Failed to create DNS resolver: {}", e))?;
@@ -148,13 +149,15 @@ impl ServerContext {
         let url = match &config.runtime.database {
             nexus_config::Database::FromUrl { url } => url.clone(),
             nexus_config::Database::FromDns => {
+                info!(log, "Accessing DB url from DNS");
                 let response = resolver
-                    .lookup_ip("cockroachdb.")
+                    .lookup_ip(COCKROACH_DNS_NAME)
                     .await
                     .map_err(|e| format!("Failed to lookup IP: {}", e))?;
                 let address = response.iter().next().ok_or_else(|| {
                     "no addresses returned from DNS resolver".to_string()
                 })?;
+                info!(log, "DB addreess: {}", address);
                 PostgresConfigWithUrl::from_str(&format!(
                     "postgresql://root@[{}]:{}/omicron?sslmode=disable",
                     address, COCKROACH_PORT

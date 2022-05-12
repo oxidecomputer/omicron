@@ -323,8 +323,10 @@ impl ServiceManager {
                     // Serialize the configuration and append it into the file.
                     let serialized_cfg = toml::Value::try_from(&runtime_config)
                         .expect("Cannot serialize config");
+                    let mut map = toml::map::Map::new();
+                    map.insert("runtime".to_string(), serialized_cfg);
                     let config_str =
-                        toml::to_string(&serialized_cfg).map_err(|err| {
+                        toml::to_string(&map).map_err(|err| {
                             Error::TomlSerialize {
                                 path: config_path.clone(),
                                 err,

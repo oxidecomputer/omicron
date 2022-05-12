@@ -325,7 +325,8 @@ fn do_install(
         Ok(())
     })?;
 
-    // Ensure we start from a clean slate - remove all packages.
+    // Ensure we start from a clean slate - remove all zones & packages.
+    uninstall_all_omicron_zones()?;
     uninstall_all_packages(config);
 
     // Extract and install the bootstrap service, which itself extracts and
