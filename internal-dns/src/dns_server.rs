@@ -10,7 +10,7 @@ use std::sync::Arc;
 use crate::dns_data::DnsRecord;
 use pretty_hex::*;
 use serde::Deserialize;
-use slog::{error, Logger};
+use slog::{error, info, Logger};
 use tokio::net::UdpSocket;
 use trust_dns_client::rr::LowerName;
 use trust_dns_proto::op::header::Header;
@@ -139,68 +139,68 @@ async fn handle_req<'a, 'b, 'c>(
         nack(&log, &mr, &socket, &header, &src).await;
         return;
     }
+    info!(log, "Records found for {}: {:?}", key, records);
 
-    // TODO: Pick something other than the first record?
-    match &records[0] {
-        DnsRecord::AAAA(addr) => {
-            let mut aaaa = Record::new();
-            aaaa.set_name(name)
-                .set_rr_type(RecordType::AAAA)
-                .set_data(Some(RData::AAAA(*addr)));
-
-            let mresp = rb.build(header, vec![&aaaa], vec![], vec![], vec![]);
-
-            let mut resp_data = Vec::new();
-            let mut enc = BinEncoder::new(&mut resp_data);
-            match mresp.destructive_emit(&mut enc) {
-                Ok(_) => {}
-                Err(e) => {
-                    error!(log, "destructive emit: {}", e);
-                    nack(&log, &mr, &socket, &header, &src).await;
-                    return;
-                }
+    let mut response_records: Vec<Record> = vec![];
+    for record in &records {
+        let resp = match record {
+            DnsRecord::AAAA(addr) => {
+                let mut aaaa = Record::new();
+                aaaa.set_name(name.clone())
+                    .set_rr_type(RecordType::AAAA)
+                    .set_data(Some(RData::AAAA(*addr)));
+                aaaa
             }
-            match socket.send_to(&resp_data, &src).await {
-                Ok(_) => {}
-                Err(e) => {
-                    error!(log, "send: {}", e);
-                }
+            DnsRecord::SRV(crate::dns_data::SRV {
+                prio,
+                weight,
+                port,
+                target,
+            }) => {
+                let mut srv = Record::new();
+                let tgt = match Name::from_str(&target) {
+                    Ok(tgt) => tgt,
+                    Err(e) => {
+                        error!(log, "srv target: '{}' {}", target, e);
+                        nack(&log, &mr, &socket, &header, &src).await;
+                        return;
+                    }
+                };
+                srv.set_name(name.clone())
+                    .set_rr_type(RecordType::SRV)
+                    .set_data(Some(RData::SRV(SRV::new(
+                        *prio, *weight, *port, tgt,
+                    ))));
+                srv
             }
+        };
+        response_records.push(resp);
+    }
+
+    let mresp = rb.build(
+        header,
+        response_records.iter().map(|r| &*r).collect::<Vec<&Record>>(),
+        vec![],
+        vec![],
+        vec![],
+    );
+
+    let mut resp_data = Vec::new();
+    let mut enc = BinEncoder::new(&mut resp_data);
+    match mresp.destructive_emit(&mut enc) {
+        Ok(_) => {}
+        Err(e) => {
+            error!(log, "destructive emit: {}", e);
+            nack(&log, &mr, &socket, &header, &src).await;
+            return;
         }
-        DnsRecord::SRV(crate::dns_data::SRV { prio, weight, port, target }) => {
-            let mut srv = Record::new();
-            let tgt = match Name::from_str(&target) {
-                Ok(tgt) => tgt,
-                Err(e) => {
-                    error!(log, "srv target: '{}' {}", target, e);
-                    nack(&log, &mr, &socket, &header, &src).await;
-                    return;
-                }
-            };
-            srv.set_name(name).set_rr_type(RecordType::SRV).set_data(Some(
-                RData::SRV(SRV::new(*prio, *weight, *port, tgt)),
-            ));
-
-            let mresp = rb.build(header, vec![&srv], vec![], vec![], vec![]);
-
-            let mut resp_data = Vec::new();
-            let mut enc = BinEncoder::new(&mut resp_data);
-            match mresp.destructive_emit(&mut enc) {
-                Ok(_) => {}
-                Err(e) => {
-                    error!(log, "destructive emit: {}", e);
-                    nack(&log, &mr, &socket, &header, &src).await;
-                    return;
-                }
-            }
-            match socket.send_to(&resp_data, &src).await {
-                Ok(_) => {}
-                Err(e) => {
-                    error!(log, "send: {}", e);
-                }
-            }
+    }
+    match socket.send_to(&resp_data, &src).await {
+        Ok(_) => {}
+        Err(e) => {
+            error!(log, "send: {}", e);
         }
-    };
+    }
 }
 
 async fn nack(

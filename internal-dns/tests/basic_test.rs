@@ -115,6 +115,64 @@ pub async fn srv_crud() -> Result<(), anyhow::Error> {
 }
 
 #[tokio::test]
+pub async fn multi_record_crud() -> Result<(), anyhow::Error> {
+    let test_ctx = init_client_server("oxide.internal".into()).await?;
+    let client = &test_ctx.client;
+    let resolver = &test_ctx.resolver;
+
+    // records should initially be empty
+    let records = client.dns_records_get().await?;
+    assert!(records.is_empty());
+
+    // Add multiple AAAA records
+    let name = DnsRecordKey { name: "devron.oxide.internal".into() };
+    let addr1 = Ipv6Addr::new(0xfd, 0, 0, 0, 0, 0, 0, 0x1);
+    let addr2 = Ipv6Addr::new(0xfd, 0, 0, 0, 0, 0, 0, 0x2);
+    let aaaa1 = DnsRecord::Aaaa(addr1);
+    let aaaa2 = DnsRecord::Aaaa(addr2);
+    client
+        .dns_records_set(&vec![DnsKv {
+            key: name.clone(),
+            records: vec![aaaa1, aaaa2],
+        }])
+        .await?;
+
+    // read back the aaaa records
+    let records = client.dns_records_get().await?;
+    assert_eq!(1, records.len());
+    assert_eq!(records[0].key.name, name.name);
+
+    assert_eq!(2, records[0].records.len());
+    match &records[0].records[0] {
+        DnsRecord::Aaaa(ra) => {
+            assert_eq!(*ra, addr1);
+        }
+        _ => {
+            panic!("expected aaaa record")
+        }
+    }
+    match &records[0].records[1] {
+        DnsRecord::Aaaa(ra) => {
+            assert_eq!(*ra, addr2);
+        }
+        _ => {
+            panic!("expected aaaa record")
+        }
+    }
+
+    // resolve the name
+    let response = resolver.lookup_ip(name.name + ".").await?;
+    let mut iter = response.iter();
+    let address = iter.next().expect("no addresses returned!");
+    assert_eq!(address, addr1);
+    let address = iter.next().expect("expected two addresses, only saw one");
+    assert_eq!(address, addr2);
+
+    test_ctx.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 pub async fn nxdomain() -> Result<(), anyhow::Error> {
     let test_ctx = init_client_server("oxide.internal".into()).await?;
     let resolver = &test_ctx.resolver;
