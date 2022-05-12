@@ -151,4 +151,9 @@ if [[ "$RC" -ne 0 ]] && [[ "$RC" -ne 4 ]]; then
 fi
 
 # Actually install the xde kernel module and opteadm tool
-pkg install driver/network/opte
+RC=0
+pkg install driver/network/opte || RC=$?;
+if [[ "$RC" -ne 0 ]] && [[ "$RC" -ne 4 ]]; then
+    echo "Installing opte failed"
+    exit "$RC"
+fi
