@@ -900,7 +900,7 @@ impl StorageManager {
         nexus_client: Arc<NexusClient>,
         physical_link: PhysicalLink,
     ) -> Self {
-        let log = log.new(o!("component" => "sled agent storage manager"));
+        let log = log.new(o!("component" => "StorageManager"));
         let pools = Arc::new(Mutex::new(HashMap::new()));
         let (new_pools_tx, new_pools_rx) = mpsc::channel(10);
         let (new_filesystems_tx, new_filesystems_rx) = mpsc::channel(10);

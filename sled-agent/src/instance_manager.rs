@@ -59,7 +59,7 @@ impl InstanceManager {
     ) -> InstanceManager {
         InstanceManager {
             inner: Arc::new(InstanceManagerInternal {
-                log,
+                log: log.new(o!("component" => "InstanceManager")),
                 nexus_client,
                 instances: Mutex::new(BTreeMap::new()),
                 vnic_allocator: VnicAllocator::new("Instance", physical_link),
