@@ -47,18 +47,15 @@ impl Server {
             client_log,
         ));
 
-        let sa_log = log.new(o!(
-            "sled_id" => config.id.clone().to_string()
-        ));
         let sled_agent =
-            SledAgent::new(&config, sa_log, nexus_client.clone(), addr)
+            SledAgent::new(&config, log.clone(), nexus_client.clone(), addr)
                 .await
                 .map_err(|e| e.to_string())?;
 
         let mut dropshot_config = dropshot::ConfigDropshot::default();
         dropshot_config.request_body_max_bytes = 1024 * 1024;
         dropshot_config.bind_address = SocketAddr::V6(addr);
-        let dropshot_log = log.new(o!("component" => "dropshot"));
+        let dropshot_log = log.new(o!("component" => "dropshot (SledAgent)"));
         let http_server = dropshot::HttpServerStarter::new(
             &dropshot_config,
             http_api(),

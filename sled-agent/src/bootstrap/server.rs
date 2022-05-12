@@ -46,7 +46,7 @@ impl Server {
         );
 
         let ba = Arc::clone(&bootstrap_agent);
-        let dropshot_log = log.new(o!("component" => "dropshot"));
+        let dropshot_log = log.new(o!("component" => "dropshot (Bootstrap)"));
         let http_server = dropshot::HttpServerStarter::new(
             &config.dropshot,
             http_api(),

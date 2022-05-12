@@ -105,7 +105,17 @@ impl SledAgent {
         sled_address: SocketAddrV6,
     ) -> Result<SledAgent, Error> {
         let id = &config.id;
-        info!(&log, "created sled agent"; "id" => ?id);
+
+        // Pass the "parent_log" to all subcomponents that want to set their own
+        // "component" value.
+        let parent_log = log.clone();
+
+        // Use "log" for ourself.
+        let log = log.new(o!(
+            "component" => "SledAgent",
+            "sled_id" => id.to_string(),
+        ));
+        info!(&log, "created sled agent");
 
         let data_link = if let Some(link) = config.data_link.clone() {
             link
@@ -186,7 +196,7 @@ impl SledAgent {
         crate::opte::delete_all_xde_devices(&log)?;
 
         let storage = StorageManager::new(
-            &log,
+            &parent_log,
             *id,
             nexus_client.clone(),
             data_link.clone(),
@@ -203,13 +213,14 @@ impl SledAgent {
             }
         }
         let instances = InstanceManager::new(
-            log.clone(),
+            parent_log.clone(),
             nexus_client.clone(),
             data_link.clone(),
             *sled_address.ip(),
         );
         let services =
-            ServiceManager::new(log.clone(), data_link.clone(), None).await?;
+            ServiceManager::new(parent_log.clone(), data_link.clone(), None)
+                .await?;
 
         Ok(SledAgent {
             id: config.id,
