@@ -18,7 +18,22 @@ impl Drop for AddressCleanup {
     }
 }
 
+// TODO(https://github.com/oxidecomputer/omicron/issues/1032):
+//
+// This test has value when hacking on multicast bootstrap address
+// swapping, but is known to be flaky. It is being set to ignored
+// for the following reasons:
+//
+// - It still can provide value when modifying the bootstrap address
+// swap locally.
+// - It is known to be flaky.
+// - According to
+// <https://rfd.shared.oxide.computer/rfd/0259#_bootstrap_address_advertisement_and_discovery>,
+// we are planning on performing address swapping via Maghemite, so
+// the implementation being tested here will eventually change enough
+// to render the test obsolete.
 #[tokio::test]
+#[ignore]
 async fn test_multicast_bootstrap_address() {
     // Setup the bootstrap address.
     //

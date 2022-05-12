@@ -5,7 +5,6 @@
 //! Organizations, and roles contained within
 
 use crate::authz;
-use crate::authz::OrganizationRoles;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::lookup::LookupPath;
@@ -98,7 +97,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         organization_name: &Name,
-    ) -> LookupResult<shared::Policy<OrganizationRoles>> {
+    ) -> LookupResult<shared::Policy<authz::OrganizationRoles>> {
         let (.., authz_org) = LookupPath::new(opctx, &self.db_datastore)
             .organization_name(organization_name)
             .lookup_for(authz::Action::ReadPolicy)
@@ -118,8 +117,8 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         organization_name: &Name,
-        policy: &shared::Policy<OrganizationRoles>,
-    ) -> UpdateResult<shared::Policy<OrganizationRoles>> {
+        policy: &shared::Policy<authz::OrganizationRoles>,
+    ) -> UpdateResult<shared::Policy<authz::OrganizationRoles>> {
         let (.., authz_org) = LookupPath::new(opctx, &self.db_datastore)
             .organization_name(organization_name)
             .lookup_for(authz::Action::ModifyPolicy)

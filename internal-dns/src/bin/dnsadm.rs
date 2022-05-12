@@ -81,7 +81,7 @@ async fn main() -> Result<()> {
             client
                 .dns_records_set(&vec![DnsKv {
                     key: DnsRecordKey { name: cmd.name },
-                    record: DnsRecord::Aaaa(cmd.addr),
+                    records: vec![DnsRecord::Aaaa(cmd.addr)],
                 }])
                 .await?;
         }
@@ -89,12 +89,12 @@ async fn main() -> Result<()> {
             client
                 .dns_records_set(&vec![DnsKv {
                     key: DnsRecordKey { name: cmd.name },
-                    record: DnsRecord::Srv(Srv {
+                    records: vec![DnsRecord::Srv(Srv {
                         prio: cmd.prio,
                         weight: cmd.weight,
                         port: cmd.port,
                         target: cmd.target,
-                    }),
+                    })],
                 }])
                 .await?;
         }

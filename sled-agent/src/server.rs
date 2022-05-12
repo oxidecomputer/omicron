@@ -11,7 +11,7 @@ use crate::nexus::NexusClient;
 use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
 };
-use slog::Drain;
+use slog::Logger;
 use std::net::{SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -36,21 +36,9 @@ impl Server {
     /// Starts a SledAgent server
     pub async fn start(
         config: &Config,
+        log: Logger,
         addr: SocketAddrV6,
     ) -> Result<Server, String> {
-        let (drain, registration) = slog_dtrace::with_drain(
-            config.log.to_logger("sled-agent").map_err(|message| {
-                format!("initializing logger: {}", message)
-            })?,
-        );
-        let log = slog::Logger::root(drain.fuse(), slog::o!());
-        if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
-            let msg = format!("Failed to register DTrace probes: {}", e);
-            error!(log, "{}", msg);
-            return Err(msg);
-        } else {
-            debug!(log, "registered DTrace probes");
-        }
         info!(log, "setting up sled agent server");
 
         let client_log = log.new(o!("component" => "NexusClient"));
@@ -59,19 +47,15 @@ impl Server {
             client_log,
         ));
 
-        let sa_log = log.new(o!(
-            "component" => "SledAgent",
-            "sled_id" => config.id.clone().to_string()
-        ));
         let sled_agent =
-            SledAgent::new(&config, sa_log, nexus_client.clone(), addr)
+            SledAgent::new(&config, log.clone(), nexus_client.clone(), addr)
                 .await
                 .map_err(|e| e.to_string())?;
 
         let mut dropshot_config = dropshot::ConfigDropshot::default();
         dropshot_config.request_body_max_bytes = 1024 * 1024;
         dropshot_config.bind_address = SocketAddr::V6(addr);
-        let dropshot_log = log.new(o!("component" => "dropshot"));
+        let dropshot_log = log.new(o!("component" => "dropshot (SledAgent)"));
         let http_server = dropshot::HttpServerStarter::new(
             &dropshot_config,
             http_api(),

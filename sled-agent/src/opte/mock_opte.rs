@@ -183,3 +183,8 @@ pub fn initialize_xde_driver(log: &Logger) -> Result<(), Error> {
     slog::warn!(log, "`xde` driver is a fiction on non-illumos systems");
     Ok(())
 }
+
+pub fn delete_all_xde_devices(log: &Logger) -> Result<(), Error> {
+    slog::warn!(log, "`xde` driver is a fiction on non-illumos systems");
+    Ok(())
+}

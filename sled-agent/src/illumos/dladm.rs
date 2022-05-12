@@ -5,6 +5,7 @@
 //! Utilities for poking at data links.
 
 use crate::common::vlan::VlanID;
+use crate::illumos::vnic::VnicKind;
 use crate::illumos::{execute, ExecutionError, PFEXEC};
 use omicron_common::api::external::MacAddr;
 use serde::{Deserialize, Serialize};
@@ -12,6 +13,11 @@ use std::str::FromStr;
 
 pub const VNIC_PREFIX: &str = "ox";
 pub const VNIC_PREFIX_CONTROL: &str = "oxControl";
+
+/// Prefix used to name VNICs over xde devices / OPTE ports.
+// TODO-correctness: Remove this when `xde` devices can be directly used beneath
+// Viona, and thus plumbed directly to guests.
+pub const VNIC_PREFIX_GUEST: &str = "vopte";
 
 pub const DLADM: &str = "/usr/sbin/dladm";
 
@@ -164,7 +170,7 @@ impl Dladm {
         Ok(())
     }
 
-    /// Returns all VNICs that may be managed by the Sled Agent.
+    /// Returns VNICs that may be managed by the Sled Agent.
     pub fn get_vnics() -> Result<Vec<String>, GetVnicError> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[DLADM, "show-vnic", "-p", "-o", "LINK"]);
@@ -172,8 +178,14 @@ impl Dladm {
 
         let vnics = String::from_utf8_lossy(&output.stdout)
             .lines()
-            .filter(|vnic| vnic.starts_with(VNIC_PREFIX))
-            .map(|s| s.to_owned())
+            .filter_map(|name| {
+                // Ensure this is a kind of VNIC that the sled agent could be
+                // responsible for.
+                match VnicKind::from_name(name) {
+                    Some(_) => Some(name.to_owned()),
+                    None => None,
+                }
+            })
             .collect();
         Ok(vnics)
     }

@@ -84,6 +84,9 @@ fn read_key_share() -> Result<Option<ShareDistribution>, BootstrapError> {
 pub(crate) struct Agent {
     /// Debug log
     log: Logger,
+    /// Store the parent log - without "component = BootstrapAgent" - so
+    /// other launched components can set their own value.
+    parent_log: Logger,
     peer_monitor: discovery::PeerMonitor,
     share: Option<ShareDistribution>,
 
@@ -130,6 +133,11 @@ impl Agent {
         sled_config: SledConfig,
         address: Ipv6Addr,
     ) -> Result<Self, BootstrapError> {
+        let ba_log = log.new(o!(
+            "component" => "BootstrapAgent",
+            "server" => sled_config.id.to_string(),
+        ));
+
         let data_link = if let Some(link) = sled_config.data_link.clone() {
             link
         } else {
@@ -148,16 +156,15 @@ impl Agent {
         )
         .map_err(|err| BootstrapError::BootstrapAddress { err })?;
 
-        let peer_monitor =
-            discovery::PeerMonitor::new(&log, address).map_err(|err| {
-                BootstrapError::Io {
-                    message: format!("Monitoring for peers from {address}"),
-                    err,
-                }
+        let peer_monitor = discovery::PeerMonitor::new(&ba_log, address)
+            .map_err(|err| BootstrapError::Io {
+                message: format!("Monitoring for peers from {address}"),
+                err,
             })?;
         let share = read_key_share()?;
         let agent = Agent {
-            log,
+            log: ba_log,
+            parent_log: log,
             peer_monitor,
             share,
             rss: Mutex::new(None),
@@ -226,9 +233,13 @@ impl Agent {
             return Ok(SledAgentResponse { id: server.id() });
         }
         // Server does not exist, initialize it.
-        let server = SledServer::start(&self.sled_config, sled_address)
-            .await
-            .map_err(|e| {
+        let server = SledServer::start(
+            &self.sled_config,
+            self.parent_log.clone(),
+            sled_address,
+        )
+        .await
+        .map_err(|e| {
             BootstrapError::SledError(format!(
                 "Could not start sled agent server: {e}"
             ))
@@ -371,7 +382,7 @@ impl Agent {
     async fn start_rss(&self, config: &Config) -> Result<(), BootstrapError> {
         if let Some(rss_config) = &config.rss_config {
             let rss = RackSetupService::new(
-                self.log.new(o!("component" => "RSS")),
+                self.parent_log.new(o!("component" => "RSS")),
                 rss_config.clone(),
                 self.peer_monitor.observer().await,
             );

@@ -135,13 +135,16 @@
           "key": {
             "$ref": "#/components/schemas/DnsRecordKey"
           },
-          "record": {
-            "$ref": "#/components/schemas/DnsRecord"
+          "records": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DnsRecord"
+            }
           }
         },
         "required": [
           "key",
-          "record"
+          "records"
         ]
       },
       "DnsRecord": {
