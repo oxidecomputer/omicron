@@ -172,14 +172,8 @@ pub async fn multi_record_crud() -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-#[tokio::test]
-pub async fn nxdomain() -> Result<(), anyhow::Error> {
-    let test_ctx = init_client_server("oxide.internal".into()).await?;
-    let resolver = &test_ctx.resolver;
-
-    // asking for a nonexistent record within the domain of the internal DNS
-    // server should result in an NXDOMAIN
-    match resolver.lookup_ip("unicorn.oxide.internal").await {
+async fn lookup_ip_expect_nxdomain(resolver: &TokioAsyncResolver, name: &str) {
+    match resolver.lookup_ip(name).await {
         Ok(unexpected) => {
             panic!("Expected NXDOMAIN, got record {:?}", unexpected);
         }
@@ -204,6 +198,45 @@ pub async fn nxdomain() -> Result<(), anyhow::Error> {
             }
         },
     };
+}
+
+#[tokio::test]
+pub async fn empty_record() -> Result<(), anyhow::Error> {
+    let test_ctx = init_client_server("oxide.internal".into()).await?;
+    let client = &test_ctx.client;
+    let resolver = &test_ctx.resolver;
+
+    // records should initially be empty
+    let records = client.dns_records_get().await?;
+    assert!(records.is_empty());
+
+    // Add an empty DNS record
+    let name = DnsRecordKey { name: "devron.oxide.internal".into() };
+    client
+        .dns_records_set(&vec![DnsKv { key: name.clone(), records: vec![] }])
+        .await?;
+
+    // read back the aaaa record
+    let records = client.dns_records_get().await?;
+    assert_eq!(1, records.len());
+    assert_eq!(records[0].key.name, name.name);
+    assert_eq!(0, records[0].records.len());
+
+    // resolve the name
+    lookup_ip_expect_nxdomain(&resolver, "devron.oxide.internal").await;
+
+    test_ctx.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+pub async fn nxdomain() -> Result<(), anyhow::Error> {
+    let test_ctx = init_client_server("oxide.internal".into()).await?;
+    let resolver = &test_ctx.resolver;
+
+    // asking for a nonexistent record within the domain of the internal DNS
+    // server should result in an NXDOMAIN
+    lookup_ip_expect_nxdomain(&resolver, "unicorn.oxide.internal").await;
 
     Ok(())
 }

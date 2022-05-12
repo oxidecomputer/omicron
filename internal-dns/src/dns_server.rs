@@ -53,6 +53,33 @@ pub async fn run(log: Logger, db: Arc<sled::Db>, config: Config) -> Result<()> {
     }
 }
 
+async fn respond_nxdomain(
+    log: &Logger,
+    socket: Arc<UdpSocket>,
+    src: SocketAddr,
+    rb: MessageResponseBuilder<'_>,
+    header: Header,
+    mr: &MessageRequest,
+) {
+    let mresp = rb.error_msg(&header, ResponseCode::NXDomain);
+    let mut resp_data = Vec::new();
+    let mut enc = BinEncoder::new(&mut resp_data);
+    match mresp.destructive_emit(&mut enc) {
+        Ok(_) => {}
+        Err(e) => {
+            error!(log, "NXDOMAIN destructive emit: {}", e);
+            nack(&log, &mr, &socket, &header, &src).await;
+            return;
+        }
+    }
+    match socket.send_to(&resp_data, &src).await {
+        Ok(_) => {}
+        Err(e) => {
+            error!(log, "NXDOMAIN send: {}", e);
+        }
+    }
+}
+
 async fn handle_req<'a, 'b, 'c>(
     log: Logger,
     db: Arc<sled::Db>,
@@ -96,23 +123,7 @@ async fn handle_req<'a, 'b, 'c>(
 
         // If no record is found bail with NXDOMAIN.
         Ok(None) => {
-            let mresp = rb.error_msg(&header, ResponseCode::NXDomain);
-            let mut resp_data = Vec::new();
-            let mut enc = BinEncoder::new(&mut resp_data);
-            match mresp.destructive_emit(&mut enc) {
-                Ok(_) => {}
-                Err(e) => {
-                    error!(log, "NXDOMAIN destructive emit: {}", e);
-                    nack(&log, &mr, &socket, &header, &src).await;
-                    return;
-                }
-            }
-            match socket.send_to(&resp_data, &src).await {
-                Ok(_) => {}
-                Err(e) => {
-                    error!(log, "NXDOMAIN send: {}", e);
-                }
-            }
+            respond_nxdomain(&log, socket, src, rb, header, &mr).await;
             return;
         }
 
@@ -136,7 +147,7 @@ async fn handle_req<'a, 'b, 'c>(
 
     if records.is_empty() {
         error!(log, "No records found for {}", key);
-        nack(&log, &mr, &socket, &header, &src).await;
+        respond_nxdomain(&log, socket, src, rb, header, &mr).await;
         return;
     }
 
