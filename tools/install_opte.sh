@@ -14,6 +14,7 @@ fi
 
 if [[ "$(uname)" != "SunOS" ]]; then
     echo "This script is intended for Helios only"
+    exit 1
 fi
 
 if [[ $(id -u) -ne 0 ]]; then
@@ -48,8 +49,9 @@ function download_and_check_sha {
             echo "SHA mismatch downloding file $FILENAME"
             exit 1
         fi
+        echo "\"$OUT_PATH\" downloaded and has verified SHA"
     else
-        echo "File $FILENAME already exists with correct SHA"
+        echo "\"$OUT_PATH\" already exists with correct SHA"
     fi
 }
 
@@ -89,22 +91,26 @@ function ensure_helios_dev_is_non_sticky {
     fi
 }
 
-function verify_publisher_search_order {
-    local EXPECTED=("on-nightly" "helios-netdev" "helios-dev")
-    local N_EXPECTED="${#EXPECTED[*]}"
-    readarray -t ACTUAL < <(pkg publisher -H | cut -d ' ' -f 1)
-    local N_ACTUAL="${#ACTUAL[*]}"
-    if [[ $N_EXPECTED -ne $N_ACTUAL ]]; then
-        echo "Mismatched number of publishers, expected: $N_EXPECTED, found: $N_ACTUAL"
-        exit 1
+# Add the publisher specified by the provided path. If that publisher already
+# exists, set the origin instead. If more than one publisher with that name
+# exists, abort with an error.
+function add_publisher {
+    local ARCHIVE_PATH="$1"
+    local PUBLISHER_NAME="$(pkgrepo info -H -s "$ARCHIVE_PATH" | cut -d ' ' -f 1)"
+    local N_PUBLISHERS="$(pkg publisher | grep -c "$PUBLISHER_NAME")"
+    if [[ "$N_PUBLISHERS" -gt 1 ]]; then
+        echo "More than one publisher named \"$PUBLISHER_NAME\" found"
+        echo "Removing all publishers and installing from scratch"
+        pkg unset-publisher "$PUBLISHER_NAME"
+        pkg set-publisher -p "$ARCHIVE_PATH" --search-first
+    elif [[ "$N_PUBLISHERS" -eq 1 ]]; then
+        echo "Publisher \"$PUBLISHER_NAME\" already exists, setting"
+        echo "the origin to "$ARCHIVE_PATH""
+        pkg set-publisher --origin-uri "$ARCHIVE_PATH" --search-first "$PUBLISHER_NAME"
+    else
+        echo "Publisher \"$PUBLISHER_NAME\" does not exist, adding"
+        pkg set-publisher -p "$ARCHIVE_PATH" --search-first
     fi
-    for ((i=0;i<N_ACTUAL;i++))
-    do
-        if [[ "${EXPECTED[i]}" != "${ACTUAL[i]}" ]]; then
-            echo "Mismatched publishers: ${EXPECTED[i]} vs ${ACTUAL[i]}"
-            exit 1
-        fi
-    done
 }
 
 # `helios-netdev` provides the xde kernel driver and the `opteadm` userland tool
@@ -133,10 +139,8 @@ download_and_check_sha "$XDE_REPO_URL" "$(sha_from_url "$XDE_REPO_SHA_URL")"
 ensure_helios_dev_is_non_sticky
 
 # Add the OPTE and xde repositories and update packages.
-pkg set-publisher -p "$HELIOS_NETDEV_REPO_PATH" --search-first
-pkg set-publisher -p "$XDE_REPO_PATH" --search-first
-
-verify_publisher_search_order
+add_publisher "$HELIOS_NETDEV_REPO_PATH"
+add_publisher "$XDE_REPO_PATH"
 
 # Actually update packages, handling case where no updates are needed
 RC=0
