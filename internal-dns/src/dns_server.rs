@@ -53,6 +53,33 @@ pub async fn run(log: Logger, db: Arc<sled::Db>, config: Config) -> Result<()> {
     }
 }
 
+async fn respond_nxdomain(
+    log: &Logger,
+    socket: Arc<UdpSocket>,
+    src: SocketAddr,
+    rb: MessageResponseBuilder<'_>,
+    header: Header,
+    mr: &MessageRequest,
+) {
+    let mresp = rb.error_msg(&header, ResponseCode::NXDomain);
+    let mut resp_data = Vec::new();
+    let mut enc = BinEncoder::new(&mut resp_data);
+    match mresp.destructive_emit(&mut enc) {
+        Ok(_) => {}
+        Err(e) => {
+            error!(log, "NXDOMAIN destructive emit: {}", e);
+            nack(&log, &mr, &socket, &header, &src).await;
+            return;
+        }
+    }
+    match socket.send_to(&resp_data, &src).await {
+        Ok(_) => {}
+        Err(e) => {
+            error!(log, "NXDOMAIN send: {}", e);
+        }
+    }
+}
+
 async fn handle_req<'a, 'b, 'c>(
     log: Logger,
     db: Arc<sled::Db>,
@@ -96,23 +123,7 @@ async fn handle_req<'a, 'b, 'c>(
 
         // If no record is found bail with NXDOMAIN.
         Ok(None) => {
-            let mresp = rb.error_msg(&header, ResponseCode::NXDomain);
-            let mut resp_data = Vec::new();
-            let mut enc = BinEncoder::new(&mut resp_data);
-            match mresp.destructive_emit(&mut enc) {
-                Ok(_) => {}
-                Err(e) => {
-                    error!(log, "NXDOMAIN destructive emit: {}", e);
-                    nack(&log, &mr, &socket, &header, &src).await;
-                    return;
-                }
-            }
-            match socket.send_to(&resp_data, &src).await {
-                Ok(_) => {}
-                Err(e) => {
-                    error!(log, "NXDOMAIN send: {}", e);
-                }
-            }
+            respond_nxdomain(&log, socket, src, rb, header, &mr).await;
             return;
         }
 
@@ -124,7 +135,7 @@ async fn handle_req<'a, 'b, 'c>(
         }
     };
 
-    let record: crate::dns_data::DnsRecord =
+    let records: Vec<crate::dns_data::DnsRecord> =
         match serde_json::from_slice(bits.as_ref()) {
             Ok(r) => r,
             Err(e) => {
@@ -134,66 +145,72 @@ async fn handle_req<'a, 'b, 'c>(
             }
         };
 
-    match record {
-        DnsRecord::AAAA(addr) => {
-            let mut aaaa = Record::new();
-            aaaa.set_name(name)
-                .set_rr_type(RecordType::AAAA)
-                .set_data(Some(RData::AAAA(addr)));
+    if records.is_empty() {
+        error!(log, "No records found for {}", key);
+        respond_nxdomain(&log, socket, src, rb, header, &mr).await;
+        return;
+    }
 
-            let mresp = rb.build(header, vec![&aaaa], vec![], vec![], vec![]);
+    let mut response_records: Vec<Record> = vec![];
+    for record in &records {
+        let resp = match record {
+            DnsRecord::AAAA(addr) => {
+                let mut aaaa = Record::new();
+                aaaa.set_name(name.clone())
+                    .set_rr_type(RecordType::AAAA)
+                    .set_data(Some(RData::AAAA(*addr)));
+                aaaa
+            }
+            DnsRecord::SRV(crate::dns_data::SRV {
+                prio,
+                weight,
+                port,
+                target,
+            }) => {
+                let mut srv = Record::new();
+                let tgt = match Name::from_str(&target) {
+                    Ok(tgt) => tgt,
+                    Err(e) => {
+                        error!(log, "srv target: '{}' {}", target, e);
+                        nack(&log, &mr, &socket, &header, &src).await;
+                        return;
+                    }
+                };
+                srv.set_name(name.clone())
+                    .set_rr_type(RecordType::SRV)
+                    .set_data(Some(RData::SRV(SRV::new(
+                        *prio, *weight, *port, tgt,
+                    ))));
+                srv
+            }
+        };
+        response_records.push(resp);
+    }
 
-            let mut resp_data = Vec::new();
-            let mut enc = BinEncoder::new(&mut resp_data);
-            match mresp.destructive_emit(&mut enc) {
-                Ok(_) => {}
-                Err(e) => {
-                    error!(log, "destructive emit: {}", e);
-                    nack(&log, &mr, &socket, &header, &src).await;
-                    return;
-                }
-            }
-            match socket.send_to(&resp_data, &src).await {
-                Ok(_) => {}
-                Err(e) => {
-                    error!(log, "send: {}", e);
-                }
-            }
+    let mresp = rb.build(
+        header,
+        response_records.iter().map(|r| &*r).collect::<Vec<&Record>>(),
+        vec![],
+        vec![],
+        vec![],
+    );
+
+    let mut resp_data = Vec::new();
+    let mut enc = BinEncoder::new(&mut resp_data);
+    match mresp.destructive_emit(&mut enc) {
+        Ok(_) => {}
+        Err(e) => {
+            error!(log, "destructive emit: {}", e);
+            nack(&log, &mr, &socket, &header, &src).await;
+            return;
         }
-        DnsRecord::SRV(crate::dns_data::SRV { prio, weight, port, target }) => {
-            let mut srv = Record::new();
-            let tgt = match Name::from_str(&target) {
-                Ok(tgt) => tgt,
-                Err(e) => {
-                    error!(log, "srv target: '{}' {}", target, e);
-                    nack(&log, &mr, &socket, &header, &src).await;
-                    return;
-                }
-            };
-            srv.set_name(name)
-                .set_rr_type(RecordType::SRV)
-                .set_data(Some(RData::SRV(SRV::new(prio, weight, port, tgt))));
-
-            let mresp = rb.build(header, vec![&srv], vec![], vec![], vec![]);
-
-            let mut resp_data = Vec::new();
-            let mut enc = BinEncoder::new(&mut resp_data);
-            match mresp.destructive_emit(&mut enc) {
-                Ok(_) => {}
-                Err(e) => {
-                    error!(log, "destructive emit: {}", e);
-                    nack(&log, &mr, &socket, &header, &src).await;
-                    return;
-                }
-            }
-            match socket.send_to(&resp_data, &src).await {
-                Ok(_) => {}
-                Err(e) => {
-                    error!(log, "send: {}", e);
-                }
-            }
+    }
+    match socket.send_to(&resp_data, &src).await {
+        Ok(_) => {}
+        Err(e) => {
+            error!(log, "send: {}", e);
         }
-    };
+    }
 }
 
 async fn nack(
