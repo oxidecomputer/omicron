@@ -10,7 +10,7 @@ use std::sync::Arc;
 use crate::dns_data::DnsRecord;
 use pretty_hex::*;
 use serde::Deserialize;
-use slog::{error, info, Logger};
+use slog::{error, Logger};
 use tokio::net::UdpSocket;
 use trust_dns_client::rr::LowerName;
 use trust_dns_proto::op::header::Header;
@@ -139,7 +139,6 @@ async fn handle_req<'a, 'b, 'c>(
         nack(&log, &mr, &socket, &header, &src).await;
         return;
     }
-    info!(log, "Records found for {}: {:?}", key, records);
 
     let mut response_records: Vec<Record> = vec![];
     for record in &records {
