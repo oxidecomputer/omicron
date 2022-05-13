@@ -89,7 +89,12 @@ impl IdentityProviderType {
                             // model to the authn type here, this is a server
                             // error: it was validated before it went into the
                             // DB.
-                            omicron_common::api::external::Error::internal_error(&e.to_string())
+                            omicron_common::api::external::Error::internal_error(
+                                &format!(
+                                    "saml_identity_provider.try_into() failed! {}",
+                                    &e.to_string()
+                                )
+                            )
                         )?
                 ))
             }
