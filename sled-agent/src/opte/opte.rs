@@ -159,7 +159,7 @@ impl OptePortAllocator {
             let phys = PhysicalLink(name.clone());
             let vnic_name = format!("v{}", name);
             Dladm::create_vnic(
-                &phys,
+                &phys.0,
                 &vnic_name,
                 Some(omicron_common::api::external::MacAddr(mac)),
                 None,
