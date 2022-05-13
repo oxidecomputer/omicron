@@ -19,9 +19,13 @@ pub const VNIC_PREFIX_CONTROL: &str = "oxControl";
 // Viona, and thus plumbed directly to guests.
 pub const VNIC_PREFIX_GUEST: &str = "vopte";
 
+/// Path to the DLADM command.
 pub const DLADM: &str = "/usr/sbin/dladm";
 
+/// The name of the etherstub to be created for the underlay.
 pub const ETHERSTUB_NAME: &str = "stub0";
+
+/// The name of the etherstub VNIC to be created in the global zone.
 pub const ETHERSTUB_VNIC_NAME: &str = "underlay0";
 
 /// Errors returned from [`Dladm::find_physical`].

@@ -88,7 +88,7 @@ impl ServiceManager {
     /// Args:
     /// - `log`: The logger
     /// - `etherstub`: An etherstub on which to allocate VNICs.
-    /// - `etherstub_vnic`: The underlay's VNIC in the Global Zone.
+    /// - `underlay_vnic`: The underlay's VNIC in the Global Zone.
     /// - `config_path`: An optional path to a configuration file to store
     /// the record of services. By default, [`default_services_config_path`]
     /// is used.
