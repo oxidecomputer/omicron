@@ -41,6 +41,9 @@ pub enum Error {
     #[error("Failed to acquire etherstub: {0}")]
     Etherstub(crate::illumos::ExecutionError),
 
+    #[error("Failed to acquire etherstub VNIC: {0}")]
+    EtherstubVnic(crate::illumos::dladm::CreateVnicError),
+
     #[error("Failed to lookup VNICs on boot: {0}")]
     GetVnics(#[from] crate::illumos::dladm::GetVnicError),
 
@@ -122,12 +125,8 @@ impl SledAgent {
 
         let etherstub =
             Dladm::create_etherstub().map_err(|e| Error::Etherstub(e))?;
-
-        let data_link = if let Some(link) = config.data_link.clone() {
-            link
-        } else {
-            Dladm::find_physical()?
-        };
+        let etherstub_vnic =
+            Dladm::create_etherstub_vnic(&etherstub).map_err(|e| Error::EtherstubVnic(e))?;
 
         // Before we start creating zones, we need to ensure that the
         // necessary ZFS and Zone resources are ready.
@@ -147,7 +146,7 @@ impl SledAgent {
         // RSS-provided IP address. In the meantime, we use one from the
         // configuration file.
         Zones::ensure_has_global_zone_v6_address(
-            data_link.clone(),
+            etherstub_vnic.clone(),
             *sled_address.ip(),
             "sled6",
         )
@@ -225,8 +224,11 @@ impl SledAgent {
             *sled_address.ip(),
         );
         let services =
-            ServiceManager::new(parent_log.clone(), etherstub.clone(), None)
-                .await?;
+            ServiceManager::new(
+                parent_log.clone(),
+                etherstub.clone(),
+                etherstub_vnic.clone(),
+            None).await?;
 
         Ok(SledAgent {
             id: config.id,

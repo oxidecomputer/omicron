@@ -9,8 +9,9 @@ use ipnetwork::IpNetwork;
 use slog::Logger;
 use std::net::{IpAddr, Ipv6Addr};
 
+use omicron_common::address::AZ_PREFIX;
 use crate::illumos::addrobj::AddrObject;
-use crate::illumos::dladm::{PhysicalLink, VNIC_PREFIX_CONTROL};
+use crate::illumos::dladm::{EtherstubVnic, VNIC_PREFIX_CONTROL};
 use crate::illumos::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use crate::illumos::{execute, PFEXEC};
 
@@ -101,7 +102,7 @@ pub struct EnsureAddressError {
 #[error("Failed to create address {address} with name {name} in the GZ on {link:?}: {err}")]
 pub struct EnsureGzAddressError {
     address: Ipv6Addr,
-    link: PhysicalLink,
+    link: EtherstubVnic,
     name: String,
     #[source]
     err: anyhow::Error,
@@ -122,7 +123,7 @@ impl AddressRequest {
     pub fn new_static(ip: IpAddr, prefix: Option<u8>) -> Self {
         let prefix = prefix.unwrap_or_else(|| match ip {
             IpAddr::V4(_) => 24,
-            IpAddr::V6(_) => 64,
+            IpAddr::V6(_) => AZ_PREFIX,
         });
         let addr = IpNetwork::new(ip, prefix).unwrap();
         AddressRequest::Static(addr)
@@ -543,13 +544,13 @@ impl Zones {
     // should remove this function when Sled Agents are provided IPv6 addresses
     // from RSS.
     pub fn ensure_has_global_zone_v6_address(
-        link: PhysicalLink,
+        link: EtherstubVnic,
         address: Ipv6Addr,
         name: &str,
     ) -> Result<(), EnsureGzAddressError> {
         // Call the guts of this function within a closure to make it easier
         // to wrap the error with appropriate context.
-        |link: PhysicalLink, address, name| -> Result<(), anyhow::Error> {
+        |link: EtherstubVnic, address, name| -> Result<(), anyhow::Error> {
             let gz_link_local_addrobj = AddrObject::new(&link.0, "linklocal")
                 .map_err(|err| anyhow!(err))?;
             Self::ensure_has_link_local_v6_address(

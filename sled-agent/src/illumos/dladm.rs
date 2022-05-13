@@ -21,7 +21,8 @@ pub const VNIC_PREFIX_GUEST: &str = "vopte";
 
 pub const DLADM: &str = "/usr/sbin/dladm";
 
-pub const ETHERSTUB_NAME: &str = "oxStub0";
+pub const ETHERSTUB_NAME: &str = "stub0";
+pub const ETHERSTUB_VNIC_NAME: &str = "underlay0";
 
 /// Errors returned from [`Dladm::find_physical`].
 #[derive(thiserror::Error, Debug)]
@@ -81,6 +82,10 @@ pub struct PhysicalLink(pub String);
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct Etherstub(pub String);
 
+/// The name of an etherstub's underlay VNIC
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+pub struct EtherstubVnic(pub String);
+
 pub trait VnicSource {
     fn name(&self) -> &str;
 }
@@ -92,6 +97,12 @@ impl VnicSource for PhysicalLink {
 }
 
 impl VnicSource for Etherstub {
+    fn name(&self) -> &str {
+        &self.0
+    }
+}
+
+impl VnicSource for EtherstubVnic {
     fn name(&self) -> &str {
         &self.0
     }
@@ -120,6 +131,25 @@ impl Dladm {
         let cmd = command.args(&[DLADM, "show-etherstub", ETHERSTUB_NAME]);
         execute(cmd)?;
         Ok(Etherstub(ETHERSTUB_NAME.to_string()))
+    }
+
+    /// Creates a VNIC on top of the etherstub.
+    ///
+    /// This VNIC is not tracked like [`crate::illumos::vnic::Vnic`], because
+    /// it is expected to exist for the lifetime of the sled.
+    pub fn create_etherstub_vnic(source: &Etherstub) -> Result<EtherstubVnic, CreateVnicError> {
+        if let Ok(vnic) = Self::get_etherstub_vnic() {
+            return Ok(vnic);
+        }
+        Self::create_vnic(source, ETHERSTUB_VNIC_NAME, None, None)?;
+        Ok(EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()))
+    }
+
+    fn get_etherstub_vnic() -> Result<EtherstubVnic, ExecutionError> {
+        let mut command = std::process::Command::new(PFEXEC);
+        let cmd = command.args(&[DLADM, "show-vnic", ETHERSTUB_VNIC_NAME]);
+        execute(cmd)?;
+        Ok(EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()))
     }
 
     /// Returns the name of the first observed physical data link.

@@ -4,11 +4,12 @@
 
 //! Support for miscellaneous services managed by the sled.
 
-use crate::illumos::dladm::Etherstub;
+use crate::illumos::dladm::{Etherstub, EtherstubVnic};
 use crate::illumos::running_zone::{InstalledZone, RunningZone};
 use crate::illumos::vnic::VnicAllocator;
 use crate::illumos::zone::AddressRequest;
 use crate::params::{ServiceEnsureBody, ServiceRequest};
+use crate::zone::Zones;
 use omicron_common::address::{DNS_PORT, DNS_SERVER_PORT};
 use slog::Logger;
 use std::collections::HashSet;
@@ -77,6 +78,7 @@ pub struct ServiceManager {
     config_path: Option<PathBuf>,
     zones: Mutex<Vec<RunningZone>>,
     vnic_allocator: VnicAllocator,
+    underlay_vnic: EtherstubVnic,
 }
 
 impl ServiceManager {
@@ -86,12 +88,14 @@ impl ServiceManager {
     /// Args:
     /// - `log`: The logger
     /// - `etherstub`: An etherstub on which to allocate VNICs.
+    /// - `etherstub_vnic`: The underlay's VNIC in the Global Zone.
     /// - `config_path`: An optional path to a configuration file to store
     /// the record of services. By default, [`default_services_config_path`]
     /// is used.
     pub async fn new(
         log: Logger,
         etherstub: Etherstub,
+        underlay_vnic: EtherstubVnic,
         config_path: Option<PathBuf>,
     ) -> Result<Self, Error> {
         debug!(log, "Creating new ServiceManager");
@@ -100,6 +104,7 @@ impl ServiceManager {
             config_path,
             zones: Mutex::new(vec![]),
             vnic_allocator: VnicAllocator::new("Service", etherstub),
+            underlay_vnic,
         };
 
         let config_path = mgr.services_config_path();
@@ -197,7 +202,6 @@ impl ServiceManager {
                 );
             }
 
-            /*
             info!(self.log, "GZ addresses: {:#?}", service.gz_addresses);
             for addr in &service.gz_addresses {
                 info!(
@@ -208,7 +212,7 @@ impl ServiceManager {
 
                 let addr_name = service.name.replace(&['-', '_'][..], "");
                 Zones::ensure_has_global_zone_v6_address(
-                    self.physical_link.clone(),
+                    self.underlay_vnic.clone(),
                     *addr,
                     &addr_name,
                 )
@@ -220,7 +224,6 @@ impl ServiceManager {
                     err,
                 })?;
             }
-            */
 
             debug!(self.log, "importing manifest");
 

@@ -138,19 +138,22 @@ impl Agent {
             "server" => sled_config.id.to_string(),
         ));
 
-        let data_link = if let Some(link) = sled_config.data_link.clone() {
-            link
-        } else {
-            Dladm::find_physical().map_err(|err| {
+        let etherstub =
+            Dladm::create_etherstub().map_err(|e| {
                 BootstrapError::SledError(format!(
-                    "Can't access physical link, and none in config: {}",
-                    err
+                    "Can't access etherstub device: {}", e
                 ))
-            })?
-        };
+            })?;
+
+        let etherstub_vnic =
+            Dladm::create_etherstub_vnic(&etherstub).map_err(|e| {
+                BootstrapError::SledError(format!(
+                    "Can't access etherstub VNIC device: {}", e
+                ))
+            })?;
 
         Zones::ensure_has_global_zone_v6_address(
-            data_link,
+            etherstub_vnic,
             address,
             "bootstrap6",
         )
