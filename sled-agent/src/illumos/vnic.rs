@@ -59,7 +59,7 @@ impl VnicAllocator {
         let name = allocator.next();
         debug_assert!(name.starts_with(VNIC_PREFIX));
         debug_assert!(name.starts_with(VNIC_PREFIX_CONTROL));
-        Dladm::create_vnic(&self.data_link.0, &name, mac, None)?;
+        Dladm::create_vnic(&self.data_link, &name, mac, None)?;
         Ok(Vnic { name, deleted: false, kind: VnicKind::OxideControl })
     }
 

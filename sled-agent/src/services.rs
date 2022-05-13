@@ -493,10 +493,12 @@ mod test {
     fn expect_new_service() -> Vec<Box<dyn std::any::Any>> {
         // Create a VNIC
         let create_vnic_ctx = MockDladm::create_vnic_context();
-        create_vnic_ctx.expect().return_once(|physical_link, _, _, _| {
-            assert_eq!(&physical_link, &ETHERSTUB_NAME);
-            Ok(())
-        });
+        create_vnic_ctx.expect().return_once(
+            |physical_link: &Etherstub, _, _, _| {
+                assert_eq!(&physical_link.0, &ETHERSTUB_NAME);
+                Ok(())
+            },
+        );
         // Install the Omicron Zone
         let install_ctx = MockZones::install_omicron_zone_context();
         install_ctx.expect().return_once(|_, name, _, _, _, _| {

@@ -86,6 +86,23 @@ pub struct Etherstub(pub String);
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct EtherstubVnic(pub String);
 
+/// Identifies that an object may be used to create a VNIC.
+pub trait VnicSource {
+    fn name(&self) -> &str;
+}
+
+impl VnicSource for Etherstub {
+    fn name(&self) -> &str {
+        &self.0
+    }
+}
+
+impl VnicSource for PhysicalLink {
+    fn name(&self) -> &str {
+        &self.0
+    }
+}
+
 /// Wraps commands for interacting with data links.
 pub struct Dladm {}
 
@@ -121,7 +138,7 @@ impl Dladm {
         if let Ok(vnic) = Self::get_etherstub_vnic() {
             return Ok(vnic);
         }
-        Self::create_vnic(&source.0, ETHERSTUB_VNIC_NAME, None, None)?;
+        Self::create_vnic(source, ETHERSTUB_VNIC_NAME, None, None)?;
         Ok(EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()))
     }
 
@@ -187,8 +204,8 @@ impl Dladm {
     /// * `vnic_name`: Exact name of the VNIC to be created.
     /// * `mac`: An optional unicast MAC address for the newly created NIC.
     /// * `vlan`: An optional VLAN ID for VLAN tagging.
-    pub fn create_vnic(
-        source: &str,
+    pub fn create_vnic<T: VnicSource + 'static>(
+        source: &T,
         vnic_name: &str,
         mac: Option<MacAddr>,
         vlan: Option<VlanID>,
@@ -199,7 +216,7 @@ impl Dladm {
             "create-vnic".to_string(),
             "-t".to_string(),
             "-l".to_string(),
-            source.to_string(),
+            source.name().to_string(),
         ];
 
         if let Some(mac) = mac {
@@ -216,7 +233,7 @@ impl Dladm {
         let cmd = command.args(&args);
         execute(cmd).map_err(|err| CreateVnicError {
             name: vnic_name.to_string(),
-            link: source.to_string(),
+            link: source.name().to_string(),
             err,
         })?;
         Ok(())
