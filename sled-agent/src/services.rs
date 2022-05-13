@@ -480,23 +480,21 @@ impl ServiceManager {
 mod test {
     use super::*;
     use crate::illumos::{
-        dladm::MockDladm, dladm::PhysicalLink, svc, zone::MockZones,
+        dladm::{Etherstub, MockDladm, ETHERSTUB_NAME, ETHERSTUB_VNIC_NAME},
+        svc,
+        zone::MockZones,
     };
     use std::os::unix::process::ExitStatusExt;
 
     const SVC_NAME: &str = "my_svc";
     const EXPECTED_ZONE_NAME: &str = "oxz_my_svc";
-    const EXPECTED_LINK_NAME: &str = "my_link";
 
     // Returns the expectations for a new service to be created.
     fn expect_new_service() -> Vec<Box<dyn std::any::Any>> {
         // Create a VNIC
         let create_vnic_ctx = MockDladm::create_vnic_context();
         create_vnic_ctx.expect().return_once(|physical_link, _, _, _| {
-            assert_eq!(
-                physical_link,
-                &PhysicalLink(EXPECTED_LINK_NAME.to_string())
-            );
+            assert_eq!(&physical_link, &ETHERSTUB_NAME);
             Ok(())
         });
         // Install the Omicron Zone
@@ -590,7 +588,8 @@ mod test {
         let config = config_dir.path().join("services.toml");
         let mgr = ServiceManager::new(
             log,
-            PhysicalLink(EXPECTED_LINK_NAME.to_string()),
+            Etherstub(ETHERSTUB_NAME.to_string()),
+            EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
             Some(config),
         )
         .await
@@ -614,7 +613,8 @@ mod test {
         let config = config_dir.path().join("services.toml");
         let mgr = ServiceManager::new(
             log,
-            PhysicalLink(EXPECTED_LINK_NAME.to_string()),
+            Etherstub(ETHERSTUB_NAME.to_string()),
+            EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
             Some(config),
         )
         .await
@@ -641,7 +641,8 @@ mod test {
         // down.
         let mgr = ServiceManager::new(
             logctx.log.clone(),
-            PhysicalLink(EXPECTED_LINK_NAME.to_string()),
+            Etherstub(ETHERSTUB_NAME.to_string()),
+            EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
             Some(config.clone()),
         )
         .await
@@ -654,7 +655,8 @@ mod test {
         let _expectations = expect_new_service();
         let mgr = ServiceManager::new(
             logctx.log.clone(),
-            PhysicalLink(EXPECTED_LINK_NAME.to_string()),
+            Etherstub(ETHERSTUB_NAME.to_string()),
+            EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
             Some(config.clone()),
         )
         .await
@@ -678,7 +680,8 @@ mod test {
         // down.
         let mgr = ServiceManager::new(
             logctx.log.clone(),
-            PhysicalLink(EXPECTED_LINK_NAME.to_string()),
+            Etherstub(ETHERSTUB_NAME.to_string()),
+            EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
             Some(config.clone()),
         )
         .await
@@ -693,7 +696,8 @@ mod test {
         // Observe that the old service is not re-initialized.
         let mgr = ServiceManager::new(
             logctx.log.clone(),
-            PhysicalLink(EXPECTED_LINK_NAME.to_string()),
+            Etherstub(ETHERSTUB_NAME.to_string()),
+            EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
             Some(config.clone()),
         )
         .await

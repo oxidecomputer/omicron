@@ -9,11 +9,11 @@ use ipnetwork::IpNetwork;
 use slog::Logger;
 use std::net::{IpAddr, Ipv6Addr};
 
-use omicron_common::address::AZ_PREFIX;
 use crate::illumos::addrobj::AddrObject;
 use crate::illumos::dladm::{EtherstubVnic, VNIC_PREFIX_CONTROL};
 use crate::illumos::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use crate::illumos::{execute, PFEXEC};
+use omicron_common::address::AZ_PREFIX;
 
 const DLADM: &str = "/usr/sbin/dladm";
 const IPADM: &str = "/usr/sbin/ipadm";

@@ -125,8 +125,8 @@ impl SledAgent {
 
         let etherstub =
             Dladm::create_etherstub().map_err(|e| Error::Etherstub(e))?;
-        let etherstub_vnic =
-            Dladm::create_etherstub_vnic(&etherstub).map_err(|e| Error::EtherstubVnic(e))?;
+        let etherstub_vnic = Dladm::create_etherstub_vnic(&etherstub)
+            .map_err(|e| Error::EtherstubVnic(e))?;
 
         // Before we start creating zones, we need to ensure that the
         // necessary ZFS and Zone resources are ready.
@@ -223,12 +223,13 @@ impl SledAgent {
             etherstub.clone(),
             *sled_address.ip(),
         );
-        let services =
-            ServiceManager::new(
-                parent_log.clone(),
-                etherstub.clone(),
-                etherstub_vnic.clone(),
-            None).await?;
+        let services = ServiceManager::new(
+            parent_log.clone(),
+            etherstub.clone(),
+            etherstub_vnic.clone(),
+            None,
+        )
+        .await?;
 
         Ok(SledAgent {
             id: config.id,

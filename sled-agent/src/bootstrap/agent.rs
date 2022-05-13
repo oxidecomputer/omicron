@@ -138,17 +138,18 @@ impl Agent {
             "server" => sled_config.id.to_string(),
         ));
 
-        let etherstub =
-            Dladm::create_etherstub().map_err(|e| {
-                BootstrapError::SledError(format!(
-                    "Can't access etherstub device: {}", e
-                ))
-            })?;
+        let etherstub = Dladm::create_etherstub().map_err(|e| {
+            BootstrapError::SledError(format!(
+                "Can't access etherstub device: {}",
+                e
+            ))
+        })?;
 
         let etherstub_vnic =
             Dladm::create_etherstub_vnic(&etherstub).map_err(|e| {
                 BootstrapError::SledError(format!(
-                    "Can't access etherstub VNIC device: {}", e
+                    "Can't access etherstub VNIC device: {}",
+                    e
                 ))
             })?;
 

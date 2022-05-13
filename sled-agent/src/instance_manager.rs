@@ -196,7 +196,7 @@ impl Drop for InstanceTicket {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::illumos::dladm::PhysicalLink;
+    use crate::illumos::dladm::Etherstub;
     use crate::illumos::{dladm::MockDladm, zone::MockZones};
     use crate::instance::MockInstance;
     use crate::mocks::MockNexusClient;
@@ -260,7 +260,7 @@ mod test {
         let im = InstanceManager::new(
             log,
             nexus_client,
-            PhysicalLink("mylink".to_string()),
+            Etherstub("mylink".to_string()),
             std::net::Ipv6Addr::new(
                 0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
             ),
@@ -342,7 +342,7 @@ mod test {
         let im = InstanceManager::new(
             log,
             nexus_client,
-            PhysicalLink("mylink".to_string()),
+            Etherstub("mylink".to_string()),
             std::net::Ipv6Addr::new(
                 0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
             ),
