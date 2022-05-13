@@ -93,7 +93,6 @@ function uninstall_xde_and_opte {
 }
 
 function ensure_not_already_on_helios {
-    local CONSOLIDATION="$1"
     RC=0
     pkg list "$STOCK_CONSOLIDATION"* || RC=$?
     if [[ $RC -eq 0 ]]; then
