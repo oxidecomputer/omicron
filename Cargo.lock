@@ -556,12 +556,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "convert_case"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb4a24b1aaf0fd0ce8b45161144d6f42cd91677fd5940fd431183eb023b3a2b8"
-
-[[package]]
 name = "cookie"
 version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2968,10 +2962,10 @@ checksum = "624a8340c38c1b80fd549087862da4ba43e08858af025b236e509b6649fc13d5"
 
 [[package]]
 name = "openapi-lint"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/openapi-lint?branch=main#9e3ada82808ef882fdefe2d01a39eeeb219c8778"
+version = "0.2.0"
+source = "git+https://github.com/oxidecomputer/openapi-lint?branch=main#9b20f893f3ed53049bf2d0feddb6ff269401aa5f"
 dependencies = [
- "convert_case",
+ "heck 0.4.0",
  "indexmap",
  "openapiv3",
 ]
