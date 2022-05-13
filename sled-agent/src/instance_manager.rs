@@ -4,7 +4,7 @@
 
 //! API for controlling multiple instances on a sled.
 
-use crate::illumos::dladm::PhysicalLink;
+use crate::illumos::dladm::Etherstub;
 use crate::illumos::vnic::VnicAllocator;
 use crate::nexus::NexusClient;
 use crate::opte::OptePortAllocator;
@@ -54,7 +54,7 @@ impl InstanceManager {
     pub fn new(
         log: Logger,
         nexus_client: Arc<NexusClient>,
-        physical_link: PhysicalLink,
+        etherstub: Etherstub,
         underlay_addr: Ipv6Addr,
     ) -> InstanceManager {
         InstanceManager {
@@ -62,7 +62,7 @@ impl InstanceManager {
                 log: log.new(o!("component" => "InstanceManager")),
                 nexus_client,
                 instances: Mutex::new(BTreeMap::new()),
-                vnic_allocator: VnicAllocator::new("Instance", physical_link),
+                vnic_allocator: VnicAllocator::new("Instance", etherstub),
                 underlay_addr,
                 port_allocator: OptePortAllocator::new(),
             }),

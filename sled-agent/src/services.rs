@@ -4,10 +4,10 @@
 
 //! Support for miscellaneous services managed by the sled.
 
-use crate::illumos::dladm::PhysicalLink;
+use crate::illumos::dladm::Etherstub;
 use crate::illumos::running_zone::{InstalledZone, RunningZone};
 use crate::illumos::vnic::VnicAllocator;
-use crate::illumos::zone::{AddressRequest, Zones};
+use crate::illumos::zone::AddressRequest;
 use crate::params::{ServiceEnsureBody, ServiceRequest};
 use omicron_common::address::{DNS_PORT, DNS_SERVER_PORT};
 use slog::Logger;
@@ -77,7 +77,6 @@ pub struct ServiceManager {
     config_path: Option<PathBuf>,
     zones: Mutex<Vec<RunningZone>>,
     vnic_allocator: VnicAllocator,
-    physical_link: PhysicalLink,
 }
 
 impl ServiceManager {
@@ -86,13 +85,13 @@ impl ServiceManager {
     ///
     /// Args:
     /// - `log`: The logger
-    /// - `physical_link`: A physical link on which to allocate datalinks.
+    /// - `etherstub`: An etherstub on which to allocate VNICs.
     /// - `config_path`: An optional path to a configuration file to store
     /// the record of services. By default, [`default_services_config_path`]
     /// is used.
     pub async fn new(
         log: Logger,
-        physical_link: PhysicalLink,
+        etherstub: Etherstub,
         config_path: Option<PathBuf>,
     ) -> Result<Self, Error> {
         debug!(log, "Creating new ServiceManager");
@@ -100,11 +99,7 @@ impl ServiceManager {
             log: log.new(o!("component" => "ServiceManager")),
             config_path,
             zones: Mutex::new(vec![]),
-            vnic_allocator: VnicAllocator::new(
-                "Service",
-                physical_link.clone(),
-            ),
-            physical_link,
+            vnic_allocator: VnicAllocator::new("Service", etherstub),
         };
 
         let config_path = mgr.services_config_path();
@@ -202,6 +197,7 @@ impl ServiceManager {
                 );
             }
 
+            /*
             info!(self.log, "GZ addresses: {:#?}", service.gz_addresses);
             for addr in &service.gz_addresses {
                 info!(
@@ -224,6 +220,7 @@ impl ServiceManager {
                     err,
                 })?;
             }
+            */
 
             debug!(self.log, "importing manifest");
 

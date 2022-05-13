@@ -38,6 +38,9 @@ pub enum Error {
     #[error("Physical link not in config, nor found automatically: {0}")]
     FindPhysicalLink(#[from] crate::illumos::dladm::FindPhysicalLinkError),
 
+    #[error("Failed to acquire etherstub: {0}")]
+    Etherstub(crate::illumos::ExecutionError),
+
     #[error("Failed to lookup VNICs on boot: {0}")]
     GetVnics(#[from] crate::illumos::dladm::GetVnicError),
 
@@ -116,6 +119,9 @@ impl SledAgent {
             "sled_id" => id.to_string(),
         ));
         info!(&log, "created sled agent");
+
+        let etherstub =
+            Dladm::create_etherstub().map_err(|e| Error::Etherstub(e))?;
 
         let data_link = if let Some(link) = config.data_link.clone() {
             link
@@ -199,7 +205,7 @@ impl SledAgent {
             &parent_log,
             *id,
             nexus_client.clone(),
-            data_link.clone(),
+            etherstub.clone(),
         )
         .await;
         if let Some(pools) = &config.zpools {
@@ -215,11 +221,11 @@ impl SledAgent {
         let instances = InstanceManager::new(
             parent_log.clone(),
             nexus_client.clone(),
-            data_link.clone(),
+            etherstub.clone(),
             *sled_address.ip(),
         );
         let services =
-            ServiceManager::new(parent_log.clone(), data_link.clone(), None)
+            ServiceManager::new(parent_log.clone(), etherstub.clone(), None)
                 .await?;
 
         Ok(SledAgent {
