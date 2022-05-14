@@ -6531,8 +6531,8 @@
       "OrganizationRoles": {
         "type": "string",
         "enum": [
-          "Admin",
-          "Collaborator"
+          "admin",
+          "collaborator"
         ]
       },
       "OrganizationRolesPolicy": {
@@ -6675,9 +6675,9 @@
       "ProjectRoles": {
         "type": "string",
         "enum": [
-          "Admin",
-          "Collaborator",
-          "Viewer"
+          "admin",
+          "collaborator",
+          "viewer"
         ]
       },
       "ProjectRolesPolicy": {
@@ -7450,9 +7450,9 @@
       "SiloRoles": {
         "type": "string",
         "enum": [
-          "Admin",
-          "Collaborator",
-          "Viewer"
+          "admin",
+          "collaborator",
+          "viewer"
         ]
       },
       "SiloRolesPolicy": {

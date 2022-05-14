@@ -348,6 +348,7 @@ impl ApiResourceWithRolesType for Organization {
     JsonSchema,
 )]
 #[display(style = "kebab-case")]
+#[serde(rename_all = "snake_case")]
 pub enum OrganizationRoles {
     Admin,
     Collaborator,
@@ -378,6 +379,7 @@ impl ApiResourceWithRolesType for Project {
     JsonSchema,
 )]
 #[display(style = "kebab-case")]
+#[serde(rename_all = "snake_case")]
 pub enum ProjectRoles {
     Admin,
     Collaborator,
@@ -499,6 +501,7 @@ impl ApiResourceWithRolesType for Silo {
     JsonSchema,
 )]
 #[display(style = "kebab-case")]
+#[serde(rename_all = "snake_case")]
 pub enum SiloRoles {
     Admin,
     Collaborator,
