@@ -71,7 +71,7 @@ function to_stock_helios {
 function ensure_helios_publisher_exists {
     pkg publisher "$HELIOS_PUBLISHER" > /dev/null || \
         echo "No \"$HELIOS_PUBLISHER\" publisher exists on this system!"
-    CONSOLIDATION="$(pkg list --no-refresh -H -af "$STOCK_CONSOLIDATION"@latest || echo "")"
+    local CONSOLIDATION="$(pkg list --no-refresh -H -af "$STOCK_CONSOLIDATION"@latest || echo "")"
     if [[ -z "$CONSOLIDATION" ]]; then
         echo "No osnet-incorporation package exists on this system,"
         echo "so we cannot determine the exact package to install"
@@ -85,7 +85,7 @@ function ensure_helios_publisher_exists {
 
 # Actually uninstall the opteadm tool and xde driver
 function uninstall_xde_and_opte {
-    RC=0
+    local RC=0
     pkg uninstall -v --ignore-missing pkg://helios-netdev/driver/network/opte || RC=$?
     if [[ $RC -ne 0 ]] && [[ $RC -ne 4 ]]; then
         exit $RC
@@ -93,7 +93,7 @@ function uninstall_xde_and_opte {
 }
 
 function ensure_not_already_on_helios {
-    RC=0
+    local RC=0
     pkg list "$STOCK_CONSOLIDATION"* || RC=$?
     if [[ $RC -eq 0 ]]; then
         echo "This system appears to already be running stock Helios"
@@ -102,7 +102,7 @@ function ensure_not_already_on_helios {
 }
 
 CONSOLIDATION="$(ensure_helios_publisher_exists)"
-ensure_not_already_on_helios "$CONSOLIDATION"
+ensure_not_already_on_helios
 uninstall_xde_and_opte
 for PUBLISHER in "${PUBLISHERS[@]}"; do
     remove_publisher "$PUBLISHER"
