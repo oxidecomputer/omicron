@@ -57,7 +57,7 @@
       }
     },
     "policy": {
-      "description": "System-wide policy",
+      "description": "System-wide IAM policy",
       "external_docs": {
         "url": "http://oxide.computer/docs/#xxx"
       }

@@ -247,7 +247,7 @@ pub fn external_api() -> NexusApiDescription {
 // clients. Client generators use operationId to name API methods, so changing
 // a function name is a breaking change from a client perspective.
 
-/// Fetch the top-level IAM policy for this deployment
+/// Fetch the top-level IAM policy
 #[endpoint {
     method = GET,
     path = "/policy",
@@ -267,7 +267,7 @@ async fn policy_get(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Update the top-level IAM policy for this deployment
+/// Update the top-level IAM policy
 #[endpoint {
     method = PUT,
     path = "/policy",
@@ -286,6 +286,8 @@ async fn policy_put(
         // This should have been validated during parsing.
         bail_unless!(nasgns <= shared::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE);
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        // XXX-dap
+        trace!(&opctx.log, "new policy"; "new_policy" => ?new_policy);
         let policy = nexus.fleet_update_policy(&opctx, &new_policy).await?;
         Ok(HttpResponseOk(policy))
     };
