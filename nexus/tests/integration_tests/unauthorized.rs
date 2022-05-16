@@ -101,7 +101,7 @@ EXAMPLE:  0 3111 5555 3111 5555 5555 0  /organizations
             The number in each cell is the last digit of the 400-level response
             that was expected for this test case.
 
-    In this case, an unauthenthicated request to "GET /organizations" returned
+    In this case, an unauthenticated request to "GET /organizations" returned
     401.  All requests to "PUT /organizations" returned 405.
 
 G GET  PUT  POST DEL  TRCE G  URL
