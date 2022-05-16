@@ -163,6 +163,17 @@ impl DiskRuntimeState {
         }
     }
 
+    pub fn attaching(self, instance_id: Uuid) -> Self {
+        Self {
+            disk_state: external::DiskState::Attaching(instance_id)
+                .label()
+                .to_string(),
+            attach_instance_id: Some(instance_id),
+            gen: self.gen.next().into(),
+            time_updated: Utc::now(),
+        }
+    }
+
     pub fn attach(self, instance_id: Uuid) -> Self {
         Self {
             disk_state: external::DiskState::Attached(instance_id)

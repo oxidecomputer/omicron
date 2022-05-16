@@ -654,6 +654,10 @@ impl super::Nexus {
             // TODO this will probably involve volume construction requests as
             // well!
             InstanceState::Running | InstanceState::Starting => {
+
+                // TODO: set state as "attaching".
+                // TODO: also can we check rcgens
+
                 self.disk_set_runtime(
                     opctx,
                     &authz_disk,

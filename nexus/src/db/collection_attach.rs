@@ -30,7 +30,7 @@ use std::marker::PhantomData;
 /// Disks, the Instance datatype should implement this trait.
 /// ```
 /// # use diesel::prelude::*;
-/// # use omicron_nexus::db::collection_insert::DatastoreAttachable;
+/// # use omicron_nexus::db::collection_attach::DatastoreAttachTarget;
 /// # use omicron_nexus::db::model::Generation;
 /// #
 /// # table! {
@@ -50,7 +50,7 @@ use std::marker::PhantomData;
 /// #     }
 /// # }
 ///
-/// #[derive(Queryable, Insertable, Debug, Selectable)]
+/// #[derive(Queryable, Debug, Selectable)]
 /// #[diesel(table_name = disk)]
 /// struct Disk {
 ///     pub id: uuid::Uuid,
@@ -59,7 +59,7 @@ use std::marker::PhantomData;
 ///     pub instance_id: Option<uuid::Uuid>,
 /// }
 ///
-/// #[derive(Queryable, Insertable, Debug, Selectable)]
+/// #[derive(Queryable, Debug, Selectable)]
 /// #[diesel(table_name = instance)]
 /// struct Instance {
 ///     pub id: uuid::Uuid,
@@ -67,20 +67,17 @@ use std::marker::PhantomData;
 ///     pub rcgen: Generation,
 /// }
 ///
-/// impl DatastoreAttachable<Disk> for Instance {
-///     // Type of Instance::identity::id and the "Some" variant of the optional
-///     // Disk::instance_id.
+/// impl DatastoreAttachTarget<Disk> for Instance {
+///     // Type of Instance::identity::id.
 ///     type CollectionId = uuid::Uuid;
 ///
 ///     type ParentGenerationColumn = instance::dsl::rcgen;
 ///     type ParentTimeDeletedColumn = instance::dsl::time_deleted;
 ///
-///     type ChildGenerationColumn = disk::dsl::rcgen;
-///     type ChildTimeDeletedColumn = disk::dsl::time_deleted;
 ///     type ChildCollectionIdColumn = disk::dsl::instance_id;
 /// }
 /// ```
-pub trait DatastoreAttachable<ResourceType> {
+pub trait DatastoreAttachTarget<ResourceType> {
     /// The Rust type of the collection id (typically Uuid for us)
     type CollectionId: Copy + Debug;
 
@@ -90,32 +87,31 @@ pub trait DatastoreAttachable<ResourceType> {
 
     /// The time deleted column in the CollectionTable
     // We enforce that this column comes from the same table as
-    // ParentGenerationColumn when defining insert_resource() below.
+    // ParentGenerationColumn when defining attach_resource() below.
     type ParentTimeDeletedColumn: Column + Default;
-
-    /// The column in the ResourceType that acts as a generation number.
-    type ChildGenerationColumn: Column + Default;
-    type ChildTimeDeletedColumn: Column + Default;
 
     /// The column in the ResourceType that acts as a foreign key into
     /// the CollectionTable
     type ChildCollectionIdColumn: Column;
 
-    /// Create a statement for inserting a resource into the given collection.
+    /// Create a statement for attaching a resource to the given collection.
     ///
-    /// The ISR type is the same type as the second generic argument to
-    /// InsertStatement, and should generally be inferred rather than explicitly
+    /// The U, V types are the same type as the 3rd and 4th generic arguments to
+    /// UpdateStatement, and should generally be inferred rather than explicitly
     /// specified.
     ///
     /// CAUTION: The API does not currently enforce that `key` matches the value
-    /// of the collection id within the inserted row.
-    fn insert_resource<ISR>(
+    /// of the collection id within the attached row.
+    fn attach_resource<U, V>(
         key: Self::CollectionId,
-        // Note that InsertStatement's fourth argument defaults to Ret =
+        // TODO: I'd like to be able to add some filters on the parent type too.
+        // For example, checking the instance state.
+
+        // Note that UpdateStatement's fourth argument defaults to Ret =
         // NoReturningClause. This enforces that the given input statement does
         // not have a RETURNING clause.
-        insert: InsertStatement<ResourceTable<ResourceType, Self>, ISR>,
-    ) -> InsertIntoCollectionStatement<ResourceType, ISR, Self>
+        update: UpdateStatement<ResourceTable<ResourceType, Self>, U, V>,
+    ) -> AttachToCollectionStatement<ResourceType, U, V, Self>
     where
         (
             <Self::ParentGenerationColumn as Column>::Table,
@@ -158,7 +154,7 @@ pub trait DatastoreAttachable<ResourceType> {
             SingleValue,
         // Allows calling "is_null()" on the time deleted column.
         ParentTimeDeletedColumn<ResourceType, Self>: ExpressionMethods,
-        // Necessary for output type (`InsertIntoCollectionStatement`).
+        // Necessary for output type (`AttachToCollectionStatement`).
         ResourceType: Selectable<Pg>,
     {
         let filter_subquery = Box::new(
@@ -176,8 +172,8 @@ pub trait DatastoreAttachable<ResourceType> {
             <CollectionTable<ResourceType, Self> as HasTable>::table()
                 .from_clause();
         let returning_clause = ResourceType::as_returning();
-        InsertIntoCollectionStatement {
-            insert_statement: insert,
+        AttachToCollectionStatement {
+            update_statement: update,
             filter_subquery,
             from_clause,
             returning_clause,
@@ -188,21 +184,21 @@ pub trait DatastoreAttachable<ResourceType> {
 
 /// Utility type to make trait bounds below easier to read.
 type CollectionId<ResourceType, C> =
-    <C as DatastoreAttachable<ResourceType>>::CollectionId;
+    <C as DatastoreAttachTarget<ResourceType>>::CollectionId;
 /// The table representing the collection. The resource references
 /// this table.
-type CollectionTable<ResourceType, C> = <<C as DatastoreAttachable<
+type CollectionTable<ResourceType, C> = <<C as DatastoreAttachTarget<
     ResourceType,
 >>::ParentGenerationColumn as Column>::Table;
 /// The table representing the resource. This table contains an
 /// ID acting as a foreign key into the collection table.
-type ResourceTable<ResourceType, C> = <<C as DatastoreAttachable<
+type ResourceTable<ResourceType, C> = <<C as DatastoreAttachTarget<
     ResourceType,
 >>::ChildCollectionIdColumn as Column>::Table;
 type ParentTimeDeletedColumn<ResourceType, C> =
-    <C as DatastoreAttachable<ResourceType>>::ParentTimeDeletedColumn;
+    <C as DatastoreAttachTarget<ResourceType>>::ParentTimeDeletedColumn;
 type ParentGenerationColumn<ResourceType, C> =
-    <C as DatastoreAttachable<ResourceType>>::ParentGenerationColumn;
+    <C as DatastoreAttachTarget<ResourceType>>::ParentGenerationColumn;
 
 // Trick to check that columns come from the same table
 pub trait TypesAreSame {}
@@ -210,35 +206,35 @@ impl<T> TypesAreSame for (T, T) {}
 
 /// The CTE described in the module docs
 #[must_use = "Queries must be executed"]
-pub struct InsertIntoCollectionStatement<ResourceType, ISR, C>
+pub struct AttachToCollectionStatement<ResourceType, U, V, C>
 where
     ResourceType: Selectable<Pg>,
-    C: DatastoreAttachable<ResourceType>,
+    C: DatastoreAttachTarget<ResourceType>,
 {
-    insert_statement: InsertStatement<ResourceTable<ResourceType, C>, ISR>,
+    update_statement: UpdateStatement<ResourceTable<ResourceType, C>, U, V>,
     filter_subquery: Box<dyn QueryFragment<Pg> + Send>,
     from_clause: <CollectionTable<ResourceType, C> as QuerySource>::FromClause,
     returning_clause: AsSelect<ResourceType, Pg>,
     query_type: PhantomData<ResourceType>,
 }
 
-impl<ResourceType, ISR, C> QueryId
-    for InsertIntoCollectionStatement<ResourceType, ISR, C>
+impl<ResourceType, U, V, C> QueryId
+    for AttachToCollectionStatement<ResourceType, U, V, C>
 where
-    C: DatastoreAttachable<ResourceType>,
     ResourceType: Selectable<Pg>,
+    C: DatastoreAttachTarget<ResourceType>,
 {
     type QueryId = ();
     const HAS_STATIC_QUERY_ID: bool = false;
 }
 
-/// Result of [`InsertIntoCollectionStatement`] when executed asynchronously
-pub type AsyncInsertIntoCollectionResult<Q> = Result<Q, AsyncInsertError>;
+/// Result of [`AttachToCollectionStatement`] when executed asynchronously
+pub type AsyncAttachToCollectionResult<Q> = Result<Q, AsyncInsertError>;
 
-/// Result of [`InsertIntoCollectionStatement`] when executed synchronously
-pub type SyncInsertIntoCollectionResult<Q> = Result<Q, SyncInsertError>;
+/// Result of [`AttachToCollectionStatement`] when executed synchronously
+pub type SyncAttachToCollectionResult<Q> = Result<Q, SyncInsertError>;
 
-/// Errors returned by [`InsertIntoCollectionStatement`].
+/// Errors returned by [`AttachToCollectionStatement`].
 #[derive(Debug)]
 pub enum AsyncInsertError {
     /// The collection that the query was inserting into does not exist
@@ -247,7 +243,7 @@ pub enum AsyncInsertError {
     DatabaseError(PoolError),
 }
 
-/// Errors returned by [`InsertIntoCollectionStatement`].
+/// Errors returned by [`AttachToCollectionStatement`].
 #[derive(Debug)]
 pub enum SyncInsertError {
     /// The collection that the query was inserting into does not exist
@@ -256,14 +252,15 @@ pub enum SyncInsertError {
     DatabaseError(diesel::result::Error),
 }
 
-impl<ResourceType, ISR, C> InsertIntoCollectionStatement<ResourceType, ISR, C>
+impl<ResourceType, U, V, C> AttachToCollectionStatement<ResourceType, U, V, C>
 where
     ResourceType: 'static + Debug + Send + Selectable<Pg>,
-    C: 'static + DatastoreAttachable<ResourceType> + Send,
+    C: 'static + DatastoreAttachTarget<ResourceType> + Send,
     CollectionId<ResourceType, C>: 'static + PartialEq + Send,
     ResourceTable<ResourceType, C>: 'static + Table + Send + Copy + Debug,
-    ISR: 'static + Send,
-    InsertIntoCollectionStatement<ResourceType, ISR, C>: Send,
+    U: 'static + Send,
+    V: 'static + Send,
+    AttachToCollectionStatement<ResourceType, U, V, C>: Send,
 {
     /// Issues the CTE asynchronously and parses the result.
     ///
@@ -271,10 +268,10 @@ where
     /// - Ok(new row)
     /// - Error(collection not found)
     /// - Error(other diesel error)
-    pub async fn insert_and_get_result_async(
+    pub async fn attach_and_get_result_async(
         self,
         pool: &bb8::Pool<ConnectionManager<DbConnection>>,
-    ) -> AsyncInsertIntoCollectionResult<ResourceType>
+    ) -> AsyncAttachToCollectionResult<ResourceType>
     where
         // We require this bound to ensure that "Self" is runnable as query.
         Self: query_methods::LoadQuery<'static, DbConnection, ResourceType>,
@@ -290,10 +287,10 @@ where
     /// - Ok(Vec of new rows)
     /// - Error(collection not found)
     /// - Error(other diesel error)
-    pub async fn insert_and_get_results_async(
+    pub async fn attach_and_get_results_async(
         self,
         pool: &bb8::Pool<ConnectionManager<DbConnection>>,
-    ) -> AsyncInsertIntoCollectionResult<Vec<ResourceType>>
+    ) -> AsyncAttachToCollectionResult<Vec<ResourceType>>
     where
         // We require this bound to ensure that "Self" is runnable as query.
         Self: query_methods::LoadQuery<'static, DbConnection, ResourceType>,
@@ -309,10 +306,10 @@ where
     /// - Ok(new row)
     /// - Error(collection not found)
     /// - Error(other diesel error)
-    pub fn insert_and_get_result(
+    pub fn attach_and_get_result(
         self,
         conn: &mut DbConnection,
-    ) -> SyncInsertIntoCollectionResult<ResourceType>
+    ) -> SyncAttachToCollectionResult<ResourceType>
     where
         // We require this bound to ensure that "Self" is runnable as query.
         Self: query_methods::LoadQuery<'static, DbConnection, ResourceType>,
@@ -327,10 +324,10 @@ where
     /// - Ok(Vec of new rows)
     /// - Error(collection not found)
     /// - Error(other diesel error)
-    pub fn insert_and_get_results(
+    pub fn attach_and_get_results(
         self,
         conn: &mut DbConnection,
-    ) -> SyncInsertIntoCollectionResult<Vec<ResourceType>>
+    ) -> SyncAttachToCollectionResult<Vec<ResourceType>>
     where
         // We require this bound to ensure that "Self" is runnable as query.
         Self: query_methods::LoadQuery<'static, DbConnection, ResourceType>,
@@ -382,20 +379,20 @@ where
 type SelectableSqlType<Q> =
     <<Q as diesel::Selectable<Pg>>::SelectExpression as Expression>::SqlType;
 
-impl<ResourceType, ISR, C> Query
-    for InsertIntoCollectionStatement<ResourceType, ISR, C>
+impl<ResourceType, U, V, C> Query
+    for AttachToCollectionStatement<ResourceType, U, V, C>
 where
     ResourceType: Selectable<Pg>,
-    C: DatastoreAttachable<ResourceType>,
+    C: DatastoreAttachTarget<ResourceType>,
 {
     type SqlType = SelectableSqlType<ResourceType>;
 }
 
-impl<ResourceType, ISR, C> RunQueryDsl<DbConnection>
-    for InsertIntoCollectionStatement<ResourceType, ISR, C>
+impl<ResourceType, U, V, C> RunQueryDsl<DbConnection>
+    for AttachToCollectionStatement<ResourceType, U, V, C>
 where
     ResourceType: Selectable<Pg>,
-    C: DatastoreAttachable<ResourceType>,
+    C: DatastoreAttachTarget<ResourceType>,
 {
 }
 
@@ -425,12 +422,12 @@ type BoxedDslOutput<T> = diesel::internal::table_macro::BoxedSelectStatement<
 /// //      dummy AS MATERIALIZED (
 /// //          SELECT IF(EXISTS(SELECT <PK> FROM found_row), TRUE,
 /// //              CAST(1/0 AS BOOL))),
-/// //      updated_row AS MATERIALIZED (
+/// //      updated_parent_row AS MATERIALIZED (
 /// //          UPDATE C SET <generation number> = <generation_number> + 1 WHERE
 /// //              <PK> IN (SELECT <PK> FROM found_row) RETURNING 1),
-/// //      inserted_row AS (<user provided insert statement>
+/// //      updated_resource_row AS (<user provided update statement>
 /// //          RETURNING <ResourceType.as_returning()>)
-/// //  SELECT * FROM inserted_row;
+/// //  SELECT * FROM updated_resource_row;
 /// ```
 ///
 /// This CTE is equivalent in desired behavior to the one specified in
@@ -439,11 +436,11 @@ type BoxedDslOutput<T> = diesel::internal::table_macro::BoxedSelectStatement<
 /// The general idea is that the first clause of the CTE (the "dummy" table)
 /// will generate a divison-by-zero error and rollback the transaction if the
 /// target collection is not found in its table. It simultaneously locks the
-/// row for update, to allow us to subsequently use the "updated_row" query to
+/// row for update, to allow us to subsequently use the "updated_parent_row" query to
 /// increase the child-resource generation count for the collection. In the same
-/// transaction, it performs the provided insert query, which should
-/// insert a new resource into its table with its collection id column set
-/// to the collection we just checked for.
+/// transaction, it performs the provided update statement, which should
+/// update the child resource, referencing the collection ID to the parent
+/// collection we just checked for.
 ///
 /// NOTE: It is important that the WHERE clauses on the SELECT and UPDATE
 /// against the collection table must match, or else we will not get the desired
@@ -454,17 +451,17 @@ type BoxedDslOutput<T> = diesel::internal::table_macro::BoxedSelectStatement<
 /// for the "dummy" table, preventing the division-by-zero error from occuring.
 /// The MATERIALIZED keyword forces the queries that are not referenced
 /// to be materialized instead.
-impl<ResourceType, ISR, C> QueryFragment<Pg>
-    for InsertIntoCollectionStatement<ResourceType, ISR, C>
+impl<ResourceType, U, V, C> QueryFragment<Pg>
+    for AttachToCollectionStatement<ResourceType, U, V, C>
 where
     ResourceType: Selectable<Pg>,
-    C: DatastoreAttachable<ResourceType>,
+    C: DatastoreAttachTarget<ResourceType>,
     CollectionPrimaryKey<ResourceType, C>: diesel::Column,
     // Necessary to "walk_ast" over "select.from_clause".
     <CollectionTable<ResourceType, C> as QuerySource>::FromClause:
         QueryFragment<Pg>,
-    // Necessary to "walk_ast" over "self.insert_statement".
-    InsertStatement<ResourceTable<ResourceType, C>, ISR>: QueryFragment<Pg>,
+    // Necessary to "walk_ast" over "self.update_statement".
+    UpdateStatement<ResourceTable<ResourceType, C>, U, V>: QueryFragment<Pg>,
     // Necessary to "walk_ast" over "self.returning_clause".
     AsSelect<ResourceType, Pg>: QueryFragment<Pg>,
 {
@@ -483,7 +480,7 @@ where
 
         // Write the update manually instead of with the dsl, to avoid the
         // explosion in complexity of type traits
-        out.push_sql("updated_row AS MATERIALIZED (UPDATE ");
+        out.push_sql("updated_parent_row AS MATERIALIZED (UPDATE ");
         self.from_clause.walk_ast(out.reborrow())?;
         out.push_sql(" SET ");
         out.push_identifier(ParentGenerationColumn::<ResourceType, C>::NAME)?;
@@ -497,24 +494,24 @@ where
         out.push_identifier(CollectionPrimaryKey::<ResourceType, C>::NAME)?;
         out.push_sql(" FROM found_row) RETURNING 1), ");
 
-        out.push_sql("inserted_row AS (");
-        // TODO: Check or force the insert_statement to have
+        out.push_sql("updated_resource_row AS (");
+        // TODO: Check or force the update_statement to have
         //       C::ChildCollectionIdColumn set
-        self.insert_statement.walk_ast(out.reborrow())?;
+        self.update_statement.walk_ast(out.reborrow())?;
         out.push_sql(" RETURNING ");
         // We manually write the RETURNING clause here because the wrapper type
-        // used for InsertStatement's Ret generic is private to diesel and so we
+        // used for UpdateStatement's Ret generic is private to diesel and so we
         // cannot express it.
         self.returning_clause.walk_ast(out.reborrow())?;
 
-        out.push_sql(") SELECT * FROM inserted_row");
+        out.push_sql(") SELECT * FROM updated_resource_row");
         Ok(())
     }
 }
 
 #[cfg(test)]
 mod test {
-    use super::{AsyncInsertError, DatastoreAttachable, SyncInsertError};
+    use super::{AsyncInsertError, DatastoreAttachTarget, SyncInsertError};
     use crate::db::{
         self, error::TransactionError, identity::Resource as IdentityResource,
     };
@@ -595,14 +592,12 @@ mod test {
     }
 
     struct Collection;
-    impl DatastoreAttachable<Resource> for Collection {
+    impl DatastoreAttachTarget<Resource> for Collection {
         type CollectionId = uuid::Uuid;
 
         type ParentGenerationColumn = collection::dsl::rcgen;
         type ParentTimeDeletedColumn = collection::dsl::time_deleted;
 
-        type ChildGenerationColumn = resource::dsl::rcgen;
-        type ChildTimeDeletedColumn = resource::dsl::time_deleted;
         type ChildCollectionIdColumn = resource::dsl::collection_id;
     }
 
@@ -614,23 +609,12 @@ mod test {
         let resource_id =
             uuid::Uuid::parse_str("223cb7f7-0d3a-4a4e-a5e1-ad38ecb785d8")
                 .unwrap();
-        let create_time =
-            DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(0, 0), Utc);
-        let modify_time =
-            DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(1, 0), Utc);
-        let insert = Collection::insert_resource(
+        let attach = Collection::attach_resource(
             collection_id,
-            diesel::insert_into(resource::table).values(vec![(
-                resource::dsl::id.eq(resource_id),
-                resource::dsl::name.eq("test"),
-                resource::dsl::description.eq("desc"),
-                resource::dsl::time_created.eq(create_time),
-                resource::dsl::time_modified.eq(modify_time),
-                resource::dsl::rcgen.eq(0),
-                resource::dsl::collection_id.eq(Some(collection_id)),
-            )]),
+            diesel::update(resource::table.filter(resource::dsl::id.eq(resource_id)))
+                .set(resource::dsl::collection_id.eq(collection_id))
         );
-        let query = diesel::debug_query::<Pg, _>(&insert).to_string();
+        let query = diesel::debug_query::<Pg, _>(&attach).to_string();
 
         let expected_query = "WITH \
              found_row AS MATERIALIZED (SELECT \
@@ -648,28 +632,24 @@ mod test {
              dummy AS MATERIALIZED (SELECT IF(\
                  EXISTS(SELECT \"id\" FROM found_row), \
                  TRUE, CAST(1/0 AS BOOL))), \
-             updated_row AS MATERIALIZED (UPDATE \
+             updated_parent_row AS MATERIALIZED (UPDATE \
                  \"test_schema\".\"collection\" SET \"rcgen\" = \"rcgen\" + 1 \
                  WHERE \"id\" IN (SELECT \"id\" FROM found_row) RETURNING 1), \
-             inserted_row AS (INSERT INTO \"test_schema\".\"resource\" \
-                 (\"id\", \"name\", \"description\", \"time_created\", \
-                  \"time_modified\", \"collection_id\") \
-                 VALUES ($2, $3, $4, $5, $6, $7) \
+             updated_resource_row AS (UPDATE \"test_schema\".\"resource\" \
+                 SET \"collection_id\" = $2 \
+                 WHERE (\"test_schema\".\"resource\".\"id\" = $3) \
                  RETURNING \"test_schema\".\"resource\".\"id\", \
                            \"test_schema\".\"resource\".\"name\", \
                            \"test_schema\".\"resource\".\"description\", \
                            \"test_schema\".\"resource\".\"time_created\", \
                            \"test_schema\".\"resource\".\"time_modified\", \
                            \"test_schema\".\"resource\".\"time_deleted\", \
+                           \"test_schema\".\"resource\".\"rcgen\", \
                            \"test_schema\".\"resource\".\"collection_id\") \
-            SELECT * FROM inserted_row \
+            SELECT * FROM updated_resource_row \
         -- binds: [223cb7f7-0d3a-4a4e-a5e1-ad38ecb785d0, \
-                   223cb7f7-0d3a-4a4e-a5e1-ad38ecb785d8, \
-                   \"test\", \
-                   \"desc\", \
-                   1970-01-01T00:00:00Z, \
-                   1970-01-01T00:00:01Z, \
-                   223cb7f7-0d3a-4a4e-a5e1-ad38ecb785d0]";
+                   223cb7f7-0d3a-4a4e-a5e1-ad38ecb785d0, \
+                   223cb7f7-0d3a-4a4e-a5e1-ad38ecb785d8]";
 
         assert_eq!(query, expected_query);
     }
@@ -685,33 +665,19 @@ mod test {
 
         let collection_id = uuid::Uuid::new_v4();
         let resource_id = uuid::Uuid::new_v4();
-        let insert = Collection::insert_resource(
+        let attach = Collection::attach_resource(
             collection_id,
-            diesel::insert_into(resource::table).values((
-                resource::dsl::id.eq(resource_id),
-                resource::dsl::name.eq("test"),
-                resource::dsl::description.eq("desc"),
-                resource::dsl::time_created.eq(Utc::now()),
-                resource::dsl::time_modified.eq(Utc::now()),
-                resource::dsl::rcgen.eq(0),
-                resource::dsl::collection_id.eq(Some(collection_id)),
-            )),
+            diesel::update(resource::table.filter(resource::dsl::id.eq(resource_id)))
+                .set(resource::dsl::collection_id.eq(collection_id))
         )
-        .insert_and_get_result_async(pool.pool())
+        .attach_and_get_result_async(pool.pool())
         .await;
-        assert!(matches!(insert, Err(AsyncInsertError::CollectionNotFound)));
+        assert!(matches!(attach, Err(AsyncInsertError::CollectionNotFound)));
 
-        let insert_query = Collection::insert_resource(
+        let attach_query = Collection::attach_resource(
             collection_id,
-            diesel::insert_into(resource::table).values((
-                resource::dsl::id.eq(resource_id),
-                resource::dsl::name.eq("test"),
-                resource::dsl::description.eq("desc"),
-                resource::dsl::time_created.eq(Utc::now()),
-                resource::dsl::time_modified.eq(Utc::now()),
-                resource::dsl::rcgen.eq(0),
-                resource::dsl::collection_id.eq(Some(collection_id)),
-            )),
+            diesel::update(resource::table.filter(resource::dsl::id.eq(resource_id)))
+                .set(resource::dsl::collection_id.eq(collection_id))
         );
 
         #[derive(Debug)]
@@ -723,7 +689,7 @@ mod test {
         let result = pool
             .pool()
             .transaction(move |conn| {
-                insert_query.insert_and_get_result(conn).map_err(|e| match e {
+                attach_query.attach_and_get_result(conn).map_err(|e| match e {
                     SyncInsertError::CollectionNotFound => {
                         TxnError::CustomError(CollectionError::NotFound)
                     }
@@ -767,31 +733,48 @@ mod test {
             .await
             .unwrap();
 
-        let create_time =
+        // Insert the resource so it's present later
+        let insert_time =
             DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(0, 0), Utc);
-        let modify_time =
-            DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(1, 0), Utc);
-        let resource = Collection::insert_resource(
-            collection_id,
-            diesel::insert_into(resource::table).values(vec![(
+        diesel::insert_into(resource::table)
+            .values(vec![(
                 resource::dsl::id.eq(resource_id),
                 resource::dsl::name.eq("test"),
                 resource::dsl::description.eq("desc"),
-                resource::dsl::time_created.eq(create_time),
-                resource::dsl::time_modified.eq(modify_time),
-                resource::dsl::rcgen.eq(0),
-                resource::dsl::collection_id.eq(Some(collection_id)),
-            )]),
+                resource::dsl::time_created.eq(insert_time),
+                resource::dsl::time_modified.eq(insert_time),
+                resource::dsl::rcgen.eq(1),
+                resource::dsl::collection_id.eq(Option::<uuid::Uuid>::None),
+            )])
+            .execute_async(pool.pool())
+            .await
+            .unwrap();
+
+        // Attempt to attach the resource.
+        let update_time =
+            DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(1, 0), Utc);
+        let resource = Collection::attach_resource(
+            collection_id,
+            diesel::update(
+                resource::table
+                    .filter(resource::dsl::id.eq(resource_id))
+                    .filter(resource::dsl::time_deleted.is_null())
+            ).set((
+                resource::dsl::collection_id.eq(collection_id),
+                resource::dsl::time_modified.eq(update_time),
+                resource::dsl::rcgen.eq(resource::dsl::rcgen + 1),
+            ))
         )
-        .insert_and_get_result_async(pool.pool())
+        .attach_and_get_result_async(pool.pool())
         .await
         .unwrap();
         assert_eq!(resource.id(), resource_id);
         assert_eq!(resource.name().as_str(), "test");
         assert_eq!(resource.description(), "desc");
-        assert_eq!(resource.time_created(), create_time);
-        assert_eq!(resource.time_modified(), modify_time);
+        assert_eq!(resource.time_created(), insert_time);
+        assert_eq!(resource.time_modified(), update_time);
         assert_eq!(resource.collection_id.unwrap(), collection_id);
+        assert_eq!(resource.rcgen, 2);
 
         let collection_rcgen = collection::table
             .find(collection_id)
