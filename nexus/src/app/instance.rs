@@ -173,12 +173,58 @@ impl super::Nexus {
         // TODO-robustness We need to figure out what to do with Destroyed
         // instances?  Presumably we need to clean them up at some point, but
         // not right away so that callers can see that they've been destroyed.
-        let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .instance_name(instance_name)
-            .lookup_for(authz::Action::Delete)
+        let (.., authz_instance, db_instance) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .organization_name(organization_name)
+                .project_name(project_name)
+                .instance_name(instance_name)
+                .fetch()
+                .await?;
+
+        opctx.authorize(authz::Action::Delete, &authz_instance).await?;
+
+        match db_instance.runtime_state.state.state() {
+            InstanceState::Stopped | InstanceState::Failed => {
+                // ok
+            }
+
+            state => {
+                return Err(Error::InvalidRequest {
+                    message: format!(
+                        "instance cannot be deleted in state \"{}\"",
+                        state,
+                    ),
+                });
+            }
+        }
+
+        // Detach all attached disks
+        let disks = self
+            .instance_list_disks(
+                opctx,
+                organization_name,
+                project_name,
+                instance_name,
+                &DataPageParams {
+                    marker: None,
+                    direction: dropshot::PaginationOrder::Ascending,
+                    limit: std::num::NonZeroU32::new(MAX_DISKS_PER_INSTANCE)
+                        .unwrap(),
+                },
+            )
             .await?;
+
+        for disk in &disks {
+            self.instance_detach_disk(
+                opctx,
+                organization_name,
+                project_name,
+                instance_name,
+                &disk.name(),
+            )
+            .await?;
+        }
+
         self.db_datastore.project_delete_instance(opctx, &authz_instance).await
     }
 
