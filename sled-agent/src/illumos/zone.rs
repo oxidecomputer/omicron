@@ -13,7 +13,7 @@ use crate::illumos::addrobj::AddrObject;
 use crate::illumos::dladm::{EtherstubVnic, VNIC_PREFIX_CONTROL};
 use crate::illumos::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use crate::illumos::{execute, PFEXEC};
-use omicron_common::address::AZ_PREFIX;
+use omicron_common::address::SLED_PREFIX;
 
 const DLADM: &str = "/usr/sbin/dladm";
 const IPADM: &str = "/usr/sbin/ipadm";
@@ -123,7 +123,7 @@ impl AddressRequest {
     pub fn new_static(ip: IpAddr, prefix: Option<u8>) -> Self {
         let prefix = prefix.unwrap_or_else(|| match ip {
             IpAddr::V4(_) => 24,
-            IpAddr::V6(_) => AZ_PREFIX,
+            IpAddr::V6(_) => SLED_PREFIX,
         });
         let addr = IpNetwork::new(ip, prefix).unwrap();
         AddressRequest::Static(addr)
