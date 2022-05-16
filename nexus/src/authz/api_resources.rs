@@ -219,10 +219,8 @@ pub enum FleetRoles {
     Admin,
     Collaborator,
     Viewer,
-
-    // Users are not allowed to assign these roles.
-    #[serde(skip_deserializing)]
-    ExternalAuthenticator,
+    // There are other Fleet roles, but they are not externally-visible and so
+    // they do not show up in this enum.
 }
 
 /// ConsoleSessionList is a synthetic resource used for modeling who has access

@@ -26,7 +26,7 @@ impl super::Nexus {
     ) -> LookupResult<shared::Policy<authz::FleetRoles>> {
         let role_assignments = self
             .db_datastore
-            .role_assignment_fetch_all(opctx, &authz::FLEET)
+            .role_assignment_fetch_visible(opctx, &authz::FLEET)
             .await?
             .into_iter()
             .map(|r| r.try_into().context("parsing database role assignment"))
@@ -42,7 +42,7 @@ impl super::Nexus {
     ) -> UpdateResult<shared::Policy<authz::FleetRoles>> {
         let role_assignments = self
             .db_datastore
-            .role_assignment_replace_all(
+            .role_assignment_replace_visible(
                 opctx,
                 &authz::FLEET,
                 &policy.role_assignments,

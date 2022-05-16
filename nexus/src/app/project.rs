@@ -164,7 +164,7 @@ impl super::Nexus {
             .await?;
         let role_assignments = self
             .db_datastore
-            .role_assignment_fetch_all(opctx, &authz_project)
+            .role_assignment_fetch_visible(opctx, &authz_project)
             .await?
             .into_iter()
             .map(|r| r.try_into().context("parsing database role assignment"))
@@ -188,7 +188,7 @@ impl super::Nexus {
 
         let role_assignments = self
             .db_datastore
-            .role_assignment_replace_all(
+            .role_assignment_replace_visible(
                 opctx,
                 &authz_project,
                 &policy.role_assignments,

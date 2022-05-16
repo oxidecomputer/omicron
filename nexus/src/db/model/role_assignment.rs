@@ -34,7 +34,6 @@ impl_enum_type!(
 impl From<shared::IdentityType> for IdentityType {
     fn from(other: shared::IdentityType) -> Self {
         match other {
-            shared::IdentityType::UserBuiltin => IdentityType::UserBuiltin,
             shared::IdentityType::SiloUser => IdentityType::SiloUser,
         }
     }
