@@ -438,7 +438,7 @@ impl<'a> NexusRequest<'a> {
         match mode {
             AuthnMode::UnprivilegedUser => {
                 let header_value = spoof::make_header_value(
-                    spoof::ActorKind::Builtin,
+                    spoof::ActorType::Builtin,
                     authn::USER_TEST_UNPRIVILEGED.id,
                 );
                 self.request_builder = self.request_builder.header(
@@ -448,7 +448,7 @@ impl<'a> NexusRequest<'a> {
             }
             AuthnMode::PrivilegedUser => {
                 let header_value = spoof::make_header_value(
-                    spoof::ActorKind::Builtin,
+                    spoof::ActorType::Builtin,
                     authn::USER_TEST_PRIVILEGED.id,
                 );
                 self.request_builder = self.request_builder.header(
@@ -458,7 +458,7 @@ impl<'a> NexusRequest<'a> {
             }
             AuthnMode::SiloUser(silo_user_id) => {
                 let header_value = spoof::make_header_value(
-                    spoof::ActorKind::Silo,
+                    spoof::ActorType::Silo,
                     silo_user_id,
                 );
                 self.request_builder = self.request_builder.header(

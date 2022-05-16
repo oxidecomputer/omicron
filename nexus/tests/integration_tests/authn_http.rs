@@ -62,7 +62,7 @@ async fn test_authn_spoof_allowed() {
     // Successful authentication
     let valid_uuid = "7f927c86-3371-4295-c34a-e3246a4b9c02";
     let header = spoof::make_header_value(
-        spoof::ActorKind::Builtin,
+        spoof::ActorType::Builtin,
         valid_uuid.parse().unwrap(),
     )
     .0
@@ -199,7 +199,7 @@ async fn test_authn_spoof_unconfigured() {
         None,
         Some(
             spoof::make_header_value(
-                spoof::ActorKind::Builtin,
+                spoof::ActorType::Builtin,
                 "7f927c86-3371-4295-c34a-e3246a4b9c02".parse().unwrap(),
             )
             .0
