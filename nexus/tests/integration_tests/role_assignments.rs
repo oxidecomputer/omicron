@@ -10,6 +10,7 @@ use futures::Future;
 use futures::FutureExt;
 use http::Method;
 use http::StatusCode;
+use lazy_static::lazy_static;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::resource_helpers::create_organization;
@@ -23,6 +24,12 @@ use omicron_nexus::db::fixed_data;
 use omicron_nexus::db::identity::Resource;
 use omicron_nexus::external_api::shared;
 use omicron_nexus::external_api::views;
+
+lazy_static! {
+    // XXX-dap TODO-doc
+    static ref AUTHN_TEST_USER: AuthnMode =
+        AuthnMode::SiloUser(USER_TEST_UNPRIVILEGED.id);
+}
 
 /// Describes the role assignment test for a particular kind of resource
 ///
@@ -129,7 +136,7 @@ async fn test_role_assignments_fleet(cptestctx: &ControlPlaneTestContext) {
                     Method::GET,
                     RESOURCE_URL,
                 )
-                .authn_as(AuthnMode::UnprivilegedUser)
+                .authn_as(AUTHN_TEST_USER.clone())
                 .execute()
                 .await
                 .unwrap();
@@ -148,7 +155,7 @@ async fn test_role_assignments_fleet(cptestctx: &ControlPlaneTestContext) {
             async {
                 let _: dropshot::ResultsPage<views::Sled> =
                     NexusRequest::object_get(client, RESOURCE_URL)
-                        .authn_as(AuthnMode::UnprivilegedUser)
+                        .authn_as(AUTHN_TEST_USER.clone())
                         .execute()
                         .await
                         .unwrap()
@@ -374,7 +381,7 @@ where
             Method::GET,
             resource_url,
         )
-        .authn_as(AuthnMode::UnprivilegedUser)
+        .authn_as(AUTHN_TEST_USER.clone())
         .execute()
         .await
         .unwrap();
@@ -402,7 +409,7 @@ where
         // (This is not really a policy test so we're not going to check all
         // possible actions.)
         let resource: V = NexusRequest::object_get(client, resource_url)
-            .authn_as(AuthnMode::UnprivilegedUser)
+            .authn_as(AUTHN_TEST_USER.clone())
             .execute()
             .await
             .unwrap()
@@ -455,7 +462,7 @@ async fn run_test<T: RoleAssignmentTest>(
         &policy_url,
         &new_policy,
     )
-    .authn_as(AuthnMode::UnprivilegedUser)
+    .authn_as(AUTHN_TEST_USER.clone())
     .execute()
     .await
     .unwrap();
@@ -505,7 +512,7 @@ async fn run_test<T: RoleAssignmentTest>(
     // revoke their own access.
     let updated_policy: shared::Policy<T::RoleType> =
         NexusRequest::object_put(client, &policy_url, Some(&initial_policy))
-            .authn_as(AuthnMode::UnprivilegedUser)
+            .authn_as(AUTHN_TEST_USER.clone())
             .execute()
             .await
             .unwrap()
