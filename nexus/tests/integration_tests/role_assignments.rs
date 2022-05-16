@@ -533,3 +533,36 @@ async fn policy_fetch<T: serde::de::DeserializeOwned>(
         .parsed_body()
         .unwrap()
 }
+
+#[nexus_test]
+async fn test_role_assignments_fleet_invalid(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let initial_policy =
+        policy_fetch::<authz::FleetRoles>(&client, "/policy").await;
+
+    // Verify that users are not allowed to assign the internal-only
+    // "external-authenticator" role.
+    let mut new_policy = initial_policy.clone();
+    new_policy.role_assignments.push(shared::RoleAssignment {
+        identity_type: shared::IdentityType::UserBuiltin,
+        identity_id: USER_TEST_UNPRIVILEGED.id,
+        role_name: authz::FleetRoles::ExternalAuthenticator,
+    });
+    let error: dropshot::HttpErrorResponseBody =
+        NexusRequest::expect_failure_with_body(
+            client,
+            StatusCode::BAD_REQUEST,
+            Method::PUT,
+            "/policy",
+            &new_policy,
+        )
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap()
+        .parsed_body()
+        .unwrap();
+    assert_eq!(error.message, ""); // XXX-dap
+}
