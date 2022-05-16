@@ -1051,7 +1051,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "Volume"
+                  "volume"
                 ]
               }
             },
@@ -1072,7 +1072,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "Url"
+                  "url"
                 ]
               },
               "url": {
@@ -1104,7 +1104,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "Region"
+                  "region"
                 ]
               }
             },
@@ -1112,6 +1112,30 @@
               "block_size",
               "gen",
               "opts",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "block_size": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              },
+              "path": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "file"
+                ]
+              }
+            },
+            "required": [
+              "block_size",
+              "path",
               "type"
             ]
           }

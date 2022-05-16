@@ -733,7 +733,7 @@ dependencies = [
 [[package]]
 name = "crucible"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=257032d1e842901d427f344a396d78b9b85b183f#257032d1e842901d427f344a396d78b9b85b183f"
+source = "git+https://github.com/oxidecomputer/crucible?rev=8ea317a9dfee65d7c018a1fda89fdec63a560ef3#8ea317a9dfee65d7c018a1fda89fdec63a560ef3"
 dependencies = [
  "aes-gcm-siv",
  "anyhow",
@@ -766,7 +766,7 @@ dependencies = [
 [[package]]
 name = "crucible-agent-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=257032d1e842901d427f344a396d78b9b85b183f#257032d1e842901d427f344a396d78b9b85b183f"
+source = "git+https://github.com/oxidecomputer/crucible?rev=8ea317a9dfee65d7c018a1fda89fdec63a560ef3#8ea317a9dfee65d7c018a1fda89fdec63a560ef3"
 dependencies = [
  "anyhow",
  "chrono",
@@ -781,7 +781,7 @@ dependencies = [
 [[package]]
 name = "crucible-common"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=257032d1e842901d427f344a396d78b9b85b183f#257032d1e842901d427f344a396d78b9b85b183f"
+source = "git+https://github.com/oxidecomputer/crucible?rev=8ea317a9dfee65d7c018a1fda89fdec63a560ef3#8ea317a9dfee65d7c018a1fda89fdec63a560ef3"
 dependencies = [
  "anyhow",
  "rusqlite",
@@ -799,7 +799,7 @@ dependencies = [
 [[package]]
 name = "crucible-protocol"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=257032d1e842901d427f344a396d78b9b85b183f#257032d1e842901d427f344a396d78b9b85b183f"
+source = "git+https://github.com/oxidecomputer/crucible?rev=8ea317a9dfee65d7c018a1fda89fdec63a560ef3#8ea317a9dfee65d7c018a1fda89fdec63a560ef3"
 dependencies = [
  "anyhow",
  "bincode",
@@ -813,7 +813,7 @@ dependencies = [
 [[package]]
 name = "crucible-scope"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=257032d1e842901d427f344a396d78b9b85b183f#257032d1e842901d427f344a396d78b9b85b183f"
+source = "git+https://github.com/oxidecomputer/crucible?rev=8ea317a9dfee65d7c018a1fda89fdec63a560ef3#8ea317a9dfee65d7c018a1fda89fdec63a560ef3"
 dependencies = [
  "anyhow",
  "futures",
@@ -3725,7 +3725,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=ec4f3a41a638ea6c3316a86f30f1895f4877f2ef#ec4f3a41a638ea6c3316a86f30f1895f4877f2ef"
+source = "git+https://github.com/oxidecomputer/propolis?rev=845c9cffc482739d417761aa1c668895f24b776d#845c9cffc482739d417761aa1c668895f24b776d"
 dependencies = [
  "crucible",
  "reqwest",
@@ -5531,12 +5531,12 @@ dependencies = [
 
 [[package]]
 name = "twox-hash"
-version = "1.6.2"
+version = "1.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ee73e6e4924fe940354b8d4d98cad5231175d615cd855b758adc658c0aac6a0"
+checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
 dependencies = [
- "cfg-if 1.0.0",
- "rand 0.8.5",
+ "cfg-if 0.1.10",
+ "rand 0.4.6",
  "static_assertions",
 ]
 

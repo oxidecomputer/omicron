@@ -53,6 +53,13 @@ pub enum Error {
     )]
     NoXdeConf,
 
+    #[error(
+        "The OS kernel does not support the xde driver. Please update the OS \
+        using `./tools/install_opte.sh` to provide kernel bits and the xde \
+        driver which are compatible."
+    )]
+    IncompatibleKernel,
+
     #[error(transparent)]
     BadAddrObj(#[from] addrobj::ParseError),
 }
@@ -319,6 +326,19 @@ pub fn initialize_xde_driver(log: &Logger) -> Result<(), Error> {
         .set_xde_underlay(&underlay_nics[0].0, &underlay_nics[1].0)
     {
         Ok(_) => Ok(()),
+        // Handle the specific case where the kernel appears to be unaware of
+        // xde at all. This implies the developer has not installed the correct
+        // helios-netdev kernel bits.
+        //
+        // TODO-correctness: This error should never occur in the product. Both
+        // xde the kernel driver and the kernel bits needed to recognize it will
+        // be packaged as part of our OS ramdisk, meaning it should not be
+        // possible to get out of sync.
+        Err(opte_ioctl::Error::IoctlFailed(_, ref message))
+            if message.contains("unexpected errno: 48") =>
+        {
+            Err(Error::IncompatibleKernel)
+        }
         // TODO-correctness: xde provides no way to get the current underlay
         // devices we're using, but we'd probably like the further check that
         // those are exactly what we're giving it now.
