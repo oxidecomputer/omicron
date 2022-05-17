@@ -39,6 +39,7 @@ use crate::context::OpContext;
 use crate::db::fixed_data::FLEET_ID;
 use crate::db::model::UpdateArtifactKind;
 use crate::db::DataStore;
+use anyhow::anyhow;
 use authz_macros::authz_resource;
 use futures::future::BoxFuture;
 use futures::FutureExt;
@@ -83,9 +84,32 @@ pub trait ApiResourceWithRoles: ApiResource {
 
 /// Describes the specific roles for an `ApiResourceWithRoles`
 pub trait ApiResourceWithRolesType: ApiResourceWithRoles {
-    type AllowedRoles: std::fmt::Display
-        + serde::Serialize
-        + serde::de::DeserializeOwned;
+    type AllowedRoles: serde::Serialize
+        + serde::de::DeserializeOwned
+        + AllowedRoles;
+}
+
+/// Describes a set of allowed roles for a particular resource
+///
+/// This trait describes how to serialize an allowed role name to a String for
+/// storing into the database.  This is potentially different than the impl of
+/// `Serialize` (which is how the role name appears in an API) and the impl of
+/// `Display` (if the type even has one).  We could piggy-back on `Display`, but
+/// it'd be a footgun in that someone might change `Display` thinking it
+/// wouldn't have much impact, not realizing that it'd be breaking an on-disk
+/// interface.
+// Note too that most of the time when we have a fixed set of values in the
+// database, we use an explicit database enum.  That's hard to do here because
+// this value is stored in the "role_assignments" table, which includes rows for
+// various types of resources.  The set of allowed roles differs across
+// resources.  It'd be more type-safe to have a separate table of role
+// assignments for every resource...but it'd be a lot more complicated,
+// particularly given that they're otherwise treated the same way.
+pub trait AllowedRoles: Sized {
+    type Error: std::fmt::Display;
+
+    fn to_database_string(&self) -> &str;
+    fn from_database_string(s: &str) -> Result<Self, Self::Error>;
 }
 
 impl<T: ApiResource + oso::ToPolar + Clone> AuthorizedResource for T {
@@ -202,18 +226,8 @@ impl ApiResourceWithRolesType for Fleet {
 }
 
 #[derive(
-    Clone,
-    Copy,
-    Debug,
-    Deserialize,
-    Display,
-    Eq,
-    FromStr,
-    PartialEq,
-    Serialize,
-    JsonSchema,
+    Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema,
 )]
-#[display(style = "kebab-case")]
 #[serde(rename_all = "snake_case")]
 pub enum FleetRoles {
     Admin,
@@ -221,6 +235,27 @@ pub enum FleetRoles {
     Viewer,
     // There are other Fleet roles, but they are not externally-visible and so
     // they do not show up in this enum.
+}
+
+impl AllowedRoles for FleetRoles {
+    type Error = anyhow::Error;
+
+    fn to_database_string(&self) -> &str {
+        match self {
+            FleetRoles::Admin => "admin",
+            FleetRoles::Collaborator => "collaborator",
+            FleetRoles::Viewer => "viewer",
+        }
+    }
+
+    fn from_database_string(s: &str) -> Result<Self, Self::Error> {
+        match s {
+            "admin" => Ok(FleetRoles::Admin),
+            "collaborator" => Ok(FleetRoles::Collaborator),
+            "viewer" => Ok(FleetRoles::Viewer),
+            _ => Err(anyhow!("unsupported Fleet role from database: {:?}", s)),
+        }
+    }
 }
 
 /// ConsoleSessionList is a synthetic resource used for modeling who has access
@@ -376,6 +411,28 @@ pub enum OrganizationRoles {
     Collaborator,
 }
 
+impl AllowedRoles for OrganizationRoles {
+    type Error = anyhow::Error;
+
+    fn to_database_string(&self) -> &str {
+        match self {
+            OrganizationRoles::Admin => "admin",
+            OrganizationRoles::Collaborator => "collaborator",
+        }
+    }
+
+    fn from_database_string(s: &str) -> Result<Self, Self::Error> {
+        match s {
+            "admin" => Ok(OrganizationRoles::Admin),
+            "collaborator" => Ok(OrganizationRoles::Collaborator),
+            _ => Err(anyhow!(
+                "unsupported Organization role from database: {:?}",
+                s
+            )),
+        }
+    }
+}
+
 authz_resource! {
     name = "Project",
     parent = "Organization",
@@ -406,6 +463,29 @@ pub enum ProjectRoles {
     Admin,
     Collaborator,
     Viewer,
+}
+
+impl AllowedRoles for ProjectRoles {
+    type Error = anyhow::Error;
+
+    fn to_database_string(&self) -> &str {
+        match self {
+            ProjectRoles::Admin => "admin",
+            ProjectRoles::Collaborator => "collaborator",
+            ProjectRoles::Viewer => "viewer",
+        }
+    }
+
+    fn from_database_string(s: &str) -> Result<Self, Self::Error> {
+        match s {
+            "admin" => Ok(ProjectRoles::Admin),
+            "collaborator" => Ok(ProjectRoles::Collaborator),
+            "viewer" => Ok(ProjectRoles::Viewer),
+            _ => {
+                Err(anyhow!("unsupported Project role from database: {:?}", s))
+            }
+        }
+    }
 }
 
 authz_resource! {
@@ -528,6 +608,27 @@ pub enum SiloRoles {
     Admin,
     Collaborator,
     Viewer,
+}
+
+impl AllowedRoles for SiloRoles {
+    type Error = anyhow::Error;
+
+    fn to_database_string(&self) -> &str {
+        match self {
+            SiloRoles::Admin => "admin",
+            SiloRoles::Collaborator => "collaborator",
+            SiloRoles::Viewer => "viewer",
+        }
+    }
+
+    fn from_database_string(s: &str) -> Result<Self, Self::Error> {
+        match s {
+            "admin" => Ok(SiloRoles::Admin),
+            "collaborator" => Ok(SiloRoles::Collaborator),
+            "viewer" => Ok(SiloRoles::Viewer),
+            _ => Err(anyhow!("unsupported Silo role from database: {:?}", s)),
+        }
+    }
 }
 
 authz_resource! {

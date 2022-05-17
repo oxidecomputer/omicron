@@ -4,6 +4,7 @@
 
 //! Types that are used as both views and params
 
+use crate::authz;
 use crate::db;
 use anyhow::anyhow;
 use omicron_common::api::external::Error;
@@ -12,7 +13,6 @@ use serde::de::Error as _;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
-use std::str::FromStr;
 use uuid::Uuid;
 
 /// Maximum number of role assignments allowed on any one resource
@@ -78,11 +78,10 @@ pub struct RoleAssignment<AllowedRoles> {
     pub role_name: AllowedRoles,
 }
 
-impl<AllowedRoles, E> TryFrom<db::model::RoleAssignment>
+impl<AllowedRoles> TryFrom<db::model::RoleAssignment>
     for RoleAssignment<AllowedRoles>
 where
-    AllowedRoles: FromStr<Err = E>,
-    E: std::fmt::Display,
+    AllowedRoles: authz::AllowedRoles,
 {
     type Error = Error;
 
@@ -98,15 +97,14 @@ where
                     ))
                 })?,
             identity_id: role_asgn.identity_id,
-            role_name: AllowedRoles::from_str(&role_asgn.role_name).map_err(
-                |error| {
+            role_name: AllowedRoles::from_database_string(&role_asgn.role_name)
+                .map_err(|error| {
                     Error::internal_error(&format!(
                         "parsing database role assignment: \
                         unrecognized role name {:?}: {:#}",
                         &role_asgn.role_name, error,
                     ))
-                },
-            )?,
+                })?,
         })
     }
 }
