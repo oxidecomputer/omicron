@@ -6,8 +6,8 @@
 // Copyright 2021 Oxide Computer Company
 
 use crate::{
-    FieldSchema, FieldSource, Metric, Target, TimeseriesKey, TimeseriesName,
-    TimeseriesSchema,
+    DbFieldSource, FieldSchema, FieldSource, Metric, Target, TimeseriesKey,
+    TimeseriesName, TimeseriesSchema,
 };
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
@@ -77,14 +77,14 @@ impl From<DbBool> for Datum {
 //
 // Note that the fields are renamed so that ClickHouse interprets them as correctly referring to
 // the nested column names.
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct DbFieldList {
     #[serde(rename = "fields.name")]
     pub names: Vec<String>,
     #[serde(rename = "fields.type")]
-    pub types: Vec<FieldType>,
+    pub types: Vec<DbFieldType>,
     #[serde(rename = "fields.source")]
-    pub sources: Vec<FieldSource>,
+    pub sources: Vec<DbFieldSource>,
 }
 
 impl From<DbFieldList> for Vec<FieldSchema> {
@@ -93,7 +93,11 @@ impl From<DbFieldList> for Vec<FieldSchema> {
             .into_iter()
             .zip(list.types.into_iter())
             .zip(list.sources.into_iter())
-            .map(|((name, ty), source)| FieldSchema { name, ty, source })
+            .map(|((name, ty), source)| FieldSchema {
+                name,
+                ty: ty.into(),
+                source: source.into(),
+            })
             .collect()
     }
 }
@@ -105,8 +109,8 @@ impl From<Vec<FieldSchema>> for DbFieldList {
         let mut sources = Vec::with_capacity(list.len());
         for field in list.into_iter() {
             names.push(field.name);
-            types.push(field.ty);
-            sources.push(field.source);
+            types.push(field.ty.into());
+            sources.push(field.source.into());
         }
         DbFieldList { names, types, sources }
     }
@@ -118,7 +122,7 @@ pub(crate) struct DbTimeseriesSchema {
     pub timeseries_name: String,
     #[serde(flatten)]
     pub field_schema: DbFieldList,
-    pub datum_type: DatumType,
+    pub datum_type: DbDatumType,
     #[serde(with = "serde_timestamp")]
     pub created: DateTime<Utc>,
 }
@@ -128,8 +132,84 @@ impl From<TimeseriesSchema> for DbTimeseriesSchema {
         DbTimeseriesSchema {
             timeseries_name: schema.timeseries_name.to_string(),
             field_schema: schema.field_schema.into(),
-            datum_type: schema.datum_type,
+            datum_type: schema.datum_type.into(),
             created: schema.created,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+pub enum DbFieldType {
+    String,
+    I64,
+    IpAddr,
+    Uuid,
+    Bool,
+}
+
+impl From<DbFieldType> for FieldType {
+    fn from(src: DbFieldType) -> Self {
+        match src {
+            DbFieldType::String => FieldType::String,
+            DbFieldType::I64 => FieldType::I64,
+            DbFieldType::IpAddr => FieldType::IpAddr,
+            DbFieldType::Uuid => FieldType::Uuid,
+            DbFieldType::Bool => FieldType::Bool,
+        }
+    }
+}
+impl From<FieldType> for DbFieldType {
+    fn from(src: FieldType) -> Self {
+        match src {
+            FieldType::String => DbFieldType::String,
+            FieldType::I64 => DbFieldType::I64,
+            FieldType::IpAddr => DbFieldType::IpAddr,
+            FieldType::Uuid => DbFieldType::Uuid,
+            FieldType::Bool => DbFieldType::Bool,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+pub enum DbDatumType {
+    Bool,
+    I64,
+    F64,
+    String,
+    Bytes,
+    CumulativeI64,
+    CumulativeF64,
+    HistogramI64,
+    HistogramF64,
+}
+
+impl From<DatumType> for DbDatumType {
+    fn from(src: DatumType) -> Self {
+        match src {
+            DatumType::Bool => DbDatumType::Bool,
+            DatumType::I64 => DbDatumType::I64,
+            DatumType::F64 => DbDatumType::F64,
+            DatumType::String => DbDatumType::String,
+            DatumType::Bytes => DbDatumType::Bytes,
+            DatumType::CumulativeI64 => DbDatumType::CumulativeI64,
+            DatumType::CumulativeF64 => DbDatumType::CumulativeI64,
+            DatumType::HistogramI64 => DbDatumType::HistogramI64,
+            DatumType::HistogramF64 => DbDatumType::HistogramF64,
+        }
+    }
+}
+
+impl From<DbDatumType> for DatumType {
+    fn from(src: DbDatumType) -> Self {
+        match src {
+            DbDatumType::Bool => DatumType::Bool,
+            DbDatumType::I64 => DatumType::I64,
+            DbDatumType::F64 => DatumType::F64,
+            DbDatumType::String => DatumType::String,
+            DbDatumType::Bytes => DatumType::Bytes,
+            DbDatumType::CumulativeI64 => DatumType::CumulativeI64,
+            DbDatumType::CumulativeF64 => DatumType::CumulativeI64,
+            DbDatumType::HistogramI64 => DatumType::HistogramI64,
+            DbDatumType::HistogramF64 => DatumType::HistogramF64,
         }
     }
 }

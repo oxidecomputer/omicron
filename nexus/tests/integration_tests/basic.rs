@@ -525,7 +525,7 @@ async fn test_projects_list(cptestctx: &ControlPlaneTestContext) {
         NexusRequest::iter_collection_authn::<Project>(
             &client,
             projects_url,
-            "sort_by=name-ascending",
+            "sort_by=name_ascending",
             Some(projects_subset),
         )
         .await
@@ -546,7 +546,7 @@ async fn test_projects_list(cptestctx: &ControlPlaneTestContext) {
         NexusRequest::iter_collection_authn::<Project>(
             &client,
             projects_url,
-            "sort_by=name-descending",
+            "sort_by=name_descending",
             Some(projects_subset),
         )
         .await
@@ -566,7 +566,7 @@ async fn test_projects_list(cptestctx: &ControlPlaneTestContext) {
     let found_projects_by_id = NexusRequest::iter_collection_authn::<Project>(
         &client,
         projects_url,
-        "sort_by=id-ascending",
+        "sort_by=id_ascending",
         Some(projects_subset),
     )
     .await

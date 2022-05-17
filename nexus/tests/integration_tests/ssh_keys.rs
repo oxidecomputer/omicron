@@ -82,7 +82,7 @@ async fn test_ssh_keys(cptestctx: &ControlPlaneTestContext) {
     let keys: Vec<SshKey> = NexusRequest::iter_collection_authn(
         client,
         "/session/me/sshkeys",
-        "sort_by=name-ascending",
+        "sort_by=name_ascending",
         Some(new_keys.len()),
     )
     .await
