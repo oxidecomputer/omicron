@@ -486,6 +486,8 @@ async fn ensure_running_zone(
             let zone = RunningZone::boot(installed_zone).await?;
 
             zone.ensure_address(address_request).await?;
+            zone.ensure_route(dataset_info.address.ip()).await.expect("Failed to add route");
+
             dataset_info
                 .start_zone(log, &zone, dataset_info.address, do_format)
                 .await?;

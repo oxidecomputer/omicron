@@ -203,16 +203,9 @@ impl ServiceManager {
 
                 // TODO:
                 // - Verify this works: ✔
-                // - Do we need to add it for non-service zone creation?: TODO
+                // - Do we need to add it for non-service zone creation?: ✔
                 // - Improve the error handling: TODO
-                running_zone.run_cmd(&[
-                    "/usr/sbin/route",
-                    "add",
-                    "-inet6",
-                    &format!("{}/{}", addr, AZ_PREFIX),
-                    &addr.to_string(),
-                    "-iface",
-                ]).expect("Failed to add route");
+                running_zone.ensure_route(IpAddr::V6(*addr)).await.expect("Failed to add route");
             }
 
             info!(self.log, "GZ addresses: {:#?}", service.gz_addresses);

@@ -10,7 +10,9 @@ use crate::illumos::vnic::{Vnic, VnicAllocator};
 use crate::illumos::zone::{AddressRequest, ZONE_PREFIX};
 use crate::opte::OptePort;
 use ipnetwork::IpNetwork;
+use omicron_common::address::AZ_PREFIX;
 use slog::Logger;
+use std::net::{IpAddr, Ipv6Addr};
 use std::path::PathBuf;
 
 #[cfg(test)]
@@ -169,6 +171,21 @@ impl RunningZone {
         let network =
             Zones::ensure_address(Some(&self.inner.name), &addrobj, addrtype)?;
         Ok(network)
+    }
+
+    pub async fn ensure_route(
+        &self,
+        // TODO: Prefer Ipv6Addr
+        address: IpAddr,
+    ) -> Result<(), RunCommandError> {
+        self.run_cmd(&[
+            "/usr/sbin/route",
+            "add",
+            &format!("{}/{}", address, AZ_PREFIX),
+            &address.to_string(),
+            "-iface",
+        ])?;
+        Ok(())
     }
 
     /// Looks up a running zone based on the `zone_prefix`, if one already exists.
