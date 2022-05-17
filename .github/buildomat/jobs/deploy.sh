@@ -19,7 +19,7 @@ set -o xtrace
 pfexec mkdir /opt/oxide
 pfexec mount -F tmpfs -O swap /opt/oxide
 pfexec mkdir /opt/oxide/work
-chown build:build /opt/oxide/work
+pfexec chown build:build /opt/oxide/work
 cd /opt/oxide/work
 
 ptime -m tar xvzf /input/package/work/package.tar.gz
