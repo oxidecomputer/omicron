@@ -32,7 +32,7 @@ bind_address = "[fd00:1122:3344:0101::3]:12221"
 # Show log messages of this level and more severe
 level = "info"
 mode = "file"
-path = "/var/oxide/nexus.log"
+path = "/dev/stdout"
 if_exists = "append"
 
 # Configuration for interacting with the timeseries database

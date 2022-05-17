@@ -12,7 +12,7 @@ batch_interval = 5 # In seconds
 [log]
 level = "debug"
 mode = "file"
-path = "/var/oxide/oximeter.log"
+path = "/dev/stdout"
 if_exists = "append"
 
 [dropshot]
