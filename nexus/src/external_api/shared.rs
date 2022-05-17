@@ -93,8 +93,9 @@ where
             identity_type: IdentityType::try_from(role_asgn.identity_type)
                 .map_err(|error| {
                     Error::internal_error(&format!(
-                    "parsing database role assignment: {:#}", error
-                ))
+                        "parsing database role assignment: {:#}",
+                        error
+                    ))
                 })?,
             identity_id: role_asgn.identity_id,
             role_name: AllowedRoles::from_str(&role_asgn.role_name).map_err(
