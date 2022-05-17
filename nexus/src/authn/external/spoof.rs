@@ -116,18 +116,19 @@ fn authn_spoof(raw_value: Option<&Authorization<Bearer>>) -> SchemeResult {
         Some(bearer) => bearer.token(),
     };
 
-    if !token.starts_with(SPOOF_PREFIX) {
-        // This is some other kind of bearer token.  Maybe another scheme knows
-        // how to deal with it.
-        return SchemeResult::NotRequested;
-    }
+    let str_value = match token.strip_prefix(SPOOF_PREFIX) {
+        None => {
+            // This is some other kind of bearer token.  Maybe another scheme
+            // knows how to deal with it.
+            return SchemeResult::NotRequested;
+        }
+        Some(s) => s,
+    };
 
-    let str_value = &token[SPOOF_PREFIX.len()..];
     let (actor_kind, str_value) = {
-        if str_value.starts_with("builtin-") {
-            (ActorType::Builtin, &str_value["builtin-".len()..])
-        } else {
-            (ActorType::Silo, str_value)
+        match str_value.strip_prefix("builtin-") {
+            Some(s) => (ActorType::Builtin, s),
+            None => (ActorType::Silo, str_value),
         }
     };
 
