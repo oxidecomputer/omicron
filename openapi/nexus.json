@@ -5716,9 +5716,9 @@
       "FleetRoles": {
         "type": "string",
         "enum": [
-          "Admin",
-          "Collaborator",
-          "Viewer"
+          "admin",
+          "collaborator",
+          "viewer"
         ]
       },
       "FleetRolesPolicy": {
