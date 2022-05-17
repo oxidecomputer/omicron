@@ -138,19 +138,33 @@ mod test {
     use super::IdentityType;
     use super::Policy;
     use super::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE;
+    use crate::authz;
     use crate::db;
     use crate::external_api::shared;
+    use anyhow::anyhow;
     use omicron_common::api::external::Error;
     use omicron_common::api::external::ResourceType;
-    use parse_display::FromStr;
-    use serde_with::DeserializeFromStr;
+    use serde::Deserialize;
 
-    #[derive(
-        Clone, Copy, Debug, DeserializeFromStr, Eq, FromStr, PartialEq,
-    )]
-    #[display(style = "kebab-case")]
+    #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+    #[serde(rename_all = "kebab-case")]
     pub enum DummyRoles {
         Bogus,
+    }
+    impl authz::AllowedRoles for DummyRoles {
+        type Error = anyhow::Error;
+
+        fn to_database_string(&self) -> &str {
+            unimplemented!()
+        }
+
+        fn from_database_string(s: &str) -> Result<Self, Self::Error> {
+            if s == "bogus" {
+                Ok(DummyRoles::Bogus)
+            } else {
+                Err(anyhow!("unsupported DummyRoles: {:?}", s))
+            }
+        }
     }
 
     #[test]
@@ -218,7 +232,7 @@ mod test {
             assert_eq!(
                 internal_message,
                 "parsing database role assignment: unrecognized role name \
-                \"bogosity\": parse failed."
+                \"bogosity\": unsupported DummyRoles: \"bogosity\""
             );
         } else {
             panic!(

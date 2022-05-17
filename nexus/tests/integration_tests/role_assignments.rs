@@ -20,6 +20,7 @@ use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::ObjectIdentity;
 use omicron_nexus::authn::USER_TEST_UNPRIVILEGED;
 use omicron_nexus::authz;
+use omicron_nexus::authz::AllowedRoles;
 use omicron_nexus::db::fixed_data;
 use omicron_nexus::db::identity::Resource;
 use omicron_nexus::external_api::shared;
@@ -69,10 +70,10 @@ trait RoleAssignmentTest {
     /// The type that's used to describe roles on this resource
     type RoleType: Clone
         + std::fmt::Debug
-        + std::fmt::Display
         + PartialEq
         + serde::Serialize
-        + serde::de::DeserializeOwned;
+        + serde::de::DeserializeOwned
+        + authz::AllowedRoles;
 
     /// The role to grant on this resource as part of the test sequence
     const ROLE: Self::RoleType;
@@ -494,12 +495,12 @@ async fn run_test<T: RoleAssignmentTest>(
             .unwrap()
             .parsed_body()
             .unwrap();
-    new_policy
-        .role_assignments
-        .sort_by_key(|r| (r.identity_id, r.role_name.to_string()));
-    updated_policy
-        .role_assignments
-        .sort_by_key(|r| (r.identity_id, r.role_name.to_string()));
+    new_policy.role_assignments.sort_by_key(|r| {
+        (r.identity_id, r.role_name.to_database_string().to_owned())
+    });
+    updated_policy.role_assignments.sort_by_key(|r| {
+        (r.identity_id, r.role_name.to_database_string().to_owned())
+    });
     assert_eq!(updated_policy, new_policy);
 
     // Check that the policy reflects that.
