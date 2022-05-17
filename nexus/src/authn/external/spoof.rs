@@ -104,6 +104,7 @@ where
 
 /// Specifies whether the spoof header explicitly specifies a built-in user or a
 /// normal (silo) user
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ActorType {
     Builtin,
     Silo,
