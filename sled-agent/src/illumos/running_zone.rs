@@ -221,11 +221,14 @@ impl RunningZone {
             },
         )?;
 
+        let control_vnic = Vnic::wrap_existing(vnic_name)
+            .expect("Failed to wrap valid control VNIC");
+
         Ok(Self {
             inner: InstalledZone {
                 log: log.new(o!("zone" => zone_name.to_string())),
                 name: zone_name.to_string(),
-                control_vnic: Vnic::wrap_existing(vnic_name),
+                control_vnic,
                 // TODO(https://github.com/oxidecomputer/omicron/issues/725)
                 //
                 // Re-initialize guest_vnic state by inspecting the zone.

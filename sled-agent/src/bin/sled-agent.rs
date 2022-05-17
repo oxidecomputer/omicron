@@ -5,8 +5,6 @@
 //! Executable program to run the sled agent
 
 use dropshot::ConfigDropshot;
-use dropshot::ConfigLogging;
-use dropshot::ConfigLoggingLevel;
 use omicron_common::api::external::Error;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
@@ -126,9 +124,7 @@ async fn do_run() -> Result<(), CmdError> {
                     request_body_max_bytes: 1024 * 1024,
                     ..Default::default()
                 },
-                log: ConfigLogging::StderrTerminal {
-                    level: ConfigLoggingLevel::Info,
-                },
+                log: config.log.clone(),
                 rss_config,
             };
 

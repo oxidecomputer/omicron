@@ -557,12 +557,6 @@ dependencies = [
 
 [[package]]
 name = "convert_case"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6245d59a3e82a7fc217c5828a6692dbc6dfb63a0c8c90495621f7b9d79704a0e"
-
-[[package]]
-name = "convert_case"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fb4a24b1aaf0fd0ce8b45161144d6f42cd91677fd5940fd431183eb023b3a2b8"
@@ -745,7 +739,7 @@ dependencies = [
 [[package]]
 name = "crucible"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=257032d1e842901d427f344a396d78b9b85b183f#257032d1e842901d427f344a396d78b9b85b183f"
+source = "git+https://github.com/oxidecomputer/crucible?rev=8ea317a9dfee65d7c018a1fda89fdec63a560ef3#8ea317a9dfee65d7c018a1fda89fdec63a560ef3"
 dependencies = [
  "aes-gcm-siv",
  "anyhow",
@@ -778,7 +772,7 @@ dependencies = [
 [[package]]
 name = "crucible-agent-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=257032d1e842901d427f344a396d78b9b85b183f#257032d1e842901d427f344a396d78b9b85b183f"
+source = "git+https://github.com/oxidecomputer/crucible?rev=8ea317a9dfee65d7c018a1fda89fdec63a560ef3#8ea317a9dfee65d7c018a1fda89fdec63a560ef3"
 dependencies = [
  "anyhow",
  "chrono",
@@ -793,7 +787,7 @@ dependencies = [
 [[package]]
 name = "crucible-common"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=257032d1e842901d427f344a396d78b9b85b183f#257032d1e842901d427f344a396d78b9b85b183f"
+source = "git+https://github.com/oxidecomputer/crucible?rev=8ea317a9dfee65d7c018a1fda89fdec63a560ef3#8ea317a9dfee65d7c018a1fda89fdec63a560ef3"
 dependencies = [
  "anyhow",
  "rusqlite",
@@ -811,7 +805,7 @@ dependencies = [
 [[package]]
 name = "crucible-protocol"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=257032d1e842901d427f344a396d78b9b85b183f#257032d1e842901d427f344a396d78b9b85b183f"
+source = "git+https://github.com/oxidecomputer/crucible?rev=8ea317a9dfee65d7c018a1fda89fdec63a560ef3#8ea317a9dfee65d7c018a1fda89fdec63a560ef3"
 dependencies = [
  "anyhow",
  "bincode",
@@ -825,7 +819,7 @@ dependencies = [
 [[package]]
 name = "crucible-scope"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=257032d1e842901d427f344a396d78b9b85b183f#257032d1e842901d427f344a396d78b9b85b183f"
+source = "git+https://github.com/oxidecomputer/crucible?rev=8ea317a9dfee65d7c018a1fda89fdec63a560ef3#8ea317a9dfee65d7c018a1fda89fdec63a560ef3"
 dependencies = [
  "anyhow",
  "futures",
@@ -2045,7 +2039,7 @@ dependencies = [
 [[package]]
 name = "illumos-ddi-dki"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=cb1767c#cb1767c80d4e9d97cb79901eed3c9d08e1fb3826"
+source = "git+https://github.com/oxidecomputer/opte?rev=b998015#b9980158540d15d44cfc5d17fc0a5d1848c5e1ae"
 dependencies = [
  "illumos-sys-hdrs",
 ]
@@ -2053,7 +2047,7 @@ dependencies = [
 [[package]]
 name = "illumos-sys-hdrs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=cb1767c#cb1767c80d4e9d97cb79901eed3c9d08e1fb3826"
+source = "git+https://github.com/oxidecomputer/opte?rev=b998015#b9980158540d15d44cfc5d17fc0a5d1848c5e1ae"
 
 [[package]]
 name = "impl-trait-for-tuples"
@@ -2135,6 +2129,7 @@ dependencies = [
  "tempdir",
  "tokio",
  "toml",
+ "trust-dns-client",
  "trust-dns-proto",
  "trust-dns-resolver",
  "trust-dns-server",
@@ -2976,7 +2971,7 @@ name = "openapi-lint"
 version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/openapi-lint?branch=main#9e3ada82808ef882fdefe2d01a39eeeb219c8778"
 dependencies = [
- "convert_case 0.5.0",
+ "convert_case",
  "indexmap",
  "openapiv3",
 ]
@@ -3028,7 +3023,7 @@ dependencies = [
 [[package]]
 name = "opte"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=cb1767c#cb1767c80d4e9d97cb79901eed3c9d08e1fb3826"
+source = "git+https://github.com/oxidecomputer/opte?rev=b998015#b9980158540d15d44cfc5d17fc0a5d1848c5e1ae"
 dependencies = [
  "anymap",
  "cfg-if 0.1.10",
@@ -3045,7 +3040,7 @@ dependencies = [
 [[package]]
 name = "opte-ioctl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=cb1767c#cb1767c80d4e9d97cb79901eed3c9d08e1fb3826"
+source = "git+https://github.com/oxidecomputer/opte?rev=b998015#b9980158540d15d44cfc5d17fc0a5d1848c5e1ae"
 dependencies = [
  "libc",
  "libnet",
@@ -3544,9 +3539,9 @@ dependencies = [
 
 [[package]]
 name = "postgres-types"
-version = "0.2.2"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04619f94ba0cc80999f4fc7073607cb825bc739a883cb6d20900fc5e009d6b0d"
+checksum = "ebd6e8b7189a73169290e89bd24c771071f1012d8fe6f738f5226531f0b03d89"
 dependencies = [
  "bytes",
  "chrono",
@@ -3671,7 +3666,7 @@ dependencies = [
 [[package]]
 name = "progenitor"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/progenitor#bbf81dfe7d107302241f9eb37c74556ffb2854ac"
+source = "git+https://github.com/oxidecomputer/progenitor#1af79ebec75f0c8ad3c0c5561783e3e9db03077a"
 dependencies = [
  "anyhow",
  "getopts",
@@ -3686,7 +3681,7 @@ dependencies = [
 [[package]]
 name = "progenitor-client"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/progenitor#bbf81dfe7d107302241f9eb37c74556ffb2854ac"
+source = "git+https://github.com/oxidecomputer/progenitor#1af79ebec75f0c8ad3c0c5561783e3e9db03077a"
 dependencies = [
  "bytes",
  "futures-core",
@@ -3699,10 +3694,10 @@ dependencies = [
 [[package]]
 name = "progenitor-impl"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/progenitor#bbf81dfe7d107302241f9eb37c74556ffb2854ac"
+source = "git+https://github.com/oxidecomputer/progenitor#1af79ebec75f0c8ad3c0c5561783e3e9db03077a"
 dependencies = [
- "convert_case 0.4.0",
  "getopts",
+ "heck 0.4.0",
  "indexmap",
  "openapiv3",
  "proc-macro2",
@@ -3721,7 +3716,7 @@ dependencies = [
 [[package]]
 name = "progenitor-macro"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/progenitor#bbf81dfe7d107302241f9eb37c74556ffb2854ac"
+source = "git+https://github.com/oxidecomputer/progenitor#1af79ebec75f0c8ad3c0c5561783e3e9db03077a"
 dependencies = [
  "openapiv3",
  "proc-macro2",
@@ -3736,7 +3731,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=ec4f3a41a638ea6c3316a86f30f1895f4877f2ef#ec4f3a41a638ea6c3316a86f30f1895f4877f2ef"
+source = "git+https://github.com/oxidecomputer/propolis?rev=845c9cffc482739d417761aa1c668895f24b776d#845c9cffc482739d417761aa1c668895f24b776d"
 dependencies = [
  "crucible",
  "reqwest",
@@ -4410,9 +4405,9 @@ dependencies = [
 
 [[package]]
 name = "serde_with"
-version = "1.12.1"
+version = "1.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "946fa04a8ac43ff78a1f4b811990afb9ddbdf5890b46d6dda0ba1998230138b7"
+checksum = "b827f2113224f3f19a665136f006709194bdfdcb1fdc1e4b2b5cbac8e0cced54"
 dependencies = [
  "rustversion",
  "serde",
@@ -5229,9 +5224,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-postgres"
-version = "0.7.5"
+version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b6c8b33df661b548dcd8f9bf87debb8c56c05657ed291122e1188698c2ece95"
+checksum = "19c88a47a23c5d2dc9ecd28fb38fba5fc7e5ddc1fe64488ec145076b0c71c8ae"
 dependencies = [
  "async-trait",
  "byteorder",
@@ -5239,7 +5234,7 @@ dependencies = [
  "fallible-iterator",
  "futures",
  "log",
- "parking_lot 0.11.2",
+ "parking_lot 0.12.0",
  "percent-encoding",
  "phf",
  "pin-project-lite",
@@ -5247,7 +5242,7 @@ dependencies = [
  "postgres-types",
  "socket2",
  "tokio",
- "tokio-util 0.6.9",
+ "tokio-util 0.7.1",
 ]
 
 [[package]]
@@ -5542,12 +5537,12 @@ dependencies = [
 
 [[package]]
 name = "twox-hash"
-version = "1.6.2"
+version = "1.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ee73e6e4924fe940354b8d4d98cad5231175d615cd855b758adc658c0aac6a0"
+checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
 dependencies = [
- "cfg-if 1.0.0",
- "rand 0.8.5",
+ "cfg-if 0.1.10",
+ "rand 0.4.6",
  "static_assertions",
 ]
 
@@ -5560,7 +5555,7 @@ checksum = "dcf81ac59edc17cc8697ff311e8f5ef2d99fcbd9817b34cec66f90b6c3dfd987"
 [[package]]
 name = "typify"
 version = "0.0.6-dev"
-source = "git+https://github.com/oxidecomputer/typify#6617df9800c81954ef2aa630f117f66e824f104d"
+source = "git+https://github.com/oxidecomputer/typify#90894d81e303cd56056b179f31b60401efa3462d"
 dependencies = [
  "typify-impl",
  "typify-macro",
@@ -5569,9 +5564,9 @@ dependencies = [
 [[package]]
 name = "typify-impl"
 version = "0.0.6-dev"
-source = "git+https://github.com/oxidecomputer/typify#6617df9800c81954ef2aa630f117f66e824f104d"
+source = "git+https://github.com/oxidecomputer/typify#90894d81e303cd56056b179f31b60401efa3462d"
 dependencies = [
- "convert_case 0.4.0",
+ "heck 0.4.0",
  "log",
  "proc-macro2",
  "quote",
@@ -5586,7 +5581,7 @@ dependencies = [
 [[package]]
 name = "typify-macro"
 version = "0.0.6-dev"
-source = "git+https://github.com/oxidecomputer/typify#6617df9800c81954ef2aa630f117f66e824f104d"
+source = "git+https://github.com/oxidecomputer/typify#90894d81e303cd56056b179f31b60401efa3462d"
 dependencies = [
  "proc-macro2",
  "quote",

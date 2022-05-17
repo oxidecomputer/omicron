@@ -6,7 +6,7 @@
 
 use crate::illumos::dladm::{
     CreateVnicError, DeleteVnicError, PhysicalLink, VNIC_PREFIX,
-    VNIC_PREFIX_CONTROL,
+    VNIC_PREFIX_CONTROL, VNIC_PREFIX_GUEST,
 };
 use omicron_common::api::external::MacAddr;
 use std::sync::{
@@ -60,7 +60,7 @@ impl VnicAllocator {
         debug_assert!(name.starts_with(VNIC_PREFIX));
         debug_assert!(name.starts_with(VNIC_PREFIX_CONTROL));
         Dladm::create_vnic(&self.data_link, &name, mac, None)?;
-        Ok(Vnic { name, deleted: false })
+        Ok(Vnic { name, deleted: false, kind: VnicKind::OxideControl })
     }
 
     fn new_superscope<S: AsRef<str>>(&self, scope: S) -> Self {
@@ -82,6 +82,32 @@ impl VnicAllocator {
     }
 }
 
+/// Represents the kind of a VNIC, such as whether it's for guest networking or
+/// communicating with Oxide services.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum VnicKind {
+    OxideControl,
+    Guest,
+}
+
+impl VnicKind {
+    /// Infer the kind from a VNIC's name, if this one the sled agent can
+    /// manage, and `None` otherwise.
+    pub fn from_name(name: &str) -> Option<Self> {
+        if name.starts_with(VNIC_PREFIX) {
+            Some(VnicKind::OxideControl)
+        } else if name.starts_with(VNIC_PREFIX_GUEST) {
+            Some(VnicKind::Guest)
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+#[error("VNIC with name '{0}' is not valid for sled agent management")]
+pub struct InvalidVnicKind(String);
+
 /// Represents an allocated VNIC on the system.
 /// The VNIC is de-allocated when it goes out of scope.
 ///
@@ -92,12 +118,22 @@ impl VnicAllocator {
 pub struct Vnic {
     name: String,
     deleted: bool,
+    kind: VnicKind,
 }
 
 impl Vnic {
     /// Takes ownership of an existing VNIC.
-    pub fn wrap_existing<S: AsRef<str>>(name: S) -> Self {
-        Vnic { name: name.as_ref().to_owned(), deleted: false }
+    pub fn wrap_existing<S: AsRef<str>>(
+        name: S,
+    ) -> Result<Self, InvalidVnicKind> {
+        match VnicKind::from_name(name.as_ref()) {
+            Some(kind) => Ok(Vnic {
+                name: name.as_ref().to_owned(),
+                deleted: false,
+                kind,
+            }),
+            None => Err(InvalidVnicKind(name.as_ref().to_owned())),
+        }
     }
 
     /// Deletes a NIC (if it has not already been deleted).
@@ -112,6 +148,10 @@ impl Vnic {
 
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    pub fn kind(&self) -> VnicKind {
+        self.kind
     }
 }
 

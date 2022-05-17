@@ -1024,6 +1024,7 @@ impl DataStore {
                     ErrorHandler::NotFoundByResource(authz_instance),
                 )
             })?;
+
         match result.status {
             UpdateStatus::Updated => Ok(()),
             UpdateStatus::NotUpdatedButExists => {

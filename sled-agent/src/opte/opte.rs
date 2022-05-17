@@ -28,6 +28,12 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
+// Names of VNICs used as underlay devices for the xde driver.
+const XDE_VNIC_NAMES: [&str; 2] = ["net0", "net1"];
+
+// Prefix used to identify xde data links.
+const XDE_LINK_PREFIX: &str = "opte";
+
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("Failure interacting with the OPTE ioctl(2) interface: {0}")]
@@ -37,7 +43,22 @@ pub enum Error {
     CreateVnic(#[from] dladm::CreateVnicError),
 
     #[error("Failed to create an IPv6 link-local address for xde underlay devices: {0}")]
-    UnderlayDevice(#[from] crate::illumos::ExecutionError),
+    UnderlayDeviceAddress(#[from] crate::illumos::ExecutionError),
+
+    #[error("Failed to get VNICs for xde underlay devices: {0}")]
+    GetVnic(#[from] crate::illumos::dladm::GetVnicError),
+
+    #[error(
+        "No xde driver configuration file exists at '/kernel/drv/xde.conf'"
+    )]
+    NoXdeConf,
+
+    #[error(
+        "The OS kernel does not support the xde driver. Please update the OS \
+        using `./tools/install_opte.sh` to provide kernel bits and the xde \
+        driver which are compatible."
+    )]
+    IncompatibleKernel,
 
     #[error(transparent)]
     BadAddrObj(#[from] addrobj::ParseError),
@@ -54,7 +75,7 @@ impl OptePortAllocator {
     }
 
     fn next(&self) -> String {
-        format!("opte{}", self.next_id())
+        format!("{}{}", XDE_LINK_PREFIX, self.next_id())
     }
 
     fn next_id(&self) -> u64 {
@@ -150,7 +171,9 @@ impl OptePortAllocator {
                 Some(omicron_common::api::external::MacAddr(mac)),
                 None,
             )?;
-            Some(Vnic::wrap_existing(vnic_name))
+            // Safety: We're explicitly creating the VNIC with the prefix
+            // `VNIC_PREFIX_GUEST`, so this call must return Some(_).
+            Some(Vnic::wrap_existing(vnic_name).unwrap())
         };
 
         Ok(OptePort {
@@ -258,16 +281,41 @@ impl Drop for OptePort {
     }
 }
 
+/// Delete all xde devices on the system.
+pub fn delete_all_xde_devices(log: &Logger) -> Result<(), Error> {
+    let hdl = OpteHdl::open(OpteHdl::DLD_CTL)?;
+    for port_info in hdl.list_ports()?.ports.into_iter() {
+        let name = &port_info.name;
+        info!(
+            log,
+            "deleting existing OPTE port and xde device";
+            "device_name" => name
+        );
+        hdl.delete_xde(name)?;
+    }
+    Ok(())
+}
+
 /// Initialize the underlay devices required for the xde kernel module.
 ///
 /// The xde driver needs information about the physical devices out which it can
 /// send traffic from the guests.
 pub fn initialize_xde_driver(log: &Logger) -> Result<(), Error> {
+    if !std::path::Path::new("/kernel/drv/xde.conf").exists() {
+        return Err(Error::NoXdeConf);
+    }
     let underlay_nics = find_chelsio_links()?;
     info!(log, "using '{:?}' as data links for xde driver", underlay_nics);
     if underlay_nics.len() < 2 {
+        const MESSAGE: &str = concat!(
+            "There must be at least two underlay NICs for the xde ",
+            "driver to operate. These are currently created by ",
+            "`./tools/create_virtual_hardware.sh`. Please ensure that ",
+            "script has been run, and that two VNICs named `net{0,1}` ",
+            "exist on the system."
+        );
         return Err(Error::Opte(opte_ioctl::Error::InvalidArgument(
-            String::from("There must be at least two underlay NICs"),
+            String::from(MESSAGE),
         )));
     }
     for nic in &underlay_nics {
@@ -278,6 +326,19 @@ pub fn initialize_xde_driver(log: &Logger) -> Result<(), Error> {
         .set_xde_underlay(&underlay_nics[0].0, &underlay_nics[1].0)
     {
         Ok(_) => Ok(()),
+        // Handle the specific case where the kernel appears to be unaware of
+        // xde at all. This implies the developer has not installed the correct
+        // helios-netdev kernel bits.
+        //
+        // TODO-correctness: This error should never occur in the product. Both
+        // xde the kernel driver and the kernel bits needed to recognize it will
+        // be packaged as part of our OS ramdisk, meaning it should not be
+        // possible to get out of sync.
+        Err(opte_ioctl::Error::IoctlFailed(_, ref message))
+            if message.contains("unexpected errno: 48") =>
+        {
+            Err(Error::IncompatibleKernel)
+        }
         // TODO-correctness: xde provides no way to get the current underlay
         // devices we're using, but we'd probably like the further check that
         // those are exactly what we're giving it now.
@@ -294,5 +355,8 @@ fn find_chelsio_links() -> Result<Vec<PhysicalLink>, Error> {
     // `Dladm` to get the real Chelsio links on a Gimlet. These will likely be
     // called `cxgbeN`, but we explicitly call them `netN` to be clear that
     // they're likely VNICs for the time being.
-    Ok((0..2).map(|i| PhysicalLink(format!("net{}", i))).collect())
+    Ok(XDE_VNIC_NAMES
+        .into_iter()
+        .map(|name| PhysicalLink(name.to_string()))
+        .collect())
 }

@@ -97,7 +97,7 @@ impl ServiceManager {
     ) -> Result<Self, Error> {
         debug!(log, "Creating new ServiceManager");
         let mgr = Self {
-            log,
+            log: log.new(o!("component" => "ServiceManager")),
             config_path,
             zones: Mutex::new(vec![]),
             vnic_allocator: VnicAllocator::new(

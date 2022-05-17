@@ -26,7 +26,7 @@ impl Server {
         sled_config: SledConfig,
     ) -> Result<Self, String> {
         let (drain, registration) = slog_dtrace::with_drain(
-            config.log.to_logger("bootstrap-agent").map_err(|message| {
+            config.log.to_logger("SledAgent").map_err(|message| {
                 format!("initializing logger: {}", message)
             })?,
         );
@@ -39,19 +39,14 @@ impl Server {
             debug!(log, "registered DTrace probes");
         }
         info!(log, "setting up bootstrap agent server");
-
-        let ba_log = log.new(o!(
-            "component" => "BootstrapAgent",
-            "server" => config.id.clone().to_string()
-        ));
         let bootstrap_agent = Arc::new(
-            Agent::new(ba_log, sled_config, address)
+            Agent::new(log.clone(), sled_config, address)
                 .await
                 .map_err(|e| e.to_string())?,
         );
 
         let ba = Arc::clone(&bootstrap_agent);
-        let dropshot_log = log.new(o!("component" => "dropshot"));
+        let dropshot_log = log.new(o!("component" => "dropshot (Bootstrap)"));
         let http_server = dropshot::HttpServerStarter::new(
             &config.dropshot,
             http_api(),

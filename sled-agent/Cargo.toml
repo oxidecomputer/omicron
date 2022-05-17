@@ -13,7 +13,7 @@ bytes = "1.1"
 cfg-if = "1.0"
 chrono = { version = "0.4", features = [ "serde" ] }
 # Only used by the simulated sled agent.
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "257032d1e842901d427f344a396d78b9b85b183f" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "8ea317a9dfee65d7c018a1fda89fdec63a560ef3" }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
 futures = "0.3.21"
 ipnetwork = "0.18"
@@ -24,7 +24,7 @@ omicron-common = { path = "../common" }
 p256 = "0.9.0"
 percent-encoding = "2.1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "ec4f3a41a638ea6c3316a86f30f1895f4877f2ef" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "845c9cffc482739d417761aa1c668895f24b776d" }
 rand = { version = "0.8.5", features = ["getrandom"] }
 reqwest = { version = "0.11.8", default-features = false, features = ["rustls-tls", "stream"] }
 schemars = { version = "0.8", features = [ "chrono", "uuid" ] }
@@ -48,8 +48,8 @@ vsss-rs = { version = "2.0.0-pre2", default-features = false, features = ["std"]
 zone = "0.1"
 
 [target.'cfg(target_os = "illumos")'.dependencies]
-opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "cb1767c" }
-opte = { git = "https://github.com/oxidecomputer/opte", rev = "cb1767c", features = [ "api", "std" ] }
+opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "b998015" }
+opte = { git = "https://github.com/oxidecomputer/opte", rev = "b998015", features = [ "api", "std" ] }
 
 [dev-dependencies]
 expectorate = "1.0.5"
