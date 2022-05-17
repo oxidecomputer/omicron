@@ -10,7 +10,7 @@ use crate::illumos::vnic::VnicAllocator;
 use crate::illumos::zone::AddressRequest;
 use crate::params::{ServiceEnsureBody, ServiceRequest};
 use crate::zone::Zones;
-use omicron_common::address::{DNS_PORT, DNS_SERVER_PORT, AZ_PREFIX};
+use omicron_common::address::{DNS_PORT, DNS_SERVER_PORT};
 use slog::Logger;
 use std::collections::HashSet;
 use std::iter::FromIterator;
@@ -201,11 +201,12 @@ impl ServiceManager {
                     addr.to_string()
                 );
 
-                // TODO:
-                // - Verify this works: ✔
-                // - Do we need to add it for non-service zone creation?: ✔
-                // - Improve the error handling: TODO
-                running_zone.ensure_route(IpAddr::V6(*addr)).await.expect("Failed to add route");
+                running_zone.ensure_route(*addr).await.map_err(|err| {
+                    Error::ZoneCommand {
+                        intent: "Adding Route".to_string(),
+                        err,
+                    }
+                })?;
             }
 
             info!(self.log, "GZ addresses: {:#?}", service.gz_addresses);

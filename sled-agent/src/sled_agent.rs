@@ -22,7 +22,7 @@ use omicron_common::api::{
     internal::nexus::UpdateArtifact,
 };
 use slog::Logger;
-use std::net::{SocketAddr, SocketAddrV6};
+use std::net::SocketAddrV6;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -261,7 +261,7 @@ impl SledAgent {
         &self,
         zpool_uuid: Uuid,
         dataset_kind: DatasetKind,
-        address: SocketAddr,
+        address: SocketAddrV6,
     ) -> Result<(), Error> {
         self.storage
             .upsert_filesystem(zpool_uuid, dataset_kind, address)

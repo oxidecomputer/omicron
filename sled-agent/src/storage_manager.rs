@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use slog::Logger;
 use std::collections::HashMap;
 use std::convert::TryFrom;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddrV6};
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -200,13 +200,17 @@ impl DatasetName {
 // by the Sled Agent.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 struct DatasetInfo {
-    address: SocketAddr,
+    address: SocketAddrV6,
     kind: DatasetKind,
     name: DatasetName,
 }
 
 impl DatasetInfo {
-    fn new(pool: &str, kind: DatasetKind, address: SocketAddr) -> DatasetInfo {
+    fn new(
+        pool: &str,
+        kind: DatasetKind,
+        address: SocketAddrV6,
+    ) -> DatasetInfo {
         match kind {
             DatasetKind::CockroachDb { .. } => DatasetInfo {
                 name: DatasetName::new(pool, "cockroachdb"),
@@ -234,7 +238,7 @@ impl DatasetInfo {
         &self,
         log: &Logger,
         zone: &RunningZone,
-        address: SocketAddr,
+        address: SocketAddrV6,
         do_format: bool,
     ) -> Result<(), Error> {
         match self.kind {
@@ -303,7 +307,8 @@ impl DatasetInfo {
                 // Await liveness of the cluster.
                 info!(log, "start_zone: awaiting liveness of CRDB");
                 let check_health = || async {
-                    let http_addr = SocketAddr::new(address.ip(), 8080);
+                    let http_addr =
+                        SocketAddrV6::new(*address.ip(), 8080, 0, 0);
                     reqwest::get(format!("http://{}/health?ready=1", http_addr))
                         .await
                         .map_err(backoff::BackoffError::transient)
@@ -456,8 +461,10 @@ async fn ensure_running_zone(
     dataset_name: &DatasetName,
     do_format: bool,
 ) -> Result<RunningZone, Error> {
-    let address_request =
-        AddressRequest::new_static(dataset_info.address.ip(), None);
+    let address_request = AddressRequest::new_static(
+        IpAddr::V6(*dataset_info.address.ip()),
+        None,
+    );
 
     let err =
         RunningZone::get(log, &dataset_info.zone_prefix(), address_request)
@@ -486,7 +493,9 @@ async fn ensure_running_zone(
             let zone = RunningZone::boot(installed_zone).await?;
 
             zone.ensure_address(address_request).await?;
-            zone.ensure_route(dataset_info.address.ip()).await.expect("Failed to add route");
+            zone.ensure_route(*dataset_info.address.ip())
+                .await
+                .map_err(Error::ZoneCommand)?;
 
             dataset_info
                 .start_zone(log, &zone, dataset_info.address, do_format)
@@ -518,7 +527,7 @@ type NotifyFut = dyn futures::Future<
 struct NewFilesystemRequest {
     zpool_id: Uuid,
     dataset_kind: DatasetKind,
-    address: SocketAddr,
+    address: SocketAddrV6,
     responder: oneshot::Sender<Result<(), Error>>,
 }
 
@@ -656,7 +665,7 @@ impl StorageWorker {
     fn add_datasets_notify(
         &self,
         nexus_notifications: &mut FuturesOrdered<Pin<Box<NotifyFut>>>,
-        datasets: Vec<(Uuid, SocketAddr, DatasetKind)>,
+        datasets: Vec<(Uuid, SocketAddrV6, DatasetKind)>,
         pool_id: Uuid,
     ) {
         let nexus = self.nexus_client.clone();
@@ -766,7 +775,7 @@ impl StorageWorker {
         &self,
         pool: &mut Pool,
         dataset_name: &DatasetName,
-    ) -> Result<(Uuid, SocketAddr, DatasetKind), Error> {
+    ) -> Result<(Uuid, SocketAddrV6, DatasetKind), Error> {
         let name = dataset_name.full();
         let id = Zfs::get_oxide_value(&name, "uuid")?
             .parse::<Uuid>()
@@ -945,7 +954,7 @@ impl StorageManager {
         &self,
         zpool_id: Uuid,
         dataset_kind: DatasetKind,
-        address: SocketAddr,
+        address: SocketAddrV6,
     ) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         let request = NewFilesystemRequest {
@@ -986,7 +995,7 @@ mod test {
     #[test]
     fn serialize_dataset_info() {
         let dataset_info = DatasetInfo {
-            address: "127.0.0.1:8080".parse().unwrap(),
+            address: "[::1]:8080".parse().unwrap(),
             kind: DatasetKind::Crucible,
             name: DatasetName::new("pool", "dataset"),
         };

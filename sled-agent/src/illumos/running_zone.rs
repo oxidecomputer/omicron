@@ -10,9 +10,8 @@ use crate::illumos::vnic::{Vnic, VnicAllocator};
 use crate::illumos::zone::{AddressRequest, ZONE_PREFIX};
 use crate::opte::OptePort;
 use ipnetwork::IpNetwork;
-use omicron_common::address::AZ_PREFIX;
 use slog::Logger;
-use std::net::{IpAddr, Ipv6Addr};
+use std::net::Ipv6Addr;
 use std::path::PathBuf;
 
 #[cfg(test)]
@@ -175,13 +174,14 @@ impl RunningZone {
 
     pub async fn ensure_route(
         &self,
-        // TODO: Prefer Ipv6Addr
-        address: IpAddr,
+        address: Ipv6Addr,
     ) -> Result<(), RunCommandError> {
         self.run_cmd(&[
             "/usr/sbin/route",
             "add",
-            &format!("{}/{}", address, AZ_PREFIX),
+            "-inet6",
+            "default",
+            "-inet6",
             &address.to_string(),
             "-iface",
         ])?;
