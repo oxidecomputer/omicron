@@ -5208,15 +5208,15 @@
         "description": "The type of an individual datum of a metric.",
         "type": "string",
         "enum": [
-          "Bool",
-          "I64",
-          "F64",
-          "String",
-          "Bytes",
-          "CumulativeI64",
-          "CumulativeF64",
-          "HistogramI64",
-          "HistogramF64"
+          "bool",
+          "i64",
+          "f64",
+          "string",
+          "bytes",
+          "cumulative_i64",
+          "cumulative_f64",
+          "histogram_i64",
+          "histogram_f64"
         ]
       },
       "Digest": {
@@ -5224,14 +5224,20 @@
           {
             "type": "object",
             "properties": {
-              "Sha256": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "sha256"
+                ]
+              },
+              "value": {
                 "type": "string"
               }
             },
             "required": [
-              "Sha256"
-            ],
-            "additionalProperties": false
+              "type",
+              "value"
+            ]
           }
         ]
       },
@@ -5391,7 +5397,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "Blank"
+                  "blank"
                 ]
               }
             },
@@ -5411,7 +5417,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "Snapshot"
+                  "snapshot"
                 ]
               }
             },
@@ -5431,7 +5437,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "Image"
+                  "image"
                 ]
               }
             },
@@ -5451,7 +5457,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "GlobalImage"
+                  "global_image"
                 ]
               }
             },
@@ -5630,19 +5636,19 @@
         "description": "The source from which a field is derived, the target or metric.",
         "type": "string",
         "enum": [
-          "Target",
-          "Metric"
+          "target",
+          "metric"
         ]
       },
       "FieldType": {
         "description": "The `FieldType` identifies the data type of a target or metric field.",
         "type": "string",
         "enum": [
-          "String",
-          "I64",
-          "IpAddr",
-          "Uuid",
-          "Bool"
+          "string",
+          "i64",
+          "ip_addr",
+          "uuid",
+          "bool"
         ]
       },
       "GlobalImage": {
@@ -5895,27 +5901,39 @@
           {
             "type": "object",
             "properties": {
-              "Url": {
+              "src": {
                 "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "url"
+                ]
               }
             },
             "required": [
-              "Url"
-            ],
-            "additionalProperties": false
+              "src",
+              "type"
+            ]
           },
           {
             "type": "object",
             "properties": {
-              "Snapshot": {
+              "src": {
                 "type": "string",
                 "format": "uuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "snapshot"
+                ]
               }
             },
             "required": [
-              "Snapshot"
-            ],
-            "additionalProperties": false
+              "src",
+              "type"
+            ]
           }
         ]
       },
@@ -6149,7 +6167,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "Create"
+                  "create"
                 ]
               }
             },
@@ -6165,7 +6183,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "Default"
+                  "default"
                 ]
               }
             },
@@ -6180,7 +6198,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "None"
+                  "none"
                 ]
               }
             },
@@ -6228,31 +6246,22 @@
         ]
       },
       "IpNet": {
-        "description": "An `IpNet` represents an IP network, either IPv4 or IPv6.",
         "oneOf": [
           {
-            "type": "object",
-            "properties": {
-              "V4": {
+            "title": "v4",
+            "allOf": [
+              {
                 "$ref": "#/components/schemas/Ipv4Net"
               }
-            },
-            "required": [
-              "V4"
-            ],
-            "additionalProperties": false
+            ]
           },
           {
-            "type": "object",
-            "properties": {
-              "V6": {
+            "title": "v6",
+            "allOf": [
+              {
                 "$ref": "#/components/schemas/Ipv6Net"
               }
-            },
-            "required": [
-              "V6"
-            ],
-            "additionalProperties": false
+            ]
           }
         ]
       },
@@ -6522,8 +6531,8 @@
       "OrganizationRoles": {
         "type": "string",
         "enum": [
-          "Admin",
-          "Collaborator"
+          "admin",
+          "collaborator"
         ]
       },
       "OrganizationRolesPolicy": {
@@ -6666,9 +6675,9 @@
       "ProjectRoles": {
         "type": "string",
         "enum": [
-          "Admin",
-          "Collaborator",
-          "Viewer"
+          "admin",
+          "collaborator",
+          "viewer"
         ]
       },
       "ProjectRolesPolicy": {
@@ -7441,9 +7450,9 @@
       "SiloRoles": {
         "type": "string",
         "enum": [
-          "Admin",
-          "Collaborator",
-          "Viewer"
+          "admin",
+          "collaborator",
+          "viewer"
         ]
       },
       "SiloRolesPolicy": {
@@ -8718,23 +8727,23 @@
         "description": "Supported set of sort modes for scanning by id only.\n\nCurrently, we only support scanning in ascending order.",
         "type": "string",
         "enum": [
-          "id-ascending"
+          "id_ascending"
         ]
       },
       "NameSortMode": {
         "description": "Supported set of sort modes for scanning by name only\n\nCurrently, we only support scanning in ascending order.",
         "type": "string",
         "enum": [
-          "name-ascending"
+          "name_ascending"
         ]
       },
       "NameOrIdSortMode": {
         "description": "Supported set of sort modes for scanning by name or id",
         "type": "string",
         "enum": [
-          "name-ascending",
-          "name-descending",
-          "id-ascending"
+          "name_ascending",
+          "name_descending",
+          "id_ascending"
         ]
       }
     }

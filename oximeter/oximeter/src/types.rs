@@ -34,6 +34,7 @@ use uuid::Uuid;
     Serialize,
     Deserialize,
 )]
+#[serde(rename_all = "snake_case")]
 pub enum FieldType {
     String,
     I64,
@@ -68,6 +69,7 @@ impl_field_type_from! { bool, FieldType::Bool }
 #[derive(
     Clone, Debug, Hash, PartialEq, Eq, JsonSchema, Serialize, Deserialize,
 )]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum FieldValue {
     String(String),
     I64(i64),
@@ -219,6 +221,7 @@ impl Field {
     Serialize,
     Deserialize,
 )]
+#[serde(rename_all = "snake_case")]
 pub enum DatumType {
     Bool,
     I64,
@@ -252,6 +255,7 @@ impl std::fmt::Display for DatumType {
 
 /// A `Datum` is a single sampled data point from a metric.
 #[derive(Clone, Debug, PartialEq, JsonSchema, Serialize, Deserialize)]
+#[serde(tag = "type", content = "datum", rename_all = "snake_case")]
 pub enum Datum {
     Bool(bool),
     I64(i64),
@@ -384,7 +388,7 @@ impl Measurement {
 
 /// Errors related to the generation or collection of metrics.
 #[derive(Debug, Clone, Error, JsonSchema, Serialize, Deserialize)]
-#[serde(tag = "type", content = "content")]
+#[serde(tag = "type", content = "content", rename_all = "snake_case")]
 pub enum MetricsError {
     /// An error related to generating metric data points
     #[error("Metric data error: {0}")]
@@ -575,6 +579,7 @@ impl Sample {
 
 type ProducerList = Vec<Box<dyn Producer>>;
 #[derive(Debug, Clone, JsonSchema, Deserialize, Serialize)]
+#[serde(tag = "status", content = "info", rename_all = "snake_case")]
 pub enum ProducerResultsItem {
     Ok(Vec<Sample>),
     Err(MetricsError),

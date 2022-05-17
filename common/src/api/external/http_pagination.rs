@@ -151,8 +151,8 @@ where
     S: ScanParams,
     C: dropshot::ServerContext,
 {
-    let limit = rqctx.page_limit(&pag_params)?;
-    data_page_params_with_limit(limit, &pag_params)
+    let limit = rqctx.page_limit(pag_params)?;
+    data_page_params_with_limit(limit, pag_params)
 }
 
 /// Provided separately from data_page_params_for() so that the test suite can
@@ -191,7 +191,7 @@ pub struct ScanByName {
 ///
 /// Currently, we only support scanning in ascending order.
 #[derive(Copy, Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "snake_case")]
 pub enum NameSortMode {
     /// sort in increasing order of "name"
     NameAscending,
@@ -236,7 +236,7 @@ pub struct ScanById {
 ///
 /// Currently, we only support scanning in ascending order.
 #[derive(Copy, Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "snake_case")]
 pub enum IdSortMode {
     /// sort in increasing order of "id"
     IdAscending,
@@ -278,7 +278,7 @@ pub struct ScanByNameOrId {
 }
 /// Supported set of sort modes for scanning by name or id
 #[derive(Copy, Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "snake_case")]
 pub enum NameOrIdSortMode {
     /// sort in increasing order of "name"
     NameAscending,
@@ -391,7 +391,7 @@ pub fn data_page_params_nameid_name<'a, C>(
 where
     C: dropshot::ServerContext,
 {
-    let limit = rqctx.page_limit(&pag_params)?;
+    let limit = rqctx.page_limit(pag_params)?;
     data_page_params_nameid_name_limit(limit, pag_params)
 }
 
@@ -420,7 +420,7 @@ pub fn data_page_params_nameid_id<'a, C>(
 where
     C: dropshot::ServerContext,
 {
-    let limit = rqctx.page_limit(&pag_params)?;
+    let limit = rqctx.page_limit(pag_params)?;
     data_page_params_nameid_id_limit(limit, pag_params)
 }
 
@@ -576,7 +576,7 @@ mod test {
                 "page selector: by name or id, using id ascending",
                 to_string_pretty(&PageSelectorByNameOrId {
                     scan: scan_by_nameid_name,
-                    last_seen: NameOrIdMarker::Name(name.clone()),
+                    last_seen: NameOrIdMarker::Name(name),
                 })
                 .unwrap(),
             ),
@@ -690,7 +690,7 @@ mod test {
         let (p0, p1) = test_scan_param_common(
             &list,
             &scan,
-            "sort_by=name-ascending",
+            "sort_by=name_ascending",
             &"thing0".parse().unwrap(),
             &"thing19".parse().unwrap(),
             &scan,
@@ -711,12 +711,12 @@ mod test {
 
         // Test from_query(): error case.
         let error = serde_urlencoded::from_str::<PaginatedByName>(
-            "sort_by=name-descending",
+            "sort_by=name_descending",
         )
         .unwrap_err();
         assert_eq!(
             error.to_string(),
-            "unknown variant `name-descending`, expected `name-ascending`"
+            "unknown variant `name_descending`, expected `name_ascending`"
         );
     }
 
@@ -729,7 +729,7 @@ mod test {
         let (p0, p1) = test_scan_param_common(
             &list,
             &scan,
-            "sort_by=id-ascending",
+            "sort_by=id_ascending",
             &list[0].identity.id,
             &list[list.len() - 1].identity.id,
             &scan,
@@ -750,12 +750,12 @@ mod test {
 
         // Test from_query(): error case.
         let error = serde_urlencoded::from_str::<PaginatedById>(
-            "sort_by=id-descending",
+            "sort_by=id_descending",
         )
         .unwrap_err();
         assert_eq!(
             error.to_string(),
-            "unknown variant `id-descending`, expected `id-ascending`"
+            "unknown variant `id_descending`, expected `id_ascending`"
         );
     }
 
@@ -763,13 +763,13 @@ mod test {
     fn test_scan_by_nameid_generic() {
         // Test from_query(): error case.
         let error = serde_urlencoded::from_str::<PaginatedByNameOrId>(
-            "sort_by=id-descending",
+            "sort_by=id_descending",
         )
         .unwrap_err();
         assert_eq!(
             error.to_string(),
-            "unknown variant `id-descending`, expected one of \
-             `name-ascending`, `name-descending`, `id-ascending`"
+            "unknown variant `id_descending`, expected one of \
+             `name_ascending`, `name_descending`, `id_ascending`"
         );
 
         // TODO-coverage It'd be nice to exercise the from_query() error cases
@@ -794,7 +794,7 @@ mod test {
         let (p0, p1) = test_scan_param_common(
             &list,
             &scan,
-            "sort_by=name-descending",
+            "sort_by=name_descending",
             &thing0_marker,
             &thinglast_marker,
             &ScanByNameOrId { sort_by: NameOrIdSortMode::NameAscending },
@@ -832,7 +832,7 @@ mod test {
         let (p0, p1) = test_scan_param_common(
             &list,
             &scan,
-            "sort_by=id-ascending",
+            "sort_by=id_ascending",
             &thing0_marker,
             &thinglast_marker,
             &ScanByNameOrId { sort_by: NameOrIdSortMode::NameAscending },
