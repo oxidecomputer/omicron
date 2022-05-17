@@ -42,6 +42,7 @@ use crate::db::DataStore;
 use authz_macros::authz_resource;
 use futures::future::BoxFuture;
 use futures::FutureExt;
+use lazy_static::lazy_static;
 use omicron_common::api::external::{Error, LookupType, ResourceType};
 use parse_display::Display;
 use parse_display::FromStr;
@@ -144,6 +145,10 @@ pub struct Fleet;
 /// Singleton representing the [`Fleet`] itself for authz purposes
 pub const FLEET: Fleet = Fleet;
 
+lazy_static! {
+    pub static ref FLEET_LOOKUP: LookupType = LookupType::ById(*FLEET_ID);
+}
+
 impl Eq for Fleet {}
 impl PartialEq for Fleet {
     fn eq(&self, _: &Self) -> bool {
@@ -163,41 +168,59 @@ impl oso::PolarClass for Fleet {
     }
 }
 
-impl AuthorizedResource for Fleet {
-    fn load_roles<'a, 'b, 'c, 'd, 'e, 'f>(
-        &'a self,
-        opctx: &'b OpContext,
-        datastore: &'c DataStore,
-        authn: &'d authn::Context,
-        roleset: &'e mut RoleSet,
-    ) -> futures::future::BoxFuture<'f, Result<(), Error>>
-    where
-        'a: 'f,
-        'b: 'f,
-        'c: 'f,
-        'd: 'f,
-        'e: 'f,
-    {
-        load_roles_for_resource(
-            opctx,
-            datastore,
-            authn,
-            ResourceType::Fleet,
-            *FLEET_ID,
-            roleset,
-        )
-        .boxed()
+impl ApiResource for Fleet {
+    fn as_resource_with_roles(&self) -> Option<&dyn ApiResourceWithRoles> {
+        Some(self)
     }
 
-    fn on_unauthorized(
-        &self,
-        _: &Authz,
-        error: Error,
-        _: AnyActor,
-        _: Action,
-    ) -> Error {
-        error
+    fn parent(&self) -> Option<&dyn AuthorizedResource> {
+        None
     }
+
+    fn resource_type(&self) -> ResourceType {
+        ResourceType::Fleet
+    }
+
+    fn lookup_type(&self) -> &LookupType {
+        &FLEET_LOOKUP
+    }
+
+    fn not_found(&self) -> Error {
+        // The Fleet is always visible.
+        Error::Forbidden
+    }
+}
+
+impl ApiResourceWithRoles for Fleet {
+    fn resource_id(&self) -> Uuid {
+        *FLEET_ID
+    }
+}
+
+impl ApiResourceWithRolesType for Fleet {
+    type AllowedRoles = FleetRoles;
+}
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    Display,
+    Eq,
+    FromStr,
+    PartialEq,
+    Serialize,
+    JsonSchema,
+)]
+#[display(style = "kebab-case")]
+#[serde(rename_all = "snake_case")]
+pub enum FleetRoles {
+    Admin,
+    Collaborator,
+    Viewer,
+    // There are other Fleet roles, but they are not externally-visible and so
+    // they do not show up in this enum.
 }
 
 /// ConsoleSessionList is a synthetic resource used for modeling who has access

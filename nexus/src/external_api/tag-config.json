@@ -56,6 +56,12 @@
         "url": "http://oxide.computer/docs/#xxx"
       }
     },
+    "policy": {
+      "description": "System-wide IAM policy",
+      "external_docs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
     "projects": {
       "description": "Projects are a grouping of associated resources such as instances and disks within an organization for purposes of billing and access control.",
       "external_docs": {
