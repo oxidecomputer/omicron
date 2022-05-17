@@ -857,31 +857,22 @@
         ]
       },
       "IpNet": {
-        "description": "An `IpNet` represents an IP network, either IPv4 or IPv6.",
         "oneOf": [
           {
-            "type": "object",
-            "properties": {
-              "V4": {
+            "title": "v4",
+            "allOf": [
+              {
                 "$ref": "#/components/schemas/Ipv4Net"
               }
-            },
-            "required": [
-              "V4"
-            ],
-            "additionalProperties": false
+            ]
           },
           {
-            "type": "object",
-            "properties": {
-              "V6": {
+            "title": "v6",
+            "allOf": [
+              {
                 "$ref": "#/components/schemas/Ipv6Net"
               }
-            },
-            "required": [
-              "V6"
-            ],
-            "additionalProperties": false
+            ]
           }
         ]
       },
@@ -1060,7 +1051,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "Volume"
+                  "volume"
                 ]
               }
             },
@@ -1081,7 +1072,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "Url"
+                  "url"
                 ]
               },
               "url": {
@@ -1113,7 +1104,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "Region"
+                  "region"
                 ]
               }
             },
@@ -1121,6 +1112,30 @@
               "block_size",
               "gen",
               "opts",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "block_size": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              },
+              "path": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "file"
+                ]
+              }
+            },
+            "required": [
+              "block_size",
+              "path",
               "type"
             ]
           }

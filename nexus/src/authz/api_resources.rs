@@ -46,8 +46,7 @@ use omicron_common::api::external::{Error, LookupType, ResourceType};
 use parse_display::Display;
 use parse_display::FromStr;
 use schemars::JsonSchema;
-use serde_with::DeserializeFromStr;
-use serde_with::SerializeDisplay;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Describes an authz resource that corresponds to an API resource that has a
@@ -339,15 +338,16 @@ impl ApiResourceWithRolesType for Organization {
     Clone,
     Copy,
     Debug,
-    DeserializeFromStr,
+    Deserialize,
     Display,
     Eq,
     FromStr,
     PartialEq,
-    SerializeDisplay,
+    Serialize,
     JsonSchema,
 )]
 #[display(style = "kebab-case")]
+#[serde(rename_all = "snake_case")]
 pub enum OrganizationRoles {
     Admin,
     Collaborator,
@@ -369,15 +369,16 @@ impl ApiResourceWithRolesType for Project {
     Clone,
     Copy,
     Debug,
-    DeserializeFromStr,
+    Deserialize,
     Display,
     Eq,
     FromStr,
     PartialEq,
-    SerializeDisplay,
+    Serialize,
     JsonSchema,
 )]
 #[display(style = "kebab-case")]
+#[serde(rename_all = "snake_case")]
 pub enum ProjectRoles {
     Admin,
     Collaborator,
@@ -490,15 +491,16 @@ impl ApiResourceWithRolesType for Silo {
     Clone,
     Copy,
     Debug,
-    DeserializeFromStr,
+    Deserialize,
     Display,
     Eq,
     FromStr,
     PartialEq,
-    SerializeDisplay,
+    Serialize,
     JsonSchema,
 )]
 #[display(style = "kebab-case")]
+#[serde(rename_all = "snake_case")]
 pub enum SiloRoles {
     Admin,
     Collaborator,

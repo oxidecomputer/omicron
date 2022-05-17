@@ -10,7 +10,6 @@ use omicron_common::api::external::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 use std::net::IpAddr;
 use uuid::Uuid;
 
@@ -92,7 +91,7 @@ pub struct NetworkInterfaceCreate {
 // _not_ scoped to a VPC, and so the VPC and/or VPC Subnet names are not present
 // in the path of endpoints handling instance operations.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(tag = "type", content = "params")]
+#[serde(tag = "type", content = "params", rename_all = "snake_case")]
 pub enum InstanceNetworkInterfaceAttachment {
     /// Create one or more `NetworkInterface`s for the `Instance`
     Create(Vec<NetworkInterfaceCreate>),
@@ -310,37 +309,24 @@ impl JsonSchema for BlockSize {
             metadata: Some(Box::new(schemars::schema::Metadata {
                 id: None,
                 title: Some("disk block size in bytes".to_string()),
-                description: None,
-                default: None,
-                deprecated: false,
-                read_only: false,
-                write_only: false,
-                examples: vec![],
+                ..Default::default()
             })),
             instance_type: Some(schemars::schema::SingleOrVec::Single(
                 Box::new(schemars::schema::InstanceType::Integer),
             )),
-            format: None,
             enum_values: Some(vec![
                 serde_json::json!(512),
                 serde_json::json!(2048),
                 serde_json::json!(4096),
             ]),
-            const_value: None,
-            subschemas: None,
-            number: None,
-            string: None,
-            array: None,
-            object: None,
-            reference: None,
-            extensions: BTreeMap::new(),
+            ..Default::default()
         })
     }
 }
 
 /// Different sources for a disk
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(tag = "type")]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum DiskSource {
     /// Create a blank disk
     Blank {
@@ -401,6 +387,7 @@ pub struct NetworkInterfaceIdentifier {
 
 /// The source of the underlying image.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "type", content = "src", rename_all = "snake_case")]
 pub enum ImageSource {
     Url(String),
     Snapshot(Uuid),
