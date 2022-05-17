@@ -26,7 +26,19 @@ use omicron_nexus::external_api::shared;
 use omicron_nexus::external_api::views;
 
 lazy_static! {
-    // XXX-dap TODO-doc
+    /// Authentication mode used for testing
+    // The role assignment APIs only support assigning roles to Silo users and
+    // eventually other externally-visible things like service accounts and
+    // groups.  They don't support assigning roles to built-in users.  So to
+    // test enforcement, we'll need to use a silo user.  We could create our
+    // own, but the facilities for doing that don't really exist.  Fortunately,
+    // there's currently a corresponding silo user for every built-in user, so
+    // we can just choose the one for the "unprivileged" user.
+    //
+    // This will all change when we have first-class facilities for creating
+    // silo users because we won't ship the "privileged" and "unprivileged"
+    // users and we won't create silo users for built-in users.  Hopefully this
+    // happens soon!
     static ref AUTHN_TEST_USER: AuthnMode =
         AuthnMode::SiloUser(USER_TEST_UNPRIVILEGED.id);
 }

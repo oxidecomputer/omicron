@@ -102,7 +102,8 @@ where
     }
 }
 
-// XXX-dap update docs
+/// Specifies whether the spoof header explicitly specifies a built-in user or a
+/// normal (silo) user
 pub enum ActorType {
     Builtin,
     Silo,
