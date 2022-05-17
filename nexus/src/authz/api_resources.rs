@@ -205,15 +205,16 @@ impl ApiResourceWithRolesType for Fleet {
     Clone,
     Copy,
     Debug,
-    DeserializeFromStr,
+    Deserialize,
     Display,
     Eq,
     FromStr,
     PartialEq,
-    SerializeDisplay,
+    Serialize,
     JsonSchema,
 )]
 #[display(style = "kebab-case")]
+#[serde(rename_all = "snake_case")]
 pub enum FleetRoles {
     Admin,
     Collaborator,
