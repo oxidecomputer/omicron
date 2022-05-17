@@ -9,18 +9,20 @@
 //! 2) Updates the collection's child resource generation number
 //! 3) Updates the child resource row
 
+use crate::db::model::Generation;
 use super::pool::DbConnection;
 use async_bb8_diesel::{
     AsyncRunQueryDsl, ConnectionError, ConnectionManager, PoolError,
 };
 use diesel::associations::HasTable;
+use diesel::expression::{AsExpression, Expression};
 use diesel::helper_types::*;
 use diesel::pg::Pg;
 use diesel::prelude::*;
 use diesel::query_builder::*;
 use diesel::query_dsl::methods as query_methods;
 use diesel::query_source::Table;
-use diesel::sql_types::SingleValue;
+use diesel::sql_types::{BigInt, SingleValue};
 use std::fmt::Debug;
 use std::marker::PhantomData;
 
@@ -83,7 +85,7 @@ pub trait DatastoreAttachTarget<ResourceType> {
 
     /// The column in the CollectionTable that acts as a generation number.
     /// This is the "child-resource-generation-number" in RFD 192.
-    type ParentGenerationColumn: Column + Default;
+    type ParentGenerationColumn: Column + Default + Expression<SqlType = BigInt>;
 
     /// The time deleted column in the CollectionTable
     // We enforce that this column comes from the same table as
@@ -104,6 +106,7 @@ pub trait DatastoreAttachTarget<ResourceType> {
     /// of the collection id within the attached row.
     fn attach_resource<U, V>(
         key: Self::CollectionId,
+        rcgen: Generation,
         // TODO: I'd like to be able to add some filters on the parent type too.
         // For example, checking the instance state.
 
@@ -145,7 +148,16 @@ pub trait DatastoreAttachTarget<ResourceType> {
                 > + query_methods::FilterDsl<
                     IsNull<ParentTimeDeletedColumn<ResourceType, Self>>,
                     Output = BoxedQuery<CollectionTable<ResourceType, Self>>,
+                > + query_methods::FilterDsl<
+                    Eq<
+                        ParentGenerationColumn<ResourceType, Self>,
+//                        Expression<SqlType = BigInt>,
+//                        AsExpr<i64, ParentGenerationColumn<ResourceType, Self>>,
+                        <Generation as AsExpression<BigInt>>::Expression,
+                    >,
+                    Output = BoxedQuery<CollectionTable<ResourceType, Self>>,
                 >,
+
         // Allows using "key" in in ".eq(...)".
         CollectionId<ResourceType, Self>: diesel::expression::AsExpression<
             SerializedCollectionPrimaryKey<ResourceType, Self>,
@@ -154,23 +166,27 @@ pub trait DatastoreAttachTarget<ResourceType> {
             SingleValue,
         // Allows calling "is_null()" on the time deleted column.
         ParentTimeDeletedColumn<ResourceType, Self>: ExpressionMethods,
+
+        ParentGenerationColumn<ResourceType, Self>: ExpressionMethods,
         // Necessary for output type (`AttachToCollectionStatement`).
         ResourceType: Selectable<Pg>,
+
+        // XXX ?
+        <ParentGenerationColumn<ResourceType, Self> as Expression>::SqlType:
+            SingleValue,
     {
-        let filter_subquery = Box::new(
+        let parent_table = || {
             <CollectionTable<ResourceType, Self> as HasTable>::table()
+        };
+        let filter_subquery = Box::new(
+            parent_table()
                 .into_boxed()
-                .filter(
-                    <CollectionTable<ResourceType, Self> as HasTable>::table()
-                        .primary_key()
-                        .eq(key),
-                )
-                .filter(Self::ParentTimeDeletedColumn::default().is_null()),
+                .filter(parent_table().primary_key().eq(key))
+                .filter(Self::ParentTimeDeletedColumn::default().is_null())
+                .filter(Self::ParentGenerationColumn::default().eq(rcgen))
         );
 
-        let from_clause =
-            <CollectionTable<ResourceType, Self> as HasTable>::table()
-                .from_clause();
+        let from_clause = parent_table().from_clause();
         let returning_clause = ResourceType::as_returning();
         AttachToCollectionStatement {
             update_statement: update,
@@ -416,22 +432,39 @@ type BoxedDslOutput<T> = diesel::internal::table_macro::BoxedSelectStatement<
 /// This implementation uses the following CTE:
 ///
 /// ```text
-/// // WITH found_row AS MATERIALIZED (
-/// //          SELECT <PK> FROM C WHERE <PK> = <value> AND
-/// //              <time_deleted> IS NULL FOR UPDATE),
+/// // WITH
+/// //      /* Look up the parent collection */
+/// //      found_row AS MATERIALIZED (
+/// //          SELECT <PK> FROM C WHERE
+/// //              <PK> = <value> AND
+/// //              <time_deleted> IS NULL AND
+/// //              <rcgen> = <value>
+/// //          FOR UPDATE
+/// //      ),
+/// //      /* Return an error if the parent collection does not exist */
 /// //      dummy AS MATERIALIZED (
-/// //          SELECT IF(EXISTS(SELECT <PK> FROM found_row), TRUE,
-/// //              CAST(1/0 AS BOOL))),
+/// //          SELECT IF(
+/// //              EXISTS(SELECT <PK> FROM found_row),
+/// //              TRUE,
+/// //              CAST(1/0 AS BOOL))
+/// //      ),
+/// //      /* Update the generation number of the parent row */
 /// //      updated_parent_row AS MATERIALIZED (
 /// //          UPDATE C SET <generation number> = <generation_number> + 1 WHERE
-/// //              <PK> IN (SELECT <PK> FROM found_row) RETURNING 1),
-/// //      updated_resource_row AS (<user provided update statement>
-/// //          RETURNING <ResourceType.as_returning()>)
+/// //              <PK> IN (SELECT <PK> FROM found_row)
+/// //          RETURNING 1
+/// //      ),
+/// //      /* Update the resource row */
+/// //      updated_resource_row AS (
+/// //          <user provided update statement>
+/// //          RETURNING <ResourceType.as_returning()>
+/// //      )
 /// //  SELECT * FROM updated_resource_row;
 /// ```
 ///
-/// This CTE is equivalent in desired behavior to the one specified in
-/// [RFD 192](https://rfd.shared.oxide.computer/rfd/0192#_dueling_administrators).
+/// This CTE is similar in desired behavior to the one specified in
+/// [RFD 192](https://rfd.shared.oxide.computer/rfd/0192#_dueling_administrators),
+/// but tuned to the case of modifying an associated resource.
 ///
 /// The general idea is that the first clause of the CTE (the "dummy" table)
 /// will generate a divison-by-zero error and rollback the transaction if the
@@ -514,6 +547,7 @@ mod test {
     use super::{AsyncInsertError, DatastoreAttachTarget, SyncInsertError};
     use crate::db::{
         self, error::TransactionError, identity::Resource as IdentityResource,
+        model::Generation,
     };
     use async_bb8_diesel::{
         AsyncConnection, AsyncRunQueryDsl, AsyncSimpleConnection,
@@ -611,6 +645,7 @@ mod test {
                 .unwrap();
         let attach = Collection::attach_resource(
             collection_id,
+            Generation::new(),
             diesel::update(resource::table.filter(resource::dsl::id.eq(resource_id)))
                 .set(resource::dsl::collection_id.eq(collection_id))
         );
@@ -667,6 +702,7 @@ mod test {
         let resource_id = uuid::Uuid::new_v4();
         let attach = Collection::attach_resource(
             collection_id,
+            Generation::new(),
             diesel::update(resource::table.filter(resource::dsl::id.eq(resource_id)))
                 .set(resource::dsl::collection_id.eq(collection_id))
         )
@@ -676,6 +712,7 @@ mod test {
 
         let attach_query = Collection::attach_resource(
             collection_id,
+            Generation::new(),
             diesel::update(resource::table.filter(resource::dsl::id.eq(resource_id)))
                 .set(resource::dsl::collection_id.eq(collection_id))
         );
@@ -755,6 +792,7 @@ mod test {
             DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(1, 0), Utc);
         let resource = Collection::attach_resource(
             collection_id,
+            Generation::new(),
             diesel::update(
                 resource::table
                     .filter(resource::dsl::id.eq(resource_id))
