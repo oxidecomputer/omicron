@@ -61,7 +61,7 @@ pub struct SpInfo {
     Serialize,
     JsonSchema,
 )]
-#[serde(tag = "state")]
+#[serde(tag = "state", rename_all = "snake_case")]
 pub enum SpState {
     Disabled,
     Unresponsive,

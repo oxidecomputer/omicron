@@ -1,39 +1,39 @@
 example pagination parameters: scan by id ascending
 {
-  "sort_by": "id-ascending"
+  "sort_by": "id_ascending"
 }
 example pagination parameters: scan by name ascending
 {
-  "sort_by": "name-ascending"
+  "sort_by": "name_ascending"
 }
 example pagination parameters: scan by name or id, using id ascending
 {
-  "sort_by": "id-ascending"
+  "sort_by": "id_ascending"
 }
 example pagination parameters: scan by name or id, using name ascending
 {
-  "sort_by": "name-ascending"
+  "sort_by": "name_ascending"
 }
 example pagination parameters: page selector: by id ascending
 {
-  "sort_by": "id-ascending",
+  "sort_by": "id_ascending",
   "last_seen": "61a78113-d3c6-4b35-a410-23e9eae64328"
 }
 example pagination parameters: page selector: by name ascending
 {
-  "sort_by": "name-ascending",
+  "sort_by": "name_ascending",
   "last_seen": "bort"
 }
 example pagination parameters: page selector: by name or id, using id ascending
 {
-  "sort_by": "id-ascending",
+  "sort_by": "id_ascending",
   "last_seen": {
     "id": "61a78113-d3c6-4b35-a410-23e9eae64328"
   }
 }
 example pagination parameters: page selector: by name or id, using id ascending
 {
-  "sort_by": "name-ascending",
+  "sort_by": "name_ascending",
   "last_seen": {
     "name": "bort"
   }

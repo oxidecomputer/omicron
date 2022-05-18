@@ -35,6 +35,9 @@ lazy_static! {
     pub static ref HARDWARE_SLED_URL: String =
         format!("/hardware/sleds/{}", SLED_AGENT_UUID);
 
+    // Global policy
+    pub static ref POLICY_URL: &'static str = "/policy";
+
     // Silo used for testing
     pub static ref DEMO_SILO_NAME: Name = "demo-silo".parse().unwrap();
     pub static ref DEMO_SILO_URL: String =
@@ -371,6 +374,22 @@ lazy_static! {
 
     /// List of endpoints to be verified
     pub static ref VERIFY_ENDPOINTS: Vec<VerifyEndpoint> = vec![
+        // Global IAM policy
+        VerifyEndpoint {
+            url: *POLICY_URL,
+            visibility: Visibility::Public,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Put(
+                    serde_json::to_value(
+                        &shared::Policy::<authz::FleetRoles> {
+                            role_assignments: vec![]
+                        }
+                    ).unwrap()
+                ),
+            ],
+        },
+
         /* Silos */
         VerifyEndpoint {
             url: "/silos",

@@ -400,9 +400,11 @@ impl TestResponse {
 
 /// Specifies what user (if any) the caller wants to use for authenticating to
 /// the server
+#[derive(Clone)]
 pub enum AuthnMode {
     UnprivilegedUser,
     PrivilegedUser,
+    SiloUser(uuid::Uuid),
     Session(String),
 }
 
@@ -434,20 +436,34 @@ impl<'a> NexusRequest<'a> {
         use omicron_nexus::authn;
 
         match mode {
-            AuthnMode::UnprivilegedUser | AuthnMode::PrivilegedUser => {
-                let header_value = match mode {
-                    AuthnMode::UnprivilegedUser => {
-                        authn::USER_TEST_UNPRIVILEGED.id
-                    }
-                    AuthnMode::PrivilegedUser => authn::USER_TEST_PRIVILEGED.id,
-                    _ => {
-                        panic!("unreachable!")
-                    }
-                };
-
+            AuthnMode::UnprivilegedUser => {
+                let header_value = spoof::make_header_value(
+                    spoof::ActorType::Builtin,
+                    authn::USER_TEST_UNPRIVILEGED.id,
+                );
                 self.request_builder = self.request_builder.header(
                     &http::header::AUTHORIZATION,
-                    spoof::make_header_value(header_value).0.encode(),
+                    header_value.0.encode(),
+                );
+            }
+            AuthnMode::PrivilegedUser => {
+                let header_value = spoof::make_header_value(
+                    spoof::ActorType::Builtin,
+                    authn::USER_TEST_PRIVILEGED.id,
+                );
+                self.request_builder = self.request_builder.header(
+                    &http::header::AUTHORIZATION,
+                    header_value.0.encode(),
+                );
+            }
+            AuthnMode::SiloUser(silo_user_id) => {
+                let header_value = spoof::make_header_value(
+                    spoof::ActorType::Silo,
+                    silo_user_id,
+                );
+                self.request_builder = self.request_builder.header(
+                    &http::header::AUTHORIZATION,
+                    header_value.0.encode(),
                 );
             }
             AuthnMode::Session(session_token) => {

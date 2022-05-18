@@ -1024,6 +1024,7 @@ impl DataStore {
                     ErrorHandler::NotFoundByResource(authz_instance),
                 )
             })?;
+
         match result.status {
             UpdateStatus::Updated => Ok(()),
             UpdateStatus::NotUpdatedButExists => {
@@ -2931,14 +2932,18 @@ impl DataStore {
 
     // Role assignments
 
-    /// Fetches all of the role assignments for the specified resource
+    /// Fetches all of the externally-visible role assignments for the specified
+    /// resource
+    ///
+    /// Role assignments for internal identities (e.g., built-in users) are not
+    /// included in this list.
     ///
     /// This function is generic over all resources that can accept roles (e.g.,
     /// Fleet, Silo, Organization, etc.).
     // TODO-scalability In an ideal world, this would be paginated.  The impact
     // is mitigated because we cap the number of role assignments per resource
     // pretty tightly.
-    pub async fn role_assignment_fetch_all<
+    pub async fn role_assignment_fetch_visible<
         T: authz::ApiResourceWithRoles + Clone,
     >(
         &self,
@@ -2952,6 +2957,7 @@ impl DataStore {
         dsl::role_assignment
             .filter(dsl::resource_type.eq(resource_type.to_string()))
             .filter(dsl::resource_id.eq(resource_id))
+            .filter(dsl::identity_type.ne(IdentityType::UserBuiltin))
             .order(dsl::role_name.asc())
             .then_order_by(dsl::identity_id.asc())
             .select(RoleAssignment::as_select())
@@ -2960,8 +2966,11 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    /// Removes all existing role assignments on `authz_resource` and adds those
-    /// specified by `new_assignments`
+    /// Removes all existing externally-visble role assignments on
+    /// `authz_resource` and adds those specified by `new_assignments`
+    ///
+    /// Role assignments for internal identities (e.g., built-in users) are not
+    /// affected.
     ///
     /// The expectation is that the caller will have just fetched the role
     /// assignments, modified them, and is giving us the complete new list.
@@ -2974,7 +2983,7 @@ impl DataStore {
     // tricky without first-classing the Policy in the database.  The impact is
     // mitigated because we cap the number of role assignments per resource
     // pretty tightly.
-    pub async fn role_assignment_replace_all<
+    pub async fn role_assignment_replace_visible<
         T: authz::ApiResourceWithRolesType + Clone,
     >(
         &self,
@@ -3016,7 +3025,8 @@ impl DataStore {
         use db::schema::role_assignment::dsl;
         let delete_old_query = diesel::delete(dsl::role_assignment)
             .filter(dsl::resource_id.eq(resource_id))
-            .filter(dsl::resource_type.eq(resource_type.to_string()));
+            .filter(dsl::resource_type.eq(resource_type.to_string()))
+            .filter(dsl::identity_type.ne(IdentityType::UserBuiltin));
         let insert_new_query = diesel::insert_into(dsl::role_assignment)
             .values(new_assignments)
             .returning(RoleAssignment::as_returning());

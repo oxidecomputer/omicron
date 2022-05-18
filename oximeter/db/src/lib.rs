@@ -102,7 +102,6 @@ impl JsonSchema for TimeseriesName {
     ) -> schemars::schema::Schema {
         schemars::schema::Schema::Object(schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
-                id: None,
                 title: Some("The name of a timeseries".to_string()),
                 description: Some(
                     "Names are constructed by concatenating the target \
@@ -111,29 +110,16 @@ impl JsonSchema for TimeseriesName {
                      with '_' separating words."
                         .to_string(),
                 ),
-                default: None,
-                deprecated: false,
-                read_only: false,
-                write_only: false,
-                examples: vec![],
+                ..Default::default()
             })),
             instance_type: Some(schemars::schema::SingleOrVec::Single(
                 Box::new(schemars::schema::InstanceType::String),
             )),
-            format: None,
-            enum_values: None,
-            const_value: None,
-            subschemas: None,
-            number: None,
             string: Some(Box::new(schemars::schema::StringValidation {
-                max_length: None,
-                min_length: None,
                 pattern: Some(TIMESERIES_NAME_REGEX.to_string()),
+                ..Default::default()
             })),
-            array: None,
-            object: None,
-            reference: None,
-            extensions: BTreeMap::new(),
+            ..Default::default()
         })
     }
 }
@@ -228,14 +214,14 @@ impl From<model::DbTimeseriesSchema> for TimeseriesSchema {
             )
             .expect("Invalid timeseries name in database"),
             field_schema: schema.field_schema.into(),
-            datum_type: schema.datum_type,
+            datum_type: schema.datum_type.into(),
             created: schema.created,
         }
     }
 }
 
 /// The target identifies the resource or component about which metric data is produced.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Target {
     pub name: String,
     pub fields: Vec<Field>,
@@ -250,7 +236,7 @@ pub struct Metric {
 }
 
 /// A list of timestamped measurements from a single timeseries.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Timeseries {
     pub timeseries_name: String,
     pub target: Target,
@@ -271,9 +257,35 @@ pub struct Timeseries {
     Serialize,
     JsonSchema,
 )]
+#[serde(rename_all = "snake_case")]
 pub enum FieldSource {
     Target,
     Metric,
+}
+
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize,
+)]
+pub enum DbFieldSource {
+    Target,
+    Metric,
+}
+
+impl From<DbFieldSource> for FieldSource {
+    fn from(src: DbFieldSource) -> Self {
+        match src {
+            DbFieldSource::Target => FieldSource::Target,
+            DbFieldSource::Metric => FieldSource::Metric,
+        }
+    }
+}
+impl From<FieldSource> for DbFieldSource {
+    fn from(src: FieldSource) -> Self {
+        match src {
+            FieldSource::Target => DbFieldSource::Target,
+            FieldSource::Metric => DbFieldSource::Metric,
+        }
+    }
 }
 
 /// The name and type information for a field of a timeseries schema.

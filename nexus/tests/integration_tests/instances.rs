@@ -1527,6 +1527,154 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
     }
 }
 
+// Test that disks are detached when instance is destroyed
+#[nexus_test]
+async fn test_disks_detached_when_instance_destroyed(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    const ORGANIZATION_NAME: &str = "bobs-barrel-of-bytes";
+    const PROJECT_NAME: &str = "bit-barrel";
+
+    // Test pre-reqs
+    DiskTest::new(&cptestctx).await;
+    create_organization(&client, ORGANIZATION_NAME).await;
+    create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
+
+    // Make 8 disks
+    for i in 0..8 {
+        create_disk(
+            &client,
+            ORGANIZATION_NAME,
+            PROJECT_NAME,
+            &format!("probablydata{}", i,),
+        )
+        .await;
+    }
+
+    // Assert we created 8 disks
+    let url_project_disks = format!(
+        "/organizations/{}/projects/{}/disks",
+        ORGANIZATION_NAME, PROJECT_NAME,
+    );
+    let disks: Vec<Disk> = NexusRequest::iter_collection_authn(
+        client,
+        &url_project_disks,
+        "",
+        None,
+    )
+    .await
+    .expect("failed to list disks")
+    .all_items;
+
+    assert_eq!(disks.len(), 8);
+    for disk in &disks {
+        assert_eq!(disk.state, DiskState::Detached);
+    }
+
+    // Boot the instance
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: Name::try_from(String::from("nfs")).unwrap(),
+            description: String::from("probably serving data"),
+        },
+        ncpus: InstanceCpuCount::try_from(2).unwrap(),
+        memory: ByteCount::from_mebibytes_u32(4),
+        hostname: String::from("nfs"),
+        user_data: vec![],
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        disks: (0..8)
+            .map(|i| {
+                params::InstanceDiskAttachment::Attach(
+                    params::InstanceDiskAttach {
+                        name: Name::try_from(
+                            format!("probablydata{}", i).to_string(),
+                        )
+                        .unwrap(),
+                    },
+                )
+            })
+            .collect(),
+    };
+
+    let url_instances = format!(
+        "/organizations/{}/projects/{}/instances",
+        ORGANIZATION_NAME, PROJECT_NAME
+    );
+
+    let builder =
+        RequestBuilder::new(client, http::Method::POST, &url_instances)
+            .body(Some(&instance_params))
+            .expect_status(Some(http::StatusCode::CREATED));
+
+    let _response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("expected instance creation!");
+
+    // Assert disks are attached
+    let url_project_disks = format!(
+        "/organizations/{}/projects/{}/disks",
+        ORGANIZATION_NAME, PROJECT_NAME,
+    );
+    let disks: Vec<Disk> = NexusRequest::iter_collection_authn(
+        client,
+        &url_project_disks,
+        "",
+        None,
+    )
+    .await
+    .expect("failed to list disks")
+    .all_items;
+
+    assert_eq!(disks.len(), 8);
+    for disk in &disks {
+        assert!(matches!(disk.state, DiskState::Attached(_)));
+    }
+
+    // Stop and delete instance
+    let instance_url = format!(
+        "/organizations/{}/projects/{}/instances/nfs",
+        ORGANIZATION_NAME, PROJECT_NAME
+    );
+
+    let instance =
+        instance_post(&client, &instance_url, InstanceOp::Stop).await;
+    let apictx = &cptestctx.server.apictx;
+    let nexus = &apictx.nexus;
+    instance_simulate(nexus, &instance.identity.id).await;
+    let instance = instance_get(&client, &instance_url).await;
+    assert_eq!(instance.runtime.run_state, InstanceState::Stopped);
+
+    NexusRequest::object_delete(&client, &instance_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+
+    // Assert disks are detached
+    let url_project_disks = format!(
+        "/organizations/{}/projects/{}/disks",
+        ORGANIZATION_NAME, PROJECT_NAME,
+    );
+    let disks: Vec<Disk> = NexusRequest::iter_collection_authn(
+        client,
+        &url_project_disks,
+        "",
+        None,
+    )
+    .await
+    .expect("failed to list disks")
+    .all_items;
+
+    assert_eq!(disks.len(), 8);
+    for disk in &disks {
+        assert_eq!(disk.state, DiskState::Detached);
+    }
+}
+
 async fn instance_get(
     client: &ClientTestContext,
     instance_url: &str,
