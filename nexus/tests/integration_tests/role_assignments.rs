@@ -21,26 +21,15 @@ use omicron_common::api::external::ObjectIdentity;
 use omicron_nexus::authn::USER_TEST_UNPRIVILEGED;
 use omicron_nexus::authz;
 use omicron_nexus::db::fixed_data;
+use omicron_nexus::db::identity::Asset;
 use omicron_nexus::db::identity::Resource;
 use omicron_nexus::external_api::shared;
 use omicron_nexus::external_api::views;
 
 lazy_static! {
     /// Authentication mode used for testing
-    // The role assignment APIs only support assigning roles to Silo users and
-    // eventually other externally-visible things like service accounts and
-    // groups.  They don't support assigning roles to built-in users.  So to
-    // test enforcement, we'll need to use a silo user.  We could create our
-    // own, but the facilities for doing that don't really exist.  Fortunately,
-    // there's currently a corresponding silo user for every built-in user, so
-    // we can just choose the one for the "unprivileged" user.
-    //
-    // This will all change when we have first-class facilities for creating
-    // silo users because we won't ship the "privileged" and "unprivileged"
-    // users and we won't create silo users for built-in users.  Hopefully this
-    // happens soon!
-    static ref AUTHN_TEST_USER: AuthnMode =
-        AuthnMode::SiloUser(USER_TEST_UNPRIVILEGED.id);
+    // XXX-dap remove this altogether
+    static ref AUTHN_TEST_USER: AuthnMode = AuthnMode::UnprivilegedUser;
 }
 
 /// Describes the role assignment test for a particular kind of resource
@@ -454,7 +443,7 @@ async fn run_test<T: RoleAssignmentTest>(
     let mut new_policy = initial_policy.clone();
     let role_assignment = shared::RoleAssignment {
         identity_type: shared::IdentityType::SiloUser,
-        identity_id: USER_TEST_UNPRIVILEGED.id,
+        identity_id: USER_TEST_UNPRIVILEGED.id(),
         role_name: T::ROLE,
     };
     new_policy.role_assignments.push(role_assignment.clone());

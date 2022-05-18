@@ -378,13 +378,17 @@ impl OpContext {
 
     /// Returns a context suitable for automated tests where an OpContext is
     /// needed outside of a Dropshot context
+    // Ideally this would only be exposed under `#[cfg(test)]`.  However, it's
+    // used by integration tests (via `app::test_interfaces::TestInterfaces`) in
+    // order to construct OpContexts that let them observe and muck with state
+    // outside public interfaces.
     pub fn for_tests(
         log: slog::Logger,
         datastore: Arc<DataStore>,
     ) -> OpContext {
         let created_instant = Instant::now();
         let created_walltime = SystemTime::now();
-        let authn = Arc::new(authn::Context::internal_test_user());
+        let authn = Arc::new(authn::Context::privileged_test_user());
         let authz = authz::Context::new(
             Arc::clone(&authn),
             Arc::new(authz::Authz::new(&log)),

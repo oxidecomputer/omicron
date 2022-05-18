@@ -27,17 +27,18 @@
 pub mod external;
 pub mod saga;
 
+pub use crate::db::fixed_data::silo_user::USER_TEST_PRIVILEGED;
+pub use crate::db::fixed_data::silo_user::USER_TEST_UNPRIVILEGED;
 pub use crate::db::fixed_data::user_builtin::USER_DB_INIT;
 pub use crate::db::fixed_data::user_builtin::USER_EXTERNAL_AUTHN;
 pub use crate::db::fixed_data::user_builtin::USER_INTERNAL_API;
 pub use crate::db::fixed_data::user_builtin::USER_INTERNAL_READ;
 pub use crate::db::fixed_data::user_builtin::USER_SAGA_RECOVERY;
-pub use crate::db::fixed_data::user_builtin::USER_TEST_PRIVILEGED;
-pub use crate::db::fixed_data::user_builtin::USER_TEST_UNPRIVILEGED;
 use crate::db::model::ConsoleSession;
 
 use crate::authz;
 use crate::db;
+use crate::db::identity::Asset;
 use omicron_common::api::external::LookupType;
 use serde::Deserialize;
 use serde::Serialize;
@@ -155,18 +156,33 @@ impl Context {
     }
 
     /// Returns an authenticated context for a special testing user
-    pub fn internal_test_user() -> Context {
-        Context::test_context_for_builtin_user(USER_TEST_PRIVILEGED.id)
+    // Ideally this would only be exposed under `#[cfg(test)]`, but it's used by
+    // `OpContext::for_tests()`.
+    pub fn privileged_test_user() -> Context {
+        Context {
+            kind: Kind::Authenticated(Details {
+                actor: Actor::SiloUser {
+                    silo_user_id: USER_TEST_PRIVILEGED.identity().id,
+                    silo_id: USER_TEST_PRIVILEGED.silo_id,
+                },
+            }),
+            schemes_tried: Vec::new(),
+        }
     }
 
-    /// Returns an authenticated context for a specific user
-    ///
-    /// This is used for testing.
-    pub fn test_context_for_builtin_user(actor_id: Uuid) -> Context {
-        Context::context_for_builtin_user(
-            actor_id,
-            *crate::db::fixed_data::silo::SILO_ID,
-        )
+    /// Returns an authenticated context for the special unprivileged user
+    /// (for testing only)
+    #[cfg(test)]
+    pub fn unprivileged_test_user() -> Context {
+        Context {
+            kind: Kind::Authenticated(Details {
+                actor: Actor::SiloUser {
+                    silo_user_id: USER_TEST_UNPRIVILEGED.identity().id,
+                    silo_id: USER_TEST_UNPRIVILEGED.silo_id,
+                },
+            }),
+            schemes_tried: Vec::new(),
+        }
     }
 }
 
@@ -178,7 +194,9 @@ mod test {
     use super::USER_INTERNAL_READ;
     use super::USER_SAGA_RECOVERY;
     use super::USER_TEST_PRIVILEGED;
+    use super::USER_TEST_UNPRIVILEGED;
     use crate::db::fixed_data::user_builtin::USER_EXTERNAL_AUTHN;
+    use crate::db::identity::Asset;
 
     #[test]
     fn test_internal_users() {
@@ -189,9 +207,13 @@ mod test {
 
         // Validate the actor behind various test contexts.
         // The privileges are (or will be) verified in authz tests.
-        let authn = Context::internal_test_user();
+        let authn = Context::privileged_test_user();
         let actor = authn.actor().unwrap();
-        assert_eq!(actor.actor_id(), USER_TEST_PRIVILEGED.id);
+        assert_eq!(actor.actor_id(), USER_TEST_PRIVILEGED.id());
+
+        let authn = Context::unprivileged_test_user();
+        let actor = authn.actor().unwrap();
+        assert_eq!(actor.actor_id(), USER_TEST_UNPRIVILEGED.id());
 
         let authn = Context::internal_read();
         let actor = authn.actor().unwrap();

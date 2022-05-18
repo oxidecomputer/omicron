@@ -200,12 +200,55 @@ impl Populator for PopulateBuiltinSilos {
     }
 }
 
+/// Populates the "test-privileged" and "test-unprivileged" silo users
+// TODO-security Once we have a proper bootstrapping mechanism, we should not
+// need to do this.  But right now, if you don't do this, then there will be no
+// identities that you can use to do anything else -- including create other
+// users or even set up a Silo that's connected to an identity provider.  This
+// is needed for interactive use of Nexus (e.g., demos or just working on Nexus)
+// as well as the test suite.
+#[derive(Debug)]
+struct PopulateSiloUsers;
+impl Populator for PopulateSiloUsers {
+    fn populate<'a, 'b>(
+        &self,
+        opctx: &'a OpContext,
+        datastore: &'a DataStore,
+    ) -> BoxFuture<'b, Result<(), Error>>
+    where
+        'a: 'b,
+    {
+        async { datastore.load_silo_users(opctx).await.map(|_| ()) }.boxed()
+    }
+}
+
+/// Populates the role assignments for the "test-privileged" user
+#[derive(Debug)]
+struct PopulateSiloUserRoleAssignments;
+impl Populator for PopulateSiloUserRoleAssignments {
+    fn populate<'a, 'b>(
+        &self,
+        opctx: &'a OpContext,
+        datastore: &'a DataStore,
+    ) -> BoxFuture<'b, Result<(), Error>>
+    where
+        'a: 'b,
+    {
+        async {
+            datastore.load_silo_user_role_assignments(opctx).await.map(|_| ())
+        }
+        .boxed()
+    }
+}
+
 lazy_static! {
-    static ref ALL_POPULATORS: [&'static dyn Populator; 4] = [
+    static ref ALL_POPULATORS: [&'static dyn Populator; 6] = [
         &PopulateBuiltinUsers,
         &PopulateBuiltinRoles,
         &PopulateBuiltinRoleAssignments,
         &PopulateBuiltinSilos,
+        &PopulateSiloUsers,
+        &PopulateSiloUserRoleAssignments,
     ];
 }
 

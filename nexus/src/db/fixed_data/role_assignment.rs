@@ -13,26 +13,6 @@ use lazy_static::lazy_static;
 lazy_static! {
     pub static ref BUILTIN_ROLE_ASSIGNMENTS: Vec<RoleAssignment> =
         vec![
-            // The "test-privileged" user gets the "admin" role on the sole
-            // Fleet.  This will grant them all permissions on all resources.
-            RoleAssignment::new(
-                IdentityType::UserBuiltin,
-                user_builtin::USER_TEST_PRIVILEGED.id,
-                role_builtin::FLEET_ADMIN.resource_type,
-                *FLEET_ID,
-                role_builtin::FLEET_ADMIN.role_name,
-            ),
-
-            // The same user also needs "fleet authenticator" to be able to
-            // create test sessions.
-            RoleAssignment::new(
-                IdentityType::UserBuiltin,
-                user_builtin::USER_TEST_PRIVILEGED.id,
-                role_builtin::FLEET_AUTHENTICATOR.resource_type,
-                *FLEET_ID,
-                role_builtin::FLEET_AUTHENTICATOR.role_name,
-            ),
-
             // The "internal-api" user gets the "admin" role on the sole Fleet.
             // This will grant them (nearly) all permissions on all resources.
             // TODO-security We should scope this down (or, really, figure out a

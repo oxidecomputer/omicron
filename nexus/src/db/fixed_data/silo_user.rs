@@ -1,0 +1,56 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+//! Built-in Silo Users
+
+use super::role_builtin;
+use crate::db;
+use crate::db::identity::Asset;
+use lazy_static::lazy_static;
+
+lazy_static! {
+    /// Test user that's granted all privileges, used for automated testing and
+    /// local development
+    pub static ref USER_TEST_PRIVILEGED: db::model::SiloUser =
+        db::model::SiloUser::new(
+            *db::fixed_data::silo::SILO_ID,
+            // "4007" looks a bit like "root".
+            "001de000-05e4-4000-8000-000000004007".parse().unwrap()
+        );
+
+    /// Role assignments needed for the privileged user
+    pub static ref ROLE_ASSIGNMENTS_PRIVILEGED:
+        Vec<db::model::RoleAssignment> = vec![
+            // The "test-privileged" user gets the "admin" role on the sole
+            // Fleet.  This will grant them all permissions on all resources.
+            db::model::RoleAssignment::new(
+                db::model::IdentityType::SiloUser,
+                USER_TEST_PRIVILEGED.id(),
+                role_builtin::FLEET_ADMIN.resource_type,
+                *db::fixed_data::FLEET_ID,
+                role_builtin::FLEET_ADMIN.role_name,
+            ),
+        ];
+
+    /// Test user that's granted no privileges, used for automated testing
+    pub static ref USER_TEST_UNPRIVILEGED: db::model::SiloUser =
+        db::model::SiloUser::new(
+            *db::fixed_data::silo::SILO_ID,
+            // 60001 is the decimal uid for "nobody" on Helios.
+            "001de000-05e4-4000-8000-000000060001".parse().unwrap()
+        );
+}
+
+#[cfg(test)]
+mod test {
+    use super::super::assert_valid_uuid;
+    use super::USER_TEST_PRIVILEGED;
+    use super::USER_TEST_UNPRIVILEGED;
+    use crate::db::identity::Asset;
+
+    #[test]
+    fn test_silo_user_ids_are_valid() {
+        assert_valid_uuid(&USER_TEST_PRIVILEGED.id());
+        assert_valid_uuid(&USER_TEST_UNPRIVILEGED.id());
+    }
+}

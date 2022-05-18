@@ -84,29 +84,6 @@ lazy_static! {
             "external-authn",
             "used by Nexus when authenticating external requests",
         );
-
-    /// Test user that's granted all privileges, used for automated testing and
-    /// local development
-    // TODO-security This eventually needs to go, maybe replaced with some kind
-    // of deployment-specific customization.
-    pub static ref USER_TEST_PRIVILEGED: UserBuiltinConfig =
-        UserBuiltinConfig::new_static(
-            // "4007" looks a bit like "root".
-            "001de000-05e4-4000-8000-000000004007",
-            &SILO_ID.to_string().as_str(),
-            "test-privileged",
-            "used for testing with all privileges",
-        );
-
-    /// Test user that's granted no privileges, used for automated testing
-    pub static ref USER_TEST_UNPRIVILEGED: UserBuiltinConfig =
-        UserBuiltinConfig::new_static(
-            // 60001 is the decimal uid for "nobody" on Helios.
-            "001de000-05e4-4000-8000-000000060001",
-            &SILO_ID.to_string().as_str(),
-            "test-unprivileged",
-            "used for testing with no privileges",
-        );
 }
 
 #[cfg(test)]
@@ -117,8 +94,6 @@ mod test {
     use super::USER_INTERNAL_API;
     use super::USER_INTERNAL_READ;
     use super::USER_SAGA_RECOVERY;
-    use super::USER_TEST_PRIVILEGED;
-    use super::USER_TEST_UNPRIVILEGED;
 
     #[test]
     fn test_builtin_user_ids_are_valid() {
@@ -127,7 +102,5 @@ mod test {
         assert_valid_uuid(&USER_EXTERNAL_AUTHN.id);
         assert_valid_uuid(&USER_INTERNAL_READ.id);
         assert_valid_uuid(&USER_SAGA_RECOVERY.id);
-        assert_valid_uuid(&USER_TEST_PRIVILEGED.id);
-        assert_valid_uuid(&USER_TEST_UNPRIVILEGED.id);
     }
 }

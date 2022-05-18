@@ -19,6 +19,7 @@ use omicron_nexus::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
 use omicron_nexus::external_api::console_api::LoginParams;
 use omicron_nexus::external_api::params::OrganizationCreate;
 use omicron_nexus::external_api::views;
+use omicron_nexus::db::identity::Asset;
 
 #[nexus_test]
 async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
@@ -231,7 +232,7 @@ async fn test_session_me(cptestctx: &ControlPlaneTestContext) {
         .parsed_body::<views::SessionUser>()
         .unwrap();
 
-    assert_eq!(priv_user, views::SessionUser { id: USER_TEST_PRIVILEGED.id });
+    assert_eq!(priv_user, views::SessionUser { id: USER_TEST_PRIVILEGED.id() });
 
     // make sure it returns different things for different users
     let unpriv_user = NexusRequest::object_get(testctx, "/session/me")
@@ -244,7 +245,7 @@ async fn test_session_me(cptestctx: &ControlPlaneTestContext) {
 
     assert_eq!(
         unpriv_user,
-        views::SessionUser { id: USER_TEST_UNPRIVILEGED.id }
+        views::SessionUser { id: USER_TEST_UNPRIVILEGED.id() }
     );
 }
 
