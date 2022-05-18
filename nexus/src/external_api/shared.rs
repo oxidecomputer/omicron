@@ -137,7 +137,6 @@ mod test {
     use super::IdentityType;
     use super::Policy;
     use super::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE;
-    use crate::authz;
     use crate::db;
     use crate::external_api::shared;
     use anyhow::anyhow;

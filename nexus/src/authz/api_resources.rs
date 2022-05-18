@@ -50,6 +50,8 @@ use parse_display::Display;
 use parse_display::FromStr;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
+use strum::EnumIter;
 use uuid::Uuid;
 
 /// Describes an authz resource that corresponds to an API resource that has a
@@ -206,6 +208,7 @@ impl ApiResourceWithRolesType for Fleet {
 #[derive(
     Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema,
 )]
+#[cfg_attr(test, derive(EnumIter))]
 #[serde(rename_all = "snake_case")]
 pub enum FleetRoles {
     Admin,
@@ -382,6 +385,7 @@ impl ApiResourceWithRolesType for Organization {
     Serialize,
     JsonSchema,
 )]
+#[cfg_attr(test, derive(EnumIter))]
 #[display(style = "kebab-case")]
 #[serde(rename_all = "snake_case")]
 pub enum OrganizationRoles {
@@ -435,6 +439,7 @@ impl ApiResourceWithRolesType for Project {
     Serialize,
     JsonSchema,
 )]
+#[cfg_attr(test, derive(EnumIter))]
 #[display(style = "kebab-case")]
 #[serde(rename_all = "snake_case")]
 pub enum ProjectRoles {
@@ -580,6 +585,7 @@ impl ApiResourceWithRolesType for Silo {
     Serialize,
     JsonSchema,
 )]
+#[cfg_attr(test, derive(EnumIter))]
 #[display(style = "kebab-case")]
 #[serde(rename_all = "snake_case")]
 pub enum SiloRoles {
@@ -647,4 +653,29 @@ authz_resource! {
     primary_key = Uuid,
     roles_allowed = false,
     polar_snippet = FleetChild,
+}
+
+#[cfg(test)]
+mod test {
+    use super::FleetRoles;
+    use super::OrganizationRoles;
+    use super::ProjectRoles;
+    use super::SiloRoles;
+    use crate::db::model::test_database_string_impl;
+
+    #[test]
+    fn test_roles_database_strings() {
+        test_database_string_impl::<FleetRoles, _>(
+            "tests/output/authz-roles-fleet.txt",
+        );
+        test_database_string_impl::<SiloRoles, _>(
+            "tests/output/authz-roles-silo.txt",
+        );
+        test_database_string_impl::<OrganizationRoles, _>(
+            "tests/output/authz-roles-organization.txt",
+        );
+        test_database_string_impl::<ProjectRoles, _>(
+            "tests/output/authz-roles-project.txt",
+        );
+    }
 }
