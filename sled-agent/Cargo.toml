@@ -27,7 +27,7 @@ progenitor = { git = "https://github.com/oxidecomputer/progenitor" }
 propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "845c9cffc482739d417761aa1c668895f24b776d" }
 rand = { version = "0.8.5", features = ["getrandom"] }
 reqwest = { version = "0.11.8", default-features = false, features = ["rustls-tls", "stream"] }
-schemars = { version = "0.8", features = [ "chrono", "uuid" ] }
+schemars = { version = "0.8.10", features = [ "chrono", "uuid1" ] }
 serde = { version = "1.0", features = [ "derive" ] }
 serde_json = "1.0"
 sled-agent-client = { path = "../sled-agent-client" }
