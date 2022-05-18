@@ -127,6 +127,7 @@ regex = "1.5.5"
 subprocess = "0.2.8"
 term = "0.7"
 httptest = "0.15.4"
+strum = { version = "0.23", features = [ "derive" ] }
 
 [dev-dependencies.openapi-lint]
 git = "https://github.com/oxidecomputer/openapi-lint"

@@ -4,7 +4,6 @@
 
 //! Types that are used as both views and params
 
-use crate::authz;
 use crate::db;
 use anyhow::anyhow;
 use omicron_common::api::external::Error;
@@ -81,7 +80,7 @@ pub struct RoleAssignment<AllowedRoles> {
 impl<AllowedRoles> TryFrom<db::model::RoleAssignment>
     for RoleAssignment<AllowedRoles>
 where
-    AllowedRoles: authz::AllowedRoles,
+    AllowedRoles: db::model::DatabaseString,
 {
     type Error = Error;
 
@@ -151,7 +150,7 @@ mod test {
     pub enum DummyRoles {
         Bogus,
     }
-    impl authz::AllowedRoles for DummyRoles {
+    impl db::model::DatabaseString for DummyRoles {
         type Error = anyhow::Error;
 
         fn to_database_string(&self) -> &str {

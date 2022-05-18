@@ -26,12 +26,13 @@ use super::identity::{Asset, Resource};
 use super::pool::DbConnection;
 use super::Pool;
 use crate::authn;
-use crate::authz::{self, AllowedRoles, ApiResource};
+use crate::authz::{self, ApiResource};
 use crate::context::OpContext;
 use crate::db::fixed_data::role_assignment::BUILTIN_ROLE_ASSIGNMENTS;
 use crate::db::fixed_data::role_builtin::BUILTIN_ROLES;
 use crate::db::fixed_data::silo::{DEFAULT_SILO, SILO_ID};
 use crate::db::lookup::LookupPath;
+use crate::db::model::DatabaseString;
 use crate::db::{
     self,
     error::{public_error_from_diesel_pool, ErrorHandler, TransactionError},

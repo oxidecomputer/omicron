@@ -20,9 +20,9 @@ use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::ObjectIdentity;
 use omicron_nexus::authn::USER_TEST_UNPRIVILEGED;
 use omicron_nexus::authz;
-use omicron_nexus::authz::AllowedRoles;
 use omicron_nexus::db::fixed_data;
 use omicron_nexus::db::identity::Resource;
+use omicron_nexus::db::model::DatabaseString;
 use omicron_nexus::external_api::shared;
 use omicron_nexus::external_api::views;
 
@@ -73,7 +73,7 @@ trait RoleAssignmentTest {
         + PartialEq
         + serde::Serialize
         + serde::de::DeserializeOwned
-        + authz::AllowedRoles;
+        + DatabaseString;
 
     /// The role to grant on this resource as part of the test sequence
     const ROLE: Self::RoleType;

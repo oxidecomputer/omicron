@@ -218,6 +218,27 @@ macro_rules! impl_enum_type {
 
 pub(crate) use impl_enum_type;
 
+/// Describes a type that's represented in the database using a String
+///
+/// If you're reaching for this type, consider whether it'd be better to use an
+/// enum in the database, along with `impl_enum_wrapper!` to define a
+/// corresponding Rust type.  This trait is really intended for cases where
+/// that's not possible (e.g., because the set of allowed values isn't the same
+/// for all rows in the table).
+///
+/// For a given type, the impl of `DatabaseString` is potentially different than
+/// the impl of `Serialize` (which is usually how the type appears in an API)
+/// and the impl of `Display` (if the type even has one).  We could piggy-back
+/// on `Display`, but it'd be a footgun in that someone might change `Display`
+/// thinking it wouldn't have much impact, not realizing that it'd be breaking
+/// an on-disk interface.
+pub trait DatabaseString: Sized {
+    type Error: std::fmt::Display;
+
+    fn to_database_string(&self) -> &str;
+    fn from_database_string(s: &str) -> Result<Self, Self::Error>;
+}
+
 #[cfg(test)]
 mod tests {
     use super::VpcSubnet;
