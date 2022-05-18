@@ -19,7 +19,7 @@ structopt = "0.3"
 thiserror = "1.0.31"
 tokio = "1.18"
 toml = "0.5.9"
-uuid = { version = "0.8.2", features = [ "v4", "serde" ] }
+uuid = { version = "1.0.0", features = [ "v4", "serde" ] }
 
 [dev-dependencies]
 expectorate = "1.0.5"

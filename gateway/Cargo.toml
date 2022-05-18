@@ -18,7 +18,7 @@ slog-dtrace = "0.2"
 structopt = "0.3"
 thiserror = "1.0.31"
 toml = "0.5.9"
-uuid = "0.8"
+uuid = "1.0"
 
 gateway-messages = { path = "../gateway-messages", features = ["std"] }
 gateway-sp-comms = { path = "../gateway-sp-comms" }
