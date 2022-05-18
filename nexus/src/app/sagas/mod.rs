@@ -20,6 +20,7 @@ use steno::SagaTemplateGeneric;
 use steno::SagaType;
 use uuid::Uuid;
 
+pub mod disk_attach;
 pub mod disk_create;
 pub mod disk_delete;
 pub mod instance_create;
@@ -42,6 +43,11 @@ fn all_templates(
         (
             instance_migrate::SAGA_NAME,
             Arc::clone(&instance_migrate::SAGA_TEMPLATE)
+                as Arc<dyn SagaTemplateGeneric<Arc<SagaContext>>>,
+        ),
+        (
+            disk_attach::SAGA_NAME,
+            Arc::clone(&disk_attach::SAGA_TEMPLATE)
                 as Arc<dyn SagaTemplateGeneric<Arc<SagaContext>>>,
         ),
         (
