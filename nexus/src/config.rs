@@ -51,6 +51,69 @@ pub struct TimeseriesDbConfig {
     pub address: SocketAddr,
 }
 
+// A deserializable type that does no validation on the tunable parameters.
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+struct UnvalidatedTunables {
+    max_vpc_ipv4_subnet_prefix: u8,
+}
+
+/// Tunable configuration parameters, intended for use in test environments or
+/// other situations in which experimentation / tuning is valuable.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(try_from = "UnvalidatedTunables")]
+pub struct Tunables {
+    /// The maximum prefix size supported for VPC Subnet IPv4 subnetworks.
+    ///
+    /// Note that this is the maximum _prefix_ size, which sets the minimum size
+    /// of the subnet.
+    pub max_vpc_ipv4_subnet_prefix: u8,
+}
+
+// Convert from the unvalidated tunables, verifying each parameter as needed.
+impl TryFrom<UnvalidatedTunables> for Tunables {
+    type Error = InvalidTunable;
+
+    fn try_from(unvalidated: UnvalidatedTunables) -> Result<Self, Self::Error> {
+        Tunables::validate_ipv4_prefix(unvalidated.max_vpc_ipv4_subnet_prefix)?;
+        Ok(Tunables {
+            max_vpc_ipv4_subnet_prefix: unvalidated.max_vpc_ipv4_subnet_prefix,
+        })
+    }
+}
+
+impl Tunables {
+    fn validate_ipv4_prefix(prefix: u8) -> Result<(), InvalidTunable> {
+        let absolute_max: u8 = 32_u8.checked_sub(
+            // Always need space for the reserved Oxide addresses, including the
+            // broadcast address at the end of the subnet.
+            ((crate::defaults::NUM_INITIAL_RESERVED_IP_ADDRESSES + 1) as f32)
+                .log2() // Subnet size to bit prefix.
+                .ceil() // Round up to a whole number of bits.
+                as u8
+            ).expect("Invalid absolute maximum IPv4 subnet prefix");
+        if prefix >= crate::defaults::MIN_VPC_IPV4_SUBNET_PREFIX
+            && prefix <= absolute_max
+        {
+            Ok(())
+        } else {
+            Err(InvalidTunable {
+                tunable: String::from("max_vpc_ipv4_subnet_prefix"),
+                message: format!(
+                    "IPv4 subnet prefix must be in the range [0, {}], found: {}",
+                    absolute_max,
+                    prefix,
+                ),
+            })
+        }
+    }
+}
+
+impl Default for Tunables {
+    fn default() -> Self {
+        Tunables { max_vpc_ipv4_subnet_prefix: 26 }
+    }
+}
+
 /// Configuration for a nexus server
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Config {
@@ -74,7 +137,24 @@ pub struct Config {
     /// unconfigured.
     #[serde(default)]
     pub updates: Option<UpdatesConfig>,
+    /// Tunable configuration for testing and experimentation
+    #[serde(default)]
+    pub tunables: Tunables,
 }
+
+#[derive(Debug)]
+pub struct InvalidTunable {
+    tunable: String,
+    message: String,
+}
+
+impl std::fmt::Display for InvalidTunable {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "invalid \"{}\": \"{}\"", self.tunable, self.message)
+    }
+}
+
+impl std::error::Error for InvalidTunable {}
 
 #[derive(Debug)]
 pub struct LoadError {
@@ -85,6 +165,7 @@ pub struct LoadError {
 pub enum LoadErrorKind {
     Io(std::io::Error),
     Parse(toml::de::Error),
+    InvalidTunable(InvalidTunable),
 }
 
 impl From<(PathBuf, std::io::Error)> for LoadError {
@@ -109,6 +190,14 @@ impl fmt::Display for LoadError {
             }
             LoadErrorKind::Parse(e) => {
                 write!(f, "parse \"{}\": {}", self.path.display(), e)
+            }
+            LoadErrorKind::InvalidTunable(inner) => {
+                write!(
+                    f,
+                    "invalid tunable \"{}\": {}",
+                    self.path.display(),
+                    inner,
+                )
             }
         }
     }
@@ -175,6 +264,7 @@ impl Config {
 
 #[cfg(test)]
 mod test {
+    use super::Tunables;
     use super::{
         AuthnConfig, Config, ConsoleConfig, LoadError, LoadErrorKind,
         SchemeName, TimeseriesDbConfig, UpdatesConfig,
@@ -301,6 +391,8 @@ mod test {
             [updates]
             trusted_root = "/path/to/root.json"
             default_base_url = "http://example.invalid/"
+            [tunables]
+            max_vpc_ipv4_subnet_prefix = 26
             "##,
         )
         .unwrap();
@@ -345,6 +437,7 @@ mod test {
                     trusted_root: PathBuf::from("/path/to/root.json"),
                     default_base_url: "http://example.invalid/".into(),
                 }),
+                tunables: Tunables::default(),
             }
         );
 
@@ -419,6 +512,54 @@ mod test {
             assert!(error.to_string().starts_with(
                 "unsupported authn scheme: \"trust-me\" \
                 for key `authn.schemes_external`"
+            ));
+        } else {
+            panic!(
+                "Got an unexpected error, expected Parse but got {:?}",
+                error
+            );
+        }
+    }
+
+    #[test]
+    fn test_invalid_ipv4_prefix_tunable() {
+        let error = read_config(
+            "invalid_ipv4_prefix_tunable",
+            r##"
+            id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
+            [console]
+            static_dir = "tests/static"
+            cache_control_max_age_minutes = 10
+            session_idle_timeout_minutes = 60
+            session_absolute_timeout_minutes = 480
+            [authn]
+            schemes_external = []
+            [dropshot_external]
+            bind_address = "10.1.2.3:4567"
+            request_body_max_bytes = 1024
+            [dropshot_internal]
+            bind_address = "10.1.2.3:4568"
+            request_body_max_bytes = 1024
+            [database]
+            url = "postgresql://127.0.0.1?sslmode=disable"
+            [log]
+            mode = "file"
+            level = "debug"
+            path = "/nonexistent/path"
+            if_exists = "fail"
+            [timeseries_db]
+            address = "[::1]:8123"
+            [updates]
+            trusted_root = "/path/to/root.json"
+            default_base_url = "http://example.invalid/"
+            [tunables]
+            max_vpc_ipv4_subnet_prefix = 100
+            "##,
+        )
+        .expect_err("Expected failure");
+        if let LoadErrorKind::Parse(error) = &error.kind {
+            assert!(error.to_string().starts_with(
+                r#"invalid "max_vpc_ipv4_subnet_prefix": "IPv4 subnet prefix must"#,
             ));
         } else {
             panic!(
