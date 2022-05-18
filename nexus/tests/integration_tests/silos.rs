@@ -7,7 +7,7 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::SamlIdentityProvider;
 use omicron_nexus::authn::silos::IdentityProviderType;
 use omicron_nexus::external_api::params;
-use omicron_nexus::external_api::views::{Organization, Silo};
+use omicron_nexus::external_api::views::{Organization, Silo, IdentityProvider};
 use omicron_nexus::TestInterfaces as _;
 
 use http::method::Method;
@@ -142,6 +142,94 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
         .silo_user_fetch(authn_opctx, new_silo_user_id)
         .await
         .expect_err("unexpected success");
+}
+
+// Test listing providers
+#[nexus_test]
+async fn test_listing_identity_providers(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    create_silo(&client, "discoverable", true).await;
+
+    // List providers - should be none
+    let providers = objects_list_page_authz::<IdentityProvider>(
+        client,
+        "/silos/discoverable/identity_providers",
+    ).await.items;
+
+    assert_eq!(providers.len(), 0);
+
+    /*
+
+    // Add some providers
+    let saml_idp_descriptor = SAML_IDP_DESCRIPTOR;
+
+    let server = Server::run();
+    server.expect(
+        Expectation::matching(request::method_path("GET", "/descriptor"))
+            .respond_with(status_code(200).body(saml_idp_descriptor)),
+    );
+
+    let silo_saml_idp_1: SamlIdentityProvider = object_create(
+        client,
+        &"/silos/discoverable/saml_identity_providers",
+        &params::SamlIdentityProviderCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "some-totally-real-saml-provider"
+                    .to_string()
+                    .parse()
+                    .unwrap(),
+                description: "a demo provider".to_string(),
+            },
+
+            idp_metadata_url: server.url("/descriptor").to_string(),
+
+            idp_entity_id: "entity_id".to_string(),
+            sp_client_id: "client_id".to_string(),
+            acs_url: "http://acs".to_string(),
+            slo_url: "http://slo".to_string(),
+            technical_contact_email: "technical@fake".to_string(),
+
+            signing_keypair: None,
+        },
+    )
+    .await;
+
+    let silo_saml_idp_2: SamlIdentityProvider = object_create(
+        client,
+        &"/silos/discoverable/saml_identity_providers",
+        &params::SamlIdentityProviderCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "another-totally-real-saml-provider"
+                    .to_string()
+                    .parse()
+                    .unwrap(),
+                description: "a demo provider".to_string(),
+            },
+
+            idp_metadata_url: server.url("/descriptor").to_string(),
+
+            idp_entity_id: "entity_id".to_string(),
+            sp_client_id: "client_id".to_string(),
+            acs_url: "http://acs".to_string(),
+            slo_url: "http://slo".to_string(),
+            technical_contact_email: "technical@fake".to_string(),
+
+            signing_keypair: None,
+        },
+    )
+    .await;
+
+    // List providers again - expect 2
+    let providers = objects_list_page_authz::<IdentityProvider>(
+        client,
+        "/silos/discoverable/identity_providers",
+    ).await.items;
+
+    assert_eq!(providers.len(), 2);
+    assert_eq!(providers[0].name, silo_saml_idp_1.identity.name);
+    assert_eq!(providers[1].name, silo_saml_idp_2.identity.name);
+    */
 }
 
 // Valid SAML IdP entity descriptor from https://en.wikipedia.org/wiki/SAML_metadata#Identity_provider_metadata

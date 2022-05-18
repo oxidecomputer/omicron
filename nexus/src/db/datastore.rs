@@ -2737,6 +2737,24 @@ impl DataStore {
         Ok(())
     }
 
+    pub async fn identity_provider_list(
+        &self,
+        opctx: &OpContext,
+        authz_silo: &authz::Silo,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<IdentityProvider> {
+        opctx.authorize(authz::Action::ListChildren, authz_silo).await?;
+
+        use db::schema::identity_provider::dsl;
+        paginated(dsl::identity_provider, dsl::name, pagparams)
+            .filter(dsl::silo_id.eq(authz_silo.id()))
+            .filter(dsl::time_deleted.is_null())
+            .select(IdentityProvider::as_select())
+            .load_async::<IdentityProvider>(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
     pub async fn saml_identity_provider_create(
         &self,
         opctx: &OpContext,

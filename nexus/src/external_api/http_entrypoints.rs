@@ -7,7 +7,7 @@
 use super::{
     console_api, params, views,
     views::{
-        GlobalImage, Image, Organization, Project, Rack, Role, Silo, Sled,
+        GlobalImage, Image, IdentityProvider, Organization, Project, Rack, Role, Silo, Sled,
         Snapshot, SshKey, User, Vpc, VpcRouter, VpcSubnet,
     },
 };
@@ -75,6 +75,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(silos_get)?;
         api.register(silos_post)?;
         api.register(silos_get_silo)?;
+        api.register(silos_get_identity_providers)?;
         api.register(silos_delete_silo)?;
 
         api.register(silo_saml_idp_create)?;
@@ -357,6 +358,37 @@ async fn silos_delete_silo(
 }
 
 // Silo identity providers
+
+/// List Silo identity providers
+#[endpoint {
+    method = GET,
+    path = "/silos/{silo_name}/identity_providers",
+    tags = ["silos"],
+}]
+async fn silos_get_identity_providers(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<SiloPathParam>,
+    query_params: Query<PaginatedByName>,
+) -> Result<HttpResponseOk<ResultsPage<IdentityProvider>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let silo_name = &path.silo_name;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let query = query_params.into_inner();
+        let pagination_params = data_page_params_for(&rqctx, &query)?
+            .map_name(|n| Name::ref_cast(n));
+        let identity_providers = nexus
+            .identity_provider_list(&opctx, &silo_name, &pagination_params)
+            .await?
+            .into_iter()
+            .map(|x| x.into())
+            .collect();
+        Ok(HttpResponseOk(ScanByName::results_page(&query, identity_providers)?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
 
 // Silo SAML identity providers
 

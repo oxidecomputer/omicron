@@ -3835,6 +3835,21 @@ impl Nexus {
         Ok(db_silo_user)
     }
 
+    // identity providers
+
+    pub async fn identity_provider_list(
+        &self,
+        opctx: &OpContext,
+        silo_name: &Name,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<db::model::IdentityProvider> {
+        let (.., authz_silo) = LookupPath::new(opctx, &self.db_datastore)
+            .silo_name(silo_name)
+            .lookup_for(authz::Action::ListChildren)
+            .await?;
+        self.db_datastore.identity_provider_list(opctx, &authz_silo, pagparams).await
+    }
+
     // Silo authn identity providers
 
     pub async fn saml_identity_provider_create(

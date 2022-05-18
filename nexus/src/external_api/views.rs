@@ -36,6 +36,42 @@ impl Into<Silo> for model::Silo {
     }
 }
 
+// IDENTITY PROVIDER
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum IdentityProviderType {
+    /// SAML identity provider
+    Saml,
+}
+
+impl Into<IdentityProviderType> for model::IdentityProviderType {
+    fn into(self) -> IdentityProviderType {
+        match self {
+            model::IdentityProviderType::Saml => IdentityProviderType::Saml,
+        }
+    }
+}
+
+/// Client view of an ['IdentityProvider']
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct IdentityProvider {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    /// Identity provider type
+    pub provider_type: IdentityProviderType,
+}
+
+impl Into<IdentityProvider> for model::IdentityProvider {
+    fn into(self) -> IdentityProvider {
+        IdentityProvider {
+            identity: self.identity(),
+            provider_type: self.provider_type.into(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct DerEncodedKeyPair {
     /// request signing public certificate (base64 encoded der file)

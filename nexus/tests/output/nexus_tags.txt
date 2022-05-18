@@ -112,6 +112,7 @@ silo_saml_idp_create                     /silos/{silo_name}/saml_identity_provid
 silo_saml_idp_fetch                      /silos/{silo_name}/saml_identity_providers/{provider_name}
 silos_delete_silo                        /silos/{silo_name}
 silos_get                                /silos
+silos_get_identity_providers             /silos/{silo_name}/identity_providers
 silos_get_silo                           /silos/{silo_name}
 silos_post                               /silos
 

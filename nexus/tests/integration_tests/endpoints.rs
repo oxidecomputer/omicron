@@ -912,12 +912,21 @@ lazy_static! {
         /* Silo identity providers */
 
         VerifyEndpoint {
+            url: "/silos/default-silo/identity_providers",
+            visibility: Visibility::Public, // Users can see their own silo! This includes USER_TEST_UNPRIVILEGED
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
+
+        VerifyEndpoint {
             url: "/silos/default-silo/saml_identity_providers",
             visibility: Visibility::Public, // Users can see their own silo! This includes USER_TEST_UNPRIVILEGED
             allowed_methods: vec![AllowedMethod::Post(
                 serde_json::to_value(&*SAML_IDENTITY_PROVIDER).unwrap(),
             )],
         },
+
         VerifyEndpoint {
             url:
                 "/silos/default-silo/saml_identity_providers/demo-saml-provider",
