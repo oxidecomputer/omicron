@@ -49,7 +49,8 @@ impl super::Nexus {
             ));
         }
         if params.ipv4_block.prefix() < defaults::MIN_VPC_IPV4_SUBNET_PREFIX
-            || params.ipv4_block.prefix() > defaults::MAX_VPC_IPV4_SUBNET_PREFIX
+            || params.ipv4_block.prefix()
+                > self.tunables.max_vpc_ipv4_subnet_prefix
         {
             return Err(external::Error::invalid_request(&format!(
                 concat!(
@@ -57,7 +58,7 @@ impl super::Nexus {
                     "length between {} and {}, inclusive"
                 ),
                 defaults::MIN_VPC_IPV4_SUBNET_PREFIX,
-                defaults::MAX_VPC_IPV4_SUBNET_PREFIX
+                self.tunables.max_vpc_ipv4_subnet_prefix,
             )));
         }
 
