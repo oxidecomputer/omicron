@@ -159,11 +159,16 @@ table! {
 }
 
 table! {
-    identity_provider (silo_id, provider_id) {
+    identity_provider (silo_id, id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+
         silo_id -> Uuid,
         provider_type -> crate::db::model::IdentityProviderTypeEnum,
-        name -> Text,
-        provider_id -> Uuid,
     }
 }
 

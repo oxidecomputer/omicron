@@ -41,7 +41,7 @@ use crate::db::{
         InstanceRuntimeState, Name, NetworkInterface, Organization,
         OrganizationUpdate, OximeterInfo, ProducerEndpoint, Project,
         ProjectUpdate, Region, RoleAssignment, RoleBuiltin, RouterRoute,
-        RouterRouteUpdate, Silo, SiloUser, Sled, SshKey,
+        RouterRouteUpdate, Silo, IdentityProvider, SiloUser, Sled, SshKey,
         UpdateAvailableArtifact, UserBuiltin, Volume, Vpc, VpcFirewallRule,
         VpcRouter, VpcRouterUpdate, VpcSubnet, VpcSubnetUpdate, VpcUpdate,
         Zpool,
@@ -2699,8 +2699,10 @@ impl DataStore {
         // delete all silo identity providers
         use db::schema::identity_provider::dsl as idp_dsl;
 
-        let updated_rows = diesel::delete(idp_dsl::identity_provider)
+        let updated_rows = diesel::update(idp_dsl::identity_provider)
             .filter(idp_dsl::silo_id.eq(id))
+            .filter(idp_dsl::time_deleted.is_null())
+            .set(idp_dsl::time_deleted.eq(Utc::now()))
             .execute_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
@@ -2751,10 +2753,16 @@ impl DataStore {
                 use db::schema::identity_provider::dsl as idp_dsl;
                 diesel::insert_into(idp_dsl::identity_provider)
                     .values(db::model::IdentityProvider {
+                        identity: db::model::IdentityProviderIdentity {
+                            id: provider.identity.id,
+                            name: provider.identity.name.clone(),
+                            description: provider.identity.description.clone(),
+                            time_created: provider.identity.time_created,
+                            time_modified: provider.identity.time_modified,
+                            time_deleted: provider.identity.time_deleted,
+                        },
                         silo_id: provider.silo_id,
-                        name: provider.name().clone(),
                         provider_type: db::model::IdentityProviderType::Saml,
-                        provider_id: provider.id(),
                     })
                     .execute(conn)?;
 

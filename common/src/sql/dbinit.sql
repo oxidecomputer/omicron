@@ -228,13 +228,29 @@ CREATE TYPE omicron.public.provider_type AS ENUM (
  * Silo identity provider list
  */
 CREATE TABLE omicron.public.identity_provider (
-    silo_id UUID NOT NULL,
-    provider_type omicron.public.provider_type NOT NULL,
-    name TEXT NOT NULL,
-    provider_id UUID NOT NULL,
+    /* Identity metadata */
+    id UUID PRIMARY KEY,
+    name STRING(128) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
 
-    PRIMARY KEY (silo_id, provider_id)
+    silo_id UUID NOT NULL,
+    provider_type omicron.public.provider_type NOT NULL
 );
+
+CREATE INDEX ON omicron.public.identity_provider (
+    id,
+    silo_id
+) WHERE
+    time_deleted IS NULL;
+
+CREATE INDEX ON omicron.public.identity_provider (
+    name,
+    silo_id
+) WHERE
+    time_deleted IS NULL;
 
 /*
  * Silo SAML identity provider

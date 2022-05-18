@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::db::identity::Resource;
-use crate::db::model::{impl_enum_type, Name};
+use crate::db::model::impl_enum_type;
 use crate::db::schema::{identity_provider, saml_identity_provider};
 use db_macros::Resource;
 use omicron_common::api::external;
@@ -25,19 +25,15 @@ impl_enum_type!(
     Saml => b"saml"
 );
 
-#[derive(Queryable, Insertable, Clone, Debug, Selectable)]
+#[derive(Queryable, Insertable, Clone, Debug, Selectable, Resource)]
 #[diesel(table_name = identity_provider)]
 pub struct IdentityProvider {
+    // Note identity here matches the specific identity provider configuration
+    #[diesel(embed)]
+    pub identity: IdentityProviderIdentity,
+
     pub silo_id: Uuid,
     pub provider_type: IdentityProviderType,
-    pub name: Name,
-    pub provider_id: Uuid,
-}
-
-impl IdentityProvider {
-    pub fn id(&self) -> Uuid {
-        self.provider_id
-    }
 }
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable, Resource)]
