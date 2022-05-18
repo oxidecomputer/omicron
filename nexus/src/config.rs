@@ -108,9 +108,17 @@ impl Tunables {
     }
 }
 
+/// The maximum prefix size by default.
+///
+/// There are 6 Oxide reserved IP addresses, 5 at the beginning for DNS and the
+/// like, and the broadcast address at the end of the subnet. This size provides
+/// room for 2 ** 6 - 6 = 58 IP addresses, which seems like a reasonable size
+/// for the smallest subnet that's still useful in many contexts.
+pub const MAX_VPC_IPV4_SUBNET_PREFIX: u8 = 26;
+
 impl Default for Tunables {
     fn default() -> Self {
-        Tunables { max_vpc_ipv4_subnet_prefix: 26 }
+        Tunables { max_vpc_ipv4_subnet_prefix: MAX_VPC_IPV4_SUBNET_PREFIX }
     }
 }
 
@@ -392,7 +400,7 @@ mod test {
             trusted_root = "/path/to/root.json"
             default_base_url = "http://example.invalid/"
             [tunables]
-            max_vpc_ipv4_subnet_prefix = 26
+            max_vpc_ipv4_subnet_prefix = 27
             "##,
         )
         .unwrap();
@@ -437,7 +445,7 @@ mod test {
                     trusted_root: PathBuf::from("/path/to/root.json"),
                     default_base_url: "http://example.invalid/".into(),
                 }),
-                tunables: Tunables::default(),
+                tunables: Tunables { max_vpc_ipv4_subnet_prefix: 27 },
             }
         );
 

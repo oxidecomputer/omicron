@@ -51,3 +51,10 @@ mode = "stderr-terminal"
 # Configuration for interacting with the timeseries database
 [timeseries_db]
 address = "[::1]:8123"
+
+# Tunable configuration parameters, for testing or experimentation
+[tunables]
+
+# The maximum allowed prefix (thus smallest size) for a VPC Subnet's
+# IPv4 subnetwork. This size allows for ~60 hosts.
+max_vpc_ipv4_subnet_prefix = 26
