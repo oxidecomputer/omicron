@@ -14,9 +14,7 @@
 //! - Updates the resource row
 
 use super::pool::DbConnection;
-use async_bb8_diesel::{
-    AsyncRunQueryDsl, ConnectionManager, PoolError,
-};
+use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager, PoolError};
 use diesel::associations::HasTable;
 use diesel::expression::Expression;
 use diesel::helper_types::*;
@@ -38,8 +36,9 @@ type CollectionTable<ResourceType, C> = <<C as DatastoreAttachTarget<
 type ResourceTable<ResourceType, C> = <<C as DatastoreAttachTarget<
     ResourceType,
 >>::ResourceCollectionIdColumn as Column>::Table;
-type ResourceTableWhereClause<ResourceType, C> = <ResourceTable<ResourceType, C> as IntoUpdateTarget>::WhereClause;
-
+/// The default WHERE clause of the resource table.
+type ResourceTableWhereClause<ResourceType, C> =
+    <ResourceTable<ResourceType, C> as IntoUpdateTarget>::WhereClause;
 type CollectionGenerationColumn<ResourceType, C> =
     <C as DatastoreAttachTarget<ResourceType>>::CollectionGenerationColumn;
 type CollectionIdColumn<ResourceType, C> =
@@ -105,7 +104,7 @@ impl<T> TypesAreSame for (T, T, T) {}
 ///     type ResourceTimeDeletedColumn = disk::dsl::time_deleted;
 /// }
 /// ```
-pub trait DatastoreAttachTarget<ResourceType> : Selectable<Pg> {
+pub trait DatastoreAttachTarget<ResourceType>: Selectable<Pg> {
     /// The Rust type of the collection and resource ids (typically Uuid).
     type Id: Copy + Debug + PartialEq + Send + 'static;
 
@@ -114,7 +113,9 @@ pub trait DatastoreAttachTarget<ResourceType> : Selectable<Pg> {
 
     /// The column in the CollectionTable that acts as a generation number.
     /// This is the "resource-generation-number" in RFD 192.
-    type CollectionGenerationColumn: Column + Default + Expression<SqlType = BigInt>;
+    type CollectionGenerationColumn: Column
+        + Default
+        + Expression<SqlType = BigInt>;
 
     /// The time deleted column in the CollectionTable
     type CollectionTimeDeletedColumn: Column + Default;
@@ -149,9 +150,9 @@ pub trait DatastoreAttachTarget<ResourceType> : Selectable<Pg> {
     /// - `update`: An update statement, identifying how the resource object
     /// should be modified to be attached.
     ///
-    /// The V, V2 types refer to the "update targets" of the UpdateStatement,
+    /// The V type refers to the "update target" of the UpdateStatement,
     /// and should generally be inferred rather than explicitly specified.
-    fn attach_resource<V, V2>(
+    fn attach_resource<V>(
         collection_id: Self::Id,
         resource_id: Self::Id,
 
@@ -172,8 +173,9 @@ pub trait DatastoreAttachTarget<ResourceType> : Selectable<Pg> {
         update: UpdateStatement<
             ResourceTable<ResourceType, Self>,
             ResourceTableWhereClause<ResourceType, Self>,
-            V>,
-    ) -> AttachToCollectionStatement<ResourceType, V2, Self>
+            V,
+        >,
+    ) -> AttachToCollectionStatement<ResourceType, V, Self>
     where
         // Ensure the "collection" columns all belong to the same table.
         (
@@ -222,39 +224,27 @@ pub trait DatastoreAttachTarget<ResourceType> : Selectable<Pg> {
         <ResourceTable<ResourceType, Self> as AsQuery>::SqlType: Send,
         // Allows calling ".filter()" on the boxed collection table.
         BoxedQuery<CollectionTable<ResourceType, Self>>:
-            // Filter by primary key
             query_methods::FilterDsl<
-                Eq<
-                    CollectionPrimaryKey<ResourceType, Self>,
-                    Self::Id,
+                    Eq<CollectionPrimaryKey<ResourceType, Self>, Self::Id>,
+                    Output = BoxedQuery<CollectionTable<ResourceType, Self>>,
+                    // Filter by time deleted = NULL
+                > + query_methods::FilterDsl<
+                    IsNull<Self::CollectionTimeDeletedColumn>,
+                    Output = BoxedQuery<CollectionTable<ResourceType, Self>>,
                 >,
-                Output = BoxedQuery<CollectionTable<ResourceType, Self>>,
-            // Filter by time deleted = NULL
-            > + query_methods::FilterDsl<
-                IsNull<Self::CollectionTimeDeletedColumn>,
-                Output = BoxedQuery<CollectionTable<ResourceType, Self>>,
-            >,
         // Allows calling ".filter()" on the boxed resource table.
-        BoxedQuery<ResourceTable<ResourceType, Self>>:
-            // Filter by primary key
-            query_methods::FilterDsl<
-                Eq<
-                    ResourcePrimaryKey<ResourceType, Self>,
-                    Self::Id,
-                >,
+        BoxedQuery<ResourceTable<ResourceType, Self>>: query_methods::FilterDsl<
+                Eq<ResourcePrimaryKey<ResourceType, Self>, Self::Id>,
                 Output = BoxedQuery<ResourceTable<ResourceType, Self>>,
-            // Filter by collection ID (when counting attached resources)
+                // Filter by collection ID (when counting attached resources)
             > + query_methods::FilterDsl<
-                Eq<
-                    Self::ResourceCollectionIdColumn,
-                    Self::Id,
-                >,
+                Eq<Self::ResourceCollectionIdColumn, Self::Id>,
                 Output = BoxedQuery<ResourceTable<ResourceType, Self>>,
-            // Filter by collection ID = NULL
+                // Filter by collection ID = NULL
             > + query_methods::FilterDsl<
                 IsNull<Self::ResourceCollectionIdColumn>,
                 Output = BoxedQuery<ResourceTable<ResourceType, Self>>,
-            // Filter by time deleted = NULL
+                // Filter by time deleted = NULL
             > + query_methods::FilterDsl<
                 IsNull<Self::ResourceTimeDeletedColumn>,
                 Output = BoxedQuery<ResourceTable<ResourceType, Self>>,
@@ -266,41 +256,50 @@ pub trait DatastoreAttachTarget<ResourceType> : Selectable<Pg> {
         // statement.
         ResourceTable<ResourceType, Self>: IntoUpdateTarget,
         // Allows calling "update.into_boxed()"
-        UpdateStatement<ResourceTable<ResourceType, Self>, ResourceTableWhereClause<ResourceType, Self>, V>:
-           query_methods::BoxedDsl<
+        UpdateStatement<
+            ResourceTable<ResourceType, Self>,
+            ResourceTableWhereClause<ResourceType, Self>,
+            V,
+        >: query_methods::BoxedDsl<
+            'static,
+            Pg,
+            Output = BoxedUpdateStatement<
                 'static,
                 Pg,
-                Output = BoxedUpdateStatement<'static, Pg, ResourceTable<ResourceType, Self>, V>,
-           >,
+                ResourceTable<ResourceType, Self>,
+                V,
+            >,
+        >,
         // Allows calling
         // ".filter(resource_table().primary_key().eq(resource_id)" on the
         // boxed update statement.
         BoxedUpdateStatement<'static, Pg, ResourceTable<ResourceType, Self>, V>:
-           query_methods::FilterDsl<
-                Eq<
-                    ResourcePrimaryKey<ResourceType, Self>,
-                    Self::Id,
+            query_methods::FilterDsl<
+                Eq<ResourcePrimaryKey<ResourceType, Self>, Self::Id>,
+                Output = BoxedUpdateStatement<
+                    'static,
+                    Pg,
+                    ResourceTable<ResourceType, Self>,
+                    V,
                 >,
-                Output = BoxedUpdateStatement<'static, Pg, ResourceTable<ResourceType, Self>, V2>,
             >,
 
         // Allows using "id" in expressions (e.g. ".eq(...)") with...
         Self::Id: diesel::expression::AsExpression<
-            // ... The Collection table's PK
-            SerializedCollectionPrimaryKey<ResourceType, Self>,
-        > + diesel::expression::AsExpression<
-            // ... The Resource table's PK
-            SerializedResourcePrimaryKey<ResourceType, Self>,
-        > + diesel::expression::AsExpression<
-            // ... The Resource table's FK to the Collection table
-            SerializedResourceForeignKey<ResourceType, Self>
-        >,
+                // ... The Collection table's PK
+                SerializedCollectionPrimaryKey<ResourceType, Self>,
+            > + diesel::expression::AsExpression<
+                // ... The Resource table's PK
+                SerializedResourcePrimaryKey<ResourceType, Self>,
+            > + diesel::expression::AsExpression<
+                // ... The Resource table's FK to the Collection table
+                SerializedResourceForeignKey<ResourceType, Self>,
+            >,
         <CollectionPrimaryKey<ResourceType, Self> as Expression>::SqlType:
             SingleValue,
         <ResourcePrimaryKey<ResourceType, Self> as Expression>::SqlType:
             SingleValue,
-        <Self::ResourceCollectionIdColumn as Expression>::SqlType:
-            SingleValue,
+        <Self::ResourceCollectionIdColumn as Expression>::SqlType: SingleValue,
 
         // Allows calling "is_null()" on the following columns.
         Self::CollectionTimeDeletedColumn: ExpressionMethods,
@@ -310,12 +309,10 @@ pub trait DatastoreAttachTarget<ResourceType> : Selectable<Pg> {
         // Necessary to actually select the resource in the output type.
         ResourceType: Selectable<Pg>,
     {
-        let collection_table = || {
-            <CollectionTable<ResourceType, Self> as HasTable>::table()
-        };
-        let resource_table = || {
-            <ResourceTable<ResourceType, Self> as HasTable>::table()
-        };
+        let collection_table =
+            || <CollectionTable<ResourceType, Self> as HasTable>::table();
+        let resource_table =
+            || <ResourceTable<ResourceType, Self> as HasTable>::table();
 
         // Create new queries to determine if the collection and resources
         // already exist.
@@ -323,13 +320,13 @@ pub trait DatastoreAttachTarget<ResourceType> : Selectable<Pg> {
             collection_table()
                 .into_boxed()
                 .filter(collection_table().primary_key().eq(collection_id))
-                .filter(Self::CollectionTimeDeletedColumn::default().is_null())
+                .filter(Self::CollectionTimeDeletedColumn::default().is_null()),
         );
         let resource_exists_query = Box::new(
             resource_table()
                 .into_boxed()
                 .filter(resource_table().primary_key().eq(resource_id))
-                .filter(Self::ResourceTimeDeletedColumn::default().is_null())
+                .filter(Self::ResourceTimeDeletedColumn::default().is_null()),
         );
 
         // Additionally, construct a new query to count the number of
@@ -337,9 +334,12 @@ pub trait DatastoreAttachTarget<ResourceType> : Selectable<Pg> {
         let resource_count_query = Box::new(
             resource_table()
                 .into_boxed()
-                .filter(Self::ResourceCollectionIdColumn::default().eq(collection_id))
+                .filter(
+                    Self::ResourceCollectionIdColumn::default()
+                        .eq(collection_id),
+                )
                 .filter(Self::ResourceTimeDeletedColumn::default().is_null())
-                .count()
+                .count(),
         );
 
         // For the queries which decide whether or not we'll perform the update,
@@ -354,20 +354,20 @@ pub trait DatastoreAttachTarget<ResourceType> : Selectable<Pg> {
         let collection_query = Box::new(
             collection_query
                 .filter(collection_table().primary_key().eq(collection_id))
-                .filter(Self::CollectionTimeDeletedColumn::default().is_null())
+                .filter(Self::CollectionTimeDeletedColumn::default().is_null()),
         );
         let resource_query = Box::new(
             resource_query
                 .filter(resource_table().primary_key().eq(resource_id))
                 .filter(Self::ResourceTimeDeletedColumn::default().is_null())
-                .filter(Self::ResourceCollectionIdColumn::default().is_null())
+                .filter(Self::ResourceCollectionIdColumn::default().is_null()),
         );
 
-        let update_resource_statement = update.into_boxed()
+        let update_resource_statement = update
+            .into_boxed()
             .filter(resource_table().primary_key().eq(resource_id));
 
         let collection_from_clause = collection_table().from_clause();
-        let collection_returning_clause = Self::as_returning();
         let resource_returning_clause = ResourceType::as_returning();
         AttachToCollectionStatement {
             collection_exists_query,
@@ -378,7 +378,6 @@ pub trait DatastoreAttachTarget<ResourceType> : Selectable<Pg> {
             max_attached_resources,
             update_resource_statement,
             collection_from_clause,
-            collection_returning_clause,
             resource_returning_clause,
         }
     }
@@ -406,11 +405,11 @@ where
     max_attached_resources: usize,
 
     // Update statement for the resource.
-    update_resource_statement: BoxedUpdateStatement<'static, Pg, ResourceTable<ResourceType, C>, V>,
+    update_resource_statement:
+        BoxedUpdateStatement<'static, Pg, ResourceTable<ResourceType, C>, V>,
     // Describes the target of the collection table UPDATE.
-    collection_from_clause: <CollectionTable<ResourceType, C> as QuerySource>::FromClause,
-    // Describes what should be returned after UPDATE-ing the collection.
-    collection_returning_clause: AsSelect<C, Pg>,
+    collection_from_clause:
+        <CollectionTable<ResourceType, C> as QuerySource>::FromClause,
     // Describes what should be returned after UPDATE-ing the resource.
     resource_returning_clause: AsSelect<ResourceType, Pg>,
 }
@@ -426,7 +425,8 @@ where
 }
 
 /// Result of [`AttachToCollectionStatement`] when executed asynchronously
-pub type AsyncAttachToCollectionResult<ResourceType, C> = Result<ResourceType, AttachError<ResourceType, C>>;
+pub type AsyncAttachToCollectionResult<ResourceType, C> =
+    Result<ResourceType, AttachError<ResourceType, C>>;
 
 /*
 /// Result of [`AttachToCollectionStatement`] when executed synchronously
@@ -445,11 +445,7 @@ pub enum AttachError<ResourceType, C> {
     /// The unchanged resource and collection are returned as a part of this
     /// error; it is the responsibility of the caller to determine which
     /// condition was not met.
-    NoUpdate {
-        attached_count: i64,
-        resource: ResourceType,
-        collection: C,
-    },
+    NoUpdate { attached_count: i64, resource: ResourceType, collection: C },
     /// Other database error
     DatabaseError(PoolError),
 }
@@ -467,7 +463,8 @@ pub enum SyncAttachError {
 
 /// Describes the type returned from the actual CTE, which is parsed
 /// and interpreted before propagating it to users of the Rust API.
-pub type RawOutput<ResourceType, C> = (i64, Option<C>, Option<ResourceType>, Option<C>, Option<ResourceType>);
+pub type RawOutput<ResourceType, C> =
+    (i64, Option<C>, Option<ResourceType>, Option<ResourceType>);
 
 impl<ResourceType, V, C> AttachToCollectionStatement<ResourceType, V, C>
 where
@@ -484,7 +481,11 @@ where
     ) -> AsyncAttachToCollectionResult<ResourceType, C>
     where
         // We require this bound to ensure that "Self" is runnable as query.
-        Self: query_methods::LoadQuery<'static, DbConnection, RawOutput<ResourceType, C>>,
+        Self: query_methods::LoadQuery<
+            'static,
+            DbConnection,
+            RawOutput<ResourceType, C>,
+        >,
     {
         self.get_result_async::<RawOutput<ResourceType, C>>(pool)
             .await
@@ -519,26 +520,22 @@ where
             attached_count,
             collection_before_update,
             resource_before_update,
-            collection_after_update,
-            resource_after_update
+            resource_after_update,
         ) = result;
 
-        let collection_before_update =
-            collection_before_update.ok_or_else(|| AttachError::CollectionNotFound)?;
+        let collection_before_update = collection_before_update
+            .ok_or_else(|| AttachError::CollectionNotFound)?;
 
-        let resource_before_update =
-            resource_before_update.ok_or_else(|| AttachError::ResourceNotFound)?;
+        let resource_before_update = resource_before_update
+            .ok_or_else(|| AttachError::ResourceNotFound)?;
 
-        match (collection_after_update, resource_after_update) {
-            (Some(_), Some(resource)) => Ok(resource),
-            (None, None) => {
-                Err(AttachError::NoUpdate {
-                    attached_count,
-                    resource: resource_before_update,
-                    collection: collection_before_update
-                })
-            }
-            _ => panic!("Partial update applied - This is a CTE bug"),
+        match resource_after_update {
+            Some(resource) => Ok(resource),
+            None => Err(AttachError::NoUpdate {
+                attached_count,
+                resource: resource_before_update,
+                collection: collection_before_update,
+            }),
         }
     }
 
@@ -586,8 +583,6 @@ where
         Nullable<SelectableSqlType<C>>,
         // If the resource exists, the value before update.
         Nullable<SelectableSqlType<ResourceType>>,
-        // If the collection was updated, the new value.
-        Nullable<SelectableSqlType<C>>,
         // If the resource was updated, the new value.
         Nullable<SelectableSqlType<ResourceType>>,
     );
@@ -606,9 +601,8 @@ type CollectionPrimaryKey<ResourceType, C> =
     <CollectionTable<ResourceType, C> as Table>::PrimaryKey;
 type ResourcePrimaryKey<ResourceType, C> =
     <ResourceTable<ResourceType, C> as Table>::PrimaryKey;
-type ResourceForeignKey<ResourceType, C> = <C as DatastoreAttachTarget<
-    ResourceType,
->>::ResourceCollectionIdColumn;
+type ResourceForeignKey<ResourceType, C> =
+    <C as DatastoreAttachTarget<ResourceType>>::ResourceCollectionIdColumn;
 
 // Representation of Primary Key in SQL.
 type SerializedCollectionPrimaryKey<ResourceType, C> =
@@ -628,7 +622,21 @@ type BoxedDslOutput<T> = diesel::internal::table_macro::BoxedSelectStatement<
     Pg,
 >;
 
-/// This implementation uses the following CTE:
+/// This implementation uses a CTE which attempts to do the following:
+///
+/// 1. (collection_by_id, resource_by_id): Identify if the collection and
+///    resource objects exist at all.
+/// 2. (resource_count): Identify if the number of resources already attached to
+///    the collection exceeds a threshold.
+/// 3. (collection_info, resource_info): Checks for arbitrary user-provided
+///    constraints on the collection and resource objects.
+/// 4. (do_update): IFF all previous checks succeeded, make a decision to perfom
+///    an update.
+/// 5. (updated_collection):  Increase the generation number on the collection.
+/// 6. (updated_resource): Apply user-provided updates on the resource -
+///    presumably, setting the collection ID value.
+///
+/// This is implemented as follows:
 ///
 /// ```text
 /// // WITH
@@ -672,10 +680,10 @@ type BoxedDslOutput<T> = diesel::internal::table_macro::BoxedSelectStatement<
 /// //          TRUE, FALSE),
 /// //      ),
 /// //      /* Update the generation number of the collection row */
-/// //      updated_collection AS (
+/// //      updated_collection AS MATERIALIZED (
 /// //          UPDATE C SET <generation number> = <generation_number> + 1
 /// //          WHERE <PK> IN (SELECT <PK> FROM collection_info) AND (SELECT * FROM do_update)
-/// //          RETURNING *
+/// //          RETURNING 1
 /// //      ),
 /// //      /* Update the resource */
 /// //      updated_resource AS (
@@ -687,32 +695,8 @@ type BoxedDslOutput<T> = diesel::internal::table_macro::BoxedSelectStatement<
 /// //      (SELECT * FROM resource_count)
 /// //      LEFT JOIN (SELECT * FROM collection_by_id) ON TRUE
 /// //      LEFT JOIN (SELECT * FROM resource_by_id) ON TRUE
-/// //      LEFT JOIN (SELECT * FROM updated_collection) ON TRUE
 /// //      LEFT JOIN (SELECT * FROM resource) ON TRUE;
 /// ```
-///
-/// This CTE is similar in desired behavior to the one specified in
-/// [RFD 192](https://rfd.shared.oxide.computer/rfd/0192#_dueling_administrators),
-/// but tuned to the case of modifying an associated resource.
-///
-/// The general idea is that the first clause of the CTE (the "dummy" table)
-/// will generate a division-by-zero error and rollback the transaction if the
-/// target collection is not found in its table. It simultaneously locks the
-/// row for update, to allow us to subsequently use the "updated_collection_row" query to
-/// increase the resource generation count for the collection. In the same
-/// transaction, it performs the provided update statement, which should
-/// update the resource, referencing the collection ID to the collection
-/// collection we just checked for.
-///
-/// NOTE: It is important that the WHERE clauses on the SELECT and UPDATE
-/// against the collection table must match, or else we will not get the desired
-/// behavior described in RFD 192.
-/// NOTE: It is important that the WITH clauses have MATERIALIZED, since under
-/// some conditions, clauses may be inlined (and potentially eliminated by
-/// consequence of being unused). At the time of writing this, this happens
-/// for the "dummy" table, preventing the division-by-zero error from occuring.
-/// The MATERIALIZED keyword forces the queries that are not referenced
-/// to be materialized instead.
 impl<ResourceType, V, C> QueryFragment<Pg>
     for AttachToCollectionStatement<ResourceType, V, C>
 where
@@ -723,11 +707,10 @@ where
     <CollectionTable<ResourceType, C> as QuerySource>::FromClause:
         QueryFragment<Pg>,
     // Necessary to "walk_ast" over "self.update_resource_statement".
-    BoxedUpdateStatement<'static, Pg, ResourceTable<ResourceType, C>, V>: QueryFragment<Pg>,
+    BoxedUpdateStatement<'static, Pg, ResourceTable<ResourceType, C>, V>:
+        QueryFragment<Pg>,
     // Necessary to "walk_ast" over "self.resource_returning_clause".
     AsSelect<ResourceType, Pg>: QueryFragment<Pg>,
-    // Necessary to "walk_ast" over "self.collection_returning_clause".
-    AsSelect<C, Pg>: QueryFragment<Pg>,
 {
     fn walk_ast<'b>(&'b self, mut out: AstPass<'_, 'b, Pg>) -> QueryResult<()> {
         out.unsafe_to_cache_prepared();
@@ -760,20 +743,23 @@ where
             self.max_attached_resources)
         );
 
-        out.push_sql("updated_collection AS (UPDATE ");
+        out.push_sql("updated_collection AS MATERIALIZED (UPDATE ");
         self.collection_from_clause.walk_ast(out.reborrow())?;
         out.push_sql(" SET ");
-        out.push_identifier(CollectionGenerationColumn::<ResourceType, C>::NAME)?;
+        out.push_identifier(
+            CollectionGenerationColumn::<ResourceType, C>::NAME,
+        )?;
         out.push_sql(" = ");
-        out.push_identifier(CollectionGenerationColumn::<ResourceType, C>::NAME)?;
+        out.push_identifier(
+            CollectionGenerationColumn::<ResourceType, C>::NAME,
+        )?;
         out.push_sql(" + 1 WHERE ");
         out.push_identifier(CollectionPrimaryKey::<ResourceType, C>::NAME)?;
         out.push_sql(" IN (SELECT ");
         out.push_identifier(CollectionPrimaryKey::<ResourceType, C>::NAME)?;
-        out.push_sql(" FROM collection_info) AND (SELECT * FROM do_update) RETURNING ");
-        // TODO: You don't actually need to return anything here. We only care
-        // about the inserted resource...
-        self.collection_returning_clause.walk_ast(out.reborrow())?;
+        out.push_sql(
+            " FROM collection_info) AND (SELECT * FROM do_update) RETURNING 1",
+        );
         out.push_sql("), ");
 
         out.push_sql("updated_resource AS (");
@@ -804,12 +790,13 @@ where
         // By returning a static number of columns, each component of the
         // "RawOutput" tuple can be parsed, regardless of nullability, without
         // preventing later portions of the result from being parsed.
-        out.push_sql("SELECT * FROM \
+        out.push_sql(
+            "SELECT * FROM \
             (SELECT * FROM resource_count) \
             LEFT JOIN (SELECT * FROM collection_by_id) ON TRUE \
             LEFT JOIN (SELECT * FROM resource_by_id) ON TRUE \
-            LEFT JOIN (SELECT * FROM updated_collection) ON TRUE \
-            LEFT JOIN (SELECT * FROM updated_resource) ON TRUE;");
+            LEFT JOIN (SELECT * FROM updated_resource) ON TRUE;",
+        );
 
         Ok(())
     }
@@ -892,7 +879,9 @@ mod test {
     }
 
     /// Describes a resource within the database.
-    #[derive(Clone, Queryable, Insertable, Debug, Resource, Selectable, PartialEq)]
+    #[derive(
+        Clone, Queryable, Insertable, Debug, Resource, Selectable, PartialEq,
+    )]
     #[diesel(table_name = resource)]
     struct Resource {
         #[diesel(embed)]
@@ -900,7 +889,9 @@ mod test {
         pub collection_id: Option<uuid::Uuid>,
     }
 
-    #[derive(Clone, Queryable, Insertable, Debug, Resource, Selectable, PartialEq)]
+    #[derive(
+        Clone, Queryable, Insertable, Debug, Resource, Selectable, PartialEq,
+    )]
     #[diesel(table_name = collection)]
     struct Collection {
         #[diesel(embed)]
@@ -920,7 +911,11 @@ mod test {
         type ResourceTimeDeletedColumn = resource::dsl::time_deleted;
     }
 
-    async fn insert_collection(id: Uuid, name: &str, pool: &db::Pool) -> Collection {
+    async fn insert_collection(
+        id: Uuid,
+        name: &str,
+        pool: &db::Pool,
+    ) -> Collection {
         let create_params = IdentityMetadataCreateParams {
             name: Name::try_from(name.to_string()).unwrap(),
             description: "description".to_string(),
@@ -948,7 +943,11 @@ mod test {
             .unwrap()
     }
 
-    async fn insert_resource(id: Uuid, name: &str, pool: &db::Pool) -> Resource {
+    async fn insert_resource(
+        id: Uuid,
+        name: &str,
+        pool: &db::Pool,
+    ) -> Resource {
         let create_params = IdentityMetadataCreateParams {
             name: Name::try_from(name.to_string()).unwrap(),
             description: "description".to_string(),
@@ -991,7 +990,7 @@ mod test {
             resource::table.into_boxed(),
             12345,
             diesel::update(resource::table)
-                .set(resource::dsl::collection_id.eq(collection_id))
+                .set(resource::dsl::collection_id.eq(collection_id)),
         );
         let query = diesel::debug_query::<Pg, _>(&attach).to_string();
 
@@ -1073,7 +1072,7 @@ mod test {
                 TRUE,\
                 FALSE)\
             ), \
-            updated_collection AS (\
+            updated_collection AS MATERIALIZED (\
                 UPDATE \
                     \"test_schema\".\"collection\" \
                 SET \
@@ -1081,14 +1080,7 @@ mod test {
                 WHERE \
                     \"id\" IN (SELECT \"id\" FROM collection_info) AND \
                     (SELECT * FROM do_update) \
-                RETURNING \
-                    \"test_schema\".\"collection\".\"id\", \
-                    \"test_schema\".\"collection\".\"name\", \
-                    \"test_schema\".\"collection\".\"description\", \
-                    \"test_schema\".\"collection\".\"time_created\", \
-                    \"test_schema\".\"collection\".\"time_modified\", \
-                    \"test_schema\".\"collection\".\"time_deleted\", \
-                    \"test_schema\".\"collection\".\"rcgen\"\
+                RETURNING 1\
             ), \
             updated_resource AS (\
                 UPDATE \
@@ -1111,14 +1103,14 @@ mod test {
                 (SELECT * FROM resource_count) \
                 LEFT JOIN (SELECT * FROM collection_by_id) ON TRUE \
                 LEFT JOIN (SELECT * FROM resource_by_id) ON TRUE \
-                LEFT JOIN (SELECT * FROM updated_collection) ON TRUE \
                 LEFT JOIN (SELECT * FROM updated_resource) ON TRUE; -- binds: [cccccccc-cccc-cccc-cccc-cccccccccccc, aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa, cccccccc-cccc-cccc-cccc-cccccccccccc, cccccccc-cccc-cccc-cccc-cccccccccccc, aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa, cccccccc-cccc-cccc-cccc-cccccccccccc, aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa]";
         assert_eq!(query, expected_query);
     }
 
     #[tokio::test]
     async fn test_attach_missing_collection_fails() {
-        let logctx = dev::test_setup_log("test_attach_missing_collection_fails");
+        let logctx =
+            dev::test_setup_log("test_attach_missing_collection_fails");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&cfg);
@@ -1134,7 +1126,7 @@ mod test {
             resource::table.into_boxed(),
             10,
             diesel::update(resource::table)
-                .set(resource::dsl::collection_id.eq(collection_id))
+                .set(resource::dsl::collection_id.eq(collection_id)),
         )
         .attach_and_get_result_async(pool.pool())
         .await;
@@ -1195,7 +1187,8 @@ mod test {
         let resource_id = uuid::Uuid::new_v4();
 
         // Create the collection
-        let collection = insert_collection(collection_id, "collection", &pool).await;
+        let collection =
+            insert_collection(collection_id, "collection", &pool).await;
 
         // Attempt to attach - even though the resource does not exist.
         let attach = Collection::attach_resource(
@@ -1205,7 +1198,7 @@ mod test {
             resource::table.into_boxed(),
             10,
             diesel::update(resource::table)
-                .set(resource::dsl::collection_id.eq(collection_id))
+                .set(resource::dsl::collection_id.eq(collection_id)),
         )
         .attach_and_get_result_async(pool.pool())
         .await;
@@ -1231,7 +1224,8 @@ mod test {
         let resource_id = uuid::Uuid::new_v4();
 
         // Create the collection and resource.
-        let collection = insert_collection(collection_id, "collection", &pool).await;
+        let collection =
+            insert_collection(collection_id, "collection", &pool).await;
         let _resource = insert_resource(resource_id, "resource", &pool).await;
 
         // Attach the resource to the collection.
@@ -1242,7 +1236,7 @@ mod test {
             resource::table.into_boxed(),
             10,
             diesel::update(resource::table)
-                .set(resource::dsl::collection_id.eq(collection_id))
+                .set(resource::dsl::collection_id.eq(collection_id)),
         )
         .attach_and_get_result_async(pool.pool())
         .await;
@@ -1256,7 +1250,10 @@ mod test {
         // The returned resource value should be the latest value in the DB.
         assert_eq!(returned_resource, get_resource(resource_id, &pool).await);
         // The generation number should have incremented in the collection.
-        assert_eq!(collection.rcgen + 1, get_collection(collection_id, &pool).await.rcgen);
+        assert_eq!(
+            collection.rcgen + 1,
+            get_collection(collection_id, &pool).await.rcgen
+        );
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
@@ -1276,12 +1273,14 @@ mod test {
         let collection_id = uuid::Uuid::new_v4();
 
         // Create the collection.
-        let collection = insert_collection(collection_id, "collection", &pool).await;
+        let collection =
+            insert_collection(collection_id, "collection", &pool).await;
 
         // Create each resource, attaching them to the collection.
         for i in 0..RESOURCE_COUNT {
             let resource_id = uuid::Uuid::new_v4();
-            insert_resource(resource_id, &format!("resource{}", i), &pool).await;
+            insert_resource(resource_id, &format!("resource{}", i), &pool)
+                .await;
 
             // Attach the resource to the collection.
             let attach = Collection::attach_resource(
@@ -1291,7 +1290,7 @@ mod test {
                 resource::table.into_boxed(),
                 RESOURCE_COUNT,
                 diesel::update(resource::table)
-                    .set(resource::dsl::collection_id.eq(collection_id))
+                    .set(resource::dsl::collection_id.eq(collection_id)),
             )
             .attach_and_get_result_async(pool.pool())
             .await;
@@ -1299,11 +1298,16 @@ mod test {
             // "attach_and_get_result_async" should return the "attached" resource.
             let returned_resource = attach.expect("Attach should have worked");
             assert_eq!(
-                returned_resource.collection_id.expect("Expected a collection ID"),
+                returned_resource
+                    .collection_id
+                    .expect("Expected a collection ID"),
                 collection_id
             );
             // The returned resource value should be the latest value in the DB.
-            assert_eq!(returned_resource, get_resource(resource_id, &pool).await);
+            assert_eq!(
+                returned_resource,
+                get_resource(resource_id, &pool).await
+            );
 
             // The generation number should have incremented in the collection.
             assert_eq!(
@@ -1328,7 +1332,8 @@ mod test {
         let collection_id = uuid::Uuid::new_v4();
 
         // Attach a resource to a collection, as usual.
-        let collection = insert_collection(collection_id, "collection", &pool).await;
+        let collection =
+            insert_collection(collection_id, "collection", &pool).await;
         let resource_id1 = uuid::Uuid::new_v4();
         let _resource = insert_resource(resource_id1, "resource1", &pool).await;
         let attach = Collection::attach_resource(
@@ -1338,11 +1343,14 @@ mod test {
             resource::table.into_boxed(),
             1,
             diesel::update(resource::table)
-                .set(resource::dsl::collection_id.eq(collection_id))
+                .set(resource::dsl::collection_id.eq(collection_id)),
         )
         .attach_and_get_result_async(pool.pool())
         .await;
-        assert_eq!(attach.expect("Attach should have worked").id(), resource_id1);
+        assert_eq!(
+            attach.expect("Attach should have worked").id(),
+            resource_id1
+        );
 
         // Let's try attaching a second resource, now that we're at capacity.
         let resource_id2 = uuid::Uuid::new_v4();
@@ -1354,7 +1362,7 @@ mod test {
             resource::table.into_boxed(),
             1,
             diesel::update(resource::table)
-                .set(resource::dsl::collection_id.eq(collection_id))
+                .set(resource::dsl::collection_id.eq(collection_id)),
         )
         .attach_and_get_result_async(pool.pool())
         .await;
@@ -1364,13 +1372,19 @@ mod test {
             AttachError::NoUpdate { attached_count, resource, collection } => {
                 assert_eq!(attached_count, 1);
                 assert_eq!(resource, get_resource(resource_id2, &pool).await);
-                assert_eq!(collection, get_collection(collection_id, &pool).await);
-            },
+                assert_eq!(
+                    collection,
+                    get_collection(collection_id, &pool).await
+                );
+            }
             _ => panic!("Unexpected error: {:?}", err),
         };
 
         // The generation number should only have bumped once.
-        assert_eq!(collection.rcgen + 1, get_collection(collection_id, &pool).await.rcgen);
+        assert_eq!(
+            collection.rcgen + 1,
+            get_collection(collection_id, &pool).await.rcgen
+        );
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
@@ -1388,7 +1402,8 @@ mod test {
         let collection_id = uuid::Uuid::new_v4();
 
         // Attach a resource to a collection, as usual.
-        let collection = insert_collection(collection_id, "collection", &pool).await;
+        let collection =
+            insert_collection(collection_id, "collection", &pool).await;
         let resource_id = uuid::Uuid::new_v4();
         let _resource = insert_resource(resource_id, "resource", &pool).await;
         let attach = Collection::attach_resource(
@@ -1398,11 +1413,14 @@ mod test {
             resource::table.into_boxed(),
             10,
             diesel::update(resource::table)
-                .set(resource::dsl::collection_id.eq(collection_id))
+                .set(resource::dsl::collection_id.eq(collection_id)),
         )
         .attach_and_get_result_async(pool.pool())
         .await;
-        assert_eq!(attach.expect("Attach should have worked").id(), resource_id);
+        assert_eq!(
+            attach.expect("Attach should have worked").id(),
+            resource_id
+        );
 
         // Try attaching when well below the capacity.
         let attach = Collection::attach_resource(
@@ -1412,7 +1430,7 @@ mod test {
             resource::table.into_boxed(),
             10,
             diesel::update(resource::table)
-                .set(resource::dsl::collection_id.eq(collection_id))
+                .set(resource::dsl::collection_id.eq(collection_id)),
         )
         .attach_and_get_result_async(pool.pool())
         .await;
@@ -1426,12 +1444,18 @@ mod test {
             AttachError::NoUpdate { attached_count, resource, collection } => {
                 assert_eq!(attached_count, 1);
                 assert_eq!(
-                    *resource.collection_id.as_ref().expect("Should already be attached"),
+                    *resource
+                        .collection_id
+                        .as_ref()
+                        .expect("Should already be attached"),
                     collection_id
                 );
                 assert_eq!(resource, get_resource(resource_id, &pool).await);
-                assert_eq!(collection, get_collection(collection_id, &pool).await);
-            },
+                assert_eq!(
+                    collection,
+                    get_collection(collection_id, &pool).await
+                );
+            }
             _ => panic!("Unexpected error: {:?}", err),
         };
 
@@ -1443,7 +1467,7 @@ mod test {
             resource::table.into_boxed(),
             1,
             diesel::update(resource::table)
-                .set(resource::dsl::collection_id.eq(collection_id))
+                .set(resource::dsl::collection_id.eq(collection_id)),
         )
         .attach_and_get_result_async(pool.pool())
         .await;
@@ -1454,18 +1478,27 @@ mod test {
             AttachError::NoUpdate { attached_count, resource, collection } => {
                 assert_eq!(attached_count, 1);
                 assert_eq!(
-                    *resource.collection_id.as_ref().expect("Should already be attached"),
+                    *resource
+                        .collection_id
+                        .as_ref()
+                        .expect("Should already be attached"),
                     collection_id
                 );
                 assert_eq!(resource, get_resource(resource_id, &pool).await);
-                assert_eq!(collection, get_collection(collection_id, &pool).await);
-            },
+                assert_eq!(
+                    collection,
+                    get_collection(collection_id, &pool).await
+                );
+            }
             _ => panic!("Unexpected error: {:?}", err),
         };
 
         // The generation number should only have bumped once, from the original
         // resource insertion.
-        assert_eq!(collection.rcgen + 1, get_collection(collection_id, &pool).await.rcgen);
+        assert_eq!(
+            collection.rcgen + 1,
+            get_collection(collection_id, &pool).await.rcgen
+        );
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
@@ -1484,7 +1517,8 @@ mod test {
         let resource_id = uuid::Uuid::new_v4();
 
         // Create the collection and resource.
-        let collection = insert_collection(collection_id, "collection", &pool).await;
+        let collection =
+            insert_collection(collection_id, "collection", &pool).await;
         let _resource = insert_resource(resource_id, "resource", &pool).await;
 
         // Attach the resource to the collection.
@@ -1495,7 +1529,9 @@ mod test {
         let attach = Collection::attach_resource(
             collection_id,
             resource_id,
-            collection::table.filter(collection::name.eq("collection")).into_boxed(),
+            collection::table
+                .filter(collection::name.eq("collection"))
+                .into_boxed(),
             resource::table.filter(resource::name.eq("resource")).into_boxed(),
             10,
             // When actually performing the update, update the collection ID
@@ -1503,11 +1539,10 @@ mod test {
             //
             // This provides an example of how one could attach an ID and update
             // the state of a resource simultaneously.
-            diesel::update(resource::table)
-                .set((
-                    resource::dsl::collection_id.eq(collection_id),
-                    resource::dsl::description.eq("new description".to_string())
-                ))
+            diesel::update(resource::table).set((
+                resource::dsl::collection_id.eq(collection_id),
+                resource::dsl::description.eq("new description".to_string()),
+            )),
         )
         .attach_and_get_result_async(pool.pool())
         .await;
@@ -1519,7 +1554,10 @@ mod test {
         );
         assert_eq!(returned_resource, get_resource(resource_id, &pool).await);
         assert_eq!(returned_resource.description(), "new description");
-        assert_eq!(collection.rcgen + 1, get_collection(collection_id, &pool).await.rcgen);
+        assert_eq!(
+            collection.rcgen + 1,
+            get_collection(collection_id, &pool).await.rcgen
+        );
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
@@ -1538,15 +1576,18 @@ mod test {
         let resource_id = uuid::Uuid::new_v4();
 
         // Create the collection and resource.
-        let _collection = insert_collection(collection_id, "collection", &pool).await;
+        let _collection =
+            insert_collection(collection_id, "collection", &pool).await;
         let _resource = insert_resource(resource_id, "resource", &pool).await;
 
         // Immediately soft-delete the resource.
-        diesel::update(resource::table.filter(resource::dsl::id.eq(resource_id)))
-            .set(resource::dsl::time_deleted.eq(Utc::now()))
-            .execute_async(pool.pool())
-            .await
-            .unwrap();
+        diesel::update(
+            resource::table.filter(resource::dsl::id.eq(resource_id)),
+        )
+        .set(resource::dsl::time_deleted.eq(Utc::now()))
+        .execute_async(pool.pool())
+        .await
+        .unwrap();
 
         // Attach the resource to the collection. Observe a failure which is
         // indistinguishable from the resource not existing.
@@ -1556,7 +1597,8 @@ mod test {
             collection::table.into_boxed(),
             resource::table.into_boxed(),
             10,
-            diesel::update(resource::table).set(resource::dsl::collection_id.eq(collection_id))
+            diesel::update(resource::table)
+                .set(resource::dsl::collection_id.eq(collection_id)),
         )
         .attach_and_get_result_async(pool.pool())
         .await;
@@ -1578,22 +1620,27 @@ mod test {
         let collection_id = uuid::Uuid::new_v4();
 
         // Create the collection and some resources.
-        let _collection = insert_collection(collection_id, "collection", &pool).await;
+        let _collection =
+            insert_collection(collection_id, "collection", &pool).await;
         let resource_id1 = uuid::Uuid::new_v4();
         let resource_id2 = uuid::Uuid::new_v4();
-        let _resource1 = insert_resource(resource_id1, "resource1", &pool).await;
-        let _resource2 = insert_resource(resource_id2, "resource2", &pool).await;
+        let _resource1 =
+            insert_resource(resource_id1, "resource1", &pool).await;
+        let _resource2 =
+            insert_resource(resource_id2, "resource2", &pool).await;
 
         // Attach the resource to the collection.
         //
-        // NOTE: In the update statement, we aren't filtering by resource ID.
+        // NOTE: In the update statement, we aren't filtering by resource ID,
+        // even though we explicitly have two "live" resources".
         let attach = Collection::attach_resource(
             collection_id,
             resource_id1,
             collection::table.into_boxed(),
             resource::table.into_boxed(),
             10,
-            diesel::update(resource::table).set(resource::dsl::collection_id.eq(collection_id))
+            diesel::update(resource::table)
+                .set(resource::dsl::collection_id.eq(collection_id)),
         )
         .attach_and_get_result_async(pool.pool())
         .await;
@@ -1601,100 +1648,21 @@ mod test {
         let returned_resource = attach.expect("Attach should have worked");
         assert_eq!(returned_resource.id(), resource_id1);
 
-        assert_eq!(get_resource(resource_id1, &pool).await.collection_id.unwrap(), collection_id);
-        assert!(get_resource(resource_id2, &pool).await.collection_id.is_none());
+        // Note that only "resource1" should be attached.
+        // "resource2" should have automatically been filtered away from the
+        // update statement, regardless of user input.
+        assert_eq!(
+            get_resource(resource_id1, &pool).await.collection_id.unwrap(),
+            collection_id
+        );
+        assert!(get_resource(resource_id2, &pool)
+            .await
+            .collection_id
+            .is_none());
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
 
-    // TODO: What if the filter is different in the resource vs update calls?
-
-    // TODO: test no filter in update?
-    // TODO: Try to break things
     // TODO: Sync API
-
-    /*
-    #[tokio::test]
-    async fn test_collection_present() {
-        let logctx = dev::test_setup_log("test_collection_present");
-        let mut db = test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&cfg);
-
-        setup_db(&pool).await;
-
-        let collection_id = uuid::Uuid::new_v4();
-        let resource_id = uuid::Uuid::new_v4();
-
-        // Insert the collection so it's present later
-        diesel::insert_into(collection::table)
-            .values(vec![(
-                collection::dsl::id.eq(collection_id),
-                collection::dsl::name.eq("test"),
-                collection::dsl::description.eq("desc"),
-                collection::dsl::time_created.eq(Utc::now()),
-                collection::dsl::time_modified.eq(Utc::now()),
-                collection::dsl::rcgen.eq(1),
-            )])
-            .execute_async(pool.pool())
-            .await
-            .unwrap();
-
-        // Insert the resource so it's present later
-        let insert_time =
-            DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(0, 0), Utc);
-        diesel::insert_into(resource::table)
-            .values(vec![(
-                resource::dsl::id.eq(resource_id),
-                resource::dsl::name.eq("test"),
-                resource::dsl::description.eq("desc"),
-                resource::dsl::time_created.eq(insert_time),
-                resource::dsl::time_modified.eq(insert_time),
-                resource::dsl::collection_id.eq(Option::<uuid::Uuid>::None),
-            )])
-            .execute_async(pool.pool())
-            .await
-            .unwrap();
-
-        // Attempt to attach the resource.
-        let update_time =
-            DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(1, 0), Utc);
-        let resource = Collection::attach_resource(
-            collection_id,
-            Generation::new(),
-            diesel::update(
-                resource::table
-                    .filter(resource::dsl::id.eq(resource_id))
-                    .filter(resource::dsl::time_deleted.is_null())
-            ).set((
-                resource::dsl::collection_id.eq(collection_id),
-                resource::dsl::time_modified.eq(update_time),
-            ))
-        )
-        .attach_and_get_result_async(pool.pool())
-        .await
-        .unwrap();
-        assert_eq!(resource.id(), resource_id);
-        assert_eq!(resource.name().as_str(), "test");
-        assert_eq!(resource.description(), "desc");
-        assert_eq!(resource.time_created(), insert_time);
-        assert_eq!(resource.time_modified(), update_time);
-        assert_eq!(resource.collection_id.unwrap(), collection_id);
-
-        let collection_rcgen = collection::table
-            .find(collection_id)
-            .select(collection::dsl::rcgen)
-            .first_async::<i64>(pool.pool())
-            .await
-            .unwrap();
-
-        // Make sure rcgen got incremented
-        assert_eq!(collection_rcgen, 2);
-
-        db.cleanup().await.unwrap();
-        logctx.cleanup_successful();
-    }
-
-    */
 }

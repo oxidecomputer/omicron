@@ -114,7 +114,6 @@ async fn sda_update_sled_agent(
 async fn sda_update_sled_agent_undo(
     _sagactx: ActionContext<SagaDiskAttach>,
 ) -> Result<(), anyhow::Error> {
-
     // TODO: Undo the "disk_put".
     todo!();
 }
