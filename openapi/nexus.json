@@ -10,6 +10,147 @@
     "version": "0.0.1"
   },
   "paths": {
+    "/client/authenticate": {
+      "post": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "Start an OAuth 2.0 Device Authorization Grant",
+        "description": "This endpoint is designed to be accessed from an unauthenticated API client. It generates and records a `device_code` and `user_code` which must be verified and confirmed prior to a token being granted.",
+        "operationId": "client_authenticate",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthenticateParams"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientAuthentication"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/client/confirm": {
+      "post": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "Confirm an OAuth 2.0 Device Authorization Grant",
+        "description": "This endpoint is designed to be accessed by the user agent (browser), not the client requesting the token. So we do not actually return the token here; it will be returned in response to the poll on `/client/token`.",
+        "operationId": "client_confirm",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientVerificationParams"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Null",
+                  "type": "string",
+                  "enum": [
+                    null
+                  ]
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/client/token": {
+      "post": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "Finish an OAuth 2.0 Device Authorization Grant",
+        "description": "This endpoint should be polled by the client until the user code is verified and the grant is confirmed.",
+        "operationId": "client_grant_token",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenRequestParams"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/client/verify": {
+      "get": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "Verify an OAuth 2.0 Device Authorization Grant",
+        "description": "Verify the user code and redirect to the login page. This endpoint should be accessed in a full user agent (e.g., a browser). If the user is not logged in, we redirect them to the login page and use the `state` parameter to get them back here on completion.",
+        "operationId": "client_verify",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "user_code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/hardware/racks": {
       "get": {
         "tags": [
@@ -5498,6 +5639,18 @@
       }
     },
     "schemas": {
+      "AuthenticateParams": {
+        "type": "object",
+        "properties": {
+          "client_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "client_id"
+        ]
+      },
       "BlockSize": {
         "title": "disk block size in bytes",
         "type": "integer",
@@ -5512,6 +5665,52 @@
         "type": "integer",
         "format": "uint64",
         "minimum": 0
+      },
+      "ClientAuthentication": {
+        "description": "Response to an authentication request. See RFC 8628 §3.2 (Device Authorization Response).",
+        "type": "object",
+        "properties": {
+          "device_code": {
+            "description": "The device (client) verification code.",
+            "type": "string"
+          },
+          "expires_in": {
+            "description": "The lifetime in seconds of the `device_code` and `user_code`.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "user_code": {
+            "description": "The end-user verification code.",
+            "type": "string"
+          },
+          "verification_uri": {
+            "description": "The end-user verification URI on the authorization server. The URI should be short and easy to remember as end users may be asked to manually type it into their user agent.",
+            "type": "string"
+          },
+          "verification_uri_complete": {
+            "description": "A verification URI that includes the `user_code` (or other information with the same function as the `user_code`), which is designed for non-textual transmission.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "device_code",
+          "expires_in",
+          "user_code",
+          "verification_uri",
+          "verification_uri_complete"
+        ]
+      },
+      "ClientVerificationParams": {
+        "type": "object",
+        "properties": {
+          "user_code": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_code"
+        ]
       },
       "DatumType": {
         "description": "The type of an individual datum of a metric.",
@@ -8504,6 +8703,26 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "TokenRequestParams": {
+        "type": "object",
+        "properties": {
+          "client_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "device_code": {
+            "type": "string"
+          },
+          "grant_type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_id",
+          "device_code",
+          "grant_type"
         ]
       },
       "User": {

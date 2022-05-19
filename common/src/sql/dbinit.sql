@@ -1112,6 +1112,36 @@ INSERT INTO omicron.public.user_builtin (
     NOW()
 );
 
+/*
+ * API client authentication and token granting à la RFC 8628
+ * (OAuth 2.0 Device Authorization Grant)
+ */
+
+-- Client authentication request record.
+CREATE TABLE omicron.public.client_authentication (
+    client_id UUID NOT NULL,
+    device_code STRING(40) NOT NULL,
+    user_code STRING(63) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_expires TIMESTAMPTZ NOT NULL,
+
+    PRIMARY KEY (client_id, device_code)
+);
+
+-- Fast lookup by user_code for verification
+CREATE INDEX ON omicron.public.client_authentication (user_code);
+
+-- Tokens granted in response to user authentication.
+-- TODO: expire tokens.
+CREATE TABLE omicron.public.client_token (
+    token STRING(40) PRIMARY KEY,
+    client_id UUID NOT NULL,
+    device_code STRING(40) NOT NULL,
+    silo_user_id UUID NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX ON omicron.public.client_token (client_id, device_code);
 
 /*
  * Roles built into the system

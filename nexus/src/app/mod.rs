@@ -20,6 +20,7 @@ use uuid::Uuid;
 
 // The implementation of Nexus is large, and split into a number of submodules
 // by resource.
+mod client_api;
 mod disk;
 mod iam;
 mod image;

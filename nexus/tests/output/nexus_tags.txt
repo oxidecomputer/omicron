@@ -12,6 +12,10 @@ vpc_firewall_rules_put                   /organizations/{organization_name}/proj
 
 API operations found with tag "hidden"
 OPERATION ID                             URL PATH
+client_authenticate                      /client/authenticate
+client_confirm                           /client/confirm
+client_grant_token                       /client/token
+client_verify                            /client/verify
 logout                                   /logout
 session_me                               /session/me
 spoof_login                              /login

@@ -77,11 +77,9 @@ impl Context {
     ) -> Result<&Actor, omicron_common::api::external::Error> {
         match &self.kind {
             Kind::Authenticated(Details { actor }) => Ok(actor),
-            Kind::Unauthenticated => {
-                Err(omicron_common::api::external::Error::Unauthenticated {
-                    internal_message: "Actor required".to_string(),
-                })
-            }
+            _ => Err(omicron_common::api::external::Error::Unauthenticated {
+                internal_message: "Actor required".to_string(),
+            }),
         }
     }
 
@@ -128,6 +126,7 @@ impl Context {
                 LookupType::ById(*silo_id),
             )),
             Actor::UserBuiltin { .. } => None,
+            Actor::ApiClient { .. } => None,
         })
     }
 
@@ -265,10 +264,12 @@ mod test {
 /// that's specific to whether they're authenticated (or not)
 #[derive(Clone, Debug, Deserialize, Serialize)]
 enum Kind {
-    /// Client successfully authenticated
-    Authenticated(Details),
     /// Client did not attempt to authenticate
     Unauthenticated,
+    /// Client has requested an authentication token
+    Authenticating(Details),
+    /// Client successfully authenticated
+    Authenticated(Details),
 }
 
 /// Describes the actor that was authenticated
@@ -286,6 +287,7 @@ pub struct Details {
 pub enum Actor {
     UserBuiltin { user_builtin_id: Uuid },
     SiloUser { silo_user_id: Uuid, silo_id: Uuid },
+    ApiClient { client_id: Uuid },
 }
 
 impl Actor {
@@ -293,6 +295,7 @@ impl Actor {
         match self {
             Actor::UserBuiltin { .. } => db::model::IdentityType::UserBuiltin,
             Actor::SiloUser { .. } => db::model::IdentityType::SiloUser,
+            Actor::ApiClient { .. } => db::model::IdentityType::ApiClient,
         }
     }
 
@@ -300,6 +303,7 @@ impl Actor {
         match self {
             Actor::UserBuiltin { user_builtin_id, .. } => *user_builtin_id,
             Actor::SiloUser { silo_user_id, .. } => *silo_user_id,
+            Actor::ApiClient { client_id } => *client_id,
         }
     }
 
@@ -307,6 +311,7 @@ impl Actor {
         match self {
             Actor::UserBuiltin { .. } => None,
             Actor::SiloUser { silo_id, .. } => Some(*silo_id),
+            Actor::ApiClient { .. } => todo!("what silo is an API client in?"),
         }
     }
 }
@@ -329,6 +334,10 @@ impl std::fmt::Debug for Actor {
                 .debug_struct("Actor::SiloUser")
                 .field("silo_user_id", &silo_user_id)
                 .field("silo_id", &silo_id)
+                .finish_non_exhaustive(),
+            Actor::ApiClient { client_id } => f
+                .debug_struct("Actor::ApiClient")
+                .field("client_id", &client_id)
                 .finish_non_exhaustive(),
         }
     }

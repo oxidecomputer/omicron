@@ -5,7 +5,7 @@
 //! Handler functions (entrypoints) for external HTTP APIs
 
 use super::{
-    console_api, params, views,
+    client_api, console_api, params, views,
     views::{
         GlobalImage, IdentityProvider, Image, Organization, Project, Rack,
         Role, Silo, Sled, Snapshot, SshKey, User, Vpc, VpcRouter, VpcSubnet,
@@ -205,6 +205,11 @@ pub fn external_api() -> NexusApiDescription {
 
         api.register(console_api::login)?;
         api.register(console_api::consume_credentials)?;
+
+        api.register(client_api::client_authenticate)?;
+        api.register(client_api::client_verify)?;
+        api.register(client_api::client_confirm)?;
+        api.register(client_api::client_grant_token)?;
 
         Ok(())
     }

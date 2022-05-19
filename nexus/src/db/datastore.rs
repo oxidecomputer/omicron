@@ -50,9 +50,10 @@ use crate::db::{
         public_error_from_diesel_pool, ErrorHandler, TransactionError,
     },
     model::{
-        ConsoleSession, Dataset, DatasetKind, Disk, DiskRuntimeState,
-        Generation, GlobalImage, IdentityProvider, IncompleteNetworkInterface,
-        Instance, InstanceRuntimeState, Name, NetworkInterface, Organization,
+        ClientAuthentication, ClientToken, ConsoleSession, Dataset,
+        DatasetKind, Disk, DiskRuntimeState, Generation, GlobalImage,
+        IdentityProvider, IncompleteNetworkInterface, Instance,
+        InstanceRuntimeState, Name, NetworkInterface, Organization,
         OrganizationUpdate, OximeterInfo, ProducerEndpoint, Project,
         ProjectUpdate, Rack, Region, RoleAssignment, RoleBuiltin, RouterRoute,
         RouterRouteUpdate, Service, Silo, SiloUser, Sled, SshKey,
@@ -3675,6 +3676,87 @@ impl DataStore {
             })
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    // Client authentication and token granting
+
+    pub async fn client_authenticate(
+        &self,
+        opctx: &OpContext,
+        client_authn: ClientAuthentication,
+    ) -> CreateResult<ClientAuthentication> {
+        //opctx.authorize(authz::Action::CreateChild, &client_authn.client_id).await?;
+
+        use db::schema::client_authentication::dsl;
+        diesel::insert_into(dsl::client_authentication)
+            .values(client_authn)
+            .returning(ClientAuthentication::as_returning())
+            .get_result_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                Error::internal_error(&format!(
+                    "error creating client authentication record: {:?}",
+                    e
+                ))
+            })
+    }
+
+    pub async fn client_verify(
+        &self,
+        opctx: &OpContext,
+        user_code: String,
+    ) -> LookupResult<ClientAuthentication> {
+        use db::schema::client_authentication::dsl;
+        dsl::client_authentication
+            .filter(dsl::user_code.eq(user_code))
+            .filter(dsl::time_expires.gt(Utc::now()))
+            .select(ClientAuthentication::as_select())
+            .get_result_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                // TODO-correctness: better error (not found)
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            })
+    }
+
+    pub async fn client_grant_token(
+        &self,
+        opctx: &OpContext,
+        client_token: ClientToken,
+    ) -> CreateResult<ClientToken> {
+        //opctx.authorize(authz::Action::CreateChild, &client_token.client_id).await?;
+
+        use db::schema::client_token::dsl;
+        diesel::insert_into(dsl::client_token)
+            .values(client_token)
+            .returning(ClientToken::as_returning())
+            .get_result_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                Error::internal_error(&format!(
+                    "error creating client token: {:?}",
+                    e
+                ))
+            })
+    }
+
+    pub async fn client_get_token(
+        &self,
+        opctx: &OpContext,
+        client_id: Uuid,
+        device_code: String,
+    ) -> LookupResult<ClientToken> {
+        use db::schema::client_token::dsl;
+        dsl::client_token
+            .filter(dsl::client_id.eq(client_id))
+            .filter(dsl::device_code.eq(device_code))
+            .select(ClientToken::as_select())
+            .get_result_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                // TODO-correctness: better error (not found)
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            })
     }
 
     // Test interfaces

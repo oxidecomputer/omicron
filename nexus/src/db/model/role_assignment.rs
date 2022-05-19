@@ -29,6 +29,7 @@ impl_enum_type!(
     // Enum values
     UserBuiltin => b"user_builtin"
     SiloUser => b"silo_user"
+    ApiClient => b"api_client"
 );
 
 impl From<shared::IdentityType> for IdentityType {

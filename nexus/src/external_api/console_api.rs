@@ -265,7 +265,7 @@ pub struct LoginUrlQuery {
 /// Generate URL to IdP login form. Optional `state` param is included in query
 /// string if present, and will typically represent the URL to send the user
 /// back to after successful login.
-fn get_login_url(state: Option<String>) -> String {
+pub fn get_login_url(state: Option<String>) -> String {
     // assume state is not URL encoded, so no risk of double encoding (dropshot
     // decodes it on the way in)
     let query = match state {
@@ -410,7 +410,7 @@ fn cache_control_header_value(apictx: &Arc<ServerContext>) -> String {
     )
 }
 
-async fn serve_console_index(
+pub async fn serve_console_index(
     apictx: &Arc<ServerContext>,
 ) -> Result<Response<Body>, HttpError> {
     let static_dir = &apictx
