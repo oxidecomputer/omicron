@@ -33,7 +33,7 @@ pub(crate) struct UdpServer {
 impl UdpServer {
     pub(crate) async fn new(
         bind_address: SocketAddrV6,
-        multicast_addr: Ipv6Addr,
+        multicast_addr: Option<Ipv6Addr>,
         log: &Logger,
     ) -> Result<Self> {
         let sock =
@@ -41,8 +41,14 @@ impl UdpServer {
                 || format!("failed to bind to {}", bind_address),
             )?);
 
-        // In some environments where sp-sim runs (e.g., some CI runners),
-        // we're not able to join ipv6 multicast groups. In those cases, we're
+        // If we don't have a multicast address, use a non-multicast address;
+        // this avoids some unslightly if/else blocks around log statements
+        // below without affecting logic (as we also have to handle
+        // non-multicast multicast addresses for CI below).
+        let multicast_addr = multicast_addr.unwrap_or(Ipv6Addr::LOCALHOST);
+
+        // In some environments where sp-sim runs (e.g., some CI runners), we're
+        // not able to join ipv6 multicast groups. In those cases, we're
         // configured with a "multicast_addr" that isn't actually multicast, so
         // don't try to join the group if we have such an address.
         if multicast_addr.is_multicast() {

@@ -15,27 +15,33 @@ use std::path::Path;
 use std::path::PathBuf;
 use thiserror::Error;
 
+/// Common configuration for all flavors of SP
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct SpCommonConfig {
+    /// IPv6 multicast address to join.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub multicast_addr: Option<Ipv6Addr>,
+    /// UDP address of the two (fake) KSZ8463 ports
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub bind_addrs: Option<[SocketAddrV6; 2]>,
+    /// Fake serial number
+    pub serial_number: SerialNumber,
+}
+
 /// Configuration of a simulated sidecar SP
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct SidecarConfig {
-    /// IPv6 multicast address to join.
-    pub multicast_addr: Ipv6Addr,
-    /// UDP address of the two (fake) KSZ8463 ports
-    pub bind_addrs: [SocketAddrV6; 2],
-    /// Fake serial number
-    pub serial_number: SerialNumber,
+    #[serde(flatten)]
+    pub common: SpCommonConfig,
 }
 
 /// Configuration of a simulated gimlet SP
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct GimletConfig {
-    /// IPv6 multicast address to join.
-    pub multicast_addr: Ipv6Addr,
-    /// UDP address of the two (fake) KSZ8463 ports
-    pub bind_addrs: [SocketAddrV6; 2],
-    /// Fake serial number
-    pub serial_number: SerialNumber,
+    #[serde(flatten)]
+    pub common: SpCommonConfig,
     /// Attached components
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub components: Vec<SpComponentConfig>,
 }
 
@@ -51,7 +57,7 @@ pub struct SpComponentConfig {
 
 /// Configuration of a set of simulated SPs
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct SimulatedSps {
+pub struct SimulatedSpsConfig {
     /// Simulated sidecar(s)
     pub sidecar: Vec<SidecarConfig>,
     /// Simulated gimlet(s)
@@ -62,7 +68,7 @@ pub struct SimulatedSps {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Config {
     /// List of SPs to simulate.
-    pub simulated_sps: SimulatedSps,
+    pub simulated_sps: SimulatedSpsConfig,
     /// Server-wide logging configuration.
     pub log: ConfigLogging,
 }

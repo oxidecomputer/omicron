@@ -32,8 +32,10 @@ pub enum Responsiveness {
 pub trait SimulatedSp {
     /// Hexlified serial number.
     fn serial_number(&self) -> String;
-    /// Listening UDP address of the given port of this simulated SP.
-    fn local_addr(&self, port: SpPort) -> SocketAddrV6;
+
+    /// Listening UDP address of the given port of this simulated SP, if it was
+    /// configured to listen.
+    fn local_addr(&self, port: SpPort) -> Option<SocketAddrV6>;
 
     /// Simulate the SP being unresponsive, in which it ignores all incoming
     /// messages.
