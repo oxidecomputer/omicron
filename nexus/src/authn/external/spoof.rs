@@ -184,7 +184,6 @@ pub fn make_header_value_raw(
 #[cfg(test)]
 mod test {
     use super::super::super::Reason;
-    use super::super::SchemeResult;
     use super::authn_spoof_parse_id;
     use super::make_header_value;
     use super::make_header_value_raw;
@@ -249,8 +248,8 @@ mod test {
         // Success case: the client provided a valid uuid in the header.
         let success_case = authn_spoof_parse_id(Some(&test_header));
         match success_case {
-            Ok(actor_id) => {
-                assert_eq!(details.actor.actor_id(), test_uuid);
+            Ok(Some(actor_id)) => {
+                assert_eq!(actor_id, test_uuid);
             }
             _ => {
                 assert!(false);
