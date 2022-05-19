@@ -413,9 +413,9 @@ dependencies = [
 
 [[package]]
 name = "clang-sys"
-version = "1.3.1"
+version = "1.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4cc00842eed744b858222c4c9faf7243aafc6d33f92f96935263ef4d8a41ce21"
+checksum = "bf6b561dcf059c85bbe388e0a7b0a1469acb3934cc0cfa148613a830629e3049"
 dependencies = [
  "glob",
  "libc",
@@ -3909,7 +3909,7 @@ checksum = "73b4b750c782965c211b42f022f59af1fbceabdd026623714f104152f1ec149f"
 [[package]]
 name = "samael"
 version = "0.0.8"
-source = "git+https://github.com/njaremko/samael?branch=master#9fd1fcb99ab2e4c7f5037550680f311b48417d77"
+source = "git+https://github.com/oxidecomputer/samael?branch=dynamic#eba1ffd80f76afbf8159c356be296602f14c71e6"
 dependencies = [
  "base64",
  "bindgen",
