@@ -386,12 +386,12 @@ pub enum SyncAttachError {
 }
 */
 
-type RawOutput<ResourceType, C> = (i64, Option<C>, Option<ResourceType>, Option<C>, Option<ResourceType>);
+pub type RawOutput<ResourceType, C> = (i64, Option<C>, Option<ResourceType>, Option<C>, Option<ResourceType>);
 
 impl<ResourceType, U, V, C> AttachToCollectionStatement<ResourceType, U, V, C>
 where
     ResourceType: 'static + Debug + Send + Selectable<Pg>,
-    C: 'static + DatastoreAttachTarget<ResourceType> + Send,
+    C: 'static + Debug + DatastoreAttachTarget<ResourceType> + Send,
     ResourceTable<ResourceType, C>: 'static + Table + Send + Copy + Debug,
     U: 'static + Send,
     V: 'static + Send,
@@ -415,7 +415,10 @@ where
         self.get_result_async::<RawOutput<ResourceType, C>>(pool)
             .await
             // If the database returns an error, propagate it right away.
-            .map_err(|e| AttachError::DatabaseError(e))
+            .map_err(|e| {
+                eprintln!("ERROR from DB - not parsing result");
+                AttachError::DatabaseError(e)
+            })
             // Otherwise, parse the output to determine if the CTE succeeded.
             .and_then(|r| Self::parse_result(r, capacity))
     }
@@ -447,6 +450,8 @@ where
         result: RawOutput<ResourceType, C>,
         capacity: usize,
     ) -> Result<ResourceType, AttachError<ResourceType, C>> {
+        eprintln!("Parsing DB result: {:?}", result);
+
         let (
             attached_count,
             collection_before_update,
@@ -614,12 +619,12 @@ type BoxedDslOutput<T> = diesel::internal::table_macro::BoxedSelectStatement<
 /// //          WHERE <PK> IN (SELECT <PK> FROM resource_info) AND (SELECT * FROM do_update)
 /// //          RETURNING *
 /// //      )
-/// //  SELECT
-/// //      (SELECT * FROM resource_count),
-/// //      COALESCE((SELECT * FROM collection_by_id)),
-/// //      COALESCE((SELECT * FROM resource_by_id)),
-/// //      COALESCE((SELECT * FROM updated_collection));
-/// //      COALESCE((SELECT * FROM resource));
+/// //  SELECT * FROM
+/// //      (SELECT * FROM resource_count)
+/// //      LEFT JOIN (SELECT * FROM collection_by_id) ON TRUE
+/// //      LEFT JOIN (SELECT * FROM resource_by_id) ON TRUE
+/// //      LEFT JOIN (SELECT * FROM updated_collection) ON TRUE
+/// //      LEFT JOIN (SELECT * FROM resource) ON TRUE;
 /// ```
 ///
 /// This CTE is similar in desired behavior to the one specified in
@@ -661,6 +666,7 @@ where
     AsSelect<C, Pg>: QueryFragment<Pg>,
 {
     fn walk_ast<'b>(&'b self, mut out: AstPass<'_, 'b, Pg>) -> QueryResult<()> {
+        out.unsafe_to_cache_prepared();
         out.push_sql("WITH collection_by_id AS (");
         self.collection_exists_query.walk_ast(out.reborrow())?;
         out.push_sql(" FOR UPDATE), ");
@@ -716,12 +722,31 @@ where
         self.resource_returning_clause.walk_ast(out.reborrow())?;
         out.push_sql(") ");
 
-        out.push_sql("SELECT \
-            (SELECT * FROM resource_count) as resource_count, \
-            COALESCE((SELECT * FROM collection_by_id)) as collection_by_id, \
-            COALESCE((SELECT * FROM resource_by_id)) as resource_by_id, \
-            COALESCE((SELECT * FROM updated_collection)) as updated_collection, \
-            COALESCE((SELECT * FROM updated_resource)) as updated_resource;");
+        // Why do all these LEFT JOINs here? In short, to ensure that we are
+        // always returning a constant number of columns.
+        //
+        // Diesel parses output "one column at a time", mapping to structs or
+        // tuples. For example, when deserializing an "Option<(A, B, C)>" object,
+        // Diesel checks nullability of the "A", "B", and "C" columns.
+        // If any of those columns unexpectedly return NULL, the entire object is
+        // treated as "None".
+        //
+        // In summary:
+        // - Without the LEFT JOINs, we'd occassionally be returning "zero
+        // rows", which would make the output entirely unparseable.
+        // - If we used an operation like COALESCE (which attempts to map the
+        // result of an expression to either "NULL" or a single tuple column),
+        // Diesel struggles to map the result back to a structure.
+        //
+        // By returning a static number of columns, each component of the
+        // "RawOutput" tuple can be parsed, regardless of nullability, without
+        // preventing later portions of the result from being parsed.
+        out.push_sql("SELECT * FROM \
+            (SELECT * FROM resource_count) \
+            LEFT JOIN (SELECT * FROM collection_by_id) ON TRUE \
+            LEFT JOIN (SELECT * FROM resource_by_id) ON TRUE \
+            LEFT JOIN (SELECT * FROM updated_collection) ON TRUE \
+            LEFT JOIN (SELECT * FROM updated_resource) ON TRUE;");
 
         Ok(())
     }
@@ -959,12 +984,12 @@ mod test {
                     \"test_schema\".\"resource\".\"time_deleted\", \
                     \"test_schema\".\"resource\".\"collection_id\"\
                 ) \
-            SELECT \
-                (SELECT * FROM resource_count) as resource_count, \
-                COALESCE((SELECT * FROM collection_by_id)) as collection_by_id, \
-                COALESCE((SELECT * FROM resource_by_id)) as resource_by_id, \
-                COALESCE((SELECT * FROM updated_collection)) as updated_collection, \
-                COALESCE((SELECT * FROM updated_resource)) as updated_resource; -- binds: [cccccccc-cccc-cccc-cccc-cccccccccccc, aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa, cccccccc-cccc-cccc-cccc-cccccccccccc, cccccccc-cccc-cccc-cccc-cccccccccccc, aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa, cccccccc-cccc-cccc-cccc-cccccccccccc, aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa]";
+            SELECT * FROM \
+                (SELECT * FROM resource_count) \
+                LEFT JOIN (SELECT * FROM collection_by_id) ON TRUE \
+                LEFT JOIN (SELECT * FROM resource_by_id) ON TRUE \
+                LEFT JOIN (SELECT * FROM updated_collection) ON TRUE \
+                LEFT JOIN (SELECT * FROM updated_resource) ON TRUE; -- binds: [cccccccc-cccc-cccc-cccc-cccccccccccc, aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa, cccccccc-cccc-cccc-cccc-cccccccccccc, cccccccc-cccc-cccc-cccc-cccccccccccc, aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa, cccccccc-cccc-cccc-cccc-cccccccccccc, aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa]";
         assert_eq!(query, expected_query);
     }
 
@@ -991,7 +1016,7 @@ mod test {
         .attach_and_get_result_async(pool.pool())
         .await;
 
-        eprintln!("result: {:?}", attach);
+        eprintln!("!!!! result: {:?}", attach);
 
         assert!(matches!(attach, Err(AttachError::CollectionNotFound)));
 
