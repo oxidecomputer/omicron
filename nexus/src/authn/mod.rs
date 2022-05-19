@@ -391,11 +391,18 @@ pub enum Reason {
         #[source]
         source: anyhow::Error,
     },
+
+    /// Operational error while attempting to authenticate
+    #[error("unexpected error during authentication: {source:#}")]
+    UnknownError {
+        #[source]
+        source: omicron_common::api::external::Error,
+    },
 }
 
 impl From<Error> for dropshot::HttpError {
     fn from(authn_error: Error) -> Self {
-        match &authn_error.reason {
+        match authn_error.reason {
             // TODO-security Does this leak too much information, to say that
             // the header itself was malformed?  It doesn't feel like it, and as
             // a user it's _really_ helpful to know if you've just, like,
@@ -413,13 +420,13 @@ impl From<Error> for dropshot::HttpError {
             // TODO Add a WWW-Authenticate header.  We probably want to provide
             // this on all requests, since different creds can always change the
             // behavior.
-            Reason::UnknownActor { .. } | Reason::BadCredentials { .. } => {
-                dropshot::HttpError::from(
-                    omicron_common::api::external::Error::Unauthenticated {
-                        internal_message: format!("{:#}", authn_error),
-                    },
-                )
-            }
+            e @ Reason::UnknownActor { .. }
+            | e @ Reason::BadCredentials { .. } => dropshot::HttpError::from(
+                omicron_common::api::external::Error::Unauthenticated {
+                    internal_message: format!("{:#}", e),
+                },
+            ),
+            Reason::UnknownError { source } => source.into(),
         }
     }
 }
