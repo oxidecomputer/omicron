@@ -426,16 +426,15 @@ where
 
 /// Result of [`AttachToCollectionStatement`] when executed asynchronously
 pub type AsyncAttachToCollectionResult<ResourceType, C> =
-    Result<ResourceType, AttachError<ResourceType, C>>;
+    Result<ResourceType, AttachError<ResourceType, C, PoolError>>;
 
-/*
 /// Result of [`AttachToCollectionStatement`] when executed synchronously
-pub type SyncAttachToCollectionResult<ResourceType, C> = Result<ResourceType, SyncAttachError<ResourceType, C>>;
-*/
+pub type SyncAttachToCollectionResult<ResourceType, C> =
+    Result<ResourceType, AttachError<ResourceType, C, diesel::result::Error>>;
 
 /// Errors returned by [`AttachToCollectionStatement`].
 #[derive(Debug)]
-pub enum AttachError<ResourceType, C> {
+pub enum AttachError<ResourceType, C, E> {
     /// The collection that the query was inserting into does not exist
     CollectionNotFound,
     /// The resource being attached does not exist
@@ -447,19 +446,8 @@ pub enum AttachError<ResourceType, C> {
     /// condition was not met.
     NoUpdate { attached_count: i64, resource: ResourceType, collection: C },
     /// Other database error
-    DatabaseError(PoolError),
+    DatabaseError(E),
 }
-
-/*
-/// Errors returned by [`AttachToCollectionStatement`].
-#[derive(Debug)]
-pub enum SyncAttachError {
-    /// The collection that the query was inserting into does not exist
-    CollectionNotFound,
-    /// Other database error
-    DatabaseError(diesel::result::Error),
-}
-*/
 
 /// Describes the type returned from the actual CTE, which is parsed
 /// and interpreted before propagating it to users of the Rust API.
@@ -495,27 +483,27 @@ where
             .and_then(Self::parse_result)
     }
 
-    /*
-
     /// Issues the CTE synchronously and parses the result.
     pub fn attach_and_get_result(
         self,
         conn: &mut DbConnection,
-    ) -> SyncAttachToCollectionResult<ResourceType>
+    ) -> SyncAttachToCollectionResult<ResourceType, C>
     where
         // We require this bound to ensure that "Self" is runnable as query.
-        Self: query_methods::LoadQuery<'static, DbConnection, ResourceType>,
+        Self: query_methods::LoadQuery<
+            'static,
+            DbConnection,
+            RawOutput<ResourceType, C>,
+        >,
     {
-        self.get_result::<ResourceType>(conn)
-            .map_err(Self::translate_sync_error)
-            .map(parse_result)
+        self.get_result::<RawOutput<ResourceType, C>>(conn)
+            .map_err(AttachError::DatabaseError)
+            .and_then(Self::parse_result)
     }
 
-    */
-
-    fn parse_result(
+    fn parse_result<E>(
         result: RawOutput<ResourceType, C>,
-    ) -> Result<ResourceType, AttachError<ResourceType, C>> {
+    ) -> Result<ResourceType, AttachError<ResourceType, C, E>> {
         let (
             attached_count,
             collection_before_update,
@@ -538,33 +526,6 @@ where
             }),
         }
     }
-
-    /*
-    /// Translate from diesel errors into AttachError, handling the
-    /// intentional division-by-zero error in the CTE.
-    fn translate_async_error(err: PoolError) -> AttachError {
-        match err {
-            PoolError::Connection(ConnectionError::Query(err))
-                if Self::error_is_division_by_zero(&err) =>
-            {
-                AttachError::CollectionNotFound
-            }
-            other => AttachError::DatabaseError(other),
-        }
-    }
-    */
-
-    /*
-    /// Translate from diesel errors into SyncAttachError, handling the
-    /// intentional division-by-zero error in the CTE.
-    fn translate_sync_error(err: diesel::result::Error) -> SyncAttachError {
-        if Self::error_is_division_by_zero(&err) {
-            SyncAttachError::CollectionNotFound
-        } else {
-            SyncAttachError::DatabaseError(err)
-        }
-    }
-    */
 }
 
 type SelectableSqlType<Q> =
@@ -807,12 +768,11 @@ mod test {
     use super::{AttachError, DatastoreAttachTarget};
     use crate::db::{
         self, error::TransactionError, identity::Resource as IdentityResource,
-        model::Generation,
     };
     use async_bb8_diesel::{
         AsyncConnection, AsyncRunQueryDsl, AsyncSimpleConnection,
     };
-    use chrono::{DateTime, NaiveDateTime, Utc};
+    use chrono::Utc;
     use db_macros::Resource;
     use diesel::expression_methods::ExpressionMethods;
     use diesel::pg::Pg;
@@ -1133,43 +1093,6 @@ mod test {
 
         assert!(matches!(attach, Err(AttachError::CollectionNotFound)));
 
-        /*
-
-        let attach_query = Collection::attach_resource(
-            collection_id,
-            resource_id,
-            collection::table.into_boxed(),
-            resource::table.into_boxed(),
-            10,
-            diesel::update(resource::table)
-                .set(resource::dsl::collection_id.eq(collection_id))
-        );
-
-        #[derive(Debug)]
-        enum CollectionError {
-            NotFound,
-        }
-        type TxnError = TransactionError<CollectionError>;
-
-        let result = pool
-            .pool()
-            .transaction(move |conn| {
-                attach_query.attach_and_get_result(conn).map_err(|e| match e {
-                    SyncAttachError::CollectionNotFound => {
-                        TxnError::CustomError(CollectionError::NotFound)
-                    }
-                    SyncAttachError::DatabaseError(e) => TxnError::from(e),
-                })
-            })
-            .await;
-
-        assert!(matches!(
-            result,
-            Err(TxnError::CustomError(CollectionError::NotFound))
-        ));
-
-        */
-
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -1243,6 +1166,65 @@ mod test {
 
         // "attach_and_get_result_async" should return the "attached" resource.
         let returned_resource = attach.expect("Attach should have worked");
+        assert_eq!(
+            returned_resource.collection_id.expect("Expected a collection ID"),
+            collection_id
+        );
+        // The returned resource value should be the latest value in the DB.
+        assert_eq!(returned_resource, get_resource(resource_id, &pool).await);
+        // The generation number should have incremented in the collection.
+        assert_eq!(
+            collection.rcgen + 1,
+            get_collection(collection_id, &pool).await.rcgen
+        );
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_attach_once_synchronous() {
+        let logctx = dev::test_setup_log("test_attach_once_synchronous");
+        let mut db = test_setup_database(&logctx.log).await;
+        let cfg = db::Config { url: db.pg_config().clone() };
+        let pool = db::Pool::new(&cfg);
+
+        setup_db(&pool).await;
+
+        let collection_id = uuid::Uuid::new_v4();
+        let resource_id = uuid::Uuid::new_v4();
+
+        // Create the collection and resource.
+        let collection =
+            insert_collection(collection_id, "collection", &pool).await;
+        let _resource = insert_resource(resource_id, "resource", &pool).await;
+
+        // Attach the resource to the collection.
+        let attach_query = Collection::attach_resource(
+            collection_id,
+            resource_id,
+            collection::table.into_boxed(),
+            resource::table.into_boxed(),
+            10,
+            diesel::update(resource::table)
+                .set(resource::dsl::collection_id.eq(collection_id)),
+        );
+
+        type TxnError = TransactionError<
+            AttachError<Resource, Collection, diesel::result::Error>,
+        >;
+        let result = pool
+            .pool()
+            .transaction(move |conn| {
+                attach_query.attach_and_get_result(conn).map_err(|e| match e {
+                    AttachError::DatabaseError(e) => TxnError::from(e),
+                    e => TxnError::CustomError(e),
+                })
+            })
+            .await;
+
+        // "attach_and_get_result" should return the "attached" resource.
+        let returned_resource = result.expect("Attach should have worked");
         assert_eq!(
             returned_resource.collection_id.expect("Expected a collection ID"),
             collection_id
@@ -1663,6 +1645,4 @@ mod test {
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
-
-    // TODO: Sync API
 }
