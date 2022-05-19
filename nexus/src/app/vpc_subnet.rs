@@ -11,7 +11,7 @@ use crate::db::identity::Resource;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
 use crate::db::model::VpcSubnet;
-use crate::db::subnet_allocation::SubnetError;
+use crate::db::queries::vpc_subnet::SubnetError;
 use crate::defaults;
 use crate::external_api::params;
 use omicron_common::api::external;

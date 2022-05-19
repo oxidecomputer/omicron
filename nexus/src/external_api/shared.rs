@@ -12,7 +12,6 @@ use serde::de::Error as _;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
-use std::str::FromStr;
 use uuid::Uuid;
 
 /// Maximum number of role assignments allowed on any one resource
@@ -78,11 +77,10 @@ pub struct RoleAssignment<AllowedRoles> {
     pub role_name: AllowedRoles,
 }
 
-impl<AllowedRoles, E> TryFrom<db::model::RoleAssignment>
+impl<AllowedRoles> TryFrom<db::model::RoleAssignment>
     for RoleAssignment<AllowedRoles>
 where
-    AllowedRoles: FromStr<Err = E>,
-    E: std::fmt::Display,
+    AllowedRoles: db::model::DatabaseString,
 {
     type Error = Error;
 
@@ -98,15 +96,14 @@ where
                     ))
                 })?,
             identity_id: role_asgn.identity_id,
-            role_name: AllowedRoles::from_str(&role_asgn.role_name).map_err(
-                |error| {
+            role_name: AllowedRoles::from_database_string(&role_asgn.role_name)
+                .map_err(|error| {
                     Error::internal_error(&format!(
                         "parsing database role assignment: \
                         unrecognized role name {:?}: {:#}",
                         &role_asgn.role_name, error,
                     ))
-                },
-            )?,
+                })?,
         })
     }
 }
@@ -142,17 +139,30 @@ mod test {
     use super::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE;
     use crate::db;
     use crate::external_api::shared;
+    use anyhow::anyhow;
     use omicron_common::api::external::Error;
     use omicron_common::api::external::ResourceType;
-    use parse_display::FromStr;
-    use serde_with::DeserializeFromStr;
+    use serde::Deserialize;
 
-    #[derive(
-        Clone, Copy, Debug, DeserializeFromStr, Eq, FromStr, PartialEq,
-    )]
-    #[display(style = "kebab-case")]
+    #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+    #[serde(rename_all = "kebab-case")]
     pub enum DummyRoles {
         Bogus,
+    }
+    impl db::model::DatabaseString for DummyRoles {
+        type Error = anyhow::Error;
+
+        fn to_database_string(&self) -> &str {
+            unimplemented!()
+        }
+
+        fn from_database_string(s: &str) -> Result<Self, Self::Error> {
+            if s == "bogus" {
+                Ok(DummyRoles::Bogus)
+            } else {
+                Err(anyhow!("unsupported DummyRoles: {:?}", s))
+            }
+        }
     }
 
     #[test]
@@ -220,7 +230,7 @@ mod test {
             assert_eq!(
                 internal_message,
                 "parsing database role assignment: unrecognized role name \
-                \"bogosity\": parse failed."
+                \"bogosity\": unsupported DummyRoles: \"bogosity\""
             );
         } else {
             panic!(

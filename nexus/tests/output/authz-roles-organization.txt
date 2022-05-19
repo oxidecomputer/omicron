@@ -1,0 +1,2 @@
+variant Admin: serialized form = admin
+variant Collaborator: serialized form = collaborator
