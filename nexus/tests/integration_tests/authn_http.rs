@@ -61,12 +61,8 @@ async fn test_authn_spoof_allowed() {
 
     // Successful authentication
     let valid_uuid = "7f927c86-3371-4295-c34a-e3246a4b9c02";
-    let header = spoof::make_header_value(
-        spoof::ActorType::Builtin,
-        valid_uuid.parse().unwrap(),
-    )
-    .0
-    .encode();
+    let header =
+        spoof::make_header_value(valid_uuid.parse().unwrap()).0.encode();
     assert_eq!(
         whoami_request(Some(header), None, &testctx).await.unwrap(),
         WhoamiResponse {
@@ -199,7 +195,6 @@ async fn test_authn_spoof_unconfigured() {
         None,
         Some(
             spoof::make_header_value(
-                spoof::ActorType::Builtin,
                 "7f927c86-3371-4295-c34a-e3246a4b9c02".parse().unwrap(),
             )
             .0
