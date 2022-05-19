@@ -30,7 +30,7 @@ use crate::authz::{self, ApiResource};
 use crate::context::OpContext;
 use crate::db::fixed_data::role_assignment::BUILTIN_ROLE_ASSIGNMENTS;
 use crate::db::fixed_data::role_builtin::BUILTIN_ROLES;
-use crate::db::fixed_data::silo::{DEFAULT_SILO, SILO_ID};
+use crate::db::fixed_data::silo::DEFAULT_SILO;
 use crate::db::lookup::LookupPath;
 use crate::db::model::DatabaseString;
 use crate::db::queries::network_interface::InsertNetworkInterfaceQuery;
@@ -2389,8 +2389,6 @@ impl DataStore {
             &*authn::USER_INTERNAL_READ,
             &*authn::USER_EXTERNAL_AUTHN,
             &*authn::USER_SAGA_RECOVERY,
-            &*authn::USER_TEST_PRIVILEGED,
-            &*authn::USER_TEST_UNPRIVILEGED,
         ]
         .iter()
         .map(|u| {
@@ -2406,19 +2404,6 @@ impl DataStore {
         })
         .collect::<Vec<UserBuiltin>>();
 
-        // TODO: This should probably be removed when we can switch
-        // "test-privileged" and "test-unprivileged" to normal silo users rather
-        // than built-in users.
-        debug!(opctx.log, "creating silo_user entries for built-in users");
-        for builtin_user in &builtin_users {
-            self.silo_user_create(SiloUser::new(
-                *SILO_ID,
-                builtin_user.identity.id, /* silo user id */
-            ))
-            .await?;
-        }
-        info!(opctx.log, "created silo_user entries for built-in users");
-
         debug!(opctx.log, "attempting to create built-in users");
         let count = diesel::insert_into(dsl::user_builtin)
             .values(builtin_users)
@@ -2430,6 +2415,60 @@ impl DataStore {
                 public_error_from_diesel_pool(e, ErrorHandler::Server)
             })?;
         info!(opctx.log, "created {} built-in users", count);
+
+        Ok(())
+    }
+
+    /// Load the testing users into the database
+    pub async fn load_silo_users(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<(), Error> {
+        use db::schema::silo_user::dsl;
+
+        opctx.authorize(authz::Action::Modify, &authz::DATABASE).await?;
+
+        let users =
+            [&*authn::USER_TEST_PRIVILEGED, &*authn::USER_TEST_UNPRIVILEGED];
+
+        debug!(opctx.log, "attempting to create silo users");
+        let count = diesel::insert_into(dsl::silo_user)
+            .values(users)
+            .on_conflict(dsl::id)
+            .do_nothing()
+            .execute_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            })?;
+        info!(opctx.log, "created {} silo users", count);
+
+        Ok(())
+    }
+
+    /// Load role assignments for the test users into the database
+    pub async fn load_silo_user_role_assignments(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<(), Error> {
+        use db::schema::role_assignment::dsl;
+        debug!(opctx.log, "attempting to create silo user role assignments");
+        let count = diesel::insert_into(dsl::role_assignment)
+            .values(&*db::fixed_data::silo_user::ROLE_ASSIGNMENTS_PRIVILEGED)
+            .on_conflict((
+                dsl::identity_type,
+                dsl::identity_id,
+                dsl::resource_type,
+                dsl::resource_id,
+                dsl::role_name,
+            ))
+            .do_nothing()
+            .execute_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            })?;
+        info!(opctx.log, "created {} silo user role assignments", count);
 
         Ok(())
     }
@@ -2497,7 +2536,6 @@ impl DataStore {
 
         opctx.authorize(authz::Action::Modify, &authz::DATABASE).await?;
 
-        // The built-in "test-privileged" user gets the "fleet admin" role.
         debug!(opctx.log, "attempting to create built-in role assignments");
         let count = diesel::insert_into(dsl::role_assignment)
             .values(&*BUILTIN_ROLE_ASSIGNMENTS)
@@ -3096,6 +3134,8 @@ pub async fn datastore_test(
     datastore.load_builtin_roles(&opctx).await.unwrap();
     datastore.load_builtin_role_asgns(&opctx).await.unwrap();
     datastore.load_builtin_silos(&opctx).await.unwrap();
+    datastore.load_silo_users(&opctx).await.unwrap();
+    datastore.load_silo_user_role_assignments(&opctx).await.unwrap();
 
     // Create an OpContext with the credentials of "test-privileged" for general
     // testing.
@@ -3110,6 +3150,7 @@ mod test {
     use super::*;
     use crate::authz;
     use crate::db::explain::ExplainableAsync;
+    use crate::db::fixed_data::silo::SILO_ID;
     use crate::db::identity::Resource;
     use crate::db::lookup::LookupPath;
     use crate::db::model::{ConsoleSession, DatasetKind, Project};
@@ -3175,6 +3216,12 @@ mod test {
         let logctx = dev::test_setup_log("test_session_methods");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let authn_opctx = OpContext::for_background(
+            logctx.log.new(o!("component" => "TestExternalAuthn")),
+            Arc::new(authz::Authz::new(&logctx.log)),
+            authn::Context::external_authn(),
+            Arc::clone(&datastore),
+        );
 
         let token = "a_token".to_string();
         let silo_user_id = Uuid::new_v4();
@@ -3186,8 +3233,10 @@ mod test {
             silo_user_id,
         };
 
-        let _ =
-            datastore.session_create(&opctx, session.clone()).await.unwrap();
+        let _ = datastore
+            .session_create(&authn_opctx, session.clone())
+            .await
+            .unwrap();
 
         // Associate silo with user
         datastore
@@ -3211,7 +3260,8 @@ mod test {
         assert_eq!(session.silo_user_id, fetched.silo_user_id);
 
         // trying to insert the same one again fails
-        let duplicate = datastore.session_create(&opctx, session.clone()).await;
+        let duplicate =
+            datastore.session_create(&authn_opctx, session.clone()).await;
         assert!(matches!(
             duplicate,
             Err(Error::InternalError { internal_message: _ })

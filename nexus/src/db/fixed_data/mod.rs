@@ -33,6 +33,7 @@ use lazy_static::lazy_static;
 pub mod role_assignment;
 pub mod role_builtin;
 pub mod silo;
+pub mod silo_user;
 pub mod user_builtin;
 
 lazy_static! {

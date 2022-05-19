@@ -152,7 +152,9 @@ resource Silo {
 has_relation(fleet: Fleet, "parent_fleet", silo: Silo)
 	if silo.fleet = fleet;
 has_role(actor: AuthenticatedActor, "viewer", silo: Silo)
-	if actor.silo = silo;
+	# TODO-security TODO-coverage We should have a test that exercises this
+	# case.
+	if silo in actor.silo;
 
 resource Organization {
 	permissions = [
