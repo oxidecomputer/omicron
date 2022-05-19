@@ -20,7 +20,7 @@ mod pagination;
 mod pool;
 // This is marked public because the error types are used elsewhere, e.g., in
 // sagas.
-pub mod queries;
+pub(crate) mod queries;
 mod saga_recovery;
 mod saga_types;
 mod sec_store;

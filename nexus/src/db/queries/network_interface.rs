@@ -307,7 +307,7 @@ fn first_available_address(subnet: &IpNetwork) -> IpAddr {
                 .iter()
                 .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as _)
                 .unwrap_or_else(|| {
-                    panic!("Unexpectedly small IPv4 subnetwork: '{}'", network)
+                    panic!("Unexpectedly small IPv6 subnetwork: '{}'", network)
                 })
                 .into()
         }
