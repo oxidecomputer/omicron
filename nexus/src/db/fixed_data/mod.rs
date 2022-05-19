@@ -51,7 +51,7 @@ fn assert_valid_uuid(id: &uuid::Uuid) {
     };
 
     match id.get_variant() {
-        Some(uuid::Variant::RFC4122) => (),
+        uuid::Variant::RFC4122 => (),
         _ => panic!("unexpected variant in uuid: {:?}", id),
     };
 }

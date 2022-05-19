@@ -733,7 +733,7 @@ dependencies = [
 [[package]]
 name = "crucible"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=8ea317a9dfee65d7c018a1fda89fdec63a560ef3#8ea317a9dfee65d7c018a1fda89fdec63a560ef3"
+source = "git+https://github.com/oxidecomputer/crucible?rev=57f0951793a74b31afd824bc3a0e5d89a41a540b#57f0951793a74b31afd824bc3a0e5d89a41a540b"
 dependencies = [
  "aes-gcm-siv",
  "anyhow",
@@ -759,14 +759,14 @@ dependencies = [
  "toml",
  "tracing",
  "usdt",
- "uuid 0.8.2",
+ "uuid",
  "version_check",
 ]
 
 [[package]]
 name = "crucible-agent-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=8ea317a9dfee65d7c018a1fda89fdec63a560ef3#8ea317a9dfee65d7c018a1fda89fdec63a560ef3"
+source = "git+https://github.com/oxidecomputer/crucible?rev=57f0951793a74b31afd824bc3a0e5d89a41a540b#57f0951793a74b31afd824bc3a0e5d89a41a540b"
 dependencies = [
  "anyhow",
  "chrono",
@@ -781,7 +781,7 @@ dependencies = [
 [[package]]
 name = "crucible-common"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=8ea317a9dfee65d7c018a1fda89fdec63a560ef3#8ea317a9dfee65d7c018a1fda89fdec63a560ef3"
+source = "git+https://github.com/oxidecomputer/crucible?rev=57f0951793a74b31afd824bc3a0e5d89a41a540b#57f0951793a74b31afd824bc3a0e5d89a41a540b"
 dependencies = [
  "anyhow",
  "rusqlite",
@@ -793,13 +793,13 @@ dependencies = [
  "tokio-rustls",
  "toml",
  "twox-hash",
- "uuid 0.8.2",
+ "uuid",
 ]
 
 [[package]]
 name = "crucible-protocol"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=8ea317a9dfee65d7c018a1fda89fdec63a560ef3#8ea317a9dfee65d7c018a1fda89fdec63a560ef3"
+source = "git+https://github.com/oxidecomputer/crucible?rev=57f0951793a74b31afd824bc3a0e5d89a41a540b#57f0951793a74b31afd824bc3a0e5d89a41a540b"
 dependencies = [
  "anyhow",
  "bincode",
@@ -807,13 +807,13 @@ dependencies = [
  "crucible-common",
  "serde",
  "tokio-util 0.7.2",
- "uuid 0.8.2",
+ "uuid",
 ]
 
 [[package]]
 name = "crucible-scope"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=8ea317a9dfee65d7c018a1fda89fdec63a560ef3#8ea317a9dfee65d7c018a1fda89fdec63a560ef3"
+source = "git+https://github.com/oxidecomputer/crucible?rev=57f0951793a74b31afd824bc3a0e5d89a41a540b#57f0951793a74b31afd824bc3a0e5d89a41a540b"
 dependencies = [
  "anyhow",
  "futures",
@@ -999,19 +999,19 @@ dependencies = [
  "pq-sys",
  "r2d2",
  "serde_json",
- "uuid 1.0.0",
+ "uuid",
 ]
 
 [[package]]
 name = "diesel-dtrace"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/diesel-dtrace?rev=bec89c2f2b01a79ae99b4db667bfcea5fb2fef04#bec89c2f2b01a79ae99b4db667bfcea5fb2fef04"
+source = "git+https://github.com/oxidecomputer/diesel-dtrace#ce623dd6a2d59024a9330bc37e54426c4ccf9167"
 dependencies = [
  "diesel",
  "lock_api",
  "serde",
  "usdt",
- "uuid 0.8.2",
+ "uuid",
 ]
 
 [[package]]
@@ -1156,7 +1156,7 @@ dependencies = [
  "tokio-rustls",
  "toml",
  "usdt",
- "uuid 1.0.0",
+ "uuid",
  "version_check",
 ]
 
@@ -1607,7 +1607,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "uuid 1.0.0",
+ "uuid",
 ]
 
 [[package]]
@@ -1640,7 +1640,7 @@ dependencies = [
  "tokio-stream",
  "tokio-tungstenite",
  "usdt",
- "uuid 1.0.0",
+ "uuid",
 ]
 
 [[package]]
@@ -2495,7 +2495,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "uuid 1.0.0",
+ "uuid",
 ]
 
 [[package]]
@@ -2522,7 +2522,7 @@ dependencies = [
  "serde_json",
  "slog",
  "tokio",
- "uuid 1.0.0",
+ "uuid",
 ]
 
 [[package]]
@@ -2681,7 +2681,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-postgres",
- "uuid 1.0.0",
+ "uuid",
 ]
 
 [[package]]
@@ -2728,7 +2728,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "toml",
- "uuid 1.0.0",
+ "uuid",
 ]
 
 [[package]]
@@ -2805,7 +2805,7 @@ dependencies = [
  "toml",
  "tough",
  "usdt",
- "uuid 1.0.0",
+ "uuid",
 ]
 
 [[package]]
@@ -2890,7 +2890,7 @@ dependencies = [
  "tokio",
  "tokio-util 0.7.2",
  "toml",
- "uuid 1.0.0",
+ "uuid",
  "vsss-rs",
  "zone",
 ]
@@ -3088,7 +3088,7 @@ dependencies = [
  "serde",
  "thiserror",
  "trybuild",
- "uuid 1.0.0",
+ "uuid",
 ]
 
 [[package]]
@@ -3101,7 +3101,7 @@ dependencies = [
  "reqwest",
  "serde",
  "slog",
- "uuid 1.0.0",
+ "uuid",
 ]
 
 [[package]]
@@ -3127,7 +3127,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "toml",
- "uuid 1.0.0",
+ "uuid",
 ]
 
 [[package]]
@@ -3154,7 +3154,7 @@ dependencies = [
  "structopt",
  "thiserror",
  "tokio",
- "uuid 1.0.0",
+ "uuid",
 ]
 
 [[package]]
@@ -3166,7 +3166,7 @@ dependencies = [
  "futures",
  "http",
  "oximeter",
- "uuid 1.0.0",
+ "uuid",
 ]
 
 [[package]]
@@ -3195,7 +3195,7 @@ dependencies = [
  "slog-dtrace",
  "thiserror",
  "tokio",
- "uuid 1.0.0",
+ "uuid",
 ]
 
 [[package]]
@@ -3543,7 +3543,7 @@ dependencies = [
  "postgres-protocol",
  "serde",
  "serde_json",
- "uuid 1.0.0",
+ "uuid",
 ]
 
 [[package]]
@@ -3725,7 +3725,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=845c9cffc482739d417761aa1c668895f24b776d#845c9cffc482739d417761aa1c668895f24b776d"
+source = "git+https://github.com/oxidecomputer/propolis?rev=b75a0a60d8928632c158e6d433b586d55774c59a#b75a0a60d8928632c158e6d433b586d55774c59a"
 dependencies = [
  "crucible",
  "reqwest",
@@ -3736,7 +3736,7 @@ dependencies = [
  "slog",
  "structopt",
  "thiserror",
- "uuid 0.8.2",
+ "uuid",
 ]
 
 [[package]]
@@ -4194,8 +4194,7 @@ dependencies = [
  "schemars_derive",
  "serde",
  "serde_json",
- "uuid 0.8.2",
- "uuid 1.0.0",
+ "uuid",
 ]
 
 [[package]]
@@ -4587,7 +4586,7 @@ dependencies = [
  "reqwest",
  "serde",
  "slog",
- "uuid 1.0.0",
+ "uuid",
 ]
 
 [[package]]
@@ -4838,7 +4837,7 @@ dependencies = [
  "slog",
  "thiserror",
  "tokio",
- "uuid 1.0.0",
+ "uuid",
 ]
 
 [[package]]
@@ -5746,16 +5745,6 @@ name = "utf-8"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "09cc8ee72d2a9becf2f2febe0205bbed8fc6615b7cb429ad062dc7b7ddd036a9"
-
-[[package]]
-name = "uuid"
-version = "0.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc5cf98d8186244414c848017f0e2676b3fcb46807f6668a97dfe67359a3c4b7"
-dependencies = [
- "getrandom",
- "serde",
-]
 
 [[package]]
 name = "uuid"
