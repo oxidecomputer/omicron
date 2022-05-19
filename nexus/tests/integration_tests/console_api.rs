@@ -16,10 +16,10 @@ use nexus_test_utils::{
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_nexus::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
+use omicron_nexus::db::identity::Asset;
 use omicron_nexus::external_api::console_api::LoginParams;
 use omicron_nexus::external_api::params::OrganizationCreate;
 use omicron_nexus::external_api::views;
-use omicron_nexus::db::identity::Asset;
 
 #[nexus_test]
 async fn test_sessions(cptestctx: &ControlPlaneTestContext) {

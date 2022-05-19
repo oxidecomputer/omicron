@@ -152,7 +152,10 @@ resource Silo {
 has_relation(fleet: Fleet, "parent_fleet", silo: Silo)
 	if silo.fleet = fleet;
 has_role(actor: AuthenticatedActor, "viewer", silo: Silo)
-	if actor.silo = silo;
+	#if actor.silo != nil and actor.silo.unwrap() = silo;
+	# XXX-dap
+	# TODO definitely want coverage for this
+	if silo in actor.silo;
 
 resource Organization {
 	permissions = [

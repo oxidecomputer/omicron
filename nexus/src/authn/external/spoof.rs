@@ -63,7 +63,6 @@ lazy_static! {
     /// Actor (id) used for the special "bad credentials" error
     static ref SPOOF_RESERVED_BAD_CREDS_ACTOR: Actor = Actor::UserBuiltin {
         user_builtin_id: "22222222-2222-2222-2222-222222222222".parse().unwrap(),
-        silo_id: *crate::db::fixed_data::silo::SILO_ID,
     };
     /// Complete HTTP header value to trigger the "bad actor" error
     pub static ref SPOOF_HEADER_BAD_ACTOR: Authorization<Bearer> =
@@ -150,7 +149,7 @@ fn authn_spoof(raw_value: Option<&Authorization<Bearer>>) -> SchemeResult {
             let silo_id = *crate::db::fixed_data::silo::SILO_ID;
             let actor = match actor_kind {
                 ActorType::Builtin => {
-                    Actor::UserBuiltin { user_builtin_id: actor_id, silo_id }
+                    Actor::UserBuiltin { user_builtin_id: actor_id }
                 }
                 ActorType::Silo => {
                     Actor::SiloUser { silo_user_id: actor_id, silo_id }

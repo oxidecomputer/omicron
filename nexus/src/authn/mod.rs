@@ -69,7 +69,8 @@ impl Context {
         self.actor_required().ok()
     }
 
-    /// Returns the authenticated actor if present, Unauthenticated error otherwise
+    /// Returns the authenticated actor if present, Unauthenticated error
+    /// otherwise
     pub fn actor_required(
         &self,
     ) -> Result<&Actor, omicron_common::api::external::Error> {
@@ -86,9 +87,21 @@ impl Context {
     pub fn silo_required(
         &self,
     ) -> Result<authz::Silo, omicron_common::api::external::Error> {
-        self.actor_required().map(|actor| {
-            let silo_id = actor.silo_id();
-            authz::Silo::new(authz::FLEET, silo_id, LookupType::ById(silo_id))
+        self.actor_required().and_then(|actor| {
+            if let Some(silo_id) = actor.silo_id() {
+                Ok(authz::Silo::new(
+                    authz::FLEET,
+                    silo_id,
+                    LookupType::ById(silo_id),
+                ))
+            } else {
+                Err(omicron_common::api::external::Error::internal_error(
+                    &format!(
+                        "needed Silo for a built-in user, but \
+                        built-in users have no Silo"
+                    ),
+                ))
+            }
         })
     }
 
@@ -106,50 +119,35 @@ impl Context {
 
     /// Returns an authenticated context for handling internal API contexts
     pub fn internal_api() -> Context {
-        Context::context_for_builtin_user(
-            USER_INTERNAL_API.id,
-            USER_INTERNAL_API.silo_id,
-        )
+        Context::context_for_builtin_user(USER_INTERNAL_API.id)
     }
 
     /// Returns an authenticated context for saga recovery
     pub fn internal_saga_recovery() -> Context {
-        Context::context_for_builtin_user(
-            USER_SAGA_RECOVERY.id,
-            USER_SAGA_RECOVERY.silo_id,
-        )
+        Context::context_for_builtin_user(USER_SAGA_RECOVERY.id)
     }
 
     /// Returns an authenticated context for use by internal resource allocation
     pub fn internal_read() -> Context {
-        Context::context_for_builtin_user(
-            USER_INTERNAL_READ.id,
-            USER_INTERNAL_READ.silo_id,
-        )
+        Context::context_for_builtin_user(USER_INTERNAL_READ.id)
     }
 
     /// Returns an authenticated context for use for authenticating external
     /// requests
     pub fn external_authn() -> Context {
-        Context::context_for_builtin_user(
-            USER_EXTERNAL_AUTHN.id,
-            USER_EXTERNAL_AUTHN.silo_id,
-        )
+        Context::context_for_builtin_user(USER_EXTERNAL_AUTHN.id)
     }
 
     /// Returns an authenticated context for Nexus-startup database
     /// initialization
     pub fn internal_db_init() -> Context {
-        Context::context_for_builtin_user(USER_DB_INIT.id, USER_DB_INIT.silo_id)
+        Context::context_for_builtin_user(USER_DB_INIT.id)
     }
 
-    fn context_for_builtin_user(
-        user_builtin_id: Uuid,
-        silo_id: Uuid,
-    ) -> Context {
+    fn context_for_builtin_user(user_builtin_id: Uuid) -> Context {
         Context {
             kind: Kind::Authenticated(Details {
-                actor: Actor::UserBuiltin { user_builtin_id, silo_id },
+                actor: Actor::UserBuiltin { user_builtin_id },
             }),
             schemes_tried: Vec::new(),
         }
@@ -260,7 +258,7 @@ pub struct Details {
 /// Who is performing an operation
 #[derive(Clone, Copy, Deserialize, Eq, PartialEq, Serialize)]
 pub enum Actor {
-    UserBuiltin { user_builtin_id: Uuid, silo_id: Uuid },
+    UserBuiltin { user_builtin_id: Uuid },
     SiloUser { silo_user_id: Uuid, silo_id: Uuid },
 }
 
@@ -279,14 +277,10 @@ impl Actor {
         }
     }
 
-    // TODO-security Built-in users should not need any silo id associated with
-    // them.  They need one today because without support for real SiloUsers,
-    // "test-privileged" and "test-unprivileged" are built-in users, and they're
-    // used for all of our testing.
-    pub fn silo_id(&self) -> Uuid {
+    pub fn silo_id(&self) -> Option<Uuid> {
         match self {
-            Actor::UserBuiltin { silo_id, .. } => *silo_id,
-            Actor::SiloUser { silo_id, .. } => *silo_id,
+            Actor::UserBuiltin { .. } => None,
+            Actor::SiloUser { silo_id, .. } => Some(*silo_id),
         }
     }
 }
@@ -301,10 +295,9 @@ impl std::fmt::Debug for Actor {
         // Do NOT include sensitive fields (e.g., private key or a bearer
         // token) in this output!
         match self {
-            Actor::UserBuiltin { user_builtin_id, silo_id } => f
+            Actor::UserBuiltin { user_builtin_id } => f
                 .debug_struct("Actor::UserBuiltin")
                 .field("user_builtin_id", &user_builtin_id)
-                .field("silo_id", &silo_id)
                 .finish_non_exhaustive(),
             Actor::SiloUser { silo_user_id, silo_id } => f
                 .debug_struct("Actor::SiloUser")

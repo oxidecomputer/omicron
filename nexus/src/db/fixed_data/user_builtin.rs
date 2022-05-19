@@ -3,14 +3,12 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 //! Built-in users
 
-use crate::db::fixed_data::silo::SILO_ID;
 use lazy_static::lazy_static;
 use omicron_common::api;
 use uuid::Uuid;
 
 pub struct UserBuiltinConfig {
     pub id: Uuid,
-    pub silo_id: Uuid,
     pub name: api::external::Name,
     pub description: &'static str,
 }
@@ -18,15 +16,11 @@ pub struct UserBuiltinConfig {
 impl UserBuiltinConfig {
     fn new_static(
         id: &str,
-        silo_id: &str,
         name: &str,
         description: &'static str,
     ) -> UserBuiltinConfig {
         UserBuiltinConfig {
             id: id.parse().expect("invalid uuid for builtin user id"),
-            silo_id: silo_id
-                .parse()
-                .expect("invalid uuid for builtin user silo id"),
             name: name.parse().expect("invalid name for builtin user name"),
             description,
         }
@@ -41,7 +35,6 @@ lazy_static! {
             // "0001" is the first possible user that wouldn't be confused with
             // 0, or root.
             "001de000-05e4-4000-8000-000000000001",
-            &SILO_ID.to_string().as_str(),
             "db-init",
             "used for seeding initial database data",
         );
@@ -50,7 +43,6 @@ lazy_static! {
     pub static ref USER_INTERNAL_API: UserBuiltinConfig =
         UserBuiltinConfig::new_static(
             "001de000-05e4-4000-8000-000000000002",
-            &SILO_ID.to_string().as_str(),
             "internal-api",
             "used by Nexus when handling internal API requests",
         );
@@ -60,7 +52,6 @@ lazy_static! {
         UserBuiltinConfig::new_static(
             // "4ead" looks like "read"
             "001de000-05e4-4000-8000-000000004ead",
-            &SILO_ID.to_string().as_str(),
             "internal-read",
             "used by Nexus to read privileged control plane data",
         );
@@ -70,7 +61,6 @@ lazy_static! {
         UserBuiltinConfig::new_static(
             // "3a8a" looks a bit like "saga".
             "001de000-05e4-4000-8000-000000003a8a",
-            &SILO_ID.to_string().as_str(),
             "saga-recovery",
             "used by Nexus when recovering sagas",
         );
@@ -80,7 +70,6 @@ lazy_static! {
         UserBuiltinConfig::new_static(
             // "3a8a" looks a bit like "saga".
             "001de000-05e4-4000-8000-000000000003",
-            &SILO_ID.to_string().as_str(),
             "external-authn",
             "used by Nexus when authenticating external requests",
         );
