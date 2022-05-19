@@ -33,6 +33,10 @@ use crate::db::fixed_data::role_builtin::BUILTIN_ROLES;
 use crate::db::fixed_data::silo::{DEFAULT_SILO, SILO_ID};
 use crate::db::lookup::LookupPath;
 use crate::db::model::DatabaseString;
+use crate::db::queries::network_interface::InsertNetworkInterfaceQuery;
+use crate::db::queries::network_interface::NetworkInterfaceError;
+use crate::db::queries::vpc_subnet::FilterConflictingVpcSubnetRangesQuery;
+use crate::db::queries::vpc_subnet::SubnetError;
 use crate::db::{
     self,
     error::{public_error_from_diesel_pool, ErrorHandler, TransactionError},
@@ -49,10 +53,6 @@ use crate::db::{
     },
     pagination::paginated,
     pagination::paginated_multicolumn,
-    subnet_allocation::FilterConflictingVpcSubnetRangesQuery,
-    subnet_allocation::InsertNetworkInterfaceQuery,
-    subnet_allocation::NetworkInterfaceError,
-    subnet_allocation::SubnetError,
     update_and_check::{UpdateAndCheck, UpdateStatus},
 };
 use crate::external_api::{params, shared};
