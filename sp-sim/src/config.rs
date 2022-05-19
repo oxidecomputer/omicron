@@ -26,6 +26,12 @@ pub struct SpCommonConfig {
     pub bind_addrs: Option<[SocketAddrV6; 2]>,
     /// Fake serial number
     pub serial_number: SerialNumber,
+    /// 32-byte seed to create a manufacturing root certificate.
+    #[serde(with = "hex")]
+    pub manufacturing_root_cert_seed: [u8; 32],
+    /// 32-byte seed to create a Device ID certificate.
+    #[serde(with = "hex")]
+    pub device_id_cert_seed: [u8; 32],
 }
 
 /// Configuration of a simulated sidecar SP
@@ -117,5 +123,16 @@ impl std::cmp::PartialEq<std::io::Error> for LoadError {
         } else {
             false
         }
+    }
+}
+
+impl GimletConfig {
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, LoadError> {
+        let path = path.as_ref();
+        let contents = std::fs::read_to_string(&path)
+            .map_err(|err| LoadError::Io { path: path.into(), err })?;
+        let config = toml::from_str(&contents)
+            .map_err(|err| LoadError::Parse { path: path.into(), err })?;
+        Ok(config)
     }
 }

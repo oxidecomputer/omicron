@@ -5,6 +5,7 @@
 use crate::config::Config;
 use crate::config::SidecarConfig;
 use crate::ignition_id;
+use crate::rot::RotSprocketExt;
 use crate::server;
 use crate::server::UdpServer;
 use crate::Responsiveness;
@@ -27,7 +28,13 @@ use slog::debug;
 use slog::info;
 use slog::warn;
 use slog::Logger;
+use sprockets_rot::common::msgs::RotRequestV1;
+use sprockets_rot::common::msgs::RotResponseV1;
+use sprockets_rot::common::Ed25519PublicKey;
+use sprockets_rot::RotSprocket;
+use sprockets_rot::RotSprocketError;
 use std::net::SocketAddrV6;
+use std::sync::Mutex;
 use tokio::select;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
@@ -35,6 +42,8 @@ use tokio::task;
 use tokio::task::JoinHandle;
 
 pub struct Sidecar {
+    rot: Mutex<RotSprocket>,
+    manufacturing_public_key: Ed25519PublicKey,
     local_addrs: Option<[SocketAddrV6; 2]>,
     serial_number: SerialNumber,
     commands:
@@ -57,6 +66,10 @@ impl SimulatedSp for Sidecar {
         hex::encode(self.serial_number)
     }
 
+    fn manufacturing_public_key(&self) -> Ed25519PublicKey {
+        self.manufacturing_public_key
+    }
+
     fn local_addr(&self, port: SpPort) -> Option<SocketAddrV6> {
         let i = match port {
             SpPort::One => 0,
@@ -72,6 +85,13 @@ impl SimulatedSp for Sidecar {
             .map_err(|_| "gimlet task died unexpectedly")
             .unwrap();
         rx.await.unwrap();
+    }
+
+    fn rot_request(
+        &self,
+        request: RotRequestV1,
+    ) -> Result<RotResponseV1, RotSprocketError> {
+        self.rot.lock().unwrap().handle_deserialized(request)
     }
 }
 
@@ -136,7 +156,11 @@ impl Sidecar {
             (None, None)
         };
 
+        let (manufacturing_public_key, rot) =
+            RotSprocket::bootstrap_from_config(&sidecar.common);
         Ok(Self {
+            rot: Mutex::new(rot),
+            manufacturing_public_key,
             local_addrs,
             serial_number: sidecar.common.serial_number,
             commands,

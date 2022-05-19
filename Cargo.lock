@@ -556,6 +556,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "convert_case"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6245d59a3e82a7fc217c5828a6692dbc6dfb63a0c8c90495621f7b9d79704a0e"
+
+[[package]]
 name = "cookie"
 version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -580,6 +586,11 @@ name = "core-foundation-sys"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5827cebf4670468b8772dd191856768aedcb1b0278a04f989f7766351917b9dc"
+
+[[package]]
+name = "corncobs"
+version = "0.1.1"
+source = "git+https://github.com/cbiffle/corncobs?tag=v0.1.1#06a276928075fd5638802d46ed2d3d0c31d2d0c3"
 
 [[package]]
 name = "cortex-m"
@@ -984,6 +995,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "derive_more"
+version = "0.99.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4fb810d30a7c1953f91334de7244731fc3f3c10d7fe163338a35b9f640960321"
+dependencies = [
+ "convert_case",
+ "proc-macro2",
+ "quote",
+ "rustc_version 0.4.0",
+ "syn",
+]
+
+[[package]]
 name = "diesel"
 version = "2.0.0-rc.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1198,6 +1222,15 @@ dependencies = [
  "der",
  "elliptic-curve",
  "hmac 0.11.0",
+ "signature",
+]
+
+[[package]]
+name = "ed25519"
+version = "1.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d5c4b5e5959dc2c2b89918d8e2cc40fcdd623cef026ed09d2f0ee05199dc8e4"
+dependencies = [
  "signature",
 ]
 
@@ -1843,6 +1876,9 @@ name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "hmac"
@@ -4158,6 +4194,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "73b4b750c782965c211b42f022f59af1fbceabdd026623714f104152f1ec149f"
 
 [[package]]
+name = "salty"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77cdd38ed8bfe51e53ee991aae0791b94349d0a05cfdecd283835a8a965d4c37"
+dependencies = [
+ "ed25519",
+ "subtle",
+ "zeroize",
+]
+
+[[package]]
 name = "same-file"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4310,6 +4357,15 @@ name = "serde-big-array"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cd31f59f6fe2b0c055371bb2f16d7f0aa7d8881676c04a55b1596d1a17cd10a4"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "serde-big-array"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3323f09a748af288c3dc2474ea6803ee81f118321775bffa3ac8f7e65c5e90e7"
 dependencies = [
  "serde",
 ]
@@ -4770,6 +4826,7 @@ dependencies = [
  "serde",
  "slog",
  "slog-dtrace",
+ "sprockets-rot",
  "structopt",
  "thiserror",
  "tokio",
@@ -4809,6 +4866,33 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5c01a0c15da1b0b0e1494112e7af814a678fec9bd157881b49beac661e9b6f32"
 dependencies = [
  "der",
+]
+
+[[package]]
+name = "sprockets-common"
+version = "0.1.0"
+source = "git+ssh://git@github.com/oxidecomputer/sprockets.git?rev=8be06230bc887f1fffddb079b9ad72adc8eceecb#8be06230bc887f1fffddb079b9ad72adc8eceecb"
+dependencies = [
+ "derive_more",
+ "hubpack",
+ "salty",
+ "serde",
+ "serde-big-array 0.4.1",
+]
+
+[[package]]
+name = "sprockets-rot"
+version = "0.1.0"
+source = "git+ssh://git@github.com/oxidecomputer/sprockets.git?rev=8be06230bc887f1fffddb079b9ad72adc8eceecb#8be06230bc887f1fffddb079b9ad72adc8eceecb"
+dependencies = [
+ "corncobs",
+ "derive_more",
+ "hubpack",
+ "rand 0.8.5",
+ "salty",
+ "serde",
+ "sprockets-common",
+ "tinyvec",
 ]
 
 [[package]]
@@ -5837,7 +5921,7 @@ dependencies = [
  "rand_chacha",
  "rand_core 0.6.3",
  "serde",
- "serde-big-array",
+ "serde-big-array 0.3.3",
  "serde_cbor",
  "sha2 0.10.2",
  "zeroize",
