@@ -336,30 +336,27 @@ fn generate_misc_helpers(config: &Config) -> TokenStream {
                 #resource_authz_name: &authz::#resource_name,
             ) -> Result<(), Error> {
                 let log = &opctx.log;
-                // XXX-dap needs work
-                if let Err(error) = opctx.authn.actor_required() {
-                    error!(
-                        log,
-                        "unexpected successful lookup of siloed resource \
-                        {:?} with no actor in OpContext",
-                        #resource_name_str,
-                    );
-                    return Err(error);
-                }
 
-                let maybe_silo = opctx.authn.silo_required();
-                let actor_silo_id = match &maybe_silo {
-                    Err(_) => {
-                        debug!(
+                let actor_silo_id = match opctx.authn.silo_or_builtin() {
+                    Ok(Some(silo)) => silo.id(),
+                    Ok(None) => {
+                        trace!(
                             log,
                             "successful lookup of siloed resource {:?} \
-                            with actor but no silo in OpContext; \
-                            assuming built-in user",
+                            using built-in user",
                             #resource_name_str,
                         );
                         return Ok(());
                     },
-                    Ok(silo) => silo.id(),
+                    Err(error) => {
+                        error!(
+                            log,
+                            "unexpected successful lookup of siloed resource \
+                            {:?} with no actor in OpContext",
+                            #resource_name_str,
+                        );
+                        return Err(error);
+                    }
                 };
 
                 let resource_silo_id = authz_silo.id();

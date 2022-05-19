@@ -84,24 +84,49 @@ impl Context {
         }
     }
 
+    /// Returns the current actor's Silo if they have one, and an appropriate
+    /// error otherwise
+    ///
+    /// This is intended for code paths that always expect a Silo to be present.
+    /// Built-in users have no Silo, and this function will return an
+    /// InternalError if the currently-authenticated user is built-in.  If you
+    /// want to handle that case differently, see
+    /// [`Context::silo_or_builtin()`].
     pub fn silo_required(
         &self,
     ) -> Result<authz::Silo, omicron_common::api::external::Error> {
-        self.actor_required().and_then(|actor| {
-            if let Some(silo_id) = actor.silo_id() {
-                Ok(authz::Silo::new(
-                    authz::FLEET,
-                    silo_id,
-                    LookupType::ById(silo_id),
-                ))
-            } else {
-                Err(omicron_common::api::external::Error::internal_error(
-                    &format!(
-                        "needed Silo for a built-in user, but \
+        self.silo_or_builtin().and_then(|maybe_silo| {
+            maybe_silo.ok_or_else(|| {
+                omicron_common::api::external::Error::internal_error(&format!(
+                    "needed Silo for a built-in user, but \
                         built-in users have no Silo"
-                    ),
                 ))
-            }
+            })
+        })
+    }
+
+    /// Determine whether the currently authenticated actor has a Silo or is a
+    /// built-in user
+    ///
+    /// This function allows callers to distinguish these three cases:
+    ///
+    /// * there's an authenticated user with an associated Silo (most common)
+    /// * there's an authenticated built-in user who has no associated Silo
+    /// * there's no authenticated user
+    ///
+    /// Built-in users have no Silo, and so they usually can't do anything that
+    /// might use a Silo.  You usually want to use [`Context::silo_required()`]
+    /// if you don't expect to be looking at a built-in user.
+    pub fn silo_or_builtin(
+        &self,
+    ) -> Result<Option<authz::Silo>, omicron_common::api::external::Error> {
+        self.actor_required().map(|actor| match actor {
+            Actor::SiloUser { silo_id, .. } => Some(authz::Silo::new(
+                authz::FLEET,
+                *silo_id,
+                LookupType::ById(*silo_id),
+            )),
+            Actor::UserBuiltin { .. } => None,
         })
     }
 
