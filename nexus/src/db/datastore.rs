@@ -32,6 +32,7 @@ use crate::db::fixed_data::role_assignment::BUILTIN_ROLE_ASSIGNMENTS;
 use crate::db::fixed_data::role_builtin::BUILTIN_ROLES;
 use crate::db::fixed_data::silo::{DEFAULT_SILO, SILO_ID};
 use crate::db::lookup::LookupPath;
+use crate::db::model::DatabaseString;
 use crate::db::{
     self,
     error::{public_error_from_diesel_pool, ErrorHandler, TransactionError},
@@ -2983,14 +2984,15 @@ impl DataStore {
     // tricky without first-classing the Policy in the database.  The impact is
     // mitigated because we cap the number of role assignments per resource
     // pretty tightly.
-    pub async fn role_assignment_replace_visible<
-        T: authz::ApiResourceWithRolesType + Clone,
-    >(
+    pub async fn role_assignment_replace_visible<T>(
         &self,
         opctx: &OpContext,
         authz_resource: &T,
         new_assignments: &[shared::RoleAssignment<T::AllowedRoles>],
-    ) -> ListResultVec<db::model::RoleAssignment> {
+    ) -> ListResultVec<db::model::RoleAssignment>
+    where
+        T: authz::ApiResourceWithRolesType + Clone,
+    {
         // TODO-security We should carefully review what permissions are
         // required for modifying the policy of a resource.
         opctx.authorize(authz::Action::ModifyPolicy, authz_resource).await?;
@@ -3013,7 +3015,7 @@ impl DataStore {
                     r.identity_id,
                     resource_type,
                     resource_id,
-                    &r.role_name.to_string(),
+                    &r.role_name.to_database_string(),
                 )
             })
             .collect::<Vec<_>>();
