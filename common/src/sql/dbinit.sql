@@ -489,6 +489,16 @@ CREATE UNIQUE INDEX on omicron.public.image (
 ) WHERE
     time_deleted is NULL;
 
+CREATE TYPE omicron.public.distribution AS ENUM (
+  'alpine',
+  'debian',
+  'ubuntu',
+  'rocky',
+  'centos',
+  'fedora',
+  'freebsd'
+);
+
 CREATE TABLE omicron.public.global_image (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
@@ -502,7 +512,8 @@ CREATE TABLE omicron.public.global_image (
     volume_id UUID NOT NULL,
 
     url STRING(8192),
-    version STRING(64),
+    distribution omicron.public.distribution NOT NULL,
+    version STRING(64) NOT NULL,
     digest TEXT,
     block_size omicron.public.block_size NOT NULL,
     size_bytes INT NOT NULL

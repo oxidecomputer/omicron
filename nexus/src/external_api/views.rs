@@ -7,6 +7,7 @@
 use crate::authn;
 use crate::db::identity::{Asset, Resource};
 use crate::db::model;
+use crate::external_api::params::Distribution;
 use api_identity::ObjectIdentity;
 use omicron_common::api::external::{
     ByteCount, Digest, IdentityMetadata, Ipv4Net, Ipv6Net, Name,
@@ -84,8 +85,11 @@ pub struct GlobalImage {
     /// URL source of this image, if any
     pub url: Option<String>,
 
-    /// Version of this, if any
-    pub version: Option<String>,
+    /// Image distribution
+    pub distribution: Distribution,
+
+    /// Image version
+    pub version: String,
 
     /// Hash of the image contents, if applicable
     pub digest: Option<Digest>,

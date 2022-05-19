@@ -223,7 +223,10 @@ lazy_static! {
             subnet_name: DEMO_VPC_SUBNET_NAME.clone(),
             ip: None,
         };
+}
 
+// Separate lazy_static! blocks to avoid hitting some recursion limit when compiling
+lazy_static! {
     // Project Images
     pub static ref DEMO_IMAGE_NAME: Name = "demo-image".parse().unwrap();
     pub static ref DEMO_PROJECT_IMAGE_URL: String =
@@ -234,13 +237,29 @@ lazy_static! {
                 name: DEMO_IMAGE_NAME.clone(),
                 description: String::from(""),
             },
-            source: params::ImageSource::Url(String::from("http://127.0.0.1:5555/image.raw")),
+            source: params::ImageSource::Url {
+                url: String::from("http://127.0.0.1:5555/image.raw")
+            },
             block_size: params::BlockSize::try_from(4096).unwrap(),
         };
 
     // Global Images
+    pub static ref DEMO_GLOBAL_IMAGE_NAME: Name = "alpine-edge".parse().unwrap();
     pub static ref DEMO_GLOBAL_IMAGE_URL: String =
-        format!("/images/{}", *DEMO_IMAGE_NAME);
+        format!("/images/{}", *DEMO_GLOBAL_IMAGE_NAME);
+    pub static ref DEMO_GLOBAL_IMAGE_CREATE: params::GlobalImageCreate =
+        params::GlobalImageCreate {
+            identity: IdentityMetadataCreateParams {
+                name: DEMO_GLOBAL_IMAGE_NAME.clone(),
+                description: String::from(""),
+            },
+            source: params::ImageSource::Url {
+                url: String::from("http://127.0.0.1:5555/image.raw")
+            },
+            distribution: params::Distribution::Alpine,
+            version: String::from("edge"),
+            block_size: params::BlockSize::try_from(4096).unwrap(),
+        };
 
     // Snapshots
     pub static ref DEMO_SNAPSHOT_NAME: Name = "demo-snapshot".parse().unwrap();
@@ -924,7 +943,7 @@ lazy_static! {
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_IMAGE_CREATE).unwrap()
+                    serde_json::to_value(&*DEMO_GLOBAL_IMAGE_CREATE).unwrap()
                 ),
             ],
         },

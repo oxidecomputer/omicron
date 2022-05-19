@@ -281,7 +281,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ImageCreate"
+                "$ref": "#/components/schemas/GlobalImageCreate"
               }
             }
           },
@@ -5655,6 +5655,17 @@
           }
         ]
       },
+      "Distribution": {
+        "type": "string",
+        "enum": [
+          "alpine",
+          "debian",
+          "ubuntu",
+          "rocky",
+          "centos",
+          "fedora"
+        ]
+      },
       "Error": {
         "description": "Error information from a response.",
         "type": "object",
@@ -5783,6 +5794,14 @@
               }
             ]
           },
+          "distribution": {
+            "description": "Image distribution",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Distribution"
+              }
+            ]
+          },
           "id": {
             "description": "unique, immutable, system-controlled identifier for each resource",
             "type": "string",
@@ -5820,19 +5839,68 @@
             "type": "string"
           },
           "version": {
-            "nullable": true,
-            "description": "Version of this, if any",
+            "description": "Image version",
             "type": "string"
           }
         },
         "required": [
           "block_size",
           "description",
+          "distribution",
           "id",
           "name",
           "size",
           "time_created",
-          "time_modified"
+          "time_modified",
+          "version"
+        ]
+      },
+      "GlobalImageCreate": {
+        "description": "Create-time parameters for an [`GlobalImage`](omicron_common::api::external::GlobalImage)",
+        "type": "object",
+        "properties": {
+          "block_size": {
+            "description": "block size in bytes",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BlockSize"
+              }
+            ]
+          },
+          "description": {
+            "type": "string"
+          },
+          "distribution": {
+            "description": "image distribution",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Distribution"
+              }
+            ]
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "source": {
+            "description": "The source of the image's contents.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ImageSource"
+              }
+            ]
+          },
+          "version": {
+            "description": "image version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "block_size",
+          "description",
+          "distribution",
+          "name",
+          "source",
+          "version"
         ]
       },
       "GlobalImageResultsPage": {
@@ -6007,25 +6075,25 @@
           {
             "type": "object",
             "properties": {
-              "src": {
-                "type": "string"
-              },
               "type": {
                 "type": "string",
                 "enum": [
                   "url"
                 ]
+              },
+              "url": {
+                "type": "string"
               }
             },
             "required": [
-              "src",
-              "type"
+              "type",
+              "url"
             ]
           },
           {
             "type": "object",
             "properties": {
-              "src": {
+              "id": {
                 "type": "string",
                 "format": "uuid"
               },
@@ -6037,7 +6105,7 @@
               }
             },
             "required": [
-              "src",
+              "id",
               "type"
             ]
           }

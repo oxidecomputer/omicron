@@ -387,10 +387,42 @@ pub struct NetworkInterfaceIdentifier {
 
 /// The source of the underlying image.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(tag = "type", content = "src", rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum ImageSource {
-    Url(String),
-    Snapshot(Uuid),
+    Url { url: String },
+    Snapshot { id: Uuid },
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum Distribution {
+    Alpine,
+    Debian,
+    Ubuntu,
+    Rocky,
+    CentOS,
+    Fedora,
+}
+
+/// Create-time parameters for an
+/// [`GlobalImage`](omicron_common::api::external::GlobalImage)
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct GlobalImageCreate {
+    /// common identifying metadata
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+
+    /// image distribution
+    pub distribution: Distribution,
+
+    /// image version
+    pub version: String,
+
+    /// block size in bytes
+    pub block_size: BlockSize,
+
+    /// The source of the image's contents.
+    pub source: ImageSource,
 }
 
 /// Create-time parameters for an
