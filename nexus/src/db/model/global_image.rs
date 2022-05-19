@@ -56,7 +56,7 @@ impl TryFrom<Distribution> for params::Distribution {
             Distribution::Rocky => Ok(params::Distribution::Rocky),
             Distribution::CentOS => Ok(params::Distribution::CentOS),
             Distribution::Fedora => Ok(params::Distribution::Fedora),
-            Distribution::FreeBSD => Err(Self::Error::interregnum_error(
+            Distribution::FreeBSD => Err(Self::Error::type_version_mismatch(
                 "FreeBSD not part of params::Distribution yet!",
             )),
         }
