@@ -89,8 +89,8 @@ version = "0.1.0"
 path = "../oximeter/producer"
 
 [dependencies.schemars]
-version = "0.8"
-features = [ "chrono", "uuid" ]
+version = "0.8.10"
+features = [ "chrono", "uuid1" ]
 
 [dependencies.serde]
 version = "1.0"
@@ -110,10 +110,10 @@ features = [ "full" ]
 
 [dependencies.tokio-postgres]
 version = "0.7"
-features = [ "with-chrono-0_4", "with-serde_json-1", "with-uuid-0_8" ]
+features = [ "with-chrono-0_4", "with-serde_json-1", "with-uuid-1" ]
 
 [dependencies.uuid]
-version = "0.8"
+version = "1.0.0"
 features = [ "serde", "v4" ]
 
 [dev-dependencies]
