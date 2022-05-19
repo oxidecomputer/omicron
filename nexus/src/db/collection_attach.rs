@@ -6,6 +6,10 @@
 //!
 //! This atomically:
 //! - Checks if the collection exists and is not soft deleted
+//! - Checks if the resource exists and is not soft deleted
+//! - Validates conditions on both the collection and resource
+//! - Ensures the number of attached resources does not exceed
+//! a provided threshold
 //! - Updates the collection's resource generation number
 //! - Updates the resource row
 
@@ -23,7 +27,6 @@ use diesel::query_dsl::methods as query_methods;
 use diesel::query_source::Table;
 use diesel::sql_types::{BigInt, Nullable, SingleValue};
 use std::fmt::Debug;
-use std::marker::PhantomData;
 
 /// The table representing the collection. The resource references
 /// this table.
@@ -35,6 +38,8 @@ type CollectionTable<ResourceType, C> = <<C as DatastoreAttachTarget<
 type ResourceTable<ResourceType, C> = <<C as DatastoreAttachTarget<
     ResourceType,
 >>::ResourceCollectionIdColumn as Column>::Table;
+type ResourceTableWhereClause<ResourceType, C> = <ResourceTable<ResourceType, C> as IntoUpdateTarget>::WhereClause;
+
 type CollectionGenerationColumn<ResourceType, C> =
     <C as DatastoreAttachTarget<ResourceType>>::CollectionGenerationColumn;
 type CollectionIdColumn<ResourceType, C> =
@@ -123,15 +128,30 @@ pub trait DatastoreAttachTarget<ResourceType> : Selectable<Pg> {
     /// The time deleted column in the ResourceTable
     type ResourceTimeDeletedColumn: Column + Default;
 
-    /// Create a statement for attaching a resource to the given collection.
+    /// Creates a statement for attaching a resource to the given collection.
     ///
-    /// The U, V types are the same type as the 3rd and 4th generic arguments to
-    /// UpdateStatement, and should generally be inferred rather than explicitly
-    /// specified.
+    /// This statement allows callers to atomically check the state of a
+    /// collection and a resource while attaching a resource to a collection.
     ///
-    /// CAUTION: The API does not currently enforce that `key` matches the value
-    /// of the collection id within the attached row.
-    fn attach_resource<U, V, V2>(
+    /// - `collection_id`: Primary key of the collection being inserted into.
+    /// - `resource_id`: Primary key of the resource being attached.
+    /// - `collection_query`: An optional query for collection state. The
+    /// CTE will automatically filter this query to `collection_id`, and
+    /// validate that the "time deleted" column is NULL.
+    /// - `resource_query`: An optional query for the resource state. The
+    /// CTE will automatically filter this query to `resource_id`,
+    /// validate that the "time deleted" column is NULL, and validate that the
+    /// "collection_id" column is NULL.
+    /// - `max_attached_resources`: The maximum number of non-deleted
+    /// resources which are permitted to have their "collection_id" column
+    /// set to the value of `collection_id`. If attaching `resource_id` would
+    /// cross this threshold, the update is aborted.
+    /// - `update`: An update statement, identifying how the resource object
+    /// should be modified to be attached.
+    ///
+    /// The V, V2 types refer to the "update targets" of the UpdateStatement,
+    /// and should generally be inferred rather than explicitly specified.
+    fn attach_resource<V, V2>(
         collection_id: Self::Id,
         resource_id: Self::Id,
 
@@ -140,24 +160,35 @@ pub trait DatastoreAttachTarget<ResourceType> : Selectable<Pg> {
 
         max_attached_resources: usize,
 
-        // Note that UpdateStatement's fourth argument defaults to Ret =
+        // We are intentionally picky about this update statement:
+        // - The second argument - the WHERE clause - must match the default
+        // for the table. This encourages the "resource_query" filter to be
+        // used instead, and makes it possible for the CTE to modify the
+        // filter here (ensuring "resource_id" is selected).
+        // - Additionally, UpdateStatement's fourth argument defaults to Ret =
         // NoReturningClause. This enforces that the given input statement does
-        // not have a RETURNING clause.
-        update: UpdateStatement<ResourceTable<ResourceType, Self>, U, V>,
+        // not have a RETURNING clause, and also lets the CTE control this
+        // value.
+        update: UpdateStatement<
+            ResourceTable<ResourceType, Self>,
+            ResourceTableWhereClause<ResourceType, Self>,
+            V>,
     ) -> AttachToCollectionStatement<ResourceType, V2, Self>
     where
+        // Ensure the "collection" columns all belong to the same table.
         (
             <Self::CollectionIdColumn as Column>::Table,
             <Self::CollectionGenerationColumn as Column>::Table,
             <Self::CollectionTimeDeletedColumn as Column>::Table,
         ): TypesAreSame,
+        // Ensure the "resource" columns all belong to the same table.
         (
             <Self::ResourceIdColumn as Column>::Table,
             <Self::ResourceCollectionIdColumn as Column>::Table,
             <Self::ResourceTimeDeletedColumn as Column>::Table,
         ): TypesAreSame,
         Self: Sized,
-        // Enables the "table()" method.
+        // Enables the "table()" method on the Collection.
         CollectionTable<ResourceType, Self>: HasTable<Table = CollectionTable<ResourceType, Self>>
             + 'static
             + Send
@@ -168,7 +199,7 @@ pub trait DatastoreAttachTarget<ResourceType> : Selectable<Pg> {
                 Pg,
                 Output = BoxedDslOutput<CollectionTable<ResourceType, Self>>,
             >,
-        // Enables the "table()" method.
+        // Enables the "table()" method on the Resource.
         ResourceTable<ResourceType, Self>: HasTable<Table = ResourceTable<ResourceType, Self>>
             + 'static
             + Send
@@ -189,34 +220,41 @@ pub trait DatastoreAttachTarget<ResourceType> : Selectable<Pg> {
         <CollectionTable<ResourceType, Self> as AsQuery>::SqlType: Send,
         // Allows sending "resource_exists_query" between threads.
         <ResourceTable<ResourceType, Self> as AsQuery>::SqlType: Send,
-        // Allows calling ".filter()" on the boxed table.
+        // Allows calling ".filter()" on the boxed collection table.
         BoxedQuery<CollectionTable<ResourceType, Self>>:
+            // Filter by primary key
             query_methods::FilterDsl<
-                    Eq<
-                        CollectionPrimaryKey<ResourceType, Self>,
-                        Self::Id,
-                    >,
-                    Output = BoxedQuery<CollectionTable<ResourceType, Self>>,
-                > + query_methods::FilterDsl<
-                    IsNull<Self::CollectionTimeDeletedColumn>,
-                    Output = BoxedQuery<CollectionTable<ResourceType, Self>>,
+                Eq<
+                    CollectionPrimaryKey<ResourceType, Self>,
+                    Self::Id,
                 >,
+                Output = BoxedQuery<CollectionTable<ResourceType, Self>>,
+            // Filter by time deleted = NULL
+            > + query_methods::FilterDsl<
+                IsNull<Self::CollectionTimeDeletedColumn>,
+                Output = BoxedQuery<CollectionTable<ResourceType, Self>>,
+            >,
+        // Allows calling ".filter()" on the boxed resource table.
         BoxedQuery<ResourceTable<ResourceType, Self>>:
+            // Filter by primary key
             query_methods::FilterDsl<
                 Eq<
                     ResourcePrimaryKey<ResourceType, Self>,
                     Self::Id,
                 >,
                 Output = BoxedQuery<ResourceTable<ResourceType, Self>>,
+            // Filter by collection ID (when counting attached resources)
             > + query_methods::FilterDsl<
                 Eq<
                     Self::ResourceCollectionIdColumn,
                     Self::Id,
                 >,
                 Output = BoxedQuery<ResourceTable<ResourceType, Self>>,
+            // Filter by collection ID = NULL
             > + query_methods::FilterDsl<
                 IsNull<Self::ResourceCollectionIdColumn>,
                 Output = BoxedQuery<ResourceTable<ResourceType, Self>>,
+            // Filter by time deleted = NULL
             > + query_methods::FilterDsl<
                 IsNull<Self::ResourceTimeDeletedColumn>,
                 Output = BoxedQuery<ResourceTable<ResourceType, Self>>,
@@ -224,8 +262,11 @@ pub trait DatastoreAttachTarget<ResourceType> : Selectable<Pg> {
 
         // See: "update_resource_statement".
         //
+        // Allows referencing the default "WHERE" clause of the update
+        // statement.
+        ResourceTable<ResourceType, Self>: IntoUpdateTarget,
         // Allows calling "update.into_boxed()"
-        UpdateStatement<ResourceTable<ResourceType, Self>, U, V>:
+        UpdateStatement<ResourceTable<ResourceType, Self>, ResourceTableWhereClause<ResourceType, Self>, V>:
            query_methods::BoxedDsl<
                 'static,
                 Pg,
@@ -258,21 +299,16 @@ pub trait DatastoreAttachTarget<ResourceType> : Selectable<Pg> {
             SingleValue,
         <ResourcePrimaryKey<ResourceType, Self> as Expression>::SqlType:
             SingleValue,
+        <Self::ResourceCollectionIdColumn as Expression>::SqlType:
+            SingleValue,
 
-        // Allows calling "is_null()" on the time deleted column.
+        // Allows calling "is_null()" on the following columns.
         Self::CollectionTimeDeletedColumn: ExpressionMethods,
         Self::ResourceTimeDeletedColumn: ExpressionMethods,
         Self::ResourceCollectionIdColumn: ExpressionMethods,
 
-        Self::CollectionGenerationColumn: ExpressionMethods,
-        // Necessary for output type (`AttachToCollectionStatement`).
+        // Necessary to actually select the resource in the output type.
         ResourceType: Selectable<Pg>,
-
-        // XXX ?
-        <Self::CollectionGenerationColumn as Expression>::SqlType:
-            SingleValue,
-        <Self::ResourceCollectionIdColumn as Expression>::SqlType:
-            SingleValue,
     {
         let collection_table = || {
             <CollectionTable<ResourceType, Self> as HasTable>::table()
@@ -297,7 +333,7 @@ pub trait DatastoreAttachTarget<ResourceType> : Selectable<Pg> {
         );
 
         // Additionally, construct a new query to count the number of
-        // already attached instances.
+        // already attached resources.
         let resource_count_query = Box::new(
             resource_table()
                 .into_boxed()
@@ -306,7 +342,7 @@ pub trait DatastoreAttachTarget<ResourceType> : Selectable<Pg> {
                 .count()
         );
 
-        // However, for the queries which decide whether or not we'll update,
+        // For the queries which decide whether or not we'll perform the update,
         // extend the user-provided arguments.
         //
         // We force these queries to:
@@ -344,7 +380,6 @@ pub trait DatastoreAttachTarget<ResourceType> : Selectable<Pg> {
             collection_from_clause,
             collection_returning_clause,
             resource_returning_clause,
-            query_type: PhantomData,
         }
     }
 }
@@ -372,10 +407,12 @@ where
 
     // Update statement for the resource.
     update_resource_statement: BoxedUpdateStatement<'static, Pg, ResourceTable<ResourceType, C>, V>,
+    // Describes the target of the collection table UPDATE.
     collection_from_clause: <CollectionTable<ResourceType, C> as QuerySource>::FromClause,
+    // Describes what should be returned after UPDATE-ing the collection.
     collection_returning_clause: AsSelect<C, Pg>,
+    // Describes what should be returned after UPDATE-ing the resource.
     resource_returning_clause: AsSelect<ResourceType, Pg>,
-    query_type: PhantomData<ResourceType>,
 }
 
 impl<ResourceType, V, C> QueryId
@@ -393,7 +430,7 @@ pub type AsyncAttachToCollectionResult<ResourceType, C> = Result<ResourceType, A
 
 /*
 /// Result of [`AttachToCollectionStatement`] when executed synchronously
-pub type SyncAttachToCollectionResult<Q> = Result<Q, SyncAttachError>;
+pub type SyncAttachToCollectionResult<ResourceType, C> = Result<ResourceType, SyncAttachError<ResourceType, C>>;
 */
 
 /// Errors returned by [`AttachToCollectionStatement`].
@@ -428,6 +465,8 @@ pub enum SyncAttachError {
 }
 */
 
+/// Describes the type returned from the actual CTE, which is parsed
+/// and interpreted before propagating it to users of the Rust API.
 pub type RawOutput<ResourceType, C> = (i64, Option<C>, Option<ResourceType>, Option<C>, Option<ResourceType>);
 
 impl<ResourceType, V, C> AttachToCollectionStatement<ResourceType, V, C>
@@ -439,11 +478,6 @@ where
     AttachToCollectionStatement<ResourceType, V, C>: Send,
 {
     /// Issues the CTE asynchronously and parses the result.
-    ///
-    /// The three outcomes are:
-    /// - Ok(new row)
-    /// - Error(collection not found)
-    /// - Error(other diesel error)
     pub async fn attach_and_get_result_async(
         self,
         pool: &bb8::Pool<ConnectionManager<DbConnection>>,
@@ -455,10 +489,7 @@ where
         self.get_result_async::<RawOutput<ResourceType, C>>(pool)
             .await
             // If the database returns an error, propagate it right away.
-            .map_err(|e| {
-                eprintln!("ERROR from DB - not parsing result");
-                AttachError::DatabaseError(e)
-            })
+            .map_err(AttachError::DatabaseError)
             // Otherwise, parse the output to determine if the CTE succeeded.
             .and_then(Self::parse_result)
     }
@@ -466,11 +497,6 @@ where
     /*
 
     /// Issues the CTE synchronously and parses the result.
-    ///
-    /// The three outcomes are:
-    /// - Ok(new row)
-    /// - Error(collection not found)
-    /// - Error(other diesel error)
     pub fn attach_and_get_result(
         self,
         conn: &mut DbConnection,
@@ -489,8 +515,6 @@ where
     fn parse_result(
         result: RawOutput<ResourceType, C>,
     ) -> Result<ResourceType, AttachError<ResourceType, C>> {
-        eprintln!("Parsing DB result: {:?}", result);
-
         let (
             attached_count,
             collection_before_update,
@@ -753,10 +777,7 @@ where
         out.push_sql("), ");
 
         out.push_sql("updated_resource AS (");
-        // TODO: Check or force the update_resource_statement to have
-        //       C::ResourceCollectionIdColumn set
         self.update_resource_statement.walk_ast(out.reborrow())?;
-
         // NOTE: It is safe to start with "AND" - we forced the update statement
         // to have a WHERE clause on the primary key of the resource.
         out.push_sql(" AND (SELECT * FROM do_update)");
@@ -1482,7 +1503,7 @@ mod test {
             //
             // This provides an example of how one could attach an ID and update
             // the state of a resource simultaneously.
-            diesel::update(resource::table.filter(resource::name.eq("resource")))
+            diesel::update(resource::table)
                 .set((
                     resource::dsl::collection_id.eq(collection_id),
                     resource::dsl::description.eq("new description".to_string())
