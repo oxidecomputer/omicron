@@ -2,7 +2,7 @@
 #:
 #: name = "helios / deploy"
 #: variety = "basic"
-#: target = "lab"
+#: target = "lab-netdev"
 #: output_rules = [
 #:	"/var/oxide/sled-agent.log",
 #: ]
@@ -28,8 +28,8 @@ ptime -m pfexec ./target/release/omicron-package install
 
 # Wait up to 5 minutes for RSS to say it's done
 for _i in {1..30}; do
-	grep 'Finished setting up services' /var/oxide/sled-agent.log && break
 	sleep 10
+	grep 'Finished setting up services' /var/oxide/sled-agent.log && break
 done
 
 # TODO: write tests and run the resulting test bin here
