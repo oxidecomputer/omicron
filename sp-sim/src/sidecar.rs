@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::net::SocketAddr;
-
 use crate::config::Config;
 use crate::config::SidecarConfig;
 use crate::ignition_id;
@@ -29,6 +27,7 @@ use slog::debug;
 use slog::info;
 use slog::warn;
 use slog::Logger;
+use std::net::SocketAddrV6;
 use tokio::select;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
@@ -36,7 +35,7 @@ use tokio::task;
 use tokio::task::JoinHandle;
 
 pub struct Sidecar {
-    local_addrs: [SocketAddr; 2],
+    local_addrs: [SocketAddrV6; 2],
     serial_number: SerialNumber,
     commands:
         mpsc::UnboundedSender<(Command, oneshot::Sender<CommandResponse>)>,
@@ -56,7 +55,7 @@ impl SimulatedSp for Sidecar {
         hex::encode(self.serial_number)
     }
 
-    fn local_addr(&self, port: SpPort) -> SocketAddr {
+    fn local_addr(&self, port: SpPort) -> SocketAddrV6 {
         let i = match port {
             SpPort::One => 0,
             SpPort::Two => 1,
@@ -255,13 +254,13 @@ impl Handler {
 impl SpHandler for Handler {
     fn discover(
         &mut self,
-        sender: SocketAddr,
+        sender: SocketAddrV6,
         port: SpPort,
     ) -> Result<gateway_messages::DiscoverResponse, ResponseError> {
         debug!(
             &self.log,
             "received discover; sending response";
-            "sender" => sender,
+            "sender" => %sender,
             "port" => ?port,
         );
         Ok(DiscoverResponse { sp_port: port })
@@ -269,7 +268,7 @@ impl SpHandler for Handler {
 
     fn ignition_state(
         &mut self,
-        sender: SocketAddr,
+        sender: SocketAddrV6,
         port: SpPort,
         target: u8,
     ) -> Result<IgnitionState, ResponseError> {
@@ -277,7 +276,7 @@ impl SpHandler for Handler {
         debug!(
             &self.log,
             "received ignition state request";
-            "sender" => sender,
+            "sender" => %sender,
             "port" => ?port,
             "target" => target,
             "reply-state" => ?state,
@@ -287,7 +286,7 @@ impl SpHandler for Handler {
 
     fn bulk_ignition_state(
         &mut self,
-        sender: SocketAddr,
+        sender: SocketAddrV6,
         port: SpPort,
     ) -> Result<BulkIgnitionState, ResponseError> {
         let num_targets = self.ignition_targets.len();
@@ -307,7 +306,7 @@ impl SpHandler for Handler {
             &self.log,
             "received bulk ignition state request; sending state for {} targets",
             num_targets;
-            "sender" => sender,
+            "sender" => %sender,
             "port" => ?port,
         );
         Ok(out)
@@ -315,7 +314,7 @@ impl SpHandler for Handler {
 
     fn ignition_command(
         &mut self,
-        sender: SocketAddr,
+        sender: SocketAddrV6,
         port: SpPort,
         target: u8,
         command: IgnitionCommand,
@@ -333,7 +332,7 @@ impl SpHandler for Handler {
         debug!(
             &self.log,
             "received ignition command; sending ack";
-            "sender" => sender,
+            "sender" => %sender,
             "port" => ?port,
             "target" => target,
             "command" => ?command,
@@ -343,13 +342,13 @@ impl SpHandler for Handler {
 
     fn serial_console_write(
         &mut self,
-        sender: SocketAddr,
+        sender: SocketAddrV6,
         port: SpPort,
         _packet: gateway_messages::SerialConsole,
     ) -> Result<(), ResponseError> {
         warn!(
             &self.log, "received serial console write; unsupported by sidecar";
-            "sender" => sender,
+            "sender" => %sender,
             "port" => ?port,
         );
         Err(ResponseError::RequestUnsupportedForSp)
@@ -357,13 +356,13 @@ impl SpHandler for Handler {
 
     fn sp_state(
         &mut self,
-        sender: SocketAddr,
+        sender: SocketAddrV6,
         port: SpPort,
     ) -> Result<SpState, ResponseError> {
         let state = SpState { serial_number: self.serial_number };
         debug!(
             &self.log, "received state request";
-            "sender" => sender,
+            "sender" => %sender,
             "port" => ?port,
             "reply-state" => ?state,
         );

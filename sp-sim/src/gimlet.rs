@@ -6,7 +6,7 @@ use crate::config::GimletConfig;
 use crate::server;
 use crate::server::UdpServer;
 use crate::{Responsiveness, SimulatedSp};
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use async_trait::async_trait;
 use futures::future;
 use gateway_messages::sp_impl::{SerialConsolePacketizer, SpHandler, SpServer};
@@ -23,7 +23,7 @@ use gateway_messages::SpPort;
 use gateway_messages::SpState;
 use slog::{debug, error, info, warn, Logger};
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::net::{SocketAddr, SocketAddrV6};
 use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
@@ -33,9 +33,9 @@ use tokio::sync::oneshot;
 use tokio::task::{self, JoinHandle};
 
 pub struct Gimlet {
-    local_addrs: [SocketAddr; 2],
+    local_addrs: [SocketAddrV6; 2],
     serial_number: SerialNumber,
-    serial_console_addrs: HashMap<String, SocketAddr>,
+    serial_console_addrs: HashMap<String, SocketAddrV6>,
     commands:
         mpsc::UnboundedSender<(Command, oneshot::Sender<CommandResponse>)>,
     inner_tasks: Vec<JoinHandle<()>>,
@@ -56,7 +56,7 @@ impl SimulatedSp for Gimlet {
         hex::encode(self.serial_number)
     }
 
-    fn local_addr(&self, port: SpPort) -> SocketAddr {
+    fn local_addr(&self, port: SpPort) -> SocketAddrV6 {
         let i = match port {
             SpPort::One => 0,
             SpPort::Two => 1,
@@ -95,11 +95,11 @@ impl Gimlet {
         // addresses, but we're spawning both the primary UDP task (which
         // receives messages from the gateway) and a helper TCP task (which
         // emulates a serial console and sends messages to the gateway
-        // unprompted). We'll share a locked `Option<SocketAddr>` between the
+        // unprompted). We'll share a locked `Option<SocketAddrV6>` between the
         // tasks, and have the UDP task populate it. If the TCP task receives
         // data but doesn't know either of the gateways addresses, it will just
         // discard it.
-        let gateway_addresses: Arc<Mutex<[Option<SocketAddr>; 2]>> =
+        let gateway_addresses: Arc<Mutex<[Option<SocketAddrV6>; 2]>> =
             Arc::default();
 
         let mut serial_console_addrs = HashMap::new();
@@ -115,15 +115,23 @@ impl Gimlet {
                     .with_context(|| format!("failed to bind to {}", addr))?;
                 debug!(
                     log, "bound fake serial console to TCP port";
-                    "addr" => addr,
+                    "addr" => %addr,
                     "component" => ?component,
                 );
 
                 serial_console_addrs.insert(
                     component.as_str().unwrap().to_string(),
-                    listener.local_addr().with_context(|| {
-                        "failed to get local address of bound socket"
-                    })?,
+                    listener
+                        .local_addr()
+                        .with_context(|| {
+                            "failed to get local address of bound socket"
+                        })
+                        .and_then(|addr| match addr {
+                            SocketAddr::V4(addr) => {
+                                bail!("bound IPv4 address {}", addr)
+                            }
+                            SocketAddr::V6(addr) => Ok(addr),
+                        })?,
                 );
 
                 let (tx, rx) = mpsc::unbounded_channel();
@@ -167,7 +175,7 @@ impl Gimlet {
         })
     }
 
-    pub fn serial_console_addr(&self, component: &str) -> Option<SocketAddr> {
+    pub fn serial_console_addr(&self, component: &str) -> Option<SocketAddrV6> {
         self.serial_console_addrs.get(component).copied()
     }
 }
@@ -176,7 +184,7 @@ struct SerialConsoleTcpTask {
     listener: TcpListener,
     incoming_serial_console: UnboundedReceiver<SerialConsole>,
     socks: [Arc<UdpSocket>; 2],
-    gateway_addresses: Arc<Mutex<[Option<SocketAddr>; 2]>>,
+    gateway_addresses: Arc<Mutex<[Option<SocketAddrV6>; 2]>>,
     console_packetizer: SerialConsolePacketizer,
     log: Logger,
 }
@@ -187,7 +195,7 @@ impl SerialConsoleTcpTask {
         listener: TcpListener,
         incoming_serial_console: UnboundedReceiver<SerialConsole>,
         socks: [Arc<UdpSocket>; 2],
-        gateway_addresses: Arc<Mutex<[Option<SocketAddr>; 2]>>,
+        gateway_addresses: Arc<Mutex<[Option<SocketAddrV6>; 2]>>,
         log: Logger,
     ) -> Self {
         Self {
@@ -344,7 +352,7 @@ struct UdpTask {
 impl UdpTask {
     fn new(
         servers: [UdpServer; 2],
-        gateway_addresses: Arc<Mutex<[Option<SocketAddr>; 2]>>,
+        gateway_addresses: Arc<Mutex<[Option<SocketAddrV6>; 2]>>,
         serial_number: SerialNumber,
         incoming_serial_console: HashMap<
             SpComponent,
@@ -422,13 +430,13 @@ impl UdpTask {
 struct Handler {
     log: Logger,
     serial_number: SerialNumber,
-    gateway_addresses: Arc<Mutex<[Option<SocketAddr>; 2]>>,
+    gateway_addresses: Arc<Mutex<[Option<SocketAddrV6>; 2]>>,
     incoming_serial_console:
         HashMap<SpComponent, UnboundedSender<SerialConsole>>,
 }
 
 impl Handler {
-    fn update_gateway_address(&self, addr: SocketAddr, port: SpPort) {
+    fn update_gateway_address(&self, addr: SocketAddrV6, port: SpPort) {
         let i = match port {
             SpPort::One => 0,
             SpPort::Two => 1,
@@ -440,13 +448,13 @@ impl Handler {
 impl SpHandler for Handler {
     fn discover(
         &mut self,
-        sender: SocketAddr,
+        sender: SocketAddrV6,
         port: SpPort,
     ) -> Result<DiscoverResponse, ResponseError> {
         debug!(
             &self.log,
             "received discover; sending response";
-            "sender" => sender,
+            "sender" => %sender,
             "port" => ?port,
         );
         Ok(DiscoverResponse { sp_port: port })
@@ -454,7 +462,7 @@ impl SpHandler for Handler {
 
     fn ignition_state(
         &mut self,
-        sender: SocketAddr,
+        sender: SocketAddrV6,
         port: SpPort,
         target: u8,
     ) -> Result<gateway_messages::IgnitionState, ResponseError> {
@@ -462,7 +470,7 @@ impl SpHandler for Handler {
         warn!(
             &self.log,
             "received ignition state request; not supported by gimlet";
-            "sender" => sender,
+            "sender" => %sender,
             "port" => ?port,
             "target" => target,
         );
@@ -471,14 +479,14 @@ impl SpHandler for Handler {
 
     fn bulk_ignition_state(
         &mut self,
-        sender: SocketAddr,
+        sender: SocketAddrV6,
         port: SpPort,
     ) -> Result<gateway_messages::BulkIgnitionState, ResponseError> {
         self.update_gateway_address(sender, port);
         warn!(
             &self.log,
             "received bulk ignition state request; not supported by gimlet";
-            "sender" => sender,
+            "sender" => %sender,
             "port" => ?port,
         );
         Err(ResponseError::RequestUnsupportedForSp)
@@ -486,7 +494,7 @@ impl SpHandler for Handler {
 
     fn ignition_command(
         &mut self,
-        sender: SocketAddr,
+        sender: SocketAddrV6,
         port: SpPort,
         target: u8,
         command: gateway_messages::IgnitionCommand,
@@ -495,7 +503,7 @@ impl SpHandler for Handler {
         warn!(
             &self.log,
             "received ignition command; not supported by gimlet";
-            "sender" => sender,
+            "sender" => %sender,
             "port" => ?port,
             "target" => target,
             "command" => ?command,
@@ -505,7 +513,7 @@ impl SpHandler for Handler {
 
     fn serial_console_write(
         &mut self,
-        sender: SocketAddr,
+        sender: SocketAddrV6,
         port: SpPort,
         packet: gateway_messages::SerialConsole,
     ) -> Result<(), ResponseError> {
@@ -513,7 +521,7 @@ impl SpHandler for Handler {
         debug!(
             &self.log,
             "received serial console packet";
-            "sender" => sender,
+            "sender" => %sender,
             "port" => ?port,
             "len" => packet.len,
             "offset" => packet.offset,
@@ -537,14 +545,14 @@ impl SpHandler for Handler {
 
     fn sp_state(
         &mut self,
-        sender: SocketAddr,
+        sender: SocketAddrV6,
         port: SpPort,
     ) -> Result<SpState, ResponseError> {
         self.update_gateway_address(sender, port);
         let state = SpState { serial_number: self.serial_number };
         debug!(
             &self.log, "received state request";
-            "sender" => sender,
+            "sender" => %sender,
             "port" => ?port,
             "reply-state" => ?state,
         );

@@ -10,7 +10,7 @@ use gateway_messages::SerialNumber;
 use serde::Deserialize;
 use serde::Serialize;
 use std::net::Ipv6Addr;
-use std::net::SocketAddr;
+use std::net::SocketAddrV6;
 use std::path::Path;
 use std::path::PathBuf;
 use thiserror::Error;
@@ -21,7 +21,7 @@ pub struct SidecarConfig {
     /// IPv6 multicast address to join.
     pub multicast_addr: Ipv6Addr,
     /// UDP address of the two (fake) KSZ8463 ports
-    pub bind_addrs: [SocketAddr; 2],
+    pub bind_addrs: [SocketAddrV6; 2],
     /// Fake serial number
     pub serial_number: SerialNumber,
 }
@@ -32,7 +32,7 @@ pub struct GimletConfig {
     /// IPv6 multicast address to join.
     pub multicast_addr: Ipv6Addr,
     /// UDP address of the two (fake) KSZ8463 ports
-    pub bind_addrs: [SocketAddr; 2],
+    pub bind_addrs: [SocketAddrV6; 2],
     /// Fake serial number
     pub serial_number: SerialNumber,
     /// Attached components
@@ -46,7 +46,7 @@ pub struct SpComponentConfig {
     pub name: String,
     /// Socket address we'll use to expose this component's serial console
     /// via TCP.
-    pub serial_console: Option<SocketAddr>,
+    pub serial_console: Option<SocketAddrV6>,
 }
 
 /// Configuration of a set of simulated SPs

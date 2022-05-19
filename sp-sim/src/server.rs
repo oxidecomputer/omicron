@@ -15,22 +15,24 @@ use gateway_messages::SerializedSize;
 use gateway_messages::SpPort;
 use slog::debug;
 use slog::error;
+use slog::info;
 use slog::Logger;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
+use std::net::SocketAddrV6;
 use std::sync::Arc;
 use tokio::net::UdpSocket;
 
 /// Thin wrapper pairing a [`UdpSocket`] with a buffer sized for [`Request`]s.
 pub(crate) struct UdpServer {
     sock: Arc<UdpSocket>,
-    local_addr: SocketAddr,
+    local_addr: SocketAddrV6,
     buf: [u8; Request::MAX_SIZE],
 }
 
 impl UdpServer {
     pub(crate) async fn new(
-        bind_address: SocketAddr,
+        bind_address: SocketAddrV6,
         multicast_addr: Ipv6Addr,
         log: &Logger,
     ) -> Result<Self> {
@@ -51,8 +53,12 @@ impl UdpServer {
 
         let local_addr = sock
             .local_addr()
-            .with_context(|| "failed to get local address of bound socket")?;
-        debug!(log, "UDP socket bound";
+            .with_context(|| "failed to get local address of bound socket")
+            .and_then(|addr| match addr {
+                SocketAddr::V4(addr) => bail!("bound IPv4 address {}", addr),
+                SocketAddr::V6(addr) => Ok(addr),
+            })?;
+        info!(log, "simulated SP UDP socket bound";
             "local_addr" => %local_addr,
             "multicast_addr" => %multicast_addr,
         );
@@ -64,20 +70,26 @@ impl UdpServer {
         &self.sock
     }
 
-    pub(crate) fn local_addr(&self) -> SocketAddr {
+    pub(crate) fn local_addr(&self) -> SocketAddrV6 {
         self.local_addr
     }
 
-    pub(crate) async fn recv_from(&mut self) -> Result<(&[u8], SocketAddr)> {
+    pub(crate) async fn recv_from(&mut self) -> Result<(&[u8], SocketAddrV6)> {
         let (len, addr) = self
             .sock
             .recv_from(&mut self.buf)
             .await
             .with_context(|| "recv_from failed")?;
+        let addr = match addr {
+            SocketAddr::V4(addr) => {
+                bail!("received data from IPv4 address {}", addr)
+            }
+            SocketAddr::V6(addr) => addr,
+        };
         Ok((&self.buf[..len], addr))
     }
 
-    pub async fn send_to(&self, buf: &[u8], addr: SocketAddr) -> Result<()> {
+    pub async fn send_to(&self, buf: &[u8], addr: SocketAddrV6) -> Result<()> {
         self.sock.send_to(buf, addr).await.with_context(|| "send_to failed")?;
         Ok(())
     }
@@ -103,11 +115,11 @@ pub fn logger(config: &Config) -> Result<Logger> {
 
 pub(crate) async fn handle_request<'a, H: SpHandler>(
     handler: &mut H,
-    recv: Result<(&[u8], SocketAddr)>,
+    recv: Result<(&[u8], SocketAddrV6)>,
     server: &'a mut SpServer,
     responsiveness: Responsiveness,
     port_num: SpPort,
-) -> Result<Option<(&'a [u8], SocketAddr)>> {
+) -> Result<Option<(&'a [u8], SocketAddrV6)>> {
     match responsiveness {
         Responsiveness::Responsive => (), // proceed
         Responsiveness::Unresponsive => {
