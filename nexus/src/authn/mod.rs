@@ -97,10 +97,10 @@ impl Context {
     ) -> Result<authz::Silo, omicron_common::api::external::Error> {
         self.silo_or_builtin().and_then(|maybe_silo| {
             maybe_silo.ok_or_else(|| {
-                omicron_common::api::external::Error::internal_error(&format!(
+                omicron_common::api::external::Error::internal_error(
                     "needed Silo for a built-in user, but \
-                        built-in users have no Silo"
-                ))
+                        built-in users have no Silo",
+                )
             })
         })
     }
