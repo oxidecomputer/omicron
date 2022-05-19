@@ -69,7 +69,7 @@ impl Context {
         self.actor_required().ok()
     }
 
-    /// Returns the authenticated actor if present, Unauthenticated error
+    /// Returns the authenticated actor if present or an Unauthenticated error
     /// otherwise
     pub fn actor_required(
         &self,
@@ -84,7 +84,7 @@ impl Context {
         }
     }
 
-    /// Returns the current actor's Silo if they have one, and an appropriate
+    /// Returns the current actor's Silo if they have one or an appropriate
     /// error otherwise
     ///
     /// This is intended for code paths that always expect a Silo to be present.
@@ -112,7 +112,7 @@ impl Context {
     ///
     /// * there's an authenticated user with an associated Silo (most common)
     /// * there's an authenticated built-in user who has no associated Silo
-    /// * there's no authenticated user
+    /// * there's no authenticated user (returned as an error)
     ///
     /// Built-in users have no Silo, and so they usually can't do anything that
     /// might use a Silo.  You usually want to use [`Context::silo_required()`]
