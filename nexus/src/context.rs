@@ -501,6 +501,17 @@ mod test {
 }
 
 #[async_trait]
+impl authn::external::spoof::SpoofContext for Arc<ServerContext> {
+    async fn silo_user_silo(
+        &self,
+        silo_user_id: Uuid,
+    ) -> Result<Uuid, authn::Reason> {
+        let opctx = self.nexus.opctx_external_authn();
+        self.nexus.lookup_silo_for_authn(opctx, silo_user_id).await
+    }
+}
+
+#[async_trait]
 impl SessionStore for Arc<ServerContext> {
     type SessionModel = ConsoleSessionWithSiloId;
 
