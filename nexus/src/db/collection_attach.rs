@@ -44,7 +44,7 @@ type ResourceIdColumn<ResourceType, C> =
 
 /// Trick to check that columns come from the same table
 pub trait TypesAreSame {}
-impl<T> TypesAreSame for (T, T) {}
+impl<T> TypesAreSame for (T, T, T) {}
 
 /// Trait to be implemented by structs representing an attachable collection.
 ///
@@ -104,6 +104,7 @@ pub trait DatastoreAttachTarget<ResourceType> : Selectable<Pg> {
     /// The Rust type of the collection and resource ids (typically Uuid).
     type Id: Copy + Debug + PartialEq + Send + 'static;
 
+    /// The primary key column of the collection.
     type CollectionIdColumn: Column;
 
     /// The column in the CollectionTable that acts as a generation number.
@@ -111,14 +112,12 @@ pub trait DatastoreAttachTarget<ResourceType> : Selectable<Pg> {
     type CollectionGenerationColumn: Column + Default + Expression<SqlType = BigInt>;
 
     /// The time deleted column in the CollectionTable
-    // We enforce that this column comes from the same table as
-    // CollectionGenerationColumn when defining attach_resource() below.
     type CollectionTimeDeletedColumn: Column + Default;
 
+    /// The primary key column of the resource
     type ResourceIdColumn: Column;
 
-    /// The column in the ResourceType that acts as a foreign key into
-    /// the CollectionTable
+    /// The column in the resource acting as a foreign key into the Collection
     type ResourceCollectionIdColumn: Column + Default;
 
     /// The time deleted column in the ResourceTable
@@ -147,12 +146,13 @@ pub trait DatastoreAttachTarget<ResourceType> : Selectable<Pg> {
         update: UpdateStatement<ResourceTable<ResourceType, Self>, U, V>,
     ) -> AttachToCollectionStatement<ResourceType, U, V, Self>
     where
-        // TODO: More of this?
         (
+            <Self::CollectionIdColumn as Column>::Table,
             <Self::CollectionGenerationColumn as Column>::Table,
             <Self::CollectionTimeDeletedColumn as Column>::Table,
         ): TypesAreSame,
         (
+            <Self::ResourceIdColumn as Column>::Table,
             <Self::ResourceCollectionIdColumn as Column>::Table,
             <Self::ResourceTimeDeletedColumn as Column>::Table,
         ): TypesAreSame,
@@ -1520,8 +1520,8 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_attach_no_update_filter() {
-        let logctx = dev::test_setup_log("test_attach_no_update_filter");
+    async fn test_attach_without_update_filter() {
+        let logctx = dev::test_setup_log("test_attach_without_update_filter");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&cfg);
@@ -1561,7 +1561,6 @@ mod test {
         logctx.cleanup_successful();
     }
 
-    // TODO: test no filter in update?
     // TODO: test no filter in update?
     // TODO: Try to break things
     // TODO: Sync API
