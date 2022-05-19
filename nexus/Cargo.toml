@@ -124,7 +124,7 @@ nexus-test-utils = { path = "test-utils" }
 omicron-test-utils = { path = "../test-utils" }
 openapiv3 = "1.0"
 regex = "1.5.5"
-subprocess = "0.2.8"
+subprocess = "0.2.9"
 term = "0.7"
 httptest = "0.15.4"
 
