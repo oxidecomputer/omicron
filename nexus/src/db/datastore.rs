@@ -28,6 +28,8 @@ use super::Pool;
 use crate::authn;
 use crate::authz::{self, ApiResource};
 use crate::context::OpContext;
+use crate::db::collection_attach::{AttachError, DatastoreAttachTarget};
+use crate::db::collection_detach::{DetachError, DatastoreDetachTarget};
 use crate::db::fixed_data::role_assignment::BUILTIN_ROLE_ASSIGNMENTS;
 use crate::db::fixed_data::role_builtin::BUILTIN_ROLES;
 use crate::db::fixed_data::silo::{DEFAULT_SILO, SILO_ID};
@@ -1109,6 +1111,299 @@ impl DataStore {
             .load_async::<Disk>(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    /// Attaches a disk to an instance, if both objects:
+    /// - Exist
+    /// - Are in valid states
+    /// - Are under the maximum "attach count" threshold
+    pub async fn disk_attach(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+        authz_disk: &authz::Disk,
+        max_disks: u32,
+    ) -> Result<(Instance, Disk), Error> {
+        use db::schema::{disk, instance};
+
+        opctx.authorize(authz::Action::Modify, authz_instance).await?;
+        opctx.authorize(authz::Action::Modify, authz_disk).await?;
+
+        let ok_to_attach_disk_states = vec![
+            api::external::DiskState::Creating,
+            api::external::DiskState::Detached,
+        ];
+        let ok_to_attach_disk_state_labels: Vec<_> =
+            ok_to_attach_disk_states.iter().map(|s| s.label()).collect();
+
+        // TODO(https://github.com/oxidecomputer/omicron/issues/811):
+        // This list of instance attach states is more restrictive than it
+        // plausibly could be.
+        //
+        // We currently only permit attaching disks to stopped instances.
+        let ok_to_attach_instance_states = vec![
+            db::model::InstanceState(api::external::InstanceState::Creating),
+            db::model::InstanceState(api::external::InstanceState::Stopped),
+        ];
+
+        let attached_label = api::external::DiskState::Attached(
+            authz_instance.id(),
+        ).label();
+
+        // TODO "u32" seems reasonable for the max disks value (input / output)
+        let (instance, disk) = Instance::attach_resource(
+            authz_instance.id(),
+            authz_disk.id(),
+            instance::table
+                .into_boxed()
+                .filter(instance::dsl::state.eq_any(ok_to_attach_instance_states)),
+            disk::table
+                .into_boxed()
+                .filter(disk::dsl::disk_state.eq_any(ok_to_attach_disk_state_labels)),
+            // TODO: Remove unwrap?
+            usize::try_from(max_disks).unwrap(),
+            diesel::update(disk::dsl::disk)
+                .set((
+                    disk::dsl::disk_state.eq(attached_label),
+                    disk::dsl::attach_instance_id.eq(authz_instance.id())
+                ))
+        )
+        .attach_and_get_result_async(self.pool_authorized(opctx).await?)
+        .await
+        .or_else(|e| {
+            match e {
+                AttachError::CollectionNotFound => {
+                    Err(Error::not_found_by_id(
+                        ResourceType::Instance,
+                        &authz_instance.id(),
+                    ))
+                },
+                AttachError::ResourceNotFound => {
+                    Err(Error::not_found_by_id(
+                        ResourceType::Disk,
+                        &authz_disk.id(),
+                    ))
+                },
+                AttachError::NoUpdate { attached_count, resource, collection } => {
+                    let disk_state = resource.state().into();
+                    match disk_state {
+                        // Idempotent errors: We did not perform an update,
+                        // because we're already in the process of attaching.
+                        api::external::DiskState::Attached(id) if id == authz_instance.id() => {
+                            return Ok((collection, resource));
+                        }
+                        api::external::DiskState::Attaching(id) if id == authz_instance.id() => {
+                            return Ok((collection, resource));
+                        }
+                        // Ok-to-attach disk states: Inspect the state to infer
+                        // why we did not attach.
+                        api::external::DiskState::Creating |
+                        api::external::DiskState::Detached => {
+                            match collection.runtime_state.state.state() {
+                                // Ok-to-be-attached instance states:
+                                api::external::InstanceState::Creating |
+                                api::external::InstanceState::Stopped => {
+                                    // The disk is ready to be attached, and the
+                                    // instance is ready to be attached. Perhaps
+                                    // we are at attachment capacity?
+                                    if attached_count == i64::from(max_disks) {
+                                        return Err(Error::invalid_request(&format!(
+                                            "cannot attach more than {} disks to instance",
+                                            max_disks
+                                        )));
+                                    }
+
+                                    // We can't attach, but the error hasn't
+                                    // helped us infer why.
+                                    return Err(Error::internal_error(
+                                        "cannot attach disk"
+                                    ));
+                                }
+                                // Not okay-to-be-attached instance states:
+                                _ => {
+                                    Err(Error::invalid_request(&format!(
+                                        "cannot attach disk to instance in {} state",
+                                        collection.runtime_state.state.state(),
+                                    )))
+                                }
+                            }
+                        },
+                        // Not-okay-to-attach disk states: The disk is attached elsewhere.
+                        api::external::DiskState::Attached(_) |
+                        api::external::DiskState::Attaching(_) |
+                        api::external::DiskState::Detaching(_) => {
+                            Err(Error::invalid_request(&format!(
+                                "cannot attach disk \"{}\": disk is attached to another instance",
+                                resource.name().as_str(),
+                            )))
+                        }
+                        _ => {
+                            Err(Error::invalid_request(&format!(
+                                "cannot attach disk \"{}\": invalid state {}",
+                                resource.name().as_str(),
+                                disk_state,
+                            )))
+                        }
+                    }
+                },
+                AttachError::DatabaseError(e) => {
+                    Err(public_error_from_diesel_pool(e, ErrorHandler::Server))
+                },
+            }
+        })?;
+
+        Ok((instance, disk))
+    }
+
+    pub async fn disk_detach(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+        authz_disk: &authz::Disk,
+        disk: &Disk,
+    ) -> Result<Disk, Error> {
+        use db::schema::{disk, instance};
+
+        opctx.authorize(authz::Action::Modify, authz_instance).await?;
+        opctx.authorize(authz::Action::Modify, authz_disk).await?;
+
+        let new_runtime = disk.runtime().detach();
+
+        let disk_id = authz_disk.id();
+        use db::schema::disk::dsl;
+        let updated = diesel::update(dsl::disk)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(disk_id))
+            .filter(dsl::state_generation.lt(new_runtime.gen))
+            .filter(dsl::attach_instance_id.eq(authz_instance.id()))
+            .set(new_runtime.clone())
+            .check_if_exists::<Disk>(disk_id)
+            .execute_and_check(self.pool())
+            .await
+            .map(|r| match r.status {
+                UpdateStatus::Updated => true,
+                UpdateStatus::NotUpdatedButExists => false,
+            })
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_disk),
+                )
+            })?;
+
+        let ok_to_detach_disk_states = vec![
+            api::external::DiskState::Attached(authz_instance.id()),
+        ];
+        let ok_to_detach_disk_state_labels: Vec<_> =
+            ok_to_detach_disk_states.iter().map(|s| s.label()).collect();
+
+        // TODO(https://github.com/oxidecomputer/omicron/issues/811):
+        // This list of instance detach states is more restrictive than it
+        // plausibly could be.
+        //
+        // We currently only permit detaching disks from stopped instances.
+        let ok_to_detach_instance_states = vec![
+            db::model::InstanceState(api::external::InstanceState::Creating),
+            db::model::InstanceState(api::external::InstanceState::Stopped),
+        ];
+
+        let detached_label = api::external::DiskState::Detached.label();
+
+        let disk = Instance::detach_resource(
+            authz_instance.id(),
+            authz_disk.id(),
+            instance::table
+                .into_boxed()
+                .filter(instance::dsl::state.eq_any(ok_to_detach_instance_states)),
+            disk::table
+                .into_boxed()
+                .filter(disk::dsl::disk_state.eq_any(ok_to_detach_disk_state_labels)),
+            diesel::update(disk::dsl::disk)
+                .set((
+                    disk::dsl::disk_state.eq(detached_label),
+                    disk::dsl::attach_instance_id.eq(Option::<Uuid>::None)
+                ))
+        )
+        .detach_and_get_result_async(self.pool_authorized(opctx).await?)
+        .await
+        .or_else(|e| {
+            match e {
+                DetachError::CollectionNotFound => {
+                    Err(Error::not_found_by_id(
+                        ResourceType::Instance,
+                        &authz_instance.id(),
+                    ))
+                },
+                DetachError::ResourceNotFound => {
+                    Err(Error::not_found_by_id(
+                        ResourceType::Disk,
+                        &authz_disk.id(),
+                    ))
+                },
+                DetachError::NoUpdate { resource, collection } => {
+                    let disk_state = resource.state().into();
+                    match disk_state {
+                        // Idempotent errors: We did not perform an update,
+                        // because we're already in the process of detaching.
+                        api::external::DiskState::Detached => {
+                            return Ok(resource);
+                        }
+                        api::external::DiskState::Detaching(id) if id == authz_instance.id() => {
+                            return Ok(resource);
+                        }
+                        // Ok-to-detach disk states: Inspect the state to infer
+                        // why we did not detach.
+                        api::external::DiskState::Attached(id) if id == authz_instance.id() => {
+                            match collection.runtime_state.state.state() {
+                                // Ok-to-be-detached instance states:
+                                api::external::InstanceState::Creating |
+                                api::external::InstanceState::Stopped => {
+                                    // We can't detach, but the error hasn't
+                                    // helped us infer why.
+                                    return Err(Error::internal_error(
+                                        "cannot detach disk"
+                                    ));
+                                }
+                                // Not okay-to-be-detached instance states:
+                                _ => {
+                                    Err(Error::invalid_request(&format!(
+                                        "cannot detach disk from instance in {} state",
+                                        collection.runtime_state.state.state(),
+                                    )))
+                                }
+                            }
+                        },
+                        api::external::DiskState::Attaching(id) if id == authz_instance.id() => {
+                            Err(Error::invalid_request(&format!(
+                                "cannot detach disk \"{}\": disk is currently being attached",
+                                resource.name().as_str(),
+                            )))
+                        },
+                        // Not-okay-to-detach disk states: The disk is attached elsewhere.
+                        api::external::DiskState::Attached(_) |
+                        api::external::DiskState::Attaching(_) |
+                        api::external::DiskState::Detaching(_) => {
+                            Err(Error::invalid_request(&format!(
+                                "cannot detach disk \"{}\": disk is attached to another instance",
+                                resource.name().as_str(),
+                            )))
+                        }
+                        _ => {
+                            Err(Error::invalid_request(&format!(
+                                "cannot detach disk \"{}\": invalid state {}",
+                                resource.name().as_str(),
+                                disk_state,
+                            )))
+                        }
+                    }
+                },
+                DetachError::DatabaseError(e) => {
+                    Err(public_error_from_diesel_pool(e, ErrorHandler::Server))
+                },
+            }
+        })?;
+
+        Ok(disk)
     }
 
     pub async fn disk_update_runtime(

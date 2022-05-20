@@ -2,9 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{ByteCount, Generation, InstanceCpuCount, InstanceState};
+use super::{ByteCount, Disk, Generation, InstanceCpuCount, InstanceState};
+use crate::db::collection_attach::DatastoreAttachTarget;
 use crate::db::identity::Resource;
-use crate::db::schema::instance;
+use crate::db::schema::{disk, instance};
 use crate::external_api::params;
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
@@ -27,6 +28,9 @@ pub struct Instance {
     /// user data for instance initialization systems (e.g. cloud-init)
     pub user_data: Vec<u8>,
 
+    /// Child Resource generation number
+    pub rcgen: Generation,
+
     /// runtime state of the Instance
     #[diesel(embed)]
     pub runtime_state: InstanceRuntimeState,
@@ -45,6 +49,7 @@ impl Instance {
             identity,
             project_id,
             user_data: params.user_data.clone(),
+            rcgen: Generation::new(),
             runtime_state: runtime,
         }
     }
@@ -66,6 +71,18 @@ impl Into<external::Instance> for Instance {
             runtime: self.runtime().clone().into(),
         }
     }
+}
+
+impl DatastoreAttachTarget<Disk> for Instance {
+    type Id = Uuid;
+
+    type CollectionIdColumn = instance::dsl::id;
+    type CollectionGenerationColumn = instance::dsl::rcgen;
+    type CollectionTimeDeletedColumn = instance::dsl::time_deleted;
+
+    type ResourceIdColumn = disk::dsl::id;
+    type ResourceCollectionIdColumn = disk::dsl::attach_instance_id;
+    type ResourceTimeDeletedColumn = disk::dsl::time_deleted;
 }
 
 /// Runtime state of the Instance, including the actual running state and minimal
