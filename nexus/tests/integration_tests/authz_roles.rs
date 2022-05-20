@@ -140,6 +140,20 @@ impl Resource {
         &self,
         client: &'a ClientTestContext,
     ) -> Vec<TestOperation<'a>> {
+        // XXX-dap TODO examples:
+        // - list children (various kinds)
+        // - modify
+        // - fetch
+        // - delete?  this one seems hard to test because it might succeed!
+        // - start/stop/halt -- hard to test because it's async
+        // - migrate?
+        // - disk attach/detach?
+        // This is getting a little nuts.  In the limit, we kind of want to run
+        // every test as a user with every role we think should grant that test
+        // the privileges it needs (to make sure they grant enough).  Then we
+        // kind of want to run every test again as every other role to make sure
+        // it fails at some point.  Then we want to check coverage of the
+        // endpoints/role combinations.  This seems really hard!
         match self.resource_type {
             // XXX-dap TODO
             ResourceType::Fleet => vec![],
@@ -223,9 +237,14 @@ lazy_static! {
     // fleet/s1/o2/p1
     // fleet/s1/o2/p1/i1
     // fleet/s2
-    // fleet/s2/o1
-    // fleet/s2/o1/p1
-    // fleet/s2/o1/p1/i1
+    // fleet/s2/o3
+    // fleet/s2/o3/p1
+    // fleet/s2/o3/p1/i1
+    //
+    // Silo 2's organization is called "o3" because otherwise it appears as
+    // though users from Silo 1 are successfully accessing it.
+    // TODO-security TODO-coverage when we add support for looking up resources
+    // by id, we should update this test to operate on things by-id as well.
 
     static ref FLEET: Resource = Resource { resource_type: ResourceType::Fleet };
 
@@ -291,24 +310,24 @@ lazy_static! {
 
     static ref SILO2: Resource =
         Resource { resource_type: ResourceType::Silo { name: "s2" } };
-    static ref SILO2_ORG1: Resource = Resource {
+    static ref SILO2_ORG3: Resource = Resource {
         resource_type: ResourceType::Organization {
-            name: "o1",
+            name: "o3",
             parent_silo: "s2",
         },
     };
-    static ref SILO2_ORG1_PROJ1: Resource = Resource {
+    static ref SILO2_ORG3_PROJ1: Resource = Resource {
         resource_type: ResourceType::Project {
             name: "p1",
-            parent_org: "o1",
+            parent_org: "o3",
             parent_silo: "s2",
         },
     };
-    static ref SILO2_ORG1_PROJ1_INST: Resource = Resource {
+    static ref SILO2_ORG3_PROJ1_INST: Resource = Resource {
         resource_type: ResourceType::Instance {
             name: "i1",
             parent_project: "p1",
-            parent_org: "o1",
+            parent_org: "o3",
             parent_silo: "s2",
         },
     };
@@ -337,9 +356,9 @@ lazy_static! {
         &*SILO1_ORG2_PROJ1,
         &*SILO1_ORG2_PROJ1_INST,
         &*SILO2,
-        &*SILO2_ORG1,
-        &*SILO2_ORG1_PROJ1,
-        &*SILO2_ORG1_PROJ1_INST,
+        &*SILO2_ORG3,
+        &*SILO2_ORG3_PROJ1,
+        &*SILO2_ORG3_PROJ1_INST,
     ];
 }
 
@@ -362,7 +381,6 @@ async fn setup_hierarchy(testctx: &ControlPlaneTestContext) -> World {
     // resources because they always use the "test-privileged" user in the
     // default Silo.  But in order to create things in other Silos, we need to
     // use different users.
-    // XXX-dap don't bother creating users except for RESOURCES_WITH_USERS
     for resource in &*ALL_RESOURCES {
         let resource = *resource;
         debug!(log, "creating resource"; "resource" => ?resource);
@@ -465,7 +483,7 @@ async fn setup_hierarchy(testctx: &ControlPlaneTestContext) -> World {
                 unimplemented!()
             }
             ResourceType::Fleet => {
-                create_users::<authz::OrganizationRoles>(
+                create_users::<authz::FleetRoles>(
                     log,
                     nexus,
                     client,
