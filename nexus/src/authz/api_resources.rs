@@ -50,7 +50,6 @@ use parse_display::Display;
 use parse_display::FromStr;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-#[cfg(test)]
 use strum::EnumIter;
 use uuid::Uuid;
 
@@ -206,9 +205,16 @@ impl ApiResourceWithRolesType for Fleet {
 }
 
 #[derive(
-    Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema,
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    EnumIter,
+    Eq,
+    PartialEq,
+    Serialize,
+    JsonSchema,
 )]
-#[cfg_attr(test, derive(EnumIter))]
 #[serde(rename_all = "snake_case")]
 pub enum FleetRoles {
     Admin,
@@ -379,13 +385,13 @@ impl ApiResourceWithRolesType for Organization {
     Debug,
     Deserialize,
     Display,
+    EnumIter,
     Eq,
     FromStr,
     PartialEq,
     Serialize,
     JsonSchema,
 )]
-#[cfg_attr(test, derive(EnumIter))]
 #[display(style = "kebab-case")]
 #[serde(rename_all = "snake_case")]
 pub enum OrganizationRoles {
@@ -433,13 +439,13 @@ impl ApiResourceWithRolesType for Project {
     Debug,
     Deserialize,
     Display,
+    EnumIter,
     Eq,
     FromStr,
     PartialEq,
     Serialize,
     JsonSchema,
 )]
-#[cfg_attr(test, derive(EnumIter))]
 #[display(style = "kebab-case")]
 #[serde(rename_all = "snake_case")]
 pub enum ProjectRoles {
@@ -579,13 +585,13 @@ impl ApiResourceWithRolesType for Silo {
     Debug,
     Deserialize,
     Display,
+    EnumIter,
     Eq,
     FromStr,
     PartialEq,
     Serialize,
     JsonSchema,
 )]
-#[cfg_attr(test, derive(EnumIter))]
 #[display(style = "kebab-case")]
 #[serde(rename_all = "snake_case")]
 pub enum SiloRoles {
