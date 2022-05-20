@@ -15,7 +15,7 @@ pub use gimlet::Gimlet;
 pub use server::logger;
 pub use sidecar::Sidecar;
 pub use slog::Logger;
-use std::net::SocketAddr;
+use std::net::SocketAddrV6;
 
 pub mod ignition_id {
     pub const GIMLET: u16 = 0b0000_0000_0001_0001;
@@ -32,8 +32,11 @@ pub enum Responsiveness {
 pub trait SimulatedSp {
     /// Hexlified serial number.
     fn serial_number(&self) -> String;
-    /// Listening UDP address of the given port of this simulated SP.
-    fn local_addr(&self, port: SpPort) -> SocketAddr;
+
+    /// Listening UDP address of the given port of this simulated SP, if it was
+    /// configured to listen.
+    fn local_addr(&self, port: SpPort) -> Option<SocketAddrV6>;
+
     /// Simulate the SP being unresponsive, in which it ignores all incoming
     /// messages.
     async fn set_responsiveness(&self, r: Responsiveness);

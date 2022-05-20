@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::net::SocketAddr;
-
 use crate::config::Config;
 use crate::config::SidecarConfig;
 use crate::ignition_id;
@@ -29,6 +27,7 @@ use slog::debug;
 use slog::info;
 use slog::warn;
 use slog::Logger;
+use std::net::SocketAddrV6;
 use tokio::select;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
@@ -36,17 +35,19 @@ use tokio::task;
 use tokio::task::JoinHandle;
 
 pub struct Sidecar {
-    local_addrs: [SocketAddr; 2],
+    local_addrs: Option<[SocketAddrV6; 2]>,
     serial_number: SerialNumber,
     commands:
         mpsc::UnboundedSender<(Command, oneshot::Sender<CommandResponse>)>,
-    inner_task: JoinHandle<()>,
+    inner_task: Option<JoinHandle<()>>,
 }
 
 impl Drop for Sidecar {
     fn drop(&mut self) {
-        // default join handle drop behavior is to detach; we want to abort
-        self.inner_task.abort();
+        if let Some(inner_task) = self.inner_task.as_ref() {
+            // default join handle drop behavior is to detach; we want to abort
+            inner_task.abort();
+        }
     }
 }
 
@@ -56,12 +57,12 @@ impl SimulatedSp for Sidecar {
         hex::encode(self.serial_number)
     }
 
-    fn local_addr(&self, port: SpPort) -> SocketAddr {
+    fn local_addr(&self, port: SpPort) -> Option<SocketAddrV6> {
         let i = match port {
             SpPort::One => 0,
             SpPort::Two => 1,
         };
-        self.local_addrs[i]
+        self.local_addrs.map(|addrs| addrs[i])
     }
 
     async fn set_responsiveness(&self, r: Responsiveness) {
@@ -81,42 +82,63 @@ impl Sidecar {
         log: Logger,
     ) -> Result<Self> {
         info!(log, "setting up simualted sidecar");
-        // bind to our two local "KSZ" ports
-        assert_eq!(sidecar.bind_addrs.len(), 2);
-        let servers = future::try_join(
-            UdpServer::new(sidecar.bind_addrs[0], sidecar.multicast_addr, &log),
-            UdpServer::new(sidecar.bind_addrs[1], sidecar.multicast_addr, &log),
-        )
-        .await?;
-        let servers = [servers.0, servers.1];
-        let local_addrs = [servers[0].local_addr(), servers[1].local_addr()];
-
-        let mut ignition_targets = Vec::new();
-        for _ in &config.simulated_sps.sidecar {
-            ignition_targets.push(IgnitionState {
-                id: ignition_id::SIDECAR,
-                flags: IgnitionFlags::POWER | IgnitionFlags::CTRL_DETECT_0,
-            });
-        }
-        for _ in &config.simulated_sps.gimlet {
-            ignition_targets.push(IgnitionState {
-                id: ignition_id::GIMLET,
-                flags: IgnitionFlags::POWER | IgnitionFlags::CTRL_DETECT_0,
-            });
-        }
 
         let (commands, commands_rx) = mpsc::unbounded_channel();
-        let inner = Inner::new(
-            servers,
-            sidecar.serial_number,
-            ignition_targets,
-            commands_rx,
-            log,
-        );
-        let inner_task = task::spawn(async move { inner.run().await.unwrap() });
+
+        let (local_addrs, inner_task) = if let Some(bind_addrs) =
+            sidecar.common.bind_addrs
+        {
+            // bind to our two local "KSZ" ports
+            assert_eq!(bind_addrs.len(), 2);
+            let servers = future::try_join(
+                UdpServer::new(
+                    bind_addrs[0],
+                    sidecar.common.multicast_addr,
+                    &log,
+                ),
+                UdpServer::new(
+                    bind_addrs[1],
+                    sidecar.common.multicast_addr,
+                    &log,
+                ),
+            )
+            .await?;
+            let servers = [servers.0, servers.1];
+            let local_addrs =
+                [servers[0].local_addr(), servers[1].local_addr()];
+
+            let mut ignition_targets = Vec::new();
+            for _ in &config.simulated_sps.sidecar {
+                ignition_targets.push(IgnitionState {
+                    id: ignition_id::SIDECAR,
+                    flags: IgnitionFlags::POWER | IgnitionFlags::CTRL_DETECT_0,
+                });
+            }
+            for _ in &config.simulated_sps.gimlet {
+                ignition_targets.push(IgnitionState {
+                    id: ignition_id::GIMLET,
+                    flags: IgnitionFlags::POWER | IgnitionFlags::CTRL_DETECT_0,
+                });
+            }
+
+            let inner = Inner::new(
+                servers,
+                sidecar.common.serial_number,
+                ignition_targets,
+                commands_rx,
+                log,
+            );
+            let inner_task =
+                task::spawn(async move { inner.run().await.unwrap() });
+
+            (Some(local_addrs), Some(inner_task))
+        } else {
+            (None, None)
+        };
+
         Ok(Self {
             local_addrs,
-            serial_number: sidecar.serial_number,
+            serial_number: sidecar.common.serial_number,
             commands,
             inner_task,
         })
@@ -255,13 +277,13 @@ impl Handler {
 impl SpHandler for Handler {
     fn discover(
         &mut self,
-        sender: SocketAddr,
+        sender: SocketAddrV6,
         port: SpPort,
     ) -> Result<gateway_messages::DiscoverResponse, ResponseError> {
         debug!(
             &self.log,
             "received discover; sending response";
-            "sender" => sender,
+            "sender" => %sender,
             "port" => ?port,
         );
         Ok(DiscoverResponse { sp_port: port })
@@ -269,7 +291,7 @@ impl SpHandler for Handler {
 
     fn ignition_state(
         &mut self,
-        sender: SocketAddr,
+        sender: SocketAddrV6,
         port: SpPort,
         target: u8,
     ) -> Result<IgnitionState, ResponseError> {
@@ -277,7 +299,7 @@ impl SpHandler for Handler {
         debug!(
             &self.log,
             "received ignition state request";
-            "sender" => sender,
+            "sender" => %sender,
             "port" => ?port,
             "target" => target,
             "reply-state" => ?state,
@@ -287,7 +309,7 @@ impl SpHandler for Handler {
 
     fn bulk_ignition_state(
         &mut self,
-        sender: SocketAddr,
+        sender: SocketAddrV6,
         port: SpPort,
     ) -> Result<BulkIgnitionState, ResponseError> {
         let num_targets = self.ignition_targets.len();
@@ -307,7 +329,7 @@ impl SpHandler for Handler {
             &self.log,
             "received bulk ignition state request; sending state for {} targets",
             num_targets;
-            "sender" => sender,
+            "sender" => %sender,
             "port" => ?port,
         );
         Ok(out)
@@ -315,7 +337,7 @@ impl SpHandler for Handler {
 
     fn ignition_command(
         &mut self,
-        sender: SocketAddr,
+        sender: SocketAddrV6,
         port: SpPort,
         target: u8,
         command: IgnitionCommand,
@@ -333,7 +355,7 @@ impl SpHandler for Handler {
         debug!(
             &self.log,
             "received ignition command; sending ack";
-            "sender" => sender,
+            "sender" => %sender,
             "port" => ?port,
             "target" => target,
             "command" => ?command,
@@ -343,13 +365,13 @@ impl SpHandler for Handler {
 
     fn serial_console_write(
         &mut self,
-        sender: SocketAddr,
+        sender: SocketAddrV6,
         port: SpPort,
         _packet: gateway_messages::SerialConsole,
     ) -> Result<(), ResponseError> {
         warn!(
             &self.log, "received serial console write; unsupported by sidecar";
-            "sender" => sender,
+            "sender" => %sender,
             "port" => ?port,
         );
         Err(ResponseError::RequestUnsupportedForSp)
@@ -357,13 +379,13 @@ impl SpHandler for Handler {
 
     fn sp_state(
         &mut self,
-        sender: SocketAddr,
+        sender: SocketAddrV6,
         port: SpPort,
     ) -> Result<SpState, ResponseError> {
         let state = SpState { serial_number: self.serial_number };
         debug!(
             &self.log, "received state request";
-            "sender" => sender,
+            "sender" => %sender,
             "port" => ?port,
             "reply-state" => ?state,
         );
