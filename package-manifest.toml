@@ -84,10 +84,10 @@ zone = true
 # 3. Use type = "manual" instead of the "prebuilt"
 type = "prebuilt"
 repo = "crucible"
-commit = "8ea317a9dfee65d7c018a1fda89fdec63a560ef3"
+commit = "cd74a23ea42ce5e673923a00faf31b0a920191cc"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible.sha256.txt
-sha256 = "f85bb22797bab58d128c8dd168a2e6ba57feee284bdc9d0adf282197cb45cccb"
+sha256 = "7e80e513b231a51f322e5c0012536f000bbb0b89c0168654277957ba77eb07a8"
 
 # Refer to
 #   https://github.com/oxidecomputer/propolis/blob/master/package/README.md
@@ -98,7 +98,7 @@ zone = true
 [external_package.propolis-server.source]
 type = "prebuilt"
 repo = "propolis"
-commit = "845c9cffc482739d417761aa1c668895f24b776d"
+commit = "a11ccd5bf001e0c690c67d117f8beb06b0bc6914"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/propolis/image/<commit>/propolis-server.sha256.txt
-sha256 = "80ba693906972d6525767596c95c0c5bafc1c6ff0c9d8cf9b9df437bfefb0bd6"
+sha256 = "52dd465bf70f3130e16cfb32eefb87f5d01514f1f60a7dd9a1eca970a0669159"
