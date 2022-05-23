@@ -141,6 +141,7 @@ impl Resource {
     fn test_operations<'a>(
         &self,
         client: &'a ClientTestContext,
+        username: &str,
     ) -> Vec<TestOperation<'a>> {
         // XXX-dap TODO examples:
         // - list children (various kinds)
@@ -164,6 +165,15 @@ impl Resource {
             // XXX-dap TODO
             ResourceType::Organization { name, .. } => {
                 let resource_url = format!("{}/{}", self.create_url(), name);
+                let projects_url = format!("{}/projects", &resource_url);
+                let new_project_name = username.parse().expect(
+                    "invalid test project name (tried to use a username \
+                    that we generated)",
+                );
+                let new_project_description =
+                    format!("created by {}", username);
+                let project_url =
+                    format!("{}/{}", &projects_url, new_project_name);
                 vec![
                     TestOperation {
                         label: "Fetch",
@@ -171,6 +181,38 @@ impl Resource {
                             client,
                             Method::GET,
                             &resource_url,
+                        )),
+                        on_success: None,
+                    },
+                    TestOperation {
+                        label: "ListProjects",
+                        template: NexusRequest::new(RequestBuilder::new(
+                            client,
+                            Method::GET,
+                            &projects_url,
+                        )),
+                        on_success: None,
+                    },
+                    TestOperation {
+                        label: "CreateProject",
+                        template: NexusRequest::new(
+                            RequestBuilder::new(
+                                client,
+                                Method::POST,
+                                &projects_url,
+                            )
+                            .body(Some(
+                                &params::ProjectCreate {
+                                    identity: IdentityMetadataCreateParams {
+                                        name: new_project_name,
+                                        description: new_project_description,
+                                    },
+                                },
+                            )),
+                        ),
+                        on_success: Some(NexusRequest::object_delete(
+                            client,
+                            &project_url,
                         )),
                     },
                     TestOperation {
@@ -192,6 +234,7 @@ impl Resource {
                                 },
                             )),
                         ),
+                        on_success: None,
                     },
                 ]
             }
@@ -346,6 +389,14 @@ lazy_static! {
         &*SILO1_ORG1_PROJ1,
     ];
 
+    // XXX-dap One idea to support testing DELETE:
+    // - every resource has a "recreate()" function that recreates it (including
+    //   the role assignments)
+    // - this list is guaranteed to be topo-sorted
+    // - we explicitly delete every resource when we're done testing it
+    //
+    // Then we can test these in reverse order.  By the time we get to any
+    // resource, its children should be gone.
     static ref ALL_RESOURCES: Vec<&'static Resource> = vec![
         &*FLEET,
         &*SILO1,
@@ -639,6 +690,7 @@ async fn create_users<
 struct TestOperation<'a> {
     label: &'static str,
     template: NexusRequest<'a>,
+    on_success: Option<NexusRequest<'a>>,
 }
 
 enum OperationResult {
@@ -675,7 +727,7 @@ async fn test_operations(
                 "user" => username.clone(),
             ));
 
-            let operations = resource.test_operations(client);
+            let operations = resource.test_operations(client, &username);
             if test_labels.is_none() {
                 test_labels =
                     Some(operations.iter().map(|t| t.label).collect());
@@ -724,6 +776,15 @@ async fn run_test_operation<'a>(
     {
         OperationResult::Denied
     } else if response.status.is_success() {
+        if let Some(request) = to.on_success {
+            debug!(log, "on_success operation");
+            request
+                .authn_as(AuthnMode::SiloUser(user_id))
+                .execute()
+                .await
+                .expect("failed to execute on-success request");
+        }
+
         OperationResult::Success
     } else {
         let status = response.status;
