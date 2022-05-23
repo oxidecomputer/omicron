@@ -55,7 +55,8 @@ cd /opt/oxide/work
 
 ptime -m tar xvzf /input/package/work/package.tar.gz
 ptime -m pfexec ./tools/create_virtual_hardware.sh
-ptime -m pfexec ./target/release/omicron-package install
+OMICRON_NO_UNINSTALL=1 \
+    ptime -m pfexec ./target/release/omicron-package install
 
 # Wait up to 5 minutes for RSS to say it's done
 for _i in {1..30}; do
