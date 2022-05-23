@@ -1005,7 +1005,7 @@ dependencies = [
 [[package]]
 name = "diesel-dtrace"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/diesel-dtrace#ce623dd6a2d59024a9330bc37e54426c4ccf9167"
+source = "git+https://github.com/oxidecomputer/diesel-dtrace#2eece1d9e0ef8a95034f47e5e7b2906bb741ae50"
 dependencies = [
  "diesel",
  "lock_api",
@@ -2274,10 +2274,11 @@ checksum = "7fb9b38af92608140b86b693604b9ffcc5824240a484d1ecd4795bacb2fe88f3"
 
 [[package]]
 name = "lock_api"
-version = "0.4.6"
+version = "0.4.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "88943dd7ef4a2e5a4bfa2753aaab3013e34ce2533d1996fb18ef591e315e2b3b"
+checksum = "327fa5b6a6940e4699ec49a9beae1ea4845c6bab9314e4f84ac68742139d8c53"
 dependencies = [
+ "autocfg 1.1.0",
  "scopeguard",
 ]
 
@@ -3473,7 +3474,7 @@ dependencies = [
  "lalrpop-util",
  "serde",
  "serde_derive",
- "strum_macros",
+ "strum_macros 0.23.1",
  "wasm-bindgen",
 ]
 
@@ -4926,11 +4927,11 @@ dependencies = [
 
 [[package]]
 name = "strum"
-version = "0.23.0"
+version = "0.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cae14b91c7d11c9a851d3fbc80a963198998c2a64eec840477fa92d8ce9b70bb"
+checksum = "e96acfc1b70604b8b2f1ffa4c57e59176c7dbb05d556c71ecd2f5498a1dee7f8"
 dependencies = [
- "strum_macros",
+ "strum_macros 0.24.0",
 ]
 
 [[package]]
@@ -4940,6 +4941,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5bb0dc7ee9c15cea6199cde9a127fa16a4c5819af85395457ad72d68edc85a38"
 dependencies = [
  "heck 0.3.3",
+ "proc-macro2",
+ "quote",
+ "rustversion",
+ "syn",
+]
+
+[[package]]
+name = "strum_macros"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6878079b17446e4d3eba6192bb0a2950d5b14f0ed8424b852310e5a94345d0ef"
+dependencies = [
+ "heck 0.4.0",
  "proc-macro2",
  "quote",
  "rustversion",
@@ -5546,7 +5560,7 @@ version = "1.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
 dependencies = [
- "cfg-if 0.1.10",
+ "cfg-if 1.0.0",
  "rand 0.8.5",
  "static_assertions",
 ]
