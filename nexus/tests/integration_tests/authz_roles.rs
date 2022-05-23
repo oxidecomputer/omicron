@@ -6,6 +6,30 @@
 //! and a group of users with various roles on these resources and verifying
 //! that each role grants the privileges we expect.
 
+// XXX-dap TODO
+// - implement tests for DELETE.  One idea:
+//   - every resource has a "recreate()" function that recreates it (including
+//     the role assignments)
+//   - this list is guaranteed to be topo-sorted
+//   - we explicitly delete every resource when we're done testing it
+//
+//   Then we can test these in reverse order.  By the time we get to any
+//   resource, its children should be gone.
+// - figure out how to implement tests for fetching/modifying the policy.  Maybe
+//   have a dummy user that we grant/remove privileges for?
+// - do we want to look into performance at all?  It takes a long time.
+// - this test needs a lot of documentation
+// - document limitations / figure out how to get better coverage.  What this
+//   test really verifies is that the roles probably grant what we expect, and
+//   that the specific APIs tested check the privileges we expect.  It doesn't
+//   test that any other APIs check the right privileges.  That's a lot harder
+//   -- we basically need a whole coverage test version of this (which seems
+//   harder than the "unauthorized" test).  Alternatively, we could modify the
+//   basic functionality tests to use minimum-privileged users, which would
+//   ensure that those minimum privileges are _sufficient_ to make the
+//   corresponding API calls.  But that wouldn't test that _other_ privileges
+//   _don't_ grant those permissions.  That seems a lot harder.
+
 use anyhow::anyhow;
 use dropshot::test_util::ClientTestContext;
 use http::Method;
@@ -156,23 +180,6 @@ impl Resource {
         client: &'a ClientTestContext,
         username: &str,
     ) -> Vec<TestOperation<'a>> {
-        // XXX-dap TODO examples:
-        // - list children (various kinds)
-        // - modify
-        // - fetch
-        // - delete?  this one seems hard to test because it might succeed!
-        // - start/stop/halt -- hard to test because it's async
-        // - migrate?
-        // - disk attach/detach?
-        // This is getting a little nuts.  In the limit, we kind of want to run
-        // every test as a user with every role we think should grant that test
-        // the privileges it needs (to make sure they grant enough).  Then we
-        // kind of want to run every test again as every other role to make sure
-        // it fails at some point.  Then we want to check coverage of the
-        // endpoints/role combinations.  This seems really hard!
-        // TODO-coverage what other interesting cases aren't covered?
-        // - fetch policy (all resources)
-        // - update policy (how do we do this?!)
         match self.resource_type {
             ResourceType::Fleet => {
                 let silos_url = "/silos";
@@ -689,14 +696,6 @@ lazy_static! {
         &*SILO1_ORG1_PROJ1,
     ];
 
-    // XXX-dap One idea to support testing DELETE:
-    // - every resource has a "recreate()" function that recreates it (including
-    //   the role assignments)
-    // - this list is guaranteed to be topo-sorted
-    // - we explicitly delete every resource when we're done testing it
-    //
-    // Then we can test these in reverse order.  By the time we get to any
-    // resource, its children should be gone.
     static ref ALL_RESOURCES: Vec<&'static Resource> = vec![
         &*FLEET,
         &*SILO1,
