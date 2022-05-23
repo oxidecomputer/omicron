@@ -28,8 +28,8 @@ if [[ -d /opt/oxide-underneath ]]; then
 	#
 	# Copy the original /opt/oxide tree into the new tmpfs:
 	#
-	(cd /opt/oxide-underneath && pfexec tar czeEp@/f - .) |
-	    (cd /opt/oxide && pfexec tar xvzeEp@/f -)
+	(cd /opt/oxide-underneath && pfexec tar ceEp@/f - .) |
+	    (cd /opt/oxide && pfexec tar xveEp@/f -)
 	rm -rf /opt/oxide-underneath
 fi
 
