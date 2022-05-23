@@ -1124,7 +1124,7 @@ checksum = "1435fa1053d8b2fbbe9be7e97eca7f33d37b28409959813daefc1446a14247f1"
 [[package]]
 name = "dropshot"
 version = "0.7.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#53106a852b4936e3a4b5d54e9801f3dc58ba9238"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#0ee11bc3ab30794838221e3662fe4911be90b0de"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -1163,7 +1163,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.7.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#53106a852b4936e3a4b5d54e9801f3dc58ba9238"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#0ee11bc3ab30794838221e3662fe4911be90b0de"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4715,9 +4715,9 @@ dependencies = [
 
 [[package]]
 name = "smoltcp"
-version = "0.8.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2308a1657c8db1f5b4993bab4e620bdbe5623bd81f254cf60326767bb243237"
+checksum = "72165c4af59f5f19c7fb774b88b95660591b612380305b5f4503157341a9f7ee"
 dependencies = [
  "bitflags",
  "byteorder",
