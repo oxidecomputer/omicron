@@ -137,16 +137,15 @@ resource Silo {
 	];
 	roles = [ "admin", "collaborator", "viewer" ];
 
-	"list_children" if "viewer";
 	"read" if "viewer";
+	"list_children" if "collaborator";
+	"create_child" if "collaborator";
+	"modify" if "admin";
 
 	"viewer" if "collaborator";
-	"create_child" if "collaborator";
 	"collaborator" if "admin";
-	"modify" if "admin";
 	relations = { parent_fleet: Fleet };
-	"admin" if "admin" on "parent_fleet";
-	"collaborator" if "collaborator" on "parent_fleet";
+	"admin" if "collaborator" on "parent_fleet";
 	"viewer" if "viewer" on "parent_fleet";
 }
 has_relation(fleet: Fleet, "parent_fleet", silo: Silo)
@@ -180,7 +179,9 @@ resource Organization {
 	"modify" if "admin";
 
 	relations = { parent_silo: Silo };
-	"admin" if "admin" on "parent_silo";
+	"admin" if "collaborator" on "parent_silo";
+	"read" if "viewer" on "parent_silo";
+	"list_children" if "viewer" on "parent_silo";
 }
 has_relation(silo: Silo, "parent_silo", organization: Organization)
 	if organization.silo = silo;
@@ -212,7 +213,7 @@ resource Project {
 	"modify" if "admin";
 
 	relations = { parent_organization: Organization };
-	"admin" if "admin" on "parent_organization";
+	"admin" if "collaborator" on "parent_organization";
 }
 has_relation(organization: Organization, "parent_organization", project: Project)
 	if project.organization = organization;

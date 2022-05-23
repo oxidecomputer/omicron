@@ -1,0 +1,280 @@
+resource:  Fleet "fleet"
+  actions: FetchPolicy, ListSagas, ListSleds, ListRacks, ListBuiltinUsers, ListBuiltinRoles, ListSilos, CreateSilo
+  note:    Fleet-level roles apply to everything in the system.  However, even fleet admins have no way to refer to resources in Silos other than the ones they exist in.  This test creates fleet admins in Silo "s1".
+
+USER                 RESULTS FOR EACH ACTION
+fleet-admin          ✓ ✓ ✓ ✓ ✓ ✓ ✓ ✓
+fleet-collaborator   ✓ ✓ ✓ ✓ ✓ ✓ ✓ ✓
+fleet-viewer         ✓ ✓ ✓ ✓ ✓ ✓ ✓ ✗
+s1-admin             ✗ ✗ ✗ ✗ ✗ ✗ ✗ ✗
+s1-collaborator      ✗ ✗ ✗ ✗ ✗ ✗ ✗ ✗
+s1-viewer            ✗ ✗ ✗ ✗ ✗ ✗ ✗ ✗
+s1o1-admin           ✗ ✗ ✗ ✗ ✗ ✗ ✗ ✗
+s1o1-collaborator    ✗ ✗ ✗ ✗ ✗ ✗ ✗ ✗
+s1o1p1-admin         ✗ ✗ ✗ ✗ ✗ ✗ ✗ ✗
+s1o1p1-collaborator  ✗ ✗ ✗ ✗ ✗ ✗ ✗ ✗
+s1o1p1-viewer        ✗ ✗ ✗ ✗ ✗ ✗ ✗ ✗
+s2-admin             ✗ ✗ ✗ ✗ ✗ ✗ ✗ ✗
+s2-collaborator      ✗ ✗ ✗ ✗ ✗ ✗ ✗ ✗
+s2-viewer            ✗ ✗ ✗ ✗ ✗ ✗ ✗ ✗
+
+resource:  Silo "s1"
+  actions: Fetch, ListOrganizations, CreateOrganization
+  note:    All users can view their own Silo.  Roles are required to list and create Organizations.  Note that administrators on "s2" appear to be able to list and create Organizations in the output below, but those are Organizations in "s2".
+
+USER                 RESULTS FOR EACH ACTION
+fleet-admin          ✓ ✓ ✓
+fleet-collaborator   ✓ ✓ ✓
+fleet-viewer         ✓ ✗ ✗
+s1-admin             ✓ ✓ ✓
+s1-collaborator      ✓ ✓ ✓
+s1-viewer            ✓ ✗ ✗
+s1o1-admin           ✓ ✗ ✗
+s1o1-collaborator    ✓ ✗ ✗
+s1o1p1-admin         ✓ ✗ ✗
+s1o1p1-collaborator  ✓ ✗ ✗
+s1o1p1-viewer        ✓ ✗ ✗
+s2-admin             ✗ ✓ ✓
+s2-collaborator      ✗ ✓ ✓
+s2-viewer            ✗ ✗ ✗
+
+resource:  Organization "s1o1"
+  actions: Fetch, ListProjects, CreateProject, ModifyDescription
+  note:    
+
+USER                 RESULTS FOR EACH ACTION
+fleet-admin          ✓ ✓ ✓ ✓
+fleet-collaborator   ✓ ✓ ✓ ✓
+fleet-viewer         ✓ ✗ ✗ ✗
+s1-admin             ✓ ✓ ✓ ✓
+s1-collaborator      ✓ ✓ ✓ ✓
+s1-viewer            ✓ ✗ ✗ ✗
+s1o1-admin           ✓ ✓ ✓ ✓
+s1o1-collaborator    ✓ ✓ ✓ ✗
+s1o1p1-admin         ✓ ✗ ✗ ✗
+s1o1p1-collaborator  ✓ ✗ ✗ ✗
+s1o1p1-viewer        ✓ ✗ ✗ ✗
+s2-admin             ✗ ✗ ✗ ✗
+s2-collaborator      ✗ ✗ ✗ ✗
+s2-viewer            ✗ ✗ ✗ ✗
+
+resource:  Project "s1o1p1"
+  actions: Fetch, ListVpcs, CreateVpc, ModifyDescription
+  note:    
+
+USER                 RESULTS FOR EACH ACTION
+fleet-admin          ✓ ✓ ✓ ✓
+fleet-collaborator   ✓ ✓ ✓ ✓
+fleet-viewer         ✗ ✗ ✗ ✗
+s1-admin             ✓ ✓ ✓ ✓
+s1-collaborator      ✓ ✓ ✓ ✓
+s1-viewer            ✗ ✗ ✗ ✗
+s1o1-admin           ✓ ✓ ✓ ✓
+s1o1-collaborator    ✓ ✓ ✓ ✓
+s1o1p1-admin         ✓ ✓ ✓ ✓
+s1o1p1-collaborator  ✓ ✓ ✓ ✗
+s1o1p1-viewer        ✓ ✓ ✗ ✗
+s2-admin             ✗ ✗ ✗ ✗
+s2-collaborator      ✗ ✗ ✗ ✗
+s2-viewer            ✗ ✗ ✗ ✗
+
+resource:  Vpc "s1o1p1v1"
+  actions: Fetch, ListSubnets, CreateSubnet, ModifyDescription
+  note:    
+
+USER                 RESULTS FOR EACH ACTION
+fleet-admin          ✓ ✓ ✓ ✓
+fleet-collaborator   ✓ ✓ ✓ ✓
+fleet-viewer         ✗ ✗ ✗ ✗
+s1-admin             ✓ ✓ ✓ ✓
+s1-collaborator      ✓ ✓ ✓ ✓
+s1-viewer            ✗ ✗ ✗ ✗
+s1o1-admin           ✓ ✓ ✓ ✓
+s1o1-collaborator    ✓ ✓ ✓ ✓
+s1o1p1-admin         ✓ ✓ ✓ ✓
+s1o1p1-collaborator  ✓ ✓ ✓ ✓
+s1o1p1-viewer        ✓ ✓ ✗ ✗
+s2-admin             ✗ ✗ ✗ ✗
+s2-collaborator      ✗ ✗ ✗ ✗
+s2-viewer            ✗ ✗ ✗ ✗
+
+resource:  Project "s1o1p2"
+  actions: Fetch, ListVpcs, CreateVpc, ModifyDescription
+  note:    
+
+USER                 RESULTS FOR EACH ACTION
+fleet-admin          ✓ ✓ ✓ ✓
+fleet-collaborator   ✓ ✓ ✓ ✓
+fleet-viewer         ✗ ✗ ✗ ✗
+s1-admin             ✓ ✓ ✓ ✓
+s1-collaborator      ✓ ✓ ✓ ✓
+s1-viewer            ✗ ✗ ✗ ✗
+s1o1-admin           ✓ ✓ ✓ ✓
+s1o1-collaborator    ✓ ✓ ✓ ✓
+s1o1p1-admin         ✗ ✗ ✗ ✗
+s1o1p1-collaborator  ✗ ✗ ✗ ✗
+s1o1p1-viewer        ✗ ✗ ✗ ✗
+s2-admin             ✗ ✗ ✗ ✗
+s2-collaborator      ✗ ✗ ✗ ✗
+s2-viewer            ✗ ✗ ✗ ✗
+
+resource:  Vpc "s1o1p2v1"
+  actions: Fetch, ListSubnets, CreateSubnet, ModifyDescription
+  note:    
+
+USER                 RESULTS FOR EACH ACTION
+fleet-admin          ✓ ✓ ✓ ✓
+fleet-collaborator   ✓ ✓ ✓ ✓
+fleet-viewer         ✗ ✗ ✗ ✗
+s1-admin             ✓ ✓ ✓ ✓
+s1-collaborator      ✓ ✓ ✓ ✓
+s1-viewer            ✗ ✗ ✗ ✗
+s1o1-admin           ✓ ✓ ✓ ✓
+s1o1-collaborator    ✓ ✓ ✓ ✓
+s1o1p1-admin         ✗ ✗ ✗ ✗
+s1o1p1-collaborator  ✗ ✗ ✗ ✗
+s1o1p1-viewer        ✗ ✗ ✗ ✗
+s2-admin             ✗ ✗ ✗ ✗
+s2-collaborator      ✗ ✗ ✗ ✗
+s2-viewer            ✗ ✗ ✗ ✗
+
+resource:  Organization "s1o2"
+  actions: Fetch, ListProjects, CreateProject, ModifyDescription
+  note:    
+
+USER                 RESULTS FOR EACH ACTION
+fleet-admin          ✓ ✓ ✓ ✓
+fleet-collaborator   ✓ ✓ ✓ ✓
+fleet-viewer         ✓ ✗ ✗ ✗
+s1-admin             ✓ ✓ ✓ ✓
+s1-collaborator      ✓ ✓ ✓ ✓
+s1-viewer            ✓ ✗ ✗ ✗
+s1o1-admin           ✓ ✗ ✗ ✗
+s1o1-collaborator    ✓ ✗ ✗ ✗
+s1o1p1-admin         ✓ ✗ ✗ ✗
+s1o1p1-collaborator  ✓ ✗ ✗ ✗
+s1o1p1-viewer        ✓ ✗ ✗ ✗
+s2-admin             ✗ ✗ ✗ ✗
+s2-collaborator      ✗ ✗ ✗ ✗
+s2-viewer            ✗ ✗ ✗ ✗
+
+resource:  Project "s1o2p1"
+  actions: Fetch, ListVpcs, CreateVpc, ModifyDescription
+  note:    
+
+USER                 RESULTS FOR EACH ACTION
+fleet-admin          ✓ ✓ ✓ ✓
+fleet-collaborator   ✓ ✓ ✓ ✓
+fleet-viewer         ✗ ✗ ✗ ✗
+s1-admin             ✓ ✓ ✓ ✓
+s1-collaborator      ✓ ✓ ✓ ✓
+s1-viewer            ✗ ✗ ✗ ✗
+s1o1-admin           ✗ ✗ ✗ ✗
+s1o1-collaborator    ✗ ✗ ✗ ✗
+s1o1p1-admin         ✗ ✗ ✗ ✗
+s1o1p1-collaborator  ✗ ✗ ✗ ✗
+s1o1p1-viewer        ✗ ✗ ✗ ✗
+s2-admin             ✗ ✗ ✗ ✗
+s2-collaborator      ✗ ✗ ✗ ✗
+s2-viewer            ✗ ✗ ✗ ✗
+
+resource:  Vpc "s1o2p1v1"
+  actions: Fetch, ListSubnets, CreateSubnet, ModifyDescription
+  note:    
+
+USER                 RESULTS FOR EACH ACTION
+fleet-admin          ✓ ✓ ✓ ✓
+fleet-collaborator   ✓ ✓ ✓ ✓
+fleet-viewer         ✗ ✗ ✗ ✗
+s1-admin             ✓ ✓ ✓ ✓
+s1-collaborator      ✓ ✓ ✓ ✓
+s1-viewer            ✗ ✗ ✗ ✗
+s1o1-admin           ✗ ✗ ✗ ✗
+s1o1-collaborator    ✗ ✗ ✗ ✗
+s1o1p1-admin         ✗ ✗ ✗ ✗
+s1o1p1-collaborator  ✗ ✗ ✗ ✗
+s1o1p1-viewer        ✗ ✗ ✗ ✗
+s2-admin             ✗ ✗ ✗ ✗
+s2-collaborator      ✗ ✗ ✗ ✗
+s2-viewer            ✗ ✗ ✗ ✗
+
+resource:  Silo "s2"
+  actions: Fetch, ListOrganizations, CreateOrganization
+  note:    All users can view their own Silo.  Roles are required to list and create Organizations.  Note that administrators on "s2" appear to be able to list and create Organizations in the output below, but those are Organizations in "s2".
+
+USER                 RESULTS FOR EACH ACTION
+fleet-admin          ✓ ✓ ✓
+fleet-collaborator   ✓ ✓ ✓
+fleet-viewer         ✓ ✗ ✗
+s1-admin             ✗ ✓ ✓
+s1-collaborator      ✗ ✓ ✓
+s1-viewer            ✗ ✗ ✗
+s1o1-admin           ✗ ✗ ✗
+s1o1-collaborator    ✗ ✗ ✗
+s1o1p1-admin         ✗ ✗ ✗
+s1o1p1-collaborator  ✗ ✗ ✗
+s1o1p1-viewer        ✗ ✗ ✗
+s2-admin             ✓ ✓ ✓
+s2-collaborator      ✓ ✓ ✓
+s2-viewer            ✓ ✗ ✗
+
+resource:  Organization "s2o3"
+  actions: Fetch, ListProjects, CreateProject, ModifyDescription
+  note:    
+
+USER                 RESULTS FOR EACH ACTION
+fleet-admin          ✗ ✗ ✗ ✗
+fleet-collaborator   ✗ ✗ ✗ ✗
+fleet-viewer         ✗ ✗ ✗ ✗
+s1-admin             ✗ ✗ ✗ ✗
+s1-collaborator      ✗ ✗ ✗ ✗
+s1-viewer            ✗ ✗ ✗ ✗
+s1o1-admin           ✗ ✗ ✗ ✗
+s1o1-collaborator    ✗ ✗ ✗ ✗
+s1o1p1-admin         ✗ ✗ ✗ ✗
+s1o1p1-collaborator  ✗ ✗ ✗ ✗
+s1o1p1-viewer        ✗ ✗ ✗ ✗
+s2-admin             ✓ ✓ ✓ ✓
+s2-collaborator      ✓ ✓ ✓ ✓
+s2-viewer            ✓ ✗ ✗ ✗
+
+resource:  Project "s2o3p1"
+  actions: Fetch, ListVpcs, CreateVpc, ModifyDescription
+  note:    
+
+USER                 RESULTS FOR EACH ACTION
+fleet-admin          ✗ ✗ ✗ ✗
+fleet-collaborator   ✗ ✗ ✗ ✗
+fleet-viewer         ✗ ✗ ✗ ✗
+s1-admin             ✗ ✗ ✗ ✗
+s1-collaborator      ✗ ✗ ✗ ✗
+s1-viewer            ✗ ✗ ✗ ✗
+s1o1-admin           ✗ ✗ ✗ ✗
+s1o1-collaborator    ✗ ✗ ✗ ✗
+s1o1p1-admin         ✗ ✗ ✗ ✗
+s1o1p1-collaborator  ✗ ✗ ✗ ✗
+s1o1p1-viewer        ✗ ✗ ✗ ✗
+s2-admin             ✓ ✓ ✓ ✓
+s2-collaborator      ✓ ✓ ✓ ✓
+s2-viewer            ✗ ✗ ✗ ✗
+
+resource:  Vpc "s2o3p1v1"
+  actions: Fetch, ListSubnets, CreateSubnet, ModifyDescription
+  note:    
+
+USER                 RESULTS FOR EACH ACTION
+fleet-admin          ✗ ✗ ✗ ✗
+fleet-collaborator   ✗ ✗ ✗ ✗
+fleet-viewer         ✗ ✗ ✗ ✗
+s1-admin             ✗ ✗ ✗ ✗
+s1-collaborator      ✗ ✗ ✗ ✗
+s1-viewer            ✗ ✗ ✗ ✗
+s1o1-admin           ✗ ✗ ✗ ✗
+s1o1-collaborator    ✗ ✗ ✗ ✗
+s1o1p1-admin         ✗ ✗ ✗ ✗
+s1o1p1-collaborator  ✗ ✗ ✗ ✗
+s1o1p1-viewer        ✗ ✗ ✗ ✗
+s2-admin             ✓ ✓ ✓ ✓
+s2-collaborator      ✓ ✓ ✓ ✓
+s2-viewer            ✗ ✗ ✗ ✗
+
