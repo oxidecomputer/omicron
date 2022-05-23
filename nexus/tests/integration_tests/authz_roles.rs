@@ -20,14 +20,12 @@ use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers;
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
-use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
-use omicron_common::api::external::InstanceCpuCount;
+use omicron_common::api::external::Name;
 use omicron_nexus::app::test_interfaces::TestInterfaces;
 use omicron_nexus::authz;
 use omicron_nexus::external_api::params;
-use omicron_nexus::external_api::params::InstanceNetworkInterfaceAttachment;
 use omicron_nexus::external_api::shared;
 use omicron_nexus::external_api::shared::IdentityType;
 use std::collections::BTreeMap;
@@ -73,7 +71,7 @@ impl Resource {
             ResourceType::Project { name, parent_org, parent_silo } => {
                 format!("{}{}{}", parent_silo, parent_org, name)
             }
-            ResourceType::Instance {
+            ResourceType::Vpc {
                 name,
                 parent_project,
                 parent_org,
@@ -95,7 +93,7 @@ impl Resource {
             ResourceType::Project { parent_org, parent_silo, .. } => {
                 format!("{}{}", parent_silo, parent_org)
             }
-            ResourceType::Instance {
+            ResourceType::Vpc {
                 parent_project,
                 parent_org,
                 parent_silo,
@@ -114,9 +112,9 @@ impl Resource {
             ResourceType::Project { parent_org, .. } => {
                 format!("/organizations/{}/projects", parent_org)
             }
-            ResourceType::Instance { parent_project, parent_org, .. } => {
+            ResourceType::Vpc { parent_project, parent_org, .. } => {
                 format!(
-                    "/organizations/{}/projects/{}/instances",
+                    "/organizations/{}/projects/{}/vpcs",
                     parent_org, parent_project
                 )
             }
@@ -134,7 +132,7 @@ impl Resource {
                 "/organizations/{}/projects/{}/policy",
                 parent_org, name
             ),
-            ResourceType::Instance { .. } => unimplemented!(),
+            ResourceType::Vpc { .. } => unimplemented!(),
         }
     }
 
@@ -162,7 +160,7 @@ impl Resource {
             ResourceType::Fleet => vec![],
             // XXX-dap TODO
             ResourceType::Silo { .. } => vec![],
-            // XXX-dap TODO
+
             ResourceType::Organization { name, .. } => {
                 let resource_url = format!("{}/{}", self.create_url(), name);
                 let projects_url = format!("{}/projects", &resource_url);
@@ -238,10 +236,85 @@ impl Resource {
                     },
                 ]
             }
+
             // XXX-dap TODO
-            ResourceType::Project { .. } => vec![],
+            ResourceType::Project { name, .. } => {
+                let resource_url = format!("{}/{}", self.create_url(), name);
+                let vpcs_url = format!("{}/vpcs", &resource_url);
+                let new_vpc_name: Name = username.parse().expect(
+                    "invalid test VPC name (tried to use a username \
+                    that we generated)",
+                );
+                let new_vpc_description = format!("created by {}", username);
+                let vpc_url = format!("{}/{}", &vpcs_url, new_vpc_name);
+                vec![
+                    TestOperation {
+                        label: "Fetch",
+                        template: NexusRequest::new(RequestBuilder::new(
+                            client,
+                            Method::GET,
+                            &resource_url,
+                        )),
+                        on_success: None,
+                    },
+                    TestOperation {
+                        label: "ListVpcs",
+                        template: NexusRequest::new(RequestBuilder::new(
+                            client,
+                            Method::GET,
+                            &vpcs_url,
+                        )),
+                        on_success: None,
+                    },
+                    TestOperation {
+                        label: "CreateVpc",
+                        template: NexusRequest::new(
+                            RequestBuilder::new(
+                                client,
+                                Method::POST,
+                                &vpcs_url,
+                            )
+                            .body(Some(
+                                &params::VpcCreate {
+                                    identity: IdentityMetadataCreateParams {
+                                        name: new_vpc_name.clone(),
+                                        description: new_vpc_description,
+                                    },
+                                    ipv6_prefix: None,
+                                    dns_name: new_vpc_name,
+                                },
+                            )),
+                        ),
+                        on_success: Some(NexusRequest::object_delete(
+                            client, &vpc_url,
+                        )),
+                    },
+                    TestOperation {
+                        label: "ModifyDescription",
+                        template: NexusRequest::new(
+                            RequestBuilder::new(
+                                client,
+                                Method::PUT,
+                                &resource_url,
+                            )
+                            .body(Some(
+                                &params::ProjectUpdate {
+                                    identity: IdentityMetadataUpdateParams {
+                                        name: None,
+                                        description: Some(String::from(
+                                            "updated!",
+                                        )),
+                                    },
+                                },
+                            )),
+                        ),
+                        on_success: None,
+                    },
+                ]
+            }
+
             // XXX-dap TODO
-            ResourceType::Instance { .. } => vec![],
+            ResourceType::Vpc { .. } => vec![],
         }
     }
 }
@@ -261,7 +334,7 @@ enum ResourceType {
         parent_org: &'static str,
         parent_silo: &'static str,
     },
-    Instance {
+    Vpc {
         name: &'static str,
         parent_project: &'static str,
         parent_org: &'static str,
@@ -309,8 +382,8 @@ lazy_static! {
         },
     };
     static ref SILO1_ORG1_PROJ1_INST: Resource = Resource {
-        resource_type: ResourceType::Instance {
-            name: "i1",
+        resource_type: ResourceType::Vpc {
+            name: "v1",
             parent_project: "p1",
             parent_org: "o1",
             parent_silo: "s1",
@@ -324,8 +397,8 @@ lazy_static! {
         },
     };
     static ref SILO1_ORG1_PROJ2_INST: Resource = Resource {
-        resource_type: ResourceType::Instance {
-            name: "i1",
+        resource_type: ResourceType::Vpc {
+            name: "v1",
             parent_project: "p2",
             parent_org: "o1",
             parent_silo: "s1",
@@ -345,8 +418,8 @@ lazy_static! {
         },
     };
     static ref SILO1_ORG2_PROJ1_INST: Resource = Resource {
-        resource_type: ResourceType::Instance {
-            name: "i1",
+        resource_type: ResourceType::Vpc {
+            name: "v1",
             parent_project: "p1",
             parent_org: "o2",
             parent_silo: "s1",
@@ -369,8 +442,8 @@ lazy_static! {
         },
     };
     static ref SILO2_ORG3_PROJ1_INST: Resource = Resource {
-        resource_type: ResourceType::Instance {
-            name: "i1",
+        resource_type: ResourceType::Vpc {
+            name: "v1",
             parent_project: "p1",
             parent_org: "o3",
             parent_silo: "s2",
@@ -497,26 +570,23 @@ async fn setup_hierarchy(testctx: &ControlPlaneTestContext) -> World {
                 .await
                 .unwrap_or_else(|_| panic!("failed to create {}", full_name));
             }
-            ResourceType::Instance { name, parent_silo, .. } => {
+            ResourceType::Vpc { name, parent_silo, .. } => {
                 let caller_id = user_id(&users, &parent_silo, "admin");
                 let full_name = resource.full_name();
                 NexusRequest::objects_post(
                     client,
                     &resource.create_url(),
-                    &params::InstanceCreate {
+                    &params::VpcCreate {
                         identity: IdentityMetadataCreateParams {
                             name: name
                                 .parse()
                                 .expect("generated name was invalid"),
                             description: full_name.clone(),
                         },
-                        ncpus: InstanceCpuCount(1),
-                        memory: ByteCount::from_gibibytes_u32(1),
-                        hostname: full_name.clone(),
-                        user_data: vec![],
-                        network_interfaces:
-                            InstanceNetworkInterfaceAttachment::Default,
-                        disks: vec![],
+                        ipv6_prefix: None,
+                        dns_name: full_name.parse().expect(
+                            "expected resource name to be a valid DNS name",
+                        ),
                     },
                 )
                 .authn_as(AuthnMode::SiloUser(caller_id))
@@ -530,9 +600,9 @@ async fn setup_hierarchy(testctx: &ControlPlaneTestContext) -> World {
     for resource in &*RESOURCES_WITH_USERS {
         match resource.resource_type {
             // XXX-dap we should be testing fleet users too
-            // We don't create users for Instances.  We already created users
-            // for Silos.
-            ResourceType::Instance { .. } | ResourceType::Silo { .. } => {
+            // We don't create users for Vpcs.  We already created users for
+            // Silos.
+            ResourceType::Vpc { .. } | ResourceType::Silo { .. } => {
                 unimplemented!()
             }
             ResourceType::Fleet => {
