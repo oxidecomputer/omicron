@@ -13,6 +13,12 @@ set -o errexit
 set -o pipefail
 set -o xtrace
 
+#
+# XXX work around 14537 (UFS should not allow directories to be unlinked) which
+# is probably not yet fixed in xde branch?
+#
+pfexec mdb -kwe 'secpolicy_fs_linkdir/v 55 48 89 e5 b8 01 00 00 00 5d c3'
+
 if [[ -d /opt/oxide ]]; then
 	#
 	# The netdev ramdisk environment contains OPTE, which presently means
