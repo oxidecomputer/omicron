@@ -8,6 +8,9 @@
 #: ]
 #: skip_clone = true
 #:
+#: [dependencies.package]
+#: job = "helios / package"
+#:
 
 set -o errexit
 set -o pipefail
@@ -49,14 +52,6 @@ pfexec mount -F tmpfs -O swap /var/oxide
 pfexec mkdir /opt/oxide/work
 pfexec chown build:build /opt/oxide/work
 cd /opt/oxide/work
-
-#
-# XXX download package to avoid rebuild for quicker cycles
-#
-pfexec mkdir -p /input/package/work
-pfexec chown build:build /input/package/work
-curl -sSf -L -o /input/package/work/package.tar.gz \
-    'https://buildomat.eng.oxide.computer/wg/0/artefact/01G3QDG4HWXN67D1F422TMKM00/plUbrACkDaWGLcRpa7iGPNPDN4KZpBvtNKFWRION8fhmhzjm/01G3QDGBXTPSC8FPF89X7CYGDG/01G3QEK2GDN48KNXH9Q9SDERY5/package.tar.gz'
 
 ptime -m tar xvzf /input/package/work/package.tar.gz
 ptime -m pfexec ./tools/create_virtual_hardware.sh
