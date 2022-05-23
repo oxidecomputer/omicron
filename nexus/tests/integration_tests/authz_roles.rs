@@ -22,6 +22,7 @@ use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
+use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::Name;
 use omicron_nexus::app::test_interfaces::TestInterfaces;
 use omicron_nexus::authz;
@@ -53,6 +54,7 @@ async fn test_authz_roles(cptestctx: &ControlPlaneTestContext) {
     print!("{}", String::from_utf8_lossy(&output));
 
     // XXX-dap add expectorate
+    panic!("blowing up to preserve results");
 }
 
 #[derive(Debug)]
@@ -313,8 +315,85 @@ impl Resource {
                 ]
             }
 
-            // XXX-dap TODO
-            ResourceType::Vpc { .. } => vec![],
+            ResourceType::Vpc { name, .. } => {
+                let resource_url = format!("{}/{}", self.create_url(), name);
+                let subnets_url = format!("{}/subnets", &resource_url);
+                let new_subnet_name: Name = username.parse().expect(
+                    "invalid test VPC name (tried to use a username \
+                    that we generated)",
+                );
+                let new_subnet_description = format!("created by {}", username);
+                let subnet_url =
+                    format!("{}/{}", &subnets_url, new_subnet_name);
+                vec![
+                    TestOperation {
+                        label: "Fetch",
+                        template: NexusRequest::new(RequestBuilder::new(
+                            client,
+                            Method::GET,
+                            &resource_url,
+                        )),
+                        on_success: None,
+                    },
+                    TestOperation {
+                        label: "ListSubnets",
+                        template: NexusRequest::new(RequestBuilder::new(
+                            client,
+                            Method::GET,
+                            &subnets_url,
+                        )),
+                        on_success: None,
+                    },
+                    TestOperation {
+                        label: "CreateSubnet",
+                        template: NexusRequest::new(
+                            RequestBuilder::new(
+                                client,
+                                Method::POST,
+                                &subnets_url,
+                            )
+                            .body(Some(
+                                &params::VpcSubnetCreate {
+                                    identity: IdentityMetadataCreateParams {
+                                        name: new_subnet_name.clone(),
+                                        description: new_subnet_description,
+                                    },
+                                    ipv4_block: Ipv4Net(
+                                        "192.168.1.0/24".parse().unwrap(),
+                                    ),
+                                    ipv6_block: None,
+                                },
+                            )),
+                        ),
+                        on_success: Some(NexusRequest::object_delete(
+                            client,
+                            &subnet_url,
+                        )),
+                    },
+                    TestOperation {
+                        label: "ModifyDescription",
+                        template: NexusRequest::new(
+                            RequestBuilder::new(
+                                client,
+                                Method::PUT,
+                                &resource_url,
+                            )
+                            .body(Some(
+                                &params::VpcUpdate {
+                                    identity: IdentityMetadataUpdateParams {
+                                        name: None,
+                                        description: Some(String::from(
+                                            "updated!",
+                                        )),
+                                    },
+                                    dns_name: None,
+                                },
+                            )),
+                        ),
+                        on_success: None,
+                    },
+                ]
+            }
         }
     }
 }
