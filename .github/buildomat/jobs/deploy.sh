@@ -30,7 +30,7 @@ if [[ -d /opt/oxide-underneath ]]; then
 	#
 	(cd /opt/oxide-underneath && pfexec tar ceEp@/f - .) |
 	    (cd /opt/oxide && pfexec tar xveEp@/f -)
-	rm -rf /opt/oxide-underneath
+	pfexec rm -rf /opt/oxide-underneath
 fi
 
 pfexec mkdir /opt/oxide/work
