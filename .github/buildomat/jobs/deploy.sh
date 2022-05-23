@@ -42,7 +42,7 @@ fi
 #
 # XXX the creation of rpool/zone is perhaps not working as expected?
 #
-/sbin/zfs create -o mountpoint=/zone rpool/zone
+pfexec /sbin/zfs create -o mountpoint=/zone rpool/zone
 
 #
 # The sled agent will ostensibly write things into /var/oxide, so make that a
