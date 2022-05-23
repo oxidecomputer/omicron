@@ -5,16 +5,9 @@
 //! (Fairly) comprehensive test of authz by creating a hierarchy of resources
 //! and a group of users with various roles on these resources and verifying
 //! that each role grants the privileges we expect.
-//! XXX-dap bugs found / confusing behavior:
-//! - it shouldn't be the case that you can create a Silo that you cannot
-//!   delete. either we should create an initial role assignment for you or we
-//!   should have a role that you get "admin" on Silo if you have "collaborator"
-//!   on parent_fleet?
-//! - why is it that everyone who can create an Organization can also delete it?
 
 use anyhow::anyhow;
 use dropshot::test_util::ClientTestContext;
-use futures::future::join_all;
 use http::Method;
 use http::StatusCode;
 use lazy_static::lazy_static;
@@ -925,6 +918,7 @@ async fn setup_hierarchy(testctx: &ControlPlaneTestContext) -> World {
         }
     }
 
+    println!("setup done\n");
     World { users, resources: ALL_RESOURCES.clone() }
 }
 
@@ -975,6 +969,7 @@ async fn create_users<
         // TODO when silo users get user names, this should go into it.
         let username = format!("{}-{}", resource_name, role_name);
         let user_id = Uuid::new_v4();
+        println!("creating user: {}", &username);
         debug!(
             log,
             "creating user";
@@ -987,6 +982,7 @@ async fn create_users<
             .unwrap_or_else(|_| panic!("failed to create user {:?}", username));
         users.insert((resource_name.to_owned(), role_name.to_owned()), user_id);
 
+        println!("adding role {} for user {}", role_name, &username);
         debug!(
             log,
             "adding role";
@@ -1046,11 +1042,6 @@ enum OperationResult {
     UnexpectedError(anyhow::Error),
 }
 
-struct ResourceUserResults {
-    username: String,
-    results: Vec<OperationResult>,
-}
-
 async fn test_all_operations<W: Write>(
     cptestctx: &ControlPlaneTestContext,
     world: &World,
@@ -1061,14 +1052,12 @@ async fn test_all_operations<W: Write>(
     for resource in &world.resources {
         write!(
             out,
-            "resource:  {} {:?}",
+            "resource:  {} {:?}\n",
             resource.resource_type.as_ref(),
             resource.full_name()
         )?;
 
-        let mut user_results = Vec::with_capacity(world.users.len());
-        let mut test_labels: Option<Vec<&'static str>> = None;
-        let mut comment: Option<&'static str> = None;
+        let mut first = true;
         for ((user_resource_name, user_role_name), user_id) in &world.users {
             let username = format!("{}-{}", user_resource_name, user_role_name);
             let log = log.new(o!(
@@ -1078,38 +1067,21 @@ async fn test_all_operations<W: Write>(
 
             let resource_operations =
                 resource.test_operations(client, &username);
-            let resource_comment = resource_operations.comment;
+            let comment = resource_operations.comment;
             let operations = resource_operations.operations;
-            if test_labels.is_none() {
-                test_labels =
-                    Some(operations.iter().map(|t| t.label).collect());
+            if first {
+                let test_labels =
+                    operations.iter().map(|t| t.label).collect::<Vec<_>>();
+                write!(out, "  actions: {}\n", test_labels.join(", "))?;
+                write!(out, "  note:    {}\n\n", comment)?;
+                write!(out, "{:20} {}\n", "USER", "RESULTS FOR EACH ACTION")?;
+                first = false;
             }
-            comment = Some(resource_comment);
-            user_results.push(ResourceUserResults {
-                username,
-                results: join_all(operations.into_iter().map(
-                    |test_operation| {
-                        run_test_operation(&log, test_operation, *user_id)
-                    },
-                ))
-                .await,
-            });
-        }
 
-        if test_labels.is_none() {
-            write!(out, ": no tests defined\n\n")?;
-            continue;
-        }
-
-        write!(out, "\n  actions: {}\n", test_labels.unwrap().join(", "))?;
-        if let Some(comment) = comment {
-            write!(out, "  note:    {}\n\n", comment)?;
-        }
-
-        write!(out, "{:20} {}\n", "USER", "RESULTS FOR EACH ACTION")?;
-        for user_result in &user_results {
-            write!(out, "{:20}", user_result.username)?;
-            for op_result in &user_result.results {
+            write!(out, "{:20}", username)?;
+            for test_operation in operations.into_iter() {
+                let op_result =
+                    run_test_operation(&log, test_operation, *user_id).await;
                 write!(
                     out,
                     " {}",
@@ -1120,6 +1092,7 @@ async fn test_all_operations<W: Write>(
                     }
                 )?;
             }
+
             write!(out, "\n")?;
         }
 
