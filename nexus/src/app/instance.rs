@@ -605,10 +605,13 @@ impl super::Nexus {
         // on database state.
         //
         // To implement hot-plug support, we should do the following in a saga:
-        // - We should update the state to "Attaching", rather than
-        // "Attached".
-        // - We should then issue a request to the associated sled agent.
-        // - Once that completes, we should update the disk state to "Attached".
+        // - Update the state to "Attaching", rather than "Attached".
+        // - If the instance is running...
+        //   - Issue a request to "disk attach" to the associated sled agent,
+        //   using the "state generation" value from the moment we attached.
+        //   - Update the DB if the request succeeded (hopefully to "Attached").
+        // - If the instance is not running...
+        //   - Update the disk state in the DB to "Attached".
         let (_instance, disk) = self
             .db_datastore
             .disk_attach(
@@ -650,10 +653,13 @@ impl super::Nexus {
         // on database state.
         //
         // To implement hot-unplug support, we should do the following in a saga:
-        // - We should update the state to "Detaching", rather than
-        // "Detached".
-        // - We should then issue a request to the associated sled agent.
-        // - Once that completes, we should update the disk state to "Detached".
+        // - Update the state to "Detaching", rather than "Detached".
+        // - If the instance is running...
+        //   - Issue a request to "disk detach" to the associated sled agent,
+        //   using the "state generation" value from the moment we attached.
+        //   - Update the DB if the request succeeded (hopefully to "Detached").
+        // - If the instance is not running...
+        //   - Update the disk state in the DB to "Detached".
         let disk = self
             .db_datastore
             .disk_detach(&opctx, &authz_instance, &authz_disk)
