@@ -5,6 +5,8 @@
 //! (Fairly) comprehensive test of authz by creating a hierarchy of resources
 //! and a group of users with various roles on these resources and verifying
 //! that each role grants the privileges we expect.
+//! XXX-dap it looks like a bug that fleet admins can't see Organizations.  Is
+//! silo.fleet not set up right in Polar?
 
 use anyhow::anyhow;
 use dropshot::test_util::ClientTestContext;
