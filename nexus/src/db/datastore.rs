@@ -33,8 +33,11 @@ use crate::db::fixed_data::role_builtin::BUILTIN_ROLES;
 use crate::db::fixed_data::silo::DEFAULT_SILO;
 use crate::db::lookup::LookupPath;
 use crate::db::model::DatabaseString;
+use crate::db::model::IncompleteVpc;
+use crate::db::model::Vpc;
 use crate::db::queries::network_interface::InsertNetworkInterfaceQuery;
 use crate::db::queries::network_interface::NetworkInterfaceError;
+use crate::db::queries::vpc::InsertVpcQuery;
 use crate::db::queries::vpc_subnet::FilterConflictingVpcSubnetRangesQuery;
 use crate::db::queries::vpc_subnet::SubnetError;
 use crate::db::{
@@ -47,7 +50,7 @@ use crate::db::{
         OrganizationUpdate, OximeterInfo, ProducerEndpoint, Project,
         ProjectUpdate, Region, RoleAssignment, RoleBuiltin, RouterRoute,
         RouterRouteUpdate, Silo, SiloUser, Sled, SshKey,
-        UpdateAvailableArtifact, UserBuiltin, Volume, Vpc, VpcFirewallRule,
+        UpdateAvailableArtifact, UserBuiltin, Volume, VpcFirewallRule,
         VpcRouter, VpcRouterUpdate, VpcSubnet, VpcSubnetUpdate, VpcUpdate,
         Zpool,
     },
@@ -1732,7 +1735,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_project: &authz::Project,
-        vpc: Vpc,
+        vpc: IncompleteVpc,
     ) -> Result<(authz::Vpc, Vpc), Error> {
         use db::schema::vpc::dsl;
 
@@ -1740,9 +1743,13 @@ impl DataStore {
         opctx.authorize(authz::Action::CreateChild, authz_project).await?;
 
         // TODO-correctness Shouldn't this use "insert_resource"?
-        let name = vpc.name().clone();
+        //
+        // Note that to do so requires adding an `rcgen` column to the project
+        // table.
+        let name = vpc.identity.name.clone();
+        let query = InsertVpcQuery::new(vpc);
         let vpc = diesel::insert_into(dsl::vpc)
-            .values(vpc)
+            .values(query)
             .returning(Vpc::as_returning())
             .get_result_async(self.pool())
             .await

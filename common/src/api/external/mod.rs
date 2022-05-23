@@ -1745,7 +1745,7 @@ impl JsonSchema for MacAddr {
 pub struct Vni(u32);
 
 impl Vni {
-    const MAX_VNI: u32 = 1 << 24;
+    pub const MAX_VNI: u32 = 1 << 24;
 
     /// Create a new random VNI.
     pub fn random() -> Self {
