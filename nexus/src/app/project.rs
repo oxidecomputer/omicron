@@ -96,7 +96,7 @@ impl super::Nexus {
     ) -> ListResultVec<db::model::Project> {
         let (.., authz_org) = LookupPath::new(opctx, &self.db_datastore)
             .organization_name(organization_name)
-            .lookup_for(authz::Action::CreateChild)
+            .lookup_for(authz::Action::ListChildren)
             .await?;
         self.db_datastore
             .projects_list_by_name(opctx, &authz_org, pagparams)
@@ -111,7 +111,7 @@ impl super::Nexus {
     ) -> ListResultVec<db::model::Project> {
         let (.., authz_org) = LookupPath::new(opctx, &self.db_datastore)
             .organization_name(organization_name)
-            .lookup_for(authz::Action::CreateChild)
+            .lookup_for(authz::Action::ListChildren)
             .await?;
         self.db_datastore
             .projects_list_by_id(opctx, &authz_org, pagparams)

@@ -52,6 +52,17 @@ async fn test_authz_roles(cptestctx: &ControlPlaneTestContext) {
             .expect("failed to write output");
     }
 
+    // Some general notes if you're debugging a failure in this test:
+    //
+    // Fleet-level roles apply to everything in the system.  However, even fleet
+    // admins have no way to refer to resources in Silos other than the ones
+    // they exist in.  This test creates fleet admins in Silo "s1".  So they can
+    // do all the usual things on the resources in "s1", but not in "s2".
+    //
+    // Administrators on "s2" appear to be able to list and create Organizations
+    // in Silo "s1" in the test's output.  But that just means they can list and
+    // create things under /organizations -- that's listing and creating
+    // Organizations in "s2", not "s1".
     let output = cursor.into_inner();
     expectorate::assert_contents(
         "tests/output/authz-roles-test.txt",
@@ -144,7 +155,7 @@ impl Resource {
         &self,
         client: &'a ClientTestContext,
         username: &str,
-    ) -> ResourceTestOperations<'a> {
+    ) -> Vec<TestOperation<'a>> {
         // XXX-dap TODO examples:
         // - list children (various kinds)
         // - modify
@@ -171,102 +182,87 @@ impl Resource {
                 );
                 let new_silo_description = format!("created by {}", username);
                 let silo_url = format!("{}/{}", &silos_url, new_silo_name);
-                ResourceTestOperations {
-                    comment: "Fleet-level roles apply to everything in \
-                            the system.  However, even fleet admins have no \
-                            way to refer to resources in Silos other than \
-                            the ones they exist in.  This test creates fleet \
-                            admins in Silo \"s1\".",
-                    operations: vec![
-                        TestOperation {
-                            label: "FetchPolicy",
-                            template: NexusRequest::new(RequestBuilder::new(
-                                client,
-                                Method::GET,
-                                "/policy",
-                            )),
-                            on_success: None,
-                        },
-                        TestOperation {
-                            label: "ListSagas",
-                            template: NexusRequest::new(RequestBuilder::new(
-                                client,
-                                Method::GET,
-                                "/sagas",
-                            )),
-                            on_success: None,
-                        },
-                        TestOperation {
-                            label: "ListSleds",
-                            template: NexusRequest::new(RequestBuilder::new(
-                                client,
-                                Method::GET,
-                                "/hardware/sleds",
-                            )),
-                            on_success: None,
-                        },
-                        TestOperation {
-                            label: "ListRacks",
-                            template: NexusRequest::new(RequestBuilder::new(
-                                client,
-                                Method::GET,
-                                "/hardware/racks",
-                            )),
-                            on_success: None,
-                        },
-                        TestOperation {
-                            label: "ListBuiltinUsers",
-                            template: NexusRequest::new(RequestBuilder::new(
-                                client,
-                                Method::GET,
-                                "/users",
-                            )),
-                            on_success: None,
-                        },
-                        TestOperation {
-                            label: "ListBuiltinRoles",
-                            template: NexusRequest::new(RequestBuilder::new(
-                                client,
-                                Method::GET,
-                                "/roles",
-                            )),
-                            on_success: None,
-                        },
-                        TestOperation {
-                            label: "ListSilos",
-                            template: NexusRequest::new(RequestBuilder::new(
-                                client,
-                                Method::GET,
-                                "/silos",
-                            )),
-                            on_success: None,
-                        },
-                        TestOperation {
-                            label: "CreateSilo",
-                            template: NexusRequest::new(
-                                RequestBuilder::new(
-                                    client,
-                                    Method::POST,
-                                    "/silos",
-                                )
-                                .body(Some(
-                                    &params::SiloCreate {
-                                        identity:
-                                            IdentityMetadataCreateParams {
-                                                name: new_silo_name,
-                                                description:
-                                                    new_silo_description,
-                                            },
-                                        discoverable: true,
+                vec![
+                    TestOperation {
+                        label: "FetchPolicy",
+                        template: NexusRequest::new(RequestBuilder::new(
+                            client,
+                            Method::GET,
+                            "/policy",
+                        )),
+                        on_success: None,
+                    },
+                    TestOperation {
+                        label: "ListSagas",
+                        template: NexusRequest::new(RequestBuilder::new(
+                            client,
+                            Method::GET,
+                            "/sagas",
+                        )),
+                        on_success: None,
+                    },
+                    TestOperation {
+                        label: "ListSleds",
+                        template: NexusRequest::new(RequestBuilder::new(
+                            client,
+                            Method::GET,
+                            "/hardware/sleds",
+                        )),
+                        on_success: None,
+                    },
+                    TestOperation {
+                        label: "ListRacks",
+                        template: NexusRequest::new(RequestBuilder::new(
+                            client,
+                            Method::GET,
+                            "/hardware/racks",
+                        )),
+                        on_success: None,
+                    },
+                    TestOperation {
+                        label: "ListBuiltinUsers",
+                        template: NexusRequest::new(RequestBuilder::new(
+                            client,
+                            Method::GET,
+                            "/users",
+                        )),
+                        on_success: None,
+                    },
+                    TestOperation {
+                        label: "ListBuiltinRoles",
+                        template: NexusRequest::new(RequestBuilder::new(
+                            client,
+                            Method::GET,
+                            "/roles",
+                        )),
+                        on_success: None,
+                    },
+                    TestOperation {
+                        label: "ListSilos",
+                        template: NexusRequest::new(RequestBuilder::new(
+                            client,
+                            Method::GET,
+                            "/silos",
+                        )),
+                        on_success: None,
+                    },
+                    TestOperation {
+                        label: "CreateSilo",
+                        template: NexusRequest::new(
+                            RequestBuilder::new(client, Method::POST, "/silos")
+                                .body(Some(&params::SiloCreate {
+                                    identity: IdentityMetadataCreateParams {
+                                        name: new_silo_name,
+                                        description: new_silo_description,
                                     },
-                                )),
-                            ),
-                            on_success: Some(NexusRequest::object_delete(
-                                client, &silo_url,
-                            )),
-                        },
-                    ],
-                }
+                                    discoverable: true,
+                                })),
+                        ),
+                        on_success: Some(NexusRequest::object_delete(
+                            client, &silo_url,
+                        )),
+                    },
+                ]
             }
 
             ResourceType::Silo { name } => {
@@ -278,56 +274,41 @@ impl Resource {
                 );
                 let new_org_description = format!("created by {}", username);
                 let org_url = format!("{}/{}", orgs_url, new_org_name);
-                ResourceTestOperations {
-                    comment: "All users can view their own Silo.  Roles are \
-                        required to list and create Organizations.  Note \
-                        that administrators on \"s2\" appear to be able to \
-                        list and create Organizations in the output below, \
-                        but those are Organizations in \"s2\".",
-                    operations: vec![
-                        TestOperation {
-                            label: "Fetch",
-                            template: NexusRequest::new(RequestBuilder::new(
-                                client,
-                                Method::GET,
-                                &resource_url,
-                            )),
-                            on_success: None,
-                        },
-                        TestOperation {
-                            label: "ListOrganizations",
-                            template: NexusRequest::new(RequestBuilder::new(
-                                client,
-                                Method::GET,
-                                orgs_url,
-                            )),
-                            on_success: None,
-                        },
-                        TestOperation {
-                            label: "CreateOrganization",
-                            template: NexusRequest::new(
-                                RequestBuilder::new(
-                                    client,
-                                    Method::POST,
-                                    orgs_url,
-                                )
-                                .body(Some(
-                                    &params::OrganizationCreate {
-                                        identity:
-                                            IdentityMetadataCreateParams {
-                                                name: new_org_name,
-                                                description:
-                                                    new_org_description,
-                                            },
+                vec![
+                    TestOperation {
+                        label: "Fetch",
+                        template: NexusRequest::new(RequestBuilder::new(
+                            client,
+                            Method::GET,
+                            &resource_url,
+                        )),
+                        on_success: None,
+                    },
+                    TestOperation {
+                        label: "ListOrganizations",
+                        template: NexusRequest::new(RequestBuilder::new(
+                            client,
+                            Method::GET,
+                            orgs_url,
+                        )),
+                        on_success: None,
+                    },
+                    TestOperation {
+                        label: "CreateOrganization",
+                        template: NexusRequest::new(
+                            RequestBuilder::new(client, Method::POST, orgs_url)
+                                .body(Some(&params::OrganizationCreate {
+                                    identity: IdentityMetadataCreateParams {
+                                        name: new_org_name,
+                                        description: new_org_description,
                                     },
-                                )),
-                            ),
-                            on_success: Some(NexusRequest::object_delete(
-                                client, &org_url,
-                            )),
-                        },
-                    ],
-                }
+                                })),
+                        ),
+                        on_success: Some(NexusRequest::object_delete(
+                            client, &org_url,
+                        )),
+                    },
+                ]
             }
 
             ResourceType::Organization { name, .. } => {
@@ -341,75 +322,69 @@ impl Resource {
                     format!("created by {}", username);
                 let project_url =
                     format!("{}/{}", &projects_url, new_project_name);
-                ResourceTestOperations {
-                    comment: "",
-                    operations: vec![
-                        TestOperation {
-                            label: "Fetch",
-                            template: NexusRequest::new(RequestBuilder::new(
+                vec![
+                    TestOperation {
+                        label: "Fetch",
+                        template: NexusRequest::new(RequestBuilder::new(
+                            client,
+                            Method::GET,
+                            &resource_url,
+                        )),
+                        on_success: None,
+                    },
+                    TestOperation {
+                        label: "ListProjects",
+                        template: NexusRequest::new(RequestBuilder::new(
+                            client,
+                            Method::GET,
+                            &projects_url,
+                        )),
+                        on_success: None,
+                    },
+                    TestOperation {
+                        label: "CreateProject",
+                        template: NexusRequest::new(
+                            RequestBuilder::new(
                                 client,
-                                Method::GET,
-                                &resource_url,
-                            )),
-                            on_success: None,
-                        },
-                        TestOperation {
-                            label: "ListProjects",
-                            template: NexusRequest::new(RequestBuilder::new(
-                                client,
-                                Method::GET,
+                                Method::POST,
                                 &projects_url,
-                            )),
-                            on_success: None,
-                        },
-                        TestOperation {
-                            label: "CreateProject",
-                            template: NexusRequest::new(
-                                RequestBuilder::new(
-                                    client,
-                                    Method::POST,
-                                    &projects_url,
-                                )
-                                .body(Some(
-                                    &params::ProjectCreate {
-                                        identity:
-                                            IdentityMetadataCreateParams {
-                                                name: new_project_name,
-                                                description:
-                                                    new_project_description,
-                                            },
+                            )
+                            .body(Some(
+                                &params::ProjectCreate {
+                                    identity: IdentityMetadataCreateParams {
+                                        name: new_project_name,
+                                        description: new_project_description,
                                     },
-                                )),
-                            ),
-                            on_success: Some(NexusRequest::object_delete(
+                                },
+                            )),
+                        ),
+                        on_success: Some(NexusRequest::object_delete(
+                            client,
+                            &project_url,
+                        )),
+                    },
+                    TestOperation {
+                        label: "ModifyDescription",
+                        template: NexusRequest::new(
+                            RequestBuilder::new(
                                 client,
-                                &project_url,
-                            )),
-                        },
-                        TestOperation {
-                            label: "ModifyDescription",
-                            template: NexusRequest::new(
-                                RequestBuilder::new(
-                                    client,
-                                    Method::PUT,
-                                    &resource_url,
-                                )
-                                .body(Some(
-                                    &params::OrganizationUpdate {
-                                        identity:
-                                            IdentityMetadataUpdateParams {
-                                                name: None,
-                                                description: Some(
-                                                    String::from("updated!"),
-                                                ),
-                                            },
+                                Method::PUT,
+                                &resource_url,
+                            )
+                            .body(Some(
+                                &params::OrganizationUpdate {
+                                    identity: IdentityMetadataUpdateParams {
+                                        name: None,
+                                        description: Some(String::from(
+                                            "updated!",
+                                        )),
                                     },
-                                )),
-                            ),
-                            on_success: None,
-                        },
-                    ],
-                }
+                                },
+                            )),
+                        ),
+                        on_success: None,
+                    },
+                ]
             }
 
             ResourceType::Project { name, .. } => {
@@ -421,76 +396,70 @@ impl Resource {
                 );
                 let new_vpc_description = format!("created by {}", username);
                 let vpc_url = format!("{}/{}", &vpcs_url, new_vpc_name);
-                ResourceTestOperations {
-                    comment: "",
-                    operations: vec![
-                        TestOperation {
-                            label: "Fetch",
-                            template: NexusRequest::new(RequestBuilder::new(
+                vec![
+                    TestOperation {
+                        label: "Fetch",
+                        template: NexusRequest::new(RequestBuilder::new(
+                            client,
+                            Method::GET,
+                            &resource_url,
+                        )),
+                        on_success: None,
+                    },
+                    TestOperation {
+                        label: "ListVpcs",
+                        template: NexusRequest::new(RequestBuilder::new(
+                            client,
+                            Method::GET,
+                            &vpcs_url,
+                        )),
+                        on_success: None,
+                    },
+                    TestOperation {
+                        label: "CreateVpc",
+                        template: NexusRequest::new(
+                            RequestBuilder::new(
                                 client,
-                                Method::GET,
-                                &resource_url,
-                            )),
-                            on_success: None,
-                        },
-                        TestOperation {
-                            label: "ListVpcs",
-                            template: NexusRequest::new(RequestBuilder::new(
-                                client,
-                                Method::GET,
+                                Method::POST,
                                 &vpcs_url,
-                            )),
-                            on_success: None,
-                        },
-                        TestOperation {
-                            label: "CreateVpc",
-                            template: NexusRequest::new(
-                                RequestBuilder::new(
-                                    client,
-                                    Method::POST,
-                                    &vpcs_url,
-                                )
-                                .body(Some(
-                                    &params::VpcCreate {
-                                        identity:
-                                            IdentityMetadataCreateParams {
-                                                name: new_vpc_name.clone(),
-                                                description:
-                                                    new_vpc_description,
-                                            },
-                                        ipv6_prefix: None,
-                                        dns_name: new_vpc_name,
+                            )
+                            .body(Some(
+                                &params::VpcCreate {
+                                    identity: IdentityMetadataCreateParams {
+                                        name: new_vpc_name.clone(),
+                                        description: new_vpc_description,
                                     },
-                                )),
-                            ),
-                            on_success: Some(NexusRequest::object_delete(
-                                client, &vpc_url,
+                                    ipv6_prefix: None,
+                                    dns_name: new_vpc_name,
+                                },
                             )),
-                        },
-                        TestOperation {
-                            label: "ModifyDescription",
-                            template: NexusRequest::new(
-                                RequestBuilder::new(
-                                    client,
-                                    Method::PUT,
-                                    &resource_url,
-                                )
-                                .body(Some(
-                                    &params::ProjectUpdate {
-                                        identity:
-                                            IdentityMetadataUpdateParams {
-                                                name: None,
-                                                description: Some(
-                                                    String::from("updated!"),
-                                                ),
-                                            },
+                        ),
+                        on_success: Some(NexusRequest::object_delete(
+                            client, &vpc_url,
+                        )),
+                    },
+                    TestOperation {
+                        label: "ModifyDescription",
+                        template: NexusRequest::new(
+                            RequestBuilder::new(
+                                client,
+                                Method::PUT,
+                                &resource_url,
+                            )
+                            .body(Some(
+                                &params::ProjectUpdate {
+                                    identity: IdentityMetadataUpdateParams {
+                                        name: None,
+                                        description: Some(String::from(
+                                            "updated!",
+                                        )),
                                     },
-                                )),
-                            ),
-                            on_success: None,
-                        },
-                    ],
-                }
+                                },
+                            )),
+                        ),
+                        on_success: None,
+                    },
+                ]
             }
 
             ResourceType::Vpc { name, .. } => {
@@ -504,80 +473,74 @@ impl Resource {
                 let subnet_url =
                     format!("{}/{}", &subnets_url, new_subnet_name);
 
-                ResourceTestOperations {
-                    comment: "",
-                    operations: vec![
-                        TestOperation {
-                            label: "Fetch",
-                            template: NexusRequest::new(RequestBuilder::new(
+                vec![
+                    TestOperation {
+                        label: "Fetch",
+                        template: NexusRequest::new(RequestBuilder::new(
+                            client,
+                            Method::GET,
+                            &resource_url,
+                        )),
+                        on_success: None,
+                    },
+                    TestOperation {
+                        label: "ListSubnets",
+                        template: NexusRequest::new(RequestBuilder::new(
+                            client,
+                            Method::GET,
+                            &subnets_url,
+                        )),
+                        on_success: None,
+                    },
+                    TestOperation {
+                        label: "CreateSubnet",
+                        template: NexusRequest::new(
+                            RequestBuilder::new(
                                 client,
-                                Method::GET,
-                                &resource_url,
-                            )),
-                            on_success: None,
-                        },
-                        TestOperation {
-                            label: "ListSubnets",
-                            template: NexusRequest::new(RequestBuilder::new(
-                                client,
-                                Method::GET,
+                                Method::POST,
                                 &subnets_url,
-                            )),
-                            on_success: None,
-                        },
-                        TestOperation {
-                            label: "CreateSubnet",
-                            template: NexusRequest::new(
-                                RequestBuilder::new(
-                                    client,
-                                    Method::POST,
-                                    &subnets_url,
-                                )
-                                .body(Some(
-                                    &params::VpcSubnetCreate {
-                                        identity:
-                                            IdentityMetadataCreateParams {
-                                                name: new_subnet_name.clone(),
-                                                description:
-                                                    new_subnet_description,
-                                            },
-                                        ipv4_block: Ipv4Net(
-                                            "192.168.1.0/24".parse().unwrap(),
-                                        ),
-                                        ipv6_block: None,
+                            )
+                            .body(Some(
+                                &params::VpcSubnetCreate {
+                                    identity: IdentityMetadataCreateParams {
+                                        name: new_subnet_name.clone(),
+                                        description: new_subnet_description,
                                     },
-                                )),
-                            ),
-                            on_success: Some(NexusRequest::object_delete(
+                                    ipv4_block: Ipv4Net(
+                                        "192.168.1.0/24".parse().unwrap(),
+                                    ),
+                                    ipv6_block: None,
+                                },
+                            )),
+                        ),
+                        on_success: Some(NexusRequest::object_delete(
+                            client,
+                            &subnet_url,
+                        )),
+                    },
+                    TestOperation {
+                        label: "ModifyDescription",
+                        template: NexusRequest::new(
+                            RequestBuilder::new(
                                 client,
-                                &subnet_url,
-                            )),
-                        },
-                        TestOperation {
-                            label: "ModifyDescription",
-                            template: NexusRequest::new(
-                                RequestBuilder::new(
-                                    client,
-                                    Method::PUT,
-                                    &resource_url,
-                                )
-                                .body(Some(
-                                    &params::VpcUpdate {
-                                        identity:
-                                            IdentityMetadataUpdateParams {
-                                                name: None,
-                                                description: Some(
-                                                    String::from("updated!"),
-                                                ),
-                                            },
-                                        dns_name: None,
+                                Method::PUT,
+                                &resource_url,
+                            )
+                            .body(Some(
+                                &params::VpcUpdate {
+                                    identity: IdentityMetadataUpdateParams {
+                                        name: None,
+                                        description: Some(String::from(
+                                            "updated!",
+                                        )),
                                     },
-                                )),
-                            ),
-                            on_success: None,
-                        },
-                    ],
-                }
+                                    dns_name: None,
+                                },
+                            )),
+                        ),
+                        on_success: None,
+                    },
+                ]
             }
         }
     }
@@ -1025,11 +988,6 @@ async fn create_users<
     }
 }
 
-struct ResourceTestOperations<'a> {
-    comment: &'static str,
-    operations: Vec<TestOperation<'a>>,
-}
-
 struct TestOperation<'a> {
     label: &'static str,
     template: NexusRequest<'a>,
@@ -1065,15 +1023,11 @@ async fn test_all_operations<W: Write>(
                 "user" => username.clone(),
             ));
 
-            let resource_operations =
-                resource.test_operations(client, &username);
-            let comment = resource_operations.comment;
-            let operations = resource_operations.operations;
+            let operations = resource.test_operations(client, &username);
             if first {
                 let test_labels =
                     operations.iter().map(|t| t.label).collect::<Vec<_>>();
                 write!(out, "  actions: {}\n", test_labels.join(", "))?;
-                write!(out, "  note:    {}\n\n", comment)?;
                 write!(out, "{:20} {}\n", "USER", "RESULTS FOR EACH ACTION")?;
                 first = false;
             }
