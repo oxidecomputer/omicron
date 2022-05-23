@@ -39,6 +39,13 @@ if [[ -d /opt/oxide-underneath ]]; then
 	pfexec rm -rf /opt/oxide-underneath
 fi
 
+#
+# The sled agent will ostensibly write things into /var/oxide, so make that a
+# tmpfs as well:
+#
+pfexec mkdir -p /var/oxide
+pfexec mount -F tmpfs -O swap /var/oxide
+
 pfexec mkdir /opt/oxide/work
 pfexec chown build:build /opt/oxide/work
 cd /opt/oxide/work
