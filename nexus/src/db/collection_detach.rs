@@ -11,8 +11,8 @@
 //! - Updates the resource row
 
 use super::pool::DbConnection;
-use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager, PoolError};
 use crate::db::collection_attach::DatastoreAttachTarget;
+use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager, PoolError};
 use diesel::associations::HasTable;
 use diesel::expression::Expression;
 use diesel::helper_types::*;
@@ -278,7 +278,10 @@ pub trait DatastoreDetachTarget<ResourceType>: Selectable<Pg> {
             resource_query
                 .filter(resource_table().primary_key().eq(resource_id))
                 .filter(Self::ResourceTimeDeletedColumn::default().is_null())
-                .filter(Self::ResourceCollectionIdColumn::default().eq(collection_id)),
+                .filter(
+                    Self::ResourceCollectionIdColumn::default()
+                        .eq(collection_id),
+                ),
         );
 
         let update_resource_statement = update
@@ -298,7 +301,9 @@ pub trait DatastoreDetachTarget<ResourceType>: Selectable<Pg> {
 }
 
 impl<T, ResourceType> DatastoreDetachTarget<ResourceType> for T
-where T: DatastoreAttachTarget<ResourceType> {
+where
+    T: DatastoreAttachTarget<ResourceType>,
+{
     type Id = T::Id;
     type CollectionIdColumn = T::CollectionIdColumn;
     type CollectionTimeDeletedColumn = T::CollectionTimeDeletedColumn;
@@ -638,8 +643,8 @@ where
 
 #[cfg(test)]
 mod test {
+    use super::{DatastoreDetachTarget, DetachError};
     use crate::db::collection_attach::DatastoreAttachTarget;
-    use super::{DetachError, DatastoreDetachTarget};
     use crate::db::{
         self, error::TransactionError, identity::Resource as IdentityResource,
     };
@@ -812,7 +817,7 @@ mod test {
             resource::table.into_boxed(),
             100,
             diesel::update(resource::table)
-                .set(resource::dsl::collection_id.eq(collection_id))
+                .set(resource::dsl::collection_id.eq(collection_id)),
         )
         .attach_and_get_result_async(pool.pool())
         .await
@@ -1037,9 +1042,7 @@ mod test {
 
         // "detach_and_get_result_async" should return the "detached" resource.
         let returned_resource = detach.expect("Detach should have worked");
-        assert!(
-            returned_resource.collection_id.is_none(),
-        );
+        assert!(returned_resource.collection_id.is_none(),);
         // The returned value should be the latest value in the DB.
         assert_eq!(returned_resource, get_resource(resource_id, &pool).await);
 
@@ -1090,9 +1093,7 @@ mod test {
 
         // "detach_and_get_result" should return the "detached" resource.
         let returned_resource = result.expect("Detach should have worked");
-        assert!(
-            returned_resource.collection_id.is_none()
-        );
+        assert!(returned_resource.collection_id.is_none());
         // The returned values should be the latest value in the DB.
         assert_eq!(returned_resource, get_resource(resource_id, &pool).await);
 
@@ -1150,12 +1151,7 @@ mod test {
         // already detached.
         match err {
             DetachError::NoUpdate { resource, collection } => {
-                assert!(
-                    resource
-                        .collection_id
-                        .as_ref()
-                        .is_none()
-                );
+                assert!(resource.collection_id.as_ref().is_none());
                 assert_eq!(resource, get_resource(resource_id, &pool).await);
                 assert_eq!(
                     collection,
@@ -1264,18 +1260,14 @@ mod test {
         // Note that only "resource1" should be detached.
         // "resource2" should have automatically been filtered away from the
         // update statement, regardless of user input.
-        assert!(
-            get_resource(resource_id1, &pool)
-                .await
-                .collection_id
-                .is_none()
-        );
-        assert!(
-            get_resource(resource_id2, &pool)
-                .await
-                .collection_id
-                .is_some()
-        );
+        assert!(get_resource(resource_id1, &pool)
+            .await
+            .collection_id
+            .is_none());
+        assert!(get_resource(resource_id2, &pool)
+            .await
+            .collection_id
+            .is_some());
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();

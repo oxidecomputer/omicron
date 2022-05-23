@@ -19,7 +19,6 @@ use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
-use omicron_common::api::external::DiskState;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::ListResultVec;
@@ -610,7 +609,8 @@ impl super::Nexus {
         // "Attached".
         // - We should then issue a request to the associated sled agent.
         // - Once that completes, we should update the disk state to "Attached".
-        let (_instance, disk) = self.db_datastore
+        let (_instance, disk) = self
+            .db_datastore
             .disk_attach(
                 &opctx,
                 &authz_instance,
@@ -630,7 +630,7 @@ impl super::Nexus {
         instance_name: &Name,
         disk_name: &Name,
     ) -> UpdateResult<db::model::Disk> {
-        let (.., authz_project, authz_disk, db_disk) =
+        let (.., authz_project, authz_disk, _db_disk) =
             LookupPath::new(opctx, &self.db_datastore)
                 .organization_name(organization_name)
                 .project_name(project_name)
@@ -654,13 +654,9 @@ impl super::Nexus {
         // "Detached".
         // - We should then issue a request to the associated sled agent.
         // - Once that completes, we should update the disk state to "Detached".
-        let disk = self.db_datastore
-            .disk_detach(
-                &opctx,
-                &authz_instance,
-                &authz_disk,
-                &db_disk,
-            )
+        let disk = self
+            .db_datastore
+            .disk_detach(&opctx, &authz_instance, &authz_disk)
             .await?;
         Ok(disk)
     }

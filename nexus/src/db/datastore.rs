@@ -29,7 +29,7 @@ use crate::authn;
 use crate::authz::{self, ApiResource};
 use crate::context::OpContext;
 use crate::db::collection_attach::{AttachError, DatastoreAttachTarget};
-use crate::db::collection_detach::{DetachError, DatastoreDetachTarget};
+use crate::db::collection_detach::{DatastoreDetachTarget, DetachError};
 use crate::db::fixed_data::role_assignment::BUILTIN_ROLE_ASSIGNMENTS;
 use crate::db::fixed_data::role_builtin::BUILTIN_ROLES;
 use crate::db::fixed_data::silo::{DEFAULT_SILO, SILO_ID};
@@ -1146,9 +1146,8 @@ impl DataStore {
             db::model::InstanceState(api::external::InstanceState::Stopped),
         ];
 
-        let attached_label = api::external::DiskState::Attached(
-            authz_instance.id(),
-        ).label();
+        let attached_label =
+            api::external::DiskState::Attached(authz_instance.id()).label();
 
         // TODO "u32" seems reasonable for the max disks value (input / output)
         let (instance, disk) = Instance::attach_resource(
@@ -1260,40 +1259,14 @@ impl DataStore {
         opctx: &OpContext,
         authz_instance: &authz::Instance,
         authz_disk: &authz::Disk,
-        disk: &Disk,
     ) -> Result<Disk, Error> {
         use db::schema::{disk, instance};
 
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
         opctx.authorize(authz::Action::Modify, authz_disk).await?;
 
-        let new_runtime = disk.runtime().detach();
-
-        let disk_id = authz_disk.id();
-        use db::schema::disk::dsl;
-        let updated = diesel::update(dsl::disk)
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(disk_id))
-            .filter(dsl::state_generation.lt(new_runtime.gen))
-            .filter(dsl::attach_instance_id.eq(authz_instance.id()))
-            .set(new_runtime.clone())
-            .check_if_exists::<Disk>(disk_id)
-            .execute_and_check(self.pool())
-            .await
-            .map(|r| match r.status {
-                UpdateStatus::Updated => true,
-                UpdateStatus::NotUpdatedButExists => false,
-            })
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByResource(authz_disk),
-                )
-            })?;
-
-        let ok_to_detach_disk_states = vec![
-            api::external::DiskState::Attached(authz_instance.id()),
-        ];
+        let ok_to_detach_disk_states =
+            vec![api::external::DiskState::Attached(authz_instance.id())];
         let ok_to_detach_disk_state_labels: Vec<_> =
             ok_to_detach_disk_states.iter().map(|s| s.label()).collect();
 

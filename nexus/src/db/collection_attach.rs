@@ -433,8 +433,10 @@ pub type AsyncAttachToCollectionResult<ResourceType, C> =
     Result<(C, ResourceType), AttachError<ResourceType, C, PoolError>>;
 
 /// Result of [`AttachToCollectionStatement`] when executed synchronously
-pub type SyncAttachToCollectionResult<ResourceType, C> =
-    Result<(C, ResourceType), AttachError<ResourceType, C, diesel::result::Error>>;
+pub type SyncAttachToCollectionResult<ResourceType, C> = Result<
+    (C, ResourceType),
+    AttachError<ResourceType, C, diesel::result::Error>,
+>;
 
 /// Errors returned by [`AttachToCollectionStatement`].
 #[derive(Debug)]
@@ -729,7 +731,9 @@ where
         out.push_identifier(CollectionPrimaryKey::<ResourceType, C>::NAME)?;
         out.push_sql(" IN (SELECT ");
         out.push_identifier(CollectionPrimaryKey::<ResourceType, C>::NAME)?;
-        out.push_sql(" FROM collection_info) AND (SELECT * FROM do_update) RETURNING ");
+        out.push_sql(
+            " FROM collection_info) AND (SELECT * FROM do_update) RETURNING ",
+        );
         self.collection_returning_clause.walk_ast(out.reborrow())?;
         out.push_sql("), ");
 
@@ -1184,13 +1188,17 @@ mod test {
         .await;
 
         // "attach_and_get_result_async" should return the "attached" resource.
-        let (returned_collection, returned_resource) = attach.expect("Attach should have worked");
+        let (returned_collection, returned_resource) =
+            attach.expect("Attach should have worked");
         assert_eq!(
             returned_resource.collection_id.expect("Expected a collection ID"),
             collection_id
         );
         // The returned value should be the latest value in the DB.
-        assert_eq!(returned_collection, get_collection(collection_id, &pool).await);
+        assert_eq!(
+            returned_collection,
+            get_collection(collection_id, &pool).await
+        );
         assert_eq!(returned_resource, get_resource(resource_id, &pool).await);
         // The generation number should have incremented in the collection.
         assert_eq!(
@@ -1244,13 +1252,17 @@ mod test {
             .await;
 
         // "attach_and_get_result" should return the "attached" resource.
-        let (returned_collection, returned_resource) = result.expect("Attach should have worked");
+        let (returned_collection, returned_resource) =
+            result.expect("Attach should have worked");
         assert_eq!(
             returned_resource.collection_id.expect("Expected a collection ID"),
             collection_id
         );
         // The returned values should be the latest value in the DB.
-        assert_eq!(returned_collection, get_collection(collection_id, &pool).await);
+        assert_eq!(
+            returned_collection,
+            get_collection(collection_id, &pool).await
+        );
         assert_eq!(returned_resource, get_resource(resource_id, &pool).await);
         // The generation number should have incremented in the collection.
         assert_eq!(
@@ -1299,7 +1311,8 @@ mod test {
             .await;
 
             // "attach_and_get_result_async" should return the "attached" resource.
-            let (_, returned_resource) = attach.expect("Attach should have worked");
+            let (_, returned_resource) =
+                attach.expect("Attach should have worked");
             assert_eq!(
                 returned_resource
                     .collection_id
