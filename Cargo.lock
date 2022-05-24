@@ -2811,8 +2811,10 @@ dependencies = [
  "omicron-sled-agent",
  "serde",
  "serde_derive",
+ "sp-sim",
  "structopt",
  "thiserror",
+ "toml",
 ]
 
 [[package]]
