@@ -151,7 +151,6 @@ resource Silo {
 	relations = { parent_fleet: Fleet };
 	"admin" if "collaborator" on "parent_fleet";
 	"viewer" if "viewer" on "parent_fleet";
-	"list_children" if "viewer" on "parent_fleet";
 }
 has_relation(fleet: Fleet, "parent_fleet", silo: Silo)
 	if silo.fleet = fleet;
