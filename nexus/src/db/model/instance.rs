@@ -74,7 +74,6 @@ impl Into<external::Instance> for Instance {
 }
 
 impl DatastoreAttachTarget<Disk> for Instance {
-    type SerializedId = diesel::sql_types::Uuid;
     type Id = Uuid;
 
     type CollectionIdColumn = instance::dsl::id;

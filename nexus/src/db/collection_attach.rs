@@ -28,7 +28,6 @@ use diesel::query_dsl::methods as query_methods;
 use diesel::query_source::Table;
 use diesel::sql_types::{BigInt, Nullable, SingleValue};
 use std::fmt::Debug;
-use uuid::Uuid;
 
 /// The table representing the collection. The resource references
 /// this table.
@@ -98,32 +97,12 @@ type ResourceIdColumn<ResourceType, C> =
 ///     type ResourceTimeDeletedColumn = disk::dsl::time_deleted;
 /// }
 /// ```
-pub trait DatastoreAttachTarget<ResourceType>: Selectable<Pg> + Sized
-//    Uuid: AsExpression<SerializedCollectionPrimaryKey<ResourceType, Self>>,
-//    SerializedCollectionPrimaryKey<ResourceType, Self>: diesel::sql_types::SqlType,
-//    <<<Self::CollectionIdColumn as Column>::Table as Table>::PrimaryKey as Expression>::SqlType: diesel::sql_types::SqlType,
-//where
-//    ExprSqlType<CollectionPrimaryKey<ResourceType, Self>>: SingleValue,
-//    ExprSqlType<ResourcePrimaryKey<ResourceType, Self>>: SingleValue,
-//    ExprSqlType<Self::ResourceCollectionIdColumn>: SingleValue,
-{
-
-    type SerializedId: Copy + Debug + Send + 'static + SingleValue + diesel::sql_types::SqlType;
-
+pub trait DatastoreAttachTarget<ResourceType>: Selectable<Pg> + Sized {
     /// The Rust type of the collection and resource ids (typically Uuid).
-    type Id: Copy + Debug + PartialEq + Send + 'static +
-//        <<Self::CollectionIdColumn as Column>::Table as Table>::PrimaryKey: diesel::sql_types::SqlType;
-//        AsExpression<Nullable<Self::SerializedId>> +
-        AsExpression<Self::SerializedId>;
-//        AsExpression<SerializedCollectionPrimaryKey<ResourceType, Self>>;
-//        AsExpression<SerializedResourcePrimaryKey<ResourceType, Self>> +
-//        AsExpression<SerializedResourceForeignKey<ResourceType, Self>>;
+    type Id: Copy + Debug + PartialEq + Send + 'static;
 
     /// The primary key column of the collection.
-    type CollectionIdColumn: Column +
-        Expression<SqlType = Self::SerializedId> +
-        ExpressionMethods;
-//        <<Self::CollectionIdColumn as Column>::Table as Table>::PrimaryKey: diesel::sql_types::SqlType;
+    type CollectionIdColumn: Column;
 
     /// The time deleted column in the CollectionTable
     type CollectionTimeDeletedColumn: Column<Table = <Self::CollectionIdColumn as Column>::Table> +
@@ -131,14 +110,11 @@ pub trait DatastoreAttachTarget<ResourceType>: Selectable<Pg> + Sized
         ExpressionMethods;
 
     /// The primary key column of the resource
-    type ResourceIdColumn: Column +
-        Expression<SqlType = Self::SerializedId> +
-        ExpressionMethods;
+    type ResourceIdColumn: Column;
 
     /// The column in the resource acting as a foreign key into the Collection
     type ResourceCollectionIdColumn: Column<Table = <Self::ResourceIdColumn as Column>::Table> +
         Default +
-//        Expression<SqlType = Nullable<Self::SerializedId>> +
         ExpressionMethods;
 
     /// The time deleted column in the ResourceTable
@@ -194,18 +170,6 @@ pub trait DatastoreAttachTarget<ResourceType>: Selectable<Pg> + Sized
         >,
     ) -> AttachToCollectionStatement<ResourceType, V, Self>
     where
-//        // Ensure the "collection" columns all belong to the same table.
-//        (
-//            <Self::CollectionIdColumn as Column>::Table,
-//            <Self::CollectionTimeDeletedColumn as Column>::Table,
-//        ): TypesAreSame2,
-//        // Ensure the "resource" columns all belong to the same table.
-//        (
-//            <Self::ResourceIdColumn as Column>::Table,
-//            <Self::ResourceCollectionIdColumn as Column>::Table,
-//            <Self::ResourceTimeDeletedColumn as Column>::Table,
-//        ): TypesAreSame3,
-
         // Treat the collection and resource as boxed tables.
         CollectionTable<ResourceType, Self>: BoxableTable,
         ResourceTable<ResourceType, Self>: BoxableTable,

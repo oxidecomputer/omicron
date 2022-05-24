@@ -12,12 +12,6 @@ use diesel::query_builder::*;
 use diesel::query_dsl::methods as query_methods;
 use diesel::query_source::Table;
 
-/// Trick to check that columns come from the same table
-pub trait TypesAreSame2 {}
-impl<T> TypesAreSame2 for (T, T) {}
-pub trait TypesAreSame3 {}
-impl<T> TypesAreSame3 for (T, T, T) {}
-
 /// The default WHERE clause of a table, when treated as an UPDATE target.
 pub(crate) type TableDefaultWhereClause<Table> = <Table as IntoUpdateTarget>::WhereClause;
 

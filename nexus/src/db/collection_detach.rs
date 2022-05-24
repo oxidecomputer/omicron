@@ -11,9 +11,8 @@
 //! - Updates the resource row
 
 use super::cte_utils::{
-    BoxableTable, BoxableUpdateStatement, BoxedQuery, FilterBy,
-    ExprSqlType, QuerySqlType, QueryFromClause, TypesAreSame2,
-    TypesAreSame3, TableDefaultWhereClause
+    BoxableTable, BoxableUpdateStatement, BoxedQuery, FilterBy, ExprSqlType,
+    QuerySqlType, QueryFromClause, TableDefaultWhereClause
 };
 use super::pool::DbConnection;
 use crate::db::collection_attach::DatastoreAttachTarget;
@@ -28,7 +27,6 @@ use diesel::query_dsl::methods as query_methods;
 use diesel::query_source::Table;
 use diesel::sql_types::{Nullable, SingleValue};
 use std::fmt::Debug;
-use uuid::Uuid;
 
 /// The table representing the collection. The resource references
 /// this table.
@@ -40,7 +38,7 @@ type CollectionTable<ResourceType, C> = <<C as DatastoreDetachTarget<
 /// ID acting as a foreign key into the collection table.
 type ResourceTable<ResourceType, C> = <<C as DatastoreDetachTarget<
     ResourceType,
->>::ResourceCollectionIdColumn as Column>::Table;
+>>::ResourceIdColumn as Column>::Table;
 
 /// The default WHERE clause of the resource table.
 type ResourceTableDefaultWhereClause<ResourceType, C> =
@@ -65,16 +63,25 @@ pub trait DatastoreDetachTarget<ResourceType>: Selectable<Pg> + Sized {
     type CollectionIdColumn: Column;
 
     /// The time deleted column in the CollectionTable
-    type CollectionTimeDeletedColumn: Column + Default;
+    type CollectionTimeDeletedColumn:
+        Column<Table = <Self::CollectionIdColumn as Column>::Table> +
+        Default +
+        ExpressionMethods;
 
     /// The primary key column of the resource
     type ResourceIdColumn: Column;
 
     /// The column in the resource acting as a foreign key into the Collection
-    type ResourceCollectionIdColumn: Column + Default;
+    type ResourceCollectionIdColumn:
+        Column<Table = <Self::ResourceIdColumn as Column>::Table> +
+        Default +
+        ExpressionMethods;
 
     /// The time deleted column in the ResourceTable
-    type ResourceTimeDeletedColumn: Column + Default;
+    type ResourceTimeDeletedColumn:
+        Column<Table = <Self::ResourceIdColumn as Column>::Table> +
+        Default +
+        ExpressionMethods;
 
     /// Creates a statement for detaching a resource from the given collection.
     ///
@@ -118,18 +125,6 @@ pub trait DatastoreDetachTarget<ResourceType>: Selectable<Pg> + Sized {
         >,
     ) -> DetachFromCollectionStatement<ResourceType, V, Self>
     where
-        // Ensure the "collection" columns all belong to the same table.
-        (
-            <Self::CollectionIdColumn as Column>::Table,
-            <Self::CollectionTimeDeletedColumn as Column>::Table,
-        ): TypesAreSame2,
-        // Ensure the "resource" columns all belong to the same table.
-        (
-            <Self::ResourceIdColumn as Column>::Table,
-            <Self::ResourceCollectionIdColumn as Column>::Table,
-            <Self::ResourceTimeDeletedColumn as Column>::Table,
-        ): TypesAreSame3,
-
         // Treat the collection and resource as boxed tables.
         CollectionTable<ResourceType, Self>: BoxableTable,
         ResourceTable<ResourceType, Self>: BoxableTable,
@@ -178,11 +173,6 @@ pub trait DatastoreDetachTarget<ResourceType>: Selectable<Pg> + Sized {
         ExprSqlType<CollectionPrimaryKey<ResourceType, Self>>: SingleValue,
         ExprSqlType<ResourcePrimaryKey<ResourceType, Self>>: SingleValue,
         ExprSqlType<Self::ResourceCollectionIdColumn>: SingleValue,
-
-        // Allows calling "is_null()" on the following columns.
-        Self::CollectionTimeDeletedColumn: ExpressionMethods,
-        Self::ResourceTimeDeletedColumn: ExpressionMethods,
-        Self::ResourceCollectionIdColumn: ExpressionMethods,
 
         // Necessary to actually select the resource in the output type.
         ResourceType: Selectable<Pg>,
@@ -1042,7 +1032,7 @@ mod test {
 
         let collection_id = uuid::Uuid::new_v4();
 
-        let collection =
+        let _collection =
             insert_collection(collection_id, "collection", &pool).await;
         let resource_id = uuid::Uuid::new_v4();
         let _resource = insert_resource(resource_id, "resource", &pool).await;
