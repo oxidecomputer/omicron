@@ -3,17 +3,20 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest};
-use omicron_nexus::external_api::views::{Organization, Silo};
+use omicron_common::api::external::{IdentityMetadataCreateParams, Name};
+use omicron_nexus::external_api::views::{self, Organization, Silo};
 use omicron_nexus::TestInterfaces as _;
 
 use http::method::Method;
 use http::StatusCode;
 use nexus_test_utils::resource_helpers::{
-    create_organization, create_silo, objects_list_page_authz,
+    create_organization, create_silo, grant_iam, objects_list_page_authz,
 };
 
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
+use omicron_nexus::authz::SiloRoles;
+use omicron_nexus::external_api::params;
 
 #[nexus_test]
 async fn test_silos(cptestctx: &ControlPlaneTestContext) {
@@ -74,6 +77,16 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
         .await
         .unwrap();
 
+    // Grant the user "admin" privileges on that Silo.
+    grant_iam(
+        client,
+        "/silos/discoverable",
+        SiloRoles::Admin,
+        new_silo_user_id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
     // TODO-coverage, TODO-security: Add test for Silo-local session
     // when we can use users in another Silo.
 
@@ -81,7 +94,45 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
 
     // Create organization with built-in user auth
     // Note: this currently goes to the built-in silo!
-    create_organization(&client, "someorg").await;
+    let org_name: Name = "someorg".parse().unwrap();
+    let new_org_in_default_silo =
+        create_organization(&client, org_name.as_str()).await;
+
+    // Create an Organization of the same name in a different Silo to verify
+    // that's possible.
+    let new_org_in_our_silo = NexusRequest::objects_post(
+        client,
+        "/organizations",
+        &params::OrganizationCreate {
+            identity: IdentityMetadataCreateParams {
+                name: org_name.clone(),
+                description: String::new(),
+            },
+        },
+    )
+    .authn_as(AuthnMode::SiloUser(new_silo_user_id))
+    .execute()
+    .await
+    .expect("failed to create same-named Organization in a different Silo")
+    .parsed_body::<views::Organization>()
+    .expect("failed to parse new Organization");
+    assert_eq!(
+        new_org_in_default_silo.identity.name,
+        new_org_in_our_silo.identity.name
+    );
+    assert_ne!(
+        new_org_in_default_silo.identity.id,
+        new_org_in_our_silo.identity.id
+    );
+    // Delete it so that we can delete the Silo later.
+    NexusRequest::object_delete(
+        client,
+        &format!("/organizations/{}", org_name),
+    )
+    .authn_as(AuthnMode::SiloUser(new_silo_user_id))
+    .execute()
+    .await
+    .expect("failed to delete test Organization");
 
     // Verify GET /organizations works with built-in user auth
     let organizations =
