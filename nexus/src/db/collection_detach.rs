@@ -11,8 +11,8 @@
 //! - Updates the resource row
 
 use super::cte_utils::{
-    BoxableTable, BoxableUpdateStatement, BoxedQuery, FilterBy, ExprSqlType,
-    QuerySqlType, QueryFromClause, TableDefaultWhereClause
+    BoxableTable, BoxableUpdateStatement, BoxedQuery, ExprSqlType, FilterBy,
+    QueryFromClause, QuerySqlType, TableDefaultWhereClause,
 };
 use super::pool::DbConnection;
 use crate::db::collection_attach::DatastoreAttachTarget;
@@ -51,6 +51,22 @@ type CollectionIdColumn<ResourceType, C> =
 type ResourceIdColumn<ResourceType, C> =
     <C as DatastoreDetachTarget<ResourceType>>::ResourceIdColumn;
 
+// Representation of Primary Key in Rust.
+type CollectionPrimaryKey<ResourceType, C> =
+    <CollectionTable<ResourceType, C> as Table>::PrimaryKey;
+type ResourcePrimaryKey<ResourceType, C> =
+    <ResourceTable<ResourceType, C> as Table>::PrimaryKey;
+type ResourceForeignKey<ResourceType, C> =
+    <C as DatastoreDetachTarget<ResourceType>>::ResourceCollectionIdColumn;
+
+// Representation of Primary Key in SQL.
+type SerializedCollectionPrimaryKey<ResourceType, C> =
+    <CollectionPrimaryKey<ResourceType, C> as diesel::Expression>::SqlType;
+type SerializedResourcePrimaryKey<ResourceType, C> =
+    <ResourcePrimaryKey<ResourceType, C> as diesel::Expression>::SqlType;
+type SerializedResourceForeignKey<ResourceType, C> =
+    <ResourceForeignKey<ResourceType, C> as diesel::Expression>::SqlType;
+
 /// Trait to be implemented by structs representing a detachable collection.
 ///
 /// A blanket implementation is provided for traits that implement
@@ -63,25 +79,22 @@ pub trait DatastoreDetachTarget<ResourceType>: Selectable<Pg> + Sized {
     type CollectionIdColumn: Column;
 
     /// The time deleted column in the CollectionTable
-    type CollectionTimeDeletedColumn:
-        Column<Table = <Self::CollectionIdColumn as Column>::Table> +
-        Default +
-        ExpressionMethods;
+    type CollectionTimeDeletedColumn: Column<Table = <Self::CollectionIdColumn as Column>::Table>
+        + Default
+        + ExpressionMethods;
 
     /// The primary key column of the resource
     type ResourceIdColumn: Column;
 
     /// The column in the resource acting as a foreign key into the Collection
-    type ResourceCollectionIdColumn:
-        Column<Table = <Self::ResourceIdColumn as Column>::Table> +
-        Default +
-        ExpressionMethods;
+    type ResourceCollectionIdColumn: Column<Table = <Self::ResourceIdColumn as Column>::Table>
+        + Default
+        + ExpressionMethods;
 
     /// The time deleted column in the ResourceTable
-    type ResourceTimeDeletedColumn:
-        Column<Table = <Self::ResourceIdColumn as Column>::Table> +
-        Default +
-        ExpressionMethods;
+    type ResourceTimeDeletedColumn: Column<Table = <Self::ResourceIdColumn as Column>::Table>
+        + Default
+        + ExpressionMethods;
 
     /// Creates a statement for detaching a resource from the given collection.
     ///
@@ -130,21 +143,21 @@ pub trait DatastoreDetachTarget<ResourceType>: Selectable<Pg> + Sized {
         ResourceTable<ResourceType, Self>: BoxableTable,
 
         // Allows treating "collection_exists_query" as a boxed "dyn QueryFragment<Pg>".
-        QueryFromClause<CollectionTable<ResourceType, Self>>: QueryFragment<Pg> + Send,
+        QueryFromClause<CollectionTable<ResourceType, Self>>:
+            QueryFragment<Pg> + Send,
         QuerySqlType<CollectionTable<ResourceType, Self>>: Send,
         // Allows treating "resource_exists_query" as a boxed "dyn QueryFragment<Pg>".
-        QueryFromClause<ResourceTable<ResourceType, Self>>: QueryFragment<Pg> + Send,
+        QueryFromClause<ResourceTable<ResourceType, Self>>:
+            QueryFragment<Pg> + Send,
         QuerySqlType<ResourceTable<ResourceType, Self>>: Send,
 
         // Allows calling ".filter()" on the boxed collection table.
-        BoxedQuery<CollectionTable<ResourceType, Self>>:
-            FilterBy<Eq<CollectionPrimaryKey<ResourceType, Self>, Self::Id>> +
-            FilterBy<IsNull<Self::CollectionTimeDeletedColumn>>,
+        BoxedQuery<CollectionTable<ResourceType, Self>>: FilterBy<Eq<CollectionPrimaryKey<ResourceType, Self>, Self::Id>>
+            + FilterBy<IsNull<Self::CollectionTimeDeletedColumn>>,
         // Allows calling ".filter()" on the boxed resource table.
-        BoxedQuery<ResourceTable<ResourceType, Self>>:
-            FilterBy<Eq<ResourcePrimaryKey<ResourceType, Self>, Self::Id>> +
-            FilterBy<Eq<Self::ResourceCollectionIdColumn, Self::Id>> +
-            FilterBy<IsNull<Self::ResourceTimeDeletedColumn>>,
+        BoxedQuery<ResourceTable<ResourceType, Self>>: FilterBy<Eq<ResourcePrimaryKey<ResourceType, Self>, Self::Id>>
+            + FilterBy<Eq<Self::ResourceCollectionIdColumn, Self::Id>>
+            + FilterBy<IsNull<Self::ResourceTimeDeletedColumn>>,
 
         // Allows calling "update.into_boxed()"
         UpdateStatement<
@@ -414,22 +427,6 @@ where
 {
 }
 
-// Representation of Primary Key in Rust.
-type CollectionPrimaryKey<ResourceType, C> =
-    <CollectionTable<ResourceType, C> as Table>::PrimaryKey;
-type ResourcePrimaryKey<ResourceType, C> =
-    <ResourceTable<ResourceType, C> as Table>::PrimaryKey;
-type ResourceForeignKey<ResourceType, C> =
-    <C as DatastoreDetachTarget<ResourceType>>::ResourceCollectionIdColumn;
-
-// Representation of Primary Key in SQL.
-type SerializedCollectionPrimaryKey<ResourceType, C> =
-    <CollectionPrimaryKey<ResourceType, C> as diesel::Expression>::SqlType;
-type SerializedResourcePrimaryKey<ResourceType, C> =
-    <ResourcePrimaryKey<ResourceType, C> as diesel::Expression>::SqlType;
-type SerializedResourceForeignKey<ResourceType, C> =
-    <ResourceForeignKey<ResourceType, C> as diesel::Expression>::SqlType;
-
 /// This implementation uses a CTE which attempts to do the following:
 ///
 /// 1. (collection_by_id, resource_by_id): Identify if the collection and
@@ -682,9 +679,8 @@ mod test {
             name: Name::try_from(name.to_string()).unwrap(),
             description: "description".to_string(),
         };
-        let c = Collection {
-            identity: CollectionIdentity::new(id, create_params),
-        };
+        let c =
+            Collection { identity: CollectionIdentity::new(id, create_params) };
 
         diesel::insert_into(collection::table)
             .values(c)
