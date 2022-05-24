@@ -13,7 +13,7 @@ gateway-messages = { path = "../gateway-messages", default-features = false, fea
 hex = { version = "0.4.3", features = ["serde"] }
 omicron-common = { path = "../common" }
 slog-dtrace = "0.2"
-sprockets-rot = { git = "ssh://git@github.com/oxidecomputer/sprockets.git", rev = "8be06230bc887f1fffddb079b9ad72adc8eceecb" }
+sprockets-rot = { git = "http://github.com/oxidecomputer/sprockets", rev = "0361fd13ff19cda6696242fe40f1325fca30d3d1" }
 structopt = "0.3"
 thiserror = "1.0"
 toml = "0.5.9"

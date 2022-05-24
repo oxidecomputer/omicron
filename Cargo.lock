@@ -4871,7 +4871,7 @@ dependencies = [
 [[package]]
 name = "sprockets-common"
 version = "0.1.0"
-source = "git+ssh://git@github.com/oxidecomputer/sprockets.git?rev=8be06230bc887f1fffddb079b9ad72adc8eceecb#8be06230bc887f1fffddb079b9ad72adc8eceecb"
+source = "git+http://github.com/oxidecomputer/sprockets?rev=0361fd13ff19cda6696242fe40f1325fca30d3d1#0361fd13ff19cda6696242fe40f1325fca30d3d1"
 dependencies = [
  "derive_more",
  "hubpack",
@@ -4883,7 +4883,7 @@ dependencies = [
 [[package]]
 name = "sprockets-rot"
 version = "0.1.0"
-source = "git+ssh://git@github.com/oxidecomputer/sprockets.git?rev=8be06230bc887f1fffddb079b9ad72adc8eceecb#8be06230bc887f1fffddb079b9ad72adc8eceecb"
+source = "git+http://github.com/oxidecomputer/sprockets?rev=0361fd13ff19cda6696242fe40f1325fca30d3d1#0361fd13ff19cda6696242fe40f1325fca30d3d1"
 dependencies = [
  "corncobs",
  "derive_more",
