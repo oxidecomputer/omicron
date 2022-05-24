@@ -67,6 +67,7 @@ has_role(actor: AuthenticatedActor, role: String, resource: Resource)
 # - silo.viewer           (can read most resources within the Silo)
 # - organization.admin    (complete control over an organization)
 # - organization.collaborator (can manage Projects)
+# - organization.viewer   (can read most resources within the Organization)
 # - project.admin         (complete control over a Project)
 # - project.collaborator  (can manage all resources within the Project)
 # - project.viewer        (can read most resources within the Project)
@@ -164,22 +165,22 @@ resource Organization {
 	    "read",
 	    "create_child",
 	];
-	roles = [ "admin", "collaborator" ];
+	roles = [ "admin", "collaborator", "viewer" ];
 
 	# Roles implied by other roles on this resource
+	"viewer" if "collaborator";
 	"collaborator" if "admin";
 
 	# Permissions granted directly by roles on this resource
-	"list_children" if "collaborator";
-	"read" if "collaborator";
+	"list_children" if "viewer";
+	"read" if "viewer";
 	"create_child" if "collaborator";
 	"modify" if "admin";
 
 	# Roles implied by roles on this resource's parent (Silo)
 	relations = { parent_silo: Silo };
 	"admin" if "collaborator" on "parent_silo";
-	"read" if "viewer" on "parent_silo";
-	"list_children" if "viewer" on "parent_silo";
+	"viewer" if "viewer" on "parent_silo";
 }
 has_relation(silo: Silo, "parent_silo", organization: Organization)
 	if organization.silo = silo;
@@ -206,7 +207,7 @@ resource Project {
 	# Roles implied by roles on this resource's parent (Organization)
 	relations = { parent_organization: Organization };
 	"admin" if "collaborator" on "parent_organization";
-	"viewer" if "list_children" on "parent_organization";
+	"viewer" if "viewer" on "parent_organization";
 }
 has_relation(organization: Organization, "parent_organization", project: Project)
 	if project.organization = organization;
@@ -253,7 +254,7 @@ has_relation(user: SiloUser, "silo_user", ssh_key: SshKey)
 # of the API path (e.g., "/images") or as an implementation detail of the system
 # (in the case of console sessions and "Database").  The policies are
 # either statically-defined in this file or driven by role assignments on the
-# Fleet.
+# Fleet.  None of these resources define their own roles.
 #
 
 # Describes the policy for accessing "/images" (in the API)
@@ -320,25 +321,11 @@ resource Database {
 	    # other general functions.
 	    "modify"
 	];
-	roles = [
-	    # All authenticated users get the "user" role, which grants the
-	    # "query" permission.  See above.
-	    "user",
-
-	    # The special "db-init" user gets the "init" role, which grants the
-	    # additional "modify" permission.
-	    "init"
-	];
-
-	# See above.
-	"query" if "user";
-
-	"user" if "init";
-	"modify" if "init";
 }
 
-# All authenticated users have the "user" role on the database.
-has_role(_actor: AuthenticatedActor, "user", _resource: Database);
+# All authenticated users have the "query" permission on the database.
+has_permission(_actor: AuthenticatedActor, "query", _resource: Database);
+
 # The "db-init" user is the only one with the "init" role.
-has_role(actor: AuthenticatedActor, "init", _resource: Database)
+has_permission(actor: AuthenticatedActor, "modify", _resource: Database)
 	if actor = USER_DB_INIT;
