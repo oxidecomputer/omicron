@@ -676,7 +676,7 @@ impl DataStore {
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<Organization> {
         let authz_silo = opctx.authn.silo_required()?;
-        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        opctx.authorize(authz::Action::ListChildren, &authz_silo).await?;
 
         use db::schema::organization::dsl;
         paginated(dsl::organization, dsl::name, pagparams)

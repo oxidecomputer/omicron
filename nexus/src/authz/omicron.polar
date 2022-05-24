@@ -137,23 +137,41 @@ resource Silo {
 	];
 	roles = [ "admin", "collaborator", "viewer" ];
 
+	# permissions granted by this resource's roles
 	"list_children" if "viewer";
 	"read" if "viewer";
-
-	"viewer" if "collaborator";
 	"create_child" if "collaborator";
-	"collaborator" if "admin";
 	"modify" if "admin";
+
+	# roles implied by other roles
+	"viewer" if "collaborator";
+	"collaborator" if "admin";
+
+	# roles implied by relationships with the parent fleet
 	relations = { parent_fleet: Fleet };
-	"admin" if "admin" on "parent_fleet";
-	"collaborator" if "collaborator" on "parent_fleet";
+	"admin" if "collaborator" on "parent_fleet";
 	"viewer" if "viewer" on "parent_fleet";
 }
 has_relation(fleet: Fleet, "parent_fleet", silo: Silo)
 	if silo.fleet = fleet;
-has_role(actor: AuthenticatedActor, "viewer", silo: Silo)
+
+# All authenticated users can read their own Silo.  That's not quite the same as
+# having the "viewer" role.  For example, they cannot list Organizations in the
+# Silo.
+#
+# One reason this is necessary is because if an unprivileged user tries to
+# create an Organization using "POST /organizations", they should get back a 403
+# (which implies they're able to see /organizations, which is essentially seeing
+# the Silo itself) rather than a 404.  This behavior isn't a hard constraint
+# (i.e., you could reasonably get a 404 for an API you're not allowed to call).
+# Nor is the implementation (i.e., we could special-case this endpoint somehow).
+# But granting this permission is the simplest way to keep this endpoint's
+# behavior consistent with the rest of the API.
+#
+# It's unclear what else would break if users couldn't see their own Silo.
+has_permission(actor: AuthenticatedActor, "read", silo: Silo)
 	# TODO-security TODO-coverage We should have a test that exercises this
-	# case.
+	# syntax.
 	if silo in actor.silo;
 
 resource Organization {
@@ -180,7 +198,9 @@ resource Organization {
 	"modify" if "admin";
 
 	relations = { parent_silo: Silo };
-	"admin" if "admin" on "parent_silo";
+	"admin" if "collaborator" on "parent_silo";
+	"read" if "viewer" on "parent_silo";
+	"list_children" if "viewer" on "parent_silo";
 }
 has_relation(silo: Silo, "parent_silo", organization: Organization)
 	if organization.silo = silo;
@@ -212,7 +232,9 @@ resource Project {
 	"modify" if "admin";
 
 	relations = { parent_organization: Organization };
-	"admin" if "admin" on "parent_organization";
+	"admin" if "collaborator" on "parent_organization";
+
+	"viewer" if "list_children" on "parent_organization";
 }
 has_relation(organization: Organization, "parent_organization", project: Project)
 	if project.organization = organization;
