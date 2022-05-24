@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::config::GimletConfig;
+use crate::rot::RotSprocketExt;
 use crate::server;
 use crate::server::UdpServer;
 use crate::{Responsiveness, SimulatedSp};
@@ -22,6 +23,9 @@ use gateway_messages::SpMessageKind;
 use gateway_messages::SpPort;
 use gateway_messages::SpState;
 use slog::{debug, error, info, warn, Logger};
+use sprockets_rot::common::msgs::{RotRequestV1, RotResponseV1};
+use sprockets_rot::common::Ed25519PublicKey;
+use sprockets_rot::{RotSprocket, RotSprocketError};
 use std::collections::HashMap;
 use std::net::{SocketAddr, SocketAddrV6};
 use std::sync::{Arc, Mutex};
@@ -33,6 +37,8 @@ use tokio::sync::oneshot;
 use tokio::task::{self, JoinHandle};
 
 pub struct Gimlet {
+    rot: Mutex<RotSprocket>,
+    manufacturing_public_key: Ed25519PublicKey,
     local_addrs: Option<[SocketAddrV6; 2]>,
     serial_number: SerialNumber,
     serial_console_addrs: HashMap<String, SocketAddrV6>,
@@ -56,6 +62,10 @@ impl SimulatedSp for Gimlet {
         hex::encode(self.serial_number)
     }
 
+    fn manufacturing_public_key(&self) -> Ed25519PublicKey {
+        self.manufacturing_public_key
+    }
+
     fn local_addr(&self, port: SpPort) -> Option<SocketAddrV6> {
         let i = match port {
             SpPort::One => 0,
@@ -70,6 +80,13 @@ impl SimulatedSp for Gimlet {
         {
             rx.await.unwrap();
         }
+    }
+
+    fn rot_request(
+        &self,
+        request: RotRequestV1,
+    ) -> Result<RotResponseV1, RotSprocketError> {
+        self.rot.lock().unwrap().handle_deserialized(request)
     }
 }
 
@@ -182,7 +199,11 @@ impl Gimlet {
             None
         };
 
+        let (manufacturing_public_key, rot) =
+            RotSprocket::bootstrap_from_config(&gimlet.common);
         Ok(Self {
+            rot: Mutex::new(rot),
+            manufacturing_public_key,
             local_addrs,
             serial_number: gimlet.common.serial_number,
             serial_console_addrs,
