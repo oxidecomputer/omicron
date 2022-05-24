@@ -7,6 +7,7 @@
 use crate::app::MAX_NICS_PER_INSTANCE;
 use crate::db;
 use crate::db::model::IncompleteNetworkInterface;
+use crate::db::model::MacAddr;
 use crate::db::queries::next_item::DefaultShiftGenerator;
 use crate::db::queries::next_item::NextItem;
 use crate::defaults::NUM_INITIAL_RESERVED_IP_ADDRESSES;
@@ -41,6 +42,8 @@ pub enum NetworkInterfaceError {
     DuplicatePrimaryKey(Uuid),
     /// There are no slots available on the instance
     NoSlotsAvailable,
+    /// There are no MAC addresses available
+    NoMacAddrressesAvailable,
     /// Any other error
     External(external::Error),
 }
@@ -110,6 +113,11 @@ impl NetworkInterfaceError {
                     MAX_NICS_PER_INSTANCE
                 ))
             }
+            NetworkInterfaceError::NoMacAddrressesAvailable => {
+                external::Error::invalid_request(
+                    "No available MAC addresses for interface",
+                )
+            }
             NetworkInterfaceError::External(e) => e,
         }
     }
@@ -174,6 +182,15 @@ fn decode_database_error(
         "((slot >= 0:::INT8) AND (slot < 8:::INT8))",
     );
 
+    // Error message generated when we attempt to insert NULL in the `mac`
+    // column, which only happens when we run out of MAC addresses. This is
+    // probably quite unlikely, but not impossible given that MACs are unique
+    // within an entire VPC. We'll probably have other constraints we hit first,
+    // or explicit limits, but until those are in place, we opt for an explicit
+    // messaage.
+    const MAC_EXHAUSTION_ERROR_MESSAGE: &str =
+        r#"null value in column "mac" violates not-null constraint"#;
+
     match err {
         // If the address allocation subquery fails, we'll attempt to insert
         // NULL for the `ip` column. This checks that the non-NULL constraint on
@@ -202,6 +219,15 @@ fn decode_database_error(
             Error::DatabaseError(DatabaseErrorKind::CheckViolation, ref info),
         )) if info.message() == NO_SLOTS_AVAILABLE_ERROR_MESSAGE => {
             NetworkInterfaceError::NoSlotsAvailable
+        }
+
+        // If the MAC allocation subquery fails, we'll attempt to insert NULL
+        // for the `mac` column. This checks that the non-NULL constraint on
+        // that colum has been violated.
+        PoolError::Connection(ConnectionError::Query(
+            Error::DatabaseError(DatabaseErrorKind::NotNullViolation, ref info),
+        )) if info.message() == MAC_EXHAUSTION_ERROR_MESSAGE => {
+            NetworkInterfaceError::NoMacAddrressesAvailable
         }
 
         // This path looks specifically at constraint names.
@@ -407,6 +433,32 @@ impl QueryFragment<Pg> for NextNicSlot {
         Ok(())
     }
 }
+
+/// A [`NextItem`] query that selects a random available MAC address for a guest
+/// network interface.
+#[derive(Debug, Clone, Copy)]
+pub struct NextGuestMacAddress {
+    inner: NextItem<
+        db::schema::network_interface::table,
+        MacAddr,
+        db::schema::network_interface::dsl::mac,
+        Uuid,
+        db::schema::network_interface::dsl::vpc_id,
+    >,
+}
+
+impl NextGuestMacAddress {
+    pub fn new(vpc_id: Uuid) -> Self {
+        let base = MacAddr::random_guest();
+        let x = base.to_i64();
+        let max_shift = MacAddr::MAX_GUEST_ADDR - x;
+        let min_shift = x - MacAddr::MIN_GUEST_ADDR;
+        let generator = DefaultShiftGenerator { base, max_shift, min_shift };
+        Self { inner: NextItem::new_scoped(generator, vpc_id) }
+    }
+}
+
+delegate_query_fragment_impl!(NextGuestMacAddress);
 
 /// Add a subquery intended to verify that an Instance's networking does not
 /// span multiple VPCs.
@@ -658,8 +710,10 @@ fn push_interface_allocation_subquery<'a>(
     out.push_identifier(dsl::subnet_id::NAME)?;
     out.push_sql(", ");
 
-    out.push_bind_param::<sql_types::Text, String>(&query.mac_sql)?;
-    out.push_sql(" AS ");
+    // Push the subquery for selecting the a MAC address.
+    out.push_sql("(");
+    query.next_mac_subquery.walk_ast(out.reborrow())?;
+    out.push_sql(") AS ");
     out.push_identifier(dsl::mac::NAME)?;
     out.push_sql(", ");
 
@@ -768,7 +822,7 @@ pub struct InsertNetworkInterfaceQuery {
     // long as the entire call to [`QueryFragment<Pg>::walk_ast`].
     vpc_id_str: String,
     ip_sql: Option<IpNetwork>,
-    mac_sql: String,
+    next_mac_subquery: NextGuestMacAddress,
     next_ipv4_address_subquery: NextGuestIpv4Address,
     next_slot_subquery: NextNicSlot,
 }
@@ -777,20 +831,18 @@ impl InsertNetworkInterfaceQuery {
     pub fn new(interface: IncompleteNetworkInterface) -> Self {
         let vpc_id_str = interface.vpc_id.to_string();
         let ip_sql = interface.ip.map(|ip| ip.into());
-        let mac_sql = interface.mac.to_string();
-
+        let next_mac_subquery = NextGuestMacAddress::new(interface.vpc_id);
         let next_ipv4_address_subquery = NextGuestIpv4Address::new(
             interface.subnet.ipv4_block.0 .0,
             interface.subnet.identity.id,
         );
         let next_slot_subquery = NextNicSlot::new(interface.instance_id);
-
         Self {
             interface,
             now: Utc::now(),
             vpc_id_str,
             ip_sql,
-            mac_sql,
+            next_mac_subquery,
             next_ipv4_address_subquery,
             next_slot_subquery,
         }
@@ -939,8 +991,8 @@ mod tests {
     use super::NetworkInterfaceError;
     use super::MAX_NICS_PER_INSTANCE;
     use crate::context::OpContext;
-    use crate::db::model;
     use crate::db::model::IncompleteNetworkInterface;
+    use crate::db::model::MacAddr;
     use crate::db::model::NetworkInterface;
     use crate::db::model::VpcSubnet;
     use nexus_test_utils::db::test_setup_database;
@@ -1010,7 +1062,6 @@ mod tests {
             instance_id,
             vpc_id,
             subnet.clone(),
-            model::MacAddr::new().unwrap(),
             IdentityMetadataCreateParams {
                 name: "interface-a".parse().unwrap(),
                 description: String::from("description"),
@@ -1038,7 +1089,6 @@ mod tests {
             instance_id,
             vpc_id,
             subnet.clone(),
-            model::MacAddr::new().unwrap(),
             IdentityMetadataCreateParams {
                 name: "interface-b".parse().unwrap(),
                 description: String::from("description"),
@@ -1063,7 +1113,6 @@ mod tests {
             instance_id,
             vpc_id,
             subnet.clone(),
-            model::MacAddr::new().unwrap(),
             IdentityMetadataCreateParams {
                 name: "interface-c".parse().unwrap(),
                 description: String::from("description"),
@@ -1089,7 +1138,6 @@ mod tests {
             instance_id,
             vpc_id,
             subnet.clone(),
-            model::MacAddr::new().unwrap(),
             IdentityMetadataCreateParams {
                 name: "interface-b".parse().unwrap(),
                 description: String::from("description"),
@@ -1116,7 +1164,6 @@ mod tests {
                 instance_id,
                 other_vpc_id,
                 other_subnet.clone(),
-                model::MacAddr::new().unwrap(),
                 IdentityMetadataCreateParams {
                     name: "interface-a".parse().unwrap(),
                     description: String::from("description"),
@@ -1146,7 +1193,6 @@ mod tests {
                 Uuid::new_v4(),
                 vpc_id,
                 subnet.clone(),
-                model::MacAddr::new().unwrap(),
                 IdentityMetadataCreateParams {
                     name: format!("interface-{}", i).try_into().unwrap(),
                     description: String::from("description"),
@@ -1167,7 +1213,6 @@ mod tests {
             instance_id,
             vpc_id,
             subnet.clone(),
-            model::MacAddr::new().unwrap(),
             IdentityMetadataCreateParams {
                 name: "interface-d".parse().unwrap(),
                 description: String::from("description"),
@@ -1195,7 +1240,6 @@ mod tests {
                 Uuid::new_v4(), // New instance ID
                 other_vpc_id,
                 other_subnet.clone(),
-                model::MacAddr::new().unwrap(),
                 IdentityMetadataCreateParams {
                     name: "interface-e".parse().unwrap(), // Same name
                     description: String::from("description"),
@@ -1231,7 +1275,12 @@ mod tests {
         assert_eq!(inserted.instance_id, incomplete.instance_id);
         assert_eq!(inserted.vpc_id, incomplete.vpc_id);
         assert_eq!(inserted.subnet_id, incomplete.subnet.id());
-        assert_eq!(inserted.mac, incomplete.mac);
+        assert!(
+            inserted.mac.to_i64() >= MacAddr::MIN_GUEST_ADDR
+                && inserted.mac.to_i64() <= MacAddr::MAX_GUEST_ADDR,
+            "The random MAC address {:?} is not a valid guest address",
+            inserted.mac,
+        );
     }
 
     // Test that inserting a record into the database with the same primary key
@@ -1278,7 +1327,6 @@ mod tests {
             instance_id,
             vpc_id,
             subnet,
-            model::MacAddr::new().unwrap(),
             IdentityMetadataCreateParams {
                 name: "interface-a".parse().unwrap(),
                 description: String::from("description"),
@@ -1347,7 +1395,6 @@ mod tests {
                 instance_id,
                 vpc_id,
                 subnet.clone(),
-                model::MacAddr::new().unwrap(),
                 IdentityMetadataCreateParams {
                     name: format!("interface-{}", slot).parse().unwrap(),
                     description: String::from("description"),
@@ -1376,7 +1423,6 @@ mod tests {
             instance_id,
             vpc_id,
             subnet,
-            model::MacAddr::new().unwrap(),
             IdentityMetadataCreateParams {
                 name: "interface-8".parse().unwrap(),
                 description: String::from("description"),

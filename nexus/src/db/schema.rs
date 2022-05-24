@@ -127,7 +127,7 @@ table! {
         instance_id -> Uuid,
         vpc_id -> Uuid,
         subnet_id -> Uuid,
-        mac -> Text,
+        mac -> Int8,
         ip -> Inet,
         slot -> Int2,
     }
