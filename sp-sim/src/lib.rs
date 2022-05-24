@@ -4,6 +4,7 @@
 
 pub mod config;
 mod gimlet;
+mod rot;
 mod server;
 mod sidecar;
 
@@ -15,6 +16,10 @@ pub use gimlet::Gimlet;
 pub use server::logger;
 pub use sidecar::Sidecar;
 pub use slog::Logger;
+pub use sprockets_rot::common::msgs::RotRequestV1;
+pub use sprockets_rot::common::msgs::RotResponseV1;
+use sprockets_rot::common::Ed25519PublicKey;
+pub use sprockets_rot::RotSprocketError;
 use std::net::SocketAddrV6;
 
 pub mod ignition_id {
@@ -33,6 +38,9 @@ pub trait SimulatedSp {
     /// Hexlified serial number.
     fn serial_number(&self) -> String;
 
+    /// Public key for the manufacturing cert used to sign this SP's RoT certs.
+    fn manufacturing_public_key(&self) -> Ed25519PublicKey;
+
     /// Listening UDP address of the given port of this simulated SP, if it was
     /// configured to listen.
     fn local_addr(&self, port: SpPort) -> Option<SocketAddrV6>;
@@ -40,6 +48,12 @@ pub trait SimulatedSp {
     /// Simulate the SP being unresponsive, in which it ignores all incoming
     /// messages.
     async fn set_responsiveness(&self, r: Responsiveness);
+
+    /// Send a request to the (simulated) RoT.
+    fn rot_request(
+        &self,
+        request: RotRequestV1,
+    ) -> Result<RotResponseV1, RotSprocketError>;
 }
 
 pub struct SimRack {
