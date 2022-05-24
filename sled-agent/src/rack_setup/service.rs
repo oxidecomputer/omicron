@@ -5,10 +5,10 @@
 //! Rack Setup Service implementation
 
 use super::config::{SetupServiceConfig as Config, SledRequest};
-use crate::bootstrap::{
-    client as bootstrap_agent_client, config::BOOTSTRAP_AGENT_PORT,
-    discovery::PeerMonitorObserver, params::SledAgentRequest,
-};
+use crate::bootstrap::config::BOOTSTRAP_AGENT_PORT;
+use crate::bootstrap::discovery::PeerMonitorObserver;
+use crate::bootstrap::params::SledAgentRequest;
+use crate::bootstrap::rss_handle::RssSledAgentSender;
 use crate::params::ServiceRequest;
 use omicron_common::address::{get_sled_address, ReservedRackSubnet};
 use omicron_common::backoff::{
@@ -32,11 +32,8 @@ pub enum SetupServiceError {
         err: std::io::Error,
     },
 
-    #[error("Error making HTTP request to Bootstrap Agent: {0}")]
-    BootstrapApi(
-        #[from]
-        bootstrap_agent_client::Error<bootstrap_agent_client::types::Error>,
-    ),
+    #[error("Error initializing sled via sled-agent: {0}")]
+    SledInitialization(String),
 
     #[error("Error making HTTP request to Sled Agent: {0}")]
     SledApi(#[from] sled_agent_client::Error<sled_agent_client::types::Error>),
@@ -71,14 +68,20 @@ impl Service {
     /// - `config`: The config file, which is used to setup the rack.
     /// - `peer_monitor`: The mechanism by which the setup service discovers
     ///   bootstrap agents on nearby sleds.
-    pub fn new(
+    /// - `sled_agent_requests`: Communication channel by which we can send
+    ///    commands to local sled-agent (e.g., to initialize other sleds).
+    pub(crate) fn new(
         log: Logger,
         config: Config,
         peer_monitor: PeerMonitorObserver,
+        sled_agent_requests: RssSledAgentSender,
     ) -> Self {
         let handle = tokio::task::spawn(async move {
             let svc = ServiceInner::new(log.clone(), peer_monitor);
-            if let Err(e) = svc.inject_rack_setup_requests(&config).await {
+            if let Err(e) = svc
+                .inject_rack_setup_requests(&config, &sled_agent_requests)
+                .await
+            {
                 warn!(log, "RSS injection failed: {}", e);
                 Err(e)
             } else {
@@ -132,62 +135,6 @@ struct ServiceInner {
 impl ServiceInner {
     fn new(log: Logger, peer_monitor: PeerMonitorObserver) -> Self {
         ServiceInner { log, peer_monitor: Mutex::new(peer_monitor) }
-    }
-
-    async fn initialize_sled_agent(
-        &self,
-        bootstrap_addr: SocketAddrV6,
-        request: &SledAgentRequest,
-    ) -> Result<(), SetupServiceError> {
-        let dur = std::time::Duration::from_secs(60);
-
-        let client = reqwest::ClientBuilder::new()
-            .connect_timeout(dur)
-            .timeout(dur)
-            .build()
-            .map_err(SetupServiceError::HttpClient)?;
-
-        let url = format!("http://{}", bootstrap_addr);
-        info!(self.log, "Sending request to peer agent: {}", url);
-        let client = bootstrap_agent_client::Client::new_with_client(
-            &url,
-            client,
-            self.log.new(o!("BootstrapAgentClient" => url.clone())),
-        );
-
-        let sled_agent_initialize = || async {
-            client
-                .start_sled(&bootstrap_agent_client::types::SledAgentRequest {
-                    subnet: bootstrap_agent_client::types::Ipv6Subnet {
-                        net: bootstrap_agent_client::types::Ipv6Net(
-                            request.subnet.net().to_string(),
-                        ),
-                    },
-                })
-                .await
-                .map_err(BackoffError::transient)?;
-
-            Ok::<
-                (),
-                BackoffError<
-                    bootstrap_agent_client::Error<
-                        bootstrap_agent_client::types::Error,
-                    >,
-                >,
-            >(())
-        };
-
-        let log_failure = |error, _| {
-            warn!(self.log, "failed to start sled agent"; "error" => ?error);
-        };
-        retry_notify(
-            internal_service_policy(),
-            sled_agent_initialize,
-            log_failure,
-        )
-        .await?;
-        info!(self.log, "Peer agent at {} initialized", url);
-        Ok(())
     }
 
     async fn initialize_datasets(
@@ -464,6 +411,7 @@ impl ServiceInner {
     async fn inject_rack_setup_requests(
         &self,
         config: &Config,
+        sled_agent_requests: &RssSledAgentSender,
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Injecting RSS configuration: {:#?}", config);
 
@@ -522,32 +470,20 @@ impl ServiceInner {
             self.create_plan(config, addrs).await?
         };
 
-        // Issue the dataset initialization requests to all sleds.
-        futures::future::join_all(plan.iter().map(
-            |(bootstrap_addr, allocation)| async move {
-                info!(
-                    self.log,
-                    "Sending request: {:#?}", allocation.initialization_request
-                );
-
-                // First, connect to the Bootstrap Agent and tell it to
-                // initialize the Sled Agent with the specified subnet.
-                self.initialize_sled_agent(
-                    *bootstrap_addr,
-                    &allocation.initialization_request,
-                )
-                .await?;
-                info!(
-                    self.log,
-                    "Initialized sled agent on sled with bootstrap address: {}",
-                    bootstrap_addr
-                );
-                Ok(())
-            },
-        ))
-        .await
-        .into_iter()
-        .collect::<Result<_, SetupServiceError>>()?;
+        // Forward the sled initialization requests to our sled-agent.
+        sled_agent_requests
+            .initialize_sleds(
+                plan.iter()
+                    .map(|(bootstrap_addr, allocation)| {
+                        (
+                            *bootstrap_addr,
+                            allocation.initialization_request.clone(),
+                        )
+                    })
+                    .collect(),
+            )
+            .await
+            .map_err(SetupServiceError::SledInitialization)?;
 
         // Set up internal DNS services.
         futures::future::join_all(
