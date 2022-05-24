@@ -77,7 +77,6 @@ impl DatastoreAttachTarget<Disk> for Instance {
     type Id = Uuid;
 
     type CollectionIdColumn = instance::dsl::id;
-    type CollectionGenerationColumn = instance::dsl::rcgen;
     type CollectionTimeDeletedColumn = instance::dsl::time_deleted;
 
     type ResourceIdColumn = disk::dsl::id;

@@ -607,7 +607,6 @@ mod test {
             time_created -> Timestamptz,
             time_modified -> Timestamptz,
             time_deleted -> Nullable<Timestamptz>,
-            rcgen -> Int8,
         }
     }
 
@@ -634,8 +633,7 @@ mod test {
                      description STRING(512) NOT NULL, \
                      time_created TIMESTAMPTZ NOT NULL, \
                      time_modified TIMESTAMPTZ NOT NULL, \
-                     time_deleted TIMESTAMPTZ, \
-                     rcgen INT NOT NULL); \
+                     time_deleted TIMESTAMPTZ); \
                  CREATE TABLE IF NOT EXISTS test_schema.resource( \
                      id UUID PRIMARY KEY, \
                      name STRING(63) NOT NULL, \
@@ -672,14 +670,12 @@ mod test {
     struct Collection {
         #[diesel(embed)]
         pub identity: CollectionIdentity,
-        pub rcgen: i64,
     }
 
     impl DatastoreAttachTarget<Resource> for Collection {
         type Id = uuid::Uuid;
 
         type CollectionIdColumn = collection::dsl::id;
-        type CollectionGenerationColumn = collection::dsl::rcgen;
         type CollectionTimeDeletedColumn = collection::dsl::time_deleted;
 
         type ResourceIdColumn = resource::dsl::id;
@@ -698,7 +694,6 @@ mod test {
         };
         let c = Collection {
             identity: CollectionIdentity::new(id, create_params),
-            rcgen: 1,
         };
 
         diesel::insert_into(collection::table)
@@ -796,8 +791,7 @@ mod test {
                     \"test_schema\".\"collection\".\"description\", \
                     \"test_schema\".\"collection\".\"time_created\", \
                     \"test_schema\".\"collection\".\"time_modified\", \
-                    \"test_schema\".\"collection\".\"time_deleted\", \
-                    \"test_schema\".\"collection\".\"rcgen\" \
+                    \"test_schema\".\"collection\".\"time_deleted\" \
                 FROM \"test_schema\".\"collection\" \
                 WHERE (\
                     (\"test_schema\".\"collection\".\"id\" = $1) AND \
@@ -826,8 +820,7 @@ mod test {
                     \"test_schema\".\"collection\".\"description\", \
                     \"test_schema\".\"collection\".\"time_created\", \
                     \"test_schema\".\"collection\".\"time_modified\", \
-                    \"test_schema\".\"collection\".\"time_deleted\", \
-                    \"test_schema\".\"collection\".\"rcgen\" \
+                    \"test_schema\".\"collection\".\"time_deleted\" \
                 FROM \"test_schema\".\"collection\" \
                 WHERE (\
                     (\"test_schema\".\"collection\".\"id\" = $3) AND \
@@ -1097,13 +1090,6 @@ mod test {
             }
             _ => panic!("Unexpected error: {:?}", err),
         };
-
-        // The generation number should only have bumped once, from the original
-        // resource insertion.
-        assert_eq!(
-            collection.rcgen + 1,
-            get_collection(collection_id, &pool).await.rcgen
-        );
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();

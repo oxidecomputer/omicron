@@ -10,12 +10,11 @@
 //! - Validates conditions on both the collection and resource
 //! - Ensures the number of attached resources does not exceed
 //! a provided threshold
-//! - Updates the collection's resource generation number
 //! - Updates the resource row
 
 use super::cte_utils::{
     BoxableUpdateStatement, BoxedQuery, BoxableTable, ExprSqlType, FilterBy,
-    QueryFromClause, QuerySqlType, TypesAreSame3,
+    QueryFromClause, QuerySqlType, TypesAreSame2, TypesAreSame3,
 };
 use super::pool::DbConnection;
 use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager, PoolError};
@@ -34,7 +33,7 @@ use std::fmt::Debug;
 /// this table.
 type CollectionTable<ResourceType, C> = <<C as DatastoreAttachTarget<
     ResourceType,
->>::CollectionGenerationColumn as Column>::Table;
+>>::CollectionIdColumn as Column>::Table;
 /// The table representing the resource. This table contains an
 /// ID acting as a foreign key into the collection table.
 type ResourceTable<ResourceType, C> = <<C as DatastoreAttachTarget<
@@ -43,8 +42,6 @@ type ResourceTable<ResourceType, C> = <<C as DatastoreAttachTarget<
 /// The default WHERE clause of the resource table.
 type ResourceTableWhereClause<ResourceType, C> =
     <ResourceTable<ResourceType, C> as IntoUpdateTarget>::WhereClause;
-type CollectionGenerationColumn<ResourceType, C> =
-    <C as DatastoreAttachTarget<ResourceType>>::CollectionGenerationColumn;
 type CollectionIdColumn<ResourceType, C> =
     <C as DatastoreAttachTarget<ResourceType>>::CollectionIdColumn;
 type ResourceIdColumn<ResourceType, C> =
@@ -57,13 +54,11 @@ type ResourceIdColumn<ResourceType, C> =
 /// ```
 /// # use diesel::prelude::*;
 /// # use omicron_nexus::db::collection_attach::DatastoreAttachTarget;
-/// # use omicron_nexus::db::model::Generation;
 /// #
 /// # table! {
 /// #     test_schema.instance (id) {
 /// #         id -> Uuid,
 /// #         time_deleted -> Nullable<Timestamptz>,
-/// #         rcgen -> Int8,
 /// #     }
 /// # }
 /// #
@@ -88,7 +83,6 @@ type ResourceIdColumn<ResourceType, C> =
 /// struct Instance {
 ///     pub id: uuid::Uuid,
 ///     pub time_deleted: Option<chrono::DateTime<chrono::Utc>>,
-///     pub rcgen: Generation,
 /// }
 ///
 /// impl DatastoreAttachTarget<Disk> for Instance {
@@ -96,7 +90,6 @@ type ResourceIdColumn<ResourceType, C> =
 ///     type Id = uuid::Uuid;
 ///
 ///     type CollectionIdColumn = instance::dsl::id;
-///     type CollectionGenerationColumn = instance::dsl::rcgen;
 ///     type CollectionTimeDeletedColumn = instance::dsl::time_deleted;
 ///
 ///     type ResourceIdColumn = disk::dsl::id;
@@ -104,30 +97,41 @@ type ResourceIdColumn<ResourceType, C> =
 ///     type ResourceTimeDeletedColumn = disk::dsl::time_deleted;
 /// }
 /// ```
-pub trait DatastoreAttachTarget<ResourceType>: Selectable<Pg> {
+pub trait DatastoreAttachTarget<ResourceType>: Selectable<Pg>
+// where
+//    <<Self::ResourceCollectionIdColumn as Column>::Table as Table>::PrimaryKey: diesel::sql_types::SqlType,
+//where
+//    ExprSqlType<CollectionPrimaryKey<ResourceType, Self>>: SingleValue,
+//    ExprSqlType<ResourcePrimaryKey<ResourceType, Self>>: SingleValue,
+//    ExprSqlType<Self::ResourceCollectionIdColumn>: SingleValue,
+{
     /// The Rust type of the collection and resource ids (typically Uuid).
     type Id: Copy + Debug + PartialEq + Send + 'static;
+//        AsExpression<SerializedCollectionPrimaryKey<ResourceType, Self>> +
+//        AsExpression<SerializedResourcePrimaryKey<ResourceType, Self>> +
+//        AsExpression<SerializedResourceForeignKey<ResourceType, Self>>;
 
     /// The primary key column of the collection.
     type CollectionIdColumn: Column;
 
-    /// The column in the CollectionTable that acts as a generation number.
-    /// This is the "resource-generation-number" in RFD 192.
-    type CollectionGenerationColumn: Column
-        + Default
-        + Expression<SqlType = BigInt>;
-
     /// The time deleted column in the CollectionTable
-    type CollectionTimeDeletedColumn: Column + Default;
+    type CollectionTimeDeletedColumn: Column<Table = <Self::CollectionIdColumn as Column>::Table> +
+        Default +
+        ExpressionMethods;
 
     /// The primary key column of the resource
     type ResourceIdColumn: Column;
 
     /// The column in the resource acting as a foreign key into the Collection
-    type ResourceCollectionIdColumn: Column + Default;
+    type ResourceCollectionIdColumn: Column + Default + ExpressionMethods;
+//    type ResourceCollectionIdColumn: Column<Table = <Self::ResourceIdColumn as Column>::Table> +
+//        Default +
+//        ExpressionMethods;
 
     /// The time deleted column in the ResourceTable
-    type ResourceTimeDeletedColumn: Column + Default;
+    type ResourceTimeDeletedColumn: Column<Table = <Self::ResourceIdColumn as Column>::Table> +
+        Default +
+        ExpressionMethods;
 
     /// Creates a statement for attaching a resource to the given collection.
     ///
@@ -180,9 +184,8 @@ pub trait DatastoreAttachTarget<ResourceType>: Selectable<Pg> {
         // Ensure the "collection" columns all belong to the same table.
         (
             <Self::CollectionIdColumn as Column>::Table,
-            <Self::CollectionGenerationColumn as Column>::Table,
             <Self::CollectionTimeDeletedColumn as Column>::Table,
-        ): TypesAreSame3,
+        ): TypesAreSame2,
         // Ensure the "resource" columns all belong to the same table.
         (
             <Self::ResourceIdColumn as Column>::Table,
@@ -309,8 +312,6 @@ pub trait DatastoreAttachTarget<ResourceType>: Selectable<Pg> {
             .into_boxed()
             .filter(resource_table().primary_key().eq(resource_id));
 
-        let collection_from_clause = collection_table().from_clause();
-        let collection_returning_clause = Self::as_returning();
         let resource_returning_clause = ResourceType::as_returning();
         AttachToCollectionStatement {
             collection_exists_query,
@@ -320,8 +321,6 @@ pub trait DatastoreAttachTarget<ResourceType>: Selectable<Pg> {
             resource_query,
             max_attached_resources,
             update_resource_statement,
-            collection_from_clause,
-            collection_returning_clause,
             resource_returning_clause,
         }
     }
@@ -351,11 +350,6 @@ where
     // Update statement for the resource.
     update_resource_statement:
         BoxedUpdateStatement<'static, Pg, ResourceTable<ResourceType, C>, V>,
-    // Describes the target of the collection table UPDATE.
-    collection_from_clause:
-        <CollectionTable<ResourceType, C> as QuerySource>::FromClause,
-    // Describes what should be returned after UPDATE-ing the collection.
-    collection_returning_clause: AsSelect<C, Pg>,
     // Describes what should be returned after UPDATE-ing the resource.
     resource_returning_clause: AsSelect<ResourceType, Pg>,
 }
@@ -400,7 +394,7 @@ pub enum AttachError<ResourceType, C, E> {
 /// Describes the type returned from the actual CTE, which is parsed
 /// and interpreted before propagating it to users of the Rust API.
 pub type RawOutput<ResourceType, C> =
-    (i64, Option<C>, Option<ResourceType>, Option<C>, Option<ResourceType>);
+    (i64, Option<C>, Option<ResourceType>, Option<ResourceType>);
 
 impl<ResourceType, V, C> AttachToCollectionStatement<ResourceType, V, C>
 where
@@ -456,7 +450,6 @@ where
             attached_count,
             collection_before_update,
             resource_before_update,
-            collection_after_update,
             resource_after_update,
         ) = result;
 
@@ -466,14 +459,13 @@ where
         let resource_before_update = resource_before_update
             .ok_or_else(|| AttachError::ResourceNotFound)?;
 
-        match (collection_after_update, resource_after_update) {
-            (Some(collection), Some(resource)) => Ok((collection, resource)),
-            (None, None) => Err(AttachError::NoUpdate {
+        match resource_after_update {
+            Some(resource) => Ok((collection_before_update, resource)),
+            None => Err(AttachError::NoUpdate {
                 attached_count,
                 resource: resource_before_update,
                 collection: collection_before_update,
             }),
-            _ => panic!("Partial update applied - this is a CTE bug"),
         }
     }
 }
@@ -494,8 +486,6 @@ where
         Nullable<SelectableSqlType<C>>,
         // If the resource exists, the value before update.
         Nullable<SelectableSqlType<ResourceType>>,
-        // If the collection was updated, the new value.
-        Nullable<SelectableSqlType<C>>,
         // If the resource was updated, the new value.
         Nullable<SelectableSqlType<ResourceType>>,
     );
@@ -535,8 +525,7 @@ type SerializedResourceForeignKey<ResourceType, C> =
 ///    constraints on the collection and resource objects.
 /// 4. (do_update): IFF all previous checks succeeded, make a decision to perfom
 ///    an update.
-/// 5. (updated_collection):  Increase the generation number on the collection.
-/// 6. (updated_resource): Apply user-provided updates on the resource -
+/// 5. (updated_resource): Apply user-provided updates on the resource -
 ///    presumably, setting the collection ID value.
 ///
 /// This is implemented as follows:
@@ -582,12 +571,6 @@ type SerializedResourceForeignKey<ResourceType, C> =
 /// //              (SELECT * FROM resource_count) < <CAPACITY>,
 /// //          TRUE, FALSE),
 /// //      ),
-/// //      /* Update the generation number of the collection row */
-/// //      updated_collection AS MATERIALIZED (
-/// //          UPDATE C SET <generation number> = <generation_number> + 1
-/// //          WHERE <PK> IN (SELECT <PK> FROM collection_info) AND (SELECT * FROM do_update)
-/// //          RETURNING *
-/// //      ),
 /// //      /* Update the resource */
 /// //      updated_resource AS (
 /// //          UPDATE R SET <User-supplied Update>
@@ -598,8 +581,7 @@ type SerializedResourceForeignKey<ResourceType, C> =
 /// //      (SELECT * FROM resource_count)
 /// //      LEFT JOIN (SELECT * FROM collection_by_id) ON TRUE
 /// //      LEFT JOIN (SELECT * FROM resource_by_id) ON TRUE
-/// //      LEFT JOIN (SELECT * FROM updated_collection) ON TRUE
-/// //      LEFT JOIN (SELECT * FROM resource) ON TRUE;
+/// //      LEFT JOIN (SELECT * FROM updated_resource) ON TRUE;
 /// ```
 impl<ResourceType, V, C> QueryFragment<Pg>
     for AttachToCollectionStatement<ResourceType, V, C>
@@ -607,16 +589,11 @@ where
     ResourceType: Selectable<Pg>,
     C: DatastoreAttachTarget<ResourceType>,
     CollectionPrimaryKey<ResourceType, C>: diesel::Column,
-    // Necessary to "walk_ast" over "select.collection_from_clause".
-    <CollectionTable<ResourceType, C> as QuerySource>::FromClause:
-        QueryFragment<Pg>,
     // Necessary to "walk_ast" over "self.update_resource_statement".
     BoxedUpdateStatement<'static, Pg, ResourceTable<ResourceType, C>, V>:
         QueryFragment<Pg>,
     // Necessary to "walk_ast" over "self.resource_returning_clause".
     AsSelect<ResourceType, Pg>: QueryFragment<Pg>,
-    // Necessary to "walk_ast" over "self.collection_returning_clause".
-    AsSelect<C, Pg>: QueryFragment<Pg>,
 {
     fn walk_ast<'b>(&'b self, mut out: AstPass<'_, 'b, Pg>) -> QueryResult<()> {
         out.unsafe_to_cache_prepared();
@@ -648,26 +625,6 @@ where
             &format!(" FROM resource_info) AND (SELECT * FROM resource_count) < {}, TRUE,FALSE)), ",
             self.max_attached_resources)
         );
-
-        out.push_sql("updated_collection AS MATERIALIZED (UPDATE ");
-        self.collection_from_clause.walk_ast(out.reborrow())?;
-        out.push_sql(" SET ");
-        out.push_identifier(
-            CollectionGenerationColumn::<ResourceType, C>::NAME,
-        )?;
-        out.push_sql(" = ");
-        out.push_identifier(
-            CollectionGenerationColumn::<ResourceType, C>::NAME,
-        )?;
-        out.push_sql(" + 1 WHERE ");
-        out.push_identifier(CollectionPrimaryKey::<ResourceType, C>::NAME)?;
-        out.push_sql(" IN (SELECT ");
-        out.push_identifier(CollectionPrimaryKey::<ResourceType, C>::NAME)?;
-        out.push_sql(
-            " FROM collection_info) AND (SELECT * FROM do_update) RETURNING ",
-        );
-        self.collection_returning_clause.walk_ast(out.reborrow())?;
-        out.push_sql("), ");
 
         out.push_sql("updated_resource AS (");
         self.update_resource_statement.walk_ast(out.reborrow())?;
@@ -702,7 +659,6 @@ where
             (SELECT * FROM resource_count) \
             LEFT JOIN (SELECT * FROM collection_by_id) ON TRUE \
             LEFT JOIN (SELECT * FROM resource_by_id) ON TRUE \
-            LEFT JOIN (SELECT * FROM updated_collection) ON TRUE \
             LEFT JOIN (SELECT * FROM updated_resource) ON TRUE;",
         );
 
@@ -738,7 +694,6 @@ mod test {
             time_created -> Timestamptz,
             time_modified -> Timestamptz,
             time_deleted -> Nullable<Timestamptz>,
-            rcgen -> Int8,
         }
     }
 
@@ -765,8 +720,7 @@ mod test {
                      description STRING(512) NOT NULL, \
                      time_created TIMESTAMPTZ NOT NULL, \
                      time_modified TIMESTAMPTZ NOT NULL, \
-                     time_deleted TIMESTAMPTZ, \
-                     rcgen INT NOT NULL); \
+                     time_deleted TIMESTAMPTZ); \
                  CREATE TABLE IF NOT EXISTS test_schema.resource( \
                      id UUID PRIMARY KEY, \
                      name STRING(63) NOT NULL, \
@@ -803,14 +757,12 @@ mod test {
     struct Collection {
         #[diesel(embed)]
         pub identity: CollectionIdentity,
-        pub rcgen: i64,
     }
 
     impl DatastoreAttachTarget<Resource> for Collection {
         type Id = uuid::Uuid;
 
         type CollectionIdColumn = collection::dsl::id;
-        type CollectionGenerationColumn = collection::dsl::rcgen;
         type CollectionTimeDeletedColumn = collection::dsl::time_deleted;
 
         type ResourceIdColumn = resource::dsl::id;
@@ -829,7 +781,6 @@ mod test {
         };
         let c = Collection {
             identity: CollectionIdentity::new(id, create_params),
-            rcgen: 1,
         };
 
         diesel::insert_into(collection::table)
@@ -909,8 +860,7 @@ mod test {
                     \"test_schema\".\"collection\".\"description\", \
                     \"test_schema\".\"collection\".\"time_created\", \
                     \"test_schema\".\"collection\".\"time_modified\", \
-                    \"test_schema\".\"collection\".\"time_deleted\", \
-                    \"test_schema\".\"collection\".\"rcgen\" \
+                    \"test_schema\".\"collection\".\"time_deleted\" \
                 FROM \"test_schema\".\"collection\" \
                 WHERE (\
                     (\"test_schema\".\"collection\".\"id\" = $1) AND \
@@ -947,8 +897,7 @@ mod test {
                     \"test_schema\".\"collection\".\"description\", \
                     \"test_schema\".\"collection\".\"time_created\", \
                     \"test_schema\".\"collection\".\"time_modified\", \
-                    \"test_schema\".\"collection\".\"time_deleted\", \
-                    \"test_schema\".\"collection\".\"rcgen\" \
+                    \"test_schema\".\"collection\".\"time_deleted\" \
                 FROM \"test_schema\".\"collection\" \
                 WHERE (\
                     (\"test_schema\".\"collection\".\"id\" = $4) AND \
@@ -979,23 +928,6 @@ mod test {
                 TRUE,\
                 FALSE)\
             ), \
-            updated_collection AS MATERIALIZED (\
-                UPDATE \
-                    \"test_schema\".\"collection\" \
-                SET \
-                    \"rcgen\" = \"rcgen\" + 1 \
-                WHERE \
-                    \"id\" IN (SELECT \"id\" FROM collection_info) AND \
-                    (SELECT * FROM do_update) \
-                RETURNING \
-                    \"test_schema\".\"collection\".\"id\", \
-                    \"test_schema\".\"collection\".\"name\", \
-                    \"test_schema\".\"collection\".\"description\", \
-                    \"test_schema\".\"collection\".\"time_created\", \
-                    \"test_schema\".\"collection\".\"time_modified\", \
-                    \"test_schema\".\"collection\".\"time_deleted\", \
-                    \"test_schema\".\"collection\".\"rcgen\"\
-            ), \
             updated_resource AS (\
                 UPDATE \
                     \"test_schema\".\"resource\" \
@@ -1017,7 +949,6 @@ mod test {
                 (SELECT * FROM resource_count) \
                 LEFT JOIN (SELECT * FROM collection_by_id) ON TRUE \
                 LEFT JOIN (SELECT * FROM resource_by_id) ON TRUE \
-                LEFT JOIN (SELECT * FROM updated_collection) ON TRUE \
                 LEFT JOIN (SELECT * FROM updated_resource) ON TRUE; -- binds: [cccccccc-cccc-cccc-cccc-cccccccccccc, aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa, cccccccc-cccc-cccc-cccc-cccccccccccc, cccccccc-cccc-cccc-cccc-cccccccccccc, aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa, cccccccc-cccc-cccc-cccc-cccccccccccc, aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa]";
         assert_eq!(query, expected_query);
     }
@@ -1102,7 +1033,7 @@ mod test {
         let resource_id = uuid::Uuid::new_v4();
 
         // Create the collection and resource.
-        let collection =
+        let _collection =
             insert_collection(collection_id, "collection", &pool).await;
         let _resource = insert_resource(resource_id, "resource", &pool).await;
 
@@ -1132,11 +1063,6 @@ mod test {
             get_collection(collection_id, &pool).await
         );
         assert_eq!(returned_resource, get_resource(resource_id, &pool).await);
-        // The generation number should have incremented in the collection.
-        assert_eq!(
-            collection.rcgen + 1,
-            get_collection(collection_id, &pool).await.rcgen
-        );
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
@@ -1155,7 +1081,7 @@ mod test {
         let resource_id = uuid::Uuid::new_v4();
 
         // Create the collection and resource.
-        let collection =
+        let _collection =
             insert_collection(collection_id, "collection", &pool).await;
         let _resource = insert_resource(resource_id, "resource", &pool).await;
 
@@ -1196,11 +1122,6 @@ mod test {
             get_collection(collection_id, &pool).await
         );
         assert_eq!(returned_resource, get_resource(resource_id, &pool).await);
-        // The generation number should have incremented in the collection.
-        assert_eq!(
-            collection.rcgen + 1,
-            get_collection(collection_id, &pool).await.rcgen
-        );
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
@@ -1220,7 +1141,7 @@ mod test {
         let collection_id = uuid::Uuid::new_v4();
 
         // Create the collection.
-        let collection =
+        let _collection =
             insert_collection(collection_id, "collection", &pool).await;
 
         // Create each resource, attaching them to the collection.
@@ -1256,12 +1177,6 @@ mod test {
                 returned_resource,
                 get_resource(resource_id, &pool).await
             );
-
-            // The generation number should have incremented in the collection.
-            assert_eq!(
-                collection.rcgen + 1 + i64::try_from(i).unwrap(),
-                get_collection(collection_id, &pool).await.rcgen
-            );
         }
 
         db.cleanup().await.unwrap();
@@ -1280,7 +1195,7 @@ mod test {
         let collection_id = uuid::Uuid::new_v4();
 
         // Attach a resource to a collection, as usual.
-        let collection =
+        let _collection =
             insert_collection(collection_id, "collection", &pool).await;
         let resource_id1 = uuid::Uuid::new_v4();
         let _resource = insert_resource(resource_id1, "resource1", &pool).await;
@@ -1328,12 +1243,6 @@ mod test {
             _ => panic!("Unexpected error: {:?}", err),
         };
 
-        // The generation number should only have bumped once.
-        assert_eq!(
-            collection.rcgen + 1,
-            get_collection(collection_id, &pool).await.rcgen
-        );
-
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -1350,7 +1259,7 @@ mod test {
         let collection_id = uuid::Uuid::new_v4();
 
         // Attach a resource to a collection, as usual.
-        let collection =
+        let _collection =
             insert_collection(collection_id, "collection", &pool).await;
         let resource_id = uuid::Uuid::new_v4();
         let _resource = insert_resource(resource_id, "resource", &pool).await;
@@ -1441,13 +1350,6 @@ mod test {
             _ => panic!("Unexpected error: {:?}", err),
         };
 
-        // The generation number should only have bumped once, from the original
-        // resource insertion.
-        assert_eq!(
-            collection.rcgen + 1,
-            get_collection(collection_id, &pool).await.rcgen
-        );
-
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -1465,7 +1367,7 @@ mod test {
         let resource_id = uuid::Uuid::new_v4();
 
         // Create the collection and resource.
-        let collection =
+        let _collection =
             insert_collection(collection_id, "collection", &pool).await;
         let _resource = insert_resource(resource_id, "resource", &pool).await;
 
@@ -1502,10 +1404,6 @@ mod test {
         );
         assert_eq!(returned_resource, get_resource(resource_id, &pool).await);
         assert_eq!(returned_resource.description(), "new description");
-        assert_eq!(
-            collection.rcgen + 1,
-            get_collection(collection_id, &pool).await.rcgen
-        );
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
