@@ -15,7 +15,7 @@
 //
 //   Then we can test these in reverse order.  By the time we get to any
 //   resource, its children should be gone.
-// - figure out how to implement tests for fetching/modifying the policy.  Maybe
+// - figure out how to implement tests for modifying the policy.  Maybe
 //   have a dummy user that we grant/remove privileges for?
 // - do we want to look into performance at all?  It takes a long time.
 // - this test needs a lot of documentation
@@ -195,7 +195,7 @@ impl Resource {
                         template: NexusRequest::new(RequestBuilder::new(
                             client,
                             Method::GET,
-                            "/policy",
+                            &self.policy_url()
                         )),
                         on_success: None,
                     },
@@ -292,6 +292,15 @@ impl Resource {
                         on_success: None,
                     },
                     TestOperation {
+                        label: "FetchPolicy",
+                        template: NexusRequest::new(RequestBuilder::new(
+                            client,
+                            Method::GET,
+                            &self.policy_url()
+                        )),
+                        on_success: None,
+                    },
+                    TestOperation {
                         label: "ListOrganizations",
                         template: NexusRequest::new(RequestBuilder::new(
                             client,
@@ -336,6 +345,15 @@ impl Resource {
                             client,
                             Method::GET,
                             &resource_url,
+                        )),
+                        on_success: None,
+                    },
+                    TestOperation {
+                        label: "FetchPolicy",
+                        template: NexusRequest::new(RequestBuilder::new(
+                            client,
+                            Method::GET,
+                            &self.policy_url()
                         )),
                         on_success: None,
                     },
@@ -414,6 +432,15 @@ impl Resource {
                         on_success: None,
                     },
                     TestOperation {
+                        label: "FetchPolicy",
+                        template: NexusRequest::new(RequestBuilder::new(
+                            client,
+                            Method::GET,
+                            &self.policy_url()
+                        )),
+                        on_success: None,
+                    },
+                    TestOperation {
                         label: "ListVpcs",
                         template: NexusRequest::new(RequestBuilder::new(
                             client,
@@ -487,6 +514,15 @@ impl Resource {
                             client,
                             Method::GET,
                             &resource_url,
+                        )),
+                        on_success: None,
+                    },
+                    TestOperation {
+                        label: "FetchPolicy",
+                        template: NexusRequest::new(RequestBuilder::new(
+                            client,
+                            Method::GET,
+                            &self.policy_url()
                         )),
                         on_success: None,
                     },
