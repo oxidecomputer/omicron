@@ -6643,7 +6643,8 @@
         "type": "string",
         "enum": [
           "admin",
-          "collaborator"
+          "collaborator",
+          "viewer"
         ]
       },
       "OrganizationRolesPolicy": {
