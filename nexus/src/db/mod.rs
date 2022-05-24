@@ -10,7 +10,7 @@ pub mod collection_attach;
 pub mod collection_detach;
 pub mod collection_insert;
 mod config;
-
+mod cte_utils;
 // This is marked public for use by the integration tests
 pub mod datastore;
 mod error;

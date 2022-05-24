@@ -10,6 +10,11 @@
 //! - Validates conditions on both the collection and resource
 //! - Updates the resource row
 
+use super::cte_utils::{
+    BoxableTable, BoxableUpdateStatement, BoxedQuery, FilterBy,
+    ExprSqlType, QuerySqlType, QueryFromClause, TypesAreSame2,
+    TypesAreSame3, TableDefaultWhereClause
+};
 use super::pool::DbConnection;
 use crate::db::collection_attach::DatastoreAttachTarget;
 use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager, PoolError};
@@ -36,13 +41,6 @@ type ResourceTable<ResourceType, C> = <<C as DatastoreDetachTarget<
     ResourceType,
 >>::ResourceCollectionIdColumn as Column>::Table;
 
-/// The default WHERE clause of a table, when treated as an UPDATE target.
-type TableDefaultWhereClause<Table> = <Table as IntoUpdateTarget>::WhereClause;
-
-type FromClause<T> = <T as QuerySource>::FromClause;
-type QuerySqlType<T> = <T as AsQuery>::SqlType;
-type ExprSqlType<T> = <T as Expression>::SqlType;
-
 /// The default WHERE clause of the resource table.
 type ResourceTableDefaultWhereClause<ResourceType, C> =
     TableDefaultWhereClause<ResourceTable<ResourceType, C>>;
@@ -53,75 +51,6 @@ type CollectionIdColumn<ResourceType, C> =
 /// Helper to access column type.
 type ResourceIdColumn<ResourceType, C> =
     <C as DatastoreDetachTarget<ResourceType>>::ResourceIdColumn;
-
-/// Trick to check that columns come from the same table
-pub trait TypesAreSame2 {}
-impl<T> TypesAreSame2 for (T, T) {}
-pub trait TypesAreSame3 {}
-impl<T> TypesAreSame3 for (T, T, T) {}
-
-/// Ensures that the type is a Diesel table, and that we can call ".table" and
-/// ".into_boxed()" on it.
-pub trait BoxableTable: HasTable<Table = Self>
-    + 'static
-    + Send
-    + Table
-    + IntoUpdateTarget
-    + query_methods::BoxedDsl<
-        'static,
-        Pg,
-        Output = BoxedDslOutput<Self>,
-    > {}
-impl<T> BoxableTable for T
-where
-    T: HasTable<Table = Self>
-        + 'static
-        + Send
-        + Table
-        + IntoUpdateTarget
-        + query_methods::BoxedDsl<
-            'static,
-            Pg,
-            Output = BoxedDslOutput<Self>,
-        >,
-{}
-
-/// Ensures that calling ".filter(predicate)" on this type is callable, and does
-/// not change the underlying type.
-pub trait FilterBy<Predicate>: query_methods::FilterDsl<Predicate, Output = Self> {}
-impl<T, Predicate> FilterBy<Predicate> for T
-where
-    T: query_methods::FilterDsl<Predicate, Output = Self> {}
-
-/// Allows calling ".into_boxed" on an update statement.
-pub trait BoxableUpdateStatement<Table, V>:
-    query_methods::BoxedDsl<
-        'static,
-        Pg,
-        Output = BoxedUpdateStatement<
-            'static,
-            Pg,
-            Table,
-            V
-        >,
-    >
-where
-    Table: QuerySource {}
-
-impl<T, Table, V> BoxableUpdateStatement<Table, V> for T
-where
-    T: query_methods::BoxedDsl<
-        'static,
-        Pg,
-        Output = BoxedUpdateStatement<
-            'static,
-            Pg,
-            Table,
-            V,
-        >,
-    >,
-    Table: QuerySource,
-{}
 
 /// Trait to be implemented by structs representing a detachable collection.
 ///
@@ -206,10 +135,10 @@ pub trait DatastoreDetachTarget<ResourceType>: Selectable<Pg> {
         ResourceTable<ResourceType, Self>: BoxableTable,
 
         // Allows treating "collection_exists_query" as a boxed "dyn QueryFragment<Pg>".
-        FromClause<CollectionTable<ResourceType, Self>>: QueryFragment<Pg> + Send,
+        QueryFromClause<CollectionTable<ResourceType, Self>>: QueryFragment<Pg> + Send,
         QuerySqlType<CollectionTable<ResourceType, Self>>: Send,
         // Allows treating "resource_exists_query" as a boxed "dyn QueryFragment<Pg>".
-        FromClause<ResourceTable<ResourceType, Self>>: QueryFragment<Pg> + Send,
+        QueryFromClause<ResourceTable<ResourceType, Self>>: QueryFragment<Pg> + Send,
         QuerySqlType<ResourceTable<ResourceType, Self>>: Send,
 
         // Allows calling ".filter()" on the boxed collection table.
@@ -510,16 +439,6 @@ type SerializedResourcePrimaryKey<ResourceType, C> =
     <ResourcePrimaryKey<ResourceType, C> as diesel::Expression>::SqlType;
 type SerializedResourceForeignKey<ResourceType, C> =
     <ResourceForeignKey<ResourceType, C> as diesel::Expression>::SqlType;
-
-type TableSqlType<T> = <T as AsQuery>::SqlType;
-
-type BoxedQuery<T> = diesel::helper_types::IntoBoxed<'static, T, Pg>;
-type BoxedDslOutput<T> = diesel::internal::table_macro::BoxedSelectStatement<
-    'static,
-    TableSqlType<T>,
-    diesel::internal::table_macro::FromClause<T>,
-    Pg,
->;
 
 /// This implementation uses a CTE which attempts to do the following:
 ///

@@ -13,10 +13,14 @@
 //! - Updates the collection's resource generation number
 //! - Updates the resource row
 
+use super::cte_utils::{
+    BoxableUpdateStatement, BoxedQuery, BoxableTable, ExprSqlType, FilterBy,
+    QueryFromClause, QuerySqlType, TypesAreSame3,
+};
 use super::pool::DbConnection;
 use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager, PoolError};
 use diesel::associations::HasTable;
-use diesel::expression::Expression;
+use diesel::expression::{AsExpression, Expression};
 use diesel::helper_types::*;
 use diesel::pg::Pg;
 use diesel::prelude::*;
@@ -45,10 +49,6 @@ type CollectionIdColumn<ResourceType, C> =
     <C as DatastoreAttachTarget<ResourceType>>::CollectionIdColumn;
 type ResourceIdColumn<ResourceType, C> =
     <C as DatastoreAttachTarget<ResourceType>>::ResourceIdColumn;
-
-/// Trick to check that columns come from the same table
-pub trait TypesAreSame {}
-impl<T> TypesAreSame for (T, T, T) {}
 
 /// Trait to be implemented by structs representing an attachable collection.
 ///
@@ -182,124 +182,66 @@ pub trait DatastoreAttachTarget<ResourceType>: Selectable<Pg> {
             <Self::CollectionIdColumn as Column>::Table,
             <Self::CollectionGenerationColumn as Column>::Table,
             <Self::CollectionTimeDeletedColumn as Column>::Table,
-        ): TypesAreSame,
+        ): TypesAreSame3,
         // Ensure the "resource" columns all belong to the same table.
         (
             <Self::ResourceIdColumn as Column>::Table,
             <Self::ResourceCollectionIdColumn as Column>::Table,
             <Self::ResourceTimeDeletedColumn as Column>::Table,
-        ): TypesAreSame,
+        ): TypesAreSame3,
         Self: Sized,
-        // Enables the "table()" method on the Collection.
-        CollectionTable<ResourceType, Self>: HasTable<Table = CollectionTable<ResourceType, Self>>
-            + 'static
-            + Send
-            + Table
-            // Allows calling ".into_boxed()" on the table.
-            + query_methods::BoxedDsl<
-                'static,
-                Pg,
-                Output = BoxedDslOutput<CollectionTable<ResourceType, Self>>,
-            >,
-        // Enables the "table()" method on the Resource.
-        ResourceTable<ResourceType, Self>: HasTable<Table = ResourceTable<ResourceType, Self>>
-            + 'static
-            + Send
-            + Table
-            // Allows calling ".into_boxed()" on the table.
-            + query_methods::BoxedDsl<
-                'static,
-                Pg,
-                Output = BoxedDslOutput<ResourceTable<ResourceType, Self>>,
-            >,
+
+        // Treat the collection and resource as boxed tables.
+        CollectionTable<ResourceType, Self>: BoxableTable,
+        ResourceTable<ResourceType, Self>: BoxableTable,
+
         // Allows treating "collection_exists_query" as a boxed "dyn QueryFragment<Pg>".
-        <CollectionTable<ResourceType, Self> as QuerySource>::FromClause:
+        QueryFromClause<CollectionTable<ResourceType, Self>>:
             QueryFragment<Pg> + Send,
         // Allows treating "resource_exists_query" as a boxed "dyn QueryFragment<Pg>".
-        <ResourceTable<ResourceType, Self> as QuerySource>::FromClause:
+        QueryFromClause<ResourceTable<ResourceType, Self>>:
             QueryFragment<Pg> + Send,
         // Allows sending "collection_exists_query" between threads.
-        <CollectionTable<ResourceType, Self> as AsQuery>::SqlType: Send,
+        QuerySqlType<CollectionTable<ResourceType, Self>>: Send,
         // Allows sending "resource_exists_query" between threads.
-        <ResourceTable<ResourceType, Self> as AsQuery>::SqlType: Send,
+        QuerySqlType<ResourceTable<ResourceType, Self>>: Send,
         // Allows calling ".filter()" on the boxed collection table.
         BoxedQuery<CollectionTable<ResourceType, Self>>:
-            query_methods::FilterDsl<
-                    Eq<CollectionPrimaryKey<ResourceType, Self>, Self::Id>,
-                    Output = BoxedQuery<CollectionTable<ResourceType, Self>>,
-                    // Filter by time deleted = NULL
-                > + query_methods::FilterDsl<
-                    IsNull<Self::CollectionTimeDeletedColumn>,
-                    Output = BoxedQuery<CollectionTable<ResourceType, Self>>,
-                >,
+            FilterBy<Eq<CollectionPrimaryKey<ResourceType, Self>, Self::Id>> +
+            FilterBy<IsNull<Self::CollectionTimeDeletedColumn>>,
         // Allows calling ".filter()" on the boxed resource table.
-        BoxedQuery<ResourceTable<ResourceType, Self>>: query_methods::FilterDsl<
-                Eq<ResourcePrimaryKey<ResourceType, Self>, Self::Id>,
-                Output = BoxedQuery<ResourceTable<ResourceType, Self>>,
-                // Filter by collection ID (when counting attached resources)
-            > + query_methods::FilterDsl<
-                Eq<Self::ResourceCollectionIdColumn, Self::Id>,
-                Output = BoxedQuery<ResourceTable<ResourceType, Self>>,
-                // Filter by collection ID = NULL
-            > + query_methods::FilterDsl<
-                IsNull<Self::ResourceCollectionIdColumn>,
-                Output = BoxedQuery<ResourceTable<ResourceType, Self>>,
-                // Filter by time deleted = NULL
-            > + query_methods::FilterDsl<
-                IsNull<Self::ResourceTimeDeletedColumn>,
-                Output = BoxedQuery<ResourceTable<ResourceType, Self>>,
-            >,
+        BoxedQuery<ResourceTable<ResourceType, Self>>:
+            FilterBy<Eq<ResourcePrimaryKey<ResourceType, Self>, Self::Id>> +
+            FilterBy<Eq<Self::ResourceCollectionIdColumn, Self::Id>> +
+            FilterBy<IsNull<Self::ResourceCollectionIdColumn>> +
+            FilterBy<IsNull<Self::ResourceTimeDeletedColumn>>,
 
-        // See: "update_resource_statement".
-        //
-        // Allows referencing the default "WHERE" clause of the update
-        // statement.
-        ResourceTable<ResourceType, Self>: IntoUpdateTarget,
         // Allows calling "update.into_boxed()"
         UpdateStatement<
             ResourceTable<ResourceType, Self>,
             ResourceTableWhereClause<ResourceType, Self>,
             V,
-        >: query_methods::BoxedDsl<
-            'static,
-            Pg,
-            Output = BoxedUpdateStatement<
-                'static,
-                Pg,
-                ResourceTable<ResourceType, Self>,
-                V,
-            >,
-        >,
+        >: BoxableUpdateStatement<ResourceTable<ResourceType, Self>, V>,
         // Allows calling
         // ".filter(resource_table().primary_key().eq(resource_id)" on the
         // boxed update statement.
         BoxedUpdateStatement<'static, Pg, ResourceTable<ResourceType, Self>, V>:
-            query_methods::FilterDsl<
-                Eq<ResourcePrimaryKey<ResourceType, Self>, Self::Id>,
-                Output = BoxedUpdateStatement<
-                    'static,
-                    Pg,
-                    ResourceTable<ResourceType, Self>,
-                    V,
-                >,
-            >,
+            FilterBy<Eq<ResourcePrimaryKey<ResourceType, Self>, Self::Id>>,
 
         // Allows using "id" in expressions (e.g. ".eq(...)") with...
-        Self::Id: diesel::expression::AsExpression<
+        Self::Id: AsExpression<
                 // ... The Collection table's PK
                 SerializedCollectionPrimaryKey<ResourceType, Self>,
-            > + diesel::expression::AsExpression<
+            > + AsExpression<
                 // ... The Resource table's PK
                 SerializedResourcePrimaryKey<ResourceType, Self>,
-            > + diesel::expression::AsExpression<
+            > + AsExpression<
                 // ... The Resource table's FK to the Collection table
                 SerializedResourceForeignKey<ResourceType, Self>,
             >,
-        <CollectionPrimaryKey<ResourceType, Self> as Expression>::SqlType:
-            SingleValue,
-        <ResourcePrimaryKey<ResourceType, Self> as Expression>::SqlType:
-            SingleValue,
-        <Self::ResourceCollectionIdColumn as Expression>::SqlType: SingleValue,
+        ExprSqlType<CollectionPrimaryKey<ResourceType, Self>>: SingleValue,
+        ExprSqlType<ResourcePrimaryKey<ResourceType, Self>>: SingleValue,
+        ExprSqlType<Self::ResourceCollectionIdColumn>: SingleValue,
 
         // Allows calling "is_null()" on the following columns.
         Self::CollectionTimeDeletedColumn: ExpressionMethods,
@@ -582,16 +524,6 @@ type SerializedResourcePrimaryKey<ResourceType, C> =
     <ResourcePrimaryKey<ResourceType, C> as diesel::Expression>::SqlType;
 type SerializedResourceForeignKey<ResourceType, C> =
     <ResourceForeignKey<ResourceType, C> as diesel::Expression>::SqlType;
-
-type TableSqlType<T> = <T as AsQuery>::SqlType;
-
-type BoxedQuery<T> = diesel::helper_types::IntoBoxed<'static, T, Pg>;
-type BoxedDslOutput<T> = diesel::internal::table_macro::BoxedSelectStatement<
-    'static,
-    TableSqlType<T>,
-    diesel::internal::table_macro::FromClause<T>,
-    Pg,
->;
 
 /// This implementation uses a CTE which attempts to do the following:
 ///
