@@ -391,6 +391,7 @@ impl ApiResourceWithRolesType for Organization {
 pub enum OrganizationRoles {
     Admin,
     Collaborator,
+    Viewer,
 }
 
 impl db::model::DatabaseString for OrganizationRoles {
@@ -400,6 +401,7 @@ impl db::model::DatabaseString for OrganizationRoles {
         match self {
             OrganizationRoles::Admin => "admin",
             OrganizationRoles::Collaborator => "collaborator",
+            OrganizationRoles::Viewer => "viewer",
         }
     }
 
@@ -407,6 +409,7 @@ impl db::model::DatabaseString for OrganizationRoles {
         match s {
             "admin" => Ok(OrganizationRoles::Admin),
             "collaborator" => Ok(OrganizationRoles::Collaborator),
+            "viewer" => Ok(OrganizationRoles::Viewer),
             _ => Err(anyhow!(
                 "unsupported Organization role from database: {:?}",
                 s
