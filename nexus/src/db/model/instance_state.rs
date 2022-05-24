@@ -25,7 +25,6 @@ impl_enum_wrapper!(
     Migrating => b"migrating"
     Repairing => b"repairing"
     Failed => b"failed"
-    Destroying => b"destroying"
     Destroyed => b"destroyed"
 );
 
@@ -53,7 +52,6 @@ impl From<InstanceState> for sled_agent_client::types::InstanceState {
             Migrating => Output::Migrating,
             Repairing => Output::Repairing,
             Failed => Output::Failed,
-            Destroying => Output::Destroying,
             Destroyed => Output::Destroyed,
         }
     }
