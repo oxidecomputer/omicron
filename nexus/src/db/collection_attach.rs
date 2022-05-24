@@ -14,7 +14,7 @@
 
 use super::cte_utils::{
     BoxableUpdateStatement, BoxedQuery, BoxableTable, ExprSqlType, FilterBy,
-    QueryFromClause, QuerySqlType, TypesAreSame2, TypesAreSame3,
+    QueryFromClause, QuerySqlType
 };
 use super::pool::DbConnection;
 use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager, PoolError};
@@ -112,7 +112,8 @@ pub trait DatastoreAttachTarget<ResourceType>: Selectable<Pg>
 //        AsExpression<SerializedResourceForeignKey<ResourceType, Self>>;
 
     /// The primary key column of the collection.
-    type CollectionIdColumn: Column;
+    type CollectionIdColumn: Column +
+        Expression<SqlType = SerializedCollectionPrimaryKey<ResourceType, Self>>;
 
     /// The time deleted column in the CollectionTable
     type CollectionTimeDeletedColumn: Column<Table = <Self::CollectionIdColumn as Column>::Table> +
@@ -120,13 +121,15 @@ pub trait DatastoreAttachTarget<ResourceType>: Selectable<Pg>
         ExpressionMethods;
 
     /// The primary key column of the resource
-    type ResourceIdColumn: Column;
+    type ResourceIdColumn: Column +
+        Expression<SqlType = SerializedResourcePrimaryKey<ResourceType, Self>>;
 
     /// The column in the resource acting as a foreign key into the Collection
-    type ResourceCollectionIdColumn: Column + Default + ExpressionMethods;
 //    type ResourceCollectionIdColumn: Column<Table = <Self::ResourceIdColumn as Column>::Table> +
-//        Default +
-//        ExpressionMethods;
+    type ResourceCollectionIdColumn: Column +
+        Default +
+//        Expression<SqlType = Nullable<SerializedCollectionPrimaryKey<ResourceType, Self>>> +
+        ExpressionMethods;
 
     /// The time deleted column in the ResourceTable
     type ResourceTimeDeletedColumn: Column<Table = <Self::ResourceIdColumn as Column>::Table> +
@@ -181,17 +184,17 @@ pub trait DatastoreAttachTarget<ResourceType>: Selectable<Pg>
         >,
     ) -> AttachToCollectionStatement<ResourceType, V, Self>
     where
-        // Ensure the "collection" columns all belong to the same table.
-        (
-            <Self::CollectionIdColumn as Column>::Table,
-            <Self::CollectionTimeDeletedColumn as Column>::Table,
-        ): TypesAreSame2,
-        // Ensure the "resource" columns all belong to the same table.
-        (
-            <Self::ResourceIdColumn as Column>::Table,
-            <Self::ResourceCollectionIdColumn as Column>::Table,
-            <Self::ResourceTimeDeletedColumn as Column>::Table,
-        ): TypesAreSame3,
+//        // Ensure the "collection" columns all belong to the same table.
+//        (
+//            <Self::CollectionIdColumn as Column>::Table,
+//            <Self::CollectionTimeDeletedColumn as Column>::Table,
+//        ): TypesAreSame2,
+//        // Ensure the "resource" columns all belong to the same table.
+//        (
+//            <Self::ResourceIdColumn as Column>::Table,
+//            <Self::ResourceCollectionIdColumn as Column>::Table,
+//            <Self::ResourceTimeDeletedColumn as Column>::Table,
+//        ): TypesAreSame3,
         Self: Sized,
 
         // Treat the collection and resource as boxed tables.
@@ -245,11 +248,6 @@ pub trait DatastoreAttachTarget<ResourceType>: Selectable<Pg>
         ExprSqlType<CollectionPrimaryKey<ResourceType, Self>>: SingleValue,
         ExprSqlType<ResourcePrimaryKey<ResourceType, Self>>: SingleValue,
         ExprSqlType<Self::ResourceCollectionIdColumn>: SingleValue,
-
-        // Allows calling "is_null()" on the following columns.
-        Self::CollectionTimeDeletedColumn: ExpressionMethods,
-        Self::ResourceTimeDeletedColumn: ExpressionMethods,
-        Self::ResourceCollectionIdColumn: ExpressionMethods,
 
         // Necessary to actually select the resource in the output type.
         ResourceType: Selectable<Pg>,
