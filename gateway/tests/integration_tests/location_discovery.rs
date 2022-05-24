@@ -28,8 +28,8 @@ async fn discovery_both_locations() {
     // both instances should report the same serial number for switch 0 and
     // switch 1, and it should match the expected values from the config
     for (switch, expected_serial) in [
-        (0, "00010001000100010001000100010001"),
-        (1, "01000100010001000100010001000100"),
+        (0, "00000000000000000000000000000001"),
+        (1, "00000000000000000000000000000002"),
     ] {
         for client in [client0, client1] {
             let url =
