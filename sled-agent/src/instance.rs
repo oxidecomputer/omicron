@@ -643,7 +643,7 @@ impl Instance {
         // Create the propolis zone and resources
         let setup = self.setup_propolis_locked(&mut inner).await?;
 
-        let ws_uri = setup.client.ws_uri_instance_serial_console();
+        let ws_uri = setup.client.instance_serial_console_ws_uri();
 
         // Ensure the instance exists in the Propolis Server before we start
         // using it.

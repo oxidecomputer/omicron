@@ -107,7 +107,9 @@ pub enum UpdateArtifactKind {
 /// Sent to a sled agent to request the contents of an Instance's serial console.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct InstanceSerialConsoleRequest {
-    /// Character index in the serial buffer (since instance boot) from which to read.
+    /// Character index in the serial buffer from which to read.
+    /// - If positive, this is the number of bytes output since instance start.
+    /// - If negative, this indexes backwards from the end of the most recently buffered data.
     pub byte_offset: Option<isize>,
     /// Maximum number of bytes of buffered serial console contents (after byte_offset) to return.
     pub max_bytes: Option<usize>,
@@ -116,6 +118,10 @@ pub struct InstanceSerialConsoleRequest {
 /// Contents of an Instance's serial console buffer.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceSerialConsoleData {
-    pub data: Vec<u8>, // might not be UTF-8.
+    /// The bytes starting from the requested offset up to either the end of the buffer or the
+    /// request's `max_bytes`. Provided as a u8 array rather than a string, as it may not be UTF-8.
+    pub data: Vec<u8>,
+    /// The absolute offset since boot (suitable for use as `byte_offset` in a subsequent request)
+    /// of the last byte returned in `data`.
     pub last_byte_offset: usize,
 }
