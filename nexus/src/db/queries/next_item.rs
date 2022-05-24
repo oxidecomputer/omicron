@@ -72,15 +72,8 @@ use uuid::Uuid;
 /// existing item. That "retry loop" is converted into a sequential scan in the
 /// database for an item that does not conflict.
 ///
-/// There are several other potential issues. One is that, we may wish to skip
-/// certain reserved items. Second, and slightly more subtle, is that the size
-/// of the search space is dependent on the starting point. If we randomly
-/// select a base that's pretty close to the end of the search space, then the
-/// search would be over a much smaller space than if the base is at the start
-/// of the total range.
-///
-/// In its most general form, the `NextItem` query accounts for both of these,
-/// and looks like:
+/// In its most general form, the `NextItem` query accounts for the latter of
+/// these, and looks like:
 ///
 /// ```sql
 /// SELECT
@@ -133,7 +126,10 @@ use uuid::Uuid;
 /// This concept of selecting a base and max/min shift is encapsulated in the
 /// [`ShiftGenerator`] trait. The simplest implementation,
 /// [`DefaultShiftGenerator`], follows the diagram above, search from `base`, to
-/// `base + max_shift`, to `base - min-shift`, to `base - 1`.
+/// `base + max_shift`, to `base - min-shift`, to `base - 1`. Other
+/// `ShiftGenerator` implementations could provide more complex behavior, such
+/// as a deny-list of precluded items, a non-contiguous search space, or other
+/// behavior.
 ///
 /// Scopes
 /// ------
@@ -375,11 +371,13 @@ where
 /// of `self` called `inner`.
 macro_rules! delegate_query_fragment_impl {
     ($parent:ty) => {
-        impl QueryFragment<Pg> for $parent {
+        impl ::diesel::query_builder::QueryFragment<::diesel::pg::Pg>
+            for $parent
+        {
             fn walk_ast<'a>(
                 &'a self,
-                out: AstPass<'_, 'a, Pg>,
-            ) -> diesel::QueryResult<()> {
+                out: ::diesel::query_builder::AstPass<'_, 'a, ::diesel::pg::Pg>,
+            ) -> ::diesel::QueryResult<()> {
                 self.inner.walk_ast(out)
             }
         }
@@ -468,5 +466,184 @@ impl<Item> ShiftGenerator<Item> for DefaultShiftGenerator<Item> {
 
     fn min_shift(&self) -> &i64 {
         &self.min_shift
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::DefaultShiftGenerator;
+    use super::NextItem;
+    use crate::db;
+    use async_bb8_diesel::AsyncRunQueryDsl;
+    use async_bb8_diesel::AsyncSimpleConnection;
+    use chrono::DateTime;
+    use chrono::Utc;
+    use diesel::pg::Pg;
+    use diesel::query_builder::AstPass;
+    use diesel::query_builder::QueryFragment;
+    use diesel::query_builder::QueryId;
+    use diesel::Column;
+    use diesel::Insertable;
+    use diesel::SelectableHelper;
+    use nexus_test_utils::db::test_setup_database;
+    use omicron_test_utils::dev;
+    use std::sync::Arc;
+    use uuid::Uuid;
+
+    table! {
+        test_schema.item (id) {
+            id -> Uuid,
+            value -> Int4,
+            time_deleted -> Nullable<Timestamptz>,
+        }
+    }
+
+    async fn setup_test_schema(pool: &db::Pool) {
+        let connection = pool.pool().get().await.unwrap();
+        (*connection)
+            .batch_execute_async(
+                "CREATE SCHEMA IF NOT EXISTS test_schema; \
+                CREATE TABLE IF NOT EXISTS test_schema.item ( \
+                    id UUID PRIMARY KEY, \
+                    value INT4 NOT NULL, \
+                    time_deleted TIMESTAMPTZ \
+                ); \
+                TRUNCATE test_schema.item; \
+                CREATE UNIQUE INDEX ON test_schema.item (value) WHERE time_deleted IS NULL; \
+            ")
+            .await
+            .unwrap()
+    }
+
+    // Describes an item to be allocated with a NextItem query
+    #[derive(Queryable, Debug, Insertable, Selectable, Clone)]
+    #[diesel(table_name = item)]
+    struct Item {
+        id: Uuid,
+        value: i32,
+        time_deleted: Option<DateTime<Utc>>,
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct NextItemQuery {
+        inner: NextItem<item::dsl::item, i32, item::dsl::value>,
+    }
+
+    // These implementations are needed to actually allow inserting the results
+    // of the `NextItemQuery` itself.
+    impl NextItemQuery {
+        fn new(generator: DefaultShiftGenerator<i32>) -> Self {
+            Self { inner: NextItem::new_unscoped(generator) }
+        }
+    }
+
+    delegate_query_fragment_impl!(NextItemQuery);
+
+    impl QueryId for NextItemQuery {
+        type QueryId = ();
+        const HAS_STATIC_QUERY_ID: bool = false;
+    }
+
+    impl Insertable<item::table> for NextItemQuery {
+        type Values = NextItemQueryValues;
+        fn values(self) -> Self::Values {
+            NextItemQueryValues(self)
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    struct NextItemQueryValues(NextItemQuery);
+
+    impl QueryId for NextItemQueryValues {
+        type QueryId = ();
+        const HAS_STATIC_QUERY_ID: bool = false;
+    }
+
+    impl diesel::insertable::CanInsertInSingleQuery<Pg> for NextItemQueryValues {
+        fn rows_to_insert(&self) -> Option<usize> {
+            Some(1)
+        }
+    }
+
+    impl QueryFragment<Pg> for NextItemQueryValues {
+        fn walk_ast<'a>(
+            &'a self,
+            mut out: AstPass<'_, 'a, Pg>,
+        ) -> diesel::QueryResult<()> {
+            out.push_sql("(");
+            out.push_identifier(item::dsl::id::NAME)?;
+            out.push_sql(", ");
+            out.push_identifier(item::dsl::value::NAME)?;
+            out.push_sql(", ");
+            out.push_identifier(item::dsl::time_deleted::NAME)?;
+            out.push_sql(") VALUES (gen_random_uuid(), (");
+            self.0.walk_ast(out.reborrow())?;
+            out.push_sql("), NULL)");
+            Ok(())
+        }
+    }
+
+    // Test that we correctly insert the next available item
+    #[tokio::test]
+    async fn test_wrapping_next_item_query() {
+        // Setup the test database
+        let logctx = dev::test_setup_log("test_wrapping_next_item_query");
+        let log = logctx.log.new(o!());
+        let mut db = test_setup_database(&log).await;
+        let cfg = crate::db::Config { url: db.pg_config().clone() };
+        let pool = Arc::new(crate::db::Pool::new(&cfg));
+
+        // We're going to operate on a separate table, for simplicity.
+        setup_test_schema(&pool).await;
+
+        // We'll first insert an item at 0.
+        //
+        // This generator should start at 0, and then select over the range [0,
+        // 10], wrapping back to 0.
+        let generator =
+            DefaultShiftGenerator { base: 0, max_shift: 10, min_shift: 0 };
+        let query = NextItemQuery::new(generator);
+        let it = diesel::insert_into(item::dsl::item)
+            .values(query)
+            .returning(Item::as_returning())
+            .get_result_async(pool.pool())
+            .await
+            .unwrap();
+        assert_eq!(it.value, 0);
+
+        // Insert the same query again, which should give us 1 now.
+        let it = diesel::insert_into(item::dsl::item)
+            .values(query)
+            .returning(Item::as_returning())
+            .get_result_async(pool.pool())
+            .await
+            .unwrap();
+        assert_eq!(it.value, 1);
+
+        // Insert 10, and guarantee that we get it back.
+        let generator =
+            DefaultShiftGenerator { base: 10, max_shift: 0, min_shift: -10 };
+        let query = NextItemQuery::new(generator);
+        let it = diesel::insert_into(item::dsl::item)
+            .values(query)
+            .returning(Item::as_returning())
+            .get_result_async(pool.pool())
+            .await
+            .unwrap();
+        assert_eq!(it.value, 10);
+
+        // Now, insert the same query again. Since 0, 1, and 10 are all
+        // allocated, we should wrap around and insert 2.
+        let it = diesel::insert_into(item::dsl::item)
+            .values(query)
+            .returning(Item::as_returning())
+            .get_result_async(pool.pool())
+            .await
+            .unwrap();
+        assert_eq!(it.value, 2);
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
     }
 }
