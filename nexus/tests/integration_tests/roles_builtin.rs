@@ -34,6 +34,7 @@ async fn test_roles_builtin(cptestctx: &ControlPlaneTestContext) {
         ("fleet.viewer", "Fleet Viewer"),
         ("organization.admin", "Organization Administrator"),
         ("organization.collaborator", "Organization Collaborator"),
+        ("organization.viewer", "Organization Viewer"),
         ("project.admin", "Project Administrator"),
         ("project.collaborator", "Project Collaborator"),
         ("project.viewer", "Project Viewer"),
