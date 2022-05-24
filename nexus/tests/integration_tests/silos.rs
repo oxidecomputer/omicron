@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::collections::HashSet;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::SamlIdentityProvider;
@@ -159,14 +160,13 @@ async fn test_listing_identity_providers(cptestctx: &ControlPlaneTestContext) {
 
     assert_eq!(providers.len(), 0);
 
-    /*
-
     // Add some providers
     let saml_idp_descriptor = SAML_IDP_DESCRIPTOR;
 
     let server = Server::run();
     server.expect(
         Expectation::matching(request::method_path("GET", "/descriptor"))
+            .times(1..)
             .respond_with(status_code(200).body(saml_idp_descriptor)),
     );
 
@@ -227,9 +227,10 @@ async fn test_listing_identity_providers(cptestctx: &ControlPlaneTestContext) {
     ).await.items;
 
     assert_eq!(providers.len(), 2);
-    assert_eq!(providers[0].name, silo_saml_idp_1.identity.name);
-    assert_eq!(providers[1].name, silo_saml_idp_2.identity.name);
-    */
+
+    let provider_name_set = providers.into_iter().map(|x| x.identity.name).collect::<HashSet<_>>();
+    assert!(provider_name_set.contains(&silo_saml_idp_1.identity.name));
+    assert!(provider_name_set.contains(&silo_saml_idp_2.identity.name));
 }
 
 // Valid SAML IdP entity descriptor from https://en.wikipedia.org/wiki/SAML_metadata#Identity_provider_metadata
