@@ -28,6 +28,7 @@ use diesel::query_dsl::methods as query_methods;
 use diesel::query_source::Table;
 use diesel::sql_types::{BigInt, Nullable, SingleValue};
 use std::fmt::Debug;
+use uuid::Uuid;
 
 /// The table representing the collection. The resource references
 /// this table.
@@ -38,7 +39,7 @@ type CollectionTable<ResourceType, C> = <<C as DatastoreAttachTarget<
 /// ID acting as a foreign key into the collection table.
 type ResourceTable<ResourceType, C> = <<C as DatastoreAttachTarget<
     ResourceType,
->>::ResourceCollectionIdColumn as Column>::Table;
+>>::ResourceIdColumn as Column>::Table;
 /// The default WHERE clause of the resource table.
 type ResourceTableWhereClause<ResourceType, C> =
     <ResourceTable<ResourceType, C> as IntoUpdateTarget>::WhereClause;
@@ -97,23 +98,32 @@ type ResourceIdColumn<ResourceType, C> =
 ///     type ResourceTimeDeletedColumn = disk::dsl::time_deleted;
 /// }
 /// ```
-pub trait DatastoreAttachTarget<ResourceType>: Selectable<Pg>
-// where
-//    <<Self::ResourceCollectionIdColumn as Column>::Table as Table>::PrimaryKey: diesel::sql_types::SqlType,
+pub trait DatastoreAttachTarget<ResourceType>: Selectable<Pg> + Sized
+//    Uuid: AsExpression<SerializedCollectionPrimaryKey<ResourceType, Self>>,
+//    SerializedCollectionPrimaryKey<ResourceType, Self>: diesel::sql_types::SqlType,
+//    <<<Self::CollectionIdColumn as Column>::Table as Table>::PrimaryKey as Expression>::SqlType: diesel::sql_types::SqlType,
 //where
 //    ExprSqlType<CollectionPrimaryKey<ResourceType, Self>>: SingleValue,
 //    ExprSqlType<ResourcePrimaryKey<ResourceType, Self>>: SingleValue,
 //    ExprSqlType<Self::ResourceCollectionIdColumn>: SingleValue,
 {
+
+    type SerializedId: Copy + Debug + Send + 'static + SingleValue + diesel::sql_types::SqlType;
+
     /// The Rust type of the collection and resource ids (typically Uuid).
-    type Id: Copy + Debug + PartialEq + Send + 'static;
-//        AsExpression<SerializedCollectionPrimaryKey<ResourceType, Self>> +
+    type Id: Copy + Debug + PartialEq + Send + 'static +
+//        <<Self::CollectionIdColumn as Column>::Table as Table>::PrimaryKey: diesel::sql_types::SqlType;
+//        AsExpression<Nullable<Self::SerializedId>> +
+        AsExpression<Self::SerializedId>;
+//        AsExpression<SerializedCollectionPrimaryKey<ResourceType, Self>>;
 //        AsExpression<SerializedResourcePrimaryKey<ResourceType, Self>> +
 //        AsExpression<SerializedResourceForeignKey<ResourceType, Self>>;
 
     /// The primary key column of the collection.
     type CollectionIdColumn: Column +
-        Expression<SqlType = SerializedCollectionPrimaryKey<ResourceType, Self>>;
+        Expression<SqlType = Self::SerializedId> +
+        ExpressionMethods;
+//        <<Self::CollectionIdColumn as Column>::Table as Table>::PrimaryKey: diesel::sql_types::SqlType;
 
     /// The time deleted column in the CollectionTable
     type CollectionTimeDeletedColumn: Column<Table = <Self::CollectionIdColumn as Column>::Table> +
@@ -122,13 +132,13 @@ pub trait DatastoreAttachTarget<ResourceType>: Selectable<Pg>
 
     /// The primary key column of the resource
     type ResourceIdColumn: Column +
-        Expression<SqlType = SerializedResourcePrimaryKey<ResourceType, Self>>;
+        Expression<SqlType = Self::SerializedId> +
+        ExpressionMethods;
 
     /// The column in the resource acting as a foreign key into the Collection
-//    type ResourceCollectionIdColumn: Column<Table = <Self::ResourceIdColumn as Column>::Table> +
-    type ResourceCollectionIdColumn: Column +
+    type ResourceCollectionIdColumn: Column<Table = <Self::ResourceIdColumn as Column>::Table> +
         Default +
-//        Expression<SqlType = Nullable<SerializedCollectionPrimaryKey<ResourceType, Self>>> +
+//        Expression<SqlType = Nullable<Self::SerializedId>> +
         ExpressionMethods;
 
     /// The time deleted column in the ResourceTable
@@ -195,7 +205,6 @@ pub trait DatastoreAttachTarget<ResourceType>: Selectable<Pg>
 //            <Self::ResourceCollectionIdColumn as Column>::Table,
 //            <Self::ResourceTimeDeletedColumn as Column>::Table,
 //        ): TypesAreSame3,
-        Self: Sized,
 
         // Treat the collection and resource as boxed tables.
         CollectionTable<ResourceType, Self>: BoxableTable,
@@ -235,13 +244,16 @@ pub trait DatastoreAttachTarget<ResourceType>: Selectable<Pg>
             FilterBy<Eq<ResourcePrimaryKey<ResourceType, Self>, Self::Id>>,
 
         // Allows using "id" in expressions (e.g. ".eq(...)") with...
-        Self::Id: AsExpression<
+        Self::Id:
+            AsExpression<
                 // ... The Collection table's PK
                 SerializedCollectionPrimaryKey<ResourceType, Self>,
-            > + AsExpression<
+            > +
+            AsExpression<
                 // ... The Resource table's PK
                 SerializedResourcePrimaryKey<ResourceType, Self>,
-            > + AsExpression<
+            > +
+            AsExpression<
                 // ... The Resource table's FK to the Collection table
                 SerializedResourceForeignKey<ResourceType, Self>,
             >,

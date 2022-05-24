@@ -28,6 +28,7 @@ use diesel::query_dsl::methods as query_methods;
 use diesel::query_source::Table;
 use diesel::sql_types::{Nullable, SingleValue};
 use std::fmt::Debug;
+use uuid::Uuid;
 
 /// The table representing the collection. The resource references
 /// this table.
@@ -56,7 +57,7 @@ type ResourceIdColumn<ResourceType, C> =
 ///
 /// A blanket implementation is provided for traits that implement
 /// [`DatastoreAttachTarget`].
-pub trait DatastoreDetachTarget<ResourceType>: Selectable<Pg> {
+pub trait DatastoreDetachTarget<ResourceType>: Selectable<Pg> + Sized {
     /// The Rust type of the collection and resource ids (typically Uuid).
     type Id: Copy + Debug + PartialEq + Send + 'static;
 
@@ -128,7 +129,6 @@ pub trait DatastoreDetachTarget<ResourceType>: Selectable<Pg> {
             <Self::ResourceCollectionIdColumn as Column>::Table,
             <Self::ResourceTimeDeletedColumn as Column>::Table,
         ): TypesAreSame3,
-        Self: Sized,
 
         // Treat the collection and resource as boxed tables.
         CollectionTable<ResourceType, Self>: BoxableTable,
