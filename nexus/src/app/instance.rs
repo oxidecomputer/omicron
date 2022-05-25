@@ -153,7 +153,7 @@ impl super::Nexus {
 
     // This operation may only occur on stopped instances, which implies that
     // the attached disks do not have any running "upstairs" process running
-    // within the Sled Agent.
+    // within the sled.
     pub async fn project_destroy_instance(
         &self,
         opctx: &OpContext,
@@ -164,7 +164,7 @@ impl super::Nexus {
         // TODO-robustness We need to figure out what to do with Destroyed
         // instances?  Presumably we need to clean them up at some point, but
         // not right away so that callers can see that they've been destroyed.
-        let (.., authz_instance, _db_instance) =
+        let (.., authz_instance, _) =
             LookupPath::new(opctx, &self.db_datastore)
                 .organization_name(organization_name)
                 .project_name(project_name)
@@ -581,14 +581,14 @@ impl super::Nexus {
         instance_name: &Name,
         disk_name: &Name,
     ) -> UpdateResult<db::model::Disk> {
-        let (.., authz_project, authz_disk, _db_disk) =
+        let (.., authz_project, authz_disk, _) =
             LookupPath::new(opctx, &self.db_datastore)
                 .organization_name(organization_name)
                 .project_name(project_name)
                 .disk_name(disk_name)
                 .fetch()
                 .await?;
-        let (.., authz_instance, _db_instance) =
+        let (.., authz_instance, _) =
             LookupPath::new(opctx, &self.db_datastore)
                 .project_id(authz_project.id())
                 .instance_name(instance_name)
