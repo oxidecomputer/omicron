@@ -68,7 +68,6 @@ lazy_static! {
     /// Internal user used by Nexus when authenticating external requests
     pub static ref USER_EXTERNAL_AUTHN: UserBuiltinConfig =
         UserBuiltinConfig::new_static(
-            // "3a8a" looks a bit like "saga".
             "001de000-05e4-4000-8000-000000000003",
             "external-authn",
             "used by Nexus when authenticating external requests",
