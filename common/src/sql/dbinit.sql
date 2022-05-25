@@ -340,9 +340,6 @@ CREATE TABLE omicron.public.instance (
     /* user data for instance initialization systems (e.g. cloud-init) */
     user_data BYTES NOT NULL,
 
-    /* child resource generation number, per RFD 192 */
-    rcgen INT NOT NULL,
-
     /*
      * TODO Would it make sense for the runtime state to live in a separate
      * table?

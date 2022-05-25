@@ -151,17 +151,9 @@ impl super::Nexus {
         Ok(db_instance)
     }
 
-    // TODO-correctness It's not totally clear what the semantics and behavior
-    // should be here.  It might be nice to say that you can only do this
-    // operation if the Instance is already stopped, in which case we can
-    // execute this immediately by just removing it from the database, with the
-    // same race we have with disk delete (i.e., if someone else is requesting
-    // an instance boot, we may wind up in an inconsistent state).  On the other
-    // hand, we could always allow this operation, issue the request to the SA
-    // to destroy the instance (not just stop it), and proceed with deletion
-    // when that finishes.  But in that case, although the HTTP DELETE request
-    // completed, the object will still appear for a little while, which kind of
-    // sucks.
+    // This operation may only occur on stopped instances, which implies that
+    // the attached disks do not have any running "upstairs" process running
+    // within the Sled Agent.
     pub async fn project_destroy_instance(
         &self,
         opctx: &OpContext,
@@ -172,57 +164,13 @@ impl super::Nexus {
         // TODO-robustness We need to figure out what to do with Destroyed
         // instances?  Presumably we need to clean them up at some point, but
         // not right away so that callers can see that they've been destroyed.
-        let (.., authz_instance, db_instance) =
+        let (.., authz_instance, _db_instance) =
             LookupPath::new(opctx, &self.db_datastore)
                 .organization_name(organization_name)
                 .project_name(project_name)
                 .instance_name(instance_name)
                 .fetch()
                 .await?;
-
-        opctx.authorize(authz::Action::Delete, &authz_instance).await?;
-
-        match db_instance.runtime_state.state.state() {
-            InstanceState::Stopped | InstanceState::Failed => {
-                // ok
-            }
-
-            state => {
-                return Err(Error::InvalidRequest {
-                    message: format!(
-                        "instance cannot be deleted in state \"{}\"",
-                        state,
-                    ),
-                });
-            }
-        }
-
-        // Detach all attached disks
-        let disks = self
-            .instance_list_disks(
-                opctx,
-                organization_name,
-                project_name,
-                instance_name,
-                &DataPageParams {
-                    marker: None,
-                    direction: dropshot::PaginationOrder::Ascending,
-                    limit: std::num::NonZeroU32::new(MAX_DISKS_PER_INSTANCE)
-                        .unwrap(),
-                },
-            )
-            .await?;
-
-        for disk in &disks {
-            self.instance_detach_disk(
-                opctx,
-                organization_name,
-                project_name,
-                instance_name,
-                &disk.name(),
-            )
-            .await?;
-        }
 
         self.db_datastore.project_delete_instance(opctx, &authz_instance).await
     }
@@ -578,7 +526,7 @@ impl super::Nexus {
 
     /// Attach a disk to an instance.
     pub async fn instance_attach_disk(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
@@ -614,7 +562,7 @@ impl super::Nexus {
         //   - Update the disk state in the DB to "Attached".
         let (_instance, disk) = self
             .db_datastore
-            .disk_attach(
+            .instance_attach_disk(
                 &opctx,
                 &authz_instance,
                 &authz_disk,
@@ -662,7 +610,7 @@ impl super::Nexus {
         //   - Update the disk state in the DB to "Detached".
         let disk = self
             .db_datastore
-            .disk_detach(&opctx, &authz_instance, &authz_disk)
+            .instance_detach_disk(&opctx, &authz_instance, &authz_disk)
             .await?;
         Ok(disk)
     }

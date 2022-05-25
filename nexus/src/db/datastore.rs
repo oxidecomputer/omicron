@@ -30,6 +30,9 @@ use crate::authz::{self, ApiResource};
 use crate::context::OpContext;
 use crate::db::collection_attach::{AttachError, DatastoreAttachTarget};
 use crate::db::collection_detach::{DatastoreDetachTarget, DetachError};
+use crate::db::collection_detach_many::{
+    DatastoreDetachManyTarget, DetachManyError,
+};
 use crate::db::fixed_data::role_assignment::BUILTIN_ROLE_ASSIGNMENTS;
 use crate::db::fixed_data::role_builtin::BUILTIN_ROLES;
 use crate::db::fixed_data::silo::{DEFAULT_SILO, SILO_ID};
@@ -997,47 +1000,65 @@ impl DataStore {
         // This is subject to change, but for now we're going to say that an
         // instance must be "stopped" or "failed" in order to delete it.  The
         // delete operation sets "time_deleted" (just like with other objects)
-        // and also sets the state to "destroyed".  By virtue of being
-        // "stopped", we assume there are no dependencies on this instance
-        // (e.g., disk attachments).  If that changes, we'll want to check for
-        // such dependencies here.
+        // and also sets the state to "destroyed".
         use api::external::InstanceState as ApiInstanceState;
         use db::model::InstanceState as DbInstanceState;
-        use db::schema::instance::dsl;
+        use db::schema::{disk, instance};
 
-        let now = Utc::now();
-
-        let destroyed = DbInstanceState::new(ApiInstanceState::Destroyed);
         let stopped = DbInstanceState::new(ApiInstanceState::Stopped);
         let failed = DbInstanceState::new(ApiInstanceState::Failed);
+        let destroyed = DbInstanceState::new(ApiInstanceState::Destroyed);
+        let ok_to_delete_instance_states = vec![stopped, failed];
 
-        let instance_id = authz_instance.id();
-        let result = diesel::update(dsl::instance)
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(instance_id))
-            .filter(dsl::state.eq_any(vec![stopped, failed]))
-            .set((dsl::state.eq(destroyed), dsl::time_deleted.eq(now)))
-            .check_if_exists::<Instance>(instance_id)
-            .execute_and_check(self.pool())
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByResource(authz_instance),
-                )
-            })?;
+        let detached_label = api::external::DiskState::Detached.label();
+        let ok_to_detach_disk_states =
+            vec![api::external::DiskState::Attached(authz_instance.id())];
+        let ok_to_detach_disk_state_labels: Vec<_> =
+            ok_to_detach_disk_states.iter().map(|s| s.label()).collect();
 
-        match result.status {
-            UpdateStatus::Updated => Ok(()),
-            UpdateStatus::NotUpdatedButExists => {
-                return Err(Error::InvalidRequest {
-                    message: format!(
+        let _instance = Instance::detach_resources(
+            authz_instance.id(),
+            instance::table.into_boxed().filter(
+                instance::dsl::state.eq_any(ok_to_delete_instance_states),
+            ),
+            disk::table.into_boxed().filter(
+                disk::dsl::disk_state.eq_any(ok_to_detach_disk_state_labels),
+            ),
+            diesel::update(instance::dsl::instance).set((
+                instance::dsl::state.eq(destroyed),
+                instance::dsl::time_deleted.eq(Utc::now()),
+            )),
+            diesel::update(disk::dsl::disk).set((
+                disk::dsl::disk_state.eq(detached_label),
+                disk::dsl::attach_instance_id.eq(Option::<Uuid>::None),
+            )),
+        )
+        .detach_and_get_result_async(self.pool_authorized(opctx).await?)
+        .await
+        .map_err(|e| match e {
+            DetachManyError::CollectionNotFound => Error::not_found_by_id(
+                ResourceType::Instance,
+                &authz_instance.id(),
+            ),
+            DetachManyError::NoUpdate { collection } => {
+                let instance_state = collection.runtime_state.state.state();
+                match instance_state {
+                    api::external::InstanceState::Stopped
+                    | api::external::InstanceState::Failed => {
+                        Error::internal_error("cannot delete instance")
+                    }
+                    _ => Error::invalid_request(&format!(
                         "instance cannot be deleted in state \"{}\"",
-                        result.found.runtime_state.state.state()
-                    ),
-                });
+                        instance_state,
+                    )),
+                }
             }
-        }
+            DetachManyError::DatabaseError(e) => {
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            }
+        })?;
+
+        Ok(())
     }
 
     // Disks
@@ -1117,7 +1138,7 @@ impl DataStore {
     /// - Exist
     /// - Are in valid states
     /// - Are under the maximum "attach count" threshold
-    pub async fn disk_attach(
+    pub async fn instance_attach_disk(
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
@@ -1254,7 +1275,7 @@ impl DataStore {
         Ok((instance, disk))
     }
 
-    pub async fn disk_detach(
+    pub async fn instance_detach_disk(
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,

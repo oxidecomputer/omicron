@@ -307,15 +307,15 @@ where
 
 /// Result of [`DetachManyFromCollectionStatement`] when executed asynchronously
 pub type AsyncDetachManyFromCollectionResult<C> =
-    Result<C, DetachError<C, PoolError>>;
+    Result<C, DetachManyError<C, PoolError>>;
 
 /// Result of [`DetachManyFromCollectionStatement`] when executed synchronously
 pub type SyncDetachManyFromCollectionResult<C> =
-    Result<C, DetachError<C, diesel::result::Error>>;
+    Result<C, DetachManyError<C, diesel::result::Error>>;
 
 /// Errors returned by [`DetachManyFromCollectionStatement`].
 #[derive(Debug)]
-pub enum DetachError<C, E> {
+pub enum DetachManyError<C, E> {
     /// The collection that the query was removing from does not exist
     CollectionNotFound,
     /// Although the collection exists, the update did not occur
@@ -354,7 +354,7 @@ where
         self.get_result_async::<RawOutput<C>>(pool)
             .await
             // If the database returns an error, propagate it right away.
-            .map_err(DetachError::DatabaseError)
+            .map_err(DetachManyError::DatabaseError)
             // Otherwise, parse the output to determine if the CTE succeeded.
             .and_then(Self::parse_result)
     }
@@ -369,19 +369,21 @@ where
         Self: query_methods::LoadQuery<'static, DbConnection, RawOutput<C>>,
     {
         self.get_result::<RawOutput<C>>(conn)
-            .map_err(DetachError::DatabaseError)
+            .map_err(DetachManyError::DatabaseError)
             .and_then(Self::parse_result)
     }
 
-    fn parse_result<E>(result: RawOutput<C>) -> Result<C, DetachError<C, E>> {
+    fn parse_result<E>(
+        result: RawOutput<C>,
+    ) -> Result<C, DetachManyError<C, E>> {
         let (_, collection_before_update, collection_after_update) = result;
 
         let collection_before_update = collection_before_update
-            .ok_or_else(|| DetachError::CollectionNotFound)?;
+            .ok_or_else(|| DetachManyError::CollectionNotFound)?;
 
         match collection_after_update {
             Some(collection) => Ok(collection),
-            None => Err(DetachError::NoUpdate {
+            None => Err(DetachManyError::NoUpdate {
                 collection: collection_before_update,
             }),
         }
@@ -478,7 +480,7 @@ impl<ResourceType, VC, VR, C> QueryFragment<Pg>
 where
     ResourceType: Selectable<Pg>,
     C: DatastoreDetachManyTarget<ResourceType>,
-    CollectionPrimaryKey<ResourceType, C>: diesel::Column,
+    ResourcePrimaryKey<ResourceType, C>: diesel::Column,
     // Necessary to "walk_ast" over "self.update_collection_statement".
     BoxedUpdateStatement<'static, Pg, CollectionTable<ResourceType, C>, VC>:
         QueryFragment<Pg>,
@@ -518,14 +520,13 @@ where
         out.push_sql("updated_resource AS (");
         self.update_resource_statement.walk_ast(out.reborrow())?;
         // NOTE: It is safe to start with "AND" - we forced the update statement
-        // to have a WHERE claustime deleted column.
-        //
-        // TODO TODO TODO : WE NEED TO FIX THIS.
-        // - Use the actual name of "id"
-        out.push_sql(" AND (id IN (SELECT id FROM resource_info))");
-        out.push_sql(" AND (SELECT * FROM do_update)");
-        out.push_sql(" RETURNING 1");
-        out.push_sql(") ");
+        // to have a WHERE clause on the time deleted column.
+        out.push_sql(" AND (");
+        out.push_identifier(ResourcePrimaryKey::<ResourceType, C>::NAME)?;
+        out.push_sql(" IN (SELECT ");
+        out.push_identifier(ResourcePrimaryKey::<ResourceType, C>::NAME)?;
+        out.push_sql(" FROM resource_info))");
+        out.push_sql(" AND (SELECT * FROM do_update) RETURNING 1) ");
 
         // Why do all these LEFT JOINs here? In short, to ensure that we are
         // always returning a constant number of columns.
@@ -559,7 +560,7 @@ where
 
 #[cfg(test)]
 mod test {
-    use super::{DatastoreDetachManyTarget, DetachError};
+    use super::{DatastoreDetachManyTarget, DetachManyError};
     use crate::db::collection_attach::DatastoreAttachTarget;
     use crate::db::{
         self, error::TransactionError, identity::Resource as IdentityResource,
@@ -836,7 +837,7 @@ mod test {
                 WHERE \
                     ((\"test_schema\".\"resource\".\"time_deleted\" IS NULL) AND \
                      (\"test_schema\".\"resource\".\"collection_id\" = $7)) AND \
-                    (id IN (SELECT id FROM resource_info)) AND \
+                    (\"id\" IN (SELECT \"id\" FROM resource_info)) AND \
                     (SELECT * FROM do_update) \
                 RETURNING 1\
             ) \
@@ -871,7 +872,7 @@ mod test {
         .detach_and_get_result_async(pool.pool())
         .await;
 
-        assert!(matches!(detach, Err(DetachError::CollectionNotFound)));
+        assert!(matches!(detach, Err(DetachManyError::CollectionNotFound)));
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
@@ -991,13 +992,14 @@ mod test {
                 .set(resource::dsl::collection_id.eq(Option::<Uuid>::None)),
         );
 
-        type TxnError =
-            TransactionError<DetachError<Collection, diesel::result::Error>>;
+        type TxnError = TransactionError<
+            DetachManyError<Collection, diesel::result::Error>,
+        >;
         let result = pool
             .pool()
             .transaction(move |conn| {
                 detach_query.detach_and_get_result(conn).map_err(|e| match e {
-                    DetachError::DatabaseError(e) => TxnError::from(e),
+                    DetachManyError::DatabaseError(e) => TxnError::from(e),
                     e => TxnError::CustomError(e),
                 })
             })
@@ -1109,7 +1111,7 @@ mod test {
         // A caller should be able to inspect this result; the collection
         // exists but has a different name than requested.
         match err {
-            DetachError::NoUpdate { collection } => {
+            DetachManyError::NoUpdate { collection } => {
                 assert_eq!(
                     collection,
                     get_collection(collection_id, &pool).await

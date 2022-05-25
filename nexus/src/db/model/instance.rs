@@ -28,9 +28,6 @@ pub struct Instance {
     /// user data for instance initialization systems (e.g. cloud-init)
     pub user_data: Vec<u8>,
 
-    /// Child Resource generation number
-    pub rcgen: Generation,
-
     /// runtime state of the Instance
     #[diesel(embed)]
     pub runtime_state: InstanceRuntimeState,
@@ -49,7 +46,6 @@ impl Instance {
             identity,
             project_id,
             user_data: params.user_data.clone(),
-            rcgen: Generation::new(),
             runtime_state: runtime,
         }
     }
