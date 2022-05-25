@@ -2743,7 +2743,7 @@ impl DataStore {
         authz_silo: &authz::Silo,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<IdentityProvider> {
-        opctx.authorize(authz::Action::ListChildren, authz_silo).await?;
+        opctx.authorize(authz::Action::ListIdentityProviders, authz_silo).await?;
 
         use db::schema::identity_provider::dsl;
         paginated(dsl::identity_provider, dsl::name, pagparams)

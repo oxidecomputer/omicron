@@ -3843,9 +3843,9 @@ impl Nexus {
         silo_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::IdentityProvider> {
-        let (.., authz_silo) = LookupPath::new(opctx, &self.db_datastore)
+        let (authz_silo, ..) = LookupPath::new(opctx, &self.db_datastore)
             .silo_name(silo_name)
-            .lookup_for(authz::Action::ListChildren)
+            .fetch()
             .await?;
         self.db_datastore.identity_provider_list(opctx, &authz_silo, pagparams).await
     }

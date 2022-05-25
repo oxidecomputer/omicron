@@ -134,16 +134,19 @@ resource Silo {
 	    "modify",
 	    "read",
 	    "create_child",
+	    "list_identity_providers",
 	];
 	roles = [ "admin", "collaborator", "viewer" ];
 
 	"list_children" if "viewer";
 	"read" if "viewer";
+	"list_identity_providers" if "viewer";
 
 	"viewer" if "collaborator";
 	"create_child" if "collaborator";
 	"collaborator" if "admin";
 	"modify" if "admin";
+
 	relations = { parent_fleet: Fleet };
 	"admin" if "admin" on "parent_fleet";
 	"collaborator" if "collaborator" on "parent_fleet";
@@ -151,7 +154,8 @@ resource Silo {
 }
 has_relation(fleet: Fleet, "parent_fleet", silo: Silo)
 	if silo.fleet = fleet;
-# Users can see their own silo! This includes USER_TEST_UNPRIVILEGED
+# Users can see their own silo! This includes users without any other
+# roles
 has_role(actor: AuthenticatedActor, "viewer", silo: Silo)
 	if actor.silo = silo;
 
