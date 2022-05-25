@@ -14,7 +14,7 @@
 
 use super::cte_utils::{
     BoxableTable, BoxableUpdateStatement, BoxedQuery, ExprSqlType, FilterBy,
-    QueryFromClause, QuerySqlType,
+    QueryFromClause, QuerySqlType, TableDefaultWhereClause,
 };
 use super::pool::DbConnection;
 use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager, PoolError};
@@ -29,39 +29,53 @@ use diesel::query_source::Table;
 use diesel::sql_types::{BigInt, Nullable, SingleValue};
 use std::fmt::Debug;
 
-/// The table representing the collection. The resource references
-/// this table.
-type CollectionTable<ResourceType, C> = <<C as DatastoreAttachTarget<
-    ResourceType,
->>::CollectionIdColumn as Column>::Table;
-/// The table representing the resource. This table contains an
-/// ID acting as a foreign key into the collection table.
-type ResourceTable<ResourceType, C> = <<C as DatastoreAttachTarget<
-    ResourceType,
->>::ResourceIdColumn as Column>::Table;
-/// The default WHERE clause of the resource table.
-type ResourceTableWhereClause<ResourceType, C> =
-    <ResourceTable<ResourceType, C> as IntoUpdateTarget>::WhereClause;
-type CollectionIdColumn<ResourceType, C> =
-    <C as DatastoreAttachTarget<ResourceType>>::CollectionIdColumn;
-type ResourceIdColumn<ResourceType, C> =
-    <C as DatastoreAttachTarget<ResourceType>>::ResourceIdColumn;
+/// A collection of type aliases particularly relevant to collection-based CTEs.
+pub(crate) mod aliases {
+    use super::{
+        Column, DatastoreAttachTarget, Table, TableDefaultWhereClause,
+    };
 
-// Representation of Primary Key in Rust.
-type CollectionPrimaryKey<ResourceType, C> =
-    <CollectionTable<ResourceType, C> as Table>::PrimaryKey;
-type ResourcePrimaryKey<ResourceType, C> =
-    <ResourceTable<ResourceType, C> as Table>::PrimaryKey;
-type ResourceForeignKey<ResourceType, C> =
-    <C as DatastoreAttachTarget<ResourceType>>::ResourceCollectionIdColumn;
+    /// The table representing the collection. The resource references
+    /// this table.
+    pub type CollectionTable<ResourceType, C> = <<C as DatastoreAttachTarget<
+        ResourceType,
+    >>::CollectionIdColumn as Column>::Table;
+    /// The table representing the resource. This table contains an
+    /// ID acting as a foreign key into the collection table.
+    pub type ResourceTable<ResourceType, C> = <<C as DatastoreAttachTarget<
+        ResourceType,
+    >>::ResourceIdColumn as Column>::Table;
 
-// Representation of Primary Key in SQL.
-type SerializedCollectionPrimaryKey<ResourceType, C> =
-    <CollectionPrimaryKey<ResourceType, C> as diesel::Expression>::SqlType;
-type SerializedResourcePrimaryKey<ResourceType, C> =
-    <ResourcePrimaryKey<ResourceType, C> as diesel::Expression>::SqlType;
-type SerializedResourceForeignKey<ResourceType, C> =
-    <ResourceForeignKey<ResourceType, C> as diesel::Expression>::SqlType;
+    /// The default WHERE clause of the collection table.
+    pub type CollectionTableDefaultWhereClause<ResourceType, C> =
+        TableDefaultWhereClause<CollectionTable<ResourceType, C>>;
+    /// The default WHERE clause of the resource table.
+    pub type ResourceTableDefaultWhereClause<ResourceType, C> =
+        TableDefaultWhereClause<ResourceTable<ResourceType, C>>;
+
+    pub type CollectionIdColumn<ResourceType, C> =
+        <C as DatastoreAttachTarget<ResourceType>>::CollectionIdColumn;
+    pub type ResourceIdColumn<ResourceType, C> =
+        <C as DatastoreAttachTarget<ResourceType>>::ResourceIdColumn;
+
+    /// Representation of Primary Key in Rust.
+    pub type CollectionPrimaryKey<ResourceType, C> =
+        <CollectionTable<ResourceType, C> as Table>::PrimaryKey;
+    pub type ResourcePrimaryKey<ResourceType, C> =
+        <ResourceTable<ResourceType, C> as Table>::PrimaryKey;
+    pub type ResourceForeignKey<ResourceType, C> =
+        <C as DatastoreAttachTarget<ResourceType>>::ResourceCollectionIdColumn;
+
+    /// Representation of Primary Key in SQL.
+    pub type SerializedCollectionPrimaryKey<ResourceType, C> =
+        <CollectionPrimaryKey<ResourceType, C> as diesel::Expression>::SqlType;
+    pub type SerializedResourcePrimaryKey<ResourceType, C> =
+        <ResourcePrimaryKey<ResourceType, C> as diesel::Expression>::SqlType;
+    pub type SerializedResourceForeignKey<ResourceType, C> =
+        <ResourceForeignKey<ResourceType, C> as diesel::Expression>::SqlType;
+}
+
+use aliases::*;
 
 /// Trait to be implemented by structs representing an attachable collection.
 ///
@@ -181,7 +195,7 @@ pub trait DatastoreAttachTarget<ResourceType>: Selectable<Pg> + Sized {
         // value.
         update: UpdateStatement<
             ResourceTable<ResourceType, Self>,
-            ResourceTableWhereClause<ResourceType, Self>,
+            ResourceTableDefaultWhereClause<ResourceType, Self>,
             V,
         >,
     ) -> AttachToCollectionStatement<ResourceType, V, Self>
@@ -212,7 +226,7 @@ pub trait DatastoreAttachTarget<ResourceType>: Selectable<Pg> + Sized {
         // Allows calling "update.into_boxed()"
         UpdateStatement<
             ResourceTable<ResourceType, Self>,
-            ResourceTableWhereClause<ResourceType, Self>,
+            ResourceTableDefaultWhereClause<ResourceType, Self>,
             V,
         >: BoxableUpdateStatement<ResourceTable<ResourceType, Self>, V>,
         // Allows calling

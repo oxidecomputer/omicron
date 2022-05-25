@@ -10,9 +10,10 @@
 //! - Updates the collection row
 //! - Updates the resource rows
 
+use super::collection_attach::aliases::*;
 use super::cte_utils::{
     BoxableTable, BoxableUpdateStatement, BoxedQuery, ExprSqlType, FilterBy,
-    QueryFromClause, QuerySqlType, TableDefaultWhereClause,
+    QueryFromClause, QuerySqlType,
 };
 use super::pool::DbConnection;
 use crate::db::collection_attach::DatastoreAttachTarget;
@@ -28,75 +29,13 @@ use diesel::query_source::Table;
 use diesel::sql_types::{Nullable, SingleValue};
 use std::fmt::Debug;
 
-/// The table representing the collection. The resource references
-/// this table.
-type CollectionTable<ResourceType, C> = <<C as DatastoreDetachManyTarget<
-    ResourceType,
->>::CollectionIdColumn as Column>::Table;
-
-/// The table representing the resource. This table contains an
-/// ID acting as a foreign key into the collection table.
-type ResourceTable<ResourceType, C> = <<C as DatastoreDetachManyTarget<
-    ResourceType,
->>::ResourceIdColumn as Column>::Table;
-
-/// The default WHERE clause of the collection table.
-type CollectionTableDefaultWhereClause<ResourceType, C> =
-    TableDefaultWhereClause<CollectionTable<ResourceType, C>>;
-/// The default WHERE clause of the resource table.
-type ResourceTableDefaultWhereClause<ResourceType, C> =
-    TableDefaultWhereClause<ResourceTable<ResourceType, C>>;
-/// Helper to access column type.
-type CollectionIdColumn<ResourceType, C> =
-    <C as DatastoreDetachManyTarget<ResourceType>>::CollectionIdColumn;
-
-// Representation of Primary Key in Rust.
-type CollectionPrimaryKey<ResourceType, C> =
-    <CollectionTable<ResourceType, C> as Table>::PrimaryKey;
-type ResourcePrimaryKey<ResourceType, C> =
-    <ResourceTable<ResourceType, C> as Table>::PrimaryKey;
-type ResourceForeignKey<ResourceType, C> =
-    <C as DatastoreDetachManyTarget<ResourceType>>::ResourceCollectionIdColumn;
-
-// Representation of Primary Key in SQL.
-type SerializedCollectionPrimaryKey<ResourceType, C> =
-    <CollectionPrimaryKey<ResourceType, C> as diesel::Expression>::SqlType;
-type SerializedResourcePrimaryKey<ResourceType, C> =
-    <ResourcePrimaryKey<ResourceType, C> as diesel::Expression>::SqlType;
-type SerializedResourceForeignKey<ResourceType, C> =
-    <ResourceForeignKey<ResourceType, C> as diesel::Expression>::SqlType;
-
 /// Trait to be implemented by structs representing a detachable collection.
 ///
 /// A blanket implementation is provided for traits that implement
 /// [`DatastoreAttachTarget`].
 pub trait DatastoreDetachManyTarget<ResourceType>:
-    Selectable<Pg> + Sized
+    DatastoreAttachTarget<ResourceType>
 {
-    /// The Rust type of the collection and resource ids (typically Uuid).
-    type Id: Copy + Debug + PartialEq + Send + 'static;
-
-    /// The primary key column of the collection.
-    type CollectionIdColumn: Column;
-
-    /// The time deleted column in the CollectionTable
-    type CollectionTimeDeletedColumn: Column<Table = <Self::CollectionIdColumn as Column>::Table>
-        + Default
-        + ExpressionMethods;
-
-    /// The primary key column of the resource
-    type ResourceIdColumn: Column;
-
-    /// The column in the resource acting as a foreign key into the Collection
-    type ResourceCollectionIdColumn: Column<Table = <Self::ResourceIdColumn as Column>::Table>
-        + Default
-        + ExpressionMethods;
-
-    /// The time deleted column in the ResourceTable
-    type ResourceTimeDeletedColumn: Column<Table = <Self::ResourceIdColumn as Column>::Table>
-        + Default
-        + ExpressionMethods;
-
     /// Creates a statement for detaching a resource from the given collection.
     ///
     /// This statement allows callers to atomically check the state of a
@@ -259,16 +198,9 @@ pub trait DatastoreDetachManyTarget<ResourceType>:
     }
 }
 
-impl<T, ResourceType> DatastoreDetachManyTarget<ResourceType> for T
-where
-    T: DatastoreAttachTarget<ResourceType>,
+impl<T, ResourceType> DatastoreDetachManyTarget<ResourceType> for T where
+    T: DatastoreAttachTarget<ResourceType>
 {
-    type Id = T::Id;
-    type CollectionIdColumn = T::CollectionIdColumn;
-    type CollectionTimeDeletedColumn = T::CollectionTimeDeletedColumn;
-    type ResourceIdColumn = T::ResourceIdColumn;
-    type ResourceCollectionIdColumn = T::ResourceCollectionIdColumn;
-    type ResourceTimeDeletedColumn = T::ResourceTimeDeletedColumn;
 }
 
 /// The CTE described in the module docs
