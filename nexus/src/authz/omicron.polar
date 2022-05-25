@@ -254,7 +254,7 @@ has_relation(user: SiloUser, "silo_user", ssh_key: SshKey)
 # of the API path (e.g., "/images") or as an implementation detail of the system
 # (in the case of console sessions and "Database").  The policies are
 # either statically-defined in this file or driven by role assignments on the
-# Fleet.  None of these resources define their own roles.
+# Fleet.  None of these resources defines their own roles.
 #
 
 # Describes the policy for accessing "/images" (in the API)
