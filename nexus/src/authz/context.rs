@@ -161,6 +161,7 @@ pub trait AuthorizedResource: oso::ToPolar + Send + Sync + 'static {
 #[cfg(test)]
 mod test {
     // These are essentially unit tests for the policy itself.
+    // XXX-dap
     // TODO-coverage This is just a start.  But we need better support for role
     // assignments for non-built-in users to do more here.
     // TODO If this gets any more complicated, we could consider automatically

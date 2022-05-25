@@ -197,12 +197,18 @@ impl Context {
     /// (for testing only)
     #[cfg(test)]
     pub fn unprivileged_test_user() -> Context {
+        Context::for_test_user(
+            USER_TEST_UNPRIVILEGED.identity().id,
+            USER_TEST_UNPRIVILEGED.silo_id,
+        )
+    }
+
+    /// Returns an authenticated context for the specific Silo user.
+    #[cfg(test)]
+    pub fn for_test_user(silo_user_id: Uuid, silo_id: Uuid) -> Context {
         Context {
             kind: Kind::Authenticated(Details {
-                actor: Actor::SiloUser {
-                    silo_user_id: USER_TEST_UNPRIVILEGED.identity().id,
-                    silo_id: USER_TEST_UNPRIVILEGED.silo_id,
-                },
+                actor: Actor::SiloUser { silo_user_id, silo_id },
             }),
             schemes_tried: Vec::new(),
         }
