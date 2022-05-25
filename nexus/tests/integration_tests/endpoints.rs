@@ -248,12 +248,20 @@ lazy_static! {
             },
             disk: DEMO_DISK_NAME.clone(),
         };
+}
 
-    // SAML identity provider
+lazy_static! {
+    // Identity providers
+    pub static ref IDENTITY_PROVIDERS_URL: String = format!("{}/identity_providers", *DEMO_SILO_URL);
+
+    pub static ref SAML_IDENTITY_PROVIDERS_URL: String = format!("{}/saml_identity_providers", *DEMO_SILO_URL);
+    pub static ref DEMO_SAML_IDENTITY_PROVIDER_NAME: Name = "demo-saml-provider".parse().unwrap();
+    pub static ref SPECIFIC_SAML_IDENTITY_PROVIDER_URL: String = format!("{}/{}", *SAML_IDENTITY_PROVIDERS_URL, *DEMO_SAML_IDENTITY_PROVIDER_NAME);
+
     pub static ref SAML_IDENTITY_PROVIDER: params::SamlIdentityProviderCreate =
         params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
-                name: "demo-saml-provider".to_string().parse().unwrap(),
+                name: DEMO_SAML_IDENTITY_PROVIDER_NAME.clone(),
                 description: "a demo provider".to_string(),
             },
 
@@ -912,24 +920,21 @@ lazy_static! {
         /* Silo identity providers */
 
         VerifyEndpoint {
-            url: "/silos/default-silo/identity_providers",
-            visibility: Visibility::Public, // Users can see their own silo! This includes USER_TEST_UNPRIVILEGED
+            url: &*IDENTITY_PROVIDERS_URL,
+            visibility: Visibility::Protected,
             allowed_methods: vec![
                 AllowedMethod::Get,
             ],
         },
-
         VerifyEndpoint {
-            url: "/silos/default-silo/saml_identity_providers",
-            visibility: Visibility::Public, // Users can see their own silo! This includes USER_TEST_UNPRIVILEGED
+            url: &*SAML_IDENTITY_PROVIDERS_URL,
+            visibility: Visibility::Protected,
             allowed_methods: vec![AllowedMethod::Post(
                 serde_json::to_value(&*SAML_IDENTITY_PROVIDER).unwrap(),
             )],
         },
-
         VerifyEndpoint {
-            url:
-                "/silos/default-silo/saml_identity_providers/demo-saml-provider",
+            url: &*SPECIFIC_SAML_IDENTITY_PROVIDER_URL,
             visibility: Visibility::Protected,
             allowed_methods: vec![AllowedMethod::Get],
         },
