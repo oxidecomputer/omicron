@@ -42,16 +42,18 @@ pub trait DatastoreDetachManyTarget<ResourceType>:
     /// collection and a resource while detaching a resource.
     ///
     /// - `collection_id`: Primary key of the collection being removed from.
-    /// - `resource_id`: Primary key of the resource being detached.
     /// - `collection_query`: An optional query for collection state. The
     /// CTE will automatically filter this query to `collection_id`, and
     /// validate that the "time deleted" column is NULL.
     /// - `resource_query`: An optional query for the resource state. The
-    /// CTE will automatically filter this query to `resource_id`,
+    /// CTE will automatically filter this query to non-deleted resources.
     /// validate that the "time deleted" column is NULL, and validate that the
     /// "collection_id" column points to `collection_id`.
-    /// - `update`: An update statement, identifying how the resource object
-    /// should be modified to be detached
+    /// - `update_collection`: An update statement, identifying how the
+    /// collection object should be modified as associated resources are
+    /// detached.
+    /// - `update_resource`: An update statement, identifying how the resource
+    /// objects should be modified to be detached
     ///
     /// The VC, VR types refer to the "update target" of the UpdateStatements,
     /// and should generally be inferred rather than explicitly specified.
