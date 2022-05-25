@@ -305,7 +305,7 @@ resource Database {
 	    #
 	    # Any authenticated user gets this permission.  There's generally
 	    # some other authz check involved in the database query.  For
-	    # example, if you'er querying the database to "read" a "Project", we
+	    # example, if you're querying the database to "read" a "Project", we
 	    # should also be checking that.  So why do we do this at all?  It's
 	    # a belt-and-suspenders measure so that if we somehow introduced an
 	    # unauthenticated code path that hits the database, it cannot be
