@@ -20,31 +20,39 @@ use crate::SpMessageKind;
 use crate::SpPort;
 use crate::SpState;
 use hubpack::SerializedSize;
-use std::net::SocketAddr;
+
+#[cfg(feature = "std")]
+use std::net::SocketAddrV6;
+
+#[cfg(not(feature = "std"))]
+pub struct SocketAddrV6 {
+    pub ip: smoltcp::wire::Ipv6Address,
+    pub port: u16,
+}
 
 pub trait SpHandler {
     fn discover(
         &mut self,
-        sender: SocketAddr,
+        sender: SocketAddrV6,
         port: SpPort,
     ) -> Result<DiscoverResponse, ResponseError>;
 
     fn ignition_state(
         &mut self,
-        sender: SocketAddr,
+        sender: SocketAddrV6,
         port: SpPort,
         target: u8,
     ) -> Result<IgnitionState, ResponseError>;
 
     fn bulk_ignition_state(
         &mut self,
-        sender: SocketAddr,
+        sender: SocketAddrV6,
         port: SpPort,
     ) -> Result<BulkIgnitionState, ResponseError>;
 
     fn ignition_command(
         &mut self,
-        sender: SocketAddr,
+        sender: SocketAddrV6,
         port: SpPort,
         target: u8,
         command: IgnitionCommand,
@@ -52,7 +60,7 @@ pub trait SpHandler {
 
     fn sp_state(
         &mut self,
-        sender: SocketAddr,
+        sender: SocketAddrV6,
         port: SpPort,
     ) -> Result<SpState, ResponseError>;
 
@@ -61,7 +69,7 @@ pub trait SpHandler {
     // UDP chunks; can SP ensure it writes all data locally?
     fn serial_console_write(
         &mut self,
-        sender: SocketAddr,
+        sender: SocketAddrV6,
         port: SpPort,
         packet: SerialConsole,
     ) -> Result<(), ResponseError>;
@@ -181,7 +189,7 @@ impl SpServer {
     /// the caller should send back to the requester.
     pub fn dispatch<H: SpHandler>(
         &mut self,
-        sender: SocketAddr,
+        sender: SocketAddrV6,
         port: SpPort,
         data: &[u8],
         handler: &mut H,

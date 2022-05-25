@@ -19,14 +19,14 @@ structopt = "0.3"
 thiserror = "1.0.31"
 tokio = "1.18"
 toml = "0.5.9"
-uuid = { version = "0.8.2", features = [ "v4", "serde" ] }
+uuid = { version = "1.0.0", features = [ "v4", "serde" ] }
 
 [dev-dependencies]
 expectorate = "1.0.5"
 omicron-test-utils = { path = "../../test-utils" }
 openapiv3 = "1.0"
 serde_json = "1.0.79"
-subprocess = "0.2.8"
+subprocess = "0.2.9"
 
 [dev-dependencies.openapi-lint]
 git = "https://github.com/oxidecomputer/openapi-lint"

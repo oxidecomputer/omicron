@@ -12,9 +12,9 @@ bytes = { version = "1.0.1", features = [ "serde" ] }
 chrono = { version = "0.4.19", features = [ "serde" ] }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
 oximeter = { path = "../oximeter" }
-regex = "1.5.5"
+regex = "1.5.6"
 reqwest = { version = "0.11.8", features = [ "json" ] }
-schemars = { version = "0.8.8", features = [ "uuid", "bytes", "chrono" ] }
+schemars = { version = "0.8.10", features = [ "uuid1", "bytes", "chrono" ] }
 serde = { version = "1", features = [ "derive" ] }
 serde_json = "1.0.79"
 slog = { version = "2.5", features = [ "max_level_trace", "release_max_level_debug" ] }
@@ -23,7 +23,7 @@ slog-term = "2.9"
 structopt = "0.3"
 thiserror = "1.0.31"
 tokio = { version = "1.18", features = [ "rt-multi-thread", "macros" ] }
-uuid = { version = "0.8.2", features = [ "v4", "serde" ] }
+uuid = { version = "1.0.0", features = [ "v4", "serde" ] }
 
 [dev-dependencies]
 itertools = "0.10.1"

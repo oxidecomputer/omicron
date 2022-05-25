@@ -21,8 +21,10 @@ use http::header::HeaderValue;
 use omicron_nexus::authn::external::session_cookie;
 use omicron_nexus::authn::external::spoof;
 use omicron_nexus::authn::external::spoof::HttpAuthnSpoof;
+use omicron_nexus::authn::external::spoof::SpoofContext;
 use omicron_nexus::authn::external::spoof::SPOOF_SCHEME_NAME;
 use omicron_nexus::authn::external::HttpAuthnScheme;
+use omicron_nexus::db::fixed_data::silo::SILO_ID;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
@@ -61,12 +63,8 @@ async fn test_authn_spoof_allowed() {
 
     // Successful authentication
     let valid_uuid = "7f927c86-3371-4295-c34a-e3246a4b9c02";
-    let header = spoof::make_header_value(
-        spoof::ActorType::Builtin,
-        valid_uuid.parse().unwrap(),
-    )
-    .0
-    .encode();
+    let header =
+        spoof::make_header_value(valid_uuid.parse().unwrap()).0.encode();
     assert_eq!(
         whoami_request(Some(header), None, &testctx).await.unwrap(),
         WhoamiResponse {
@@ -199,7 +197,6 @@ async fn test_authn_spoof_unconfigured() {
         None,
         Some(
             spoof::make_header_value(
-                spoof::ActorType::Builtin,
                 "7f927c86-3371-4295-c34a-e3246a4b9c02".parse().unwrap(),
             )
             .0
@@ -311,6 +308,20 @@ async fn start_whoami_server(
 struct WhoamiServerState {
     authn: omicron_nexus::authn::external::Authenticator<WhoamiServerState>,
     sessions: Mutex<HashMap<String, FakeSession>>,
+}
+
+#[async_trait]
+impl SpoofContext for WhoamiServerState {
+    async fn silo_user_silo(
+        &self,
+        silo_user_id: Uuid,
+    ) -> Result<Uuid, omicron_nexus::authn::Reason> {
+        assert_eq!(
+            silo_user_id.to_string(),
+            "7f927c86-3371-4295-c34a-e3246a4b9c02"
+        );
+        Ok(*SILO_ID)
+    }
 }
 
 #[derive(Clone, Copy)]

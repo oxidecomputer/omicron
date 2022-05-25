@@ -18,6 +18,8 @@ use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_nexus::crucible_agent_client::types::State as RegionState;
 use omicron_nexus::external_api::params;
+use omicron_nexus::external_api::shared;
+use omicron_nexus::external_api::shared::IdentityType;
 use omicron_nexus::external_api::views::{
     Organization, Project, Silo, Vpc, VpcRouter,
 };
@@ -278,6 +280,51 @@ pub async fn create_router(
     .unwrap()
     .parsed_body()
     .unwrap()
+}
+
+/// Grant a role on a resource to a user
+///
+/// * `grant_resource_url`: URL of the resource we're granting the role on
+/// * `grant_role`: the role we're granting
+/// * `grant_user`: the uuid of the user we're granting the role to
+/// * `run_as`: the user _doing_ the granting
+pub async fn grant_iam<T>(
+    client: &ClientTestContext,
+    grant_resource_url: &str,
+    grant_role: T,
+    grant_user: Uuid,
+    run_as: AuthnMode,
+) where
+    T: serde::Serialize + serde::de::DeserializeOwned,
+{
+    let policy_url = format!("{}/policy", grant_resource_url);
+    let existing_policy: shared::Policy<T> =
+        NexusRequest::object_get(client, &policy_url)
+            .authn_as(run_as.clone())
+            .execute()
+            .await
+            .expect("failed to fetch policy")
+            .parsed_body()
+            .expect("failed to parse policy");
+    let new_role_assignment = shared::RoleAssignment {
+        identity_type: IdentityType::SiloUser,
+        identity_id: grant_user,
+        role_name: grant_role,
+    };
+    let new_role_assignments = existing_policy
+        .role_assignments
+        .into_iter()
+        .chain(std::iter::once(new_role_assignment))
+        .collect();
+
+    let new_policy = shared::Policy { role_assignments: new_role_assignments };
+
+    // TODO-correctness use etag when we have it
+    NexusRequest::object_put(client, &policy_url, Some(&new_policy))
+        .authn_as(run_as)
+        .execute()
+        .await
+        .expect("failed to update policy");
 }
 
 pub async fn project_get(

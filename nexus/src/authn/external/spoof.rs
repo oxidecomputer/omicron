@@ -37,14 +37,8 @@ use uuid::Uuid;
 // _authentication_ information.  Similarly, the "Unauthorized" HTTP response
 // code usually describes an _authentication_ error.)
 //
-// The above example treats the specified user as a silo user.  It's also
-// possible to use this mechanism to specify a built-in user.  In that case, the
-// bearer token format looks like this:
-//
-//     Authorization: Bearer oxide-spoof-builtin-<uuid>
-//
-// Either way, this mechanism trusts (without verification) that the client is
-// whoever they say they are.  That's true of any bearer token, but this one is
+// This mechanism trusts (without verification) that the client is whoever
+// they say they are.  That's true of any bearer token, but this one is
 // particularly dangerous because the tokens are long-lived and not secret.
 
 pub const SPOOF_SCHEME_NAME: authn::SchemeName = authn::SchemeName("spoof");
@@ -63,16 +57,13 @@ lazy_static! {
     /// Actor (id) used for the special "bad credentials" error
     static ref SPOOF_RESERVED_BAD_CREDS_ACTOR: Actor = Actor::UserBuiltin {
         user_builtin_id: "22222222-2222-2222-2222-222222222222".parse().unwrap(),
-        silo_id: *crate::db::fixed_data::silo::SILO_ID,
     };
     /// Complete HTTP header value to trigger the "bad actor" error
     pub static ref SPOOF_HEADER_BAD_ACTOR: Authorization<Bearer> =
-        make_header_value_str(ActorType::Builtin, SPOOF_RESERVED_BAD_ACTOR)
-            .unwrap();
+        make_header_value_str(SPOOF_RESERVED_BAD_ACTOR).unwrap();
     /// Complete HTTP header value to trigger the "bad creds" error
     pub static ref SPOOF_HEADER_BAD_CREDS: Authorization<Bearer> =
-        make_header_value_str(ActorType::Builtin, SPOOF_RESERVED_BAD_CREDS)
-            .unwrap();
+        make_header_value_str(SPOOF_RESERVED_BAD_CREDS).unwrap();
 }
 
 /// Implements a (test-only) authentication scheme where the client simply
@@ -85,7 +76,7 @@ pub struct HttpAuthnSpoof;
 #[async_trait]
 impl<T> HttpAuthnScheme<T> for HttpAuthnSpoof
 where
-    T: Send + Sync + 'static,
+    T: SpoofContext + Send + Sync + 'static,
 {
     fn name(&self) -> authn::SchemeName {
         SPOOF_SCHEME_NAME
@@ -93,79 +84,73 @@ where
 
     async fn authn(
         &self,
-        _ctx: &T,
-        _log: &slog::Logger,
+        ctx: &T,
+        log: &slog::Logger,
         request: &http::Request<hyper::Body>,
     ) -> SchemeResult {
         let headers = request.headers();
-        authn_spoof(headers.typed_get().as_ref())
+        match authn_spoof_parse_id(headers.typed_get().as_ref()) {
+            Err(error) => SchemeResult::Failed(error),
+            Ok(None) => SchemeResult::NotRequested,
+            Ok(Some(silo_user_id)) => {
+                debug!(
+                    log,
+                    "looking up silo for user";
+                    "silo_user_id" => silo_user_id.to_string()
+                );
+                match ctx.silo_user_silo(silo_user_id).await {
+                    Err(error) => SchemeResult::Failed(error),
+                    Ok(silo_id) => {
+                        let actor = Actor::SiloUser { silo_id, silo_user_id };
+                        SchemeResult::Authenticated(Details { actor })
+                    }
+                }
+            }
+        }
     }
 }
 
-/// Specifies whether the spoof header explicitly specifies a built-in user or a
-/// normal (silo) user
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ActorType {
-    Builtin,
-    Silo,
-}
-
-fn authn_spoof(raw_value: Option<&Authorization<Bearer>>) -> SchemeResult {
+fn authn_spoof_parse_id(
+    raw_value: Option<&Authorization<Bearer>>,
+) -> Result<Option<Uuid>, Reason> {
     let token = match raw_value {
-        None => return SchemeResult::NotRequested,
+        None => return Ok(None),
         Some(bearer) => bearer.token(),
     };
 
-    let str_value = match token.strip_prefix(SPOOF_PREFIX) {
-        None => {
-            // This is some other kind of bearer token.  Maybe another scheme
-            // knows how to deal with it.
-            return SchemeResult::NotRequested;
-        }
-        Some(s) => s,
-    };
+    if !token.starts_with(SPOOF_PREFIX) {
+        // This is some other kind of bearer token.  Maybe another scheme knows
+        // how to deal with it.
+        return Ok(None);
+    }
 
-    let (actor_kind, str_value) = {
-        match str_value.strip_prefix("builtin-") {
-            Some(s) => (ActorType::Builtin, s),
-            None => (ActorType::Silo, str_value),
-        }
-    };
-
+    let str_value = &token[SPOOF_PREFIX.len()..];
     if str_value == SPOOF_RESERVED_BAD_ACTOR {
-        return SchemeResult::Failed(Reason::UnknownActor {
-            actor: str_value.to_owned(),
-        });
+        return Err(Reason::UnknownActor { actor: str_value.to_owned() });
     }
 
     if str_value == SPOOF_RESERVED_BAD_CREDS {
-        return SchemeResult::Failed(Reason::BadCredentials {
+        return Err(Reason::BadCredentials {
             actor: *SPOOF_RESERVED_BAD_CREDS_ACTOR,
             source: anyhow!("do not sell to the people on this list"),
         });
     }
 
-    match Uuid::parse_str(str_value).context("parsing header value as UUID") {
-        Ok(actor_id) => {
-            let silo_id = *crate::db::fixed_data::silo::SILO_ID;
-            let actor = match actor_kind {
-                ActorType::Builtin => {
-                    Actor::UserBuiltin { user_builtin_id: actor_id, silo_id }
-                }
-                ActorType::Silo => {
-                    Actor::SiloUser { silo_user_id: actor_id, silo_id }
-                }
-            };
-            SchemeResult::Authenticated(Details { actor })
-        }
-        Err(source) => SchemeResult::Failed(Reason::BadFormat { source }),
-    }
+    Uuid::parse_str(str_value)
+        .context("parsing header value as UUID")
+        .map(|silo_user_id| Some(silo_user_id))
+        .map_err(|source| Reason::BadFormat { source })
+}
+
+#[async_trait]
+pub trait SpoofContext {
+    async fn silo_user_silo(&self, silo_user_id: Uuid) -> Result<Uuid, Reason>;
 }
 
 /// Returns a value of the `Authorization` header for this actor that will be
 /// accepted using this scheme
-pub fn make_header_value(kind: ActorType, id: Uuid) -> Authorization<Bearer> {
-    make_header_value_str(kind, &id.to_string()).unwrap()
+pub fn make_header_value(id: Uuid) -> Authorization<Bearer> {
+    make_header_value_str(&id.to_string()).unwrap()
 }
 
 /// Returns a value of the `Authorization` header with `str` in the place where
@@ -176,14 +161,9 @@ pub fn make_header_value(kind: ActorType, id: Uuid) -> Authorization<Bearer> {
 /// this returns a typed value and so cannot be used to make various kinds of
 /// invalid headers.
 fn make_header_value_str(
-    kind: ActorType,
     s: &str,
 ) -> Result<Authorization<Bearer>, anyhow::Error> {
-    let suffix = match kind {
-        ActorType::Builtin => format!("builtin-{}", s),
-        ActorType::Silo => String::from(s),
-    };
-    Authorization::bearer(&format!("{}{}", SPOOF_PREFIX, suffix))
+    Authorization::bearer(&format!("{}{}", SPOOF_PREFIX, s))
         .context("not a valid HTTP header value")
 }
 
@@ -204,13 +184,10 @@ pub fn make_header_value_raw(
 #[cfg(test)]
 mod test {
     use super::super::super::Reason;
-    use super::super::SchemeResult;
-    use super::authn_spoof;
+    use super::authn_spoof_parse_id;
     use super::make_header_value;
     use super::make_header_value_raw;
     use super::make_header_value_str;
-    use super::ActorType;
-    use crate::db;
     use headers::authorization::Bearer;
     use headers::authorization::Credentials;
     use headers::Authorization;
@@ -221,18 +198,12 @@ mod test {
     fn test_make_header_value() {
         let test_uuid_str = "37b56e4f-8c60-453b-a37e-99be6efe8a89";
         let test_uuid = test_uuid_str.parse::<Uuid>().unwrap();
-        let header_value = make_header_value(ActorType::Builtin, test_uuid);
+        let header_value = make_header_value(test_uuid);
         // Other formats are valid here (e.g., changes in case or spacing).
         // However, a black-box test that accounted for those would be at least
         // as complicated as `make_header_value()` itself and wouldn't be so
         // convincing in demonstrating that that function does what we think it
         // does.
-        assert_eq!(
-            header_value.0.encode().to_str().unwrap(),
-            "Bearer oxide-spoof-builtin-37b56e4f-8c60-453b-a37e-99be6efe8a89"
-        );
-
-        let header_value = make_header_value(ActorType::Silo, test_uuid);
         assert_eq!(
             header_value.0.encode().to_str().unwrap(),
             "Bearer oxide-spoof-37b56e4f-8c60-453b-a37e-99be6efe8a89"
@@ -245,7 +216,7 @@ mod test {
         let test_uuid = test_uuid_str.parse::<Uuid>().unwrap();
         assert_eq!(
             make_header_value_raw(test_uuid_str.as_bytes()).unwrap(),
-            make_header_value(ActorType::Silo, test_uuid).0.encode(),
+            make_header_value(test_uuid).0.encode(),
         );
 
         assert_eq!(
@@ -272,35 +243,24 @@ mod test {
     fn test_spoof_header_valid() {
         let test_uuid_str = "37b56e4f-8c60-453b-a37e-99be6efe8a89";
         let test_uuid = test_uuid_str.parse::<Uuid>().unwrap();
+        let test_header = make_header_value(test_uuid);
 
-        // Success casees: the client provided a valid uuid in the header.
-        for actor_type in [ActorType::Builtin, ActorType::Silo] {
-            let test_header = make_header_value(actor_type, test_uuid);
-            let success_case = authn_spoof(Some(&test_header));
-            match success_case {
-                SchemeResult::Authenticated(details) => {
-                    assert_eq!(details.actor.actor_id(), test_uuid);
-                    let found_type = details.actor.actor_type();
-                    match found_type {
-                        db::model::IdentityType::UserBuiltin => {
-                            assert_eq!(actor_type, ActorType::Builtin);
-                        }
-                        db::model::IdentityType::SiloUser => {
-                            assert_eq!(actor_type, ActorType::Silo);
-                        }
-                    }
-                }
-                result => {
-                    panic!("unexpectedly failed authentication: {:?}", result);
-                }
-            };
-        }
+        // Success case: the client provided a valid uuid in the header.
+        let success_case = authn_spoof_parse_id(Some(&test_header));
+        match success_case {
+            Ok(Some(actor_id)) => {
+                assert_eq!(actor_id, test_uuid);
+            }
+            _ => {
+                assert!(false);
+            }
+        };
     }
 
     #[test]
     fn test_spoof_header_missing() {
         // The client provided no credentials.
-        assert!(matches!(authn_spoof(None), SchemeResult::NotRequested));
+        assert!(matches!(authn_spoof_parse_id(None), Ok(None)));
     }
 
     #[test]
@@ -308,15 +268,15 @@ mod test {
         let bad_actor = super::SPOOF_RESERVED_BAD_ACTOR;
         let header = super::SPOOF_HEADER_BAD_ACTOR.clone();
         assert!(matches!(
-            authn_spoof(Some(&header)),
-            SchemeResult::Failed(Reason::UnknownActor{ actor })
+            authn_spoof_parse_id(Some(&header)),
+            Err(Reason::UnknownActor{ actor })
                 if actor == bad_actor
         ));
 
         let header = super::SPOOF_HEADER_BAD_CREDS.clone();
         assert!(matches!(
-            authn_spoof(Some(&header)),
-            SchemeResult::Failed(Reason::BadCredentials{
+            authn_spoof_parse_id(Some(&header)),
+            Err(Reason::BadCredentials{
                 actor,
                 source
             }) if actor == *super::SPOOF_RESERVED_BAD_CREDS_ACTOR &&
@@ -335,10 +295,9 @@ mod test {
         ];
 
         for input in &bad_inputs {
-            let test_header =
-                make_header_value_str(ActorType::Builtin, input).unwrap();
-            let result = authn_spoof(Some(&test_header));
-            if let SchemeResult::Failed(error) = result {
+            let test_header = make_header_value_str(input).unwrap();
+            let result = authn_spoof_parse_id(Some(&test_header));
+            if let Err(error) = result {
                 assert!(error.to_string().starts_with(
                     "bad authentication credentials: parsing header value"
                 ));
@@ -368,8 +327,8 @@ mod test {
         let typed_header = map.typed_get::<Authorization<Bearer>>();
         assert!(typed_header.is_none());
         assert!(matches!(
-            authn_spoof(typed_header.as_ref()),
-            SchemeResult::NotRequested
+            authn_spoof_parse_id(typed_header.as_ref()),
+            Ok(None)
         ));
     }
 }

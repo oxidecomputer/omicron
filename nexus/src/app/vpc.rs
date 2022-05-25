@@ -10,7 +10,7 @@ use crate::db;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
 use crate::db::model::VpcRouterKind;
-use crate::db::subnet_allocation::SubnetError;
+use crate::db::queries::vpc_subnet::SubnetError;
 use crate::defaults;
 use crate::external_api::params;
 use omicron_common::api::external;

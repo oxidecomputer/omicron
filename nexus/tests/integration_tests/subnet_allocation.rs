@@ -9,6 +9,7 @@ use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use http::method::Method;
 use http::StatusCode;
+use ipnetwork::Ipv4Network;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
@@ -23,6 +24,7 @@ use omicron_common::api::external::{
 };
 use omicron_nexus::defaults::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use omicron_nexus::external_api::params;
+use std::net::Ipv4Addr;
 
 async fn create_instance_expect_failure(
     client: &ClientTestContext,
@@ -87,12 +89,16 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
 
     // Create a new, small VPC Subnet, so we don't need to issue many requests
     // to test address exhaustion.
+    let subnet_size =
+        cptestctx.server.apictx.nexus.tunables().max_vpc_ipv4_subnet_prefix;
     let url_subnets = format!(
         "/organizations/{}/projects/{}/vpcs/default/subnets",
         organization_name, project_name
     );
     let subnet_name = "small";
-    let subnet = "192.168.42.0/26".parse().unwrap();
+    let network_address = Ipv4Addr::new(192, 168, 42, 0);
+    let subnet = Ipv4Network::new(network_address, subnet_size)
+        .expect("Invalid IPv4 network");
     let subnet_create = params::VpcSubnetCreate {
         identity: IdentityMetadataCreateParams {
             name: subnet_name.parse().unwrap(),
@@ -122,9 +128,8 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
         },
     ]);
 
-    // Create enough instances to fill the subnet. There should be 58 instances
-    // total created here. The subnet is a /26, and there are 6 reserved
-    // addresses. So 2 ** (32 - 26) - 6 = 2 ** 6 - 6 = 64 - 6 = 58.
+    // Create enough instances to fill the subnet. There are subnet.size() total
+    // addresses, 6 of which are reserved.
     let n_final_reserved_addresses = 1;
     let n_reserved_addresses =
         NUM_INITIAL_RESERVED_IP_ADDRESSES + n_final_reserved_addresses;
