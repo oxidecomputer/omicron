@@ -2,13 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! CTE for detaching a resource from a collection.
+//! CTE for detaching multiple resources from a collection.
 //!
 //! This atomically:
 //! - Checks if the collection exists and is not soft deleted
-//! - Checks if the resource exists and is not soft deleted
-//! - Validates conditions on both the collection and resource
-//! - Updates the resource row
+//! - Validates conditions on both the collection and resources
+//! - Updates the collection row
+//! - Updates the resource rows
 
 use super::cte_utils::{
     BoxableTable, BoxableUpdateStatement, BoxedQuery, ExprSqlType, FilterBy,
@@ -30,26 +30,25 @@ use std::fmt::Debug;
 
 /// The table representing the collection. The resource references
 /// this table.
-type CollectionTable<ResourceType, C> = <<C as DatastoreDetachTarget<
+type CollectionTable<ResourceType, C> = <<C as DatastoreDetachManyTarget<
     ResourceType,
 >>::CollectionIdColumn as Column>::Table;
 
 /// The table representing the resource. This table contains an
 /// ID acting as a foreign key into the collection table.
-type ResourceTable<ResourceType, C> = <<C as DatastoreDetachTarget<
+type ResourceTable<ResourceType, C> = <<C as DatastoreDetachManyTarget<
     ResourceType,
 >>::ResourceIdColumn as Column>::Table;
 
+/// The default WHERE clause of the collection table.
+type CollectionTableDefaultWhereClause<ResourceType, C> =
+    TableDefaultWhereClause<CollectionTable<ResourceType, C>>;
 /// The default WHERE clause of the resource table.
 type ResourceTableDefaultWhereClause<ResourceType, C> =
     TableDefaultWhereClause<ResourceTable<ResourceType, C>>;
-
 /// Helper to access column type.
 type CollectionIdColumn<ResourceType, C> =
-    <C as DatastoreDetachTarget<ResourceType>>::CollectionIdColumn;
-/// Helper to access column type.
-type ResourceIdColumn<ResourceType, C> =
-    <C as DatastoreDetachTarget<ResourceType>>::ResourceIdColumn;
+    <C as DatastoreDetachManyTarget<ResourceType>>::CollectionIdColumn;
 
 // Representation of Primary Key in Rust.
 type CollectionPrimaryKey<ResourceType, C> =
@@ -57,7 +56,7 @@ type CollectionPrimaryKey<ResourceType, C> =
 type ResourcePrimaryKey<ResourceType, C> =
     <ResourceTable<ResourceType, C> as Table>::PrimaryKey;
 type ResourceForeignKey<ResourceType, C> =
-    <C as DatastoreDetachTarget<ResourceType>>::ResourceCollectionIdColumn;
+    <C as DatastoreDetachManyTarget<ResourceType>>::ResourceCollectionIdColumn;
 
 // Representation of Primary Key in SQL.
 type SerializedCollectionPrimaryKey<ResourceType, C> =
@@ -71,7 +70,9 @@ type SerializedResourceForeignKey<ResourceType, C> =
 ///
 /// A blanket implementation is provided for traits that implement
 /// [`DatastoreAttachTarget`].
-pub trait DatastoreDetachTarget<ResourceType>: Selectable<Pg> + Sized {
+pub trait DatastoreDetachManyTarget<ResourceType>:
+    Selectable<Pg> + Sized
+{
     /// The Rust type of the collection and resource ids (typically Uuid).
     type Id: Copy + Debug + PartialEq + Send + 'static;
 
@@ -113,30 +114,25 @@ pub trait DatastoreDetachTarget<ResourceType>: Selectable<Pg> + Sized {
     /// - `update`: An update statement, identifying how the resource object
     /// should be modified to be detached
     ///
-    /// The V type refers to the "update target" of the UpdateStatement,
+    /// The VC, VR types refer to the "update target" of the UpdateStatements,
     /// and should generally be inferred rather than explicitly specified.
-    fn detach_resource<V>(
+    fn detach_resources<VC, VR>(
         collection_id: Self::Id,
-        resource_id: Self::Id,
 
         collection_query: BoxedQuery<CollectionTable<ResourceType, Self>>,
         resource_query: BoxedQuery<ResourceTable<ResourceType, Self>>,
 
-        // We are intentionally picky about this update statement:
-        // - The second argument - the WHERE clause - must match the default
-        // for the table. This encourages the "resource_query" filter to be
-        // used instead, and makes it possible for the CTE to modify the
-        // filter here (ensuring "resource_id" is selected).
-        // - Additionally, UpdateStatement's fourth argument defaults to Ret =
-        // NoReturningClause. This enforces that the given input statement does
-        // not have a RETURNING clause, and also lets the CTE control this
-        // value.
-        update: UpdateStatement<
+        update_collection: UpdateStatement<
+            CollectionTable<ResourceType, Self>,
+            CollectionTableDefaultWhereClause<ResourceType, Self>,
+            VC,
+        >,
+        update_resource: UpdateStatement<
             ResourceTable<ResourceType, Self>,
             ResourceTableDefaultWhereClause<ResourceType, Self>,
-            V,
+            VR,
         >,
-    ) -> DetachFromCollectionStatement<ResourceType, V, Self>
+    ) -> DetachManyFromCollectionStatement<ResourceType, VC, VR, Self>
     where
         // Treat the collection and resource as boxed tables.
         CollectionTable<ResourceType, Self>: BoxableTable,
@@ -155,22 +151,39 @@ pub trait DatastoreDetachTarget<ResourceType>: Selectable<Pg> + Sized {
         BoxedQuery<CollectionTable<ResourceType, Self>>: FilterBy<Eq<CollectionPrimaryKey<ResourceType, Self>, Self::Id>>
             + FilterBy<IsNull<Self::CollectionTimeDeletedColumn>>,
         // Allows calling ".filter()" on the boxed resource table.
-        BoxedQuery<ResourceTable<ResourceType, Self>>: FilterBy<Eq<ResourcePrimaryKey<ResourceType, Self>, Self::Id>>
-            + FilterBy<Eq<Self::ResourceCollectionIdColumn, Self::Id>>
+        BoxedQuery<ResourceTable<ResourceType, Self>>: FilterBy<Eq<Self::ResourceCollectionIdColumn, Self::Id>>
             + FilterBy<IsNull<Self::ResourceTimeDeletedColumn>>,
 
         // Allows calling "update.into_boxed()"
         UpdateStatement<
+            CollectionTable<ResourceType, Self>,
+            CollectionTableDefaultWhereClause<ResourceType, Self>,
+            VC,
+        >: BoxableUpdateStatement<CollectionTable<ResourceType, Self>, VC>,
+        UpdateStatement<
             ResourceTable<ResourceType, Self>,
             ResourceTableDefaultWhereClause<ResourceType, Self>,
-            V,
-        >: BoxableUpdateStatement<ResourceTable<ResourceType, Self>, V>,
+            VR,
+        >: BoxableUpdateStatement<ResourceTable<ResourceType, Self>, VR>,
 
         // Allows calling
-        // ".filter(resource_table().primary_key().eq(resource_id)" on the
+        // ".filter(collection_table().primary_key().eq(collection_id)" on the
         // boxed update statement.
-        BoxedUpdateStatement<'static, Pg, ResourceTable<ResourceType, Self>, V>:
-            FilterBy<Eq<ResourcePrimaryKey<ResourceType, Self>, Self::Id>>,
+        BoxedUpdateStatement<
+            'static,
+            Pg,
+            CollectionTable<ResourceType, Self>,
+            VC,
+        >: FilterBy<Eq<CollectionPrimaryKey<ResourceType, Self>, Self::Id>>,
+        // Allows calling
+        // ".filter(Self::ResourceTimeDeletedColumn::default().is_null())"
+        BoxedUpdateStatement<
+            'static,
+            Pg,
+            ResourceTable<ResourceType, Self>,
+            VR,
+        >: FilterBy<Eq<Self::ResourceCollectionIdColumn, Self::Id>>
+            + FilterBy<IsNull<Self::ResourceTimeDeletedColumn>>,
 
         // Allows using "id" in expressions (e.g. ".eq(...)") with...
         Self::Id: AsExpression<
@@ -187,27 +200,17 @@ pub trait DatastoreDetachTarget<ResourceType>: Selectable<Pg> + Sized {
         ExprSqlType<ResourcePrimaryKey<ResourceType, Self>>: SingleValue,
         ExprSqlType<Self::ResourceCollectionIdColumn>: SingleValue,
 
-        // Necessary to actually select the resource in the output type.
         ResourceType: Selectable<Pg>,
     {
         let collection_table =
             || <CollectionTable<ResourceType, Self> as HasTable>::table();
-        let resource_table =
-            || <ResourceTable<ResourceType, Self> as HasTable>::table();
 
-        // Create new queries to determine if the collection and resources
-        // already exist.
+        // Create new queries to determine if the collection exists.
         let collection_exists_query = Box::new(
             collection_table()
                 .into_boxed()
                 .filter(collection_table().primary_key().eq(collection_id))
                 .filter(Self::CollectionTimeDeletedColumn::default().is_null()),
-        );
-        let resource_exists_query = Box::new(
-            resource_table()
-                .into_boxed()
-                .filter(resource_table().primary_key().eq(resource_id))
-                .filter(Self::ResourceTimeDeletedColumn::default().is_null()),
         );
 
         // For the queries which decide whether or not we'll perform the update,
@@ -216,8 +219,8 @@ pub trait DatastoreDetachTarget<ResourceType>: Selectable<Pg> + Sized {
         // We force these queries to:
         // - Check against the primary key of the target objects
         // - Ensure the objects are not deleted
-        // - (for the resource) Ensure it is attached
-        // - (for the update) Ensure that only the resource with "resource_id"
+        // - (for the resources) Ensure they are attached
+        // - (for the update) Ensure that only the collection with "collection_id"
         // is modified.
         let collection_query = Box::new(
             collection_query
@@ -226,7 +229,6 @@ pub trait DatastoreDetachTarget<ResourceType>: Selectable<Pg> + Sized {
         );
         let resource_query = Box::new(
             resource_query
-                .filter(resource_table().primary_key().eq(resource_id))
                 .filter(Self::ResourceTimeDeletedColumn::default().is_null())
                 .filter(
                     Self::ResourceCollectionIdColumn::default()
@@ -234,23 +236,30 @@ pub trait DatastoreDetachTarget<ResourceType>: Selectable<Pg> + Sized {
                 ),
         );
 
-        let update_resource_statement = update
+        let update_collection_statement = update_collection
             .into_boxed()
-            .filter(resource_table().primary_key().eq(resource_id));
+            .filter(collection_table().primary_key().eq(collection_id));
 
-        let resource_returning_clause = ResourceType::as_returning();
-        DetachFromCollectionStatement {
+        let update_resource_statement = update_resource
+            .into_boxed()
+            .filter(Self::ResourceTimeDeletedColumn::default().is_null())
+            .filter(
+                Self::ResourceCollectionIdColumn::default().eq(collection_id),
+            );
+
+        let collection_returning_clause = Self::as_returning();
+        DetachManyFromCollectionStatement {
             collection_exists_query,
-            resource_exists_query,
             collection_query,
             resource_query,
+            update_collection_statement,
             update_resource_statement,
-            resource_returning_clause,
+            collection_returning_clause,
         }
     }
 }
 
-impl<T, ResourceType> DatastoreDetachTarget<ResourceType> for T
+impl<T, ResourceType> DatastoreDetachManyTarget<ResourceType> for T
 where
     T: DatastoreAttachTarget<ResourceType>,
 {
@@ -264,89 +273,85 @@ where
 
 /// The CTE described in the module docs
 #[must_use = "Queries must be executed"]
-pub struct DetachFromCollectionStatement<ResourceType, V, C>
+pub struct DetachManyFromCollectionStatement<ResourceType, VC, VR, C>
 where
     ResourceType: Selectable<Pg>,
-    C: DatastoreDetachTarget<ResourceType>,
+    C: DatastoreDetachManyTarget<ResourceType>,
 {
     // Query which answers: "Does the collection exist?"
     collection_exists_query: Box<dyn QueryFragment<Pg> + Send>,
-    // Query which answers: "Does the resource exist?"
-    resource_exists_query: Box<dyn QueryFragment<Pg> + Send>,
     // A (mostly) user-provided query for validating the collection.
     collection_query: Box<dyn QueryFragment<Pg> + Send>,
     // A (mostly) user-provided query for validating the resource.
     resource_query: Box<dyn QueryFragment<Pg> + Send>,
 
+    // Update statement for the collection.
+    update_collection_statement:
+        BoxedUpdateStatement<'static, Pg, CollectionTable<ResourceType, C>, VC>,
     // Update statement for the resource.
     update_resource_statement:
-        BoxedUpdateStatement<'static, Pg, ResourceTable<ResourceType, C>, V>,
+        BoxedUpdateStatement<'static, Pg, ResourceTable<ResourceType, C>, VR>,
     // Describes what should be returned after UPDATE-ing the resource.
-    resource_returning_clause: AsSelect<ResourceType, Pg>,
+    collection_returning_clause: AsSelect<C, Pg>,
 }
 
-impl<ResourceType, V, C> QueryId
-    for DetachFromCollectionStatement<ResourceType, V, C>
+impl<ResourceType, VC, VR, C> QueryId
+    for DetachManyFromCollectionStatement<ResourceType, VC, VR, C>
 where
     ResourceType: Selectable<Pg>,
-    C: DatastoreDetachTarget<ResourceType>,
+    C: DatastoreDetachManyTarget<ResourceType>,
 {
     type QueryId = ();
     const HAS_STATIC_QUERY_ID: bool = false;
 }
 
-/// Result of [`DetachFromCollectionStatement`] when executed asynchronously
-pub type AsyncDetachFromCollectionResult<ResourceType, C> =
-    Result<ResourceType, DetachError<ResourceType, C, PoolError>>;
+/// Result of [`DetachManyFromCollectionStatement`] when executed asynchronously
+pub type AsyncDetachManyFromCollectionResult<C> =
+    Result<C, DetachError<C, PoolError>>;
 
-/// Result of [`DetachFromCollectionStatement`] when executed synchronously
-pub type SyncDetachFromCollectionResult<ResourceType, C> =
-    Result<ResourceType, DetachError<ResourceType, C, diesel::result::Error>>;
+/// Result of [`DetachManyFromCollectionStatement`] when executed synchronously
+pub type SyncDetachManyFromCollectionResult<C> =
+    Result<C, DetachError<C, diesel::result::Error>>;
 
-/// Errors returned by [`DetachFromCollectionStatement`].
+/// Errors returned by [`DetachManyFromCollectionStatement`].
 #[derive(Debug)]
-pub enum DetachError<ResourceType, C, E> {
+pub enum DetachError<C, E> {
     /// The collection that the query was removing from does not exist
     CollectionNotFound,
-    /// The resource being detached does not exist
-    ResourceNotFound,
-    /// Although the resource and collection exist, the update did not occur
+    /// Although the collection exists, the update did not occur
     ///
     /// The unchanged resource and collection are returned as a part of this
     /// error; it is the responsibility of the caller to determine which
     /// condition was not met.
-    NoUpdate { resource: ResourceType, collection: C },
+    NoUpdate { collection: C },
     /// Other database error
     DatabaseError(E),
 }
 
 /// Describes the type returned from the actual CTE, which is parsed
 /// and interpreted before propagating it to users of the Rust API.
-pub type RawOutput<ResourceType, C> =
-    (i64, Option<C>, Option<ResourceType>, Option<ResourceType>);
+pub type RawOutput<C> = (i64, Option<C>, Option<C>);
 
-impl<ResourceType, V, C> DetachFromCollectionStatement<ResourceType, V, C>
+impl<ResourceType, VC, VR, C>
+    DetachManyFromCollectionStatement<ResourceType, VC, VR, C>
 where
     ResourceType: 'static + Debug + Send + Selectable<Pg>,
-    C: 'static + Debug + DatastoreDetachTarget<ResourceType> + Send,
+    C: 'static + Debug + DatastoreDetachManyTarget<ResourceType> + Send,
     ResourceTable<ResourceType, C>: 'static + Table + Send + Copy + Debug,
-    V: 'static + Send,
-    DetachFromCollectionStatement<ResourceType, V, C>: Send,
+    VC: 'static + Send,
+    VR: 'static + Send,
+    DetachManyFromCollectionStatement<ResourceType, VC, VR, C>: Send,
 {
     /// Issues the CTE asynchronously and parses the result.
     pub async fn detach_and_get_result_async(
         self,
         pool: &bb8::Pool<ConnectionManager<DbConnection>>,
-    ) -> AsyncDetachFromCollectionResult<ResourceType, C>
+    ) -> AsyncDetachManyFromCollectionResult<C>
     where
         // We require this bound to ensure that "Self" is runnable as query.
-        Self: query_methods::LoadQuery<
-            'static,
-            DbConnection,
-            RawOutput<ResourceType, C>,
-        >,
+        Self: query_methods::LoadQuery<'static, DbConnection, RawOutput<C>>,
     {
-        self.get_result_async::<RawOutput<ResourceType, C>>(pool)
+        self.get_result_async::<RawOutput<C>>(pool)
             .await
             // If the database returns an error, propagate it right away.
             .map_err(DetachError::DatabaseError)
@@ -358,40 +363,25 @@ where
     pub fn detach_and_get_result(
         self,
         conn: &mut DbConnection,
-    ) -> SyncDetachFromCollectionResult<ResourceType, C>
+    ) -> SyncDetachManyFromCollectionResult<C>
     where
         // We require this bound to ensure that "Self" is runnable as query.
-        Self: query_methods::LoadQuery<
-            'static,
-            DbConnection,
-            RawOutput<ResourceType, C>,
-        >,
+        Self: query_methods::LoadQuery<'static, DbConnection, RawOutput<C>>,
     {
-        self.get_result::<RawOutput<ResourceType, C>>(conn)
+        self.get_result::<RawOutput<C>>(conn)
             .map_err(DetachError::DatabaseError)
             .and_then(Self::parse_result)
     }
 
-    fn parse_result<E>(
-        result: RawOutput<ResourceType, C>,
-    ) -> Result<ResourceType, DetachError<ResourceType, C, E>> {
-        let (
-            _,
-            collection_before_update,
-            resource_before_update,
-            resource_after_update,
-        ) = result;
+    fn parse_result<E>(result: RawOutput<C>) -> Result<C, DetachError<C, E>> {
+        let (_, collection_before_update, collection_after_update) = result;
 
         let collection_before_update = collection_before_update
             .ok_or_else(|| DetachError::CollectionNotFound)?;
 
-        let resource_before_update = resource_before_update
-            .ok_or_else(|| DetachError::ResourceNotFound)?;
-
-        match resource_after_update {
-            Some(resource) => Ok(resource),
+        match collection_after_update {
+            Some(collection) => Ok(collection),
             None => Err(DetachError::NoUpdate {
-                resource: resource_before_update,
                 collection: collection_before_update,
             }),
         }
@@ -401,42 +391,40 @@ where
 type SelectableSqlType<Q> =
     <<Q as diesel::Selectable<Pg>>::SelectExpression as Expression>::SqlType;
 
-impl<ResourceType, V, C> Query
-    for DetachFromCollectionStatement<ResourceType, V, C>
+impl<ResourceType, VC, VR, C> Query
+    for DetachManyFromCollectionStatement<ResourceType, VC, VR, C>
 where
     ResourceType: Selectable<Pg>,
-    C: DatastoreDetachTarget<ResourceType>,
+    C: DatastoreDetachManyTarget<ResourceType>,
 {
     type SqlType = (
         // Ignored "SELECT 1" value
         diesel::sql_types::BigInt,
         // If the collection exists, the value before update.
         Nullable<SelectableSqlType<C>>,
-        // If the resource exists, the value before update.
-        Nullable<SelectableSqlType<ResourceType>>,
-        // If the resource was updated, the new value.
-        Nullable<SelectableSqlType<ResourceType>>,
+        // If the collection was updated, the new value.
+        Nullable<SelectableSqlType<C>>,
     );
 }
 
-impl<ResourceType, V, C> RunQueryDsl<DbConnection>
-    for DetachFromCollectionStatement<ResourceType, V, C>
+impl<ResourceType, VC, VR, C> RunQueryDsl<DbConnection>
+    for DetachManyFromCollectionStatement<ResourceType, VC, VR, C>
 where
     ResourceType: Selectable<Pg>,
-    C: DatastoreDetachTarget<ResourceType>,
+    C: DatastoreDetachManyTarget<ResourceType>,
 {
 }
 
 /// This implementation uses a CTE which attempts to do the following:
 ///
-/// 1. (collection_by_id, resource_by_id): Identify if the collection and
-///    resource objects exist at all.
+/// 1. (collection_by_id): Identify if the collection exists at all.
 /// 2. (collection_info, resource_info): Checks for arbitrary user-provided
 ///    constraints on the collection and resource objects.
 /// 3. (do_update): IFF all previous checks succeeded, make a decision to perfom
 ///    an update.
-/// 4. (updated_resource): Apply user-provided updates on the resource -
-///    presumably, setting the collection ID value.
+/// 4. (updated_collection, updated_resource): Apply user-provided updates on
+///    the collection and resource - presumably, setting the collection ID
+///    value.
 ///
 /// This is implemented as follows:
 ///
@@ -445,12 +433,6 @@ where
 /// //      /* Look up the collection - Check for existence only! */
 /// //      collection_by_id AS (
 /// //          SELECT * FROM C
-/// //          WHERE <PK> = <VALUE> AND <time_deleted> IS NULL
-/// //          FOR UPDATE
-/// //      ),
-/// //      /* Look up the resource - Check for existence only! */
-/// //      resource_by_id AS (
-/// //          SELECT * FROM R
 /// //          WHERE <PK> = <VALUE> AND <time_deleted> IS NULL
 /// //          FOR UPDATE
 /// //      ),
@@ -464,40 +446,45 @@ where
 /// //      /* Look up the resource - Check for additional constraints */
 /// //      resource_info AS (
 /// //          SELECT * FROM R
-/// //          WHERE <PK> = <VALUE> AND <time_deleted> IS NULL AND
+/// //          WHERE <time_deleted> IS NULL AND
 /// //              <FK> = <VALUE> AND <Additional user-supplied constraints>
 /// //          FOR UPDATE
 /// //      ),
 /// //      /* Make a decision on whether or not to apply ANY updates */
 /// //      do_update AS (
 /// //          SELECT IF(
-/// //              EXISTS(SELECT id FROM collection_info) AND
-/// //              EXISTS(SELECT id FROM resource_info),
+/// //              EXISTS(SELECT id FROM collection_info)
 /// //          TRUE, FALSE),
+/// //      ),
+/// //      /* Update the collection */
+/// //      updated_collection AS (
+/// //          UPDATE C SET <User-supplied Update>
+/// //          WHERE <PK> IN (SELECT <PK> FROM collection_info) AND (SELECT * FROM do_update)
+/// //          RETURNING *
 /// //      ),
 /// //      /* Update the resource */
 /// //      updated_resource AS (
 /// //          UPDATE R SET <User-supplied Update>
-/// //          WHERE <PK> IN (SELECT <PK> FROM resource_info) AND (SELECT * FROM do_update)
-/// //          RETURNING *
+/// //          WHERE (id IN (SELECT id FROM resource_info)) AND (SELECT * FROM do_update)
+/// //          RETURNING 1
 /// //      )
 /// //  SELECT * FROM
 /// //      (SELECT 1)
 /// //      LEFT JOIN (SELECT * FROM collection_by_id) ON TRUE
-/// //      LEFT JOIN (SELECT * FROM resource_by_id) ON TRUE
-/// //      LEFT JOIN (SELECT * FROM resource) ON TRUE;
+/// //      LEFT JOIN (SELECT * FROM updated_collection) ON TRUE;
 /// ```
-impl<ResourceType, V, C> QueryFragment<Pg>
-    for DetachFromCollectionStatement<ResourceType, V, C>
+impl<ResourceType, VC, VR, C> QueryFragment<Pg>
+    for DetachManyFromCollectionStatement<ResourceType, VC, VR, C>
 where
     ResourceType: Selectable<Pg>,
-    C: DatastoreDetachTarget<ResourceType>,
+    C: DatastoreDetachManyTarget<ResourceType>,
     CollectionPrimaryKey<ResourceType, C>: diesel::Column,
-    // Necessary to "walk_ast" over "self.update_resource_statement".
-    BoxedUpdateStatement<'static, Pg, ResourceTable<ResourceType, C>, V>:
+    // Necessary to "walk_ast" over "self.update_collection_statement".
+    BoxedUpdateStatement<'static, Pg, CollectionTable<ResourceType, C>, VC>:
         QueryFragment<Pg>,
-    // Necessary to "walk_ast" over "self.resource_returning_clause".
-    AsSelect<ResourceType, Pg>: QueryFragment<Pg>,
+    // Necessary to "walk_ast" over "self.update_resource_statement".
+    BoxedUpdateStatement<'static, Pg, ResourceTable<ResourceType, C>, VR>:
+        QueryFragment<Pg>,
     // Necessary to "walk_ast" over "self.collection_returning_clause".
     AsSelect<C, Pg>: QueryFragment<Pg>,
 {
@@ -505,10 +492,6 @@ where
         out.unsafe_to_cache_prepared();
         out.push_sql("WITH collection_by_id AS (");
         self.collection_exists_query.walk_ast(out.reborrow())?;
-        out.push_sql(" FOR UPDATE), ");
-
-        out.push_sql("resource_by_id AS (");
-        self.resource_exists_query.walk_ast(out.reborrow())?;
         out.push_sql(" FOR UPDATE), ");
 
         out.push_sql("collection_info AS (");
@@ -521,17 +504,27 @@ where
 
         out.push_sql("do_update AS (SELECT IF(EXISTS(SELECT ");
         out.push_identifier(CollectionIdColumn::<ResourceType, C>::NAME)?;
-        out.push_sql(" FROM collection_info) AND EXISTS(SELECT ");
-        out.push_identifier(ResourceIdColumn::<ResourceType, C>::NAME)?;
-        out.push_sql(" FROM resource_info), TRUE,FALSE)), ");
+        out.push_sql(" FROM collection_info), TRUE,FALSE)), ");
 
-        out.push_sql("updated_resource AS (");
-        self.update_resource_statement.walk_ast(out.reborrow())?;
+        out.push_sql("updated_collection AS (");
+        self.update_collection_statement.walk_ast(out.reborrow())?;
         // NOTE: It is safe to start with "AND" - we forced the update statement
         // to have a WHERE clause on the primary key of the resource.
         out.push_sql(" AND (SELECT * FROM do_update)");
         out.push_sql(" RETURNING ");
-        self.resource_returning_clause.walk_ast(out.reborrow())?;
+        self.collection_returning_clause.walk_ast(out.reborrow())?;
+        out.push_sql("), ");
+
+        out.push_sql("updated_resource AS (");
+        self.update_resource_statement.walk_ast(out.reborrow())?;
+        // NOTE: It is safe to start with "AND" - we forced the update statement
+        // to have a WHERE claustime deleted column.
+        //
+        // TODO TODO TODO : WE NEED TO FIX THIS.
+        // - Use the actual name of "id"
+        out.push_sql(" AND (id IN (SELECT id FROM resource_info))");
+        out.push_sql(" AND (SELECT * FROM do_update)");
+        out.push_sql(" RETURNING 1");
         out.push_sql(") ");
 
         // Why do all these LEFT JOINs here? In short, to ensure that we are
@@ -557,8 +550,7 @@ where
             "SELECT * FROM \
             (SELECT 1) \
             LEFT JOIN (SELECT * FROM collection_by_id) ON TRUE \
-            LEFT JOIN (SELECT * FROM resource_by_id) ON TRUE \
-            LEFT JOIN (SELECT * FROM updated_resource) ON TRUE;",
+            LEFT JOIN (SELECT * FROM updated_collection) ON TRUE;",
         );
 
         Ok(())
@@ -567,7 +559,7 @@ where
 
 #[cfg(test)]
 mod test {
-    use super::{DatastoreDetachTarget, DetachError};
+    use super::{DatastoreDetachManyTarget, DetachError};
     use crate::db::collection_attach::DatastoreAttachTarget;
     use crate::db::{
         self, error::TransactionError, identity::Resource as IdentityResource,
@@ -756,14 +748,15 @@ mod test {
         let collection_id =
             uuid::Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccccccc")
                 .unwrap();
-        let resource_id =
+        let _resource_id =
             uuid::Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
                 .unwrap();
-        let detach = Collection::detach_resource(
+        let detach = Collection::detach_resources(
             collection_id,
-            resource_id,
             collection::table.into_boxed(),
             resource::table.into_boxed(),
+            diesel::update(collection::table)
+                .set(collection::dsl::description.eq("Updated desc")),
             diesel::update(resource::table)
                 .set(resource::dsl::collection_id.eq(Option::<Uuid>::None)),
         );
@@ -784,21 +777,6 @@ mod test {
                     (\"test_schema\".\"collection\".\"time_deleted\" IS NULL)\
                 ) FOR UPDATE\
             ), \
-            resource_by_id AS (\
-                SELECT \
-                    \"test_schema\".\"resource\".\"id\", \
-                    \"test_schema\".\"resource\".\"name\", \
-                    \"test_schema\".\"resource\".\"description\", \
-                    \"test_schema\".\"resource\".\"time_created\", \
-                    \"test_schema\".\"resource\".\"time_modified\", \
-                    \"test_schema\".\"resource\".\"time_deleted\", \
-                    \"test_schema\".\"resource\".\"collection_id\" \
-                FROM \"test_schema\".\"resource\" \
-                WHERE (\
-                    (\"test_schema\".\"resource\".\"id\" = $2) AND \
-                    (\"test_schema\".\"resource\".\"time_deleted\" IS NULL)\
-                ) FOR UPDATE\
-            ), \
             collection_info AS (\
                 SELECT \
                     \"test_schema\".\"collection\".\"id\", \
@@ -809,7 +787,7 @@ mod test {
                     \"test_schema\".\"collection\".\"time_deleted\" \
                 FROM \"test_schema\".\"collection\" \
                 WHERE (\
-                    (\"test_schema\".\"collection\".\"id\" = $3) AND \
+                    (\"test_schema\".\"collection\".\"id\" = $2) AND \
                     (\"test_schema\".\"collection\".\"time_deleted\" IS NULL)\
                 ) FOR UPDATE\
             ), \
@@ -823,18 +801,32 @@ mod test {
                     \"test_schema\".\"resource\".\"time_deleted\", \
                     \"test_schema\".\"resource\".\"collection_id\" \
                 FROM \"test_schema\".\"resource\" \
-                WHERE ((\
-                    (\"test_schema\".\"resource\".\"id\" = $4) AND \
-                    (\"test_schema\".\"resource\".\"time_deleted\" IS NULL)) AND \
-                    (\"test_schema\".\"resource\".\"collection_id\" = $5)\
+                WHERE (\
+                    (\"test_schema\".\"resource\".\"time_deleted\" IS NULL) AND \
+                    (\"test_schema\".\"resource\".\"collection_id\" = $3)\
                 ) FOR UPDATE\
             ), \
             do_update AS (\
                 SELECT IF(\
-                    EXISTS(SELECT \"id\" FROM collection_info) AND \
-                    EXISTS(SELECT \"id\" FROM resource_info), \
+                    EXISTS(SELECT \"id\" FROM collection_info), \
                 TRUE,\
                 FALSE)\
+            ), \
+            updated_collection AS (\
+                UPDATE \
+                    \"test_schema\".\"collection\" \
+                SET \
+                    \"description\" = $4 \
+                WHERE \
+                    (\"test_schema\".\"collection\".\"id\" = $5) AND \
+                    (SELECT * FROM do_update) \
+                RETURNING \
+                    \"test_schema\".\"collection\".\"id\", \
+                    \"test_schema\".\"collection\".\"name\", \
+                    \"test_schema\".\"collection\".\"description\", \
+                    \"test_schema\".\"collection\".\"time_created\", \
+                    \"test_schema\".\"collection\".\"time_modified\", \
+                    \"test_schema\".\"collection\".\"time_deleted\"\
             ), \
             updated_resource AS (\
                 UPDATE \
@@ -842,22 +834,16 @@ mod test {
                 SET \
                     \"collection_id\" = $6 \
                 WHERE \
-                    (\"test_schema\".\"resource\".\"id\" = $7) AND \
+                    ((\"test_schema\".\"resource\".\"time_deleted\" IS NULL) AND \
+                     (\"test_schema\".\"resource\".\"collection_id\" = $7)) AND \
+                    (id IN (SELECT id FROM resource_info)) AND \
                     (SELECT * FROM do_update) \
-                RETURNING \
-                    \"test_schema\".\"resource\".\"id\", \
-                    \"test_schema\".\"resource\".\"name\", \
-                    \"test_schema\".\"resource\".\"description\", \
-                    \"test_schema\".\"resource\".\"time_created\", \
-                    \"test_schema\".\"resource\".\"time_modified\", \
-                    \"test_schema\".\"resource\".\"time_deleted\", \
-                    \"test_schema\".\"resource\".\"collection_id\"\
+                RETURNING 1\
             ) \
             SELECT * FROM \
                 (SELECT 1) \
                 LEFT JOIN (SELECT * FROM collection_by_id) ON TRUE \
-                LEFT JOIN (SELECT * FROM resource_by_id) ON TRUE \
-                LEFT JOIN (SELECT * FROM updated_resource) ON TRUE; -- binds: [cccccccc-cccc-cccc-cccc-cccccccccccc, aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa, cccccccc-cccc-cccc-cccc-cccccccccccc, aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa, cccccccc-cccc-cccc-cccc-cccccccccccc, None, aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa]";
+                LEFT JOIN (SELECT * FROM updated_collection) ON TRUE; -- binds: [cccccccc-cccc-cccc-cccc-cccccccccccc, cccccccc-cccc-cccc-cccc-cccccccccccc, cccccccc-cccc-cccc-cccc-cccccccccccc, \"Updated desc\", cccccccc-cccc-cccc-cccc-cccccccccccc, None, cccccccc-cccc-cccc-cccc-cccccccccccc]";
         assert_eq!(query, expected_query);
     }
 
@@ -872,12 +858,13 @@ mod test {
         setup_db(&pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
-        let resource_id = uuid::Uuid::new_v4();
-        let detach = Collection::detach_resource(
+        let _resource_id = uuid::Uuid::new_v4();
+        let detach = Collection::detach_resources(
             collection_id,
-            resource_id,
             collection::table.into_boxed(),
             resource::table.into_boxed(),
+            diesel::update(collection::table)
+                .set(collection::dsl::description.eq("Updated desc")),
             diesel::update(resource::table)
                 .set(resource::dsl::collection_id.eq(Option::<Uuid>::None)),
         )
@@ -891,8 +878,9 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_detach_missing_resource_fails() {
-        let logctx = dev::test_setup_log("test_detach_missing_resource_fails");
+    async fn test_detach_missing_resource_succeeds() {
+        let logctx =
+            dev::test_setup_log("test_detach_missing_resource_succeeds");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&cfg);
@@ -900,27 +888,32 @@ mod test {
         setup_db(&pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
-        let resource_id = uuid::Uuid::new_v4();
+        let _resource_id = uuid::Uuid::new_v4();
 
         // Create the collection
-        let collection =
+        let _collection =
             insert_collection(collection_id, "collection", &pool).await;
 
         // Attempt to detach - even though the resource does not exist.
-        let detach = Collection::detach_resource(
+        let detach = Collection::detach_resources(
             collection_id,
-            resource_id,
             collection::table.into_boxed(),
             resource::table.into_boxed(),
+            diesel::update(collection::table)
+                .set(collection::dsl::description.eq("Updated desc")),
             diesel::update(resource::table)
                 .set(resource::dsl::collection_id.eq(Option::<Uuid>::None)),
         )
         .detach_and_get_result_async(pool.pool())
         .await;
 
-        assert!(matches!(detach, Err(DetachError::ResourceNotFound)));
-        // The collection should remain unchanged.
-        assert_eq!(collection, get_collection(collection_id, &pool).await);
+        let returned_collection = detach.expect("Detach should have worked");
+        assert_eq!(returned_collection.description(), "Updated desc");
+        // The collection should still be updated.
+        assert_eq!(
+            returned_collection,
+            get_collection(collection_id, &pool).await
+        );
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
@@ -945,22 +938,25 @@ mod test {
         attach_resource(collection_id, resource_id, &pool).await;
 
         // Detach the resource from the collection.
-        let detach = Collection::detach_resource(
+        let detach = Collection::detach_resources(
             collection_id,
-            resource_id,
             collection::table.into_boxed(),
             resource::table.into_boxed(),
+            diesel::update(collection::table)
+                .set(collection::dsl::description.eq("Updated desc")),
             diesel::update(resource::table)
                 .set(resource::dsl::collection_id.eq(Option::<Uuid>::None)),
         )
         .detach_and_get_result_async(pool.pool())
         .await;
 
-        // "detach_and_get_result_async" should return the "detached" resource.
-        let returned_resource = detach.expect("Detach should have worked");
-        assert!(returned_resource.collection_id.is_none(),);
+        // "detach_and_get_result_async" should return the updated collection.
+        let returned_collection = detach.expect("Detach should have worked");
         // The returned value should be the latest value in the DB.
-        assert_eq!(returned_resource, get_resource(resource_id, &pool).await);
+        assert_eq!(
+            returned_collection,
+            get_collection(collection_id, &pool).await
+        );
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
@@ -985,18 +981,18 @@ mod test {
         attach_resource(collection_id, resource_id, &pool).await;
 
         // Detach the resource from the collection.
-        let detach_query = Collection::detach_resource(
+        let detach_query = Collection::detach_resources(
             collection_id,
-            resource_id,
             collection::table.into_boxed(),
             resource::table.into_boxed(),
+            diesel::update(collection::table)
+                .set(collection::dsl::description.eq("Updated desc")),
             diesel::update(resource::table)
                 .set(resource::dsl::collection_id.eq(Option::<Uuid>::None)),
         );
 
-        type TxnError = TransactionError<
-            DetachError<Resource, Collection, diesel::result::Error>,
-        >;
+        type TxnError =
+            TransactionError<DetachError<Collection, diesel::result::Error>>;
         let result = pool
             .pool()
             .transaction(move |conn| {
@@ -1008,10 +1004,12 @@ mod test {
             .await;
 
         // "detach_and_get_result" should return the "detached" resource.
-        let returned_resource = result.expect("Detach should have worked");
-        assert!(returned_resource.collection_id.is_none());
+        let returned_collection = result.expect("Detach should have worked");
         // The returned values should be the latest value in the DB.
-        assert_eq!(returned_resource, get_resource(resource_id, &pool).await);
+        assert_eq!(
+            returned_collection,
+            get_collection(collection_id, &pool).await
+        );
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
@@ -1035,40 +1033,83 @@ mod test {
         attach_resource(collection_id, resource_id, &pool).await;
 
         // Detach a resource from a collection, as usual.
-        let detach = Collection::detach_resource(
+        let detach = Collection::detach_resources(
             collection_id,
-            resource_id,
             collection::table.into_boxed(),
             resource::table.into_boxed(),
+            diesel::update(collection::table)
+                .set(collection::dsl::description.eq("Updated desc")),
             diesel::update(resource::table)
                 .set(resource::dsl::collection_id.eq(Option::<Uuid>::None)),
         )
         .detach_and_get_result_async(pool.pool())
         .await;
         assert_eq!(
-            detach.expect("Detach should have worked").id(),
-            resource_id
+            detach.expect("Detach should have worked").description(),
+            "Updated desc"
         );
 
-        // Try detaching once more
-        let detach = Collection::detach_resource(
+        // Try detaching once more. This one won't detach anything, but
+        // we still expect it to succeed.
+        let detach = Collection::detach_resources(
             collection_id,
-            resource_id,
             collection::table.into_boxed(),
             resource::table.into_boxed(),
+            diesel::update(collection::table)
+                .set(collection::dsl::description.eq("... and again!")),
             diesel::update(resource::table)
                 .set(resource::dsl::collection_id.eq(Option::<Uuid>::None)),
         )
         .detach_and_get_result_async(pool.pool())
         .await;
-        let err = detach.expect_err("Should have failed to detach");
+        assert_eq!(
+            detach.expect("Detach should have worked").description(),
+            "... and again!"
+        );
 
-        // A caller should be able to inspect this result, the resource is
-        // already detached.
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_detach_filter_collection() {
+        let logctx = dev::test_setup_log("test_detach_filter_collection");
+        let mut db = test_setup_database(&logctx.log).await;
+        let cfg = db::Config { url: db.pg_config().clone() };
+        let pool = db::Pool::new(&cfg);
+
+        setup_db(&pool).await;
+
+        let collection_id = uuid::Uuid::new_v4();
+
+        let _collection =
+            insert_collection(collection_id, "collection", &pool).await;
+        let resource_id = uuid::Uuid::new_v4();
+        let _resource = insert_resource(resource_id, "resource", &pool).await;
+        attach_resource(collection_id, resource_id, &pool).await;
+
+        // Detach a resource from a collection, but do so with a picky filter
+        // on the collectipon.
+        let detach = Collection::detach_resources(
+            collection_id,
+            collection::table
+                .into_boxed()
+                .filter(collection::dsl::name.eq("This name will not match")),
+            resource::table.into_boxed(),
+            diesel::update(collection::table)
+                .set(collection::dsl::description.eq("Updated desc")),
+            diesel::update(resource::table)
+                .set(resource::dsl::collection_id.eq(Option::<Uuid>::None)),
+        )
+        .detach_and_get_result_async(pool.pool())
+        .await;
+
+        let err = detach.expect_err("Expected this detach to fail");
+
+        // A caller should be able to inspect this result; the collection
+        // exists but has a different name than requested.
         match err {
-            DetachError::NoUpdate { resource, collection } => {
-                assert!(resource.collection_id.as_ref().is_none());
-                assert_eq!(resource, get_resource(resource_id, &pool).await);
+            DetachError::NoUpdate { collection } => {
                 assert_eq!(
                     collection,
                     get_collection(collection_id, &pool).await
@@ -1082,8 +1123,8 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_detach_deleted_resource_fails() {
-        let logctx = dev::test_setup_log("test_detach_deleted_resource_fails");
+    async fn test_detach_deleted_resource() {
+        let logctx = dev::test_setup_log("test_detach_deleted_resource");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&cfg);
@@ -1097,6 +1138,7 @@ mod test {
         let _collection =
             insert_collection(collection_id, "collection", &pool).await;
         let _resource = insert_resource(resource_id, "resource", &pool).await;
+        attach_resource(collection_id, resource_id, &pool).await;
 
         // Immediately soft-delete the resource.
         diesel::update(
@@ -1109,54 +1151,76 @@ mod test {
 
         // Detach the resource from the collection. Observe a failure which is
         // indistinguishable from the resource not existing.
-        let detach = Collection::detach_resource(
+        let detach = Collection::detach_resources(
             collection_id,
-            resource_id,
             collection::table.into_boxed(),
             resource::table.into_boxed(),
+            diesel::update(collection::table)
+                .set(collection::dsl::description.eq("Updated desc")),
             diesel::update(resource::table)
                 .set(resource::dsl::collection_id.eq(collection_id)),
         )
         .detach_and_get_result_async(pool.pool())
         .await;
-        assert!(matches!(detach, Err(DetachError::ResourceNotFound)));
+
+        assert_eq!(
+            detach.expect("Detach should have worked").description(),
+            "Updated desc"
+        );
+        assert_eq!(
+            get_resource(resource_id, &pool)
+                .await
+                .collection_id
+                .as_ref()
+                .expect("Should be deleted, but still attached"),
+            &collection_id,
+        );
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
 
     #[tokio::test]
-    async fn test_detach_without_update_filter() {
-        let logctx = dev::test_setup_log("test_detach_without_update_filter");
+    async fn test_detach_many() {
+        let logctx = dev::test_setup_log("test_detach_many");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&cfg);
 
         setup_db(&pool).await;
 
-        let collection_id = uuid::Uuid::new_v4();
-
         // Create the collection and some resources.
-        let _collection =
-            insert_collection(collection_id, "collection", &pool).await;
+        let collection_id1 = uuid::Uuid::new_v4();
+        let _collection1 =
+            insert_collection(collection_id1, "collection", &pool).await;
         let resource_id1 = uuid::Uuid::new_v4();
         let resource_id2 = uuid::Uuid::new_v4();
         let _resource1 =
             insert_resource(resource_id1, "resource1", &pool).await;
-        attach_resource(collection_id, resource_id1, &pool).await;
+        attach_resource(collection_id1, resource_id1, &pool).await;
         let _resource2 =
             insert_resource(resource_id2, "resource2", &pool).await;
-        attach_resource(collection_id, resource_id2, &pool).await;
+        attach_resource(collection_id1, resource_id2, &pool).await;
+
+        // Create a separate collection with a resource.
+        //
+        // We will check that this resource is untouched after operating
+        // on "collection_id1".
+        let collection_id2 = uuid::Uuid::new_v4();
+        let _collection2 =
+            insert_collection(collection_id2, "collection2", &pool).await;
+        let resource_id3 = uuid::Uuid::new_v4();
+        let _resource3 =
+            insert_resource(resource_id3, "resource3", &pool).await;
+        attach_resource(collection_id2, resource_id3, &pool).await;
 
         // Detach the resource from the collection.
-        //
-        // NOTE: In the update statement, we aren't filtering by resource ID,
-        // even though we explicitly have two "live" resources".
-        let detach = Collection::detach_resource(
-            collection_id,
-            resource_id1,
+        let detach = Collection::detach_resources(
+            collection_id1,
             collection::table.into_boxed(),
             resource::table.into_boxed(),
+            diesel::update(collection::table)
+                .set(collection::dsl::description.eq("Updated desc")),
             diesel::update(resource::table)
                 .set(resource::dsl::collection_id.eq(Option::<Uuid>::None)),
         )
@@ -1164,11 +1228,10 @@ mod test {
         .await;
 
         let returned_resource = detach.expect("Detach should have worked");
-        assert_eq!(returned_resource.id(), resource_id1);
+        assert_eq!(returned_resource.id(), collection_id1);
+        assert_eq!(returned_resource.description(), "Updated desc");
 
-        // Note that only "resource1" should be detached.
-        // "resource2" should have automatically been filtered away from the
-        // update statement, regardless of user input.
+        // Note that only "resource1" and "resource2" should be detached.
         assert!(get_resource(resource_id1, &pool)
             .await
             .collection_id
@@ -1176,7 +1239,17 @@ mod test {
         assert!(get_resource(resource_id2, &pool)
             .await
             .collection_id
-            .is_some());
+            .is_none());
+
+        // "resource3" should have been left alone.
+        assert_eq!(
+            get_resource(resource_id3, &pool)
+                .await
+                .collection_id
+                .as_ref()
+                .expect("Should still be attached"),
+            &collection_id2
+        );
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();

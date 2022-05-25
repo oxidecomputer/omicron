@@ -8,6 +8,7 @@
 // doctests
 pub mod collection_attach;
 pub mod collection_detach;
+pub mod collection_detach_many;
 pub mod collection_insert;
 mod config;
 mod cte_utils;
