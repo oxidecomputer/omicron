@@ -326,6 +326,6 @@ resource Database {
 # All authenticated users have the "query" permission on the database.
 has_permission(_actor: AuthenticatedActor, "query", _resource: Database);
 
-# The "db-init" user is the only one with the "init" role.
-has_permission(actor: AuthenticatedActor, "modify", _resource: Database)
-	if actor = USER_DB_INIT;
+# The "db-init" user is the only one with the "modify" permission.
+# XXX-dap TODO-coverage add a test for this
+has_permission(USER_DB_INIT: AuthenticatedActor, "modify", _resource: Database);
