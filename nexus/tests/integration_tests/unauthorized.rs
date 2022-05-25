@@ -55,24 +55,6 @@ async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     let log = &cptestctx.logctx.log;
 
-    // Run a httptest server
-    let server = ServerBuilder::new()
-        .bind_addr("127.0.0.1:5555".parse().unwrap())
-        .run()
-        .unwrap();
-
-    // Fake some data
-    server.expect(
-        Expectation::matching(request::method_path("HEAD", "/image.raw"))
-            .times(1..)
-            .respond_with(
-                status_code(200).append_header(
-                    "Content-Length",
-                    format!("{}", 4096 * 1000),
-                ),
-            ),
-    );
-
     // Create test data.
     info!(log, "setting up resource hierarchy");
     for request in &*SETUP_REQUESTS {
@@ -118,7 +100,7 @@ EXAMPLE:  0 3111 5555 3111 5555 5555 0  /organizations
             The number in each cell is the last digit of the 400-level response
             that was expected for this test case.
 
-    In this case, an unauthenthicated request to "GET /organizations" returned
+    In this case, an unauthenticated request to "GET /organizations" returned
     401.  All requests to "PUT /organizations" returned 405.
 
 G GET  PUT  POST DEL  TRCE G  URL
@@ -141,6 +123,25 @@ struct SetupReq {
 }
 
 lazy_static! {
+    pub static ref HTTP_SERVER: httptest::Server = {
+        // Run a httptest server
+        let server = ServerBuilder::new().run().unwrap();
+
+        // Fake some data
+        server.expect(
+            Expectation::matching(request::method_path("HEAD", "/image.raw"))
+                .times(1..)
+                .respond_with(
+                    status_code(200).append_header(
+                        "Content-Length",
+                        format!("{}", 4096 * 1000),
+                    ),
+                ),
+        );
+
+        server
+    };
+
     /// List of requests to execute at setup time
     static ref SETUP_REQUESTS: Vec<SetupReq> = vec![
         // Create a separate Silo (not used for anything else)
