@@ -7,6 +7,7 @@
 //! This is used for various authz-related tests.
 //! THERE ARE NO TESTS IN THIS FILE.
 
+use crate::integration_tests::unauthorized::HTTP_SERVER;
 use http::method::Method;
 use lazy_static::lazy_static;
 use nexus_test_utils::RACK_UUID;
@@ -234,7 +235,7 @@ lazy_static! {
                 name: DEMO_IMAGE_NAME.clone(),
                 description: String::from(""),
             },
-            source: params::ImageSource::Url(String::from("http://127.0.0.1:5555/image.raw")),
+            source: params::ImageSource::Url(HTTP_SERVER.url("/image.raw").to_string()),
             block_size: params::BlockSize::try_from(4096).unwrap(),
         };
 
