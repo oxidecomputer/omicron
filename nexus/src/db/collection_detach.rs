@@ -418,7 +418,7 @@ where
 /// //      (SELECT 1)
 /// //      LEFT JOIN (SELECT * FROM collection_by_id) ON TRUE
 /// //      LEFT JOIN (SELECT * FROM resource_by_id) ON TRUE
-/// //      LEFT JOIN (SELECT * FROM resource) ON TRUE;
+/// //      LEFT JOIN (SELECT * FROM updated_resource) ON TRUE;
 /// ```
 impl<ResourceType, V, C> QueryFragment<Pg>
     for DetachFromCollectionStatement<ResourceType, V, C>
