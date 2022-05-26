@@ -7,6 +7,7 @@
 use super::config::{Config, BOOTSTRAP_AGENT_PORT};
 use super::discovery;
 use super::params::SledAgentRequest;
+use super::rss_handle::RssHandle;
 use super::trust_quorum::{
     self, RackSecret, ShareDistribution, TrustQuorumError,
 };
@@ -14,7 +15,6 @@ use super::views::{ShareResponse, SledAgentResponse};
 use crate::config::Config as SledConfig;
 use crate::illumos::dladm::{self, Dladm, PhysicalLink};
 use crate::illumos::zone::Zones;
-use crate::rack_setup::service::Service as RackSetupService;
 use crate::server::Server as SledServer;
 use omicron_common::address::get_sled_address;
 use omicron_common::api::external::{Error as ExternalError, MacAddr};
@@ -90,7 +90,7 @@ pub(crate) struct Agent {
     peer_monitor: discovery::PeerMonitor,
     share: Option<ShareDistribution>,
 
-    rss: Mutex<Option<RackSetupService>>,
+    rss: Mutex<Option<RssHandle>>,
     sled_agent: Mutex<Option<SledServer>>,
     sled_config: SledConfig,
 }
@@ -381,8 +381,8 @@ impl Agent {
     // Initializes the Rack Setup Service.
     async fn start_rss(&self, config: &Config) -> Result<(), BootstrapError> {
         if let Some(rss_config) = &config.rss_config {
-            let rss = RackSetupService::new(
-                self.parent_log.new(o!("component" => "RSS")),
+            let rss = RssHandle::start_rss(
+                &self.parent_log,
                 rss_config.clone(),
                 self.peer_monitor.observer().await,
             );
