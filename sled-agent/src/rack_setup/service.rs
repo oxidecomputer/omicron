@@ -137,10 +137,7 @@ struct ServiceInner {
 }
 
 impl ServiceInner {
-    fn new(
-        log: Logger,
-        peer_monitor: PeerMonitorObserver,
-    ) -> Self {
+    fn new(log: Logger, peer_monitor: PeerMonitorObserver) -> Self {
         ServiceInner { log, peer_monitor: Mutex::new(peer_monitor) }
     }
 
