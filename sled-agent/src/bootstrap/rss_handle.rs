@@ -10,7 +10,6 @@ use super::params::SledAgentRequest;
 use crate::rack_setup::config::SetupServiceConfig;
 use crate::rack_setup::service::Service;
 use futures::stream::FuturesUnordered;
-use futures::Future;
 use futures::StreamExt;
 use omicron_common::backoff::internal_service_policy;
 use omicron_common::backoff::retry_notify;
@@ -55,41 +54,10 @@ impl RssHandle {
         );
         let log = log.new(o!("component" => "BootstrapAgentRssHandler"));
         let task = tokio::spawn(async move {
-            handle_rss_requests(&log, rx).await;
+            rx.initialize_sleds(&log).await;
         });
         Self { _rss: rss, task }
     }
-}
-
-async fn handle_rss_requests(
-    log: &Logger,
-    requests: BootstrapAgentHandleReceiver,
-) {
-    requests
-        .initialize_sleds(log, |bootstrap_addr, request| async move {
-            info!(
-                log, "Received initialization request from RSS";
-                "request" => ?request,
-                "target_sled" => %bootstrap_addr,
-            );
-
-            initialize_sled_agent(log, bootstrap_addr, &request)
-                .await
-                .map_err(|err| {
-                    format!(
-                        "Failed to initialize sled agent at {}: {}",
-                        bootstrap_addr, err
-                    )
-                })?;
-
-            info!(
-                log, "Initialized sled agent";
-                "target_sled" => %bootstrap_addr,
-            );
-
-            Ok(())
-        })
-        .await;
 }
 
 #[derive(Debug, Error)]
@@ -210,11 +178,7 @@ struct BootstrapAgentHandleReceiver {
 }
 
 impl BootstrapAgentHandleReceiver {
-    async fn initialize_sleds<F, Fut>(mut self, log: &Logger, init_one_sled: F)
-    where
-        F: Fn(SocketAddrV6, SledAgentRequest) -> Fut,
-        Fut: Future<Output = Result<(), String>>,
-    {
+    async fn initialize_sleds(mut self, log: &Logger) {
         let (requests, tx_response) = match self.inner.recv().await {
             Some(requests) => requests,
             None => {
@@ -226,9 +190,33 @@ impl BootstrapAgentHandleReceiver {
             }
         };
 
+        // Convert the vec of requests into a `FuturesUnordered` containing all
+        // of the initialization requests, allowing them to run concurrently.
         let mut futs = requests
             .into_iter()
-            .map(|(addr, req)| init_one_sled(addr, req))
+            .map(|(bootstrap_addr, request)| async move {
+                info!(
+                    log, "Received initialization request from RSS";
+                    "request" => ?request,
+                    "target_sled" => %bootstrap_addr,
+                );
+
+                initialize_sled_agent(log, bootstrap_addr, &request)
+                    .await
+                    .map_err(|err| {
+                        format!(
+                            "Failed to initialize sled agent at {}: {}",
+                            bootstrap_addr, err
+                        )
+                    })?;
+
+                info!(
+                    log, "Initialized sled agent";
+                    "target_sled" => %bootstrap_addr,
+                );
+
+                Ok(())
+            })
             .collect::<FuturesUnordered<_>>();
 
         // Wait for all initialization requests to complete, but stop on the
