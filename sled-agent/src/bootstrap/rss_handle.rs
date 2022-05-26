@@ -45,7 +45,7 @@ impl RssHandle {
         config: SetupServiceConfig,
         peer_monitor: PeerMonitorObserver,
     ) -> Self {
-        let (tx, rx) = rss_sled_agent_channel();
+        let (tx, rx) = rss_channel();
 
         let rss = Service::new(
             log.new(o!("component" => "RSS")),
@@ -61,7 +61,10 @@ impl RssHandle {
     }
 }
 
-async fn handle_rss_requests(log: &Logger, requests: RssSledAgentReceiver) {
+async fn handle_rss_requests(
+    log: &Logger,
+    requests: BootstrapAgentHandleReceiver,
+) {
     requests
         .initialize_sleds(log, |bootstrap_addr, request| async move {
             info!(
@@ -159,9 +162,12 @@ async fn initialize_sled_agent(
 // communication in the types below to avoid using tokio channels directly and
 // leave a breadcrumb for where the work will need to be done to switch the
 // communication mechanism.
-fn rss_sled_agent_channel() -> (RssSledAgentSender, RssSledAgentReceiver) {
+fn rss_channel() -> (BootstrapAgentHandle, BootstrapAgentHandleReceiver) {
     let (tx, rx) = mpsc::channel(32);
-    (RssSledAgentSender { inner: tx }, RssSledAgentReceiver { inner: rx })
+    (
+        BootstrapAgentHandle { inner: tx },
+        BootstrapAgentHandleReceiver { inner: rx },
+    )
 }
 
 type InnerInitRequest = (
@@ -169,13 +175,21 @@ type InnerInitRequest = (
     oneshot::Sender<Result<(), String>>,
 );
 
-pub(crate) struct RssSledAgentSender {
+pub(crate) struct BootstrapAgentHandle {
     inner: mpsc::Sender<InnerInitRequest>,
 }
 
-impl RssSledAgentSender {
+impl BootstrapAgentHandle {
+    /// Instruct the local bootstrap-agent to initialize sled-agents based on
+    /// the contents of `requests`.
+    ///
+    /// This function takes `self` and can only be called once with the full set
+    /// of sleds to initialize. Returns `Ok(())` if initializing all sleds
+    /// succeeds; if any sled fails to initialize, an error is returned
+    /// immediately (i.e., the error message will pertain only to the first sled
+    /// that failed to initialize).
     pub(crate) async fn initialize_sleds(
-        &self,
+        self,
         requests: Vec<(SocketAddrV6, SledAgentRequest)>,
     ) -> Result<(), String> {
         let (tx, rx) = oneshot::channel();
@@ -188,11 +202,11 @@ impl RssSledAgentSender {
     }
 }
 
-struct RssSledAgentReceiver {
+struct BootstrapAgentHandleReceiver {
     inner: mpsc::Receiver<InnerInitRequest>,
 }
 
-impl RssSledAgentReceiver {
+impl BootstrapAgentHandleReceiver {
     async fn initialize_sleds<F, Fut>(mut self, log: &Logger, init_one_sled: F)
     where
         F: Fn(SocketAddrV6, SledAgentRequest) -> Fut,

@@ -8,7 +8,7 @@ use super::config::{SetupServiceConfig as Config, SledRequest};
 use crate::bootstrap::config::BOOTSTRAP_AGENT_PORT;
 use crate::bootstrap::discovery::PeerMonitorObserver;
 use crate::bootstrap::params::SledAgentRequest;
-use crate::bootstrap::rss_handle::RssSledAgentSender;
+use crate::bootstrap::rss_handle::BootstrapAgentHandle;
 use crate::params::ServiceRequest;
 use omicron_common::address::{get_sled_address, ReservedRackSubnet};
 use omicron_common::backoff::{
@@ -68,18 +68,19 @@ impl Service {
     /// - `config`: The config file, which is used to setup the rack.
     /// - `peer_monitor`: The mechanism by which the setup service discovers
     ///   bootstrap agents on nearby sleds.
-    /// - `sled_agent_requests`: Communication channel by which we can send
-    ///    commands to local sled-agent (e.g., to initialize other sleds).
+    /// - `local_bootstrap_agent`: Communication channel by which we can send
+    ///   commands to our local bootstrap-agent (e.g., to initialize sled
+    ///   agents).
     pub(crate) fn new(
         log: Logger,
         config: Config,
         peer_monitor: PeerMonitorObserver,
-        sled_agent_requests: RssSledAgentSender,
+        local_bootstrap_agent: BootstrapAgentHandle,
     ) -> Self {
         let handle = tokio::task::spawn(async move {
             let svc = ServiceInner::new(log.clone(), peer_monitor);
             if let Err(e) = svc
-                .inject_rack_setup_requests(&config, &sled_agent_requests)
+                .inject_rack_setup_requests(&config, local_bootstrap_agent)
                 .await
             {
                 warn!(log, "RSS injection failed: {}", e);
@@ -411,7 +412,7 @@ impl ServiceInner {
     async fn inject_rack_setup_requests(
         &self,
         config: &Config,
-        sled_agent_requests: &RssSledAgentSender,
+        local_bootstrap_agent: BootstrapAgentHandle,
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Injecting RSS configuration: {:#?}", config);
 
@@ -471,7 +472,7 @@ impl ServiceInner {
         };
 
         // Forward the sled initialization requests to our sled-agent.
-        sled_agent_requests
+        local_bootstrap_agent
             .initialize_sleds(
                 plan.iter()
                     .map(|(bootstrap_addr, allocation)| {
