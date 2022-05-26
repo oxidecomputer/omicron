@@ -197,6 +197,9 @@ impl BootstrapAgentHandle {
         // IPC will require real error handling, but we know the sled-agent task
         // will not close the channel until we do and that it will always send a
         // response, so unwrapping here is fine.
+        //
+        // Moving from channels to IPC will happen as a part of
+        // https://github.com/oxidecomputer/omicron/issues/820.
         self.inner.send((requests, tx)).await.unwrap();
         rx.await.unwrap()
     }
@@ -230,11 +233,17 @@ impl BootstrapAgentHandleReceiver {
 
         // Wait for all initialization requests to complete, but stop on the
         // first error.
+        //
+        // We `.unwrap()` when sending a result on `tx_response` (either in this
+        // loop or afterwards if all requests succeed), which is okay because we
+        // know RSS is waiting for our response (i.e., we can only panic if RSS
+        // already panicked itself). When we move RSS
+        // out-of-process, tracked by
+        // https://github.com/oxidecomputer/omicron/issues/820, we'll have to
+        // replace these channels with IPC, which will also eliminiate these
+        // unwraps.
         while let Some(result) = futs.next().await {
             if result.is_err() {
-                // IPC will require real error handling, but we know the
-                // RSS task is waiting for our response, so unwrapping here is
-                // fine (we can only panic if RSS already panicked).
                 tx_response.send(result).unwrap();
                 return;
             }
