@@ -4,16 +4,16 @@
 
 //! Unit tests for the Oso policy
 //!
-//! This differs from the end-to-end integration tests for authz.  This test is
-//! intended to verify
+//! This differs from the end-to-end integration tests for authz.  The tests
+//! here verify:
+//!
 //! - for resources covered by RBAC: that the roles in the policy grant the
 //!   permissions that we expect that they do
+//!
 //! - for other policies: that the policy reflects the privileges that we expect
 //!   (e.g., ordinary users don't have internal roles)
 //!
-//! XXX-dap current status
 //! XXX-dap TODO:
-//! - check the actual output!
 //! - review above comment
 //! - review remaining XXX-dap
 //! - clean up, document test
@@ -127,9 +127,6 @@ async fn test_iam_roles() {
     }
 
     expectorate::assert_contents("tests/output/authz-roles.out", &buffer);
-
-    // XXX-dap
-    panic!("boom");
 
     db.cleanup().await.unwrap();
     logctx.cleanup_successful();
@@ -373,7 +370,7 @@ fn make_project(
         Box::new(authz::Disk::new(
             project.clone(),
             make_uuid(),
-            LookupType::ByName(format!("{}-instance1", project_name)),
+            LookupType::ByName(format!("{}-disk1", project_name)),
         )),
         Box::new(authz::Instance::new(
             project.clone(),

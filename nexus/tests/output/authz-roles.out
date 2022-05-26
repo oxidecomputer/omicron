@@ -62,7 +62,7 @@ resource: Project "silo1-org1-proj1"
   silo1-org1-proj1-collaborator    ✗  ✓  ✓  ✓  ✗  ✗  ✓  ✗
   silo1-org1-proj1-viewer          ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
 
-resource: Disk "silo1-org1-proj1-instance1"
+resource: Disk "silo1-org1-proj1-disk1"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
@@ -142,7 +142,7 @@ resource: Project "silo1-org1-proj2"
   silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
   silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
 
-resource: Disk "silo1-org1-proj2-instance1"
+resource: Disk "silo1-org1-proj2-disk1"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
@@ -238,7 +238,7 @@ resource: Project "silo1-org2-proj1"
   silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
   silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
 
-resource: Disk "silo1-org2-proj1-instance1"
+resource: Disk "silo1-org2-proj1-disk1"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
@@ -350,7 +350,7 @@ resource: Project "silo2-org1-proj1"
   silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
   silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
 
-resource: Disk "silo2-org1-proj1-instance1"
+resource: Disk "silo2-org1-proj1-disk1"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
