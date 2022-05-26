@@ -391,6 +391,10 @@ pub struct NetworkInterfaceIdentifier {
 pub enum ImageSource {
     Url(String),
     Snapshot(Uuid),
+
+    /// Boot the Alpine ISO that ships with the Propolis zone. Intended for
+    /// development purposes only.
+    YouCanBootAnythingAsLongAsItsAlpine,
 }
 
 /// Create-time parameters for an
