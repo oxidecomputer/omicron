@@ -11,6 +11,7 @@ use crate::opte::OptePortAllocator;
 use crate::params::{
     InstanceHardware, InstanceMigrateParams, InstanceRuntimeStateRequested,
 };
+use crate::serial::ByteOffset;
 use omicron_common::api::internal::nexus::{
     InstanceRuntimeState, InstanceSerialConsoleData,
 };
@@ -171,7 +172,7 @@ impl InstanceManager {
     pub async fn instance_serial_console_buffer_data(
         &self,
         instance_id: Uuid,
-        byte_offset: Option<isize>,
+        byte_offset: ByteOffset,
         max_bytes: Option<usize>,
     ) -> Result<InstanceSerialConsoleData, Error> {
         let instance = {

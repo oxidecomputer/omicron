@@ -5,6 +5,7 @@
 //! HTTP entrypoint functions for the sled agent's exposed API
 
 use crate::params::{DiskEnsureBody, InstanceEnsureBody};
+use crate::serial::ByteOffset;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
@@ -156,11 +157,29 @@ async fn instance_serial_get(
     let instance_id = path_params.into_inner().instance_id;
     let query_params = query.into_inner();
 
+    let byte_offset = match query_params {
+        InstanceSerialConsoleRequest {
+            from_start: Some(offset),
+            most_recent: None,
+            ..
+        } => ByteOffset::FromStart(offset as usize),
+        InstanceSerialConsoleRequest {
+            from_start: None,
+            most_recent: Some(offset),
+            ..
+        } => ByteOffset::MostRecent(offset as usize),
+        _ => return Err(HttpError::for_bad_request(
+            None,
+            "Exactly one of 'from_start' or 'most_recent' must be specified."
+                .to_string(),
+        )),
+    };
+
     let data = sa
         .instance_serial_console_data(
             instance_id,
-            query_params.byte_offset,
-            query_params.max_bytes,
+            byte_offset,
+            query_params.max_bytes.map(|x| x as usize),
         )
         .await
         .map_err(HttpError::for_internal_error)?;

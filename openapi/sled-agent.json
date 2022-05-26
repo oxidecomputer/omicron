@@ -142,23 +142,36 @@
           },
           {
             "in": "query",
-            "name": "byte_offset",
-            "description": "Character index in the serial buffer (since instance boot) from which to read.",
+            "name": "from_start",
+            "description": "Character index in the serial buffer from which to read, counting the bytes output since instance start. If this is not provided, `most_recent` must be provided, and if this *is* provided, `most_recent` must *not* be provided.",
             "schema": {
               "nullable": true,
               "type": "integer",
-              "format": "int"
+              "format": "uint32",
+              "minimum": 0
             },
             "style": "form"
           },
           {
             "in": "query",
             "name": "max_bytes",
-            "description": "Maximum number of bytes of buffered serial console contents (after byte_offset) to return.",
+            "description": "Maximum number of bytes of buffered serial console contents to return. If the requested range runs to the end of the available buffer, the data returned will be shorter than `max_bytes`.",
             "schema": {
               "nullable": true,
               "type": "integer",
-              "format": "uint",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "most_recent",
+            "description": "Character index in the serial buffer from which to read, counting *backward* from the most recently buffered data retrieved from the instance. (See note on `from_start` about mutual exclusivity)",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
               "minimum": 0
             },
             "style": "form"
@@ -906,6 +919,7 @@
         "type": "object",
         "properties": {
           "data": {
+            "description": "The bytes starting from the requested offset up to either the end of the buffer or the request's `max_bytes`. Provided as a u8 array rather than a string, as it may not be UTF-8.",
             "type": "array",
             "items": {
               "type": "integer",
@@ -914,8 +928,9 @@
             }
           },
           "last_byte_offset": {
+            "description": "The absolute offset since boot (suitable for use as `byte_offset` in a subsequent request) of the last byte returned in `data`.",
             "type": "integer",
-            "format": "uint",
+            "format": "uint32",
             "minimum": 0
           }
         },

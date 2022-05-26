@@ -19,7 +19,7 @@ use crate::params::NetworkInterface;
 use crate::params::{
     InstanceHardware, InstanceMigrateParams, InstanceRuntimeStateRequested,
 };
-use crate::serial::SerialConsoleBuffer;
+use crate::serial::{ByteOffset, SerialConsoleBuffer};
 use anyhow::anyhow;
 use futures::lock::{Mutex, MutexGuard};
 use omicron_common::address::PROPOLIS_PORT;
@@ -340,6 +340,12 @@ impl InstanceInner {
             }
         }));
 
+        if self.serial_tty_task.is_none() {
+            let ws_uri = client.instance_serial_console_ws_uri();
+            self.serial_tty_task =
+                Some(SerialConsoleBuffer::new(ws_uri, self.log.clone()));
+        }
+
         self.running_state = Some(RunningState {
             client,
             ticket,
@@ -410,7 +416,7 @@ mockall::mock! {
         ) -> Result<InstanceRuntimeState, Error>;
         pub async fn serial_console_buffer_data(
             &self,
-            byte_offset: Option<isize>,
+            byte_offset: ByteOffset,
             max_bytes: Option<usize>,
         ) -> Result<InstanceSerialConsoleData, Error>;
     }
@@ -643,16 +649,9 @@ impl Instance {
         // Create the propolis zone and resources
         let setup = self.setup_propolis_locked(&mut inner).await?;
 
-        let ws_uri = setup.client.instance_serial_console_ws_uri();
-
         // Ensure the instance exists in the Propolis Server before we start
         // using it.
         inner.ensure(self.clone(), ticket, setup, migrate).await?;
-
-        if inner.serial_tty_task.is_none() {
-            inner.serial_tty_task =
-                Some(SerialConsoleBuffer::new(ws_uri, inner.log.clone()));
-        }
 
         Ok(())
     }
@@ -734,14 +733,17 @@ impl Instance {
 
     pub async fn serial_console_buffer_data(
         &self,
-        byte_offset: Option<isize>,
+        byte_offset: ByteOffset,
         max_bytes: Option<usize>,
     ) -> Result<InstanceSerialConsoleData, Error> {
         let inner = self.inner.lock().await;
         if let Some(ttybuf) = &inner.serial_tty_task {
             let (data, last_byte_offset) =
                 ttybuf.contents(byte_offset, max_bytes).await?;
-            Ok(InstanceSerialConsoleData { data, last_byte_offset })
+            Ok(InstanceSerialConsoleData {
+                data,
+                last_byte_offset: last_byte_offset as u32,
+            })
         } else {
             Err(crate::serial::Error::Existential.into())
         }

@@ -7,6 +7,7 @@
 use crate::params::{
     DatasetEnsureBody, DiskEnsureBody, InstanceEnsureBody, ServiceEnsureBody,
 };
+use crate::serial::ByteOffset;
 use dropshot::{
     endpoint, ApiDescription, HttpError, HttpResponseOk,
     HttpResponseUpdatedNoContent, Path, Query, RequestContext, TypedBody,
@@ -160,17 +161,35 @@ async fn instance_serial_get(
     path_params: Path<InstancePathParam>,
     query: Query<InstanceSerialConsoleRequest>,
 ) -> Result<HttpResponseOk<InstanceSerialConsoleData>, HttpError> {
+    // TODO: support websocket in dropshot, detect websocket upgrade header and proxy the data
+
     let sa = rqctx.context();
     let instance_id = path_params.into_inner().instance_id;
     let query_params = query.into_inner();
 
-    // TODO: support websocket in dropshot, detect websocket upgrade header and proxy the data
+    let byte_offset = match query_params {
+        InstanceSerialConsoleRequest {
+            from_start: Some(offset),
+            most_recent: None,
+            ..
+        } => ByteOffset::FromStart(offset as usize),
+        InstanceSerialConsoleRequest {
+            from_start: None,
+            most_recent: Some(offset),
+            ..
+        } => ByteOffset::MostRecent(offset as usize),
+        _ => return Err(HttpError::for_bad_request(
+            None,
+            "Exactly one of 'from_start' or 'most_recent' must be specified."
+                .to_string(),
+        )),
+    };
 
     let data = sa
         .instance_serial_console_data(
             instance_id,
-            query_params.byte_offset,
-            query_params.max_bytes,
+            byte_offset,
+            query_params.max_bytes.map(|x| x as usize),
         )
         .await
         .map_err(Error::from)?;

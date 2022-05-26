@@ -8,6 +8,7 @@ use crate::nexus::NexusClient;
 use crate::params::{
     DiskStateRequested, InstanceHardware, InstanceRuntimeStateRequested,
 };
+use crate::serial::ByteOffset;
 use futures::lock::Mutex;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
@@ -139,7 +140,7 @@ impl SledAgent {
     pub async fn instance_serial_console_data(
         &self,
         instance_id: Uuid,
-        byte_offset: Option<isize>,
+        byte_offset: ByteOffset,
         max_bytes: Option<usize>,
     ) -> Result<InstanceSerialConsoleData, String> {
         if !self.instances.sim_contains(&instance_id).await {
@@ -205,15 +206,16 @@ impl SledAgent {
         }
         buf += "\x1b[2J\x1b[HOS/478 (localhorse) (ttyl)\n\nlocalhorse login: ";
 
-        let byte_offset = byte_offset
-            .map(|x| if x < 0 { buf.len() as isize + x } else { x } as usize)
-            .unwrap_or(0);
+        let start = match byte_offset {
+            ByteOffset::FromStart(offset) => offset,
+            ByteOffset::MostRecent(offset) => buf.len() - offset,
+        };
 
-        let start = byte_offset.min(buf.len());
-        let end = (byte_offset + max_bytes.unwrap_or(16 * 1024)).min(buf.len());
+        let start = start.min(buf.len());
+        let end = (start + max_bytes.unwrap_or(16 * 1024)).min(buf.len());
         let data = buf[start..end].as_bytes().to_vec();
 
-        let last_byte_offset = byte_offset + data.len();
+        let last_byte_offset = (start + data.len()) as u32;
 
         Ok(InstanceSerialConsoleData { data, last_byte_offset })
     }

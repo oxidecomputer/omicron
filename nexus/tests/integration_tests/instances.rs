@@ -2257,7 +2257,8 @@ async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
     let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
     // Make sure we get a 404 if we try to access the serial console before creation.
-    let instance_serial_url = format!("{}/kris-picks/serial", url_instances);
+    let instance_serial_url =
+        format!("{}/kris-picks/serial?from_start=0", url_instances);
     let error: HttpErrorResponseBody = NexusRequest::expect_failure(
         client,
         StatusCode::NOT_FOUND,

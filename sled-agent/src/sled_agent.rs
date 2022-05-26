@@ -34,6 +34,7 @@ use crate::illumos::{dladm::Dladm, zfs::Zfs, zone::Zones};
 use crate::illumos::{
     dladm::MockDladm as Dladm, zfs::MockZfs as Zfs, zone::MockZones as Zones,
 };
+use crate::serial::ByteOffset;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -328,7 +329,7 @@ impl SledAgent {
     pub async fn instance_serial_console_data(
         &self,
         instance_id: Uuid,
-        byte_offset: Option<isize>,
+        byte_offset: ByteOffset,
         max_bytes: Option<usize>,
     ) -> Result<InstanceSerialConsoleData, Error> {
         self.instances
