@@ -7,7 +7,9 @@
 use crate::common::instance::{
     Action as InstanceAction, InstanceStates, PROPOLIS_PORT,
 };
-use crate::illumos::running_zone::{InstalledZone, RunningZone};
+use crate::illumos::running_zone::{
+    InstalledZone, RunCommandError, RunningZone,
+};
 use crate::illumos::svc::wait_for_service;
 use crate::illumos::vnic::VnicAllocator;
 use crate::illumos::zone::{AddressRequest, PROPOLIS_ZONE_PREFIX};
@@ -516,37 +518,80 @@ impl Instance {
         info!(inner.log, "Created address {} for zone: {}", network, zname);
 
         // Run Propolis in the Zone.
+        let smf_service_name = "svc:/system/illumos/propolis-server";
+        let instance_name = format!("vm-{}", inner.propolis_id());
+        let smf_instance_name =
+            format!("{}:{}", smf_service_name, instance_name);
         let server_addr = SocketAddr::new(inner.propolis_ip, PROPOLIS_PORT);
-        running_zone.run_cmd(&[
-            crate::illumos::zone::SVCCFG,
-            "import",
-            "/var/svc/manifest/site/propolis-server/manifest.xml",
-        ])?;
 
+        // We intentionally do not import the service - it is placed under
+        // `/var/svc/manifest`, and should automatically be imported by
+        // configd.
+        //
+        // Insteady, we re-try adding the instance until it succeeds.
+        // This implies that the service was added successfully.
+        info!(
+            inner.log,
+            "Adding {} as a {} service", &instance_name, smf_service_name
+        );
+        backoff::retry_notify(
+            backoff::internal_service_policy(),
+            || async {
+                running_zone
+                    .run_cmd(&[
+                        crate::illumos::zone::SVCCFG,
+                        "-s",
+                        smf_service_name,
+                        "add",
+                        &instance_name,
+                    ])
+                    .map_err(|e| backoff::BackoffError::transient(e))
+            },
+            |err: RunCommandError, delay| {
+                warn!(
+                    inner.log,
+                    "Failed to add {} as a service (retrying in {:?}): {}",
+                    instance_name,
+                    delay,
+                    err.to_string()
+                );
+            },
+        )
+        .await?;
+
+        info!(inner.log, "Adding service property group");
         running_zone.run_cmd(&[
             crate::illumos::zone::SVCCFG,
             "-s",
-            "system/illumos/propolis-server",
+            &smf_instance_name,
+            "addpg",
+            "config",
+            "astring",
+        ])?;
+
+        info!(inner.log, "Setting server address property");
+        running_zone.run_cmd(&[
+            crate::illumos::zone::SVCCFG,
+            "-s",
+            &smf_instance_name,
             "setprop",
             &format!("config/server_addr={}", server_addr),
         ])?;
 
+        info!(inner.log, "Refreshing instance");
         running_zone.run_cmd(&[
             crate::illumos::zone::SVCCFG,
             "-s",
-            "svc:/system/illumos/propolis-server",
-            "add",
-            &format!("vm-{}", inner.propolis_id()),
+            &smf_instance_name,
+            "refresh",
         ])?;
 
+        info!(inner.log, "Enabling instance");
         running_zone.run_cmd(&[
             crate::illumos::zone::SVCADM,
             "enable",
             "-t",
-            &format!(
-                "svc:/system/illumos/propolis-server:vm-{}",
-                inner.propolis_id()
-            ),
+            &smf_instance_name,
         ])?;
 
         info!(inner.log, "Started propolis in zone: {}", zname);
