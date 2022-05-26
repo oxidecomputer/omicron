@@ -1746,7 +1746,7 @@ pub struct Vni(u32);
 
 impl Vni {
     /// Virtual Network Identifiers are constrained to be 24-bit values.
-    pub const MAX_VNI: u32 = 1 << 24;
+    pub const MAX_VNI: u32 = 0xFF_FFFF;
 
     /// Oxide reserves a slice of initial VNIs for its own use.
     pub const MIN_GUEST_VNI: u32 = 1024;
