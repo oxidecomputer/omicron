@@ -124,7 +124,11 @@ impl QueryFragment<Pg> for InsertVpcQuery {
         out.push_identifier(dsl::vni::NAME)?;
         out.push_sql(", ");
 
-        // TODO(ben): Replace with a NextItem query.
+        // TODO-performance: It might be possible to replace this with a
+        // NextItem query, but Cockroach doesn't currently support the 128-bit
+        // integers we'd need to create `/48` prefixes by adding a random offset
+        // to `fd00::/8`. For now, we do that with a retry-loop in the
+        // application.
         out.push_bind_param::<sql_types::Inet, IpNetwork>(
             &self.vpc.ipv6_prefix,
         )?;
@@ -198,10 +202,11 @@ impl NextVni {
     fn new(vni: Vni) -> Self {
         let base_u32 = u32::from(vni.0);
         // The valid range is [0, 1 << 24], so the maximum shift is whatever
-        // gets us to 1 << 24, and the minimum is whatever gets us to 0.
+        // gets us to 1 << 24, and the minimum is whatever gets us back to the
+        // minimum guest VNI.
         let max_shift = i64::from(external::Vni::MAX_VNI - base_u32);
         let min_shift = i64::from(
-            -i32::try_from(base_u32)
+            -i32::try_from(base_u32 - external::Vni::MIN_GUEST_VNI)
                 .expect("Expected a valid VNI at this point"),
         );
         let generator =
