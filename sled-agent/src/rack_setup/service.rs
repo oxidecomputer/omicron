@@ -416,18 +416,6 @@ impl ServiceInner {
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Injecting RSS configuration: {:#?}", config);
 
-        // We expect this directory to exist - ensure that it does, before any
-        // subsequent operations which may write configs here.
-        tokio::fs::create_dir_all(omicron_common::OMICRON_CONFIG_PATH)
-            .await
-            .map_err(|err| SetupServiceError::Io {
-                message: format!(
-                    "Creating config directory {}",
-                    omicron_common::OMICRON_CONFIG_PATH
-                ),
-                err,
-            })?;
-
         // Check if a previous RSS plan has completed successfully.
         //
         // If it has, the system should be up-and-running.
