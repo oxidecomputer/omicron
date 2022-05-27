@@ -9,10 +9,11 @@ anyhow = "1.0"
 async-trait = "0.1.53"
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
 futures = "0.3"
-gateway-messages = { path = "../gateway-messages" }
-hex = "0.4.3"
+gateway-messages = { path = "../gateway-messages", default-features = false, features = ["std"] }
+hex = { version = "0.4.3", features = ["serde"] }
 omicron-common = { path = "../common" }
 slog-dtrace = "0.2"
+sprockets-rot = { git = "http://github.com/oxidecomputer/sprockets", rev = "0361fd13ff19cda6696242fe40f1325fca30d3d1" }
 structopt = "0.3"
 thiserror = "1.0"
 toml = "0.5.9"

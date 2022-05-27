@@ -204,7 +204,7 @@ mod test {
             crate::db::datastore::datastore_test(&logctx, &db).await;
         let authz_privileged = authz_context_for_actor(
             &logctx.log,
-            authn::Context::internal_test_user(),
+            authn::Context::privileged_test_user(),
             Arc::clone(&datastore),
         );
         authz_privileged
@@ -224,9 +224,7 @@ mod test {
         ));
         let authz_nobody = authz_context_for_actor(
             &logctx.log,
-            authn::Context::test_context_for_builtin_user(
-                authn::USER_TEST_UNPRIVILEGED.id,
-            ),
+            authn::Context::unprivileged_test_user(),
             Arc::clone(&datastore),
         );
         authz_nobody
@@ -253,7 +251,7 @@ mod test {
 
         let authz_privileged = authz_context_for_actor(
             &logctx.log,
-            authn::Context::internal_test_user(),
+            authn::Context::privileged_test_user(),
             Arc::clone(&datastore),
         );
         authz_privileged
@@ -264,9 +262,7 @@ mod test {
             );
         let authz_nobody = authz_context_for_actor(
             &logctx.log,
-            authn::Context::test_context_for_builtin_user(
-                authn::USER_TEST_UNPRIVILEGED.id,
-            ),
+            authn::Context::unprivileged_test_user(),
             Arc::clone(&datastore),
         );
         authz_nobody

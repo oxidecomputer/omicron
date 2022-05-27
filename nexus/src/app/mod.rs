@@ -84,6 +84,9 @@ pub struct Nexus {
     /// Contents of the trusted root role for the TUF repository.
     updates_config: Option<config::UpdatesConfig>,
 
+    /// The tunable parameters from a configuration file
+    tunables: config::Tunables,
+
     /// Operational context used for Instance allocation
     opctx_alloc: OpContext,
 
@@ -151,6 +154,7 @@ impl Nexus {
             populate_status,
             timeseries_client,
             updates_config: config.updates.clone(),
+            tunables: config.tunables.clone(),
             opctx_alloc: OpContext::for_background(
                 log.new(o!("component" => "InstanceAllocator")),
                 Arc::clone(&authz),
@@ -189,6 +193,11 @@ impl Nexus {
 
         *nexus.recovery_task.lock().unwrap() = Some(recovery_task);
         nexus
+    }
+
+    /// Return the tunable configuration parameters, e.g. for use in tests.
+    pub fn tunables(&self) -> &config::Tunables {
+        &self.tunables
     }
 
     pub async fn wait_for_populate(&self) -> Result<(), anyhow::Error> {

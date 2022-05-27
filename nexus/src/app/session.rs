@@ -5,6 +5,7 @@
 //! Console session management.
 
 use crate::authn;
+use crate::authn::Reason;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
@@ -131,5 +132,32 @@ impl super::Nexus {
             LookupType::ByCompositeId(token.to_string()),
         );
         self.db_datastore.session_hard_delete(opctx, &authz_session).await
+    }
+
+    pub async fn lookup_silo_for_authn(
+        &self,
+        opctx: &OpContext,
+        silo_user_id: Uuid,
+    ) -> Result<Uuid, Reason> {
+        let (.., db_silo_user) = LookupPath::new(opctx, &self.db_datastore)
+            .silo_user_id(silo_user_id)
+            .fetch()
+            .await
+            .map_err(|error| match error {
+                Error::ObjectNotFound { .. } => {
+                    Reason::UnknownActor { actor: silo_user_id.to_string() }
+                }
+                Error::ObjectAlreadyExists { .. }
+                | Error::InvalidRequest { .. }
+                | Error::Unauthenticated { .. }
+                | Error::InvalidValue { .. }
+                | Error::Forbidden
+                | Error::InternalError { .. }
+                | Error::ServiceUnavailable { .. }
+                | Error::MethodNotAllowed { .. } => {
+                    Reason::UnknownError { source: error }
+                }
+            })?;
+        Ok(db_silo_user.silo_id)
     }
 }

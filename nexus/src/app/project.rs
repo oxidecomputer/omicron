@@ -96,7 +96,7 @@ impl super::Nexus {
     ) -> ListResultVec<db::model::Project> {
         let (.., authz_org) = LookupPath::new(opctx, &self.db_datastore)
             .organization_name(organization_name)
-            .lookup_for(authz::Action::CreateChild)
+            .lookup_for(authz::Action::ListChildren)
             .await?;
         self.db_datastore
             .projects_list_by_name(opctx, &authz_org, pagparams)
@@ -111,7 +111,7 @@ impl super::Nexus {
     ) -> ListResultVec<db::model::Project> {
         let (.., authz_org) = LookupPath::new(opctx, &self.db_datastore)
             .organization_name(organization_name)
-            .lookup_for(authz::Action::CreateChild)
+            .lookup_for(authz::Action::ListChildren)
             .await?;
         self.db_datastore
             .projects_list_by_id(opctx, &authz_org, pagparams)
@@ -164,7 +164,7 @@ impl super::Nexus {
             .await?;
         let role_assignments = self
             .db_datastore
-            .role_assignment_fetch_all(opctx, &authz_project)
+            .role_assignment_fetch_visible(opctx, &authz_project)
             .await?
             .into_iter()
             .map(|r| r.try_into().context("parsing database role assignment"))
@@ -188,7 +188,7 @@ impl super::Nexus {
 
         let role_assignments = self
             .db_datastore
-            .role_assignment_replace_all(
+            .role_assignment_replace_visible(
                 opctx,
                 &authz_project,
                 &policy.role_assignments,

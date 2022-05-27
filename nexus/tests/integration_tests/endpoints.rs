@@ -7,6 +7,7 @@
 //! This is used for various authz-related tests.
 //! THERE ARE NO TESTS IN THIS FILE.
 
+use crate::integration_tests::unauthorized::HTTP_SERVER;
 use http::method::Method;
 use lazy_static::lazy_static;
 use nexus_test_utils::RACK_UUID;
@@ -34,6 +35,9 @@ lazy_static! {
         format!("/hardware/racks/{}", RACK_UUID);
     pub static ref HARDWARE_SLED_URL: String =
         format!("/hardware/sleds/{}", SLED_AGENT_UUID);
+
+    // Global policy
+    pub static ref POLICY_URL: &'static str = "/policy";
 
     // Silo used for testing
     pub static ref DEMO_SILO_NAME: Name = "demo-silo".parse().unwrap();
@@ -231,7 +235,7 @@ lazy_static! {
                 name: DEMO_IMAGE_NAME.clone(),
                 description: String::from(""),
             },
-            source: params::ImageSource::Url(String::from("http://127.0.0.1:5555/image.raw")),
+            source: params::ImageSource::Url(HTTP_SERVER.url("/image.raw").to_string()),
             block_size: params::BlockSize::try_from(4096).unwrap(),
         };
 
@@ -371,6 +375,22 @@ lazy_static! {
 
     /// List of endpoints to be verified
     pub static ref VERIFY_ENDPOINTS: Vec<VerifyEndpoint> = vec![
+        // Global IAM policy
+        VerifyEndpoint {
+            url: *POLICY_URL,
+            visibility: Visibility::Public,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Put(
+                    serde_json::to_value(
+                        &shared::Policy::<authz::FleetRoles> {
+                            role_assignments: vec![]
+                        }
+                    ).unwrap()
+                ),
+            ],
+        },
+
         /* Silos */
         VerifyEndpoint {
             url: "/silos",

@@ -114,7 +114,7 @@ pub async fn test_setup_with_config(
             SpType::Sled => simrack.gimlets[target_sp.slot].local_addr(sp_port),
             SpType::Power => todo!(),
         };
-        port_config.multicast_addr.set_port(sp_addr.port());
+        port_config.multicast_addr.set_port(sp_addr.unwrap().port());
     }
 
     // Start gateway server

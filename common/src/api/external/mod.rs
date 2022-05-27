@@ -726,7 +726,7 @@ pub struct Instance {
 
 // DISKS
 
-/// Client view of an [`Disk`]
+/// Client view of a [`Disk`]
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Disk {
     #[serde(flatten)]

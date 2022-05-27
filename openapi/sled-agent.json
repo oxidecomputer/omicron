@@ -969,6 +969,7 @@
             }
           },
           "gz_addresses": {
+            "default": [],
             "type": "array",
             "items": {
               "type": "string",

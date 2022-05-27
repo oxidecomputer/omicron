@@ -163,6 +163,11 @@ impl super::Nexus {
 
     /// Modifies the runtime state of the Disk as requested.  This generally
     /// means attaching or detaching the disk.
+    // TODO(https://github.com/oxidecomputer/omicron/issues/811):
+    // This will be unused until we implement hot-plug support.
+    // However, it has been left for reference until then, as it will
+    // likely be needed once that feature is implemented.
+    #[allow(dead_code)]
     pub(crate) async fn disk_set_runtime(
         &self,
         opctx: &OpContext,
