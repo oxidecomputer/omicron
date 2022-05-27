@@ -19,7 +19,6 @@ use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
-use omicron_common::api::external::DiskState;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::ListResultVec;
@@ -152,17 +151,9 @@ impl super::Nexus {
         Ok(db_instance)
     }
 
-    // TODO-correctness It's not totally clear what the semantics and behavior
-    // should be here.  It might be nice to say that you can only do this
-    // operation if the Instance is already stopped, in which case we can
-    // execute this immediately by just removing it from the database, with the
-    // same race we have with disk delete (i.e., if someone else is requesting
-    // an instance boot, we may wind up in an inconsistent state).  On the other
-    // hand, we could always allow this operation, issue the request to the SA
-    // to destroy the instance (not just stop it), and proceed with deletion
-    // when that finishes.  But in that case, although the HTTP DELETE request
-    // completed, the object will still appear for a little while, which kind of
-    // sucks.
+    // This operation may only occur on stopped instances, which implies that
+    // the attached disks do not have any running "upstairs" process running
+    // within the sled.
     pub async fn project_destroy_instance(
         &self,
         opctx: &OpContext,
@@ -173,57 +164,13 @@ impl super::Nexus {
         // TODO-robustness We need to figure out what to do with Destroyed
         // instances?  Presumably we need to clean them up at some point, but
         // not right away so that callers can see that they've been destroyed.
-        let (.., authz_instance, db_instance) =
+        let (.., authz_instance, _) =
             LookupPath::new(opctx, &self.db_datastore)
                 .organization_name(organization_name)
                 .project_name(project_name)
                 .instance_name(instance_name)
                 .fetch()
                 .await?;
-
-        opctx.authorize(authz::Action::Delete, &authz_instance).await?;
-
-        match db_instance.runtime_state.state.state() {
-            InstanceState::Stopped | InstanceState::Failed => {
-                // ok
-            }
-
-            state => {
-                return Err(Error::InvalidRequest {
-                    message: format!(
-                        "instance cannot be deleted in state \"{}\"",
-                        state,
-                    ),
-                });
-            }
-        }
-
-        // Detach all attached disks
-        let disks = self
-            .instance_list_disks(
-                opctx,
-                organization_name,
-                project_name,
-                instance_name,
-                &DataPageParams {
-                    marker: None,
-                    direction: dropshot::PaginationOrder::Ascending,
-                    limit: std::num::NonZeroU32::new(MAX_DISKS_PER_INSTANCE)
-                        .unwrap(),
-                },
-            )
-            .await?;
-
-        for disk in &disks {
-            self.instance_detach_disk(
-                opctx,
-                organization_name,
-                project_name,
-                instance_name,
-                &disk.name(),
-            )
-            .await?;
-        }
 
         self.db_datastore.project_delete_instance(opctx, &authz_instance).await
     }
@@ -586,144 +533,43 @@ impl super::Nexus {
         instance_name: &Name,
         disk_name: &Name,
     ) -> UpdateResult<db::model::Disk> {
-        let (.., authz_project, authz_disk, db_disk) =
+        let (.., authz_project, authz_disk, _) =
             LookupPath::new(opctx, &self.db_datastore)
                 .organization_name(organization_name)
                 .project_name(project_name)
                 .disk_name(disk_name)
                 .fetch()
                 .await?;
-        let (.., authz_instance, db_instance) =
+        let (.., authz_instance, _) =
             LookupPath::new(opctx, &self.db_datastore)
                 .project_id(authz_project.id())
                 .instance_name(instance_name)
                 .fetch()
                 .await?;
-        let instance_id = &authz_instance.id();
 
-        // Enforce attached disks limit
-        let attached_disks = self
-            .instance_list_disks(
-                opctx,
-                organization_name,
-                project_name,
-                instance_name,
-                &DataPageParams {
-                    marker: None,
-                    direction: dropshot::PaginationOrder::Ascending,
-                    limit: std::num::NonZeroU32::new(MAX_DISKS_PER_INSTANCE)
-                        .unwrap(),
-                },
+        // TODO(https://github.com/oxidecomputer/omicron/issues/811):
+        // Disk attach is only implemented for instances that are not
+        // currently running. This operation therefore can operate exclusively
+        // on database state.
+        //
+        // To implement hot-plug support, we should do the following in a saga:
+        // - Update the state to "Attaching", rather than "Attached".
+        // - If the instance is running...
+        //   - Issue a request to "disk attach" to the associated sled agent,
+        //   using the "state generation" value from the moment we attached.
+        //   - Update the DB if the request succeeded (hopefully to "Attached").
+        // - If the instance is not running...
+        //   - Update the disk state in the DB to "Attached".
+        let (_instance, disk) = self
+            .db_datastore
+            .instance_attach_disk(
+                &opctx,
+                &authz_instance,
+                &authz_disk,
+                MAX_DISKS_PER_INSTANCE,
             )
             .await?;
-
-        if attached_disks.len() == MAX_DISKS_PER_INSTANCE as usize {
-            return Err(Error::invalid_request(&format!(
-                "cannot attach more than {} disks to instance!",
-                MAX_DISKS_PER_INSTANCE
-            )));
-        }
-
-        fn disk_attachment_error(
-            disk: &db::model::Disk,
-        ) -> CreateResult<db::model::Disk> {
-            let disk_status = match disk.runtime().state().into() {
-                DiskState::Destroyed => "disk is destroyed",
-                DiskState::Faulted => "disk is faulted",
-                DiskState::Creating => "disk is detached",
-                DiskState::Detached => "disk is detached",
-
-                // It would be nice to provide a more specific message here, but
-                // the appropriate identifier to provide the user would be the
-                // other instance's name.  Getting that would require another
-                // database hit, which doesn't seem worth it for this.
-                DiskState::Attaching(_) => {
-                    "disk is attached to another instance"
-                }
-                DiskState::Attached(_) => {
-                    "disk is attached to another instance"
-                }
-                DiskState::Detaching(_) => {
-                    "disk is attached to another instance"
-                }
-            };
-            let message = format!(
-                "cannot attach disk \"{}\": {}",
-                disk.name().as_str(),
-                disk_status
-            );
-            Err(Error::InvalidRequest { message })
-        }
-
-        match &db_disk.state().into() {
-            // If we're already attaching or attached to the requested instance,
-            // there's nothing else to do.
-            // TODO-security should it be an error if you're not authorized to
-            // do this and we did not actually have to do anything?
-            DiskState::Attached(id) if id == instance_id => return Ok(db_disk),
-
-            // If the disk is currently attaching or attached to another
-            // instance, fail this request.  Users must explicitly detach first
-            // if that's what they want.  If it's detaching, they have to wait
-            // for it to become detached.
-            // TODO-debug: the error message here could be better.  We'd have to
-            // look up the other instance by id (and gracefully handle it not
-            // existing).
-            DiskState::Attached(id) => {
-                assert_ne!(id, instance_id);
-                return disk_attachment_error(&db_disk);
-            }
-            DiskState::Detaching(_) => {
-                return disk_attachment_error(&db_disk);
-            }
-            DiskState::Attaching(id) if id != instance_id => {
-                return disk_attachment_error(&db_disk);
-            }
-            DiskState::Destroyed => {
-                return disk_attachment_error(&db_disk);
-            }
-            DiskState::Faulted => {
-                return disk_attachment_error(&db_disk);
-            }
-
-            DiskState::Creating => (),
-            DiskState::Detached => (),
-            DiskState::Attaching(id) => {
-                assert_eq!(id, instance_id);
-            }
-        }
-
-        match &db_instance.runtime_state.state.state() {
-            // If there's a propolis zone for this instance, ask the Sled Agent
-            // to hot-plug the disk.
-            //
-            // TODO this will probably involve volume construction requests as
-            // well!
-            InstanceState::Running | InstanceState::Starting => {
-                self.disk_set_runtime(
-                    opctx,
-                    &authz_disk,
-                    &db_disk,
-                    self.instance_sled(&db_instance).await?,
-                    sled_agent_client::types::DiskStateRequested::Attached(
-                        *instance_id,
-                    ),
-                )
-                .await?;
-            }
-
-            _ => {
-                // If there is not a propolis zone, then disk attach only occurs
-                // in the DB.
-                let new_runtime = db_disk.runtime().attach(*instance_id);
-
-                self.db_datastore
-                    .disk_update_runtime(opctx, &authz_disk, &new_runtime)
-                    .await?;
-            }
-        }
-
-        self.db_datastore.disk_refetch(opctx, &authz_disk).await
+        Ok(disk)
     }
 
     /// Detach a disk from an instance.
@@ -735,83 +581,38 @@ impl super::Nexus {
         instance_name: &Name,
         disk_name: &Name,
     ) -> UpdateResult<db::model::Disk> {
-        let (.., authz_project, authz_disk, db_disk) =
+        let (.., authz_project, authz_disk, _) =
             LookupPath::new(opctx, &self.db_datastore)
                 .organization_name(organization_name)
                 .project_name(project_name)
                 .disk_name(disk_name)
                 .fetch()
                 .await?;
-        let (.., authz_instance, db_instance) =
+        let (.., authz_instance, _) =
             LookupPath::new(opctx, &self.db_datastore)
                 .project_id(authz_project.id())
                 .instance_name(instance_name)
                 .fetch()
                 .await?;
-        let instance_id = &authz_instance.id();
 
-        match &db_disk.state().into() {
-            // This operation is a noop if the disk is not attached or already
-            // detaching from the same instance.
-            // TODO-security should it be an error if you're not authorized to
-            // do this and we did not actually have to do anything?
-            DiskState::Creating => return Ok(db_disk),
-            DiskState::Detached => return Ok(db_disk),
-            DiskState::Destroyed => return Ok(db_disk),
-            DiskState::Faulted => return Ok(db_disk),
-            DiskState::Detaching(id) if id == instance_id => {
-                return Ok(db_disk)
-            }
-
-            // This operation is not allowed if the disk is attached to some
-            // other instance.
-            DiskState::Attaching(id) if id != instance_id => {
-                return Err(Error::InvalidRequest {
-                    message: String::from("disk is attached elsewhere"),
-                });
-            }
-            DiskState::Attached(id) if id != instance_id => {
-                return Err(Error::InvalidRequest {
-                    message: String::from("disk is attached elsewhere"),
-                });
-            }
-            DiskState::Detaching(_) => {
-                return Err(Error::InvalidRequest {
-                    message: String::from("disk is attached elsewhere"),
-                });
-            }
-
-            // These are the cases where we have to do something.
-            DiskState::Attaching(_) => (),
-            DiskState::Attached(_) => (),
-        }
-
-        // If there's a propolis zone for this instance, ask the Sled
-        // Agent to hot-remove the disk.
-        match &db_instance.runtime_state.state.state() {
-            InstanceState::Running | InstanceState::Starting => {
-                self.disk_set_runtime(
-                    opctx,
-                    &authz_disk,
-                    &db_disk,
-                    self.instance_sled(&db_instance).await?,
-                    sled_agent_client::types::DiskStateRequested::Detached,
-                )
-                .await?;
-            }
-
-            _ => {
-                // If there is not a propolis zone, then disk detach only occurs
-                // in the DB.
-                let new_runtime = db_disk.runtime().detach();
-
-                self.db_datastore
-                    .disk_update_runtime(opctx, &authz_disk, &new_runtime)
-                    .await?;
-            }
-        }
-
-        self.db_datastore.disk_refetch(opctx, &authz_disk).await
+        // TODO(https://github.com/oxidecomputer/omicron/issues/811):
+        // Disk detach is only implemented for instances that are not
+        // currently running. This operation therefore can operate exclusively
+        // on database state.
+        //
+        // To implement hot-unplug support, we should do the following in a saga:
+        // - Update the state to "Detaching", rather than "Detached".
+        // - If the instance is running...
+        //   - Issue a request to "disk detach" to the associated sled agent,
+        //   using the "state generation" value from the moment we attached.
+        //   - Update the DB if the request succeeded (hopefully to "Detached").
+        // - If the instance is not running...
+        //   - Update the disk state in the DB to "Detached".
+        let disk = self
+            .db_datastore
+            .instance_detach_disk(&opctx, &authz_instance, &authz_disk)
+            .await?;
+        Ok(disk)
     }
 
     /// Create a network interface attached to the provided instance.
