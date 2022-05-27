@@ -1171,7 +1171,6 @@ impl DataStore {
         let attached_label =
             api::external::DiskState::Attached(authz_instance.id()).label();
 
-        // TODO "u32" seems reasonable for the max disks value (input / output)
         let (instance, disk) = Instance::attach_resource(
             authz_instance.id(),
             authz_disk.id(),
@@ -1181,8 +1180,7 @@ impl DataStore {
             disk::table
                 .into_boxed()
                 .filter(disk::dsl::disk_state.eq_any(ok_to_attach_disk_state_labels)),
-            // TODO: Remove unwrap?
-            usize::try_from(max_disks).unwrap(),
+            max_disks,
             diesel::update(disk::dsl::disk)
                 .set((
                     disk::dsl::disk_state.eq(attached_label),

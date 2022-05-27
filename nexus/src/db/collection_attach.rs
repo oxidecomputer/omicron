@@ -182,7 +182,7 @@ pub trait DatastoreAttachTarget<ResourceType>: Selectable<Pg> + Sized {
         collection_query: BoxedQuery<CollectionTable<ResourceType, Self>>,
         resource_query: BoxedQuery<ResourceTable<ResourceType, Self>>,
 
-        max_attached_resources: usize,
+        max_attached_resources: u32,
 
         // We are intentionally picky about this update statement:
         // - The second argument - the WHERE clause - must match the default
@@ -344,7 +344,7 @@ where
     // A (mostly) user-provided query for validating the resource.
     resource_query: Box<dyn QueryFragment<Pg> + Send>,
     // The maximum number of resources which may be attached to the collection.
-    max_attached_resources: usize,
+    max_attached_resources: u32,
 
     // Update statement for the resource.
     update_resource_statement:
@@ -1118,7 +1118,7 @@ mod test {
 
         setup_db(&pool).await;
 
-        const RESOURCE_COUNT: usize = 5;
+        const RESOURCE_COUNT: u32 = 5;
 
         let collection_id = uuid::Uuid::new_v4();
 
