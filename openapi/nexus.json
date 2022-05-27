@@ -5304,7 +5304,7 @@
         ]
       },
       "Disk": {
-        "description": "Client view of an [`Disk`]",
+        "description": "Client view of a [`Disk`]",
         "type": "object",
         "properties": {
           "block_size": {
@@ -6643,7 +6643,8 @@
         "type": "string",
         "enum": [
           "admin",
-          "collaborator"
+          "collaborator",
+          "viewer"
         ]
       },
       "OrganizationRolesPolicy": {
