@@ -1811,6 +1811,9 @@ pub struct NetworkInterface {
     pub ip: IpAddr,
     // TODO-correctness: We need to split this into an optional V4 and optional
     // V6 address, at least one of which must be specified.
+    /// True if this interface is the primary for the instance to which it's
+    /// attached.
+    pub primary: bool,
 }
 
 #[derive(

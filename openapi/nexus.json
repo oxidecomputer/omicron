@@ -2209,6 +2209,7 @@
           "instances"
         ],
         "summary": "Detach a network interface from an instance.",
+        "description": "Note that the primary interface for an instance cannot be deleted if there are any secondary interfaces. A new primary interface must be designated first. The primary interface can be deleted if there are no secondary interfaces.",
         "operationId": "instance_network_interfaces_delete_interface",
         "parameters": [
           {
@@ -6266,7 +6267,7 @@
         "description": "Describes an attachment of a `NetworkInterface` to an `Instance`, at the time the instance is created.",
         "oneOf": [
           {
-            "description": "Create one or more `NetworkInterface`s for the `Instance`",
+            "description": "Create one or more `NetworkInterface`s for the `Instance`.\n\nIf more than one interface is provided, then the first will be designated the primary interface for the instance.",
             "type": "object",
             "properties": {
               "params": {
@@ -6288,7 +6289,7 @@
             ]
           },
           {
-            "description": "Default networking setup, which creates a single interface with an auto-assigned IP address from project's \"default\" VPC and \"default\" VPC Subnet.",
+            "description": "The default networking configuration for an instance is to create a single primary interface with an automatically-assigned IP address. The IP will be pulled from the Project's default VPC / VPC Subnet.",
             "type": "object",
             "properties": {
               "type": {
@@ -6467,6 +6468,10 @@
               }
             ]
           },
+          "primary": {
+            "description": "True if this interface is the primary for the instance to which it's attached.",
+            "type": "boolean"
+          },
           "subnet_id": {
             "description": "The subnet to which the interface belongs.",
             "type": "string",
@@ -6495,6 +6500,7 @@
           "ip",
           "mac",
           "name",
+          "primary",
           "subnet_id",
           "time_created",
           "time_modified",

@@ -9,7 +9,8 @@ use crate::app::{MAX_DISKS_PER_INSTANCE, MAX_NICS_PER_INSTANCE};
 use crate::context::OpContext;
 use crate::db::identity::Resource;
 use crate::db::lookup::LookupPath;
-use crate::db::queries::network_interface::NetworkInterfaceError;
+use crate::db::queries::network_interface::InsertNetworkInterfaceError;
+use crate::defaults::DEFAULT_PRIMARY_NIC_NAME;
 use crate::external_api::params;
 use crate::saga_interface::SagaContext;
 use crate::{authn, authz, db};
@@ -242,7 +243,7 @@ async fn sic_create_network_interfaces(
     match sagactx.saga_params().create_params.network_interfaces {
         params::InstanceNetworkInterfaceAttachment::None => Ok(()),
         params::InstanceNetworkInterfaceAttachment::Default => {
-            sic_create_default_network_interface(&sagactx).await
+            sic_create_default_primary_network_interface(&sagactx).await
         }
         params::InstanceNetworkInterfaceAttachment::Create(
             ref create_params,
@@ -347,7 +348,7 @@ async fn sic_create_custom_network_interfaces(
             // crashed. The saga recovery machinery will replay just this node,
             // without first unwinding it, so any previously-inserted interfaces
             // will still exist. This is expected.
-            Err(NetworkInterfaceError::DuplicatePrimaryKey(_)) => {
+            Err(InsertNetworkInterfaceError::DuplicatePrimaryKey(_)) => {
                 // TODO-observability: We should bump a counter here.
                 let log = osagactx.log();
                 warn!(
@@ -369,8 +370,9 @@ async fn sic_create_custom_network_interfaces(
     Ok(())
 }
 
-/// Create the default network interface for an instance during the create saga
-async fn sic_create_default_network_interface(
+/// Create a default primary network interface for an instance during the create
+/// saga.
+async fn sic_create_default_primary_network_interface(
     sagactx: &ActionContext<SagaInstanceCreate>,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
@@ -379,13 +381,23 @@ async fn sic_create_default_network_interface(
     let opctx =
         OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+
+    // The literal name "default" is currently used for the VPC and VPC Subnet,
+    // when not specified in the client request.
+    // TODO-completeness: We'd like to select these from Project-level defaults.
+    // See https://github.com/oxidecomputer/omicron/issues/1015.
     let default_name = Name::try_from("default".to_string()).unwrap();
     let internal_default_name = db::model::Name::from(default_name.clone());
+
+    // The name of the default primary interface.
+    let iface_name =
+        Name::try_from(DEFAULT_PRIMARY_NIC_NAME.to_string()).unwrap();
+
     let interface_params = params::NetworkInterfaceCreate {
         identity: IdentityMetadataCreateParams {
-            name: default_name.clone(),
+            name: iface_name.clone(),
             description: format!(
-                "default interface for {}",
+                "default primary interface for {}",
                 saga_params.create_params.identity.name,
             ),
         },
@@ -427,7 +439,7 @@ async fn sic_create_default_network_interface(
             interface,
         )
         .await
-        .map_err(NetworkInterfaceError::into_external)
+        .map_err(InsertNetworkInterfaceError::into_external)
         .map_err(ActionError::action_failed)?;
     Ok(())
 }
