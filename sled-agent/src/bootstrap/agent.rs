@@ -138,6 +138,22 @@ impl Agent {
             "server" => sled_config.id.to_string(),
         ));
 
+        // We expect this directory to exist - ensure that it does, before any
+        // subsequent operations which may write configs here.
+        info!(
+            log, "Ensuring config directory exists";
+            "path" => omicron_common::OMICRON_CONFIG_PATH,
+        );
+        tokio::fs::create_dir_all(omicron_common::OMICRON_CONFIG_PATH)
+            .await
+            .map_err(|err| BootstrapError::Io {
+                message: format!(
+                    "Creating config directory {}",
+                    omicron_common::OMICRON_CONFIG_PATH
+                ),
+                err,
+            })?;
+
         let data_link = if let Some(link) = sled_config.data_link.clone() {
             link
         } else {
