@@ -531,8 +531,7 @@ impl Instance {
         // Insteady, we re-try adding the instance until it succeeds.
         // This implies that the service was added successfully.
         info!(
-            inner.log,
-            "Adding {} as a {} service", &instance_name, smf_service_name
+            inner.log, "Adding service"; "smf_name" => &smf_instance_name
         );
         backoff::retry_notify(
             backoff::internal_service_policy(),
@@ -559,7 +558,7 @@ impl Instance {
         )
         .await?;
 
-        info!(inner.log, "Adding service property group");
+        info!(inner.log, "Adding service property group 'config'");
         running_zone.run_cmd(&[
             crate::illumos::zone::SVCCFG,
             "-s",
@@ -569,7 +568,7 @@ impl Instance {
             "astring",
         ])?;
 
-        info!(inner.log, "Setting server address property");
+        info!(inner.log, "Setting server address property"; "address" => &server_addr);
         running_zone.run_cmd(&[
             crate::illumos::zone::SVCCFG,
             "-s",
