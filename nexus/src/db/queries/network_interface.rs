@@ -7,6 +7,7 @@
 use crate::app::MAX_NICS_PER_INSTANCE;
 use crate::db;
 use crate::db::model::IncompleteNetworkInterface;
+use crate::db::queries::next_item::DefaultShiftGenerator;
 use crate::db::queries::next_item::NextItem;
 use crate::defaults::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use chrono::DateTime;
@@ -331,8 +332,10 @@ impl NextGuestIpv4Address {
     pub fn new(subnet: Ipv4Network, subnet_id: Uuid) -> Self {
         let subnet = IpNetwork::from(subnet);
         let net = IpNetwork::from(first_available_address(&subnet));
-        let max_offset = last_address_offset(&subnet);
-        Self { inner: NextItem::new_scoped(net, subnet_id, max_offset) }
+        let max_shift = i64::from(last_address_offset(&subnet));
+        let generator =
+            DefaultShiftGenerator { base: net, max_shift, min_shift: 0 };
+        Self { inner: NextItem::new_scoped(generator, subnet_id) }
     }
 }
 
@@ -387,9 +390,12 @@ pub struct NextNicSlot {
 
 impl NextNicSlot {
     pub fn new(instance_id: Uuid) -> Self {
-        Self {
-            inner: NextItem::new_scoped(0, instance_id, MAX_NICS_PER_INSTANCE),
-        }
+        let generator = DefaultShiftGenerator {
+            base: 0,
+            max_shift: i64::from(MAX_NICS_PER_INSTANCE),
+            min_shift: 0,
+        };
+        Self { inner: NextItem::new_scoped(generator, instance_id) }
     }
 }
 

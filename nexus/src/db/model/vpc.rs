@@ -10,6 +10,7 @@ use crate::defaults;
 use crate::external_api::params;
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
+use ipnetwork::IpNetwork;
 use omicron_common::api::external;
 use uuid::Uuid;
 
@@ -30,7 +31,22 @@ pub struct Vpc {
     pub firewall_gen: Generation,
 }
 
-impl Vpc {
+/// An `IncompleteVpc` is a candidate VPC, where some of the values may be
+/// modified and returned as part of the query inserting it into the database.
+/// In particular, the requested VNI may not actually be available, in which
+/// case the database will select an available one (if it exists).
+#[derive(Clone, Debug)]
+pub struct IncompleteVpc {
+    pub identity: VpcIdentity,
+    pub project_id: Uuid,
+    pub system_router_id: Uuid,
+    pub vni: Vni,
+    pub ipv6_prefix: IpNetwork,
+    pub dns_name: Name,
+    pub firewall_gen: Generation,
+}
+
+impl IncompleteVpc {
     pub fn new(
         vpc_id: Uuid,
         project_id: Uuid,
@@ -38,20 +54,22 @@ impl Vpc {
         params: params::VpcCreate,
     ) -> Result<Self, external::Error> {
         let identity = VpcIdentity::new(vpc_id, params.identity);
-        let ipv6_prefix = match params.ipv6_prefix {
-            None => defaults::random_vpc_ipv6_prefix(),
-            Some(prefix) => {
-                if prefix.is_vpc_prefix() {
-                    Ok(prefix)
-                } else {
-                    Err(external::Error::invalid_request(
-                        "VPC IPv6 address prefixes must be in the 
+        let ipv6_prefix = IpNetwork::from(
+            match params.ipv6_prefix {
+                None => defaults::random_vpc_ipv6_prefix(),
+                Some(prefix) => {
+                    if prefix.is_vpc_prefix() {
+                        Ok(prefix)
+                    } else {
+                        Err(external::Error::invalid_request(
+                            "VPC IPv6 address prefixes must be in the \
                             Unique Local Address range `fd00::/48` (RFD 4193)",
-                    ))
+                        ))
+                    }
                 }
-            }
-        }?
-        .into();
+            }?
+            .0,
+        );
         Ok(Self {
             identity,
             project_id,
