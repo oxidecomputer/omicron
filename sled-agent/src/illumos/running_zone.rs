@@ -11,7 +11,6 @@ use crate::illumos::zone::{AddressRequest, ZONE_PREFIX};
 use crate::opte::OptePort;
 use ipnetwork::IpNetwork;
 use slog::Logger;
-use std::net::Ipv6Addr;
 use std::path::PathBuf;
 
 #[cfg(test)]
@@ -172,18 +171,17 @@ impl RunningZone {
         Ok(network)
     }
 
-    pub async fn ensure_route(
+    pub async fn add_route(
         &self,
-        address: Ipv6Addr,
+        destination: ipnetwork::Ipv6Network,
     ) -> Result<(), RunCommandError> {
         self.run_cmd(&[
             "/usr/sbin/route",
             "add",
             "-inet6",
-            "default",
+            &format!("{}/{}", destination.network(), destination.prefix()),
             "-inet6",
-            &address.to_string(),
-            "-iface",
+            &destination.ip().to_string(),
         ])?;
         Ok(())
     }

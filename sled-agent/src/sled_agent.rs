@@ -9,6 +9,7 @@ use crate::illumos::vnic::VnicKind;
 use crate::illumos::zfs::{
     Mountpoint, ZONE_ZFS_DATASET, ZONE_ZFS_DATASET_MOUNTPOINT,
 };
+use crate::illumos::{execute, PFEXEC};
 use crate::instance_manager::InstanceManager;
 use crate::nexus::NexusClient;
 use crate::params::{
@@ -37,6 +38,9 @@ use crate::illumos::{
 pub enum Error {
     #[error("Physical link not in config, nor found automatically: {0}")]
     FindPhysicalLink(#[from] crate::illumos::dladm::FindPhysicalLinkError),
+
+    #[error("Failed to enable routing: {0}")]
+    EnablingRouting(crate::illumos::ExecutionError),
 
     #[error("Failed to acquire etherstub: {0}")]
     Etherstub(crate::illumos::ExecutionError),
@@ -200,11 +204,24 @@ impl SledAgent {
         // https://github.com/oxidecomputer/omicron/issues/725.
         crate::opte::delete_all_xde_devices(&log)?;
 
+        // Ipv6 forwarding must be enabled to route traffic between zones.
+        //
+        // This should be a no-op if already enabled.
+        let mut command = std::process::Command::new(PFEXEC);
+        let cmd = command.args(&[
+            "/usr/sbin/routeadm",
+            "-e",
+            "ipv6-forwarding",
+            "-u",
+        ]);
+        execute(cmd).map_err(|e| Error::EnablingRouting(e))?;
+
         let storage = StorageManager::new(
             &parent_log,
             *id,
             nexus_client.clone(),
             etherstub.clone(),
+            *sled_address.ip(),
         )
         .await;
         if let Some(pools) = &config.zpools {
@@ -227,6 +244,7 @@ impl SledAgent {
             parent_log.clone(),
             etherstub.clone(),
             etherstub_vnic.clone(),
+            *sled_address.ip(),
             None,
         )
         .await?;

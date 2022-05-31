@@ -10,11 +10,12 @@ use crate::illumos::vnic::VnicAllocator;
 use crate::illumos::zone::AddressRequest;
 use crate::params::{ServiceEnsureBody, ServiceRequest};
 use crate::zone::Zones;
-use omicron_common::address::{DNS_PORT, DNS_SERVER_PORT};
+use ipnetwork::Ipv6Network;
+use omicron_common::address::{AZ_PREFIX, DNS_PORT, DNS_SERVER_PORT};
 use slog::Logger;
 use std::collections::HashSet;
 use std::iter::FromIterator;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv6Addr};
 use std::path::{Path, PathBuf};
 use tokio::sync::Mutex;
 
@@ -79,6 +80,7 @@ pub struct ServiceManager {
     zones: Mutex<Vec<RunningZone>>,
     vnic_allocator: VnicAllocator,
     underlay_vnic: EtherstubVnic,
+    underlay_address: Ipv6Addr,
 }
 
 impl ServiceManager {
@@ -96,6 +98,7 @@ impl ServiceManager {
         log: Logger,
         etherstub: Etherstub,
         underlay_vnic: EtherstubVnic,
+        underlay_address: Ipv6Addr,
         config_path: Option<PathBuf>,
     ) -> Result<Self, Error> {
         debug!(log, "Creating new ServiceManager");
@@ -105,6 +108,7 @@ impl ServiceManager {
             zones: Mutex::new(vec![]),
             vnic_allocator: VnicAllocator::new("Service", etherstub),
             underlay_vnic,
+            underlay_address,
         };
 
         let config_path = mgr.services_config_path();
@@ -200,13 +204,6 @@ impl ServiceManager {
                     "Ensuring address {} exists - OK",
                     addr.to_string()
                 );
-
-                running_zone.ensure_route(*addr).await.map_err(|err| {
-                    Error::ZoneCommand {
-                        intent: "Adding Route".to_string(),
-                        err,
-                    }
-                })?;
             }
 
             info!(self.log, "GZ addresses: {:#?}", service.gz_addresses);
@@ -231,6 +228,25 @@ impl ServiceManager {
                     err,
                 })?;
             }
+
+            let gz_route_subnet = if !service.gz_addresses.is_empty() {
+                // If this service supplies its own GZ address, add a route.
+                //
+                // This is currently being used for the DNS service.
+                //
+                // TODO: consider limitng the number of GZ addresses which
+                // can be supplied - now that we're actively using it, we
+                // aren't really handling the "many GZ addresses" case, and it
+                // doesn't seem necessary now.
+                Ipv6Network::new(service.gz_addresses[0], AZ_PREFIX).unwrap()
+            } else {
+                // Otherwise, add a route to the global Zone's sled address for
+                // everything within the AZ.
+                Ipv6Network::new(self.underlay_address, AZ_PREFIX).unwrap()
+            };
+            running_zone.add_route(gz_route_subnet).await.map_err(|err| {
+                Error::ZoneCommand { intent: "Adding Route".to_string(), err }
+            })?;
 
             debug!(self.log, "importing manifest");
 
