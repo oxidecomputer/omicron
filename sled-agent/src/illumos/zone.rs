@@ -99,13 +99,14 @@ pub struct EnsureAddressError {
 
 /// Errors from [`Zones::ensure_has_global_zone_v6_address`].
 #[derive(thiserror::Error, Debug)]
-#[error("Failed to create address {address} with name {name} in the GZ on {link:?}: {err}")]
+#[error("Failed to create address {address} with name {name} in the GZ on {link:?}: {err}. Note to developers: {extra_note}")]
 pub struct EnsureGzAddressError {
     address: Ipv6Addr,
     link: EtherstubVnic,
     name: String,
     #[source]
     err: anyhow::Error,
+    extra_note: String
 }
 
 /// Describes the type of addresses which may be requested from a zone.
@@ -583,6 +584,22 @@ impl Zones {
             link,
             name: name.to_string(),
             err,
+            extra_note:
+                r#"As of https://github.com/oxidecomputer/omicron/pull/1066, we are changing the
+                physical device on which Global Zone addresses are allocated.
+
+                Before this PR, we allocated addresses and VNICs directly on a physical link.
+                After this PR, we are allocating them on etherstubs.
+
+                As a result, however, if your machine previously ran Omicron, it
+                may have addresses on the physical link which we'd like to
+                allocate from the etherstub instead.
+
+                This can be fixed with the following commands:
+
+                $ pfexec ipadm delete-addr <your-link>/bootstrap6
+                $ pfexec ipadm delete-addr <your-link>/sled6
+                $ pfexec ipadm delete-addr <your-link>/internaldns"#.to_string()
         })?;
         Ok(())
     }
