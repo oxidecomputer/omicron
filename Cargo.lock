@@ -1148,7 +1148,7 @@ checksum = "1435fa1053d8b2fbbe9be7e97eca7f33d37b28409959813daefc1446a14247f1"
 [[package]]
 name = "dropshot"
 version = "0.7.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#1da9d81a052a66bbbbb65e4bd3be1cb34d57ff2c"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#7f5a76533795b55d3c6989a62fd85288bdca864b"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -1187,7 +1187,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.7.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#1da9d81a052a66bbbbb65e4bd3be1cb34d57ff2c"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#7f5a76533795b55d3c6989a62fd85288bdca864b"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2002,9 +2002,9 @@ checksum = "9a3a5bfb195931eeb336b2a7b4d761daec841b97f947d34394601737a7bba5e4"
 
 [[package]]
 name = "hyper"
-version = "0.14.18"
+version = "0.14.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b26ae0a80afebe130861d90abf98e3814a4f28a4c6ffeb5ab8ebb2be311e0ef2"
+checksum = "42dc3c131584288d375f2d07f822b0cb012d8c6fb899a5b9fdb3cb7eb9b6004f"
 dependencies = [
  "bytes",
  "futures-channel",
@@ -5645,7 +5645,7 @@ version = "1.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
 dependencies = [
- "cfg-if 1.0.0",
+ "cfg-if 0.1.10",
  "rand 0.8.5",
  "static_assertions",
 ]
