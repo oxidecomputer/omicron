@@ -54,7 +54,7 @@ impl super::Nexus {
         // which may not even happen here. Creating the vpc, its system router,
         // and that routers default route should all be a part of the same
         // transaction.
-        let vpc = db::model::Vpc::new(
+        let vpc = db::model::IncompleteVpc::new(
             vpc_id,
             authz_project.id(),
             system_router_id,
