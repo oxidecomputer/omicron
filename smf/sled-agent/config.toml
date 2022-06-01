@@ -19,7 +19,9 @@ zpools = [
   "oxp_f4b4dc87-ab46-49fb-a4b4-d361ae214c03",
 ]
 
-# An optional data link on which VNICs should be created.
+# An optional data link from which we extract a MAC address.
+# This is used as a unique identifier for the bootstrap address.
+#
 # If empty, this will be equivalent to the first result from:
 # $ dladm show-phys -p -o LINK
 # data_link = "igb0"

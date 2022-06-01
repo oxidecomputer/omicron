@@ -89,10 +89,10 @@ impl super::Nexus {
     pub async fn global_image_create(
         self: &Arc<Self>,
         opctx: &OpContext,
-        params: &params::ImageCreate,
+        params: params::GlobalImageCreate,
     ) -> CreateResult<db::model::GlobalImage> {
         let new_image = match &params.source {
-            params::ImageSource::Url(url) => {
+            params::ImageSource::Url { url } => {
                 let db_block_size = db::model::BlockSize::try_from(
                     params.block_size,
                 )
@@ -178,13 +178,6 @@ impl super::Nexus {
                     });
                 }
 
-                // for images backed by a url, store the ETag as the version
-                let etag = response
-                    .headers()
-                    .get(reqwest::header::ETAG)
-                    .and_then(|x| x.to_str().ok())
-                    .map(|x| x.to_string());
-
                 let new_image_volume =
                     db::model::Volume::new(Uuid::new_v4(), volume_data);
                 let volume =
@@ -197,14 +190,15 @@ impl super::Nexus {
                     ),
                     volume_id: volume.id(),
                     url: Some(url.clone()),
-                    version: etag,
+                    distribution: params.distribution.into(),
+                    version: params.version,
                     digest: None, // not computed for URL type
                     block_size: db_block_size,
                     size: size.into(),
                 }
             }
 
-            params::ImageSource::Snapshot(_id) => {
+            params::ImageSource::Snapshot { id: _id } => {
                 return Err(Error::unavail(
                     &"creating images from snapshots not supported",
                 ));
@@ -255,7 +249,12 @@ impl super::Nexus {
                     ),
                     volume_id: volume.id(),
                     url: None,
-                    version: None,
+                    distribution: "alpine".parse().map_err(|_| {
+                        Error::internal_error(
+                            &"alpine is not a valid distribution?",
+                        )
+                    })?,
+                    version: "propolis-blob".into(),
                     digest: None,
                     block_size: db_block_size,
                     size: size.into(),
