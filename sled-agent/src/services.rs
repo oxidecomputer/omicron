@@ -469,7 +469,7 @@ mod test {
         wait_ctx.expect().return_once(|_, _| Ok(()));
         // Import the manifest, enable the service
         let execute_ctx = crate::illumos::execute_context();
-        execute_ctx.expect().times(2).returning(|_| {
+        execute_ctx.expect().times(3).returning(|_| {
             Ok(std::process::Output {
                 status: std::process::ExitStatus::from_raw(0),
                 stdout: vec![],
@@ -545,6 +545,7 @@ mod test {
             log,
             Etherstub(ETHERSTUB_NAME.to_string()),
             EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
+            Ipv6Addr::LOCALHOST,
             Some(config),
         )
         .await
@@ -570,6 +571,7 @@ mod test {
             log,
             Etherstub(ETHERSTUB_NAME.to_string()),
             EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
+            Ipv6Addr::LOCALHOST,
             Some(config),
         )
         .await
@@ -598,6 +600,7 @@ mod test {
             logctx.log.clone(),
             Etherstub(ETHERSTUB_NAME.to_string()),
             EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
+            Ipv6Addr::LOCALHOST,
             Some(config.clone()),
         )
         .await
@@ -612,6 +615,7 @@ mod test {
             logctx.log.clone(),
             Etherstub(ETHERSTUB_NAME.to_string()),
             EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
+            Ipv6Addr::LOCALHOST,
             Some(config.clone()),
         )
         .await
@@ -637,6 +641,7 @@ mod test {
             logctx.log.clone(),
             Etherstub(ETHERSTUB_NAME.to_string()),
             EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
+            Ipv6Addr::LOCALHOST,
             Some(config.clone()),
         )
         .await
@@ -653,6 +658,7 @@ mod test {
             logctx.log.clone(),
             Etherstub(ETHERSTUB_NAME.to_string()),
             EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
+            Ipv6Addr::LOCALHOST,
             Some(config.clone()),
         )
         .await

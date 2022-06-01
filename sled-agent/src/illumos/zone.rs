@@ -106,7 +106,7 @@ pub struct EnsureGzAddressError {
     name: String,
     #[source]
     err: anyhow::Error,
-    extra_note: String
+    extra_note: String,
 }
 
 /// Describes the type of addresses which may be requested from a zone.
