@@ -4,7 +4,7 @@
 
 //! API for controlling multiple instances on a sled.
 
-use crate::illumos::dladm::PhysicalLink;
+use crate::illumos::dladm::Etherstub;
 use crate::illumos::vnic::VnicAllocator;
 use crate::nexus::NexusClient;
 use crate::opte::OptePortAllocator;
@@ -54,7 +54,7 @@ impl InstanceManager {
     pub fn new(
         log: Logger,
         nexus_client: Arc<NexusClient>,
-        physical_link: PhysicalLink,
+        etherstub: Etherstub,
         underlay_addr: Ipv6Addr,
     ) -> InstanceManager {
         InstanceManager {
@@ -62,7 +62,7 @@ impl InstanceManager {
                 log: log.new(o!("component" => "InstanceManager")),
                 nexus_client,
                 instances: Mutex::new(BTreeMap::new()),
-                vnic_allocator: VnicAllocator::new("Instance", physical_link),
+                vnic_allocator: VnicAllocator::new("Instance", etherstub),
                 underlay_addr,
                 port_allocator: OptePortAllocator::new(),
             }),
@@ -196,7 +196,7 @@ impl Drop for InstanceTicket {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::illumos::dladm::PhysicalLink;
+    use crate::illumos::dladm::Etherstub;
     use crate::illumos::{dladm::MockDladm, zone::MockZones};
     use crate::instance::MockInstance;
     use crate::mocks::MockNexusClient;
@@ -260,7 +260,7 @@ mod test {
         let im = InstanceManager::new(
             log,
             nexus_client,
-            PhysicalLink("mylink".to_string()),
+            Etherstub("mylink".to_string()),
             std::net::Ipv6Addr::new(
                 0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
             ),
@@ -342,7 +342,7 @@ mod test {
         let im = InstanceManager::new(
             log,
             nexus_client,
-            PhysicalLink("mylink".to_string()),
+            Etherstub("mylink".to_string()),
             std::net::Ipv6Addr::new(
                 0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
             ),

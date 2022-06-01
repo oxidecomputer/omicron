@@ -715,7 +715,7 @@ impl Instance {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::illumos::dladm::PhysicalLink;
+    use crate::illumos::dladm::Etherstub;
     use crate::mocks::MockNexusClient;
     use crate::opte::OptePortAllocator;
     use crate::params::InstanceStateRequested;
@@ -786,7 +786,7 @@ mod test {
         let log = logger();
         let vnic_allocator = VnicAllocator::new(
             "Test".to_string(),
-            PhysicalLink("mylink".to_string()),
+            Etherstub("mylink".to_string()),
         );
         let port_allocator = OptePortAllocator::new();
         let nexus_client = MockNexusClient::default();

@@ -27,7 +27,7 @@ pub struct Config {
     /// Optional list of zpools to be used as "discovered disks".
     pub zpools: Option<Vec<ZpoolName>>,
 
-    /// The data link on which to allocate VNICs.
+    /// The data link on which we infer the bootstrap address.
     ///
     /// If unsupplied, we default to the first physical device.
     pub data_link: Option<PhysicalLink>,

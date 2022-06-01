@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Display, Formatter, Result as FormatResult};
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
-use std::net::SocketAddr;
+use std::net::{SocketAddr, SocketAddrV6};
 use uuid::Uuid;
 
 /// Information required to construct a virtual network interface for a guest
@@ -218,7 +218,7 @@ pub struct DatasetEnsureBody {
     // The type of the filesystem.
     pub dataset_kind: DatasetKind,
     // The address on which the zone will listen for requests.
-    pub address: SocketAddr,
+    pub address: SocketAddrV6,
     // NOTE: We could insert a UUID here, if we want that to be set by the
     // caller explicitly? Currently, the lack of a UUID implies that
     // "at most one dataset type" exists within a zpool.

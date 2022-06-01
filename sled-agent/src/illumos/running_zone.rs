@@ -171,6 +171,21 @@ impl RunningZone {
         Ok(network)
     }
 
+    pub async fn add_route(
+        &self,
+        destination: ipnetwork::Ipv6Network,
+    ) -> Result<(), RunCommandError> {
+        self.run_cmd(&[
+            "/usr/sbin/route",
+            "add",
+            "-inet6",
+            &format!("{}/{}", destination.network(), destination.prefix()),
+            "-inet6",
+            &destination.ip().to_string(),
+        ])?;
+        Ok(())
+    }
+
     /// Looks up a running zone based on the `zone_prefix`, if one already exists.
     ///
     /// - If the zone was found, is running, and has a network interface, it is
