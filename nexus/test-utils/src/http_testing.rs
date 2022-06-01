@@ -11,6 +11,7 @@ use dropshot::test_util::ClientTestContext;
 use dropshot::ResultsPage;
 use headers::authorization::Credentials;
 use omicron_nexus::authn::external::spoof;
+use omicron_nexus::db::identity::Asset;
 use std::convert::TryInto;
 use std::fmt::Debug;
 
@@ -438,8 +439,7 @@ impl<'a> NexusRequest<'a> {
         match mode {
             AuthnMode::UnprivilegedUser => {
                 let header_value = spoof::make_header_value(
-                    spoof::ActorType::Builtin,
-                    authn::USER_TEST_UNPRIVILEGED.id,
+                    authn::USER_TEST_UNPRIVILEGED.id(),
                 );
                 self.request_builder = self.request_builder.header(
                     &http::header::AUTHORIZATION,
@@ -447,20 +447,15 @@ impl<'a> NexusRequest<'a> {
                 );
             }
             AuthnMode::PrivilegedUser => {
-                let header_value = spoof::make_header_value(
-                    spoof::ActorType::Builtin,
-                    authn::USER_TEST_PRIVILEGED.id,
-                );
+                let header_value =
+                    spoof::make_header_value(authn::USER_TEST_PRIVILEGED.id());
                 self.request_builder = self.request_builder.header(
                     &http::header::AUTHORIZATION,
                     header_value.0.encode(),
                 );
             }
             AuthnMode::SiloUser(silo_user_id) => {
-                let header_value = spoof::make_header_value(
-                    spoof::ActorType::Silo,
-                    silo_user_id,
-                );
+                let header_value = spoof::make_header_value(silo_user_id);
                 self.request_builder = self.request_builder.header(
                     &http::header::AUTHORIZATION,
                     header_value.0.encode(),

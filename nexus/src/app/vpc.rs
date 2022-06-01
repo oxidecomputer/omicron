@@ -10,7 +10,7 @@ use crate::db;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
 use crate::db::model::VpcRouterKind;
-use crate::db::subnet_allocation::SubnetError;
+use crate::db::queries::vpc_subnet::SubnetError;
 use crate::defaults;
 use crate::external_api::params;
 use omicron_common::api::external;
@@ -54,7 +54,7 @@ impl super::Nexus {
         // which may not even happen here. Creating the vpc, its system router,
         // and that routers default route should all be a part of the same
         // transaction.
-        let vpc = db::model::Vpc::new(
+        let vpc = db::model::IncompleteVpc::new(
             vpc_id,
             authz_project.id(),
             system_router_id,

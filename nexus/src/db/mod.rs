@@ -6,9 +6,12 @@
 
 // This is not intended to be public, but this is necessary to use it from
 // doctests
+pub mod collection_attach;
+pub mod collection_detach;
+pub mod collection_detach_many;
 pub mod collection_insert;
 mod config;
-
+mod cte_utils;
 // This is marked public for use by the integration tests
 pub mod datastore;
 mod error;
@@ -18,10 +21,12 @@ pub mod ipv6;
 pub mod lookup;
 mod pagination;
 mod pool;
+// This is marked public because the error types are used elsewhere, e.g., in
+// sagas.
+pub(crate) mod queries;
 mod saga_recovery;
 mod saga_types;
 mod sec_store;
-pub(crate) mod subnet_allocation;
 mod update_and_check;
 
 #[cfg(test)]

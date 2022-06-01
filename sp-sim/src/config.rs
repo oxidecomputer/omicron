@@ -10,32 +10,45 @@ use gateway_messages::SerialNumber;
 use serde::Deserialize;
 use serde::Serialize;
 use std::net::Ipv6Addr;
-use std::net::SocketAddr;
+use std::net::SocketAddrV6;
 use std::path::Path;
 use std::path::PathBuf;
 use thiserror::Error;
 
+/// Common configuration for all flavors of SP
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct SpCommonConfig {
+    /// IPv6 multicast address to join.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub multicast_addr: Option<Ipv6Addr>,
+    /// UDP address of the two (fake) KSZ8463 ports
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub bind_addrs: Option<[SocketAddrV6; 2]>,
+    /// Fake serial number
+    #[serde(with = "hex")]
+    pub serial_number: SerialNumber,
+    /// 32-byte seed to create a manufacturing root certificate.
+    #[serde(with = "hex")]
+    pub manufacturing_root_cert_seed: [u8; 32],
+    /// 32-byte seed to create a Device ID certificate.
+    #[serde(with = "hex")]
+    pub device_id_cert_seed: [u8; 32],
+}
+
 /// Configuration of a simulated sidecar SP
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct SidecarConfig {
-    /// IPv6 multicast address to join.
-    pub multicast_addr: Ipv6Addr,
-    /// UDP address of the two (fake) KSZ8463 ports
-    pub bind_addrs: [SocketAddr; 2],
-    /// Fake serial number
-    pub serial_number: SerialNumber,
+    #[serde(flatten)]
+    pub common: SpCommonConfig,
 }
 
 /// Configuration of a simulated gimlet SP
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct GimletConfig {
-    /// IPv6 multicast address to join.
-    pub multicast_addr: Ipv6Addr,
-    /// UDP address of the two (fake) KSZ8463 ports
-    pub bind_addrs: [SocketAddr; 2],
-    /// Fake serial number
-    pub serial_number: SerialNumber,
+    #[serde(flatten)]
+    pub common: SpCommonConfig,
     /// Attached components
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub components: Vec<SpComponentConfig>,
 }
 
@@ -46,12 +59,12 @@ pub struct SpComponentConfig {
     pub name: String,
     /// Socket address we'll use to expose this component's serial console
     /// via TCP.
-    pub serial_console: Option<SocketAddr>,
+    pub serial_console: Option<SocketAddrV6>,
 }
 
 /// Configuration of a set of simulated SPs
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct SimulatedSps {
+pub struct SimulatedSpsConfig {
     /// Simulated sidecar(s)
     pub sidecar: Vec<SidecarConfig>,
     /// Simulated gimlet(s)
@@ -62,7 +75,7 @@ pub struct SimulatedSps {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Config {
     /// List of SPs to simulate.
-    pub simulated_sps: SimulatedSps,
+    pub simulated_sps: SimulatedSpsConfig,
     /// Server-wide logging configuration.
     pub log: ConfigLogging,
 }
@@ -111,5 +124,16 @@ impl std::cmp::PartialEq<std::io::Error> for LoadError {
         } else {
             false
         }
+    }
+}
+
+impl GimletConfig {
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, LoadError> {
+        let path = path.as_ref();
+        let contents = std::fs::read_to_string(&path)
+            .map_err(|err| LoadError::Io { path: path.into(), err })?;
+        let config = toml::from_str(&contents)
+            .map_err(|err| LoadError::Parse { path: path.into(), err })?;
+        Ok(config)
     }
 }

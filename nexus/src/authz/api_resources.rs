@@ -36,9 +36,11 @@ use super::Action;
 use super::{actor::AuthenticatedActor, Authz};
 use crate::authn;
 use crate::context::OpContext;
+use crate::db;
 use crate::db::fixed_data::FLEET_ID;
 use crate::db::model::UpdateArtifactKind;
 use crate::db::DataStore;
+use anyhow::anyhow;
 use authz_macros::authz_resource;
 use futures::future::BoxFuture;
 use futures::FutureExt;
@@ -48,6 +50,8 @@ use parse_display::Display;
 use parse_display::FromStr;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
+use strum::EnumIter;
 use uuid::Uuid;
 
 /// Describes an authz resource that corresponds to an API resource that has a
@@ -83,9 +87,9 @@ pub trait ApiResourceWithRoles: ApiResource {
 
 /// Describes the specific roles for an `ApiResourceWithRoles`
 pub trait ApiResourceWithRolesType: ApiResourceWithRoles {
-    type AllowedRoles: std::fmt::Display
-        + serde::Serialize
-        + serde::de::DeserializeOwned;
+    type AllowedRoles: serde::Serialize
+        + serde::de::DeserializeOwned
+        + db::model::DatabaseString;
 }
 
 impl<T: ApiResource + oso::ToPolar + Clone> AuthorizedResource for T {
@@ -202,18 +206,9 @@ impl ApiResourceWithRolesType for Fleet {
 }
 
 #[derive(
-    Clone,
-    Copy,
-    Debug,
-    Deserialize,
-    Display,
-    Eq,
-    FromStr,
-    PartialEq,
-    Serialize,
-    JsonSchema,
+    Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema,
 )]
-#[display(style = "kebab-case")]
+#[cfg_attr(test, derive(EnumIter))]
 #[serde(rename_all = "snake_case")]
 pub enum FleetRoles {
     Admin,
@@ -221,6 +216,27 @@ pub enum FleetRoles {
     Viewer,
     // There are other Fleet roles, but they are not externally-visible and so
     // they do not show up in this enum.
+}
+
+impl db::model::DatabaseString for FleetRoles {
+    type Error = anyhow::Error;
+
+    fn to_database_string(&self) -> &str {
+        match self {
+            FleetRoles::Admin => "admin",
+            FleetRoles::Collaborator => "collaborator",
+            FleetRoles::Viewer => "viewer",
+        }
+    }
+
+    fn from_database_string(s: &str) -> Result<Self, Self::Error> {
+        match s {
+            "admin" => Ok(FleetRoles::Admin),
+            "collaborator" => Ok(FleetRoles::Collaborator),
+            "viewer" => Ok(FleetRoles::Viewer),
+            _ => Err(anyhow!("unsupported Fleet role from database: {:?}", s)),
+        }
+    }
 }
 
 /// ConsoleSessionList is a synthetic resource used for modeling who has access
@@ -369,11 +385,37 @@ impl ApiResourceWithRolesType for Organization {
     Serialize,
     JsonSchema,
 )]
+#[cfg_attr(test, derive(EnumIter))]
 #[display(style = "kebab-case")]
 #[serde(rename_all = "snake_case")]
 pub enum OrganizationRoles {
     Admin,
     Collaborator,
+    Viewer,
+}
+
+impl db::model::DatabaseString for OrganizationRoles {
+    type Error = anyhow::Error;
+
+    fn to_database_string(&self) -> &str {
+        match self {
+            OrganizationRoles::Admin => "admin",
+            OrganizationRoles::Collaborator => "collaborator",
+            OrganizationRoles::Viewer => "viewer",
+        }
+    }
+
+    fn from_database_string(s: &str) -> Result<Self, Self::Error> {
+        match s {
+            "admin" => Ok(OrganizationRoles::Admin),
+            "collaborator" => Ok(OrganizationRoles::Collaborator),
+            "viewer" => Ok(OrganizationRoles::Viewer),
+            _ => Err(anyhow!(
+                "unsupported Organization role from database: {:?}",
+                s
+            )),
+        }
+    }
 }
 
 authz_resource! {
@@ -400,12 +442,36 @@ impl ApiResourceWithRolesType for Project {
     Serialize,
     JsonSchema,
 )]
+#[cfg_attr(test, derive(EnumIter))]
 #[display(style = "kebab-case")]
 #[serde(rename_all = "snake_case")]
 pub enum ProjectRoles {
     Admin,
     Collaborator,
     Viewer,
+}
+
+impl db::model::DatabaseString for ProjectRoles {
+    type Error = anyhow::Error;
+
+    fn to_database_string(&self) -> &str {
+        match self {
+            ProjectRoles::Admin => "admin",
+            ProjectRoles::Collaborator => "collaborator",
+            ProjectRoles::Viewer => "viewer",
+        }
+    }
+
+    fn from_database_string(s: &str) -> Result<Self, Self::Error> {
+        match s {
+            "admin" => Ok(ProjectRoles::Admin),
+            "collaborator" => Ok(ProjectRoles::Collaborator),
+            "viewer" => Ok(ProjectRoles::Viewer),
+            _ => {
+                Err(anyhow!("unsupported Project role from database: {:?}", s))
+            }
+        }
+    }
 }
 
 authz_resource! {
@@ -522,12 +588,34 @@ impl ApiResourceWithRolesType for Silo {
     Serialize,
     JsonSchema,
 )]
+#[cfg_attr(test, derive(EnumIter))]
 #[display(style = "kebab-case")]
 #[serde(rename_all = "snake_case")]
 pub enum SiloRoles {
     Admin,
     Collaborator,
     Viewer,
+}
+
+impl db::model::DatabaseString for SiloRoles {
+    type Error = anyhow::Error;
+
+    fn to_database_string(&self) -> &str {
+        match self {
+            SiloRoles::Admin => "admin",
+            SiloRoles::Collaborator => "collaborator",
+            SiloRoles::Viewer => "viewer",
+        }
+    }
+
+    fn from_database_string(s: &str) -> Result<Self, Self::Error> {
+        match s {
+            "admin" => Ok(SiloRoles::Admin),
+            "collaborator" => Ok(SiloRoles::Collaborator),
+            "viewer" => Ok(SiloRoles::Viewer),
+            _ => Err(anyhow!("unsupported Silo role from database: {:?}", s)),
+        }
+    }
 }
 
 authz_resource! {
@@ -568,4 +656,29 @@ authz_resource! {
     primary_key = Uuid,
     roles_allowed = false,
     polar_snippet = FleetChild,
+}
+
+#[cfg(test)]
+mod test {
+    use super::FleetRoles;
+    use super::OrganizationRoles;
+    use super::ProjectRoles;
+    use super::SiloRoles;
+    use crate::db::model::test_database_string_impl;
+
+    #[test]
+    fn test_roles_database_strings() {
+        test_database_string_impl::<FleetRoles, _>(
+            "tests/output/authz-roles-fleet.txt",
+        );
+        test_database_string_impl::<SiloRoles, _>(
+            "tests/output/authz-roles-silo.txt",
+        );
+        test_database_string_impl::<OrganizationRoles, _>(
+            "tests/output/authz-roles-organization.txt",
+        );
+        test_database_string_impl::<ProjectRoles, _>(
+            "tests/output/authz-roles-project.txt",
+        );
+    }
 }

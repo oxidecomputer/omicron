@@ -726,7 +726,7 @@ pub struct Instance {
 
 // DISKS
 
-/// Client view of an [`Disk`]
+/// Client view of a [`Disk`]
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Disk {
     #[serde(flatten)]
@@ -1745,12 +1745,16 @@ impl JsonSchema for MacAddr {
 pub struct Vni(u32);
 
 impl Vni {
-    const MAX_VNI: u32 = 1 << 24;
+    /// Virtual Network Identifiers are constrained to be 24-bit values.
+    pub const MAX_VNI: u32 = 0xFF_FFFF;
+
+    /// Oxide reserves a slice of initial VNIs for its own use.
+    pub const MIN_GUEST_VNI: u32 = 1024;
 
     /// Create a new random VNI.
     pub fn random() -> Self {
         use rand::Rng;
-        Self(rand::thread_rng().gen_range(0..=Self::MAX_VNI))
+        Self(rand::thread_rng().gen_range(Self::MIN_GUEST_VNI..=Self::MAX_VNI))
     }
 }
 

@@ -45,7 +45,7 @@ impl oso::PolarClass for AnyActor {
 #[derive(Clone, Debug)]
 pub struct AuthenticatedActor {
     actor_id: Uuid,
-    silo_id: Uuid,
+    silo_id: Option<Uuid>,
     roles: RoleSet,
 }
 
@@ -76,17 +76,19 @@ impl oso::PolarClass for AuthenticatedActor {
             .add_constant(
                 AuthenticatedActor {
                     actor_id: authn::USER_DB_INIT.id,
-                    silo_id: authn::USER_DB_INIT.silo_id,
+                    silo_id: None,
                     roles: RoleSet::new(),
                 },
                 "USER_DB_INIT",
             )
             .add_attribute_getter("silo", |a: &AuthenticatedActor| {
-                super::Silo::new(
-                    super::FLEET,
-                    a.silo_id,
-                    LookupType::ById(a.silo_id),
-                )
+                a.silo_id.map(|silo_id| {
+                    super::Silo::new(
+                        super::FLEET,
+                        silo_id,
+                        LookupType::ById(silo_id),
+                    )
+                })
             })
     }
 }

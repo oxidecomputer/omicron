@@ -7,6 +7,7 @@
 use super::config::{Config, BOOTSTRAP_AGENT_PORT};
 use super::discovery;
 use super::params::SledAgentRequest;
+use super::rss_handle::RssHandle;
 use super::trust_quorum::{
     self, RackSecret, ShareDistribution, TrustQuorumError,
 };
@@ -14,7 +15,6 @@ use super::views::{ShareResponse, SledAgentResponse};
 use crate::config::Config as SledConfig;
 use crate::illumos::dladm::{self, Dladm, PhysicalLink};
 use crate::illumos::zone::Zones;
-use crate::rack_setup::service::Service as RackSetupService;
 use crate::server::Server as SledServer;
 use omicron_common::address::get_sled_address;
 use omicron_common::api::external::{Error as ExternalError, MacAddr};
@@ -90,7 +90,7 @@ pub(crate) struct Agent {
     peer_monitor: discovery::PeerMonitor,
     share: Option<ShareDistribution>,
 
-    rss: Mutex<Option<RackSetupService>>,
+    rss: Mutex<Option<RssHandle>>,
     sled_agent: Mutex<Option<SledServer>>,
     sled_config: SledConfig,
 }
@@ -138,19 +138,39 @@ impl Agent {
             "server" => sled_config.id.to_string(),
         ));
 
-        let data_link = if let Some(link) = sled_config.data_link.clone() {
-            link
-        } else {
-            Dladm::find_physical().map_err(|err| {
+        // We expect this directory to exist - ensure that it does, before any
+        // subsequent operations which may write configs here.
+        info!(
+            log, "Ensuring config directory exists";
+            "path" => omicron_common::OMICRON_CONFIG_PATH,
+        );
+        tokio::fs::create_dir_all(omicron_common::OMICRON_CONFIG_PATH)
+            .await
+            .map_err(|err| BootstrapError::Io {
+                message: format!(
+                    "Creating config directory {}",
+                    omicron_common::OMICRON_CONFIG_PATH
+                ),
+                err,
+            })?;
+
+        let etherstub = Dladm::create_etherstub().map_err(|e| {
+            BootstrapError::SledError(format!(
+                "Can't access etherstub device: {}",
+                e
+            ))
+        })?;
+
+        let etherstub_vnic =
+            Dladm::create_etherstub_vnic(&etherstub).map_err(|e| {
                 BootstrapError::SledError(format!(
-                    "Can't access physical link, and none in config: {}",
-                    err
+                    "Can't access etherstub VNIC device: {}",
+                    e
                 ))
-            })?
-        };
+            })?;
 
         Zones::ensure_has_global_zone_v6_address(
-            data_link,
+            etherstub_vnic,
             address,
             "bootstrap6",
         )
@@ -381,8 +401,8 @@ impl Agent {
     // Initializes the Rack Setup Service.
     async fn start_rss(&self, config: &Config) -> Result<(), BootstrapError> {
         if let Some(rss_config) = &config.rss_config {
-            let rss = RackSetupService::new(
-                self.parent_log.new(o!("component" => "RSS")),
+            let rss = RssHandle::start_rss(
+                &self.parent_log,
                 rss_config.clone(),
                 self.peer_monitor.observer().await,
             );

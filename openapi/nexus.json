@@ -33,7 +33,7 @@
           {
             "in": "query",
             "name": "page_token",
-            "description": "Token returned by previous call to retreive the subsequent page",
+            "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -133,7 +133,7 @@
           {
             "in": "query",
             "name": "page_token",
-            "description": "Token returned by previous call to retreive the subsequent page",
+            "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -234,7 +234,7 @@
           {
             "in": "query",
             "name": "page_token",
-            "description": "Token returned by previous call to retreive the subsequent page",
+            "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -445,7 +445,7 @@
           {
             "in": "query",
             "name": "page_token",
-            "description": "Token returned by previous call to retreive the subsequent page",
+            "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -742,7 +742,7 @@
           {
             "in": "query",
             "name": "page_token",
-            "description": "Token returned by previous call to retreive the subsequent page",
+            "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -1005,7 +1005,7 @@
           {
             "in": "query",
             "name": "page_token",
-            "description": "Token returned by previous call to retreive the subsequent page",
+            "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -1246,7 +1246,7 @@
           {
             "in": "query",
             "name": "page_token",
-            "description": "Token returned by previous call to retreive the subsequent page",
+            "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -1489,7 +1489,7 @@
           {
             "in": "query",
             "name": "page_token",
-            "description": "Token returned by previous call to retreive the subsequent page",
+            "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -1729,7 +1729,7 @@
           {
             "in": "query",
             "name": "page_token",
-            "description": "Token returned by previous call to retreive the subsequent page",
+            "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -2012,7 +2012,7 @@
           {
             "in": "query",
             "name": "page_token",
-            "description": "Token returned by previous call to retreive the subsequent page",
+            "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -2558,7 +2558,7 @@
           {
             "in": "query",
             "name": "page_token",
-            "description": "Token returned by previous call to retreive the subsequent page",
+            "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -2798,7 +2798,7 @@
           {
             "in": "query",
             "name": "page_token",
-            "description": "Token returned by previous call to retreive the subsequent page",
+            "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -3222,7 +3222,7 @@
           {
             "in": "query",
             "name": "page_token",
-            "description": "Token returned by previous call to retreive the subsequent page",
+            "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -3567,7 +3567,7 @@
           {
             "in": "query",
             "name": "page_token",
-            "description": "Token returned by previous call to retreive the subsequent page",
+            "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -3957,7 +3957,7 @@
           {
             "in": "query",
             "name": "page_token",
-            "description": "Token returned by previous call to retreive the subsequent page",
+            "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -4302,7 +4302,7 @@
           {
             "in": "query",
             "name": "page_token",
-            "description": "Token returned by previous call to retreive the subsequent page",
+            "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -4460,7 +4460,7 @@
           {
             "in": "query",
             "name": "page_token",
-            "description": "Token returned by previous call to retreive the subsequent page",
+            "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -4551,7 +4551,7 @@
           {
             "in": "query",
             "name": "page_token",
-            "description": "Token returned by previous call to retreive the subsequent page",
+            "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -4677,7 +4677,7 @@
           {
             "in": "query",
             "name": "page_token",
-            "description": "Token returned by previous call to retreive the subsequent page",
+            "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -4838,7 +4838,7 @@
           {
             "in": "query",
             "name": "page_token",
-            "description": "Token returned by previous call to retreive the subsequent page",
+            "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -5088,7 +5088,7 @@
           {
             "in": "query",
             "name": "page_token",
-            "description": "Token returned by previous call to retreive the subsequent page",
+            "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -5160,7 +5160,7 @@
           {
             "in": "query",
             "name": "page_token",
-            "description": "Token returned by previous call to retreive the subsequent page",
+            "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -5304,7 +5304,7 @@
         ]
       },
       "Disk": {
-        "description": "Client view of an [`Disk`]",
+        "description": "Client view of a [`Disk`]",
         "type": "object",
         "properties": {
           "block_size": {
@@ -6196,6 +6196,7 @@
           },
           "disks": {
             "description": "The disks to be created or attached for this instance.",
+            "default": [],
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/InstanceDiskAttachment"
@@ -6215,6 +6216,9 @@
           },
           "network_interfaces": {
             "description": "The network interfaces to be created for this instance.",
+            "default": {
+              "type": "default"
+            },
             "allOf": [
               {
                 "$ref": "#/components/schemas/InstanceNetworkInterfaceAttachment"
@@ -6223,6 +6227,7 @@
           },
           "user_data": {
             "description": "User data for instance initialization systems (such as cloud-init). Must be a Base64-encoded string, as specified in RFC 4648 § 4 (+ and / characters with padding). Maximum 32 KiB unencoded data.",
+            "default": "",
             "type": "string"
           }
         },
@@ -6698,7 +6703,8 @@
         "type": "string",
         "enum": [
           "admin",
-          "collaborator"
+          "collaborator",
+          "viewer"
         ]
       },
       "OrganizationRolesPolicy": {

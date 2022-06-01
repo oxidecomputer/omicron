@@ -10,7 +10,6 @@ use futures::Future;
 use futures::FutureExt;
 use http::Method;
 use http::StatusCode;
-use lazy_static::lazy_static;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::resource_helpers::create_organization;
@@ -21,27 +20,11 @@ use omicron_common::api::external::ObjectIdentity;
 use omicron_nexus::authn::USER_TEST_UNPRIVILEGED;
 use omicron_nexus::authz;
 use omicron_nexus::db::fixed_data;
+use omicron_nexus::db::identity::Asset;
 use omicron_nexus::db::identity::Resource;
+use omicron_nexus::db::model::DatabaseString;
 use omicron_nexus::external_api::shared;
 use omicron_nexus::external_api::views;
-
-lazy_static! {
-    /// Authentication mode used for testing
-    // The role assignment APIs only support assigning roles to Silo users and
-    // eventually other externally-visible things like service accounts and
-    // groups.  They don't support assigning roles to built-in users.  So to
-    // test enforcement, we'll need to use a silo user.  We could create our
-    // own, but the facilities for doing that don't really exist.  Fortunately,
-    // there's currently a corresponding silo user for every built-in user, so
-    // we can just choose the one for the "unprivileged" user.
-    //
-    // This will all change when we have first-class facilities for creating
-    // silo users because we won't ship the "privileged" and "unprivileged"
-    // users and we won't create silo users for built-in users.  Hopefully this
-    // happens soon!
-    static ref AUTHN_TEST_USER: AuthnMode =
-        AuthnMode::SiloUser(USER_TEST_UNPRIVILEGED.id);
-}
 
 /// Describes the role assignment test for a particular kind of resource
 ///
@@ -69,10 +52,10 @@ trait RoleAssignmentTest {
     /// The type that's used to describe roles on this resource
     type RoleType: Clone
         + std::fmt::Debug
-        + std::fmt::Display
         + PartialEq
         + serde::Serialize
-        + serde::de::DeserializeOwned;
+        + serde::de::DeserializeOwned
+        + DatabaseString;
 
     /// The role to grant on this resource as part of the test sequence
     const ROLE: Self::RoleType;
@@ -148,7 +131,7 @@ async fn test_role_assignments_fleet(cptestctx: &ControlPlaneTestContext) {
                     Method::GET,
                     RESOURCE_URL,
                 )
-                .authn_as(AUTHN_TEST_USER.clone())
+                .authn_as(AuthnMode::UnprivilegedUser)
                 .execute()
                 .await
                 .unwrap();
@@ -167,7 +150,7 @@ async fn test_role_assignments_fleet(cptestctx: &ControlPlaneTestContext) {
             async {
                 let _: dropshot::ResultsPage<views::Sled> =
                     NexusRequest::object_get(client, RESOURCE_URL)
-                        .authn_as(AUTHN_TEST_USER.clone())
+                        .authn_as(AuthnMode::UnprivilegedUser)
                         .execute()
                         .await
                         .unwrap()
@@ -393,7 +376,7 @@ where
             Method::GET,
             resource_url,
         )
-        .authn_as(AUTHN_TEST_USER.clone())
+        .authn_as(AuthnMode::UnprivilegedUser)
         .execute()
         .await
         .unwrap();
@@ -421,7 +404,7 @@ where
         // (This is not really a policy test so we're not going to check all
         // possible actions.)
         let resource: V = NexusRequest::object_get(client, resource_url)
-            .authn_as(AUTHN_TEST_USER.clone())
+            .authn_as(AuthnMode::UnprivilegedUser)
             .execute()
             .await
             .unwrap()
@@ -454,7 +437,7 @@ async fn run_test<T: RoleAssignmentTest>(
     let mut new_policy = initial_policy.clone();
     let role_assignment = shared::RoleAssignment {
         identity_type: shared::IdentityType::SiloUser,
-        identity_id: USER_TEST_UNPRIVILEGED.id,
+        identity_id: USER_TEST_UNPRIVILEGED.id(),
         role_name: T::ROLE,
     };
     new_policy.role_assignments.push(role_assignment.clone());
@@ -474,7 +457,7 @@ async fn run_test<T: RoleAssignmentTest>(
         &policy_url,
         &new_policy,
     )
-    .authn_as(AUTHN_TEST_USER.clone())
+    .authn_as(AuthnMode::UnprivilegedUser)
     .execute()
     .await
     .unwrap();
@@ -494,12 +477,12 @@ async fn run_test<T: RoleAssignmentTest>(
             .unwrap()
             .parsed_body()
             .unwrap();
-    new_policy
-        .role_assignments
-        .sort_by_key(|r| (r.identity_id, r.role_name.to_string()));
-    updated_policy
-        .role_assignments
-        .sort_by_key(|r| (r.identity_id, r.role_name.to_string()));
+    new_policy.role_assignments.sort_by_key(|r| {
+        (r.identity_id, r.role_name.to_database_string().to_owned())
+    });
+    updated_policy.role_assignments.sort_by_key(|r| {
+        (r.identity_id, r.role_name.to_database_string().to_owned())
+    });
     assert_eq!(updated_policy, new_policy);
 
     // Check that the policy reflects that.
@@ -524,7 +507,7 @@ async fn run_test<T: RoleAssignmentTest>(
     // revoke their own access.
     let updated_policy: shared::Policy<T::RoleType> =
         NexusRequest::object_put(client, &policy_url, Some(&initial_policy))
-            .authn_as(AUTHN_TEST_USER.clone())
+            .authn_as(AuthnMode::UnprivilegedUser)
             .execute()
             .await
             .unwrap()
