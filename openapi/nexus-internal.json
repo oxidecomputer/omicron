@@ -267,6 +267,55 @@
         }
       }
     },
+    "/sled_agents/{sled_id}/services/{service_id}": {
+      "put": {
+        "summary": "Report that a service should be running on a sled.",
+        "operationId": "service_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "service_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "sled_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServicePutRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/sled_agents/{sled_id}/zpools/{zpool_id}": {
       "put": {
         "summary": "Report that a pool for a specified sled has come online.",
@@ -1689,6 +1738,38 @@
           "metric",
           "target",
           "timeseries_name"
+        ]
+      },
+      "ServiceKind": {
+        "description": "Describes the purpose of the service.",
+        "type": "string",
+        "enum": [
+          "internal_d_n_s",
+          "nexus",
+          "oximeter"
+        ]
+      },
+      "ServicePutRequest": {
+        "description": "Describes a service on a sled",
+        "type": "object",
+        "properties": {
+          "address": {
+            "description": "Address on which a service is responding to requests.",
+            "type": "string",
+            "format": "ipv6"
+          },
+          "kind": {
+            "description": "Type of service being inserted.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ServiceKind"
+              }
+            ]
+          }
+        },
+        "required": [
+          "address",
+          "kind"
         ]
       },
       "SledAgentStartupInfo": {

@@ -263,6 +263,18 @@ table! {
 }
 
 table! {
+    service (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+
+        sled_id -> Uuid,
+        ip -> Inet,
+        kind -> crate::db::model::ServiceKindEnum,
+    }
+}
+
+table! {
     zpool (id) {
         id -> Uuid,
         time_created -> Timestamptz,
@@ -467,6 +479,7 @@ allow_tables_to_appear_in_same_query!(
     saga,
     saga_node_event,
     console_session,
+    service,
     sled,
     router_route,
     vpc,

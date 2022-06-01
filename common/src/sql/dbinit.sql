@@ -73,6 +73,35 @@ CREATE TABLE omicron.public.sled (
 );
 
 /*
+ * Services
+ */
+
+CREATE TYPE omicron.public.service_kind AS ENUM (
+  'internal_dns',
+  'nexus',
+  'oximeter'
+);
+
+CREATE TABLE omicron.public.service (
+    /* Identity metadata (asset) */
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+
+    /* FK into the Sled table */
+    sled_id UUID NOT NULL,
+    /* The IP address of the service. */
+    ip INET NOT NULL,
+    /* Indicates the type of service. */
+    kind omicron.public.service_kind NOT NULL
+);
+
+/* Add an index which lets us look up the services on a sled */
+CREATE INDEX ON omicron.public.service (
+    sled_id
+);
+
+/*
  * ZPools of Storage, attached to Sleds.
  * Typically these are backed by a single physical disk.
  */

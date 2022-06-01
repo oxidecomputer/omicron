@@ -39,7 +39,6 @@ use crate::db::fixed_data::silo::DEFAULT_SILO;
 use crate::db::lookup::LookupPath;
 use crate::db::model::DatabaseString;
 use crate::db::model::IncompleteVpc;
-use crate::db::model::Vpc;
 use crate::db::queries::network_interface::InsertNetworkInterfaceQuery;
 use crate::db::queries::network_interface::NetworkInterfaceError;
 use crate::db::queries::vpc::InsertVpcQuery;
@@ -54,8 +53,8 @@ use crate::db::{
         InstanceRuntimeState, Name, NetworkInterface, Organization,
         OrganizationUpdate, OximeterInfo, ProducerEndpoint, Project,
         ProjectUpdate, Region, RoleAssignment, RoleBuiltin, RouterRoute,
-        RouterRouteUpdate, Silo, SiloUser, Sled, SshKey,
-        UpdateAvailableArtifact, UserBuiltin, Volume, VpcFirewallRule,
+        RouterRouteUpdate, Service, Silo, SiloUser, Sled, SshKey,
+        UpdateAvailableArtifact, UserBuiltin, Volume, Vpc, VpcFirewallRule,
         VpcRouter, VpcRouterUpdate, VpcSubnet, VpcSubnetUpdate, VpcUpdate,
         Zpool,
     },
@@ -255,6 +254,46 @@ impl DataStore {
                     ErrorHandler::Conflict(
                         ResourceType::Dataset,
                         &dataset.id().to_string(),
+                    ),
+                )
+            }
+        })
+    }
+
+    /// Stores a new service in the database.
+    pub async fn service_upsert(
+        &self,
+        service: Service,
+    ) -> CreateResult<Service> {
+        use db::schema::service::dsl;
+
+        let sled_id = service.sled_id;
+        Sled::insert_resource(
+            sled_id,
+            diesel::insert_into(dsl::service)
+                .values(service.clone())
+                .on_conflict(dsl::id)
+                .do_update()
+                .set((
+                    dsl::time_modified.eq(Utc::now()),
+                    dsl::sled_id.eq(excluded(dsl::sled_id)),
+                    dsl::ip.eq(excluded(dsl::ip)),
+                    dsl::kind.eq(excluded(dsl::kind)),
+                )),
+        )
+        .insert_and_get_result_async(self.pool())
+        .await
+        .map_err(|e| match e {
+            AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
+                type_name: ResourceType::Sled,
+                lookup_type: LookupType::ById(sled_id),
+            },
+            AsyncInsertError::DatabaseError(e) => {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::Conflict(
+                        ResourceType::Service,
+                        &service.id().to_string(),
                     ),
                 )
             }
@@ -3961,7 +4000,7 @@ mod test {
     // Test sled-specific IPv6 address allocation
     #[tokio::test]
     async fn test_sled_ipv6_address_allocation() {
-        use crate::db::model::STATIC_IPV6_ADDRESS_OFFSET;
+        use omicron_common::address::RSS_RESERVED_ADDRESSES as STATIC_IPV6_ADDRESS_OFFSET;
         use std::net::Ipv6Addr;
 
         let logctx = dev::test_setup_log("test_sled_ipv6_address_allocation");
