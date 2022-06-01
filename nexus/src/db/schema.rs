@@ -56,7 +56,7 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         volume_id -> Uuid,
         url -> Nullable<Text>,
-        distribution -> crate::db::model::DistributionEnum,
+        distribution -> Text,
         version -> Text,
         digest -> Nullable<Text>,
         block_size -> crate::db::model::BlockSizeEnum,

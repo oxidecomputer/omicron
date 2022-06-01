@@ -5656,15 +5656,11 @@
         ]
       },
       "Distribution": {
+        "title": "OS image distribution",
+        "description": "Distribution must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'.",
         "type": "string",
-        "enum": [
-          "alpine",
-          "debian",
-          "ubuntu",
-          "rocky",
-          "centos",
-          "fedora"
-        ]
+        "pattern": "[a-z](|[a-zA-Z0-9-]*[a-zA-Z0-9])",
+        "maxLength": 63
       },
       "Error": {
         "description": "Error information from a response.",
@@ -5796,11 +5792,7 @@
           },
           "distribution": {
             "description": "Image distribution",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Distribution"
-              }
-            ]
+            "type": "string"
           },
           "id": {
             "description": "unique, immutable, system-controlled identifier for each resource",
@@ -5871,7 +5863,7 @@
             "type": "string"
           },
           "distribution": {
-            "description": "image distribution",
+            "description": "OS image distribution",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Distribution"

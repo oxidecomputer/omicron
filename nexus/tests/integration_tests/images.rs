@@ -58,7 +58,7 @@ async fn test_global_image_create(cptestctx: &ControlPlaneTestContext) {
         source: params::ImageSource::Url {
             url: server.url("/image.raw").to_string(),
         },
-        distribution: params::Distribution::Alpine,
+        distribution: "alpine".parse().unwrap(),
         version: "edge".into(),
         block_size: params::BlockSize::try_from(512).unwrap(),
     };
@@ -102,7 +102,7 @@ async fn test_global_image_create_url_404(cptestctx: &ControlPlaneTestContext) {
         source: params::ImageSource::Url {
             url: server.url("/image.raw").to_string(),
         },
-        distribution: params::Distribution::Alpine,
+        distribution: "alpine".parse().unwrap(),
         version: "edge".into(),
         block_size: params::BlockSize::try_from(512).unwrap(),
     };
@@ -137,7 +137,7 @@ async fn test_global_image_create_bad_url(cptestctx: &ControlPlaneTestContext) {
             ),
         },
         source: params::ImageSource::Url { url: "not_a_url".to_string() },
-        distribution: params::Distribution::Alpine,
+        distribution: "alpine".parse().unwrap(),
         version: "edge".into(),
         block_size: params::BlockSize::try_from(512).unwrap(),
     };
@@ -185,7 +185,7 @@ async fn test_global_image_create_bad_content_length(
         source: params::ImageSource::Url {
             url: server.url("/image.raw").to_string(),
         },
-        distribution: params::Distribution::Alpine,
+        distribution: "alpine".parse().unwrap(),
         version: "edge".into(),
         block_size: params::BlockSize::try_from(512).unwrap(),
     };
@@ -234,7 +234,7 @@ async fn test_global_image_create_bad_image_size(
         source: params::ImageSource::Url {
             url: server.url("/image.raw").to_string(),
         },
-        distribution: params::Distribution::Alpine,
+        distribution: "alpine".parse().unwrap(),
         version: "edge".into(),
         block_size: params::BlockSize::try_from(512).unwrap(),
     };
@@ -283,7 +283,7 @@ async fn test_make_disk_from_global_image(cptestctx: &ControlPlaneTestContext) {
         source: params::ImageSource::Url {
             url: server.url("/alpine/edge.raw").to_string(),
         },
-        distribution: params::Distribution::Alpine,
+        distribution: "alpine".parse().unwrap(),
         version: "edge".into(),
         block_size: params::BlockSize::try_from(512).unwrap(),
     };
@@ -351,7 +351,7 @@ async fn test_make_disk_from_global_image_too_small(
         source: params::ImageSource::Url {
             url: server.url("/alpine/edge.raw").to_string(),
         },
-        distribution: params::Distribution::Alpine,
+        distribution: "alpine".parse().unwrap(),
         version: "edge".into(),
         block_size: params::BlockSize::try_from(512).unwrap(),
     };

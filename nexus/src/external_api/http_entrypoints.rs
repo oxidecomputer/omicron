@@ -1438,8 +1438,8 @@ async fn images_get(
             )
             .await?
             .into_iter()
-            .map(|d| d.try_into())
-            .collect::<Result<Vec<GlobalImage>, _>>()?;
+            .map(|d| d.into())
+            .collect();
         Ok(HttpResponseOk(ScanByName::results_page(&query, images)?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -1464,7 +1464,7 @@ async fn images_post(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let image = nexus.global_image_create(&opctx, new_image_params).await?;
-        Ok(HttpResponseCreated(image.try_into()?))
+        Ok(HttpResponseCreated(image.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1494,7 +1494,7 @@ async fn images_get_image(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let image = nexus.global_image_fetch(&opctx, &image_name).await?;
-        Ok(HttpResponseOk(image.try_into()?))
+        Ok(HttpResponseOk(image.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

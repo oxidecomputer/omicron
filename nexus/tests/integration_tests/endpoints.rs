@@ -256,7 +256,7 @@ lazy_static! {
             source: params::ImageSource::Url {
                 url: String::from("http://127.0.0.1:5555/image.raw")
             },
-            distribution: params::Distribution::Alpine,
+            distribution: params::Distribution::try_from(String::from("alpine")).unwrap(),
             version: String::from("edge"),
             block_size: params::BlockSize::try_from(4096).unwrap(),
         };
