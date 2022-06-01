@@ -187,7 +187,7 @@ fn decode_database_error(
     // probably quite unlikely, but not impossible given that MACs are unique
     // within an entire VPC. We'll probably have other constraints we hit first,
     // or explicit limits, but until those are in place, we opt for an explicit
-    // messaage.
+    // message.
     const MAC_EXHAUSTION_ERROR_MESSAGE: &str =
         r#"null value in column "mac" violates not-null constraint"#;
 
