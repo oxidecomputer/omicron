@@ -662,14 +662,12 @@ impl super::Nexus {
                 .vpc_subnet_name(&subnet_name)
                 .fetch()
                 .await?;
-        let mac = db::model::MacAddr::new()?;
         let interface_id = Uuid::new_v4();
         let interface = db::model::IncompleteNetworkInterface::new(
             interface_id,
             authz_instance.id(),
             authz_vpc.id(),
             db_subnet,
-            mac,
             params.identity.clone(),
             params.ip,
         )?;
