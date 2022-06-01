@@ -238,7 +238,7 @@ lazy_static! {
                 name: DEMO_IMAGE_NAME.clone(),
                 description: String::from(""),
             },
-            source: params::ImageSource::Url(HTTP_SERVER.url("/image.raw").to_string()),
+            source: params::ImageSource::Url { url: HTTP_SERVER.url("/image.raw").to_string() },
             block_size: params::BlockSize::try_from(4096).unwrap(),
         };
 
@@ -252,9 +252,7 @@ lazy_static! {
                 name: DEMO_GLOBAL_IMAGE_NAME.clone(),
                 description: String::from(""),
             },
-            source: params::ImageSource::Url {
-                url: String::from("http://127.0.0.1:5555/image.raw")
-            },
+            source: params::ImageSource::Url { url: HTTP_SERVER.url("/image.raw").to_string() },
             distribution: params::Distribution::try_from(String::from("alpine")).unwrap(),
             version: String::from("edge"),
             block_size: params::BlockSize::try_from(4096).unwrap(),
