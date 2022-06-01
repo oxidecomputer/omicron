@@ -6,7 +6,7 @@
 use lazy_static::lazy_static;
 use omicron_common::api;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct RoleBuiltinConfig {
     pub resource_type: api::external::ResourceType,
     pub role_name: &'static str,
@@ -68,6 +68,11 @@ lazy_static! {
         ORGANIZATION_ADMINISTRATOR.clone(),
         ORGANIZATION_COLLABORATOR.clone(),
         RoleBuiltinConfig {
+            resource_type: api::external::ResourceType::Organization,
+            role_name: "viewer",
+            description: "Organization Viewer",
+        },
+        RoleBuiltinConfig {
             resource_type: api::external::ResourceType::Project,
             role_name: "admin",
             description: "Project Administrator",
@@ -83,4 +88,53 @@ lazy_static! {
             description: "Project Viewer",
         },
     ];
+}
+
+#[cfg(test)]
+mod test {
+    use super::BUILTIN_ROLES;
+    use crate::authz;
+    use crate::db::model::DatabaseString;
+    use omicron_common::api::external::ResourceType;
+    use strum::IntoEnumIterator;
+
+    #[test]
+    fn test_fixed_role_data() {
+        // Every role that's defined in the public API as assignable on a
+        // resource must have a corresponding entry in BUILTIN_ROLES above.
+        // The reverse is not necessarily true because we have some internal
+        // roles that are not exposed to end users.
+        check_public_roles::<authz::FleetRoles>(ResourceType::Fleet);
+        check_public_roles::<authz::SiloRoles>(ResourceType::Silo);
+        check_public_roles::<authz::OrganizationRoles>(
+            ResourceType::Organization,
+        );
+        check_public_roles::<authz::ProjectRoles>(ResourceType::Project);
+    }
+
+    fn check_public_roles<T>(resource_type: ResourceType)
+    where
+        T: std::fmt::Debug + DatabaseString + IntoEnumIterator,
+    {
+        for variant in T::iter() {
+            let role_name = variant.to_database_string();
+
+            let found = BUILTIN_ROLES.iter().find(|role_config| {
+                role_config.resource_type == resource_type
+                    && role_config.role_name == role_name
+            });
+            if let Some(found_config) = found {
+                println!(
+                    "variant: {:?} found fixed data {:?}",
+                    variant, found_config
+                );
+            } else {
+                panic!(
+                    "found public role {:?} on {:?} with no corresponding \
+                    built-in role",
+                    role_name, resource_type
+                );
+            }
+        }
+    }
 }

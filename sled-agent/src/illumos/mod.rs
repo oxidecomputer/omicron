@@ -15,7 +15,7 @@ pub mod zfs;
 pub mod zone;
 pub mod zpool;
 
-const PFEXEC: &str = "/usr/bin/pfexec";
+pub const PFEXEC: &str = "/usr/bin/pfexec";
 
 #[derive(thiserror::Error, Debug)]
 pub enum ExecutionError {
@@ -23,11 +23,12 @@ pub enum ExecutionError {
     ExecutionStart { command: String, err: std::io::Error },
 
     #[error(
-        "Command [{command}] executed and failed with status: {status}. Output: {stderr}"
+        "Command [{command}] executed and failed with status: {status}. Stdout: {stdout}, Stderr: {stderr}"
     )]
     CommandFailure {
         command: String,
         status: std::process::ExitStatus,
+        stdout: String,
         stderr: String,
     },
 }
@@ -63,6 +64,7 @@ mod inner {
                     .collect::<Vec<String>>()
                     .join(" "),
                 status: output.status,
+                stdout: String::from_utf8_lossy(&output.stdout).to_string(),
                 stderr: String::from_utf8_lossy(&output.stderr).to_string(),
             });
         }

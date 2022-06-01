@@ -22,9 +22,23 @@ pub struct LoadError {
 }
 
 #[derive(Debug)]
+pub struct InvalidTunable {
+    pub tunable: String,
+    pub message: String,
+}
+
+impl std::fmt::Display for InvalidTunable {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "invalid \"{}\": \"{}\"", self.tunable, self.message)
+    }
+}
+impl std::error::Error for InvalidTunable {}
+
+#[derive(Debug)]
 pub enum LoadErrorKind {
     Io(std::io::Error),
     Parse(toml::de::Error),
+    InvalidTunable(InvalidTunable),
 }
 
 impl From<(PathBuf, std::io::Error)> for LoadError {
@@ -49,6 +63,14 @@ impl fmt::Display for LoadError {
             }
             LoadErrorKind::Parse(e) => {
                 write!(f, "parse \"{}\": {}", self.path.display(), e)
+            }
+            LoadErrorKind::InvalidTunable(inner) => {
+                write!(
+                    f,
+                    "invalid tunable \"{}\": {}",
+                    self.path.display(),
+                    inner,
+                )
             }
         }
     }

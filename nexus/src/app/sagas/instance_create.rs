@@ -9,6 +9,7 @@ use crate::app::{MAX_DISKS_PER_INSTANCE, MAX_NICS_PER_INSTANCE};
 use crate::context::OpContext;
 use crate::db::identity::Resource;
 use crate::db::lookup::LookupPath;
+use crate::db::queries::network_interface::NetworkInterfaceError;
 use crate::external_api::params;
 use crate::saga_interface::SagaContext;
 use crate::{authn, authz, db};
@@ -331,7 +332,6 @@ async fn sic_create_custom_network_interfaces(
             )
             .await;
 
-        use crate::db::subnet_allocation::NetworkInterfaceError;
         match result {
             Ok(_) => Ok(()),
 
@@ -432,7 +432,7 @@ async fn sic_create_default_network_interface(
             interface,
         )
         .await
-        .map_err(db::subnet_allocation::NetworkInterfaceError::into_external)
+        .map_err(NetworkInterfaceError::into_external)
         .map_err(ActionError::action_failed)?;
     Ok(())
 }

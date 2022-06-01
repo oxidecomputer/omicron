@@ -33,7 +33,7 @@
           {
             "in": "query",
             "name": "page_token",
-            "description": "Token returned by previous call to retreive the subsequent page",
+            "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -133,7 +133,7 @@
           {
             "in": "query",
             "name": "page_token",
-            "description": "Token returned by previous call to retreive the subsequent page",
+            "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -234,7 +234,7 @@
           {
             "in": "query",
             "name": "page_token",
-            "description": "Token returned by previous call to retreive the subsequent page",
+            "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -445,7 +445,7 @@
           {
             "in": "query",
             "name": "page_token",
-            "description": "Token returned by previous call to retreive the subsequent page",
+            "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -742,7 +742,7 @@
           {
             "in": "query",
             "name": "page_token",
-            "description": "Token returned by previous call to retreive the subsequent page",
+            "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -1005,7 +1005,7 @@
           {
             "in": "query",
             "name": "page_token",
-            "description": "Token returned by previous call to retreive the subsequent page",
+            "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -1246,7 +1246,7 @@
           {
             "in": "query",
             "name": "page_token",
-            "description": "Token returned by previous call to retreive the subsequent page",
+            "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -1489,7 +1489,7 @@
           {
             "in": "query",
             "name": "page_token",
-            "description": "Token returned by previous call to retreive the subsequent page",
+            "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -1729,7 +1729,7 @@
           {
             "in": "query",
             "name": "page_token",
-            "description": "Token returned by previous call to retreive the subsequent page",
+            "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -2012,7 +2012,7 @@
           {
             "in": "query",
             "name": "page_token",
-            "description": "Token returned by previous call to retreive the subsequent page",
+            "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -2558,7 +2558,7 @@
           {
             "in": "query",
             "name": "page_token",
-            "description": "Token returned by previous call to retreive the subsequent page",
+            "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -2798,7 +2798,7 @@
           {
             "in": "query",
             "name": "page_token",
-            "description": "Token returned by previous call to retreive the subsequent page",
+            "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -3222,7 +3222,7 @@
           {
             "in": "query",
             "name": "page_token",
-            "description": "Token returned by previous call to retreive the subsequent page",
+            "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -3567,7 +3567,7 @@
           {
             "in": "query",
             "name": "page_token",
-            "description": "Token returned by previous call to retreive the subsequent page",
+            "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -3957,7 +3957,7 @@
           {
             "in": "query",
             "name": "page_token",
-            "description": "Token returned by previous call to retreive the subsequent page",
+            "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -4302,7 +4302,7 @@
           {
             "in": "query",
             "name": "page_token",
-            "description": "Token returned by previous call to retreive the subsequent page",
+            "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -4375,6 +4375,68 @@
         "x-dropshot-pagination": true
       }
     },
+    "/policy": {
+      "get": {
+        "tags": [
+          "policy"
+        ],
+        "summary": "Fetch the top-level IAM policy",
+        "operationId": "policy_get",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetRolesPolicy"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "policy"
+        ],
+        "summary": "Update the top-level IAM policy",
+        "operationId": "policy_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FleetRolesPolicy"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetRolesPolicy"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/roles": {
       "get": {
         "tags": [
@@ -4398,7 +4460,7 @@
           {
             "in": "query",
             "name": "page_token",
-            "description": "Token returned by previous call to retreive the subsequent page",
+            "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -4489,7 +4551,7 @@
           {
             "in": "query",
             "name": "page_token",
-            "description": "Token returned by previous call to retreive the subsequent page",
+            "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -4615,7 +4677,7 @@
           {
             "in": "query",
             "name": "page_token",
-            "description": "Token returned by previous call to retreive the subsequent page",
+            "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -4776,7 +4838,7 @@
           {
             "in": "query",
             "name": "page_token",
-            "description": "Token returned by previous call to retreive the subsequent page",
+            "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -5026,7 +5088,7 @@
           {
             "in": "query",
             "name": "page_token",
-            "description": "Token returned by previous call to retreive the subsequent page",
+            "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -5098,7 +5160,7 @@
           {
             "in": "query",
             "name": "page_token",
-            "description": "Token returned by previous call to retreive the subsequent page",
+            "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -5208,15 +5270,15 @@
         "description": "The type of an individual datum of a metric.",
         "type": "string",
         "enum": [
-          "Bool",
-          "I64",
-          "F64",
-          "String",
-          "Bytes",
-          "CumulativeI64",
-          "CumulativeF64",
-          "HistogramI64",
-          "HistogramF64"
+          "bool",
+          "i64",
+          "f64",
+          "string",
+          "bytes",
+          "cumulative_i64",
+          "cumulative_f64",
+          "histogram_i64",
+          "histogram_f64"
         ]
       },
       "Digest": {
@@ -5224,19 +5286,25 @@
           {
             "type": "object",
             "properties": {
-              "Sha256": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "sha256"
+                ]
+              },
+              "value": {
                 "type": "string"
               }
             },
             "required": [
-              "Sha256"
-            ],
-            "additionalProperties": false
+              "type",
+              "value"
+            ]
           }
         ]
       },
       "Disk": {
-        "description": "Client view of an [`Disk`]",
+        "description": "Client view of a [`Disk`]",
         "type": "object",
         "properties": {
           "block_size": {
@@ -5391,7 +5459,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "Blank"
+                  "blank"
                 ]
               }
             },
@@ -5411,7 +5479,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "Snapshot"
+                  "snapshot"
                 ]
               }
             },
@@ -5431,7 +5499,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "Image"
+                  "image"
                 ]
               }
             },
@@ -5451,7 +5519,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "GlobalImage"
+                  "global_image"
                 ]
               }
             },
@@ -5630,19 +5698,64 @@
         "description": "The source from which a field is derived, the target or metric.",
         "type": "string",
         "enum": [
-          "Target",
-          "Metric"
+          "target",
+          "metric"
         ]
       },
       "FieldType": {
         "description": "The `FieldType` identifies the data type of a target or metric field.",
         "type": "string",
         "enum": [
-          "String",
-          "I64",
-          "IpAddr",
-          "Uuid",
-          "Bool"
+          "string",
+          "i64",
+          "ip_addr",
+          "uuid",
+          "bool"
+        ]
+      },
+      "FleetRoles": {
+        "type": "string",
+        "enum": [
+          "admin",
+          "collaborator",
+          "viewer"
+        ]
+      },
+      "FleetRolesPolicy": {
+        "description": "Client view of a [`Policy`], which describes how this resource may be accessed\n\nNote that the Policy only describes access granted explicitly for this resource.  The policies of parent resources can also cause a user to have access to this resource.",
+        "type": "object",
+        "properties": {
+          "role_assignments": {
+            "description": "Roles directly assigned on this resource",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FleetRolesRoleAssignment"
+            }
+          }
+        },
+        "required": [
+          "role_assignments"
+        ]
+      },
+      "FleetRolesRoleAssignment": {
+        "description": "Describes the assignment of a particular role on a particular resource to a particular identity (user, group, etc.)\n\nThe resource is not part of this structure.  Rather, [`RoleAssignment`]s are put into a [`Policy`] and that Policy is applied to a particular resource.",
+        "type": "object",
+        "properties": {
+          "identity_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "identity_type": {
+            "$ref": "#/components/schemas/IdentityType"
+          },
+          "role_name": {
+            "$ref": "#/components/schemas/FleetRoles"
+          }
+        },
+        "required": [
+          "identity_id",
+          "identity_type",
+          "role_name"
         ]
       },
       "GlobalImage": {
@@ -5747,7 +5860,6 @@
         "description": "Describes what kind of identity is described by an id",
         "type": "string",
         "enum": [
-          "user_builtin",
           "silo_user"
         ]
       },
@@ -5895,27 +6007,39 @@
           {
             "type": "object",
             "properties": {
-              "Url": {
+              "src": {
                 "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "url"
+                ]
               }
             },
             "required": [
-              "Url"
-            ],
-            "additionalProperties": false
+              "src",
+              "type"
+            ]
           },
           {
             "type": "object",
             "properties": {
-              "Snapshot": {
+              "src": {
                 "type": "string",
                 "format": "uuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "snapshot"
+                ]
               }
             },
             "required": [
-              "Snapshot"
-            ],
-            "additionalProperties": false
+              "src",
+              "type"
+            ]
           }
         ]
       },
@@ -6012,6 +6136,7 @@
           },
           "disks": {
             "description": "The disks to be created or attached for this instance.",
+            "default": [],
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/InstanceDiskAttachment"
@@ -6031,6 +6156,9 @@
           },
           "network_interfaces": {
             "description": "The network interfaces to be created for this instance.",
+            "default": {
+              "type": "default"
+            },
             "allOf": [
               {
                 "$ref": "#/components/schemas/InstanceNetworkInterfaceAttachment"
@@ -6039,6 +6167,7 @@
           },
           "user_data": {
             "description": "User data for instance initialization systems (such as cloud-init). Must be a Base64-encoded string, as specified in RFC 4648 § 4 (+ and / characters with padding). Maximum 32 KiB unencoded data.",
+            "default": "",
             "type": "string"
           }
         },
@@ -6149,7 +6278,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "Create"
+                  "create"
                 ]
               }
             },
@@ -6165,7 +6294,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "Default"
+                  "default"
                 ]
               }
             },
@@ -6180,7 +6309,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "None"
+                  "none"
                 ]
               }
             },
@@ -6228,31 +6357,22 @@
         ]
       },
       "IpNet": {
-        "description": "An `IpNet` represents an IP network, either IPv4 or IPv6.",
         "oneOf": [
           {
-            "type": "object",
-            "properties": {
-              "V4": {
+            "title": "v4",
+            "allOf": [
+              {
                 "$ref": "#/components/schemas/Ipv4Net"
               }
-            },
-            "required": [
-              "V4"
-            ],
-            "additionalProperties": false
+            ]
           },
           {
-            "type": "object",
-            "properties": {
-              "V6": {
+            "title": "v6",
+            "allOf": [
+              {
                 "$ref": "#/components/schemas/Ipv6Net"
               }
-            },
-            "required": [
-              "V6"
-            ],
-            "additionalProperties": false
+            ]
           }
         ]
       },
@@ -6522,8 +6642,9 @@
       "OrganizationRoles": {
         "type": "string",
         "enum": [
-          "Admin",
-          "Collaborator"
+          "admin",
+          "collaborator",
+          "viewer"
         ]
       },
       "OrganizationRolesPolicy": {
@@ -6666,9 +6787,9 @@
       "ProjectRoles": {
         "type": "string",
         "enum": [
-          "Admin",
-          "Collaborator",
-          "Viewer"
+          "admin",
+          "collaborator",
+          "viewer"
         ]
       },
       "ProjectRolesPolicy": {
@@ -7441,9 +7562,9 @@
       "SiloRoles": {
         "type": "string",
         "enum": [
-          "Admin",
-          "Collaborator",
-          "Viewer"
+          "admin",
+          "collaborator",
+          "viewer"
         ]
       },
       "SiloRolesPolicy": {
@@ -8718,23 +8839,23 @@
         "description": "Supported set of sort modes for scanning by id only.\n\nCurrently, we only support scanning in ascending order.",
         "type": "string",
         "enum": [
-          "id-ascending"
+          "id_ascending"
         ]
       },
       "NameSortMode": {
         "description": "Supported set of sort modes for scanning by name only\n\nCurrently, we only support scanning in ascending order.",
         "type": "string",
         "enum": [
-          "name-ascending"
+          "name_ascending"
         ]
       },
       "NameOrIdSortMode": {
         "description": "Supported set of sort modes for scanning by name or id",
         "type": "string",
         "enum": [
-          "name-ascending",
-          "name-descending",
-          "id-ascending"
+          "name_ascending",
+          "name_descending",
+          "id_ascending"
         ]
       }
     }
@@ -8792,6 +8913,13 @@
     {
       "name": "organizations",
       "description": "Organizations represent a subset of users and projects in an Oxide deployment.",
+      "externalDocs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    {
+      "name": "policy",
+      "description": "System-wide IAM policy",
       "externalDocs": {
         "url": "http://oxide.computer/docs/#xxx"
       }

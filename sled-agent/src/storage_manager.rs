@@ -4,7 +4,7 @@
 
 //! Management of sled-local storage.
 
-use crate::illumos::dladm::PhysicalLink;
+use crate::illumos::dladm::Etherstub;
 use crate::illumos::running_zone::{InstalledZone, RunningZone};
 use crate::illumos::vnic::VnicAllocator;
 use crate::illumos::zone::AddressRequest;
@@ -15,7 +15,9 @@ use crate::params::DatasetKind;
 use futures::stream::FuturesOrdered;
 use futures::FutureExt;
 use futures::StreamExt;
+use ipnetwork::Ipv6Network;
 use nexus_client::types::{DatasetPutRequest, ZpoolPutRequest};
+use omicron_common::address::AZ_PREFIX;
 use omicron_common::api::external::{ByteCount, ByteCountRangeError};
 use omicron_common::backoff;
 use schemars::JsonSchema;
@@ -23,7 +25,7 @@ use serde::{Deserialize, Serialize};
 use slog::Logger;
 use std::collections::HashMap;
 use std::convert::TryFrom;
-use std::net::{IpAddr, SocketAddrV6};
+use std::net::{IpAddr, Ipv6Addr, SocketAddrV6};
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -307,13 +309,11 @@ impl DatasetInfo {
                 // Await liveness of the cluster.
                 info!(log, "start_zone: awaiting liveness of CRDB");
                 let check_health = || async {
-                    reqwest::get(format!(
-                        "http://[{}]:{}/health?ready=1",
-                        address.ip(),
-                        8080
-                    ))
-                    .await
-                    .map_err(backoff::BackoffError::transient)
+                    let http_addr =
+                        SocketAddrV6::new(*address.ip(), 8080, 0, 0);
+                    reqwest::get(format!("http://{}/health?ready=1", http_addr))
+                        .await
+                        .map_err(backoff::BackoffError::transient)
                 };
                 let log_failure = |_, _| {
                     warn!(log, "cockroachdb not yet alive");
@@ -462,6 +462,7 @@ async fn ensure_running_zone(
     dataset_info: &DatasetInfo,
     dataset_name: &DatasetName,
     do_format: bool,
+    underlay_address: Ipv6Addr,
 ) -> Result<RunningZone, Error> {
     let address_request = AddressRequest::new_static(
         IpAddr::V6(*dataset_info.address.ip()),
@@ -495,6 +496,11 @@ async fn ensure_running_zone(
             let zone = RunningZone::boot(installed_zone).await?;
 
             zone.ensure_address(address_request).await?;
+
+            let gz_subnet =
+                Ipv6Network::new(underlay_address, AZ_PREFIX).unwrap();
+            zone.add_route(gz_subnet).await.map_err(Error::ZoneCommand)?;
+
             dataset_info
                 .start_zone(log, &zone, dataset_info.address, do_format)
                 .await?;
@@ -538,6 +544,7 @@ struct StorageWorker {
     new_pools_rx: mpsc::Receiver<ZpoolName>,
     new_filesystems_rx: mpsc::Receiver<NewFilesystemRequest>,
     vnic_allocator: VnicAllocator,
+    underlay_address: Ipv6Addr,
 }
 
 impl StorageWorker {
@@ -602,6 +609,7 @@ impl StorageWorker {
             dataset_info,
             &dataset_name,
             do_format,
+            self.underlay_address,
         )
         .await?;
 
@@ -898,7 +906,8 @@ impl StorageManager {
         log: &Logger,
         sled_id: Uuid,
         nexus_client: Arc<NexusClient>,
-        physical_link: PhysicalLink,
+        etherstub: Etherstub,
+        underlay_address: Ipv6Addr,
     ) -> Self {
         let log = log.new(o!("component" => "StorageManager"));
         let pools = Arc::new(Mutex::new(HashMap::new()));
@@ -911,7 +920,8 @@ impl StorageManager {
             pools: pools.clone(),
             new_pools_rx,
             new_filesystems_rx,
-            vnic_allocator: VnicAllocator::new("Storage", physical_link),
+            vnic_allocator: VnicAllocator::new("Storage", etherstub),
+            underlay_address,
         };
         StorageManager {
             pools,
@@ -993,7 +1003,7 @@ mod test {
     #[test]
     fn serialize_dataset_info() {
         let dataset_info = DatasetInfo {
-            address: "[fd00::1]:8080".parse().unwrap(),
+            address: "[::1]:8080".parse().unwrap(),
             kind: DatasetKind::Crucible,
             name: DatasetName::new("pool", "dataset"),
         };

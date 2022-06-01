@@ -18,11 +18,6 @@ use std::net::Ipv6Addr;
 /// NOTE: This is the minimum _prefix_, which sets the maximum subnet size.
 pub const MIN_VPC_IPV4_SUBNET_PREFIX: u8 = 8;
 
-/// Maximum prefix size supported in IPv4 VPC Subnets.
-///
-/// NOTE: This is the maximum _prefix_, which sets the minimum subnet size.
-pub const MAX_VPC_IPV4_SUBNET_PREFIX: u8 = 26;
-
 /// The number of reserved addresses at the beginning of a subnet range.
 pub const NUM_INITIAL_RESERVED_IP_ADDRESSES: usize = 5;
 

@@ -14,4 +14,4 @@ slog = { version = "2.5.0", features = [ "max_level_trace", "release_max_level_d
 structopt = "0.3"
 trust-dns-proto = "0.21"
 trust-dns-resolver = "0.21"
-uuid = { version = "0.8", features = [ "v4", "serde" ] }
+uuid = { version = "1.1.0", features = [ "v4", "serde" ] }

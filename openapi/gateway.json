@@ -107,7 +107,7 @@
           {
             "in": "query",
             "name": "page_token",
-            "description": "Token returned by previous call to retreive the subsequent page",
+            "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -246,7 +246,7 @@
           {
             "in": "query",
             "name": "page_token",
-            "description": "Token returned by previous call to retreive the subsequent page",
+            "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -898,7 +898,7 @@
               "state": {
                 "type": "string",
                 "enum": [
-                  "Disabled"
+                  "disabled"
                 ]
               }
             },
@@ -912,7 +912,7 @@
               "state": {
                 "type": "string",
                 "enum": [
-                  "Unresponsive"
+                  "unresponsive"
                 ]
               }
             },
@@ -929,7 +929,7 @@
               "state": {
                 "type": "string",
                 "enum": [
-                  "Enabled"
+                  "enabled"
                 ]
               }
             },

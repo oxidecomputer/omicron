@@ -261,6 +261,12 @@ pub trait ClientError: std::fmt::Debug {
 impl<T: ClientError> From<progenitor::progenitor_client::Error<T>> for Error {
     fn from(e: progenitor::progenitor_client::Error<T>) -> Self {
         match e {
+            // This error indicates that the inputs were not valid for this API
+            // call. It's reflective of either a client-side programming error.
+            progenitor::progenitor_client::Error::InvalidRequest(msg) => {
+                Error::internal_error(&format!("InvalidRequest: {}", msg))
+            }
+
             // This error indicates a problem with the request to the remote
             // service that did not result in an HTTP response code, but rather
             // pertained to local (i.e. client-side) encoding or network

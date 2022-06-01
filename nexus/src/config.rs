@@ -7,7 +7,7 @@
 
 use anyhow::anyhow;
 use dropshot::ConfigLogging;
-use omicron_common::nexus_config::{LoadError, RuntimeConfig};
+use omicron_common::nexus_config::{InvalidTunable, LoadError, RuntimeConfig};
 use serde::Deserialize;
 use serde::Serialize;
 use serde_with::DeserializeFromStr;
@@ -49,6 +49,77 @@ pub struct TimeseriesDbConfig {
     pub address: SocketAddr,
 }
 
+// A deserializable type that does no validation on the tunable parameters.
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+struct UnvalidatedTunables {
+    max_vpc_ipv4_subnet_prefix: u8,
+}
+
+/// Tunable configuration parameters, intended for use in test environments or
+/// other situations in which experimentation / tuning is valuable.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(try_from = "UnvalidatedTunables")]
+pub struct Tunables {
+    /// The maximum prefix size supported for VPC Subnet IPv4 subnetworks.
+    ///
+    /// Note that this is the maximum _prefix_ size, which sets the minimum size
+    /// of the subnet.
+    pub max_vpc_ipv4_subnet_prefix: u8,
+}
+
+// Convert from the unvalidated tunables, verifying each parameter as needed.
+impl TryFrom<UnvalidatedTunables> for Tunables {
+    type Error = InvalidTunable;
+
+    fn try_from(unvalidated: UnvalidatedTunables) -> Result<Self, Self::Error> {
+        Tunables::validate_ipv4_prefix(unvalidated.max_vpc_ipv4_subnet_prefix)?;
+        Ok(Tunables {
+            max_vpc_ipv4_subnet_prefix: unvalidated.max_vpc_ipv4_subnet_prefix,
+        })
+    }
+}
+
+impl Tunables {
+    fn validate_ipv4_prefix(prefix: u8) -> Result<(), InvalidTunable> {
+        let absolute_max: u8 = 32_u8.checked_sub(
+            // Always need space for the reserved Oxide addresses, including the
+            // broadcast address at the end of the subnet.
+            ((crate::defaults::NUM_INITIAL_RESERVED_IP_ADDRESSES + 1) as f32)
+                .log2() // Subnet size to bit prefix.
+                .ceil() // Round up to a whole number of bits.
+                as u8
+            ).expect("Invalid absolute maximum IPv4 subnet prefix");
+        if prefix >= crate::defaults::MIN_VPC_IPV4_SUBNET_PREFIX
+            && prefix <= absolute_max
+        {
+            Ok(())
+        } else {
+            Err(InvalidTunable {
+                tunable: String::from("max_vpc_ipv4_subnet_prefix"),
+                message: format!(
+                    "IPv4 subnet prefix must be in the range [0, {}], found: {}",
+                    absolute_max,
+                    prefix,
+                ),
+            })
+        }
+    }
+}
+
+/// The maximum prefix size by default.
+///
+/// There are 6 Oxide reserved IP addresses, 5 at the beginning for DNS and the
+/// like, and the broadcast address at the end of the subnet. This size provides
+/// room for 2 ** 6 - 6 = 58 IP addresses, which seems like a reasonable size
+/// for the smallest subnet that's still useful in many contexts.
+pub const MAX_VPC_IPV4_SUBNET_PREFIX: u8 = 26;
+
+impl Default for Tunables {
+    fn default() -> Self {
+        Tunables { max_vpc_ipv4_subnet_prefix: MAX_VPC_IPV4_SUBNET_PREFIX }
+    }
+}
+
 /// Configuration for a nexus server
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct PackageConfig {
@@ -65,6 +136,9 @@ pub struct PackageConfig {
     /// unconfigured.
     #[serde(default)]
     pub updates: Option<UpdatesConfig>,
+    /// Tunable configuration for testing and experimentation
+    #[serde(default)]
+    pub tunables: Tunables,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -128,6 +202,7 @@ impl std::fmt::Display for SchemeName {
 
 #[cfg(test)]
 mod test {
+    use super::Tunables;
     use super::{
         AuthnConfig, Config, ConsoleConfig, LoadError, PackageConfig,
         SchemeName, TimeseriesDbConfig, UpdatesConfig,
@@ -213,7 +288,7 @@ mod test {
         let error = read_config("empty", "").expect_err("expected failure");
         if let LoadErrorKind::Parse(error) = &error.kind {
             assert_eq!(error.line_col(), None);
-            assert_eq!(error.to_string(), "missing field `id`");
+            assert_eq!(error.to_string(), "missing field `runtime`");
         } else {
             panic!(
                 "Got an unexpected error, expected Parse but got {:?}",
@@ -231,7 +306,6 @@ mod test {
         let config = read_config(
             "valid",
             r##"
-            id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             [console]
             static_dir = "tests/static"
             cache_control_max_age_minutes = 10
@@ -239,16 +313,6 @@ mod test {
             session_absolute_timeout_minutes = 480
             [authn]
             schemes_external = []
-            [dropshot_external]
-            bind_address = "10.1.2.3:4567"
-            request_body_max_bytes = 1024
-            [dropshot_internal]
-            bind_address = "10.1.2.3:4568"
-            request_body_max_bytes = 1024
-            [subnet]
-            net = "::/56"
-            [database]
-            type = "from_dns"
             [log]
             mode = "file"
             level = "debug"
@@ -259,6 +323,20 @@ mod test {
             [updates]
             trusted_root = "/path/to/root.json"
             default_base_url = "http://example.invalid/"
+            [tunables]
+            max_vpc_ipv4_subnet_prefix = 27
+            [runtime]
+            id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
+            [runtime.dropshot_external]
+            bind_address = "10.1.2.3:4567"
+            request_body_max_bytes = 1024
+            [runtime.dropshot_internal]
+            bind_address = "10.1.2.3:4568"
+            request_body_max_bytes = 1024
+            [runtime.subnet]
+            net = "::/56"
+            [runtime.database]
+            type = "from_dns"
             "##,
         )
         .unwrap();
@@ -303,6 +381,7 @@ mod test {
                         trusted_root: PathBuf::from("/path/to/root.json"),
                         default_base_url: "http://example.invalid/".into(),
                     }),
+                    tunables: Tunables { max_vpc_ipv4_subnet_prefix: 27 },
                 },
             }
         );
@@ -310,7 +389,6 @@ mod test {
         let config = read_config(
             "valid",
             r##"
-            id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             [console]
             static_dir = "tests/static"
             cache_control_max_age_minutes = 10
@@ -318,16 +396,6 @@ mod test {
             session_absolute_timeout_minutes = 480
             [authn]
             schemes_external = [ "spoof", "session_cookie" ]
-            [dropshot_external]
-            bind_address = "10.1.2.3:4567"
-            request_body_max_bytes = 1024
-            [dropshot_internal]
-            bind_address = "10.1.2.3:4568"
-            request_body_max_bytes = 1024
-            [subnet]
-            net = "::/56"
-            [database]
-            type = "from_dns"
             [log]
             mode = "file"
             level = "debug"
@@ -335,6 +403,18 @@ mod test {
             if_exists = "fail"
             [timeseries_db]
             address = "[::1]:8123"
+            [runtime]
+            id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
+            [runtime.dropshot_external]
+            bind_address = "10.1.2.3:4567"
+            request_body_max_bytes = 1024
+            [runtime.dropshot_internal]
+            bind_address = "10.1.2.3:4568"
+            request_body_max_bytes = 1024
+            [runtime.subnet]
+            net = "::/56"
+            [runtime.database]
+            type = "from_dns"
             "##,
         )
         .unwrap();
@@ -350,7 +430,6 @@ mod test {
         let error = read_config(
             "bad authn.schemes_external",
             r##"
-            id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             [console]
             static_dir = "tests/static"
             cache_control_max_age_minutes = 10
@@ -358,16 +437,6 @@ mod test {
             session_absolute_timeout_minutes = 480
             [authn]
             schemes_external = ["trust-me"]
-            [dropshot_external]
-            bind_address = "10.1.2.3:4567"
-            request_body_max_bytes = 1024
-            [dropshot_internal]
-            bind_address = "10.1.2.3:4568"
-            request_body_max_bytes = 1024
-            [subnet]
-            net = "::/56"
-            [database]
-            type = "from_dns"
             [log]
             mode = "file"
             level = "debug"
@@ -375,6 +444,18 @@ mod test {
             if_exists = "fail"
             [timeseries_db]
             address = "[::1]:8123"
+            [runtime]
+            id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
+            [runtime.dropshot_external]
+            bind_address = "10.1.2.3:4567"
+            request_body_max_bytes = 1024
+            [runtime.dropshot_internal]
+            bind_address = "10.1.2.3:4568"
+            request_body_max_bytes = 1024
+            [runtime.subnet]
+            net = "::/56"
+            [runtime.database]
+            type = "from_dns"
             "##,
         )
         .expect_err("expected failure");
@@ -386,6 +467,57 @@ mod test {
                 "error = {}",
                 error.to_string()
             );
+        } else {
+            panic!(
+                "Got an unexpected error, expected Parse but got {:?}",
+                error
+            );
+        }
+    }
+
+    #[test]
+    fn test_invalid_ipv4_prefix_tunable() {
+        let error = read_config(
+            "invalid_ipv4_prefix_tunable",
+            r##"
+            [console]
+            static_dir = "tests/static"
+            cache_control_max_age_minutes = 10
+            session_idle_timeout_minutes = 60
+            session_absolute_timeout_minutes = 480
+            [authn]
+            schemes_external = []
+            [log]
+            mode = "file"
+            level = "debug"
+            path = "/nonexistent/path"
+            if_exists = "fail"
+            [timeseries_db]
+            address = "[::1]:8123"
+            [updates]
+            trusted_root = "/path/to/root.json"
+            default_base_url = "http://example.invalid/"
+            [tunables]
+            max_vpc_ipv4_subnet_prefix = 100
+            [runtime]
+            id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
+            [runtime.dropshot_external]
+            bind_address = "10.1.2.3:4567"
+            request_body_max_bytes = 1024
+            [runtime.dropshot_internal]
+            bind_address = "10.1.2.3:4568"
+            request_body_max_bytes = 1024
+            [runtime.subnet]
+            net = "::/56"
+            [runtime.database]
+            type = "from_dns"
+            "##,
+        )
+        .expect_err("Expected failure");
+        if let LoadErrorKind::Parse(error) = &error.kind {
+            assert!(error.to_string().starts_with(
+                r#"invalid "max_vpc_ipv4_subnet_prefix": "IPv4 subnet prefix must"#,
+            ));
         } else {
             panic!(
                 "Got an unexpected error, expected Parse but got {:?}",

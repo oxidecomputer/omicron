@@ -4,19 +4,22 @@
 
 //! Support for miscellaneous services managed by the sled.
 
-use crate::illumos::dladm::PhysicalLink;
+use crate::illumos::dladm::{Etherstub, EtherstubVnic};
 use crate::illumos::running_zone::{InstalledZone, RunningZone};
 use crate::illumos::vnic::VnicAllocator;
 use crate::illumos::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
-use crate::illumos::zone::{AddressRequest, Zones};
+use crate::illumos::zone::AddressRequest;
 use crate::params::{ServiceEnsureBody, ServiceRequest, ServiceType};
+use crate::zone::Zones;
 use dropshot::ConfigDropshot;
-use omicron_common::address::{Ipv6Subnet, RACK_PREFIX, SLED_PREFIX};
+use ipnetwork::Ipv6Network;
+use omicron_common::address::AZ_PREFIX;
+use omicron_common::address::{Ipv6Subnet, RACK_PREFIX};
 use omicron_common::nexus_config::{self, RuntimeConfig as NexusRuntimeConfig};
 use slog::Logger;
 use std::collections::HashSet;
 use std::iter::FromIterator;
-use std::net::{IpAddr, SocketAddr};
+use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
@@ -117,8 +120,8 @@ pub struct ServiceManager {
     config: Config,
     zones: Mutex<Vec<RunningZone>>,
     vnic_allocator: VnicAllocator,
-    physical_link: PhysicalLink,
-    sled_subnet: Ipv6Subnet<SLED_PREFIX>,
+    underlay_vnic: EtherstubVnic,
+    underlay_address: Ipv6Addr,
 }
 
 impl ServiceManager {
@@ -127,14 +130,16 @@ impl ServiceManager {
     ///
     /// Args:
     /// - `log`: The logger
-    /// - `physical_link`: A physical link on which to allocate datalinks.
+    /// - `etherstub`: An etherstub on which to allocate VNICs.
+    /// - `underlay_vnic`: The underlay's VNIC in the Global Zone.
     /// - `config_path`: An optional path to a configuration file to store
     /// the record of services. By default, [`default_services_config_path`]
     /// is used.
     pub async fn new(
         log: Logger,
-        physical_link: PhysicalLink,
-        sled_subnet: Ipv6Subnet<SLED_PREFIX>,
+        etherstub: Etherstub,
+        underlay_vnic: EtherstubVnic,
+        underlay_address: Ipv6Addr,
         config: Config,
     ) -> Result<Self, Error> {
         debug!(log, "Creating new ServiceManager");
@@ -142,12 +147,9 @@ impl ServiceManager {
             log: log.new(o!("component" => "ServiceManager")),
             config,
             zones: Mutex::new(vec![]),
-            vnic_allocator: VnicAllocator::new(
-                "Service",
-                physical_link.clone(),
-            ),
-            physical_link,
-            sled_subnet,
+            vnic_allocator: VnicAllocator::new("Service", etherstub),
+            underlay_vnic,
+            underlay_address,
         };
 
         let config_path = mgr.services_config_path();
@@ -251,7 +253,7 @@ impl ServiceManager {
 
                 let addr_name = service.name.replace(&['-', '_'][..], "");
                 Zones::ensure_has_global_zone_v6_address(
-                    self.physical_link.clone(),
+                    self.underlay_vnic.clone(),
                     *addr,
                     &addr_name,
                 )
@@ -263,6 +265,25 @@ impl ServiceManager {
                     err,
                 })?;
             }
+
+            let gz_route_subnet = if !service.gz_addresses.is_empty() {
+                // If this service supplies its own GZ address, add a route.
+                //
+                // This is currently being used for the DNS service.
+                //
+                // TODO: consider limitng the number of GZ addresses which
+                // can be supplied - now that we're actively using it, we
+                // aren't really handling the "many GZ addresses" case, and it
+                // doesn't seem necessary now.
+                Ipv6Network::new(service.gz_addresses[0], AZ_PREFIX).unwrap()
+            } else {
+                // Otherwise, add a route to the global Zone's sled address for
+                // everything within the AZ.
+                Ipv6Network::new(self.underlay_address, AZ_PREFIX).unwrap()
+            };
+            running_zone.add_route(gz_route_subnet).await.map_err(|err| {
+                Error::ZoneCommand { intent: "Adding Route".to_string(), err }
+            })?;
 
             debug!(self.log, "importing manifest");
 
@@ -300,7 +321,7 @@ impl ServiceManager {
                             ..Default::default()
                         },
                         subnet: Ipv6Subnet::<RACK_PREFIX>::new(
-                            self.sled_subnet.net().ip(),
+                            self.underlay_address,
                         ),
                         database: nexus_config::Database::FromDns,
                     };
@@ -325,13 +346,9 @@ impl ServiceManager {
                         .expect("Cannot serialize config");
                     let mut map = toml::map::Map::new();
                     map.insert("runtime".to_string(), serialized_cfg);
-                    let config_str =
-                        toml::to_string(&map).map_err(|err| {
-                            Error::TomlSerialize {
-                                path: config_path.clone(),
-                                err,
-                            }
-                        })?;
+                    let config_str = toml::to_string(&map).map_err(|err| {
+                        Error::TomlSerialize { path: config_path.clone(), err }
+                    })?;
                     let mut file = tokio::fs::OpenOptions::new()
                         .append(true)
                         .open(&config_path)
@@ -492,7 +509,9 @@ impl ServiceManager {
 mod test {
     use super::*;
     use crate::illumos::{
-        dladm::MockDladm, dladm::PhysicalLink, svc, zone::MockZones,
+        dladm::{Etherstub, MockDladm, ETHERSTUB_NAME, ETHERSTUB_VNIC_NAME},
+        svc,
+        zone::MockZones,
     };
     use std::net::{Ipv6Addr, SocketAddrV6};
     use std::os::unix::process::ExitStatusExt;
@@ -500,19 +519,17 @@ mod test {
 
     const SVC_NAME: &str = "my_svc";
     const EXPECTED_ZONE_NAME: &str = "oxz_my_svc";
-    const EXPECTED_LINK_NAME: &str = "my_link";
 
     // Returns the expectations for a new service to be created.
     fn expect_new_service() -> Vec<Box<dyn std::any::Any>> {
         // Create a VNIC
         let create_vnic_ctx = MockDladm::create_vnic_context();
-        create_vnic_ctx.expect().return_once(|physical_link, _, _, _| {
-            assert_eq!(
-                physical_link,
-                &PhysicalLink(EXPECTED_LINK_NAME.to_string())
-            );
-            Ok(())
-        });
+        create_vnic_ctx.expect().return_once(
+            |physical_link: &Etherstub, _, _, _| {
+                assert_eq!(&physical_link.0, &ETHERSTUB_NAME);
+                Ok(())
+            },
+        );
         // Install the Omicron Zone
         let install_ctx = MockZones::install_omicron_zone_context();
         install_ctx.expect().return_once(|_, name, _, _, _, _| {
@@ -530,7 +547,7 @@ mod test {
         wait_ctx.expect().return_once(|_, _| Ok(()));
         // Import the manifest, enable the service
         let execute_ctx = crate::illumos::execute_context();
-        execute_ctx.expect().times(2).returning(|_| {
+        execute_ctx.expect().times(3).returning(|_| {
             Ok(std::process::Output {
                 status: std::process::ExitStatus::from_raw(0),
                 stdout: vec![],
@@ -663,8 +680,9 @@ mod test {
 
         let mgr = ServiceManager::new(
             log,
-            PhysicalLink(EXPECTED_LINK_NAME.to_string()),
-            Ipv6Subnet::<SLED_PREFIX>::new(Ipv6Addr::LOCALHOST),
+            Etherstub(ETHERSTUB_NAME.to_string()),
+            EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
+            Ipv6Addr::LOCALHOST,
             test_config.make_config(),
         )
         .await
@@ -688,8 +706,9 @@ mod test {
 
         let mgr = ServiceManager::new(
             log,
-            PhysicalLink(EXPECTED_LINK_NAME.to_string()),
-            Ipv6Subnet::<SLED_PREFIX>::new(Ipv6Addr::LOCALHOST),
+            Etherstub(ETHERSTUB_NAME.to_string()),
+            EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
+            Ipv6Addr::LOCALHOST,
             test_config.make_config(),
         )
         .await
@@ -715,8 +734,9 @@ mod test {
         // down.
         let mgr = ServiceManager::new(
             logctx.log.clone(),
-            PhysicalLink(EXPECTED_LINK_NAME.to_string()),
-            Ipv6Subnet::<SLED_PREFIX>::new(Ipv6Addr::LOCALHOST),
+            Etherstub(ETHERSTUB_NAME.to_string()),
+            EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
+            Ipv6Addr::LOCALHOST,
             test_config.make_config(),
         )
         .await
@@ -731,8 +751,9 @@ mod test {
         let _expectations = expect_new_service();
         let mgr = ServiceManager::new(
             logctx.log.clone(),
-            PhysicalLink(EXPECTED_LINK_NAME.to_string()),
-            Ipv6Subnet::<SLED_PREFIX>::new(Ipv6Addr::LOCALHOST),
+            Etherstub(ETHERSTUB_NAME.to_string()),
+            EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
+            Ipv6Addr::LOCALHOST,
             test_config.make_config(),
         )
         .await
@@ -754,8 +775,9 @@ mod test {
         // down.
         let mgr = ServiceManager::new(
             logctx.log.clone(),
-            PhysicalLink(EXPECTED_LINK_NAME.to_string()),
-            Ipv6Subnet::<SLED_PREFIX>::new(Ipv6Addr::LOCALHOST),
+            Etherstub(ETHERSTUB_NAME.to_string()),
+            EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
+            Ipv6Addr::LOCALHOST,
             test_config.make_config(),
         )
         .await
@@ -772,8 +794,9 @@ mod test {
         // Observe that the old service is not re-initialized.
         let mgr = ServiceManager::new(
             logctx.log.clone(),
-            PhysicalLink(EXPECTED_LINK_NAME.to_string()),
-            Ipv6Subnet::<SLED_PREFIX>::new(Ipv6Addr::LOCALHOST),
+            Etherstub(ETHERSTUB_NAME.to_string()),
+            EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
+            Ipv6Addr::LOCALHOST,
             config,
         )
         .await

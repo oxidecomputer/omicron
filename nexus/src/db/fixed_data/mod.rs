@@ -33,6 +33,7 @@ use lazy_static::lazy_static;
 pub mod role_assignment;
 pub mod role_builtin;
 pub mod silo;
+pub mod silo_user;
 pub mod user_builtin;
 
 lazy_static! {
@@ -51,7 +52,7 @@ fn assert_valid_uuid(id: &uuid::Uuid) {
     };
 
     match id.get_variant() {
-        Some(uuid::Variant::RFC4122) => (),
+        uuid::Variant::RFC4122 => (),
         _ => panic!("unexpected variant in uuid: {:?}", id),
     };
 }

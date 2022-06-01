@@ -142,13 +142,36 @@ ensure_helios_dev_is_non_sticky
 add_publisher "$HELIOS_NETDEV_REPO_PATH"
 add_publisher "$XDE_REPO_PATH"
 
-# Actually update packages, handling case where no updates are needed
+# Actually install the xde kernel module and opteadm tool
 RC=0
-pkg update || RC=$?;
+pkg install -v pkg://helios-netdev/driver/network/opte || RC=$?
 if [[ "$RC" -ne 0 ]] && [[ "$RC" -ne 4 ]]; then
-    echo "Adding OPTE and/or xde package repositories failed"
+    echo "Installing xde kernel driver and opteadm tool failed"
     exit "$RC"
 fi
 
-# Actually install the xde kernel module and opteadm tool
-pkg install driver/network/opte
+# Check the user's path
+RC=0
+which opteadm > /dev/null || RC=$?
+if [[ "$RC" -ne 0 ]]; then
+    echo "The \`opteadm\` administration tool is not on your path."
+    echo "You may add \"/opt/oxide/opte/bin\" to your path to access it."
+fi
+
+# Install the kernel bits required for the xde kernel driver to operate
+# correctly
+RC=0
+pkg install -v pkg://on-nightly/consolidation/osnet/osnet-incorporation* || RC=$?
+if [[ "$RC" -eq 0 ]]; then
+    echo "The xde kernel driver, opteadm tool, and xde-related kernel bits"
+    echo "have successfully been installed. A reboot may be required to activate"
+    echo "the new boot environment, if the kernel has been changed (upgrade"
+    echo "or downgrade)"
+    exit 0
+elif [[ "$RC" -eq 4 ]]; then
+    echo "The kernel appears to be up-to-date for use with opte"
+    exit 0
+else
+    echo "Installing kernel bits for xde failed"
+    exit "$RC"
+fi

@@ -35,12 +35,6 @@ async fn test_users_builtin(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(u.identity.id, authn::USER_EXTERNAL_AUTHN.id);
     let u = users.remove(&authn::USER_SAGA_RECOVERY.name.to_string()).unwrap();
     assert_eq!(u.identity.id, authn::USER_SAGA_RECOVERY.id);
-    let u =
-        users.remove(&authn::USER_TEST_PRIVILEGED.name.to_string()).unwrap();
-    assert_eq!(u.identity.id, authn::USER_TEST_PRIVILEGED.id);
-    let u =
-        users.remove(&authn::USER_TEST_UNPRIVILEGED.name.to_string()).unwrap();
-    assert_eq!(u.identity.id, authn::USER_TEST_UNPRIVILEGED.id);
     assert!(users.is_empty(), "found unexpected built-in users");
 
     // TODO-coverage add test for fetching individual users, including invalid

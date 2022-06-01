@@ -245,7 +245,7 @@ impl From<DatasetEnsureBody> for sled_agent_client::types::DatasetEnsureBody {
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]
 // Struct variant enums require some assistance for serialization to TOML.
-#[serde(tag = "type")]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServiceType {
     Nexus { internal_address: SocketAddrV6, external_address: SocketAddrV6 },
     InternalDns { server_address: SocketAddrV6, dns_address: SocketAddrV6 },

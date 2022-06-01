@@ -12,8 +12,7 @@ session_absolute_timeout_minutes = 480
 # List of authentication schemes to support.
 #
 # This is not fleshed out yet and the only reason to change it now is for
-# working on authentication or authorization.  Neither is really implemented
-# yet.
+# working on authentication or authorization.
 [authn]
 # TODO(https://github.com/oxidecomputer/omicron/issues/372): Remove "spoof".
 schemes_external = ["spoof", "session_cookie"]
@@ -56,3 +55,10 @@ net = "fd00:1122:3344:0100::/56"
 # URL for connecting to the database
 type = "from_url"
 url = "postgresql://root@127.0.0.1:32221/omicron?sslmode=disable"
+
+# Tunable configuration parameters, for testing or experimentation
+[tunables]
+
+# The maximum allowed prefix (thus smallest size) for a VPC Subnet's
+# IPv4 subnetwork. This size allows for ~60 hosts.
+max_vpc_ipv4_subnet_prefix = 26

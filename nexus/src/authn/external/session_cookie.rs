@@ -107,13 +107,8 @@ where
             }
         };
 
-        // TODO-security Once we have real SiloUsers and we can have
-        // "test-privileged" and "test-unprivileged" be Silo Users, this should
-        // be changed accordingly.  Until then, the integration tests attempt to
-        // use this scheme with "test-privileged", which requires that we
-        // interpret these as BuiltinUsers.
-        let actor = Actor::UserBuiltin {
-            user_builtin_id: session.silo_user_id(),
+        let actor = Actor::SiloUser {
+            silo_user_id: session.silo_user_id(),
             silo_id: session.silo_id(),
         };
 

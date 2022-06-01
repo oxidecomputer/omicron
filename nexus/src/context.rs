@@ -18,7 +18,9 @@ use authn::external::session_cookie::HttpAuthnSessionCookie;
 use authn::external::spoof::HttpAuthnSpoof;
 use authn::external::HttpAuthnScheme;
 use chrono::{DateTime, Duration, Utc};
-use omicron_common::address::{Ipv6Subnet, AZ_PREFIX, COCKROACH_PORT, COCKROACH_DNS_NAME};
+use omicron_common::address::{
+    Ipv6Subnet, AZ_PREFIX, COCKROACH_DNS_NAME, COCKROACH_PORT,
+};
 use omicron_common::api::external::Error;
 use omicron_common::nexus_config;
 use omicron_common::postgres_config::PostgresConfigWithUrl;
@@ -413,13 +415,17 @@ impl OpContext {
 
     /// Returns a context suitable for automated tests where an OpContext is
     /// needed outside of a Dropshot context
+    // Ideally this would only be exposed under `#[cfg(test)]`.  However, it's
+    // used by integration tests (via `app::test_interfaces::TestInterfaces`) in
+    // order to construct OpContexts that let them observe and muck with state
+    // outside public interfaces.
     pub fn for_tests(
         log: slog::Logger,
         datastore: Arc<DataStore>,
     ) -> OpContext {
         let created_instant = Instant::now();
         let created_walltime = SystemTime::now();
-        let authn = Arc::new(authn::Context::internal_test_user());
+        let authn = Arc::new(authn::Context::privileged_test_user());
         let authz = authz::Context::new(
             Arc::clone(&authn),
             Arc::new(authz::Authz::new(&log)),
@@ -528,6 +534,17 @@ mod test {
             .expect("expected authorization to succeed");
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
+    }
+}
+
+#[async_trait]
+impl authn::external::spoof::SpoofContext for Arc<ServerContext> {
+    async fn silo_user_silo(
+        &self,
+        silo_user_id: Uuid,
+    ) -> Result<Uuid, authn::Reason> {
+        let opctx = self.nexus.opctx_external_authn();
+        self.nexus.lookup_silo_for_authn(opctx, silo_user_id).await
     }
 }
 

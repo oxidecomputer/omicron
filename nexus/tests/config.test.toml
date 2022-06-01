@@ -30,6 +30,11 @@ path = "UNUSED"
 [timeseries_db]
 address = "[::1]:0"
 
+# Tunable parameters used during tests
+[tunables]
+# Allow small subnets, so we can test IP address exhaustion easily / quickly
+max_vpc_ipv4_subnet_prefix = 29
+
 [runtime]
 # Identifier for this instance of Nexus.
 # NOTE: The test suite always overrides this.

@@ -301,6 +301,7 @@ CREATE TABLE omicron.public.organization (
 );
 
 CREATE UNIQUE INDEX ON omicron.public.organization (
+    silo_id,
     name
 ) WHERE
     time_deleted IS NULL;

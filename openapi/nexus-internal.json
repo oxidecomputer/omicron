@@ -450,56 +450,66 @@
             "description": "A range unbounded below and exclusively above, `..end`.",
             "type": "object",
             "properties": {
-              "RangeTo": {
+              "end": {
                 "type": "number",
                 "format": "double"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range_to"
+                ]
               }
             },
             "required": [
-              "RangeTo"
-            ],
-            "additionalProperties": false
+              "end",
+              "type"
+            ]
           },
           {
             "description": "A range bounded inclusively below and exclusively above, `start..end`.",
             "type": "object",
             "properties": {
-              "Range": {
-                "type": "object",
-                "properties": {
-                  "end": {
-                    "type": "number",
-                    "format": "double"
-                  },
-                  "start": {
-                    "type": "number",
-                    "format": "double"
-                  }
-                },
-                "required": [
-                  "end",
-                  "start"
+              "end": {
+                "type": "number",
+                "format": "double"
+              },
+              "start": {
+                "type": "number",
+                "format": "double"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range"
                 ]
               }
             },
             "required": [
-              "Range"
-            ],
-            "additionalProperties": false
+              "end",
+              "start",
+              "type"
+            ]
           },
           {
-            "description": "A range bounded inclusively below and unbouned above, `start..`.",
+            "description": "A range bounded inclusively below and unbounded above, `start..`.",
             "type": "object",
             "properties": {
-              "RangeFrom": {
+              "start": {
                 "type": "number",
                 "format": "double"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range_from"
+                ]
               }
             },
             "required": [
-              "RangeFrom"
-            ],
-            "additionalProperties": false
+              "start",
+              "type"
+            ]
           }
         ]
       },
@@ -510,56 +520,66 @@
             "description": "A range unbounded below and exclusively above, `..end`.",
             "type": "object",
             "properties": {
-              "RangeTo": {
+              "end": {
                 "type": "integer",
                 "format": "int64"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range_to"
+                ]
               }
             },
             "required": [
-              "RangeTo"
-            ],
-            "additionalProperties": false
+              "end",
+              "type"
+            ]
           },
           {
             "description": "A range bounded inclusively below and exclusively above, `start..end`.",
             "type": "object",
             "properties": {
-              "Range": {
-                "type": "object",
-                "properties": {
-                  "end": {
-                    "type": "integer",
-                    "format": "int64"
-                  },
-                  "start": {
-                    "type": "integer",
-                    "format": "int64"
-                  }
-                },
-                "required": [
-                  "end",
-                  "start"
+              "end": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "start": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range"
                 ]
               }
             },
             "required": [
-              "Range"
-            ],
-            "additionalProperties": false
+              "end",
+              "start",
+              "type"
+            ]
           },
           {
-            "description": "A range bounded inclusively below and unbouned above, `start..`.",
+            "description": "A range bounded inclusively below and unbounded above, `start..`.",
             "type": "object",
             "properties": {
-              "RangeFrom": {
+              "start": {
                 "type": "integer",
                 "format": "int64"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range_from"
+                ]
               }
             },
             "required": [
-              "RangeFrom"
-            ],
-            "additionalProperties": false
+              "start",
+              "type"
+            ]
           }
         ]
       },
@@ -657,9 +677,9 @@
         "description": "Describes the purpose of the dataset.",
         "type": "string",
         "enum": [
-          "Crucible",
-          "Cockroach",
-          "Clickhouse"
+          "crucible",
+          "cockroach",
+          "clickhouse"
         ]
       },
       "DatasetPutRequest": {
@@ -714,117 +734,171 @@
           {
             "type": "object",
             "properties": {
-              "Bool": {
+              "datum": {
                 "type": "boolean"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "bool"
+                ]
               }
             },
             "required": [
-              "Bool"
-            ],
-            "additionalProperties": false
+              "datum",
+              "type"
+            ]
           },
           {
             "type": "object",
             "properties": {
-              "I64": {
+              "datum": {
                 "type": "integer",
                 "format": "int64"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "i64"
+                ]
               }
             },
             "required": [
-              "I64"
-            ],
-            "additionalProperties": false
+              "datum",
+              "type"
+            ]
           },
           {
             "type": "object",
             "properties": {
-              "F64": {
+              "datum": {
                 "type": "number",
                 "format": "double"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "f64"
+                ]
               }
             },
             "required": [
-              "F64"
-            ],
-            "additionalProperties": false
+              "datum",
+              "type"
+            ]
           },
           {
             "type": "object",
             "properties": {
-              "String": {
+              "datum": {
                 "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "string"
+                ]
               }
             },
             "required": [
-              "String"
-            ],
-            "additionalProperties": false
+              "datum",
+              "type"
+            ]
           },
           {
             "type": "object",
             "properties": {
-              "Bytes": {
+              "datum": {
                 "type": "array",
                 "items": {
                   "type": "integer",
                   "format": "uint8",
                   "minimum": 0
                 }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "bytes"
+                ]
               }
             },
             "required": [
-              "Bytes"
-            ],
-            "additionalProperties": false
+              "datum",
+              "type"
+            ]
           },
           {
             "type": "object",
             "properties": {
-              "CumulativeI64": {
+              "datum": {
                 "$ref": "#/components/schemas/Cumulativeint64"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "cumulative_i64"
+                ]
               }
             },
             "required": [
-              "CumulativeI64"
-            ],
-            "additionalProperties": false
+              "datum",
+              "type"
+            ]
           },
           {
             "type": "object",
             "properties": {
-              "CumulativeF64": {
+              "datum": {
                 "$ref": "#/components/schemas/Cumulativedouble"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "cumulative_f64"
+                ]
               }
             },
             "required": [
-              "CumulativeF64"
-            ],
-            "additionalProperties": false
+              "datum",
+              "type"
+            ]
           },
           {
             "type": "object",
             "properties": {
-              "HistogramI64": {
+              "datum": {
                 "$ref": "#/components/schemas/Histogramint64"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "histogram_i64"
+                ]
               }
             },
             "required": [
-              "HistogramI64"
-            ],
-            "additionalProperties": false
+              "datum",
+              "type"
+            ]
           },
           {
             "type": "object",
             "properties": {
-              "HistogramF64": {
+              "datum": {
                 "$ref": "#/components/schemas/Histogramdouble"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "histogram_f64"
+                ]
               }
             },
             "required": [
-              "HistogramF64"
-            ],
-            "additionalProperties": false
+              "datum",
+              "type"
+            ]
           }
         ]
       },
@@ -1063,65 +1137,95 @@
           {
             "type": "object",
             "properties": {
-              "String": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "string"
+                ]
+              },
+              "value": {
                 "type": "string"
               }
             },
             "required": [
-              "String"
-            ],
-            "additionalProperties": false
+              "type",
+              "value"
+            ]
           },
           {
             "type": "object",
             "properties": {
-              "I64": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "i64"
+                ]
+              },
+              "value": {
                 "type": "integer",
                 "format": "int64"
               }
             },
             "required": [
-              "I64"
-            ],
-            "additionalProperties": false
+              "type",
+              "value"
+            ]
           },
           {
             "type": "object",
             "properties": {
-              "IpAddr": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ip_addr"
+                ]
+              },
+              "value": {
                 "type": "string",
                 "format": "ip"
               }
             },
             "required": [
-              "IpAddr"
-            ],
-            "additionalProperties": false
+              "type",
+              "value"
+            ]
           },
           {
             "type": "object",
             "properties": {
-              "Uuid": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "uuid"
+                ]
+              },
+              "value": {
                 "type": "string",
                 "format": "uuid"
               }
             },
             "required": [
-              "Uuid"
-            ],
-            "additionalProperties": false
+              "type",
+              "value"
+            ]
           },
           {
             "type": "object",
             "properties": {
-              "Bool": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "bool"
+                ]
+              },
+              "value": {
                 "type": "boolean"
               }
             },
             "required": [
-              "Bool"
-            ],
-            "additionalProperties": false
+              "type",
+              "value"
+            ]
           }
         ]
       },
@@ -1141,7 +1245,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "EmptyBins"
+                  "empty_bins"
                 ]
               }
             },
@@ -1156,7 +1260,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "NonmonotonicBins"
+                  "nonmonotonic_bins"
                 ]
               }
             },
@@ -1174,7 +1278,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "NonFiniteValue"
+                  "non_finite_value"
                 ]
               }
             },
@@ -1205,7 +1309,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "NonAdjoiningBins"
+                  "non_adjoining_bins"
                 ]
               }
             },
@@ -1240,7 +1344,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "ArraySizeMismatch"
+                  "array_size_mismatch"
                 ]
               }
             },
@@ -1439,7 +1543,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "DatumError"
+                  "datum_error"
                 ]
               }
             },
@@ -1458,7 +1562,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "OximeterServer"
+                  "oximeter_server"
                 ]
               }
             },
@@ -1477,7 +1581,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "HistogramError"
+                  "histogram_error"
                 ]
               }
             },
@@ -1508,7 +1612,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "ParseError"
+                  "parse_error"
                 ]
               }
             },
@@ -1568,29 +1672,41 @@
           {
             "type": "object",
             "properties": {
-              "Ok": {
+              "info": {
                 "type": "array",
                 "items": {
                   "$ref": "#/components/schemas/Sample"
                 }
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "ok"
+                ]
               }
             },
             "required": [
-              "Ok"
-            ],
-            "additionalProperties": false
+              "info",
+              "status"
+            ]
           },
           {
             "type": "object",
             "properties": {
-              "Err": {
+              "info": {
                 "$ref": "#/components/schemas/MetricsError"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "err"
+                ]
               }
             },
             "required": [
-              "Err"
-            ],
-            "additionalProperties": false
+              "info",
+              "status"
+            ]
           }
         ]
       },
@@ -1628,8 +1744,8 @@
         "description": "Describes the purpose of the service.",
         "type": "string",
         "enum": [
-          "Nexus",
-          "Oximeter"
+          "nexus",
+          "oximeter"
         ]
       },
       "ServicePutRequest": {

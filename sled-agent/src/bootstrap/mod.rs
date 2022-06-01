@@ -11,6 +11,7 @@ pub mod discovery;
 mod http_entrypoints;
 pub mod multicast;
 pub(crate) mod params;
+pub(crate) mod rss_handle;
 pub mod server;
 mod spdm;
 pub mod trust_quorum;

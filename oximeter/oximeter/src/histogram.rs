@@ -45,7 +45,7 @@ impl HistogramSupport for f64 {
 
 /// Errors related to constructing histograms or adding samples into them.
 #[derive(Debug, Clone, Error, JsonSchema, Serialize, Deserialize)]
-#[serde(tag = "type", content = "content")]
+#[serde(tag = "type", content = "content", rename_all = "snake_case")]
 pub enum HistogramError {
     /// An attempt to construct a histogram with an empty set of bins.
     #[error("Bins may not be empty")]
@@ -74,15 +74,16 @@ pub enum HistogramError {
 /// standard library. Those cover `(..end)`, `(start..end)`, and `(start..)` respectively.
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[schemars(rename = "BinRange{T}")]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum BinRange<T> {
     /// A range unbounded below and exclusively above, `..end`.
-    RangeTo(T),
+    RangeTo { end: T },
 
     /// A range bounded inclusively below and exclusively above, `start..end`.
     Range { start: T, end: T },
 
-    /// A range bounded inclusively below and unbouned above, `start..`.
-    RangeFrom(T),
+    /// A range bounded inclusively below and unbounded above, `start..`.
+    RangeFrom { start: T },
 }
 
 impl<T> BinRange<T>
@@ -91,7 +92,7 @@ where
 {
     /// Construct a range unbounded below and bounded exclusively from above.
     pub fn to(end: T) -> Self {
-        BinRange::RangeTo(end)
+        BinRange::RangeTo { end }
     }
 
     /// Construct a range bounded inclusively from below and exclusively from above.
@@ -101,7 +102,7 @@ where
 
     /// Construct a range bounded inclusively from below and unbounded from above.
     pub fn from(start: T) -> Self {
-        BinRange::RangeFrom(start)
+        BinRange::RangeFrom { start }
     }
 
     /// Order the given *value* relative to the *bin*.
@@ -115,10 +116,10 @@ where
             match self {
                 // If the bin doesn't contain the value but is unbounded below, the value must be
                 // greater than the bin.
-                BinRange::RangeTo(_) => Ordering::Greater,
+                BinRange::RangeTo { .. } => Ordering::Greater,
                 // If the bin doesn't contain the value but is unbounded above, the value must be
                 // less than the bin.
-                BinRange::RangeFrom(_) => Ordering::Less,
+                BinRange::RangeFrom { .. } => Ordering::Less,
                 BinRange::Range { start, .. } => {
                     if value < start {
                         Ordering::Less
@@ -145,7 +146,7 @@ where
     T: HistogramSupport,
 {
     fn from(range: RangeTo<T>) -> Self {
-        BinRange::RangeTo(range.end)
+        BinRange::RangeTo { end: range.end }
     }
 }
 
@@ -154,7 +155,7 @@ where
     T: HistogramSupport,
 {
     fn from(range: RangeFrom<T>) -> Self {
-        BinRange::RangeFrom(range.start)
+        BinRange::RangeFrom { start: range.start }
     }
 }
 
@@ -164,17 +165,17 @@ where
 {
     fn start_bound(&self) -> Bound<&T> {
         match self {
-            BinRange::RangeTo(_) => Bound::Unbounded,
+            BinRange::RangeTo { .. } => Bound::Unbounded,
             BinRange::Range { start, .. } => Bound::Included(start),
-            BinRange::RangeFrom(start) => Bound::Included(start),
+            BinRange::RangeFrom { start } => Bound::Included(start),
         }
     }
 
     fn end_bound(&self) -> Bound<&T> {
         match self {
-            BinRange::RangeTo(end) => Bound::Excluded(end),
+            BinRange::RangeTo { end } => Bound::Excluded(end),
             BinRange::Range { end, .. } => Bound::Excluded(end),
-            BinRange::RangeFrom(_) => Bound::Unbounded,
+            BinRange::RangeFrom { .. } => Bound::Unbounded,
         }
     }
 }
@@ -430,7 +431,7 @@ where
                 BinRange::Range { start, .. } => {
                     bins.push(start);
                 },
-                BinRange::RangeFrom(start) => {
+                BinRange::RangeFrom{start} => {
                     bins.push(start);
                 },
                 _ => unreachable!("No bins in a constructed histogram should be of type RangeTo"),
@@ -691,7 +692,7 @@ mod tests {
         let data = hist.iter().collect::<Vec<_>>();
         assert_eq!(data[0].range, BinRange::range(i64::MIN, 0));
         assert_eq!(data[1].range, BinRange::range(0, 10));
-        assert_eq!(data[2].range, BinRange::RangeFrom(10));
+        assert_eq!(data[2].range, BinRange::from(10));
     }
 
     #[test]

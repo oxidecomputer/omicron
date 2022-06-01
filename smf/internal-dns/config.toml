@@ -5,7 +5,7 @@ request_body_max_bytes = 1048576
 # Show log messages of this level and more severe
 level = "info"
 mode = "file"
-path = "/var/oxide/internal-dns.log"
+path = "/dev/stdout"
 if_exists = "append"
 
 [data]

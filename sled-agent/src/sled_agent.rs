@@ -9,6 +9,7 @@ use crate::illumos::vnic::VnicKind;
 use crate::illumos::zfs::{
     Mountpoint, ZONE_ZFS_DATASET, ZONE_ZFS_DATASET_MOUNTPOINT,
 };
+use crate::illumos::{execute, PFEXEC};
 use crate::instance_manager::InstanceManager;
 use crate::nexus::NexusClient;
 use crate::params::{
@@ -17,7 +18,6 @@ use crate::params::{
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::StorageManager;
-use omicron_common::address::{Ipv6Subnet, SLED_PREFIX};
 use omicron_common::api::{
     internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
     internal::nexus::UpdateArtifact,
@@ -38,6 +38,15 @@ use crate::illumos::{
 pub enum Error {
     #[error("Physical link not in config, nor found automatically: {0}")]
     FindPhysicalLink(#[from] crate::illumos::dladm::FindPhysicalLinkError),
+
+    #[error("Failed to enable routing: {0}")]
+    EnablingRouting(crate::illumos::ExecutionError),
+
+    #[error("Failed to acquire etherstub: {0}")]
+    Etherstub(crate::illumos::ExecutionError),
+
+    #[error("Failed to acquire etherstub VNIC: {0}")]
+    EtherstubVnic(crate::illumos::dladm::CreateVnicError),
 
     #[error("Failed to lookup VNICs on boot: {0}")]
     GetVnics(#[from] crate::illumos::dladm::GetVnicError),
@@ -118,11 +127,10 @@ impl SledAgent {
         ));
         info!(&log, "created sled agent");
 
-        let data_link = if let Some(link) = config.data_link.clone() {
-            link
-        } else {
-            Dladm::find_physical()?
-        };
+        let etherstub =
+            Dladm::create_etherstub().map_err(|e| Error::Etherstub(e))?;
+        let etherstub_vnic = Dladm::create_etherstub_vnic(&etherstub)
+            .map_err(|e| Error::EtherstubVnic(e))?;
 
         // Before we start creating zones, we need to ensure that the
         // necessary ZFS and Zone resources are ready.
@@ -142,7 +150,7 @@ impl SledAgent {
         // RSS-provided IP address. In the meantime, we use one from the
         // configuration file.
         Zones::ensure_has_global_zone_v6_address(
-            data_link.clone(),
+            etherstub_vnic.clone(),
             *sled_address.ip(),
             "sled6",
         )
@@ -196,11 +204,24 @@ impl SledAgent {
         // https://github.com/oxidecomputer/omicron/issues/725.
         crate::opte::delete_all_xde_devices(&log)?;
 
+        // Ipv6 forwarding must be enabled to route traffic between zones.
+        //
+        // This should be a no-op if already enabled.
+        let mut command = std::process::Command::new(PFEXEC);
+        let cmd = command.args(&[
+            "/usr/sbin/routeadm",
+            "-e",
+            "ipv6-forwarding",
+            "-u",
+        ]);
+        execute(cmd).map_err(|e| Error::EnablingRouting(e))?;
+
         let storage = StorageManager::new(
             &parent_log,
             *id,
             nexus_client.clone(),
-            data_link.clone(),
+            etherstub.clone(),
+            *sled_address.ip(),
         )
         .await;
         if let Some(pools) = &config.zpools {
@@ -216,13 +237,14 @@ impl SledAgent {
         let instances = InstanceManager::new(
             parent_log.clone(),
             nexus_client.clone(),
-            data_link.clone(),
+            etherstub.clone(),
             *sled_address.ip(),
         );
         let services = ServiceManager::new(
             parent_log.clone(),
-            data_link.clone(),
-            Ipv6Subnet::<SLED_PREFIX>::new(*sled_address.ip()),
+            etherstub.clone(),
+            etherstub_vnic.clone(),
+            *sled_address.ip(),
             services::Config::default(),
         )
         .await?;

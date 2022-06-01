@@ -11,7 +11,7 @@ use crate::db::identity::Resource;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
 use crate::db::model::VpcSubnet;
-use crate::db::subnet_allocation::SubnetError;
+use crate::db::queries::vpc_subnet::SubnetError;
 use crate::defaults;
 use crate::external_api::params;
 use omicron_common::api::external;
@@ -49,7 +49,8 @@ impl super::Nexus {
             ));
         }
         if params.ipv4_block.prefix() < defaults::MIN_VPC_IPV4_SUBNET_PREFIX
-            || params.ipv4_block.prefix() > defaults::MAX_VPC_IPV4_SUBNET_PREFIX
+            || params.ipv4_block.prefix()
+                > self.tunables.max_vpc_ipv4_subnet_prefix
         {
             return Err(external::Error::invalid_request(&format!(
                 concat!(
@@ -57,7 +58,7 @@ impl super::Nexus {
                     "length between {} and {}, inclusive"
                 ),
                 defaults::MIN_VPC_IPV4_SUBNET_PREFIX,
-                defaults::MAX_VPC_IPV4_SUBNET_PREFIX
+                self.tunables.max_vpc_ipv4_subnet_prefix,
             )));
         }
 
