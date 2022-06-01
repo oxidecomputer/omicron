@@ -503,7 +503,8 @@ CREATE TABLE omicron.public.global_image (
     volume_id UUID NOT NULL,
 
     url STRING(8192),
-    version STRING(64),
+    distribution STRING(64) NOT NULL,
+    version STRING(64) NOT NULL,
     digest TEXT,
     block_size omicron.public.block_size NOT NULL,
     size_bytes INT NOT NULL

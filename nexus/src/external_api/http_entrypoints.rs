@@ -1456,15 +1456,14 @@ async fn images_get(
 }]
 async fn images_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    new_image: TypedBody<params::ImageCreate>,
+    new_image: TypedBody<params::GlobalImageCreate>,
 ) -> Result<HttpResponseCreated<GlobalImage>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
-    let new_image_params = &new_image.into_inner();
+    let new_image_params = new_image.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let image =
-            nexus.global_image_create(&opctx, &new_image_params).await?;
+        let image = nexus.global_image_create(&opctx, new_image_params).await?;
         Ok(HttpResponseCreated(image.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
