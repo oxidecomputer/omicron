@@ -270,6 +270,10 @@ impl ServiceManager {
             let smf_name = format!("svc:/system/illumos/{}", service.name);
             let default_smf_name = format!("{}:default", smf_name);
 
+            // Ensure the IPv6 traffic can be routed to this non-global zone.
+            //
+            // This is particularly important for accessing Nexus' external
+            // interface from off-device.
             running_zone
                 .run_cmd(&[
                     "/usr/sbin/routeadm",
