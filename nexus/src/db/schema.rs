@@ -235,6 +235,7 @@ table! {
         id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
+        initialized -> Bool,
         tuf_base_url -> Text,
     }
 }

@@ -3486,7 +3486,7 @@ mod test {
     use crate::db::fixed_data::silo::SILO_ID;
     use crate::db::identity::Resource;
     use crate::db::lookup::LookupPath;
-    use crate::db::model::{ConsoleSession, DatasetKind, Project};
+    use crate::db::model::{ConsoleSession, DatasetKind, ServiceKind, Project};
     use crate::external_api::params;
     use chrono::{Duration, Utc};
     use nexus_test_utils::db::test_setup_database;
@@ -4129,6 +4129,32 @@ mod test {
         datastore.ssh_key_delete(&opctx, &authz_ssh_key).await.unwrap();
 
         // Clean up.
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_service_upsert() {
+        let logctx = dev::test_setup_log("test_service_upsert");
+        let mut db = test_setup_database(&logctx.log).await;
+        let cfg = db::Config { url: db.pg_config().clone() };
+        let pool = db::Pool::new(&cfg);
+        let datastore = Arc::new(DataStore::new(Arc::new(pool)));
+
+        // Create a sled on which the service should exist.
+        let sled_id = create_test_sled(&datastore).await;
+
+        // Create a new service to exist on this sled.
+        let service_id = Uuid::new_v4();
+        let addr = Ipv6Addr::LOCALHOST;
+        let kind = ServiceKind::Nexus;
+
+        let service = Service::new(service_id, sled_id, addr, kind);
+        let result = datastore.service_upsert(service.clone()).await.unwrap();
+        assert_eq!(service.id(), result.id());
+        assert_eq!(service.ip, result.ip);
+        assert_eq!(service.kind, result.kind);
+
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

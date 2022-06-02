@@ -37,7 +37,7 @@ type NexusApiDescription = ApiDescription<Arc<ServerContext>>;
 pub fn internal_api() -> NexusApiDescription {
     fn register_endpoints(api: &mut NexusApiDescription) -> Result<(), String> {
         api.register(cpapi_sled_agents_post)?;
-        api.register(service_put)?;
+        api.register(rss_initialization_complete)?;
         api.register(zpool_put)?;
         api.register(dataset_put)?;
         api.register(cpapi_instances_put)?;
@@ -88,34 +88,32 @@ async fn cpapi_sled_agents_post(
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-#[derive(Deserialize, JsonSchema)]
-struct ServicePathParam {
-    sled_id: Uuid,
-    service_id: Uuid,
-}
-
-/// Report that a service should be running on a sled.
+/// Report that RSS initialization is complete
 #[endpoint {
      method = PUT,
-     path = "/sled_agents/{sled_id}/services/{service_id}",
+     path = "/rss_initialization_complete",
  }]
-async fn service_put(
+async fn rss_initialization_complete(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<ServicePathParam>,
-    info: TypedBody<ServicePutRequest>,
+    info: TypedBody<Vec<ServicePutRequest>>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let info = info.into_inner();
-    nexus
-        .upsert_service(
-            path.service_id,
-            path.sled_id,
-            info.address,
-            info.kind.into(),
-        )
-        .await?;
+    let svcs = info.into_inner();
+
+    // TODO: Make this atomic
+    for svc in &svcs {
+        nexus
+            .upsert_service(
+                svc.service_id,
+                svc.sled_id,
+                svc.address,
+                svc.kind.into(),
+            )
+            .await?;
+    }
+    // TODO: Mark rack as initialized, somehow.
+
     Ok(HttpResponseUpdatedNoContent())
 }
 

@@ -138,6 +138,9 @@ impl FromStr for ServiceKind {
 /// Describes a service on a sled
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ServicePutRequest {
+    pub service_id: Uuid,
+    pub sled_id: Uuid,
+
     /// Address on which a service is responding to requests.
     pub address: Ipv6Addr,
 
