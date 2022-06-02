@@ -5,8 +5,9 @@
 //! Interface to a (currently simulated) SP / RoT.
 
 use crate::config::Config as SledConfig;
+use crate::illumos;
+use crate::illumos::dladm::CreateVnicError;
 use crate::illumos::dladm::Dladm;
-use crate::illumos::dladm::FindPhysicalLinkError;
 use crate::zone::EnsureGzAddressError;
 use crate::zone::Zones;
 use slog::Logger;
@@ -36,8 +37,10 @@ use thiserror::Error;
 pub enum SpError {
     #[error("Simulated SP config specifies distinct IP addresses ({0}, {1})")]
     SimulatedSpMultipleIpAddresses(Ipv6Addr, Ipv6Addr),
-    #[error("Can't access physical link, and none in config: {0}")]
-    FindPhysicalLinkError(#[from] FindPhysicalLinkError),
+    #[error("Could not access etherstub for simulated SP: {0}")]
+    CreateEtherstub(illumos::ExecutionError),
+    #[error("Could not access etherstub VNIC device for simulated SP: {0}")]
+    CreateEtherstubVnic(CreateVnicError),
     #[error("Could not ensure IP address {addr} in global zone for simulated SP: {err}")]
     EnsureGlobalZoneAddressError { addr: Ipv6Addr, err: EnsureGzAddressError },
     #[error("Could not start simualted SP: {0}")]
@@ -130,16 +133,19 @@ async fn start_simulated_sp(
         }
 
         // Ensure we have the global zone IP address we need for the SP.
-        let data_link = if let Some(link) = sled_config.data_link.clone() {
-            link
-        } else {
-            Dladm::find_physical()?
-        };
-        Zones::ensure_has_global_zone_v6_address(data_link, *sp_addr, "simsp")
-            .map_err(|err| SpError::EnsureGlobalZoneAddressError {
-                addr: *sp_addr,
-                err,
-            })?;
+        let etherstub =
+            Dladm::create_etherstub().map_err(SpError::CreateEtherstub)?;
+        let etherstub_vnic = Dladm::create_etherstub_vnic(&etherstub)
+            .map_err(SpError::CreateEtherstubVnic)?;
+        Zones::ensure_has_global_zone_v6_address(
+            etherstub_vnic,
+            *sp_addr,
+            "simsp",
+        )
+        .map_err(|err| SpError::EnsureGlobalZoneAddressError {
+            addr: *sp_addr,
+            err,
+        })?;
     }
 
     // Start up the simulated SP.
