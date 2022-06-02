@@ -248,6 +248,9 @@ impl ServiceManager {
                 Error::ZoneCommand { intent: "Adding Route".to_string(), err }
             })?;
 
+            // TODO: Related to
+            // https://github.com/oxidecomputer/omicron/pull/1124 , should we
+            // avoid importing this manifest?
             debug!(self.log, "importing manifest");
 
             running_zone
@@ -266,6 +269,18 @@ impl ServiceManager {
 
             let smf_name = format!("svc:/system/illumos/{}", service.name);
             let default_smf_name = format!("{}:default", smf_name);
+
+            running_zone
+                .run_cmd(&[
+                    "/usr/sbin/routeadm",
+                    "-e",
+                    "ipv6-routing",
+                    "-u",
+                ])
+                .map_err(|err| Error::ZoneCommand {
+                    intent: "enabling IPv6 routing".to_string(),
+                    err,
+                })?;
 
             match service.name.as_str() {
                 "internal-dns" => {
