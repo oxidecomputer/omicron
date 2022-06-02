@@ -136,7 +136,7 @@ other services and allocating them with vNICs and IPv6 addresses.
 
 === How to provision an instance using the CLI
 
-Here are the current steps to provision an instance using the [oxide](https://github.com/oxidecomputer/cli)
+Here are the current steps to provision an instance using the https://github.com/oxidecomputer/cli[oxide]
 command line interface.
 
 1. Create an organization and project that the resources will live under:
