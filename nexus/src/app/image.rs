@@ -203,6 +203,63 @@ impl super::Nexus {
                     &"creating images from snapshots not supported",
                 ));
             }
+
+            params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine => {
+                // Each Propolis zone ships with an alpine.iso (it's part of the
+                // package-manifest.toml blobs), and for development purposes
+                // allow users to boot that. This should go away when that blob
+                // does.
+                let db_block_size = db::model::BlockSize::Traditional;
+                let block_size: u64 = db_block_size.to_bytes() as u64;
+
+                let volume_construction_request = sled_agent_client::types::VolumeConstructionRequest::Volume {
+                    block_size,
+                    sub_volumes: vec![
+                        sled_agent_client::types::VolumeConstructionRequest::File {
+                            block_size,
+                            path: "/opt/oxide/propolis-server/blob/alpine.iso".into(),
+                        }
+                    ],
+                    read_only_parent: None,
+                };
+
+                let volume_data =
+                    serde_json::to_string(&volume_construction_request)?;
+
+                // Nexus runs in its own zone so we can't ask the propolis zone
+                // image tar file for size of alpine.iso. Conservatively set the
+                // size to 100M (at the time of this comment, it's 41M). Any
+                // disk created from this image has to be larger than it.
+                let size: u64 = 100 * 1024 * 1024;
+                let size: external::ByteCount =
+                    size.try_into().map_err(|e| Error::InvalidValue {
+                        label: String::from("size"),
+                        message: format!("size is invalid: {}", e),
+                    })?;
+
+                let new_image_volume =
+                    db::model::Volume::new(Uuid::new_v4(), volume_data);
+                let volume =
+                    self.db_datastore.volume_create(new_image_volume).await?;
+
+                db::model::GlobalImage {
+                    identity: db::model::GlobalImageIdentity::new(
+                        Uuid::new_v4(),
+                        params.identity.clone(),
+                    ),
+                    volume_id: volume.id(),
+                    url: None,
+                    distribution: "alpine".parse().map_err(|_| {
+                        Error::internal_error(
+                            &"alpine is not a valid distribution?",
+                        )
+                    })?,
+                    version: "propolis-blob".into(),
+                    digest: None,
+                    block_size: db_block_size,
+                    size: size.into(),
+                }
+            }
         };
 
         self.db_datastore.global_image_create_image(opctx, new_image).await

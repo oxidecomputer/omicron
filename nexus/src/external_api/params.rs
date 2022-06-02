@@ -390,8 +390,16 @@ pub struct NetworkInterfaceIdentifier {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ImageSource {
-    Url { url: String },
-    Snapshot { id: Uuid },
+    Url {
+        url: String,
+    },
+    Snapshot {
+        id: Uuid,
+    },
+
+    /// Boot the Alpine ISO that ships with the Propolis zone. Intended for
+    /// development purposes only.
+    YouCanBootAnythingAsLongAsItsAlpine,
 }
 
 /// OS image distribution
