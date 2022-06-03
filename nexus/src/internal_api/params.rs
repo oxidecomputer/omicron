@@ -135,6 +135,14 @@ impl FromStr for ServiceKind {
     }
 }
 
+/// Describes the state of the rack, such that RSS -> Nexus handoff can occur.
+///
+/// See RFD 278 for more details.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct RssInitializationCompleteRequest {
+    service: Vec<ServicePutRequest>,
+}
+
 /// Describes a service on a sled
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ServicePutRequest {

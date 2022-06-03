@@ -89,6 +89,8 @@ async fn cpapi_sled_agents_post(
 }
 
 /// Report that RSS initialization is complete
+///
+/// See RFD 278 for more details.
 #[endpoint {
      method = PUT,
      path = "/rss_initialization_complete",
