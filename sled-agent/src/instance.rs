@@ -4,9 +4,7 @@
 
 //! API for controlling a single instance.
 
-use crate::common::instance::{
-    Action as InstanceAction, InstanceStates, PROPOLIS_PORT,
-};
+use crate::common::instance::{Action as InstanceAction, InstanceStates};
 use crate::illumos::running_zone::{
     InstalledZone, RunCommandError, RunningZone,
 };
@@ -23,6 +21,7 @@ use crate::params::{
 };
 use anyhow::anyhow;
 use futures::lock::{Mutex, MutexGuard};
+use omicron_common::address::PROPOLIS_PORT;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::backoff;
 use propolis_client::api::DiskRequest;

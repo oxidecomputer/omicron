@@ -14,9 +14,6 @@ use omicron_common::api::external::InstanceState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use propolis_client::api::InstanceState as PropolisInstanceState;
 
-/// The port propolis-server listens on inside the propolis zone.
-pub const PROPOLIS_PORT: u16 = 12400;
-
 /// Action to be taken on behalf of state transition.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
