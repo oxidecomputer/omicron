@@ -42,6 +42,20 @@ use nexus_test_utils_macros::nexus_test;
 static ORGANIZATION_NAME: &str = "test-org";
 static PROJECT_NAME: &str = "springfield-squidport";
 
+fn get_project_url() -> String {
+    format!("/organizations/{}/projects/{}", ORGANIZATION_NAME, PROJECT_NAME)
+}
+
+fn get_instances_url() -> String {
+    format!("{}/instances", get_project_url())
+}
+
+async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
+    create_organization(&client, ORGANIZATION_NAME).await;
+    let project = create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
+    project.identity.id
+}
+
 #[nexus_test]
 async fn test_instances_access_before_create_returns_not_found(
     cptestctx: &ControlPlaneTestContext,
@@ -128,7 +142,7 @@ async fn test_instances_create_reboot_halt(
     let InstanceCpuCount(nfoundcpus) = instance.ncpus;
     // These particulars are hardcoded in create_instance().
     assert_eq!(nfoundcpus, 4);
-    assert_eq!(instance.memory.to_whole_mebibytes(), 256);
+    assert_eq!(instance.memory.to_whole_gibibytes(), 1);
     assert_eq!(instance.hostname, "the_host");
     assert_eq!(instance.runtime.run_state, InstanceState::Starting);
 
@@ -562,7 +576,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
             description: String::from("instance to test saga unwind"),
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
-        memory: ByteCount::from_mebibytes_u32(4),
+        memory: ByteCount::from_gibibytes_u32(1),
         hostname: String::from("inst"),
         user_data: vec![],
         network_interfaces: interface_params.clone(),
@@ -584,7 +598,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
             description: String::from("instance to test saga unwind 2"),
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
-        memory: ByteCount::from_mebibytes_u32(4),
+        memory: ByteCount::from_gibibytes_u32(1),
         hostname: String::from("inst2"),
         user_data: vec![],
         network_interfaces: interface_params,
@@ -670,7 +684,7 @@ async fn test_instance_with_single_explicit_ip_address(
             description: String::from("instance to test multiple nics"),
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
-        memory: ByteCount::from_mebibytes_u32(4),
+        memory: ByteCount::from_gibibytes_u32(1),
         hostname: String::from("nic-test"),
         user_data: vec![],
         network_interfaces: interface_params,
@@ -787,7 +801,7 @@ async fn test_instance_with_new_custom_network_interfaces(
             description: String::from("instance to test multiple nics"),
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
-        memory: ByteCount::from_mebibytes_u32(4),
+        memory: ByteCount::from_gibibytes_u32(1),
         hostname: String::from("nic-test"),
         user_data: vec![],
         network_interfaces: interface_params,
@@ -881,7 +895,7 @@ async fn test_instance_create_delete_network_interface(
             description: String::from("instance to test attaching new nic"),
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
-        memory: ByteCount::from_mebibytes_u32(4),
+        memory: ByteCount::from_gibibytes_u32(1),
         hostname: String::from("nic-test"),
         user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::None,
@@ -1065,7 +1079,7 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
             description: String::from("instance to test multiple bad nics"),
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
-        memory: ByteCount::from_mebibytes_u32(4),
+        memory: ByteCount::from_gibibytes_u32(1),
         hostname: String::from("nic-test"),
         user_data: vec![],
         network_interfaces: interface_params,
@@ -1139,7 +1153,7 @@ async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
             description: String::from("probably serving data"),
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
-        memory: ByteCount::from_mebibytes_u32(4),
+        memory: ByteCount::from_gibibytes_u32(1),
         hostname: String::from("nfs"),
         user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
@@ -1235,7 +1249,7 @@ async fn test_attach_eight_disks_to_instance(
             description: String::from("probably serving data"),
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
-        memory: ByteCount::from_mebibytes_u32(4),
+        memory: ByteCount::from_gibibytes_u32(1),
         hostname: String::from("nfs"),
         user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
@@ -1341,7 +1355,7 @@ async fn test_cannot_attach_nine_disks_to_instance(
             description: String::from("probably serving data"),
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
-        memory: ByteCount::from_mebibytes_u32(4),
+        memory: ByteCount::from_gibibytes_u32(1),
         hostname: String::from("nfs"),
         user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
@@ -1468,7 +1482,7 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
             description: String::from("probably serving data"),
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
-        memory: ByteCount::from_mebibytes_u32(4),
+        memory: ByteCount::from_gibibytes_u32(1),
         hostname: String::from("nfs"),
         user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
@@ -1580,7 +1594,7 @@ async fn test_disks_detached_when_instance_destroyed(
             description: String::from("probably serving data"),
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
-        memory: ByteCount::from_mebibytes_u32(4),
+        memory: ByteCount::from_gibibytes_u32(1),
         hostname: String::from("nfs"),
         user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
@@ -1673,6 +1687,43 @@ async fn test_disks_detached_when_instance_destroyed(
     for disk in &disks {
         assert_eq!(disk.state, DiskState::Detached);
     }
+}
+
+//Tests that an instance is rejected if the memory is less than one gibibyte
+#[nexus_test]
+async fn test_instances_memory_less_than_one_gibibyte(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    create_org_and_project(client).await;
+
+    // Attempt to create the instance, observe a server error.
+    let instances_url = get_instances_url();
+    let instance_name = "just-rainsticks";
+    let instance = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: instance_name.parse().unwrap(),
+            description: format!("instance {:?}", &instance_name),
+        },
+        ncpus: InstanceCpuCount(1),
+        memory: ByteCount::from_mebibytes_u32(512),
+        hostname: String::from("inst"),
+        user_data:
+            b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
+                .to_vec(),
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        disks: vec![],
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &instances_url)
+            .body(Some(&instance))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
 }
 
 async fn instance_get(

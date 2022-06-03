@@ -56,6 +56,16 @@ impl super::Nexus {
             )));
         }
 
+        // Reject instances where the memory is not at least one gibibyte
+        if params.memory.to_whole_gibibytes() < 1 {
+            return Err(Error::InvalidValue {
+                label: String::from("size"),
+                message: String::from(
+                    "memory must be at least one gibibyte",
+                )
+            });
+        }
+
         let saga_params = Arc::new(sagas::instance_create::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             organization_name: organization_name.clone().into(),

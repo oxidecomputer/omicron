@@ -52,7 +52,7 @@ async fn create_instance_expect_failure(
             description: "".to_string(),
         },
         ncpus: InstanceCpuCount(1),
-        memory: ByteCount::from_mebibytes_u32(256),
+        memory: ByteCount::from_gibibytes_u32(1),
         hostname: name.to_string(),
         user_data: vec![],
         network_interfaces,
