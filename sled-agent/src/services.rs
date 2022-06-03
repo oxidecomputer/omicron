@@ -275,15 +275,16 @@ impl ServiceManager {
             // This is particularly important for accessing Nexus' external
             // interface from off-device.
             running_zone
-                .run_cmd(&["/usr/sbin/routeadm", "-e", "ipv6-forwarding"])
+                .run_cmd(&[
+                    "/usr/sbin/routeadm",
+                    "-e",
+                    "ipv6-forwarding",
+                    "-e",
+                    "ipv6-routing",
+                    "-u",
+                ])
                 .map_err(|err| Error::ZoneCommand {
-                    intent: "enabling IPv6 forwarding".to_string(),
-                    err,
-                })?;
-            running_zone
-                .run_cmd(&["/usr/sbin/routeadm", "-e", "ipv6-routing", "-u"])
-                .map_err(|err| Error::ZoneCommand {
-                    intent: "enabling IPv6 routing".to_string(),
+                    intent: "enabling IPv6 forwarding & routing".to_string(),
                     err,
                 })?;
 
@@ -489,7 +490,7 @@ mod test {
         wait_ctx.expect().return_once(|_, _| Ok(()));
         // Import the manifest, enable the service
         let execute_ctx = crate::illumos::execute_context();
-        execute_ctx.expect().times(5).returning(|_| {
+        execute_ctx.expect().times(4).returning(|_| {
             Ok(std::process::Output {
                 status: std::process::ExitStatus::from_raw(0),
                 stdout: vec![],
