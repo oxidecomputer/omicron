@@ -3,3 +3,8 @@
 # the buildomat integration to create check suites.
 #
 enable = true
+
+#
+# Require approval for pull requests made by users outside our organisation.
+#
+org_only = true
