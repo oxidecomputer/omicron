@@ -44,7 +44,6 @@ pub struct SamlIdentityProvider {
 
     pub silo_id: Uuid,
 
-    pub idp_metadata_url: String,
     pub idp_metadata_document_string: String,
 
     pub idp_entity_id: String,
@@ -60,7 +59,6 @@ impl Into<external::SamlIdentityProvider> for SamlIdentityProvider {
     fn into(self) -> external::SamlIdentityProvider {
         external::SamlIdentityProvider {
             identity: self.identity(),
-            idp_metadata_url: self.idp_metadata_url.clone(),
             idp_entity_id: self.idp_entity_id.clone(),
             sp_client_id: self.sp_client_id.clone(),
             acs_url: self.acs_url.clone(),

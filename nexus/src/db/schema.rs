@@ -183,7 +183,6 @@ table! {
 
         silo_id -> Uuid,
 
-        idp_metadata_url -> Text,
         idp_metadata_document_string -> Text,
 
         idp_entity_id -> Text,

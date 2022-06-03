@@ -272,7 +272,7 @@ lazy_static! {
                 description: "a demo provider".to_string(),
             },
 
-            idp_metadata_url: HTTP_SERVER.url("/descriptor").to_string(),
+            idp_metadata_source: params::IdpMetadataSource::Url { url: HTTP_SERVER.url("/descriptor").to_string() },
 
             idp_entity_id: "entity_id".to_string(),
             sp_client_id: "client_id".to_string(),

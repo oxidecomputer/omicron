@@ -229,46 +229,60 @@ impl super::Nexus {
             .fetch_for(authz::Action::CreateChild)
             .await?;
 
-        // Download the SAML IdP descriptor, and write it into the DB. This is
-        // so that it can be deserialized later.
-        //
-        // Importantly, do this only once and store it. It would introduce
-        // attack surface to download it each time it was required.
-        let dur = std::time::Duration::from_secs(5);
-        let client = reqwest::ClientBuilder::new()
-            .connect_timeout(dur)
-            .timeout(dur)
-            .build()
-            .map_err(|e| {
-                Error::internal_error(&format!(
-                    "failed to build reqwest client: {}",
-                    e
-                ))
-            })?;
+        let idp_metadata_document_string = match &params.idp_metadata_source {
+            params::IdpMetadataSource::Url { url } => {
+                // Download the SAML IdP descriptor, and write it into the DB. This is
+                // so that it can be deserialized later.
+                //
+                // Importantly, do this only once and store it. It would introduce
+                // attack surface to download it each time it was required.
+                let dur = std::time::Duration::from_secs(5);
+                let client = reqwest::ClientBuilder::new()
+                    .connect_timeout(dur)
+                    .timeout(dur)
+                    .build()
+                    .map_err(|e| {
+                        Error::internal_error(&format!(
+                            "failed to build reqwest client: {}",
+                            e
+                        ))
+                    })?;
 
-        let response =
-            client.get(&params.idp_metadata_url).send().await.map_err(|e| {
-                Error::InvalidValue {
-                    label: String::from("url"),
-                    message: format!("error querying url: {}", e),
+                let response = client.get(url).send().await.map_err(|e| {
+                    Error::InvalidValue {
+                        label: String::from("url"),
+                        message: format!("error querying url: {}", e),
+                    }
+                })?;
+
+                if !response.status().is_success() {
+                    return Err(Error::InvalidValue {
+                        label: String::from("url"),
+                        message: format!(
+                            "querying url returned: {}",
+                            response.status()
+                        ),
+                    });
                 }
-            })?;
 
-        if !response.status().is_success() {
-            return Err(Error::InvalidValue {
-                label: String::from("url"),
-                message: format!(
-                    "querying url returned: {}",
-                    response.status()
-                ),
-            });
-        }
+                response.text().await.map_err(|e| Error::InvalidValue {
+                    label: String::from("url"),
+                    message: format!("error getting text from url: {}", e),
+                })?
+            }
 
-        let idp_metadata_document_string =
-            response.text().await.map_err(|e| Error::InvalidValue {
-                label: String::from("url"),
-                message: format!("error getting text from url: {}", e),
-            })?;
+            params::IdpMetadataSource::Base64EncodedXML { data } => {
+                let bytes =
+                    base64::decode(data).map_err(|e| Error::InvalidValue {
+                        label: String::from("data"),
+                        message: format!(
+                            "error getting decoding base64 data: {}",
+                            e
+                        ),
+                    })?;
+                String::from_utf8_lossy(&bytes).into_owned()
+            }
+        };
 
         let provider = db::model::SamlIdentityProvider {
             identity: db::model::SamlIdentityProviderIdentity::new(
@@ -277,7 +291,6 @@ impl super::Nexus {
             ),
             silo_id: db_silo.id(),
 
-            idp_metadata_url: params.idp_metadata_url,
             idp_metadata_document_string,
 
             idp_entity_id: params.idp_entity_id,

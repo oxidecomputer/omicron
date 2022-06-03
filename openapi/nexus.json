@@ -6202,6 +6202,46 @@
           "silo_user"
         ]
       },
+      "IdpMetadataSource": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "url"
+                ]
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "url"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "base64_encoded_x_m_l"
+                ]
+              }
+            },
+            "required": [
+              "data",
+              "type"
+            ]
+          }
+        ]
+      },
       "Image": {
         "description": "Client view of project Images",
         "type": "object",
@@ -7820,10 +7860,6 @@
             "description": "idp's entity id",
             "type": "string"
           },
-          "idp_metadata_url": {
-            "description": "url where identity provider metadata descriptor is",
-            "type": "string"
-          },
           "name": {
             "description": "unique, mutable, user-controlled identifier for each resource",
             "allOf": [
@@ -7869,7 +7905,6 @@
           "description",
           "id",
           "idp_entity_id",
-          "idp_metadata_url",
           "name",
           "slo_url",
           "sp_client_id",
@@ -7893,9 +7928,13 @@
             "description": "idp's entity id",
             "type": "string"
           },
-          "idp_metadata_url": {
-            "description": "url where identity provider metadata descriptor is",
-            "type": "string"
+          "idp_metadata_source": {
+            "description": "the source of an identity provider metadata descriptor",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IdpMetadataSource"
+              }
+            ]
           },
           "name": {
             "$ref": "#/components/schemas/Name"
@@ -7926,7 +7965,7 @@
           "acs_url",
           "description",
           "idp_entity_id",
-          "idp_metadata_url",
+          "idp_metadata_source",
           "name",
           "slo_url",
           "sp_client_id",

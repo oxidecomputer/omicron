@@ -235,7 +235,9 @@ async fn test_listing_identity_providers(cptestctx: &ControlPlaneTestContext) {
                 description: "a demo provider".to_string(),
             },
 
-            idp_metadata_url: server.url("/descriptor").to_string(),
+            idp_metadata_source: params::IdpMetadataSource::Url {
+                url: server.url("/descriptor").to_string(),
+            },
 
             idp_entity_id: "entity_id".to_string(),
             sp_client_id: "client_id".to_string(),
@@ -260,7 +262,9 @@ async fn test_listing_identity_providers(cptestctx: &ControlPlaneTestContext) {
                 description: "a demo provider".to_string(),
             },
 
-            idp_metadata_url: server.url("/descriptor").to_string(),
+            idp_metadata_source: params::IdpMetadataSource::Url {
+                url: server.url("/descriptor").to_string(),
+            },
 
             idp_entity_id: "entity_id".to_string(),
             sp_client_id: "client_id".to_string(),
@@ -367,7 +371,9 @@ async fn test_create_a_saml_idp(cptestctx: &ControlPlaneTestContext) {
                 description: "a demo provider".to_string(),
             },
 
-            idp_metadata_url: server.url("/descriptor").to_string(),
+            idp_metadata_source: params::IdpMetadataSource::Url {
+                url: server.url("/descriptor").to_string(),
+            },
 
             idp_entity_id: "entity_id".to_string(),
             sp_client_id: "client_id".to_string(),
@@ -470,7 +476,9 @@ async fn test_deleting_a_silo_deletes_the_idp(
                 description: "a demo provider".to_string(),
             },
 
-            idp_metadata_url: server.url("/descriptor").to_string(),
+            idp_metadata_source: params::IdpMetadataSource::Url {
+                url: server.url("/descriptor").to_string(),
+            },
 
             idp_entity_id: "entity_id".to_string(),
             sp_client_id: "client_id".to_string(),
@@ -575,7 +583,9 @@ async fn test_create_a_saml_idp_invalid_descriptor_truncated(
                 description: "a demo provider".to_string(),
             },
 
-            idp_metadata_url: server.url("/descriptor").to_string(),
+            idp_metadata_source: params::IdpMetadataSource::Url {
+                url: server.url("/descriptor").to_string(),
+            },
 
             idp_entity_id: "entity_id".to_string(),
             sp_client_id: "client_id".to_string(),
@@ -641,7 +651,9 @@ async fn test_create_a_saml_idp_invalid_descriptor_no_redirect_binding(
                 description: "a demo provider".to_string(),
             },
 
-            idp_metadata_url: server.url("/descriptor").to_string(),
+            idp_metadata_source: params::IdpMetadataSource::Url {
+                url: server.url("/descriptor").to_string(),
+            },
 
             idp_entity_id: "entity_id".to_string(),
             sp_client_id: "client_id".to_string(),
@@ -689,7 +701,9 @@ async fn test_create_a_hidden_silo_saml_idp(
                 description: "a demo provider".to_string(),
             },
 
-            idp_metadata_url: server.url("/descriptor").to_string(),
+            idp_metadata_source: params::IdpMetadataSource::Url {
+                url: server.url("/descriptor").to_string(),
+            },
 
             idp_entity_id: "entity_id".to_string(),
             sp_client_id: "client_id".to_string(),
@@ -753,7 +767,9 @@ async fn test_saml_idp_metadata_url_404(cptestctx: &ControlPlaneTestContext) {
                 description: "a demo provider".to_string(),
             },
 
-            idp_metadata_url: server.url("/descriptor").to_string(),
+            idp_metadata_source: params::IdpMetadataSource::Url {
+                url: server.url("/descriptor").to_string(),
+            },
 
             idp_entity_id: "entity_id".to_string(),
             sp_client_id: "client_id".to_string(),
@@ -796,7 +812,161 @@ async fn test_saml_idp_metadata_url_invalid(
                 description: "a demo provider".to_string(),
             },
 
-            idp_metadata_url: "htttps://fake.url".to_string(),
+            idp_metadata_source: params::IdpMetadataSource::Url {
+                url: "htttps://fake.url".to_string(),
+            },
+
+            idp_entity_id: "entity_id".to_string(),
+            sp_client_id: "client_id".to_string(),
+            acs_url: "http://acs".to_string(),
+            slo_url: "http://slo".to_string(),
+            technical_contact_email: "technical@fake".to_string(),
+
+            signing_keypair: None,
+        }))
+        .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("unexpected success");
+}
+
+// Create a Silo with a SAML IdP document string
+#[nexus_test]
+async fn test_saml_idp_metadata_data_valid(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    create_silo(&client, "blahblah", true).await;
+
+    let silo_saml_idp: SamlIdentityProvider = object_create(
+        client,
+        "/silos/blahblah/saml_identity_providers",
+        &params::SamlIdentityProviderCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "some-totally-real-saml-provider"
+                    .to_string()
+                    .parse()
+                    .unwrap(),
+                description: "a demo provider".to_string(),
+            },
+
+            idp_metadata_source: params::IdpMetadataSource::Base64EncodedXML {
+                data: base64::encode(SAML_IDP_DESCRIPTOR.to_string()),
+            },
+
+            idp_entity_id: "entity_id".to_string(),
+            sp_client_id: "client_id".to_string(),
+            acs_url: "http://acs".to_string(),
+            slo_url: "http://slo".to_string(),
+            technical_contact_email: "technical@fake".to_string(),
+
+            signing_keypair: None,
+        },
+    )
+    .await;
+
+    // Expect the SSO redirect when trying to log in
+    let result = NexusRequest::new(
+        RequestBuilder::new(
+            client,
+            Method::GET,
+            &format!("/login/blahblah/{}", silo_saml_idp.identity.name),
+        )
+        .expect_status(Some(StatusCode::FOUND)),
+    )
+    .execute()
+    .await
+    .expect("expected success");
+
+    assert!(result.headers["Location"]
+        .to_str()
+        .unwrap()
+        .to_string()
+        .starts_with(
+            "https://idp.example.org/SAML2/SSO/Redirect?SAMLRequest=",
+        ));
+}
+
+// Fail to create a Silo with a SAML IdP document string that isn't valid
+#[nexus_test]
+async fn test_saml_idp_metadata_data_truncated(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    create_silo(&client, "blahblah", true).await;
+
+    NexusRequest::new(
+        RequestBuilder::new(
+            client,
+            Method::POST,
+            &"/silos/blahblah/saml_identity_providers",
+        )
+        .body(Some(&params::SamlIdentityProviderCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "some-totally-real-saml-provider"
+                    .to_string()
+                    .parse()
+                    .unwrap(),
+                description: "a demo provider".to_string(),
+            },
+
+            idp_metadata_source: params::IdpMetadataSource::Base64EncodedXML {
+                data: base64::encode({
+                    let mut saml_idp_descriptor =
+                        SAML_IDP_DESCRIPTOR.to_string();
+                    saml_idp_descriptor.truncate(100);
+                    saml_idp_descriptor
+                }),
+            },
+
+            idp_entity_id: "entity_id".to_string(),
+            sp_client_id: "client_id".to_string(),
+            acs_url: "http://acs".to_string(),
+            slo_url: "http://slo".to_string(),
+            technical_contact_email: "technical@fake".to_string(),
+
+            signing_keypair: None,
+        }))
+        .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("unexpected success");
+}
+
+// Can't create a SAML IdP from bad base64 data
+#[nexus_test]
+async fn test_saml_idp_metadata_data_invalid(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    const SILO_NAME: &str = "saml-silo";
+    create_silo(&client, SILO_NAME, true).await;
+
+    NexusRequest::new(
+        RequestBuilder::new(
+            client,
+            Method::POST,
+            &format!("/silos/{}/saml_identity_providers", SILO_NAME),
+        )
+        .body(Some(&params::SamlIdentityProviderCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "some-totally-real-saml-provider"
+                    .to_string()
+                    .parse()
+                    .unwrap(),
+                description: "a demo provider".to_string(),
+            },
+
+            idp_metadata_source: params::IdpMetadataSource::Base64EncodedXML {
+                data: "bad data".to_string(),
+            },
 
             idp_entity_id: "entity_id".to_string(),
             sp_client_id: "client_id".to_string(),
@@ -890,7 +1060,9 @@ async fn test_saml_idp_reject_keypair(cptestctx: &ControlPlaneTestContext) {
                     description: "a demo provider".to_string(),
                 },
 
-                idp_metadata_url: server.url("/descriptor").to_string(),
+                idp_metadata_source: params::IdpMetadataSource::Url {
+                    url: server.url("/descriptor").to_string(),
+                },
 
                 idp_entity_id: "entity_id".to_string(),
                 sp_client_id: "client_id".to_string(),
@@ -942,7 +1114,9 @@ async fn test_saml_idp_rsa_keypair_ok(cptestctx: &ControlPlaneTestContext) {
                 description: "a demo provider".to_string(),
             },
 
-            idp_metadata_url: server.url("/descriptor").to_string(),
+            idp_metadata_source: params::IdpMetadataSource::Url {
+                url: server.url("/descriptor").to_string(),
+            },
 
             idp_entity_id: "entity_id".to_string(),
             sp_client_id: "client_id".to_string(),

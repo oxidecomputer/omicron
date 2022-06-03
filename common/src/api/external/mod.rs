@@ -1873,9 +1873,6 @@ pub struct SamlIdentityProvider {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
-    /// url where identity provider metadata descriptor is
-    pub idp_metadata_url: String,
-
     /// identity provider's entity id
     pub idp_entity_id: String,
 

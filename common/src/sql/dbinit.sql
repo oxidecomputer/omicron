@@ -266,7 +266,6 @@ CREATE TABLE omicron.public.saml_identity_provider (
 
     silo_id UUID NOT NULL,
 
-    idp_metadata_url TEXT NOT NULL,
     idp_metadata_document_string TEXT NOT NULL,
 
     idp_entity_id TEXT NOT NULL,

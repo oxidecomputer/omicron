@@ -83,9 +83,6 @@ pub struct SamlIdentityProvider {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
-    /// url where identity provider metadata descriptor is
-    pub idp_metadata_url: String,
-
     /// idp's entity id
     pub idp_entity_id: String,
 
@@ -109,7 +106,6 @@ impl From<model::SamlIdentityProvider> for SamlIdentityProvider {
     fn from(saml_idp: model::SamlIdentityProvider) -> Self {
         Self {
             identity: saml_idp.identity(),
-            idp_metadata_url: saml_idp.idp_metadata_url,
             idp_entity_id: saml_idp.idp_entity_id,
             sp_client_id: saml_idp.sp_client_id,
             acs_url: saml_idp.acs_url,

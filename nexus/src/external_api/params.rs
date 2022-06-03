@@ -140,12 +140,19 @@ where
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum IdpMetadataSource {
+    Url { url: String },
+    Base64EncodedXML { data: String },
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SamlIdentityProviderCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
 
-    /// url where identity provider metadata descriptor is
-    pub idp_metadata_url: String,
+    /// the source of an identity provider metadata descriptor
+    pub idp_metadata_source: IdpMetadataSource,
 
     /// idp's entity id
     pub idp_entity_id: String,
