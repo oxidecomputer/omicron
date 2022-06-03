@@ -46,11 +46,9 @@ impl From<NetworkInterface> for external::NetworkInterface {
 #[derive(Clone, Debug)]
 pub struct IncompleteNetworkInterface {
     pub identity: NetworkInterfaceIdentity,
-
     pub instance_id: Uuid,
     pub vpc_id: Uuid,
     pub subnet: VpcSubnet,
-    pub mac: MacAddr,
     pub ip: Option<std::net::IpAddr>,
 }
 
@@ -60,7 +58,6 @@ impl IncompleteNetworkInterface {
         instance_id: Uuid,
         vpc_id: Uuid,
         subnet: VpcSubnet,
-        mac: MacAddr,
         identity: external::IdentityMetadataCreateParams,
         ip: Option<std::net::IpAddr>,
     ) -> Result<Self, external::Error> {
@@ -68,7 +65,6 @@ impl IncompleteNetworkInterface {
             subnet.check_requestable_addr(ip)?;
         };
         let identity = NetworkInterfaceIdentity::new(interface_id, identity);
-
-        Ok(Self { identity, instance_id, subnet, vpc_id, mac, ip })
+        Ok(Self { identity, instance_id, subnet, vpc_id, ip })
     }
 }

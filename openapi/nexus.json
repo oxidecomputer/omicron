@@ -281,7 +281,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ImageCreate"
+                "$ref": "#/components/schemas/GlobalImageCreate"
               }
             }
           },
@@ -5655,6 +5655,13 @@
           }
         ]
       },
+      "Distribution": {
+        "title": "OS image distribution",
+        "description": "Distribution must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'.",
+        "type": "string",
+        "pattern": "[a-z](|[a-zA-Z0-9-]*[a-zA-Z0-9])",
+        "maxLength": 63
+      },
       "Error": {
         "description": "Error information from a response.",
         "type": "object",
@@ -5783,6 +5790,10 @@
               }
             ]
           },
+          "distribution": {
+            "description": "Image distribution",
+            "type": "string"
+          },
           "id": {
             "description": "unique, immutable, system-controlled identifier for each resource",
             "type": "string",
@@ -5820,19 +5831,68 @@
             "type": "string"
           },
           "version": {
-            "nullable": true,
-            "description": "Version of this, if any",
+            "description": "Image version",
             "type": "string"
           }
         },
         "required": [
           "block_size",
           "description",
+          "distribution",
           "id",
           "name",
           "size",
           "time_created",
-          "time_modified"
+          "time_modified",
+          "version"
+        ]
+      },
+      "GlobalImageCreate": {
+        "description": "Create-time parameters for an [`GlobalImage`](omicron_common::api::external::GlobalImage)",
+        "type": "object",
+        "properties": {
+          "block_size": {
+            "description": "block size in bytes",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BlockSize"
+              }
+            ]
+          },
+          "description": {
+            "type": "string"
+          },
+          "distribution": {
+            "description": "OS image distribution",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Distribution"
+              }
+            ]
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "source": {
+            "description": "The source of the image's contents.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ImageSource"
+              }
+            ]
+          },
+          "version": {
+            "description": "image version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "block_size",
+          "description",
+          "distribution",
+          "name",
+          "source",
+          "version"
         ]
       },
       "GlobalImageResultsPage": {
@@ -6007,25 +6067,25 @@
           {
             "type": "object",
             "properties": {
-              "src": {
-                "type": "string"
-              },
               "type": {
                 "type": "string",
                 "enum": [
                   "url"
                 ]
+              },
+              "url": {
+                "type": "string"
               }
             },
             "required": [
-              "src",
-              "type"
+              "type",
+              "url"
             ]
           },
           {
             "type": "object",
             "properties": {
-              "src": {
+              "id": {
                 "type": "string",
                 "format": "uuid"
               },
@@ -6037,7 +6097,22 @@
               }
             },
             "required": [
-              "src",
+              "id",
+              "type"
+            ]
+          },
+          {
+            "description": "Boot the Alpine ISO that ships with the Propolis zone. Intended for development purposes only.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "you_can_boot_anything_as_long_as_its_alpine"
+                ]
+              }
+            },
+            "required": [
               "type"
             ]
           }

@@ -133,3 +133,83 @@ unique local addresses in the subnet of the first Sled Agent: `fd00:1122:3344:1:
 
 Note that Sled Agent runs in the global zone and is the one responsible for bringing up all the other
 other services and allocating them with vNICs and IPv6 addresses.
+
+=== How to provision an instance using the CLI
+
+Here are the current steps to provision an instance using the https://github.com/oxidecomputer/cli[oxide]
+command line interface.
+
+1. Create an organization and project that the resources will live under:
+
+    oxide org create myorg
+    oxide project create -o myorg myproj
+
+2. Define a global image that will be used as initial disk contents. This can be the alpine.iso image that ships with propolis, or an ISO / raw disk image / etc hosted at a URL:
+
+    oxide api /images --method POST --input - <<EOF
+    {
+      "name": "alpine",
+      "description": "boot from propolis zone blob!",
+      "block_size": 512,
+      "distribution": "alpine",
+      "version": "propolis-blob",
+      "source": {
+        "type": "you_can_boot_anything_as_long_as_its_alpine"
+      }
+    }
+    EOF
+
+    oxide api /images --method POST --input - <<EOF
+    {
+      "name": "crucible-tester-sparse",
+      "description": "boot from a url!",
+      "block_size": 512,
+      "distribution": "debian",
+      "version": "9",
+      "source": {
+        "type": "url",
+        "url": "http://[fd00:1122:3344:101::15]/crucible-tester-sparse.img"
+      }
+    }
+    EOF
+
+3. Create a disk from that global image (note that disk size must be greater than or equal to image size!). The example below creates a disk using the image made from the alpine ISO that ships with propolis, and sets the size to be the exact same as the image size:
+
+    oxide api /organizations/myorg/projects/myproj/disks/ --method POST --input - <<EOF
+    {
+      "name": "alpine",
+      "description": "alpine.iso blob",
+      "block_size": 512,
+      "size": $(oxide api /images/alpine | jq -r .size),
+      "disk_source": {
+          "type": "global_image",
+          "image_id": "$(oxide api /images/alpine | jq -r .id)"
+      }
+    }
+    EOF
+
+4. Create an instance, attaching the disk created above:
+
+    oxide api /organizations/myorg/projects/myproj/instances --method POST --input - <<EOF
+    {
+      "name": "myinst",
+      "description": "my inst",
+      "hostname": "myinst",
+      "memory": 1073741824,
+      "ncpus": 2,
+      "disks": [
+        {
+          "type": "attach",
+          "name": "alpine"
+        }
+      ]
+    }
+    EOF
+
+5. Optionally, attach to the propolis server serial console:
+
+  a. find the zone launched for the instance: `zoneadm list -c | grep oxz_propolis-server`
+  b. get the instance uuid from the zone name. if the zone's name is `oxz_propolis-server_3b03ad43-4e9b-4f3a-866c-238d9ec4ac45`, then the uuid is `3b03ad43-4e9b-4f3a-866c-238d9ec4ac45`
+  c. find the propolis server listen address: `pfexec zlogin oxz_propolis-server_3b03ad43-4e9b-4f3a-866c-238d9ec4ac45 svccfg -s svc:/system/illumos/propolis-server:vm-3b03ad43-4e9b-4f3a-866c-238d9ec4ac45 listprop config/server_addr`
+  d. build and launch propolis-cli, filling in values for IP and PORT based on the listen address: `./target/release/propolis-cli -s <IP> -p <PORT> serial`
+

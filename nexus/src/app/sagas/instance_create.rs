@@ -311,14 +311,11 @@ async fn sic_create_custom_network_interfaces(
             .fetch()
             .await
             .map_err(ActionError::action_failed)?;
-        let mac =
-            db::model::MacAddr::new().map_err(ActionError::action_failed)?;
         let interface = db::model::IncompleteNetworkInterface::new(
             interface_id,
             instance_id,
             authz_vpc.id(),
             db_subnet.clone(),
-            mac,
             params.identity.clone(),
             params.ip,
         )
@@ -412,14 +409,12 @@ async fn sic_create_default_network_interface(
             .await
             .map_err(ActionError::action_failed)?;
 
-    let mac = db::model::MacAddr::new().map_err(ActionError::action_failed)?;
     let interface_id = Uuid::new_v4();
     let interface = db::model::IncompleteNetworkInterface::new(
         interface_id,
         instance_id,
         authz_vpc.id(),
         db_subnet.clone(),
-        mac,
         interface_params.identity.clone(),
         interface_params.ip,
     )

@@ -57,6 +57,9 @@ pub enum Error {
     /// Method Not Allowed
     #[error("Method Not Allowed: {internal_message}")]
     MethodNotAllowed { internal_message: String },
+
+    #[error("Type version mismatch! {internal_message}")]
+    TypeVersionMismatch { internal_message: String },
 }
 
 /// Indicates how an object was looked up (for an `ObjectNotFound` error)
@@ -113,7 +116,8 @@ impl Error {
             | Error::InvalidValue { .. }
             | Error::Forbidden
             | Error::MethodNotAllowed { .. }
-            | Error::InternalError { .. } => false,
+            | Error::InternalError { .. }
+            | Error::TypeVersionMismatch { .. } => false,
         }
     }
 
@@ -155,6 +159,18 @@ impl Error {
     /// server problem) or InvalidRequest (if it's a client problem) instead.
     pub fn unavail(message: &str) -> Error {
         Error::ServiceUnavailable { internal_message: message.to_owned() }
+    }
+
+    /// Generates an [`Error::TypeVersionMismatch`] with a specific message.
+    ///
+    /// TypeVersionMismatch errors are a specific type of error arising from differences
+    /// between types in different versions of Nexus. For example, a param
+    /// struct enum and db struct enum may have the same variants for one
+    /// version of Nexus, but different variants when one of those Nexus servers
+    /// is upgraded. Deserializing from the database in the new Nexus would be
+    /// ok, but in the old Nexus would otherwise be a 500.
+    pub fn type_version_mismatch(message: &str) -> Error {
+        Error::TypeVersionMismatch { internal_message: message.to_owned() }
     }
 }
 
@@ -243,6 +259,10 @@ impl From<Error> for HttpError {
                     Some(String::from("ServiceNotAvailable")),
                     internal_message,
                 )
+            }
+
+            Error::TypeVersionMismatch { internal_message } => {
+                HttpError::for_internal_error(internal_message)
             }
         }
     }

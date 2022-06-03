@@ -8,55 +8,87 @@ use diesel::pg::Pg;
 use diesel::serialize::{self, ToSql};
 use diesel::sql_types;
 use omicron_common::api::external;
-use rand::{rngs::StdRng, SeedableRng};
-use std::convert::TryFrom;
+use rand::thread_rng;
+use rand::Rng;
 
 #[derive(Clone, Copy, Debug, PartialEq, AsExpression, FromSqlRow)]
-#[diesel(sql_type = sql_types::Text)]
+#[diesel(sql_type = sql_types::BigInt)]
 pub struct MacAddr(pub external::MacAddr);
 
 impl MacAddr {
-    /// Generate a unique MAC address for an interface
-    pub fn new() -> Result<Self, external::Error> {
-        use rand::Fill;
-        // Use the Oxide OUI A8 40 25
-        let mut addr = [0xA8, 0x40, 0x25, 0x00, 0x00, 0x00];
-        addr[3..].try_fill(&mut StdRng::from_entropy()).map_err(|_| {
-            external::Error::internal_error("failed to generate MAC")
-        })?;
-        // From RFD 174, Oxide virtual MACs are constrained to have these bits
-        // set.
-        addr[3] |= 0xF0;
-        // TODO-correctness: We should use an explicit allocator for the MACs
-        // given the small address space. Right now creation requests may fail
-        // due to MAC collision, especially given the 20-bit space.
-        Ok(Self(external::MacAddr(macaddr::MacAddr6::from(addr))))
+    // Guest MAC addresses begin with the Oxide OUI A8:40:25. Further, guest
+    // address are constrained to be in the virtual address range
+    // A8:40:24:F_:__:__. Even further, the range F0:00:00 - FE:FF:FF is
+    // reserved for customer-visible addresses (FF:00:00-FF:FF:FF is for
+    // system MAC addresses). See RFD 174 for the discussion of the virtual
+    // range, and
+    // https://github.com/oxidecomputer/omicron/pull/955#discussion_r856432498
+    // for an initial discussion of the customer/system address range split.
+    pub(crate) const MIN_GUEST_ADDR: i64 = 0xA8_40_25_F0_00_00;
+    pub(crate) const MAX_GUEST_ADDR: i64 = 0xA8_40_25_FE_FF_FF;
+
+    /// Generate a random MAC address for a guest network interface
+    pub fn random_guest() -> Self {
+        let value =
+            thread_rng().gen_range(Self::MIN_GUEST_ADDR..=Self::MAX_GUEST_ADDR);
+        Self::from_i64(value)
+    }
+
+    /// Construct a MAC address from its i64 big-endian byte representation.
+    // NOTE: This is the representation used in the database.
+    pub(crate) fn from_i64(value: i64) -> Self {
+        let bytes = value.to_be_bytes();
+        Self(external::MacAddr(macaddr::MacAddr6::new(
+            bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+        )))
+    }
+
+    /// Convert a MAC address to its i64 big-endian byte representation
+    // NOTE: This is the representation used in the database.
+    pub(crate) fn to_i64(self) -> i64 {
+        let bytes = self.0.as_bytes();
+        i64::from_be_bytes([
+            0, 0, bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5],
+        ])
     }
 }
 
 NewtypeFrom! { () pub struct MacAddr(external::MacAddr); }
 NewtypeDeref! { () pub struct MacAddr(external::MacAddr); }
 
-impl ToSql<sql_types::Text, Pg> for MacAddr {
+impl ToSql<sql_types::BigInt, Pg> for MacAddr {
     fn to_sql<'a>(
         &'a self,
         out: &mut serialize::Output<'a, '_, Pg>,
     ) -> serialize::Result {
-        <String as ToSql<sql_types::Text, Pg>>::to_sql(
-            &self.0.to_string(),
+        <i64 as ToSql<sql_types::BigInt, Pg>>::to_sql(
+            &self.to_i64(),
             &mut out.reborrow(),
         )
     }
 }
 
-impl<DB> FromSql<sql_types::Text, DB> for MacAddr
+impl<DB> FromSql<sql_types::BigInt, DB> for MacAddr
 where
     DB: Backend,
-    String: FromSql<sql_types::Text, DB>,
+    i64: FromSql<sql_types::BigInt, DB>,
 {
     fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
-        external::MacAddr::try_from(String::from_sql(bytes)?)
-            .map(MacAddr)
-            .map_err(|e| e.into())
+        let value = i64::from_sql(bytes)?;
+        Ok(MacAddr::from_i64(value))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MacAddr;
+
+    #[test]
+    fn test_mac_to_int_conversions() {
+        let original: i64 = 0xa8_40_25_ff_00_01;
+        let mac = MacAddr::from_i64(original);
+        assert_eq!(mac.0.as_bytes(), &[0xa8, 0x40, 0x25, 0xff, 0x00, 0x01]);
+        let conv = mac.to_i64();
+        assert_eq!(original, conv);
     }
 }
