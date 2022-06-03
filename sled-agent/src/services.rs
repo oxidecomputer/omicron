@@ -489,7 +489,7 @@ mod test {
         wait_ctx.expect().return_once(|_, _| Ok(()));
         // Import the manifest, enable the service
         let execute_ctx = crate::illumos::execute_context();
-        execute_ctx.expect().times(3).returning(|_| {
+        execute_ctx.expect().times(5).returning(|_| {
             Ok(std::process::Output {
                 status: std::process::ExitStatus::from_raw(0),
                 stdout: vec![],
