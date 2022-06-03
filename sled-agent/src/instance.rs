@@ -4,9 +4,7 @@
 
 //! API for controlling a single instance.
 
-use crate::common::instance::{
-    Action as InstanceAction, InstanceStates,
-};
+use crate::common::instance::{Action as InstanceAction, InstanceStates};
 use crate::illumos::running_zone::{
     InstalledZone, RunCommandError, RunningZone,
 };
