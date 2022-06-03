@@ -54,6 +54,17 @@ impl super::Nexus {
                         ),
                     });
                 }
+
+                // Reject disks where the block size isn't at least
+                // one gibibyte
+                if params.size.to_whole_gibibytes() < 1 {
+                    return Err(Error::InvalidValue {
+                        label: String::from("size"),
+                        message: String::from(
+                            "total size must be at least one gibibyte",
+                        ),
+                    });
+                }
             }
             params::DiskSource::Snapshot { snapshot_id: _ } => {
                 // Until we implement snapshots, do not allow disks to be

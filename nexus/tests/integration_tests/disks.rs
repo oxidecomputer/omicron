@@ -732,6 +732,40 @@ async fn test_disk_reject_total_size_not_divisible_by_block_size(
     .unwrap();
 }
 
+//Tests that a disk is rejected if the total size is less than one gibibyte
+#[nexus_test]
+async fn test_disk_reject_total_size_less_than_one_gibibyte(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    create_org_and_project(client).await;
+
+    let disk_size = ByteCount::from_mebibytes_u32(512);
+
+    // Attempt to allocate the disk, observe a server error.
+    let disks_url = get_disks_url();
+    let new_disk = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: DISK_NAME.parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
+        size: disk_size,
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&new_disk))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+}
+
 async fn disk_get(client: &ClientTestContext, disk_url: &str) -> Disk {
     NexusRequest::object_get(client, disk_url)
         .authn_as(AuthnMode::PrivilegedUser)
