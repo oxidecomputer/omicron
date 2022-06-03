@@ -131,6 +131,7 @@ table! {
         mac -> Int8,
         ip -> Inet,
         slot -> Int2,
+        is_primary -> Bool,
     }
 }
 

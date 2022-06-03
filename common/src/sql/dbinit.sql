@@ -675,7 +675,14 @@ CREATE TABLE omicron.public.network_interface (
      * Limited to 8 NICs per instance. This value must be kept in sync with
      * `crate::nexus::MAX_NICS_PER_INSTANCE`.
      */
-    slot INT2 NOT NULL CHECK (slot >= 0 AND slot < 8)
+    slot INT2 NOT NULL CHECK (slot >= 0 AND slot < 8),
+
+    /* True if this interface is the primary interface for the instance.
+     *
+     * The primary interface appears in DNS and its address is used for external
+     * connectivity for the instance.
+     */
+    is_primary BOOL NOT NULL
 );
 
 /* TODO-completeness
