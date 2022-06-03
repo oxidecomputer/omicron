@@ -275,6 +275,12 @@ impl ServiceManager {
             // This is particularly important for accessing Nexus' external
             // interface from off-device.
             running_zone
+                .run_cmd(&["/usr/sbin/routeadm", "-e", "ipv6-forwarding"])
+                .map_err(|err| Error::ZoneCommand {
+                    intent: "enabling IPv6 forwarding".to_string(),
+                    err,
+                })?;
+            running_zone
                 .run_cmd(&["/usr/sbin/routeadm", "-e", "ipv6-routing", "-u"])
                 .map_err(|err| Error::ZoneCommand {
                     intent: "enabling IPv6 routing".to_string(),
