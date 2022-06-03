@@ -40,10 +40,7 @@ use crate::db::lookup::LookupPath;
 use crate::db::model::DatabaseString;
 use crate::db::model::IncompleteVpc;
 use crate::db::model::Vpc;
-use crate::db::queries::network_interface::DeleteNetworkInterfaceError;
-use crate::db::queries::network_interface::DeleteNetworkInterfaceQuery;
-use crate::db::queries::network_interface::InsertNetworkInterfaceError;
-use crate::db::queries::network_interface::InsertNetworkInterfaceQuery;
+use crate::db::queries::network_interface;
 use crate::db::queries::vpc::InsertVpcQuery;
 use crate::db::queries::vpc_subnet::FilterConflictingVpcSubnetRangesQuery;
 use crate::db::queries::vpc_subnet::SubnetError;
@@ -1577,15 +1574,15 @@ impl DataStore {
         authz_subnet: &authz::VpcSubnet,
         authz_instance: &authz::Instance,
         interface: IncompleteNetworkInterface,
-    ) -> Result<NetworkInterface, InsertNetworkInterfaceError> {
+    ) -> Result<NetworkInterface, network_interface::InsertError> {
         opctx
             .authorize(authz::Action::CreateChild, authz_instance)
             .await
-            .map_err(InsertNetworkInterfaceError::External)?;
+            .map_err(network_interface::InsertError::External)?;
         opctx
             .authorize(authz::Action::CreateChild, authz_subnet)
             .await
-            .map_err(InsertNetworkInterfaceError::External)?;
+            .map_err(network_interface::InsertError::External)?;
         self.instance_create_network_interface_raw(&opctx, interface).await
     }
 
@@ -1593,19 +1590,21 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         interface: IncompleteNetworkInterface,
-    ) -> Result<NetworkInterface, InsertNetworkInterfaceError> {
+    ) -> Result<NetworkInterface, network_interface::InsertError> {
         use db::schema::network_interface::dsl;
-        let query = InsertNetworkInterfaceQuery::new(interface.clone());
+        let query = network_interface::InsertQuery::new(interface.clone());
         diesel::insert_into(dsl::network_interface)
             .values(query)
             .returning(NetworkInterface::as_returning())
             .get_result_async(
                 self.pool_authorized(opctx)
                     .await
-                    .map_err(InsertNetworkInterfaceError::External)?,
+                    .map_err(network_interface::InsertError::External)?,
             )
             .await
-            .map_err(|e| InsertNetworkInterfaceError::from_pool(e, &interface))
+            .map_err(|e| {
+                network_interface::InsertError::from_pool(e, &interface)
+            })
     }
 
     /// Delete all network interfaces attached to the given instance.
@@ -1644,12 +1643,12 @@ impl DataStore {
         opctx: &OpContext,
         authz_instance: &authz::Instance,
         authz_interface: &authz::NetworkInterface,
-    ) -> Result<(), DeleteNetworkInterfaceError> {
+    ) -> Result<(), network_interface::DeleteError> {
         opctx
             .authorize(authz::Action::Delete, authz_interface)
             .await
-            .map_err(DeleteNetworkInterfaceError::External)?;
-        let query = DeleteNetworkInterfaceQuery::new(
+            .map_err(network_interface::DeleteError::External)?;
+        let query = network_interface::DeleteQuery::new(
             authz_instance.id(),
             authz_interface.id(),
         );
@@ -1658,10 +1657,12 @@ impl DataStore {
             .execute_async(
                 self.pool_authorized(opctx)
                     .await
-                    .map_err(DeleteNetworkInterfaceError::External)?,
+                    .map_err(network_interface::DeleteError::External)?,
             )
             .await
-            .map_err(|e| DeleteNetworkInterfaceError::from_pool(e, &query))?;
+            .map_err(|e| {
+                network_interface::DeleteError::from_pool(e, &query)
+            })?;
         Ok(())
     }
 

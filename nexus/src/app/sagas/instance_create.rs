@@ -9,7 +9,7 @@ use crate::app::{MAX_DISKS_PER_INSTANCE, MAX_NICS_PER_INSTANCE};
 use crate::context::OpContext;
 use crate::db::identity::Resource;
 use crate::db::lookup::LookupPath;
-use crate::db::queries::network_interface::InsertNetworkInterfaceError;
+use crate::db::queries::network_interface::InsertError as InsertNicError;
 use crate::defaults::DEFAULT_PRIMARY_NIC_NAME;
 use crate::external_api::params;
 use crate::saga_interface::SagaContext;
@@ -341,14 +341,14 @@ async fn sic_create_custom_network_interfaces(
             // insert that record if it exists, which obviously fails with a
             // primary key violation. (If the record does _not_ exist, one will
             // be inserted as usual, see
-            // `db::subnet_name::InsertNetworkInterfaceQuery` for details).
+            // `db::queries::network_interface::InsertQuery` for details).
             //
             // In this one specific case, we're asserting that any primary key
             // duplicate arises because this saga node ran partway and then
             // crashed. The saga recovery machinery will replay just this node,
             // without first unwinding it, so any previously-inserted interfaces
             // will still exist. This is expected.
-            Err(InsertNetworkInterfaceError::DuplicatePrimaryKey(_)) => {
+            Err(InsertNicError::DuplicatePrimaryKey(_)) => {
                 // TODO-observability: We should bump a counter here.
                 let log = osagactx.log();
                 warn!(
@@ -439,7 +439,7 @@ async fn sic_create_default_primary_network_interface(
             interface,
         )
         .await
-        .map_err(InsertNetworkInterfaceError::into_external)
+        .map_err(InsertNicError::into_external)
         .map_err(ActionError::action_failed)?;
     Ok(())
 }

@@ -13,8 +13,7 @@ use crate::db;
 use crate::db::identity::Resource;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
-use crate::db::queries::network_interface::DeleteNetworkInterfaceError;
-use crate::db::queries::network_interface::InsertNetworkInterfaceError;
+use crate::db::queries::network_interface;
 use crate::external_api::params;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
@@ -682,7 +681,7 @@ impl super::Nexus {
                 interface,
             )
             .await
-            .map_err(InsertNetworkInterfaceError::into_external)?;
+            .map_err(network_interface::InsertError::into_external)?;
         Ok(interface)
     }
 
@@ -767,7 +766,7 @@ impl super::Nexus {
                 &authz_interface,
             )
             .await
-            .map_err(DeleteNetworkInterfaceError::into_external)
+            .map_err(network_interface::DeleteError::into_external)
     }
 
     /// Invoked by a sled agent to publish an updated runtime state for an
