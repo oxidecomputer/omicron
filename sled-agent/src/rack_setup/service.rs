@@ -314,7 +314,10 @@ impl ServiceInner {
             (
                 bootstrap_addr,
                 SledAllocation {
-                    initialization_request: SledAgentRequest { subnet },
+                    initialization_request: SledAgentRequest {
+                        subnet,
+                        trust_quorum_share: None,
+                    },
                     services_request: request,
                 },
             )

@@ -4,24 +4,29 @@
 
 //! Request types for the bootstrap agent
 
+use super::trust_quorum::ShareDistribution;
+use omicron_common::address::{Ipv6Subnet, SLED_PREFIX};
+use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 
-use omicron_common::address::{Ipv6Subnet, SLED_PREFIX};
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-
 /// Identity signed by local RoT and Oxide certificate chain.
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Serialize, Deserialize)]
 pub struct ShareRequest {
     // TODO-completeness: format TBD; currently opaque.
     pub identity: Vec<u8>,
 }
 
 /// Configuration information for launching a Sled Agent.
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct SledAgentRequest {
     /// Portion of the IP space to be managed by the Sled Agent.
     pub subnet: Ipv6Subnet<SLED_PREFIX>,
+
+    /// Share of the rack secret for this Sled Agent.
+    // TODO-cleanup This is currently optional because we don't do trust quorum
+    // shares for single-node deployments (i.e., most dev/test environments),
+    // but eventually this should be required.
+    pub trust_quorum_share: Option<ShareDistribution>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
