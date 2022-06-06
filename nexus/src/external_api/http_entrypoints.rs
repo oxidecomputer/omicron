@@ -1568,15 +1568,14 @@ async fn images_get(
 }]
 async fn images_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    new_image: TypedBody<params::ImageCreate>,
+    new_image: TypedBody<params::GlobalImageCreate>,
 ) -> Result<HttpResponseCreated<GlobalImage>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
-    let new_image_params = &new_image.into_inner();
+    let new_image_params = new_image.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let image =
-            nexus.global_image_create(&opctx, &new_image_params).await?;
+        let image = nexus.global_image_create(&opctx, new_image_params).await?;
         Ok(HttpResponseCreated(image.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -1871,6 +1870,13 @@ pub struct NetworkInterfacePathParam {
 }
 
 /// Detach a network interface from an instance.
+///
+/// Note that the primary interface for an instance cannot be deleted if there
+/// are any secondary interfaces. A new primary interface must be designated
+/// first. The primary interface can be deleted if there are no secondary
+/// interfaces.
+// TODO-completeness: Add API for modifying an interface, including setting as
+// new primary. See https://github.com/oxidecomputer/omicron/issues/1153.
 #[endpoint {
     method = DELETE,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}",

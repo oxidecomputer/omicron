@@ -11,6 +11,7 @@ use crate::illumos::zone::{AddressRequest, ZONE_PREFIX};
 use crate::opte::OptePort;
 use ipnetwork::IpNetwork;
 use slog::Logger;
+use std::net::Ipv6Addr;
 use std::path::PathBuf;
 
 #[cfg(test)]
@@ -169,6 +170,21 @@ impl RunningZone {
         let network =
             Zones::ensure_address(Some(&self.inner.name), &addrobj, addrtype)?;
         Ok(network)
+    }
+
+    pub async fn add_default_route(
+        &self,
+        gateway: Ipv6Addr,
+    ) -> Result<(), RunCommandError> {
+        self.run_cmd(&[
+            "/usr/sbin/route",
+            "add",
+            "-inet6",
+            "default",
+            "-inet6",
+            &gateway.to_string(),
+        ])?;
+        Ok(())
     }
 
     /// Looks up a running zone based on the `zone_prefix`, if one already exists.

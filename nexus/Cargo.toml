@@ -49,7 +49,7 @@ ring = "0.16"
 samael = { git = "https://github.com/njaremko/samael", features = ["xmlsec"], branch = "master" }
 serde_json = "1.0"
 serde_urlencoded = "0.7.1"
-serde_with = "1.13.0"
+serde_with = "1.14.0"
 sled-agent-client = { path = "../sled-agent-client" }
 slog-dtrace = "0.2"
 structopt = "0.3"
@@ -73,9 +73,6 @@ features = [ "usdt-probes" ]
 
 [dependencies.omicron-common]
 path = "../common"
-
-[dependencies.omicron-sled-agent]
-path = "../sled-agent"
 
 [dependencies.oximeter]
 version = "0.1.0"
@@ -115,7 +112,7 @@ version = "0.7"
 features = [ "with-chrono-0_4", "with-serde_json-1", "with-uuid-1" ]
 
 [dependencies.uuid]
-version = "1.0.0"
+version = "1.1.0"
 features = [ "serde", "v4" ]
 
 [dev-dependencies]

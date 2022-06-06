@@ -154,7 +154,8 @@ impl super::Nexus {
                 | Error::Forbidden
                 | Error::InternalError { .. }
                 | Error::ServiceUnavailable { .. }
-                | Error::MethodNotAllowed { .. } => {
+                | Error::MethodNotAllowed { .. }
+                | Error::TypeVersionMismatch { .. } => {
                     Reason::UnknownError { source: error }
                 }
             })?;

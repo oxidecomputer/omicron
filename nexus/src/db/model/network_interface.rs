@@ -26,6 +26,8 @@ pub struct NetworkInterface {
     // If neither is specified, auto-assign one of each?
     pub ip: ipnetwork::IpNetwork,
     pub slot: i16,
+    #[diesel(column_name = is_primary)]
+    pub primary: bool,
 }
 
 impl From<NetworkInterface> for external::NetworkInterface {
@@ -37,6 +39,7 @@ impl From<NetworkInterface> for external::NetworkInterface {
             subnet_id: iface.subnet_id,
             ip: iface.ip.ip(),
             mac: *iface.mac,
+            primary: iface.primary,
         }
     }
 }
@@ -46,11 +49,9 @@ impl From<NetworkInterface> for external::NetworkInterface {
 #[derive(Clone, Debug)]
 pub struct IncompleteNetworkInterface {
     pub identity: NetworkInterfaceIdentity,
-
     pub instance_id: Uuid,
     pub vpc_id: Uuid,
     pub subnet: VpcSubnet,
-    pub mac: MacAddr,
     pub ip: Option<std::net::IpAddr>,
 }
 
@@ -60,7 +61,6 @@ impl IncompleteNetworkInterface {
         instance_id: Uuid,
         vpc_id: Uuid,
         subnet: VpcSubnet,
-        mac: MacAddr,
         identity: external::IdentityMetadataCreateParams,
         ip: Option<std::net::IpAddr>,
     ) -> Result<Self, external::Error> {
@@ -68,7 +68,6 @@ impl IncompleteNetworkInterface {
             subnet.check_requestable_addr(ip)?;
         };
         let identity = NetworkInterfaceIdentity::new(interface_id, identity);
-
-        Ok(Self { identity, instance_id, subnet, vpc_id, mac, ip })
+        Ok(Self { identity, instance_id, subnet, vpc_id, ip })
     }
 }

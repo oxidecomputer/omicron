@@ -199,7 +199,7 @@ lazy_static! {
         // Create a GlobalImage
         SetupReq {
             url: "/images",
-            body: serde_json::to_value(&*DEMO_IMAGE_CREATE).unwrap(),
+            body: serde_json::to_value(&*DEMO_GLOBAL_IMAGE_CREATE).unwrap(),
         },
         // Create a SAML identity provider
         SetupReq {

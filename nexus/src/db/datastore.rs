@@ -40,8 +40,7 @@ use crate::db::lookup::LookupPath;
 use crate::db::model::DatabaseString;
 use crate::db::model::IncompleteVpc;
 use crate::db::model::Vpc;
-use crate::db::queries::network_interface::InsertNetworkInterfaceQuery;
-use crate::db::queries::network_interface::NetworkInterfaceError;
+use crate::db::queries::network_interface;
 use crate::db::queries::vpc::InsertVpcQuery;
 use crate::db::queries::vpc_subnet::FilterConflictingVpcSubnetRangesQuery;
 use crate::db::queries::vpc_subnet::SubnetError;
@@ -1575,15 +1574,15 @@ impl DataStore {
         authz_subnet: &authz::VpcSubnet,
         authz_instance: &authz::Instance,
         interface: IncompleteNetworkInterface,
-    ) -> Result<NetworkInterface, NetworkInterfaceError> {
+    ) -> Result<NetworkInterface, network_interface::InsertError> {
         opctx
             .authorize(authz::Action::CreateChild, authz_instance)
             .await
-            .map_err(NetworkInterfaceError::External)?;
+            .map_err(network_interface::InsertError::External)?;
         opctx
             .authorize(authz::Action::CreateChild, authz_subnet)
             .await
-            .map_err(NetworkInterfaceError::External)?;
+            .map_err(network_interface::InsertError::External)?;
         self.instance_create_network_interface_raw(&opctx, interface).await
     }
 
@@ -1591,19 +1590,21 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         interface: IncompleteNetworkInterface,
-    ) -> Result<NetworkInterface, NetworkInterfaceError> {
+    ) -> Result<NetworkInterface, network_interface::InsertError> {
         use db::schema::network_interface::dsl;
-        let query = InsertNetworkInterfaceQuery::new(interface.clone());
+        let query = network_interface::InsertQuery::new(interface.clone());
         diesel::insert_into(dsl::network_interface)
             .values(query)
             .returning(NetworkInterface::as_returning())
             .get_result_async(
                 self.pool_authorized(opctx)
                     .await
-                    .map_err(NetworkInterfaceError::External)?,
+                    .map_err(network_interface::InsertError::External)?,
             )
             .await
-            .map_err(|e| NetworkInterfaceError::from_pool(e, &interface))
+            .map_err(|e| {
+                network_interface::InsertError::from_pool(e, &interface)
+            })
     }
 
     /// Delete all network interfaces attached to the given instance.
@@ -1634,27 +1635,33 @@ impl DataStore {
     }
 
     /// Delete a `NetworkInterface` attached to a provided instance.
+    ///
+    /// Note that the primary interface for an instance cannot be deleted if
+    /// there are any secondary interfaces.
     pub async fn instance_delete_network_interface(
         &self,
         opctx: &OpContext,
+        authz_instance: &authz::Instance,
         authz_interface: &authz::NetworkInterface,
-    ) -> DeleteResult {
-        opctx.authorize(authz::Action::Delete, authz_interface).await?;
-
-        use db::schema::network_interface::dsl;
-        let now = Utc::now();
-        let interface_id = authz_interface.id();
-        diesel::update(dsl::network_interface)
-            .filter(dsl::id.eq(interface_id))
-            .filter(dsl::time_deleted.is_null())
-            .set((dsl::time_deleted.eq(now),))
-            .execute_async(self.pool_authorized(opctx).await?)
+    ) -> Result<(), network_interface::DeleteError> {
+        opctx
+            .authorize(authz::Action::Delete, authz_interface)
+            .await
+            .map_err(network_interface::DeleteError::External)?;
+        let query = network_interface::DeleteQuery::new(
+            authz_instance.id(),
+            authz_interface.id(),
+        );
+        query
+            .clone()
+            .execute_async(
+                self.pool_authorized(opctx)
+                    .await
+                    .map_err(network_interface::DeleteError::External)?,
+            )
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByResource(authz_interface),
-                )
+                network_interface::DeleteError::from_pool(e, &query)
             })?;
         Ok(())
     }

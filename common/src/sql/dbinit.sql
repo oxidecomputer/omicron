@@ -564,7 +564,8 @@ CREATE TABLE omicron.public.global_image (
     volume_id UUID NOT NULL,
 
     url STRING(8192),
-    version STRING(64),
+    distribution STRING(64) NOT NULL,
+    version STRING(64) NOT NULL,
     digest TEXT,
     block_size omicron.public.block_size NOT NULL,
     size_bytes INT NOT NULL
@@ -721,13 +722,28 @@ CREATE TABLE omicron.public.network_interface (
     vpc_id UUID NOT NULL,
     /* FK into VPCSubnet table. */
     subnet_id UUID NOT NULL,
-    mac STRING(17) NOT NULL, -- e.g., "ff:ff:ff:ff:ff:ff"
+
+    /*
+     * The EUI-48 MAC address of the guest interface.
+     *
+     * Note that we use the bytes of a 64-bit integer, in big-endian byte order
+     * to represent the MAC.
+     */
+    mac INT8 NOT NULL,
+
     ip INET NOT NULL,
     /*
      * Limited to 8 NICs per instance. This value must be kept in sync with
      * `crate::nexus::MAX_NICS_PER_INSTANCE`.
      */
-    slot INT2 NOT NULL CHECK (slot >= 0 AND slot < 8)
+    slot INT2 NOT NULL CHECK (slot >= 0 AND slot < 8),
+
+    /* True if this interface is the primary interface for the instance.
+     *
+     * The primary interface appears in DNS and its address is used for external
+     * connectivity for the instance.
+     */
+    is_primary BOOL NOT NULL
 );
 
 /* TODO-completeness

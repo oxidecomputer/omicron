@@ -13,7 +13,7 @@ use crate::db;
 use crate::db::identity::Resource;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
-use crate::db::queries::network_interface::NetworkInterfaceError;
+use crate::db::queries::network_interface;
 use crate::external_api::params;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
@@ -642,7 +642,8 @@ impl super::Nexus {
         // instance between this check and when we actually create the NIC
         // record. One solution is to place the state verification in the query
         // to create the NIC. Unfortunately, that query is already very
-        // complicated.
+        // complicated. See
+        // https://github.com/oxidecomputer/omicron/issues/1134.
         let stopped =
             db::model::InstanceState::new(external::InstanceState::Stopped);
         if db_instance.runtime_state.state != stopped {
@@ -662,14 +663,12 @@ impl super::Nexus {
                 .vpc_subnet_name(&subnet_name)
                 .fetch()
                 .await?;
-        let mac = db::model::MacAddr::new()?;
         let interface_id = Uuid::new_v4();
         let interface = db::model::IncompleteNetworkInterface::new(
             interface_id,
             authz_instance.id(),
             authz_vpc.id(),
             db_subnet,
-            mac,
             params.identity.clone(),
             params.ip,
         )?;
@@ -682,7 +681,7 @@ impl super::Nexus {
                 interface,
             )
             .await
-            .map_err(NetworkInterfaceError::into_external)?;
+            .map_err(network_interface::InsertError::into_external)?;
         Ok(interface)
     }
 
@@ -726,6 +725,9 @@ impl super::Nexus {
     }
 
     /// Delete a network interface from the provided instance.
+    ///
+    /// Note that the primary interface for an instance cannot be deleted if
+    /// there are any secondary interfaces.
     pub async fn instance_delete_network_interface(
         &self,
         opctx: &OpContext,
@@ -748,6 +750,8 @@ impl super::Nexus {
             .await?;
 
         // TODO-completeness: We'd like to relax this once hot-plug is supported
+        // TODO-correctness: There's a race condition here. Someone may start
+        // the instance after this check but before we actually delete the NIC.
         let stopped =
             db::model::InstanceState::new(external::InstanceState::Stopped);
         if db_instance.runtime_state.state != stopped {
@@ -756,8 +760,13 @@ impl super::Nexus {
             ));
         }
         self.db_datastore
-            .instance_delete_network_interface(opctx, &authz_interface)
+            .instance_delete_network_interface(
+                opctx,
+                &authz_instance,
+                &authz_interface,
+            )
             .await
+            .map_err(network_interface::DeleteError::into_external)
     }
 
     /// Invoked by a sled agent to publish an updated runtime state for an

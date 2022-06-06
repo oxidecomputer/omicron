@@ -166,8 +166,11 @@ pub struct GlobalImage {
     /// URL source of this image, if any
     pub url: Option<String>,
 
-    /// Version of this, if any
-    pub version: Option<String>,
+    /// Image distribution
+    pub distribution: String,
+
+    /// Image version
+    pub version: String,
 
     /// Hash of the image contents, if applicable
     pub digest: Option<Digest>,

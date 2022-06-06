@@ -14,6 +14,7 @@ use serde::{
     Deserialize, Deserializer, Serialize,
 };
 use std::net::IpAddr;
+use std::str::FromStr;
 use uuid::Uuid;
 
 // Silos
@@ -304,12 +305,15 @@ pub struct NetworkInterfaceCreate {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", content = "params", rename_all = "snake_case")]
 pub enum InstanceNetworkInterfaceAttachment {
-    /// Create one or more `NetworkInterface`s for the `Instance`
+    /// Create one or more `NetworkInterface`s for the `Instance`.
+    ///
+    /// If more than one interface is provided, then the first will be
+    /// designated the primary interface for the instance.
     Create(Vec<NetworkInterfaceCreate>),
 
-    /// Default networking setup, which creates a single interface with an
-    /// auto-assigned IP address from project's "default" VPC and "default" VPC
-    /// Subnet.
+    /// The default networking configuration for an instance is to create a
+    /// single primary interface with an automatically-assigned IP address. The
+    /// IP will be pulled from the Project's default VPC / VPC Subnet.
     Default,
 
     /// No network interfaces at all will be created for the instance.
@@ -598,10 +602,129 @@ pub struct NetworkInterfaceIdentifier {
 
 /// The source of the underlying image.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(tag = "type", content = "src", rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum ImageSource {
-    Url(String),
-    Snapshot(Uuid),
+    Url {
+        url: String,
+    },
+    Snapshot {
+        id: Uuid,
+    },
+
+    /// Boot the Alpine ISO that ships with the Propolis zone. Intended for
+    /// development purposes only.
+    YouCanBootAnythingAsLongAsItsAlpine,
+}
+
+/// OS image distribution
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct Distribution(String);
+
+impl From<Distribution> for String {
+    fn from(distribution: Distribution) -> String {
+        distribution.0
+    }
+}
+
+impl TryFrom<String> for Distribution {
+    type Error = String;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if value.len() > 63 {
+            return Err(String::from(
+                "distribution may contain at most 63 characters",
+            ));
+        }
+
+        let mut iter = value.chars();
+
+        let first = iter.next().ok_or_else(|| {
+            String::from("distribution requires at least one character")
+        })?;
+        if !first.is_ascii_lowercase() {
+            return Err(String::from(
+                "distribution must begin with an ASCII lowercase character",
+            ));
+        }
+
+        let mut last = first;
+        for c in iter {
+            last = c;
+
+            if !c.is_ascii_lowercase() && !c.is_digit(10) && c != '-' {
+                return Err(format!(
+                    "distribution contains invalid character: \"{}\" (allowed \
+                     characters are lowercase ASCII, digits, and \"-\")",
+                    c
+                ));
+            }
+        }
+
+        if last == '-' {
+            return Err(String::from("distribution cannot end with \"-\""));
+        }
+
+        Ok(Distribution(value))
+    }
+}
+
+impl FromStr for Distribution {
+    type Err = String;
+    fn from_str(value: &str) -> Result<Self, String> {
+        Distribution::try_from(String::from(value))
+    }
+}
+
+impl JsonSchema for Distribution {
+    fn schema_name() -> String {
+        "Distribution".to_string()
+    }
+
+    fn json_schema(
+        _gen: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::Schema::Object(schemars::schema::SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                title: Some("OS image distribution".to_string()),
+                description: Some(
+                    "Distribution must begin with a lower case ASCII letter, be \
+                     composed exclusively of lowercase ASCII, uppercase \
+                     ASCII, numbers, and '-', and may not end with a '-'."
+                        .to_string(),
+                ),
+                ..Default::default()
+            })),
+            instance_type: Some(schemars::schema::SingleOrVec::Single(
+                Box::new(schemars::schema::InstanceType::String),
+            )),
+            string: Some(Box::new(schemars::schema::StringValidation {
+                max_length: Some(63),
+                min_length: None,
+                pattern: Some("[a-z](|[a-zA-Z0-9-]*[a-zA-Z0-9])".to_string()),
+            })),
+            ..Default::default()
+        })
+    }
+}
+
+/// Create-time parameters for an
+/// [`GlobalImage`](omicron_common::api::external::GlobalImage)
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct GlobalImageCreate {
+    /// common identifying metadata
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+
+    /// OS image distribution
+    pub distribution: Distribution,
+
+    /// image version
+    pub version: String,
+
+    /// block size in bytes
+    pub block_size: BlockSize,
+
+    /// The source of the image's contents.
+    pub source: ImageSource,
 }
 
 /// Create-time parameters for an

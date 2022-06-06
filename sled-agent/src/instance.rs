@@ -4,9 +4,7 @@
 
 //! API for controlling a single instance.
 
-use crate::common::instance::{
-    Action as InstanceAction, InstanceStates, PROPOLIS_PORT,
-};
+use crate::common::instance::{Action as InstanceAction, InstanceStates};
 use crate::illumos::running_zone::{
     InstalledZone, RunCommandError, RunningZone,
 };
@@ -23,6 +21,7 @@ use crate::params::{
 };
 use anyhow::anyhow;
 use futures::lock::{Mutex, MutexGuard};
+use omicron_common::address::PROPOLIS_PORT;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::backoff;
 use propolis_client::api::DiskRequest;
@@ -715,7 +714,7 @@ impl Instance {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::illumos::dladm::PhysicalLink;
+    use crate::illumos::dladm::Etherstub;
     use crate::mocks::MockNexusClient;
     use crate::opte::OptePortAllocator;
     use crate::params::InstanceStateRequested;
@@ -786,7 +785,7 @@ mod test {
         let log = logger();
         let vnic_allocator = VnicAllocator::new(
             "Test".to_string(),
-            PhysicalLink("mylink".to_string()),
+            Etherstub("mylink".to_string()),
         );
         let port_allocator = OptePortAllocator::new();
         let nexus_client = MockNexusClient::default();
