@@ -1704,8 +1704,6 @@ async fn instance_network_interfaces_get(
                 &organization_name,
                 &project_name,
                 &instance_name,
-                &data_page_params_for(&rqctx, &query)?
-                    .map_name(|n| Name::ref_cast(n)),
             )
             .await?
             .into_iter()

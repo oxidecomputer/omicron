@@ -1750,16 +1750,16 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
-        pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<NetworkInterface> {
         opctx.authorize(authz::Action::ListChildren, authz_instance).await?;
-
         use db::schema::network_interface::dsl;
-        paginated(dsl::network_interface, dsl::name, &pagparams)
+
+        dsl::network_interface
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::instance_id.eq(authz_instance.id()))
+            .filter(dsl::vpc_id.eq(authz_instance.id()))
+            .order(dsl::name.asc())
             .select(NetworkInterface::as_select())
-            .load_async::<NetworkInterface>(self.pool_authorized(opctx).await?)
+            .load_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }

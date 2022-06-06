@@ -692,7 +692,6 @@ impl super::Nexus {
         organization_name: &Name,
         project_name: &Name,
         instance_name: &Name,
-        pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::NetworkInterface> {
         let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
             .organization_name(organization_name)
@@ -701,7 +700,7 @@ impl super::Nexus {
             .lookup_for(authz::Action::ListChildren)
             .await?;
         self.db_datastore
-            .instance_list_network_interfaces(opctx, &authz_instance, pagparams)
+            .instance_list_network_interfaces(opctx, &authz_instance)
             .await
     }
 
