@@ -9,6 +9,7 @@ use crate::bootstrap::config::BOOTSTRAP_AGENT_PORT;
 use crate::bootstrap::discovery::PeerMonitorObserver;
 use crate::bootstrap::params::SledAgentRequest;
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
+use crate::bootstrap::trust_quorum::{RackSecret, ShareDistribution};
 use crate::params::ServiceRequest;
 use omicron_common::address::{get_sled_address, ReservedRackSubnet};
 use omicron_common::backoff::{
@@ -46,6 +47,9 @@ pub enum SetupServiceError {
 
     #[error("Failed to construct an HTTP client: {0}")]
     HttpClient(reqwest::Error),
+
+    #[error("Failed to split rack secret: {0:?}")]
+    SplitRackSecret(vsss_rs::Error),
 }
 
 // The workload / information allocated to a single sled.
@@ -264,8 +268,42 @@ impl ServiceInner {
     async fn create_plan(
         &self,
         config: &Config,
-        bootstrap_addrs: impl IntoIterator<Item = Ipv6Addr>,
+        bootstrap_addrs: Vec<Ipv6Addr>,
     ) -> Result<HashMap<SocketAddrV6, SledAllocation>, SetupServiceError> {
+        // Create a rack secret, unless we're in the single-sled case.
+        let mut rack_secret_shares = if bootstrap_addrs.len() > 1 {
+            let total_shares = bootstrap_addrs.len();
+            if config.rack_secret_threshold > 1 {
+                let secret = RackSecret::new();
+                let (shares, verifier) = secret
+                    .split(config.rack_secret_threshold, total_shares)
+                    .map_err(SetupServiceError::SplitRackSecret)?;
+
+                // Sanity check that `split` returned the expected number of
+                // shares (one per bootstrap agent)
+                assert_eq!(shares.len(), total_shares);
+
+                Some(shares.into_iter().map(move |share| ShareDistribution {
+                    threshold: config.rack_secret_threshold,
+                    total_shares,
+                    verifier: verifier.clone(),
+                    share,
+                }))
+            } else {
+                warn!(
+                    self.log,
+                    concat!(
+                        "Skipping rack secret creation due to config",
+                        " (despite discovery of {} bootstrap agents)"
+                    ),
+                    total_shares,
+                );
+                None
+            }
+        } else {
+            None
+        };
+
         let bootstrap_addrs = bootstrap_addrs.into_iter().enumerate();
         let reserved_rack_subnet = ReservedRackSubnet::new(config.az_subnet());
         let dns_subnets = reserved_rack_subnet.get_dns_subnets();
@@ -316,7 +354,15 @@ impl ServiceInner {
                 SledAllocation {
                     initialization_request: SledAgentRequest {
                         subnet,
-                        trust_quorum_share: None,
+                        trust_quorum_share: rack_secret_shares.as_mut().map(
+                            |shares_iter| {
+                                // We asserted when creating
+                                // `rack_secret_shares` that it contained
+                                // exactly the number of shares as we have
+                                // bootstrap addrs, so we can unwrap here.
+                                shares_iter.next().unwrap()
+                            },
+                        ),
                     },
                     services_request: request,
                 },
