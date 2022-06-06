@@ -24,7 +24,6 @@ use omicron_common::backoff::{
 };
 
 use slog::Logger;
-use std::io;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -56,28 +55,6 @@ pub enum BootstrapError {
 impl From<BootstrapError> for ExternalError {
     fn from(err: BootstrapError) -> Self {
         Self::internal_error(&err.to_string())
-    }
-}
-
-// Attempt to read a key share file. If the file does not exist, we return
-// `Ok(None)`, indicating the sled is operating in a single node cluster. If
-// the file exists, we parse it and return Ok(ShareDistribution). For any
-// other error, we return the error.
-//
-// TODO: Remove after dynamic key generation. See #513.
-fn read_key_share() -> Result<Option<ShareDistribution>, BootstrapError> {
-    let key_share_dir = Path::new("/opt/oxide/sled-agent/pkg");
-
-    match ShareDistribution::read(&key_share_dir) {
-        Ok(share) => Ok(Some(share)),
-        Err(TrustQuorumError::Io { message, err }) => {
-            if err.kind() == io::ErrorKind::NotFound {
-                Ok(None)
-            } else {
-                Err(BootstrapError::Io { message, err })
-            }
-        }
-        Err(e) => Err(e.into()),
     }
 }
 
@@ -184,21 +161,10 @@ impl Agent {
                 message: format!("Monitoring for peers from {address}"),
                 err,
             })?;
-        let share = read_key_share()?;
-        let agent = Agent {
-            log: ba_log,
-            parent_log: log,
-            peer_monitor,
-            share,
-            rss: Mutex::new(None),
-            sled_agent: Mutex::new(None),
-            sled_config,
-            sp,
-        };
 
         let request_path = get_sled_agent_request_path();
-        if request_path.exists() {
-            info!(agent.log, "Sled already configured, loading sled agent");
+        let sled_request = if request_path.exists() {
+            info!(ba_log, "Sled already configured, loading sled agent");
             let sled_request: SledAgentRequest = toml::from_str(
                 &tokio::fs::read_to_string(&request_path).await.map_err(
                     |err| BootstrapError::Io {
@@ -210,6 +176,25 @@ impl Agent {
                 )?,
             )
             .map_err(|err| BootstrapError::Toml { path: request_path, err })?;
+            Some(sled_request)
+        } else {
+            None
+        };
+
+        let agent = Agent {
+            log: ba_log,
+            parent_log: log,
+            peer_monitor,
+            share: sled_request
+                .as_ref()
+                .and_then(|req| req.trust_quorum_share.clone()),
+            rss: Mutex::new(None),
+            sled_agent: Mutex::new(None),
+            sled_config,
+            sp,
+        };
+
+        if let Some(sled_request) = sled_request {
             agent.request_agent(&sled_request).await?;
         }
 
@@ -252,6 +237,19 @@ impl Agent {
                     server.address().ip(),
                     sled_address.ip(),
                 );
+                return Err(BootstrapError::SledError(err_str));
+            }
+
+            // Bail out if this request includes a trust quorum share that
+            // doesn't match ours. TODO-correctness Need to handle a
+            // partially-initialized rack where we may have a share from a
+            // previously-started-but-not-completed init process.
+            if request.trust_quorum_share != self.share {
+                let err_str = concat!(
+                    "Sled Agent already running with",
+                    " a different trust quorum share"
+                )
+                .to_string();
                 return Err(BootstrapError::SledError(err_str));
             }
 
