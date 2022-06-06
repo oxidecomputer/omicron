@@ -14,6 +14,7 @@ use omicron_sled_agent::bootstrap::{
 };
 use omicron_sled_agent::rack_setup::config::SetupServiceConfig as RssConfig;
 use omicron_sled_agent::{config::Config as SledConfig, server as sled_server};
+use sp_sim::config::GimletConfig;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use structopt::StructOpt;
@@ -108,6 +109,20 @@ async fn do_run() -> Result<(), CmdError> {
             } else {
                 None
             };
+            let sp_config_path = {
+                let mut sp_config_path = config_path.clone();
+                sp_config_path.pop();
+                sp_config_path.push("config-sp.toml");
+                sp_config_path
+            };
+            let sp_config = if sp_config_path.exists() {
+                Some(
+                    GimletConfig::from_file(sp_config_path)
+                        .map_err(|e| CmdError::Failure(e.to_string()))?,
+                )
+            } else {
+                None
+            };
 
             // Derive the bootstrap address from the data link's MAC address.
             let link = config
@@ -116,16 +131,47 @@ async fn do_run() -> Result<(), CmdError> {
             let bootstrap_address = bootstrap_address(link)
                 .map_err(|e| CmdError::Failure(e.to_string()))?;
 
+            // Are we going to simulate a local SP? If so:
+            //
+            // 1. The bootstrap dropshot server listens on localhost
+            // 2. A sprockets proxy listens on `bootstrap_address` (and relays
+            //    incoming connections to the localhost dropshot server)
+            //
+            // If we're not simulating a local SP, we can't establish sprockets
+            // sessions, so we'll have the bootstrap dropshot server listen on
+            // `bootstrap_address` (and no sprockets proxy).
+            //
+            // TODO-security: With this configuration, dropshot itself is
+            // running plain HTTP and blindly trusting all connections from
+            // localhost. We have a similar sprockets proxy on the client side,
+            // where the proxy blindly trusts all connections from localhost
+            // (although the client-side proxy only runs while is being made,
+            // while our dropshot server is always listening). Can we secure
+            // these connections sufficiently? Other options include expanding
+            // dropshot/progenitor to allow a custom connection layer (supported
+            // by hyper, but not reqwest), keeping the sprockets proxy but using
+            // something other than TCP that we can lock down, or abandoning
+            // dropshot and using a bespoke protocol over a raw
+            // sprockets-encrypted TCP connection.
+            let (bootstrap_dropshot_addr, sprockets_proxy_bind_addr) =
+                if sp_config.is_some() {
+                    ("[::1]:0".parse().unwrap(), Some(bootstrap_address))
+                } else {
+                    (SocketAddr::V6(bootstrap_address), None)
+                };
+
             // Configure and run the Bootstrap server.
             let bootstrap_config = BootstrapConfig {
                 id: config.id,
                 dropshot: ConfigDropshot {
-                    bind_address: SocketAddr::V6(bootstrap_address),
+                    bind_address: bootstrap_dropshot_addr,
                     request_body_max_bytes: 1024 * 1024,
                     ..Default::default()
                 },
                 log: config.log.clone(),
                 rss_config,
+                sprockets_proxy_bind_addr,
+                sp_config,
             };
 
             // TODO: It's a little silly to pass the config this way - namely,
