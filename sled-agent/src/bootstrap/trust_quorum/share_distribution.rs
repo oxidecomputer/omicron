@@ -4,6 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json;
+use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 use vsss_rs::Share;
@@ -16,12 +17,25 @@ const FILENAME: &'static str = "share.json";
 /// A ShareDistribution is an individual share of a secret along with all the
 /// metadata required to allow a server in possession of the share to know how
 /// to correctly recreate a split secret.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct ShareDistribution {
     pub threshold: usize,
     pub total_shares: usize,
     pub verifier: Verifier,
     pub share: Share,
+}
+
+// We don't want to risk debug-logging the actual share contents, so implement
+// `Debug` manually and omit sensitive fields.
+impl fmt::Debug for ShareDistribution {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ShareDistribution")
+            .field("threshold", &self.threshold)
+            .field("total_shares", &self.total_shares)
+            .field("verifier", &"Verifier")
+            .field("share", &"Share")
+            .finish()
+    }
 }
 
 impl ShareDistribution {
