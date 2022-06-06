@@ -4,6 +4,8 @@
 
 //! Params define the request bodies of API endpoints for creating or updating resources.
 
+use omicron_common::api::external::IpNet;
+use omicron_common::api::external::IpRange;
 use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
     InstanceCpuCount, Ipv4Net, Ipv6Net, Name,
@@ -308,6 +310,48 @@ pub struct NetworkInterfaceUpdate {
     // for the instance, though not the name.
     #[serde(default)]
     pub make_primary: bool,
+}
+
+// IP POOLS
+
+/// Create-time parameters for an IP Pool.
+///
+/// See [`IpPool`](omicron_nexus::external_api::views::IpPool)
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct IpPoolCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+}
+
+/// Parameters for updating an IP Pool
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct IpPoolUpdate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParams,
+}
+
+/// Parameters for adding a new IP range to an IP Pool
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]
+pub enum IpRangeAdd {
+    Network(IpNet),
+    Range(IpRange),
+}
+
+/// Parameters for creating a new CIDR block within an existing IP Pool.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct IpPoolCidrBlockCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+
+    /// The IP subnet, expressed as a CIDR block.
+    pub cidr_block: IpNet,
+}
+
+/// Parameters for updating an existing CIDR block within an IP Pool.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct IpPoolCidrBlockUpdate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParams,
 }
 
 // INSTANCES

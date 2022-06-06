@@ -525,6 +525,7 @@ pub enum ResourceType {
     Disk,
     Image,
     Instance,
+    IpPool,
     NetworkInterface,
     Rack,
     Service,
@@ -1123,6 +1124,51 @@ pub enum IpNet {
     V6(Ipv6Net),
 }
 
+impl IpNet {
+    /// Return the first address in this subnet
+    pub fn first_address(&self) -> IpAddr {
+        match self {
+            IpNet::V4(inner) => IpAddr::from(inner.iter().next().unwrap()),
+            IpNet::V6(inner) => IpAddr::from(inner.iter().next().unwrap()),
+        }
+    }
+
+    /// Return the last address in this subnet.
+    ///
+    /// For a subnet of size 1, e.g., a /32, this is the same as the first
+    /// address.
+    // NOTE: This is a workaround for the fact that the `ipnetwork` crate's
+    // iterator provides only the `Iterator::next()` method. That means that
+    // finding the last address is linear in the size of the subnet, which is
+    // completely untenable and totally avoidable with some addition. In the
+    // long term, we should either put up a patch to the `ipnetwork` crate or
+    // move the `ipnet` crate, which does provide an efficient iterator
+    // implementation.
+    pub fn last_address(&self) -> IpAddr {
+        match self {
+            IpNet::V4(inner) => {
+                let base: u32 = inner.network().into();
+                let size = inner.size() - 1;
+                std::net::IpAddr::V4(std::net::Ipv4Addr::from(base + size))
+            }
+            IpNet::V6(inner) => {
+                let base: u128 = inner.network().into();
+                let size = inner.size() - 1;
+                std::net::IpAddr::V6(std::net::Ipv6Addr::from(base + size))
+            }
+        }
+    }
+}
+
+impl From<ipnetwork::IpNetwork> for IpNet {
+    fn from(n: ipnetwork::IpNetwork) -> Self {
+        match n {
+            ipnetwork::IpNetwork::V4(v4) => IpNet::V4(Ipv4Net(v4)),
+            ipnetwork::IpNetwork::V6(v6) => IpNet::V6(Ipv6Net(v6)),
+        }
+    }
+}
+
 impl From<Ipv4Net> for IpNet {
     fn from(n: Ipv4Net) -> IpNet {
         IpNet::V4(n)
@@ -1256,6 +1302,116 @@ fn label_schema(
         ..Default::default()
     }
     .into()
+}
+
+/// An IP Range is a contiguous range of IP addresses, usually within an IP
+/// Pool.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+pub enum IpRange {
+    V4(Ipv4Range),
+    V6(Ipv6Range),
+}
+
+impl JsonSchema for IpRange {
+    fn schema_name() -> String {
+        "IpRange".to_string()
+    }
+
+    fn json_schema(
+        gen: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::SchemaObject {
+            metadata: Some(
+                schemars::schema::Metadata { ..Default::default() }.into(),
+            ),
+            subschemas: Some(
+                schemars::schema::SubschemaValidation {
+                    one_of: Some(vec![
+                        label_schema("v4", gen.subschema_for::<Ipv4Range>()),
+                        label_schema("v6", gen.subschema_for::<Ipv6Range>()),
+                    ]),
+                    ..Default::default()
+                }
+                .into(),
+            ),
+            ..Default::default()
+        }
+        .into()
+    }
+}
+
+impl IpRange {
+    pub fn first_address(&self) -> IpAddr {
+        match self {
+            IpRange::V4(inner) => IpAddr::from(inner.first),
+            IpRange::V6(inner) => IpAddr::from(inner.first),
+        }
+    }
+
+    pub fn last_address(&self) -> IpAddr {
+        match self {
+            IpRange::V4(inner) => IpAddr::from(inner.last),
+            IpRange::V6(inner) => IpAddr::from(inner.last),
+        }
+    }
+}
+
+/// A non-decreasing IPv4 address range, inclusive of both ends.
+///
+/// The first address must be less than or equal to the last address.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(try_from = "AnyIpv4Range")]
+pub struct Ipv4Range {
+    pub first: Ipv4Addr,
+    pub last: Ipv4Addr,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+struct AnyIpv4Range {
+    first: Ipv4Addr,
+    last: Ipv4Addr,
+}
+
+impl TryFrom<AnyIpv4Range> for Ipv4Range {
+    type Error = Error;
+    fn try_from(r: AnyIpv4Range) -> Result<Self, Self::Error> {
+        if r.first <= r.last {
+            Ok(Self { first: r.first, last: r.last })
+        } else {
+            Err(Error::invalid_request(
+                "IP address ranges must be non-decreasing",
+            ))
+        }
+    }
+}
+
+/// A non-decreasing IPv6 address range, inclusive of both ends.
+///
+/// The first address must be less than or equal to the last address.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(try_from = "AnyIpv6Range")]
+pub struct Ipv6Range {
+    pub first: Ipv6Addr,
+    pub last: Ipv6Addr,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+struct AnyIpv6Range {
+    first: Ipv6Addr,
+    last: Ipv6Addr,
+}
+
+impl TryFrom<AnyIpv6Range> for Ipv6Range {
+    type Error = Error;
+    fn try_from(r: AnyIpv6Range) -> Result<Self, Self::Error> {
+        if r.first <= r.last {
+            Ok(Self { first: r.first, last: r.last })
+        } else {
+            Err(Error::invalid_request(
+                "IP address ranges must be non-decreasing",
+            ))
+        }
+    }
 }
 
 /// A `RouteTarget` describes the possible locations that traffic matching a
@@ -2448,5 +2604,53 @@ mod test {
         assert_eq!(format!(r#""{}""#, net_str), ser);
         let net_des = serde_json::from_str::<IpNet>(&ser).unwrap();
         assert_eq!(net, net_des);
+    }
+
+    #[test]
+    fn test_ipnet_first_last_address() {
+        use std::net::IpAddr;
+        use std::net::Ipv4Addr;
+        use std::net::Ipv6Addr;
+        let net: IpNet = "fd00::/128".parse().unwrap();
+        assert_eq!(
+            net.first_address(),
+            IpAddr::from(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0)),
+        );
+        assert_eq!(
+            net.last_address(),
+            IpAddr::from(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0)),
+        );
+
+        let net: IpNet = "fd00::/64".parse().unwrap();
+        assert_eq!(
+            net.first_address(),
+            IpAddr::from(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0)),
+        );
+        assert_eq!(
+            net.last_address(),
+            IpAddr::from(Ipv6Addr::new(
+                0xfd00, 0, 0, 0, 0xffff, 0xffff, 0xffff, 0xffff
+            )),
+        );
+
+        let net: IpNet = "10.0.0.0/16".parse().unwrap();
+        assert_eq!(
+            net.first_address(),
+            IpAddr::from(Ipv4Addr::new(10, 0, 0, 0)),
+        );
+        assert_eq!(
+            net.last_address(),
+            IpAddr::from(Ipv4Addr::new(10, 0, 255, 255)),
+        );
+
+        let net: IpNet = "10.0.0.0/32".parse().unwrap();
+        assert_eq!(
+            net.first_address(),
+            IpAddr::from(Ipv4Addr::new(10, 0, 0, 0)),
+        );
+        assert_eq!(
+            net.last_address(),
+            IpAddr::from(Ipv4Addr::new(10, 0, 0, 0)),
+        );
     }
 }

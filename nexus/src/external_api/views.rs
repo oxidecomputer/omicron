@@ -8,12 +8,16 @@ use crate::authn;
 use crate::db::identity::{Asset, Resource};
 use crate::db::model;
 use api_identity::ObjectIdentity;
+use chrono::DateTime;
+use chrono::Utc;
+use omicron_common::api::external;
 use omicron_common::api::external::{
     ByteCount, Digest, IdentityMetadata, Ipv4Net, Ipv6Net, Name,
     ObjectIdentity, RoleName,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::net::IpAddr;
 use std::net::SocketAddrV6;
 use uuid::Uuid;
 
@@ -312,6 +316,44 @@ impl From<model::VpcRouter> for VpcRouter {
             vpc_id: router.vpc_id,
             kind: router.kind.into(),
         }
+    }
+}
+
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct IpPool {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+}
+
+impl From<model::IpPool> for IpPool {
+    fn from(pool: model::IpPool) -> Self {
+        Self { identity: pool.identity() }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct IpRange {
+    pub id: Uuid,
+    pub time_created: DateTime<Utc>,
+    pub range: external::IpRange,
+}
+
+impl From<model::IpPoolRange> for IpRange {
+    fn from(range: model::IpPoolRange) -> Self {
+        let r = match (range.first_address.ip(), range.last_address.ip()) {
+            (IpAddr::V4(first), IpAddr::V4(last)) => {
+                external::IpRange::V4(external::Ipv4Range { first, last })
+            }
+            (IpAddr::V6(first), IpAddr::V6(last)) => {
+                external::IpRange::V6(external::Ipv6Range { first, last })
+            }
+            (first, last) => unreachable!(
+                "Expected first and last address from the same IP \
+                protocol versions, found {:?} and {:?}",
+                first, last
+            ),
+        };
+        Self { id: range.id, time_created: range.time_created, range: r }
     }
 }
 
