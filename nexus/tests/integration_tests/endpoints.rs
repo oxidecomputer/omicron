@@ -52,6 +52,7 @@ lazy_static! {
                 description: String::from(""),
             },
             discoverable: true,
+            user_provision_type: params::UserProvisionType::Fixed,
         };
 
     // Organization used for testing

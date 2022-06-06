@@ -4,7 +4,7 @@
 
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use omicron_common::api::external::{IdentityMetadataCreateParams, Name};
-use omicron_nexus::authn::silos::IdentityProviderType;
+use omicron_nexus::authn::silos::{AuthenticatedSubject, IdentityProviderType};
 use omicron_nexus::external_api::params;
 use omicron_nexus::external_api::views::{
     self, IdentityProvider, Organization, SamlIdentityProvider, Silo,
@@ -19,6 +19,7 @@ use nexus_test_utils::resource_helpers::{
     objects_list_page_authz,
 };
 
+use crate::integration_tests::saml::SAML_IDP_DESCRIPTOR;
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 use omicron_nexus::authz::SiloRoles;
@@ -31,8 +32,15 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     let nexus = &cptestctx.server.apictx.nexus;
 
     // Create two silos: one discoverable, one not
-    create_silo(&client, "discoverable", true).await;
-    create_silo(&client, "hidden", false).await;
+    create_silo(
+        &client,
+        "discoverable",
+        true,
+        params::UserProvisionType::Fixed,
+    )
+    .await;
+    create_silo(&client, "hidden", false, params::UserProvisionType::Fixed)
+        .await;
 
     // Verify GET /silos/{silo} works for both discoverable and not
     let discoverable_url = "/silos/discoverable";
@@ -80,6 +88,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
         .silo_user_create(
             silos[0].identity.id, /* silo id */
             new_silo_user_id,
+            None,
         )
         .await
         .unwrap();
@@ -291,160 +300,6 @@ async fn test_listing_identity_providers(cptestctx: &ControlPlaneTestContext) {
     assert!(provider_name_set.contains(&silo_saml_idp_2.identity.name));
 }
 
-// Valid SAML IdP entity descriptor from https://en.wikipedia.org/wiki/SAML_metadata#Identity_provider_metadata
-// note: no signing keys
-pub const SAML_IDP_DESCRIPTOR: &str = r#"
-<md:EntityDescriptor entityID="https://sso.example.org/idp" validUntil="3017-08-30T19:10:29Z"
-    xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata"
-    xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
-    xmlns:mdrpi="urn:oasis:names:tc:SAML:metadata:rpi"
-    xmlns:mdattr="urn:oasis:names:tc:SAML:metadata:attribute"
-    xmlns:mdui="urn:oasis:names:tc:SAML:metadata:ui"
-    xmlns:ds="http://www.w3.org/2000/09/xmldsig#">
-    <md:Extensions>
-      <mdrpi:RegistrationInfo registrationAuthority="https://registrar.example.net"/>
-      <mdrpi:PublicationInfo creationInstant="2017-08-16T19:10:29Z" publisher="https://registrar.example.net"/>
-      <mdattr:EntityAttributes>
-        <saml:Attribute Name="http://registrar.example.net/entity-category" NameFormat="urn:oasis:names:tc:SAML:2.0:attrname-format:uri">
-          <saml:AttributeValue>https://registrar.example.net/category/self-certified</saml:AttributeValue>
-        </saml:Attribute>
-      </mdattr:EntityAttributes>
-    </md:Extensions>
-    <md:IDPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
-      <md:Extensions>
-        <mdui:UIInfo>
-          <mdui:DisplayName xml:lang="en">Example.org</mdui:DisplayName>
-          <mdui:Description xml:lang="en">The identity provider at Example.org</mdui:Description>
-          <mdui:Logo height="32" width="32" xml:lang="en">https://idp.example.org/myicon.png</mdui:Logo>
-        </mdui:UIInfo>
-      </md:Extensions>
-      <md:SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="https://idp.example.org/SAML2/SSO/Redirect"/>
-      <md:SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" Location="https://idp.example.org/SAML2/SSO/POST"/>
-    </md:IDPSSODescriptor>
-    <md:Organization>
-      <md:OrganizationName xml:lang="en">Example.org Non-Profit Org</md:OrganizationName>
-      <md:OrganizationDisplayName xml:lang="en">Example.org</md:OrganizationDisplayName>
-      <md:OrganizationURL xml:lang="en">https://www.example.org/</md:OrganizationURL>
-    </md:Organization>
-    <md:ContactPerson contactType="technical">
-      <md:SurName>SAML Technical Support</md:SurName>
-      <md:EmailAddress>mailto:technical-support@example.org</md:EmailAddress>
-    </md:ContactPerson>
-  </md:EntityDescriptor>"#;
-
-// Create a SAML IdP
-#[nexus_test]
-async fn test_create_a_saml_idp(cptestctx: &ControlPlaneTestContext) {
-    let client = &cptestctx.external_client;
-
-    const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true).await;
-
-    let silo: Silo =
-        NexusRequest::object_get(&client, &format!("/silos/{}", SILO_NAME,))
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .expect("failed to make request")
-            .parsed_body()
-            .unwrap();
-
-    let saml_idp_descriptor = SAML_IDP_DESCRIPTOR;
-
-    let server = Server::run();
-    server.expect(
-        Expectation::matching(request::method_path("GET", "/descriptor"))
-            .respond_with(status_code(200).body(saml_idp_descriptor)),
-    );
-
-    let silo_saml_idp: SamlIdentityProvider = object_create(
-        client,
-        &format!("/silos/{}/saml_identity_providers", SILO_NAME),
-        &params::SamlIdentityProviderCreate {
-            identity: IdentityMetadataCreateParams {
-                name: "some-totally-real-saml-provider"
-                    .to_string()
-                    .parse()
-                    .unwrap(),
-                description: "a demo provider".to_string(),
-            },
-
-            idp_metadata_source: params::IdpMetadataSource::Url {
-                url: server.url("/descriptor").to_string(),
-            },
-
-            idp_entity_id: "entity_id".to_string(),
-            sp_client_id: "client_id".to_string(),
-            acs_url: "http://acs".to_string(),
-            slo_url: "http://slo".to_string(),
-            technical_contact_email: "technical@fake".to_string(),
-
-            signing_keypair: None,
-        },
-    )
-    .await;
-
-    // Assert external authenticator opctx can read it
-    let nexus = &cptestctx.server.apictx.nexus;
-
-    let _retrieved_silo_nexus = nexus
-        .silo_fetch(
-            &nexus.opctx_external_authn(),
-            &omicron_common::api::external::Name::try_from(
-                SILO_NAME.to_string(),
-            )
-            .unwrap()
-            .into(),
-        )
-        .await
-        .unwrap();
-
-    let retrieved_silo_idp_from_nexus = IdentityProviderType::lookup(
-        &nexus.datastore(),
-        &nexus.opctx_external_authn(),
-        &omicron_common::api::external::Name::try_from(SILO_NAME.to_string())
-            .unwrap()
-            .into(),
-        &omicron_common::api::external::Name::try_from(
-            "some-totally-real-saml-provider".to_string(),
-        )
-        .unwrap()
-        .into(),
-    )
-    .await
-    .unwrap();
-
-    match retrieved_silo_idp_from_nexus {
-        IdentityProviderType::Saml(_) => {
-            // ok
-        }
-    }
-
-    // Expect the SSO redirect when trying to log in unauthenticated
-    let result = NexusRequest::new(
-        RequestBuilder::new(
-            client,
-            Method::GET,
-            &format!(
-                "/login/{}/{}",
-                silo.identity.name, silo_saml_idp.identity.name
-            ),
-        )
-        .expect_status(Some(StatusCode::FOUND)),
-    )
-    .execute()
-    .await
-    .expect("expected success");
-
-    assert!(result.headers["Location"]
-        .to_str()
-        .unwrap()
-        .to_string()
-        .starts_with(
-            "https://idp.example.org/SAML2/SSO/Redirect?SAMLRequest=",
-        ));
-}
-
 // Test that deleting the silo deletes the idp
 #[nexus_test]
 async fn test_deleting_a_silo_deletes_the_idp(
@@ -544,292 +399,6 @@ async fn test_deleting_a_silo_deletes_the_idp(
     .expect("expected success");
 }
 
-// Fail to create a SAML IdP out of an invalid descriptor
-#[nexus_test]
-async fn test_create_a_saml_idp_invalid_descriptor_truncated(
-    cptestctx: &ControlPlaneTestContext,
-) {
-    let client = &cptestctx.external_client;
-
-    const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true).await;
-
-    let saml_idp_descriptor = {
-        let mut saml_idp_descriptor = SAML_IDP_DESCRIPTOR.to_string();
-        saml_idp_descriptor.truncate(100);
-        saml_idp_descriptor
-    };
-
-    let server = Server::run();
-    server.expect(
-        Expectation::matching(request::method_path("GET", "/descriptor"))
-            .respond_with(status_code(200).body(saml_idp_descriptor)),
-    );
-
-    NexusRequest::new(
-        RequestBuilder::new(
-            client,
-            Method::POST,
-            &format!("/silos/{}/saml_identity_providers", SILO_NAME),
-        )
-        .body(Some(&params::SamlIdentityProviderCreate {
-            identity: IdentityMetadataCreateParams {
-                name: "some-totally-real-saml-provider"
-                    .to_string()
-                    .parse()
-                    .unwrap(),
-                description: "a demo provider".to_string(),
-            },
-
-            idp_metadata_source: params::IdpMetadataSource::Url {
-                url: server.url("/descriptor").to_string(),
-            },
-
-            idp_entity_id: "entity_id".to_string(),
-            sp_client_id: "client_id".to_string(),
-            acs_url: "http://acs".to_string(),
-            slo_url: "http://slo".to_string(),
-            technical_contact_email: "technical@fake".to_string(),
-
-            signing_keypair: None,
-        }))
-        .expect_status(Some(StatusCode::BAD_REQUEST)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("unexpected success");
-}
-
-// Fail to create a SAML IdP out of a descriptor with no SSO redirect binding url
-#[nexus_test]
-async fn test_create_a_saml_idp_invalid_descriptor_no_redirect_binding(
-    cptestctx: &ControlPlaneTestContext,
-) {
-    let client = &cptestctx.external_client;
-
-    const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true).await;
-
-    let saml_idp_descriptor = {
-        let saml_idp_descriptor = SAML_IDP_DESCRIPTOR.to_string();
-        saml_idp_descriptor
-            .lines()
-            .filter(|x| {
-                !x.contains(
-                    "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect",
-                )
-            })
-            .map(|x| x.to_string())
-            .collect::<Vec<String>>()
-            .join("\n")
-    };
-
-    assert!(!saml_idp_descriptor
-        .contains("urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"));
-
-    let server = Server::run();
-    server.expect(
-        Expectation::matching(request::method_path("GET", "/descriptor"))
-            .respond_with(status_code(200).body(saml_idp_descriptor)),
-    );
-
-    NexusRequest::new(
-        RequestBuilder::new(
-            client,
-            Method::POST,
-            &format!("/silos/{}/saml_identity_providers", SILO_NAME),
-        )
-        .body(Some(&params::SamlIdentityProviderCreate {
-            identity: IdentityMetadataCreateParams {
-                name: "some-totally-real-saml-provider"
-                    .to_string()
-                    .parse()
-                    .unwrap(),
-                description: "a demo provider".to_string(),
-            },
-
-            idp_metadata_source: params::IdpMetadataSource::Url {
-                url: server.url("/descriptor").to_string(),
-            },
-
-            idp_entity_id: "entity_id".to_string(),
-            sp_client_id: "client_id".to_string(),
-            acs_url: "http://acs".to_string(),
-            slo_url: "http://slo".to_string(),
-            technical_contact_email: "technical@fake".to_string(),
-
-            signing_keypair: None,
-        }))
-        .expect_status(Some(StatusCode::BAD_REQUEST)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("unexpected success");
-}
-
-// Create a hidden Silo with a SAML IdP
-#[nexus_test]
-async fn test_create_a_hidden_silo_saml_idp(
-    cptestctx: &ControlPlaneTestContext,
-) {
-    let client = &cptestctx.external_client;
-
-    create_silo(&client, "hidden", false).await;
-
-    // Valid IdP descriptor
-    let saml_idp_descriptor = SAML_IDP_DESCRIPTOR.to_string();
-
-    let server = Server::run();
-    server.expect(
-        Expectation::matching(request::method_path("GET", "/descriptor"))
-            .respond_with(status_code(200).body(saml_idp_descriptor)),
-    );
-
-    let silo_saml_idp: SamlIdentityProvider = object_create(
-        client,
-        "/silos/hidden/saml_identity_providers",
-        &params::SamlIdentityProviderCreate {
-            identity: IdentityMetadataCreateParams {
-                name: "some-totally-real-saml-provider"
-                    .to_string()
-                    .parse()
-                    .unwrap(),
-                description: "a demo provider".to_string(),
-            },
-
-            idp_metadata_source: params::IdpMetadataSource::Url {
-                url: server.url("/descriptor").to_string(),
-            },
-
-            idp_entity_id: "entity_id".to_string(),
-            sp_client_id: "client_id".to_string(),
-            acs_url: "http://acs".to_string(),
-            slo_url: "http://slo".to_string(),
-            technical_contact_email: "technical@fake".to_string(),
-
-            signing_keypair: None,
-        },
-    )
-    .await;
-
-    // Expect the SSO redirect when trying to log in
-    let result = NexusRequest::new(
-        RequestBuilder::new(
-            client,
-            Method::GET,
-            &format!("/login/hidden/{}", silo_saml_idp.identity.name),
-        )
-        .expect_status(Some(StatusCode::FOUND)),
-    )
-    .execute()
-    .await
-    .expect("expected success");
-
-    assert!(result.headers["Location"]
-        .to_str()
-        .unwrap()
-        .to_string()
-        .starts_with(
-            "https://idp.example.org/SAML2/SSO/Redirect?SAMLRequest=",
-        ));
-}
-
-// Can't create a SAML IdP if the metadata URL returns something that's not 200
-#[nexus_test]
-async fn test_saml_idp_metadata_url_404(cptestctx: &ControlPlaneTestContext) {
-    let client = &cptestctx.external_client;
-
-    const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true).await;
-
-    let server = Server::run();
-    server.expect(
-        Expectation::matching(request::method_path("GET", "/descriptor"))
-            .respond_with(status_code(404).body("no descriptor found")),
-    );
-
-    NexusRequest::new(
-        RequestBuilder::new(
-            client,
-            Method::POST,
-            &format!("/silos/{}/saml_identity_providers", SILO_NAME),
-        )
-        .body(Some(&params::SamlIdentityProviderCreate {
-            identity: IdentityMetadataCreateParams {
-                name: "some-totally-real-saml-provider"
-                    .to_string()
-                    .parse()
-                    .unwrap(),
-                description: "a demo provider".to_string(),
-            },
-
-            idp_metadata_source: params::IdpMetadataSource::Url {
-                url: server.url("/descriptor").to_string(),
-            },
-
-            idp_entity_id: "entity_id".to_string(),
-            sp_client_id: "client_id".to_string(),
-            acs_url: "http://acs".to_string(),
-            slo_url: "http://slo".to_string(),
-            technical_contact_email: "technical@fake".to_string(),
-
-            signing_keypair: None,
-        }))
-        .expect_status(Some(StatusCode::BAD_REQUEST)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("unexpected success");
-}
-
-// Can't create a SAML IdP if the metadata URL isn't a URL
-#[nexus_test]
-async fn test_saml_idp_metadata_url_invalid(
-    cptestctx: &ControlPlaneTestContext,
-) {
-    let client = &cptestctx.external_client;
-
-    const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true).await;
-
-    NexusRequest::new(
-        RequestBuilder::new(
-            client,
-            Method::POST,
-            &format!("/silos/{}/saml_identity_providers", SILO_NAME),
-        )
-        .body(Some(&params::SamlIdentityProviderCreate {
-            identity: IdentityMetadataCreateParams {
-                name: "some-totally-real-saml-provider"
-                    .to_string()
-                    .parse()
-                    .unwrap(),
-                description: "a demo provider".to_string(),
-            },
-
-            idp_metadata_source: params::IdpMetadataSource::Url {
-                url: "htttps://fake.url".to_string(),
-            },
-
-            idp_entity_id: "entity_id".to_string(),
-            sp_client_id: "client_id".to_string(),
-            acs_url: "http://acs".to_string(),
-            slo_url: "http://slo".to_string(),
-            technical_contact_email: "technical@fake".to_string(),
-
-            signing_keypair: None,
-        }))
-        .expect_status(Some(StatusCode::BAD_REQUEST)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("unexpected success");
-}
-
 // Create a Silo with a SAML IdP document string
 #[nexus_test]
 async fn test_saml_idp_metadata_data_valid(
@@ -837,7 +406,8 @@ async fn test_saml_idp_metadata_data_valid(
 ) {
     let client = &cptestctx.external_client;
 
-    create_silo(&client, "blahblah", true).await;
+    create_silo(&client, "blahblah", true, params::UserProvisionType::Fixed)
+        .await;
 
     let silo_saml_idp: SamlIdentityProvider = object_create(
         client,
@@ -895,7 +465,8 @@ async fn test_saml_idp_metadata_data_truncated(
 ) {
     let client = &cptestctx.external_client;
 
-    create_silo(&client, "blahblah", true).await;
+    create_silo(&client, "blahblah", true, params::UserProvisionType::Fixed)
+        .await;
 
     NexusRequest::new(
         RequestBuilder::new(
@@ -945,7 +516,8 @@ async fn test_saml_idp_metadata_data_invalid(
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true).await;
+    create_silo(&client, SILO_NAME, true, params::UserProvisionType::Fixed)
+        .await;
 
     NexusRequest::new(
         RequestBuilder::new(
@@ -982,155 +554,90 @@ async fn test_saml_idp_metadata_data_invalid(
     .expect("unexpected success");
 }
 
-// TODO samael does not support ECDSA yet, add tests when it does
-const RSA_KEY_1_PUBLIC: &str = include_str!("data/rsa-key-1-public.b64");
-const RSA_KEY_1_PRIVATE: &str = include_str!("data/rsa-key-1-private.b64");
-const RSA_KEY_2_PUBLIC: &str = include_str!("data/rsa-key-2-public.b64");
-const RSA_KEY_2_PRIVATE: &str = include_str!("data/rsa-key-2-private.b64");
+struct TestSiloUserProvisionTypes {
+    provision_type: params::UserProvisionType,
+    existing_silo_user: bool,
+    expect_user: bool,
+}
 
 #[nexus_test]
-async fn test_saml_idp_reject_keypair(cptestctx: &ControlPlaneTestContext) {
+async fn test_silo_user_provision_types(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.apictx.nexus;
 
-    let saml_idp_descriptor = SAML_IDP_DESCRIPTOR;
-
-    // Spin up a server but expect it never to be accessed
-    let server = Server::run();
-    server.expect(
-        Expectation::matching(request::method_path("GET", "/descriptor"))
-            .times(0)
-            .respond_with(status_code(200).body(saml_idp_descriptor)),
-    );
-
-    const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true).await;
-
-    let test_cases = vec![
-        // Reject signing keypair if the certificate or key is not base64
-        // encoded
-        params::DerEncodedKeyPair {
-            public_cert: "regular string".to_string(),
-            private_key: RSA_KEY_1_PRIVATE.to_string(),
+    let test_cases: Vec<TestSiloUserProvisionTypes> = vec![
+        // A silo configured with a "fixed" user provision type should fetch a
+        // user if it exists already.
+        TestSiloUserProvisionTypes {
+            provision_type: params::UserProvisionType::Fixed,
+            existing_silo_user: true,
+            expect_user: true,
         },
-        params::DerEncodedKeyPair {
-            public_cert: RSA_KEY_1_PUBLIC.to_string(),
-            private_key: "regular string".to_string(),
+        // A silo configured with a "fixed" user provision type should not create a
+        // user if one does not exist already.
+        TestSiloUserProvisionTypes {
+            provision_type: params::UserProvisionType::Fixed,
+            existing_silo_user: false,
+            expect_user: false,
         },
-        // Reject signing keypair if the certificate or key is base64 encoded
-        // but not valid
-        params::DerEncodedKeyPair {
-            public_cert: base64::encode("not a cert"),
-            private_key: RSA_KEY_1_PRIVATE.to_string(),
+        // A silo configured with a "JIT" user provision type should fetch a
+        // user if it exists already.
+        TestSiloUserProvisionTypes {
+            provision_type: params::UserProvisionType::Jit,
+            existing_silo_user: true,
+            expect_user: true,
         },
-        params::DerEncodedKeyPair {
-            public_cert: RSA_KEY_1_PUBLIC.to_string(),
-            private_key: base64::encode("not a cert"),
-        },
-        // Reject signing keypair if cert and key are swapped
-        params::DerEncodedKeyPair {
-            public_cert: RSA_KEY_1_PRIVATE.to_string(),
-            private_key: RSA_KEY_1_PUBLIC.to_string(),
-        },
-        // Reject signing keypair if the keys do not match
-        params::DerEncodedKeyPair {
-            public_cert: RSA_KEY_1_PUBLIC.to_string(),
-            private_key: RSA_KEY_2_PRIVATE.to_string(),
-        },
-        params::DerEncodedKeyPair {
-            public_cert: RSA_KEY_2_PUBLIC.to_string(),
-            private_key: RSA_KEY_1_PRIVATE.to_string(),
+        // A silo configured with a "JIT" user provision type should create a user
+        // if one does not exist already.
+        TestSiloUserProvisionTypes {
+            provision_type: params::UserProvisionType::Jit,
+            existing_silo_user: false,
+            expect_user: true,
         },
     ];
 
+    let new_silo_user_id =
+        "06a95238-1ec7-4d5c-a47b-c33544f2db20".parse().unwrap();
+
     for test_case in test_cases {
-        NexusRequest::new(
-            RequestBuilder::new(
-                client,
-                Method::POST,
-                &format!("/silos/{}/saml_identity_providers", SILO_NAME),
+        let silo =
+            create_silo(&client, "test-silo", true, test_case.provision_type)
+                .await;
+
+        if test_case.existing_silo_user {
+            nexus
+                .silo_user_create(
+                    silo.identity.id,
+                    new_silo_user_id,
+                    Some("external@id.com".into()),
+                )
+                .await
+                .unwrap();
+        }
+
+        let authn_opctx = nexus.opctx_external_authn();
+        let existing_silo_user = nexus
+            .silo_user_from_authenticated_subject(
+                &authn_opctx,
+                &silo.identity.name.into(),
+                &AuthenticatedSubject {
+                    external_id: "external@id.com".into(),
+                    groups: vec![],
+                },
             )
-            .body(Some(&params::SamlIdentityProviderCreate {
-                identity: IdentityMetadataCreateParams {
-                    name: "some-totally-real-saml-provider"
-                        .to_string()
-                        .parse()
-                        .unwrap(),
-                    description: "a demo provider".to_string(),
-                },
+            .await
+            .unwrap();
 
-                idp_metadata_source: params::IdpMetadataSource::Url {
-                    url: server.url("/descriptor").to_string(),
-                },
+        if test_case.expect_user {
+            assert!(existing_silo_user.is_some());
+        } else {
+            assert!(existing_silo_user.is_none());
+        }
 
-                idp_entity_id: "entity_id".to_string(),
-                sp_client_id: "client_id".to_string(),
-                acs_url: "http://acs".to_string(),
-                slo_url: "http://slo".to_string(),
-                technical_contact_email: "technical@fake".to_string(),
-
-                signing_keypair: Some(test_case),
-            }))
-            .expect_status(Some(StatusCode::BAD_REQUEST)),
-        )
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .expect("unexpected success");
+        NexusRequest::object_delete(&client, &"/silos/test-silo")
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .expect("failed to make request");
     }
-}
-
-// Test that a RSA keypair works
-#[nexus_test]
-async fn test_saml_idp_rsa_keypair_ok(cptestctx: &ControlPlaneTestContext) {
-    let client = &cptestctx.external_client;
-
-    let saml_idp_descriptor = SAML_IDP_DESCRIPTOR;
-
-    // Spin up a server but expect it never to be accessed
-    let server = Server::run();
-    server.expect(
-        Expectation::matching(request::method_path("GET", "/descriptor"))
-            .times(1)
-            .respond_with(status_code(200).body(saml_idp_descriptor)),
-    );
-
-    const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true).await;
-
-    NexusRequest::new(
-        RequestBuilder::new(
-            client,
-            Method::POST,
-            &format!("/silos/{}/saml_identity_providers", SILO_NAME),
-        )
-        .body(Some(&params::SamlIdentityProviderCreate {
-            identity: IdentityMetadataCreateParams {
-                name: "some-totally-real-saml-provider"
-                    .to_string()
-                    .parse()
-                    .unwrap(),
-                description: "a demo provider".to_string(),
-            },
-
-            idp_metadata_source: params::IdpMetadataSource::Url {
-                url: server.url("/descriptor").to_string(),
-            },
-
-            idp_entity_id: "entity_id".to_string(),
-            sp_client_id: "client_id".to_string(),
-            acs_url: "http://acs".to_string(),
-            slo_url: "http://slo".to_string(),
-            technical_contact_email: "technical@fake".to_string(),
-
-            signing_keypair: Some(params::DerEncodedKeyPair {
-                public_cert: RSA_KEY_1_PUBLIC.to_string(),
-                private_key: RSA_KEY_1_PRIVATE.to_string(),
-            }),
-        }))
-        .expect_status(Some(StatusCode::CREATED)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("unexpected failure");
 }

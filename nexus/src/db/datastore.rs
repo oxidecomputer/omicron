@@ -3138,6 +3138,41 @@ impl DataStore {
         Ok(())
     }
 
+    pub async fn silo_user_fetch_by_external_id(
+        &self,
+        opctx: &OpContext,
+        authz_silo: &authz::Silo,
+        external_id: &str,
+    ) -> Result<Option<SiloUser>, Error> {
+        opctx.authorize(authz::Action::ListChildren, authz_silo).await?;
+
+        use db::schema::silo_user::dsl;
+
+        let mut silo_user_vec = dsl::silo_user
+            .filter(dsl::silo_id.eq(authz_silo.id()))
+            .filter(dsl::external_id.eq(external_id.to_string()))
+            .filter(dsl::time_deleted.is_null())
+            .select(SiloUser::as_select())
+            .load_async::<SiloUser>(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            })?;
+
+        if silo_user_vec.is_empty() {
+            Ok(None)
+        } else {
+            if silo_user_vec.len() != 1 {
+                return Err(Error::internal_error(&format!(
+                    "more than one silo user with external id {:#}!",
+                    external_id
+                )));
+            }
+
+            Ok(Some(silo_user_vec.remove(0)))
+        }
+    }
+
     /// Load built-in silos into the database
     pub async fn load_builtin_silos(
         &self,
@@ -3829,7 +3864,7 @@ mod test {
 
         // Associate silo with user
         datastore
-            .silo_user_create(SiloUser::new(*SILO_ID, silo_user_id))
+            .silo_user_create(SiloUser::new(*SILO_ID, silo_user_id, None))
             .await
             .unwrap();
 
@@ -4328,7 +4363,7 @@ mod test {
         // Create a new Silo user so that we can lookup their keys.
         let silo_user_id = Uuid::new_v4();
         datastore
-            .silo_user_create(SiloUser::new(*SILO_ID, silo_user_id))
+            .silo_user_create(SiloUser::new(*SILO_ID, silo_user_id, None))
             .await
             .unwrap();
 

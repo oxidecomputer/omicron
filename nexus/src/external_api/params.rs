@@ -19,6 +19,16 @@ use uuid::Uuid;
 
 // Silos
 
+/// How users will be provisioned in a silo.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub enum UserProvisionType {
+    /// Do not allow users to be created
+    Fixed,
+
+    /// Create users based on identity provider authentication.
+    Jit,
+}
+
 /// Create-time parameters for a [`Silo`](crate::external_api::views::Silo)
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SiloCreate {
@@ -26,6 +36,8 @@ pub struct SiloCreate {
     pub identity: IdentityMetadataCreateParams,
 
     pub discoverable: bool,
+
+    pub user_provision_type: UserProvisionType,
 }
 
 // Silo identity providers

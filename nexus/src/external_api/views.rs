@@ -19,6 +19,23 @@ use uuid::Uuid;
 
 // SILOS
 
+/// How users will be provisioned in a silo.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum UserProvisionType {
+    Fixed,
+    Jit,
+}
+
+impl From<model::UserProvisionType> for UserProvisionType {
+    fn from(model: model::UserProvisionType) -> UserProvisionType {
+        match model {
+            model::UserProvisionType::Fixed => UserProvisionType::Fixed,
+            model::UserProvisionType::Jit => UserProvisionType::Jit,
+        }
+    }
+}
+
 /// Client view of a ['Silo']
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Silo {
@@ -28,11 +45,18 @@ pub struct Silo {
     /// A silo where discoverable is false can be retrieved only by its id - it
     /// will not be part of the "list all silos" output.
     pub discoverable: bool,
+
+    /// User provision type
+    pub user_provision_type: UserProvisionType,
 }
 
 impl Into<Silo> for model::Silo {
     fn into(self) -> Silo {
-        Silo { identity: self.identity(), discoverable: self.discoverable }
+        Silo {
+            identity: self.identity(),
+            discoverable: self.discoverable,
+            user_provision_type: self.user_provision_type.into(),
+        }
     }
 }
 

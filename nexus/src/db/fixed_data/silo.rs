@@ -19,6 +19,7 @@ lazy_static! {
                 description: "default silo".to_string(),
             },
             discoverable: false,
+            user_provision_type: params::UserProvisionType::Fixed,
         }
     );
 }

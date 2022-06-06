@@ -136,6 +136,10 @@ resource Silo {
 	relations = { parent_fleet: Fleet };
 	"admin" if "collaborator" on "parent_fleet";
 	"viewer" if "viewer" on "parent_fleet";
+
+	# external authenticator has to create silo users
+	"list_children" if "external-authenticator" on "parent_fleet";
+	"create_child" if "external-authenticator" on "parent_fleet";
 }
 
 has_relation(fleet: Fleet, "parent_fleet", silo: Silo)
