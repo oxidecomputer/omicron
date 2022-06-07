@@ -60,9 +60,7 @@ impl super::Nexus {
         if params.memory.to_whole_gibibytes() < 1 {
             return Err(Error::InvalidValue {
                 label: String::from("size"),
-                message: String::from(
-                    "memory must be at least one gibibyte",
-                )
+                message: String::from("memory must be at least one gibibyte"),
             });
         }
 
