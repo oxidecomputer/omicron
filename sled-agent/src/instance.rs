@@ -742,7 +742,7 @@ impl Instance {
                 ttybuf.contents(byte_offset, max_bytes).await?;
             Ok(InstanceSerialConsoleData {
                 data,
-                last_byte_offset: last_byte_offset as u32,
+                last_byte_offset: last_byte_offset as u64,
             })
         } else {
             Err(crate::serial::Error::Existential.into())

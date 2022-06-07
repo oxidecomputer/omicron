@@ -215,7 +215,7 @@ impl SledAgent {
         let end = (start + max_bytes.unwrap_or(16 * 1024)).min(buf.len());
         let data = buf[start..end].as_bytes().to_vec();
 
-        let last_byte_offset = (start + data.len()) as u32;
+        let last_byte_offset = (start + data.len()) as u64;
 
         Ok(InstanceSerialConsoleData { data, last_byte_offset })
     }

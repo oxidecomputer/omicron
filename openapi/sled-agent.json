@@ -147,7 +147,7 @@
             "schema": {
               "nullable": true,
               "type": "integer",
-              "format": "uint32",
+              "format": "uint64",
               "minimum": 0
             },
             "style": "form"
@@ -159,7 +159,7 @@
             "schema": {
               "nullable": true,
               "type": "integer",
-              "format": "uint32",
+              "format": "uint64",
               "minimum": 0
             },
             "style": "form"
@@ -171,7 +171,7 @@
             "schema": {
               "nullable": true,
               "type": "integer",
-              "format": "uint32",
+              "format": "uint64",
               "minimum": 0
             },
             "style": "form"
@@ -930,7 +930,7 @@
           "last_byte_offset": {
             "description": "The absolute offset since boot (suitable for use as `byte_offset` in a subsequent request) of the last byte returned in `data`.",
             "type": "integer",
-            "format": "uint32",
+            "format": "uint64",
             "minimum": 0
           }
         },

@@ -1452,7 +1452,7 @@ async fn project_instances_instance_serial_get(
                 &query_params.into_inner(),
             )
             .await?;
-        Ok(HttpResponseOk(data.into()))
+        Ok(HttpResponseOk(data))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

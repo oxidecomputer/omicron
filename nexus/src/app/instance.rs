@@ -916,7 +916,7 @@ impl super::Nexus {
             )
             .await?;
         let sa_data: sled_agent_client::types::InstanceSerialConsoleData =
-            data.into_inner().into();
+            data.into_inner();
         Ok(nexus::InstanceSerialConsoleData {
             data: sa_data.data,
             last_byte_offset: sa_data.last_byte_offset,
