@@ -1758,6 +1758,13 @@ pub struct NetworkInterfacePathParam {
 }
 
 /// Detach a network interface from an instance.
+///
+/// Note that the primary interface for an instance cannot be deleted if there
+/// are any secondary interfaces. A new primary interface must be designated
+/// first. The primary interface can be deleted if there are no secondary
+/// interfaces.
+// TODO-completeness: Add API for modifying an interface, including setting as
+// new primary. See https://github.com/oxidecomputer/omicron/issues/1153.
 #[endpoint {
     method = DELETE,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}",

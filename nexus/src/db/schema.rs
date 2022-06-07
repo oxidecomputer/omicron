@@ -131,6 +131,7 @@ table! {
         mac -> Int8,
         ip -> Inet,
         slot -> Int2,
+        is_primary -> Bool,
     }
 }
 
@@ -237,7 +238,7 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         initialized -> Bool,
-        tuf_base_url -> Text,
+        tuf_base_url -> Nullable<Text>,
     }
 }
 
@@ -477,6 +478,7 @@ allow_tables_to_appear_in_same_query!(
     organization,
     oximeter,
     project,
+    rack,
     region,
     saga,
     saga_node_event,

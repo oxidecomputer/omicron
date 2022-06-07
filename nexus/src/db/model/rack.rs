@@ -4,6 +4,7 @@
 
 use crate::db::schema::rack;
 use db_macros::Asset;
+use uuid::Uuid;
 
 /// Information about a local rack.
 #[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
@@ -14,4 +15,14 @@ pub struct Rack {
 
     pub initialized: bool,
     pub tuf_base_url: Option<String>,
+}
+
+impl Rack {
+    pub fn new(id: Uuid) -> Self {
+        Self {
+            identity: RackIdentity::new(id),
+            initialized: false,
+            tuf_base_url: None,
+        }
+    }
 }

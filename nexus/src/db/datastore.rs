@@ -39,8 +39,7 @@ use crate::db::fixed_data::silo::DEFAULT_SILO;
 use crate::db::lookup::LookupPath;
 use crate::db::model::DatabaseString;
 use crate::db::model::IncompleteVpc;
-use crate::db::queries::network_interface::InsertNetworkInterfaceQuery;
-use crate::db::queries::network_interface::NetworkInterfaceError;
+use crate::db::queries::network_interface;
 use crate::db::queries::vpc::InsertVpcQuery;
 use crate::db::queries::vpc_subnet::FilterConflictingVpcSubnetRangesQuery;
 use crate::db::queries::vpc_subnet::SubnetError;
@@ -52,7 +51,7 @@ use crate::db::{
         Generation, GlobalImage, IncompleteNetworkInterface, Instance,
         InstanceRuntimeState, Name, NetworkInterface, Organization,
         OrganizationUpdate, OximeterInfo, ProducerEndpoint, Project,
-        ProjectUpdate, Region, RoleAssignment, RoleBuiltin, RouterRoute,
+        ProjectUpdate, Rack, Region, RoleAssignment, RoleBuiltin, RouterRoute,
         RouterRouteUpdate, Service, Silo, SiloUser, Sled, SshKey,
         UpdateAvailableArtifact, UserBuiltin, Volume, Vpc, VpcFirewallRule,
         VpcRouter, VpcRouterUpdate, VpcSubnet, VpcSubnetUpdate, VpcUpdate,
@@ -141,6 +140,63 @@ impl DataStore {
     ) -> Result<&bb8::Pool<ConnectionManager<DbConnection>>, Error> {
         opctx.authorize(authz::Action::Query, &authz::DATABASE).await?;
         Ok(self.pool.pool())
+    }
+
+    /// Stores a new rack in the database.
+    ///
+    /// This function is a no-op if the rack already exists.
+    pub async fn rack_insert(
+        &self,
+        opctx: &OpContext,
+        rack: &Rack
+    ) -> Result<Rack, Error> {
+        use db::schema::rack::dsl;
+
+        diesel::insert_into(dsl::rack)
+            .values(rack.clone())
+            .on_conflict(dsl::id)
+            .do_update()
+            // This is a no-op, since we conflicted on the ID.
+            .set(dsl::id.eq(excluded(dsl::id)))
+            .returning(Rack::as_returning())
+            .get_result_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::Conflict(
+                        ResourceType::Rack,
+                        &rack.id().to_string(),
+                    ),
+                )
+            })
+    }
+
+    /// Update a rack to mark that it has been initialized
+    pub async fn rack_set_initialized(
+        &self,
+        opctx: &OpContext,
+        rack_id: Uuid,
+    ) -> UpdateResult<Rack> {
+        use db::schema::rack::dsl;
+
+        diesel::update(dsl::rack)
+            .filter(dsl::id.eq(rack_id))
+            .set(
+                (
+                    dsl::initialized.eq(true),
+                    dsl::time_modified.eq(Utc::now()),
+                )
+            )
+            .returning(Rack::as_returning())
+            .get_result_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::Server,
+                )
+            })
     }
 
     /// Stores a new sled in the database.
@@ -263,6 +319,7 @@ impl DataStore {
     /// Stores a new service in the database.
     pub async fn service_upsert(
         &self,
+        opctx: &OpContext,
         service: Service,
     ) -> CreateResult<Service> {
         use db::schema::service::dsl;
@@ -281,7 +338,7 @@ impl DataStore {
                     dsl::kind.eq(excluded(dsl::kind)),
                 )),
         )
-        .insert_and_get_result_async(self.pool())
+        .insert_and_get_result_async(self.pool_authorized(opctx).await?)
         .await
         .map_err(|e| match e {
             AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
@@ -1614,15 +1671,15 @@ impl DataStore {
         authz_subnet: &authz::VpcSubnet,
         authz_instance: &authz::Instance,
         interface: IncompleteNetworkInterface,
-    ) -> Result<NetworkInterface, NetworkInterfaceError> {
+    ) -> Result<NetworkInterface, network_interface::InsertError> {
         opctx
             .authorize(authz::Action::CreateChild, authz_instance)
             .await
-            .map_err(NetworkInterfaceError::External)?;
+            .map_err(network_interface::InsertError::External)?;
         opctx
             .authorize(authz::Action::CreateChild, authz_subnet)
             .await
-            .map_err(NetworkInterfaceError::External)?;
+            .map_err(network_interface::InsertError::External)?;
         self.instance_create_network_interface_raw(&opctx, interface).await
     }
 
@@ -1630,19 +1687,21 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         interface: IncompleteNetworkInterface,
-    ) -> Result<NetworkInterface, NetworkInterfaceError> {
+    ) -> Result<NetworkInterface, network_interface::InsertError> {
         use db::schema::network_interface::dsl;
-        let query = InsertNetworkInterfaceQuery::new(interface.clone());
+        let query = network_interface::InsertQuery::new(interface.clone());
         diesel::insert_into(dsl::network_interface)
             .values(query)
             .returning(NetworkInterface::as_returning())
             .get_result_async(
                 self.pool_authorized(opctx)
                     .await
-                    .map_err(NetworkInterfaceError::External)?,
+                    .map_err(network_interface::InsertError::External)?,
             )
             .await
-            .map_err(|e| NetworkInterfaceError::from_pool(e, &interface))
+            .map_err(|e| {
+                network_interface::InsertError::from_pool(e, &interface)
+            })
     }
 
     /// Delete all network interfaces attached to the given instance.
@@ -1673,27 +1732,33 @@ impl DataStore {
     }
 
     /// Delete a `NetworkInterface` attached to a provided instance.
+    ///
+    /// Note that the primary interface for an instance cannot be deleted if
+    /// there are any secondary interfaces.
     pub async fn instance_delete_network_interface(
         &self,
         opctx: &OpContext,
+        authz_instance: &authz::Instance,
         authz_interface: &authz::NetworkInterface,
-    ) -> DeleteResult {
-        opctx.authorize(authz::Action::Delete, authz_interface).await?;
-
-        use db::schema::network_interface::dsl;
-        let now = Utc::now();
-        let interface_id = authz_interface.id();
-        diesel::update(dsl::network_interface)
-            .filter(dsl::id.eq(interface_id))
-            .filter(dsl::time_deleted.is_null())
-            .set((dsl::time_deleted.eq(now),))
-            .execute_async(self.pool_authorized(opctx).await?)
+    ) -> Result<(), network_interface::DeleteError> {
+        opctx
+            .authorize(authz::Action::Delete, authz_interface)
+            .await
+            .map_err(network_interface::DeleteError::External)?;
+        let query = network_interface::DeleteQuery::new(
+            authz_instance.id(),
+            authz_interface.id(),
+        );
+        query
+            .clone()
+            .execute_async(
+                self.pool_authorized(opctx)
+                    .await
+                    .map_err(network_interface::DeleteError::External)?,
+            )
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByResource(authz_interface),
-                )
+                network_interface::DeleteError::from_pool(e, &query)
             })?;
         Ok(())
     }
@@ -4137,9 +4202,7 @@ mod test {
     async fn test_service_upsert() {
         let logctx = dev::test_setup_log("test_service_upsert");
         let mut db = test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&cfg);
-        let datastore = Arc::new(DataStore::new(Arc::new(pool)));
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
         // Create a sled on which the service should exist.
         let sled_id = create_test_sled(&datastore).await;
@@ -4150,10 +4213,39 @@ mod test {
         let kind = ServiceKind::Nexus;
 
         let service = Service::new(service_id, sled_id, addr, kind);
-        let result = datastore.service_upsert(service.clone()).await.unwrap();
+        let result = datastore.service_upsert(&opctx, service.clone()).await.unwrap();
         assert_eq!(service.id(), result.id());
         assert_eq!(service.ip, result.ip);
         assert_eq!(service.kind, result.kind);
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_rack_initialize_is_idempotent() {
+        let logctx = dev::test_setup_log("test_rack_initialize_is_idempotent");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        // Create a Rack, insert it into the DB.
+        let rack = Rack::new(Uuid::new_v4());
+        let result = datastore.rack_insert(&opctx, &rack).await.unwrap();
+        assert_eq!(result.id(), rack.id());
+        assert_eq!(result.initialized, false);
+
+        // Re-insert the Rack (check for idempotency).
+        datastore.rack_insert(&opctx, &rack).await.unwrap();
+        assert_eq!(result.id(), rack.id());
+        assert_eq!(result.initialized, false);
+
+        // Initialize the Rack.
+        let result = datastore.rack_set_initialized(&opctx, rack.id()).await.unwrap();
+        assert!(result.initialized);
+
+        // Re-initialize the rack (check for idempotency)
+        let result = datastore.rack_set_initialized(&opctx, rack.id()).await.unwrap();
+        assert!(result.initialized);
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();

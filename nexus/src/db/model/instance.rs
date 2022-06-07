@@ -9,9 +9,9 @@ use crate::db::schema::{disk, instance};
 use crate::external_api::params;
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
+use omicron_common::address::PROPOLIS_PORT;
 use omicron_common::api::external;
 use omicron_common::api::internal;
-use omicron_sled_agent::common::instance::PROPOLIS_PORT;
 use std::net::SocketAddr;
 use uuid::Uuid;
 

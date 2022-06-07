@@ -31,6 +31,9 @@ pub const DNS_PORT: u16 = 53;
 pub const DNS_SERVER_PORT: u16 = 5353;
 pub const SLED_AGENT_PORT: u16 = 12345;
 
+/// The port propolis-server listens on inside the propolis zone.
+pub const PROPOLIS_PORT: u16 = 12400;
+
 // Anycast is a mechanism in which a single IP address is shared by multiple
 // devices, and the destination is located based on routing distance.
 //

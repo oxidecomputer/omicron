@@ -94,12 +94,15 @@ pub struct NetworkInterfaceCreate {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", content = "params", rename_all = "snake_case")]
 pub enum InstanceNetworkInterfaceAttachment {
-    /// Create one or more `NetworkInterface`s for the `Instance`
+    /// Create one or more `NetworkInterface`s for the `Instance`.
+    ///
+    /// If more than one interface is provided, then the first will be
+    /// designated the primary interface for the instance.
     Create(Vec<NetworkInterfaceCreate>),
 
-    /// Default networking setup, which creates a single interface with an
-    /// auto-assigned IP address from project's "default" VPC and "default" VPC
-    /// Subnet.
+    /// The default networking configuration for an instance is to create a
+    /// single primary interface with an automatically-assigned IP address. The
+    /// IP will be pulled from the Project's default VPC / VPC Subnet.
     Default,
 
     /// No network interfaces at all will be created for the instance.

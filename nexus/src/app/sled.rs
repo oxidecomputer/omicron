@@ -149,6 +149,7 @@ impl super::Nexus {
     /// Upserts a Service into the database, updating it if it already exists.
     pub async fn upsert_service(
         &self,
+        opctx: &OpContext,
         id: Uuid,
         sled_id: Uuid,
         address: Ipv6Addr,
@@ -162,7 +163,7 @@ impl super::Nexus {
             "address" => address.to_string(),
         );
         let service = db::model::Service::new(id, sled_id, address, kind);
-        self.db_datastore.service_upsert(service).await?;
+        self.db_datastore.service_upsert(opctx, service).await?;
         Ok(())
     }
 }
