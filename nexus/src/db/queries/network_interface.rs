@@ -155,7 +155,7 @@ fn decode_database_error(
 
     // Error message generated when we attempt to insert an interface in a
     // different VPC from the interface(s) already associated with the instance
-    const MULTIPLE_VPC_ERROR_MESSAGE: &str = r#"could not parse "vpc_id" as type uuid: uuid: incorrect UUID length: vpc_id"#;
+    const MULTIPLE_VPC_ERROR_MESSAGE: &str = r#"could not parse "multiple-vpcs" as type uuid: uuid: incorrect UUID length: multiple-vpcs"#;
 
     // Error message generated when we attempt to insert NULL in the `ip`
     // column, which only happens when we run out of IPs in the subnet.
@@ -202,7 +202,7 @@ fn decode_database_error(
     // Subnet, where that instance already has an interface in that VPC Subnet.
     // This enforces the constraint that all interfaces are in distinct VPC
     // Subnets.
-    const NON_UNIQUE_VPC_SUBNET_ERROR_MESSAGE: &str = r#"could not parse "subnet_id" as type uuid: uuid: incorrect UUID length: subnet_id"#;
+    const NON_UNIQUE_VPC_SUBNET_ERROR_MESSAGE: &str = r#"could not parse "non-unique-subnets" as type uuid: uuid: incorrect UUID length: non-unique-subnets"#;
 
     match err {
         // If the address allocation subquery fails, we'll attempt to insert
@@ -483,13 +483,13 @@ delegate_query_fragment_impl!(NextGuestMacAddress);
 /// structure of the query is:
 ///
 /// ```text
-/// CAST(IF(<instance is in one VPC>, '<vpc_id>', 'vpc_id') AS UUID)
+/// CAST(IF(<instance is in one VPC>, '<vpc_id>', 'multiple-vpcs') AS UUID)
 /// ```
 ///
 /// This selects either the actual VPC UUID (as a string) or the literal string
-/// "vpc_id" if any existing VPC IDs for this instance are the same. If true, we
-/// cast the VPC ID string back to a UUID. If false, we try to cast the string
-/// `"vpc_id"` which fails in a detectable way.
+/// "multiple-vpcs" if any existing VPC IDs for this instance are the same. If
+/// true, we cast the VPC ID string back to a UUID. If false, we try to cast the
+/// string `"multiple-vpcs"` which fails in a detectable way.
 ///
 /// Details
 /// -------
@@ -510,7 +510,7 @@ delegate_query_fragment_impl!(NextGuestMacAddress);
 ///          <vpc_id>
 ///      ) = <vpc_id>,
 ///      '<vpc_id>', -- UUID as a string
-///      'vpc_id' -- The literal string "vpc_id"
+///      'multiple-vpcs' -- The literal string "multiple-vpcs"
 /// ) AS UUID)
 /// ```
 ///
@@ -518,7 +518,7 @@ delegate_query_fragment_impl!(NextGuestMacAddress);
 /// first record with the provided `instance_id`, if any. It then compares that
 /// stored `vpc_id` to the one provided to this query. If those IDs match, then
 /// the ID is returned. If they do _not_ match, the `IF` statement returns the
-/// string "vpc_id", which it tries to cast as a UUID. That fails, in a
+/// string "multiple-vpcs", which it tries to cast as a UUID. That fails, in a
 /// detectable way, so that we can check this case as distinct from other
 /// errors.
 ///
@@ -557,11 +557,12 @@ fn push_ensure_unique_vpc_expression<'a>(
     // To do that, we generate a query like:
     //
     // ```
-    // CAST(IF(<instance VPC is the same>, '<vpc_id>', 'vpc_id') AS UUID)
+    // CAST(IF(<instance VPC is the same>, '<vpc_id>', 'multiple-vpcs') AS UUID)
     // ```
     //
-    // The string "vpc_id" cannot be cast to a UUID, so we get a parsing error,
-    // but only if the condition _succeeds_. It's not evaluated otherwise.
+    // The string "multiple-vpcs" cannot be cast to a UUID, so we get a parsing
+    // error, but only if the condition _succeeds_. That conversion is not done
+    // otherwise.
     //
     // However, if we push this parameter as a UUID explicitly, the database
     // looks at the parts of the `IF` statement, and tries to make them a common
@@ -569,7 +570,7 @@ fn push_ensure_unique_vpc_expression<'a>(
     // evaluated too early. So we ensure both are strings here, and then ask the
     // DB to cast them after that condition is evaluated.
     out.push_bind_param::<sql_types::Text, String>(vpc_id_str)?;
-    out.push_sql(", 'vpc_id') AS UUID)");
+    out.push_sql(", 'multiple-vpcs') AS UUID)");
     Ok(())
 }
 
@@ -589,7 +590,7 @@ fn push_ensure_unique_vpc_expression<'a>(
 ///            subnet_id = <subnet_id> AND
 ///            id != <interface_id>
 ///     ),
-///     'subnet_id', -- the literal string "subnet_id",
+///     'non-unique-subnets', -- the literal string "non-unique-subnets",
 ///     '<subnet_id>', -- <subnet_id> as a string,
 ///     ) AS UUID
 /// )
@@ -597,7 +598,7 @@ fn push_ensure_unique_vpc_expression<'a>(
 ///
 /// That is, if the subnet ID provided in the query already exists for an
 /// interface on the target instance, we return the literal string
-/// `'subnet_id'`, which will fail casting to a UUID.
+/// `'non-unique-subnets'`, which will fail casting to a UUID.
 ///
 /// The interface ID check
 /// ----------------------
@@ -634,6 +635,10 @@ fn push_ensure_unique_vpc_expression<'a>(
 /// We check that the VPC Subnet for any interfaces _not equal to this one_ are
 /// different. This allows us to do the check on new interfaces, but not fail in
 /// the saga-replay case.
+///
+/// See https://github.com/oxidecomputer/omicron/issues/1166 for more background
+/// on this issue, and https://github.com/cockroachdb/cockroach/issues/82498 for
+/// the related CRDB issue.
 fn push_ensure_unique_vpc_subnet_expression<'a>(
     mut out: AstPass<'_, 'a, Pg>,
     interface_id: &'a Uuid,
@@ -659,7 +664,7 @@ fn push_ensure_unique_vpc_subnet_expression<'a>(
     out.push_identifier(dsl::id::NAME)?;
     out.push_sql(" != ");
     out.push_bind_param::<sql_types::Uuid, Uuid>(interface_id)?;
-    out.push_sql("), 'subnet_id', ");
+    out.push_sql("), 'non-unique-subnets', ");
     out.push_bind_param::<sql_types::Text, String>(subnet_id_str)?;
     out.push_sql(") AS UUID)");
     Ok(())
@@ -882,15 +887,15 @@ fn push_interface_allocation_subquery<'a>(
     out.push_identifier(dsl::instance_id::NAME)?;
     out.push_sql(", ");
 
-    // Helper function to push a suqbuery selecting something from the CTE.
+    // Helper function to push a subquery selecting something from the CTE.
     fn select_from_cte(
         mut out: AstPass<Pg>,
         column: &'static str,
     ) -> diesel::QueryResult<()> {
         out.push_sql("(SELECT ");
         out.push_identifier(column)?;
-        out.push_sql(" FROM validated_instance) AS ");
-        out.push_identifier(column)
+        out.push_sql(" FROM validated_instance)");
+        Ok(())
     }
 
     select_from_cte(out.reborrow(), dsl::vpc_id::NAME)?;
