@@ -141,6 +141,37 @@ enum FlingError {
     NotAbsolutePath { field: &'static str },
 }
 
+// How should `ssh_exec` be run?
+enum SshStrategy {
+    // Forward agent and source .profile
+    Forward,
+
+    // Forward agent and don't source profile
+    ForwardNoProfile,
+
+    // Don't agent, but source profile,
+    NoForward,
+
+    // Don't forward agent and don't source profile
+    NoForwardNoProfile,
+}
+
+impl SshStrategy {
+    fn forward_agent(&self) -> bool {
+        match self {
+            SshStrategy::Forward | SshStrategy::ForwardNoProfile => true,
+            _ => false,
+        }
+    }
+
+    fn source_profile(&self) -> bool {
+        match self {
+            SshStrategy::Forward | &SshStrategy::NoForward => true,
+            _ => false,
+        }
+    }
+}
+
 // TODO: run in parallel when that option is given
 fn do_exec(
     config: &Config,
@@ -152,11 +183,11 @@ fn do_exec(
 
         for name in servers {
             let server = &config.servers[name];
-            ssh_exec(&server, &cmd, false)?;
+            ssh_exec(&server, &cmd, SshStrategy::NoForward)?;
         }
     } else {
         for (_, server) in config.servers.iter() {
-            ssh_exec(&server, &cmd, false)?;
+            ssh_exec(&server, &cmd, SshStrategy::NoForward)?;
         }
     }
     Ok(())
@@ -295,7 +326,7 @@ fn do_install_prereqs(config: &Config) -> Result<()> {
             root_path.display()
         );
         println!("install runner prerequisites on {}", server.addr);
-        ssh_exec(server, &cmd, false)?;
+        ssh_exec(server, &cmd, SshStrategy::NoForward)?;
     }
 
     Ok(())
@@ -313,7 +344,7 @@ fn do_build_minimal(config: &Config) -> Result<()> {
         "omicron-package",
         "omicron-deploy"
     );
-    ssh_exec(&server, &cmd, false)
+    ssh_exec(&server, &cmd, SshStrategy::NoForward)
 }
 
 fn do_package(config: &Config, artifact_dir: PathBuf) -> Result<()> {
@@ -336,7 +367,7 @@ fn do_package(config: &Config, artifact_dir: PathBuf) -> Result<()> {
         &artifact_dir,
     );
 
-    ssh_exec(&builder, &cmd, false)
+    ssh_exec(&builder, &cmd, SshStrategy::NoForward)
 }
 
 fn do_check(config: &Config) -> Result<()> {
@@ -350,7 +381,7 @@ fn do_check(config: &Config) -> Result<()> {
         config.release_arg(),
     );
 
-    ssh_exec(&builder, &cmd, false)
+    ssh_exec(&builder, &cmd, SshStrategy::NoForward)
 }
 
 fn do_uninstall(
@@ -372,7 +403,7 @@ fn do_uninstall(
             install_dir.to_string_lossy()
         );
         println!("$ {}", cmd);
-        ssh_exec(&server, &cmd, true)?;
+        ssh_exec(&server, &cmd, SshStrategy::Forward)?;
     }
     Ok(())
 }
@@ -491,7 +522,7 @@ fn overlay_sled_agent(
         config.release_arg(),
         dirs.map(|dir| format!(" --directories {}", dir)).collect::<String>(),
     );
-    ssh_exec(builder, &cmd, false)
+    ssh_exec(builder, &cmd, SshStrategy::NoForward)
 }
 
 fn overlay_rss_config(
@@ -604,7 +635,7 @@ fn copy_package_artifacts_to_staging(
         config.deployment.staging_dir.to_string_lossy()
     );
     println!("$ {}", cmd);
-    ssh_exec(builder, &cmd, true)
+    ssh_exec(builder, &cmd, SshStrategy::Forward)
 }
 
 fn copy_omicron_package_binary_to_staging(
@@ -625,7 +656,7 @@ fn copy_omicron_package_binary_to_staging(
         config.deployment.staging_dir.to_string_lossy()
     );
     println!("$ {}", cmd);
-    ssh_exec(builder, &cmd, true)
+    ssh_exec(builder, &cmd, SshStrategy::Forward)
 }
 
 fn copy_package_manifest_to_staging(
@@ -643,7 +674,7 @@ fn copy_package_manifest_to_staging(
         config.deployment.staging_dir.to_string_lossy()
     );
     println!("$ {}", cmd);
-    ssh_exec(builder, &cmd, true)
+    ssh_exec(builder, &cmd, SshStrategy::Forward)
 }
 
 fn run_omicron_package_install_from_staging(
@@ -663,7 +694,7 @@ fn run_omicron_package_install_from_staging(
         install_dir.to_string_lossy()
     );
     println!("$ {}", cmd);
-    ssh_exec(destination, &cmd, true)
+    ssh_exec(destination, &cmd, SshStrategy::Forward)
 }
 
 fn copy_overlay_files_to_staging(
@@ -682,7 +713,7 @@ fn copy_overlay_files_to_staging(
         config.deployment.staging_dir.to_string_lossy()
     );
     println!("$ {}", cmd);
-    ssh_exec(builder, &cmd, true)
+    ssh_exec(builder, &cmd, SshStrategy::Forward)
 }
 
 fn install_overlay_files_from_staging(
@@ -696,26 +727,31 @@ fn install_overlay_files_from_staging(
         install_dir.to_string_lossy()
     );
     println!("$ {}", cmd);
-    ssh_exec(&destination, &cmd, false)
+    ssh_exec(&destination, &cmd, SshStrategy::NoForward)
 }
 
 // For now, we just restart sled-agent, as that's the only service with an
 // overlay file.
 fn restart_services(destination: &Server) -> Result<()> {
-    ssh_exec(destination, "svcadm restart sled-agent", false)
+    ssh_exec(destination, "svcadm restart sled-agent", SshStrategy::NoForward)
 }
 
 fn ssh_exec(
     server: &Server,
     remote_cmd: &str,
-    forward_agent: bool,
+    strategy: SshStrategy,
 ) -> Result<()> {
-    // Source .profile, so we have access to cargo. Rustup installs knowledge
-    // about the cargo path here.
-    let remote_cmd = String::from(". $HOME/.profile && ") + remote_cmd;
+    let remote_cmd = if strategy.source_profile() {
+        // Source .profile, so we have access to cargo. Rustup installs knowledge
+        // about the cargo path here.
+        String::from(". $HOME/.profile && ") + remote_cmd
+    } else {
+        remote_cmd.into()
+    };
+
     let auth_sock = std::env::var("SSH_AUTH_SOCK")?;
     let mut cmd = Command::new("ssh");
-    if forward_agent {
+    if strategy.forward_agent() {
         cmd.arg("-A");
     }
     cmd.arg("-o")
