@@ -1706,7 +1706,7 @@ async fn test_instances_memory_less_than_one_gibibyte(
             description: format!("instance {:?}", &instance_name),
         },
         ncpus: InstanceCpuCount(1),
-        memory: ByteCount::from(params::MIN_MEMORY_SIZE / 2),
+        memory: ByteCount::from(params::MIN_MEMORY_SIZE_BYTES / 2),
         hostname: String::from("inst"),
         user_data:
             b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
