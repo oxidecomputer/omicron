@@ -271,7 +271,7 @@ pub struct VpcRouterUpdate {
 
 // DISKS
 
-pub const MIN_DISK_SIZE: u32 = 1 << 30; // 1 GiB
+pub const MIN_DISK_SIZE_BYTES: u32 = 1 << 30; // 1 GiB
 
 #[derive(Copy, Clone, Debug, Deserialize, Serialize)]
 #[serde(try_from = "u32")] // invoke the try_from validation routine below

@@ -55,8 +55,9 @@ impl super::Nexus {
                     });
                 }
 
-                // Reject disks where the size isn't at least MIN_DISK_SIZE
-                if params.size.to_bytes() < params::MIN_DISK_SIZE as u64 {
+                // Reject disks where the size isn't at least
+                // MIN_DISK_SIZE_BYTES_BYTES
+                if params.size.to_bytes() < params::MIN_DISK_SIZE_BYTES as u64 {
                     return Err(Error::InvalidValue {
                         label: String::from("size"),
                         message: String::from(
@@ -65,9 +66,10 @@ impl super::Nexus {
                     });
                 }
 
-                // Reject disks where the MIN_DISK_SIZE doesn't evenly divide
+                // Reject disks where the MIN_DISK_SIZE_BYTES doesn't evenly divide
                 // the size
-                if (params.size.to_bytes() % params::MIN_DISK_SIZE as u64) != 0
+                if (params.size.to_bytes() % params::MIN_DISK_SIZE_BYTES as u64)
+                    != 0
                 {
                     return Err(Error::InvalidValue {
                         label: String::from("size"),
