@@ -741,7 +741,7 @@ async fn test_disk_reject_total_size_less_than_one_gibibyte(
     let client = &cptestctx.external_client;
     create_org_and_project(client).await;
 
-    let disk_size = ByteCount::from(params::MIN_DISK_SIZE / 2);
+    let disk_size = ByteCount::from(params::MIN_DISK_SIZE_BYTES / 2);
 
     // Attempt to allocate the disk, observe a server error.
     let disks_url = get_disks_url();
