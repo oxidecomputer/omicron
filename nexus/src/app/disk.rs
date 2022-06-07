@@ -61,7 +61,7 @@ impl super::Nexus {
                     return Err(Error::InvalidValue {
                         label: String::from("size"),
                         message: String::from(
-                            "total size must be at least 1 GiB",
+                            "total size must be at least MIN_DISK_SIZE_BYTES",
                         ),
                     });
                 }
@@ -74,7 +74,7 @@ impl super::Nexus {
                     return Err(Error::InvalidValue {
                         label: String::from("size"),
                         message: String::from(
-                            "total size must be a multiple of 1 GiB",
+                            "total size must be a multiple of MIN_DISK_SIZE_BYTES",
                         ),
                     });
                 }
@@ -136,7 +136,7 @@ impl super::Nexus {
                     return Err(Error::InvalidValue {
                         label: String::from("size"),
                         message: String::from(
-                            "total size must be at least 1 GiB",
+                            "total size must be at least MIN_DISK_SIZE_BYTES",
                         ),
                     });
                 }
@@ -149,7 +149,7 @@ impl super::Nexus {
                     return Err(Error::InvalidValue {
                         label: String::from("size"),
                         message: String::from(
-                            "total size must be a multiple of 1 GiB",
+                            "total size must be a multiple of MIN_DISK_SIZE_BYTES",
                         ),
                     });
                 }

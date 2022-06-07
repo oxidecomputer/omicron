@@ -733,7 +733,7 @@ async fn test_disk_reject_total_size_not_divisible_by_block_size(
     .unwrap();
 }
 
-// Tests that a disk is rejected if the total size is less than 1 GiB
+// Tests that a disk is rejected if the total size is less than MIN_DISK_SIZE
 #[nexus_test]
 async fn test_disk_reject_total_size_less_than_one_gibibyte(
     cptestctx: &ControlPlaneTestContext,
@@ -768,7 +768,7 @@ async fn test_disk_reject_total_size_less_than_one_gibibyte(
 }
 
 // Tests that a disk is rejected if the total size isn't divisible by
-// MIN_DISK_SIZE
+// MIN_DISK_SIZE_BYTES
 #[nexus_test]
 async fn test_disk_reject_total_size_not_divisible_by_min_disk_size(
     cptestctx: &ControlPlaneTestContext,
