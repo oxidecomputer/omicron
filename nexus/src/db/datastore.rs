@@ -1756,8 +1756,8 @@ impl DataStore {
 
         dsl::network_interface
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::vpc_id.eq(authz_instance.id()))
-            .order(dsl::name.asc())
+            .filter(dsl::instance_id.eq(authz_instance.id()))
+            .order(dsl::slot.asc())
             .select(NetworkInterface::as_select())
             .load_async(self.pool_authorized(opctx).await?)
             .await
