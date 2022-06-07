@@ -107,11 +107,7 @@ impl super::Nexus {
             .await?;
         }
 
-        self.db_datastore
-            .rack_set_initialized(
-                opctx,
-                rack_id,
-            ).await?;
+        self.db_datastore.rack_set_initialized(opctx, rack_id).await?;
 
         Ok(())
     }

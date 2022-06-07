@@ -148,7 +148,7 @@ impl DataStore {
     pub async fn rack_insert(
         &self,
         opctx: &OpContext,
-        rack: &Rack
+        rack: &Rack,
     ) -> Result<Rack, Error> {
         use db::schema::rack::dsl;
 
@@ -182,21 +182,11 @@ impl DataStore {
 
         diesel::update(dsl::rack)
             .filter(dsl::id.eq(rack_id))
-            .set(
-                (
-                    dsl::initialized.eq(true),
-                    dsl::time_modified.eq(Utc::now()),
-                )
-            )
+            .set((dsl::initialized.eq(true), dsl::time_modified.eq(Utc::now())))
             .returning(Rack::as_returning())
             .get_result_async(self.pool_authorized(opctx).await?)
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::Server,
-                )
-            })
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     /// Stores a new sled in the database.
@@ -3551,7 +3541,7 @@ mod test {
     use crate::db::fixed_data::silo::SILO_ID;
     use crate::db::identity::Resource;
     use crate::db::lookup::LookupPath;
-    use crate::db::model::{ConsoleSession, DatasetKind, ServiceKind, Project};
+    use crate::db::model::{ConsoleSession, DatasetKind, Project, ServiceKind};
     use crate::external_api::params;
     use chrono::{Duration, Utc};
     use nexus_test_utils::db::test_setup_database;
@@ -4213,7 +4203,8 @@ mod test {
         let kind = ServiceKind::Nexus;
 
         let service = Service::new(service_id, sled_id, addr, kind);
-        let result = datastore.service_upsert(&opctx, service.clone()).await.unwrap();
+        let result =
+            datastore.service_upsert(&opctx, service.clone()).await.unwrap();
         assert_eq!(service.id(), result.id());
         assert_eq!(service.ip, result.ip);
         assert_eq!(service.kind, result.kind);
@@ -4240,11 +4231,13 @@ mod test {
         assert_eq!(result.initialized, false);
 
         // Initialize the Rack.
-        let result = datastore.rack_set_initialized(&opctx, rack.id()).await.unwrap();
+        let result =
+            datastore.rack_set_initialized(&opctx, rack.id()).await.unwrap();
         assert!(result.initialized);
 
         // Re-initialize the rack (check for idempotency)
-        let result = datastore.rack_set_initialized(&opctx, rack.id()).await.unwrap();
+        let result =
+            datastore.rack_set_initialized(&opctx, rack.id()).await.unwrap();
         assert!(result.initialized);
 
         db.cleanup().await.unwrap();

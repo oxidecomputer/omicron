@@ -9,7 +9,7 @@ use super::identity::Asset;
 use super::identity::Resource;
 use super::model;
 use crate::{
-    authz::self,
+    authz,
     context::OpContext,
     db,
     db::error::{public_error_from_diesel_pool, ErrorHandler},

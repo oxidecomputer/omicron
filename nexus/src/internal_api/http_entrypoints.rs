@@ -112,11 +112,7 @@ async fn rack_initialization_complete(
     let svcs = info.into_inner();
     let opctx = OpContext::for_internal_api(&rqctx).await;
 
-    nexus.rack_initialize(
-        &opctx,
-        path.rack_id,
-        svcs,
-    ).await?;
+    nexus.rack_initialize(&opctx, path.rack_id, svcs).await?;
 
     Ok(HttpResponseUpdatedNoContent())
 }
