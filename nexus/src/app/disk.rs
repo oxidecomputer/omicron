@@ -55,13 +55,24 @@ impl super::Nexus {
                     });
                 }
 
-                // Reject disks where the block size isn't at least
-                // one gibibyte
-                if params.size.to_whole_gibibytes() < 1 {
+                // Reject disks where the size isn't at least MIN_DISK_SIZE
+                if params.size.to_bytes() < params::MIN_DISK_SIZE as u64 {
                     return Err(Error::InvalidValue {
                         label: String::from("size"),
                         message: String::from(
-                            "total size must be at least one gibibyte",
+                            "total size must be at least 1 GiB",
+                        ),
+                    });
+                }
+
+                // Reject disks where the MIN_DISK_SIZE doesn't evenly divide
+                // the size
+                if (params.size.to_bytes() % params::MIN_DISK_SIZE as u64) != 0
+                {
+                    return Err(Error::InvalidValue {
+                        label: String::from("size"),
+                        message: String::from(
+                            "total size must be a multiple of 1 GiB",
                         ),
                     });
                 }
