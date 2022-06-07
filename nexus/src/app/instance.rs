@@ -56,21 +56,27 @@ impl super::Nexus {
             )));
         }
 
-        // Reject instances where the memory is not at least 1 GiB
+        // Reject instances where the memory is not at least
+        // MIN_MEMORY_SIZE_BYTES
         if params.memory.to_bytes() < params::MIN_MEMORY_SIZE_BYTES as u64 {
             return Err(Error::InvalidValue {
                 label: String::from("size"),
-                message: String::from("memory must be at least 1 GiB"),
+                message: String::from(
+                    "memory must be at least MIN_MEMORY_SIZE_BYTES",
+                ),
             });
         }
 
-        // Reject instances where the memory is not divisible by 1 GiB
+        // Reject instances where the memory is not divisible by
+        // MIN_MEMORY_SIZE_BYTES
         if (params.memory.to_bytes() % params::MIN_MEMORY_SIZE_BYTES as u64)
             != 0
         {
             return Err(Error::InvalidValue {
                 label: String::from("size"),
-                message: String::from("memory must be divisible by 1 GiB"),
+                message: String::from(
+                    "memory must be divisible by MIN_MEMORY_SIZE_BYTES",
+                ),
             });
         }
 

@@ -1689,7 +1689,8 @@ async fn test_disks_detached_when_instance_destroyed(
     }
 }
 
-//Tests that an instance is rejected if the memory is less than one gibibyte
+// Tests that an instance is rejected if the memory is less than
+// MIN_MEMORY_SIZE_BYTES
 #[nexus_test]
 async fn test_instances_memory_less_than_one_gibibyte(
     cptestctx: &ControlPlaneTestContext,
