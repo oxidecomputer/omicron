@@ -199,7 +199,7 @@ mod serde_user_data {
 /// Migration parameters for an [`Instance`](omicron_common::api::external::Instance)
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceMigrate {
-    pub dst_sled_uuid: Uuid,
+    pub dst_sled_id: Uuid,
 }
 
 // VPCS

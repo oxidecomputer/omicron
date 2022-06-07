@@ -343,7 +343,7 @@ impl super::Nexus {
         &self,
         instance: &db::model::Instance,
     ) -> Result<Arc<SledAgentClient>, Error> {
-        let sa_id = &instance.runtime().sled_uuid;
+        let sa_id = &instance.runtime().sled_id;
         self.sled_client(&sa_id).await
     }
 
@@ -787,7 +787,7 @@ impl super::Nexus {
             Ok(true) => {
                 info!(log, "instance updated by sled agent";
                     "instance_id" => %id,
-                    "propolis_id" => %new_runtime_state.propolis_uuid,
+                    "propolis_id" => %new_runtime_state.propolis_id,
                     "new_state" => %new_runtime_state.run_state);
                 Ok(())
             }
@@ -795,7 +795,7 @@ impl super::Nexus {
             Ok(false) => {
                 info!(log, "instance update from sled agent ignored (old)";
                     "instance_id" => %id,
-                    "propolis_id" => %new_runtime_state.propolis_uuid,
+                    "propolis_id" => %new_runtime_state.propolis_id,
                     "requested_state" => %new_runtime_state.run_state);
                 Ok(())
             }
