@@ -1726,6 +1726,44 @@ async fn test_instances_memory_less_than_one_gibibyte(
     .unwrap();
 }
 
+// Test that an instance is rejected if memory is not divisible by
+// MIN_MEMORY_SIZE
+#[nexus_test]
+async fn test_instances_memory_not_divisible_by_min_memory_size(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    create_org_and_project(client).await;
+
+    // Attempt to create the instance, observe a server error.
+    let instances_url = get_instances_url();
+    let instance_name = "just-rainsticks";
+    let instance = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: instance_name.parse().unwrap(),
+            description: format!("instance {:?}", &instance_name),
+        },
+        ncpus: InstanceCpuCount(1),
+        memory: ByteCount::from(1024 * 1024 * 1024 + 300),
+        hostname: String::from("inst"),
+        user_data:
+            b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
+                .to_vec(),
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        disks: vec![],
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &instances_url)
+            .body(Some(&instance))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+}
+
 async fn instance_get(
     client: &ClientTestContext,
     instance_url: &str,
