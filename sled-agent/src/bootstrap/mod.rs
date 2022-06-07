@@ -8,7 +8,7 @@ pub mod agent;
 pub mod client;
 pub mod config;
 pub mod discovery;
-mod http_entrypoints;
+//mod http_entrypoints;
 pub mod multicast;
 pub(crate) mod params;
 pub(crate) mod rss_handle;

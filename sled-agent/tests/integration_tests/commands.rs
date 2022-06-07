@@ -56,31 +56,8 @@ fn test_sled_agent_no_args() {
 }
 
 #[test]
-fn test_sled_agent_openapi_bootagent() {
-    let exec = Exec::cmd(path_to_sled_agent()).arg("openapi").arg("bootstrap");
-    let (exit_status, stdout_text, stderr_text) = run_command(exec);
-    assert_exit_code(exit_status, EXIT_SUCCESS);
-    assert_contents(
-        "tests/output/cmd-sled-agent-openapi-bootstrap-stderr",
-        &stderr_text,
-    );
-
-    let spec: OpenAPI = serde_json::from_str(&stdout_text)
-        .expect("stdout was not valid OpenAPI");
-
-    // Check for lint errors.
-    let errors = openapi_lint::validate(&spec);
-    assert!(errors.is_empty(), "{}", errors.join("\n\n"));
-
-    // Confirm that the output hasn't changed. It's expected that we'll change
-    // this file as the API evolves, but pay attention to the diffs to ensure
-    // that the changes match your expectations.
-    assert_contents("../openapi/bootstrap-agent.json", &stdout_text);
-}
-
-#[test]
 fn test_sled_agent_openapi_sled() {
-    let exec = Exec::cmd(path_to_sled_agent()).arg("openapi").arg("sled");
+    let exec = Exec::cmd(path_to_sled_agent()).arg("openapi");
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
     assert_exit_code(exit_status, EXIT_SUCCESS);
     assert_contents(

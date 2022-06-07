@@ -2,11 +2,15 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Request body types for the bootstrap agent
+//! Request types for the bootstrap agent
+
+use std::borrow::Cow;
 
 use omicron_common::address::{Ipv6Subnet, SLED_PREFIX};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use serde_repr::Deserialize_repr;
+use serde_repr::Serialize_repr;
 
 /// Identity signed by local RoT and Oxide certificate chain.
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -20,4 +24,25 @@ pub struct ShareRequest {
 pub struct SledAgentRequest {
     /// Portion of the IP space to be managed by the Sled Agent.
     pub subnet: Ipv6Subnet<SLED_PREFIX>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize_repr, Deserialize_repr, PartialEq)]
+#[repr(u32)]
+pub enum Version {
+    V1 = 1,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub enum Request<'a> {
+    /// Send configuration information for launching a Sled Agent.
+    SledAgentRequest(Cow<'a, SledAgentRequest>),
+
+    /// Request the sled's share of the rack secret.
+    ShareRequest,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct RequestEnvelope<'a> {
+    pub version: Version,
+    pub request: Request<'a>,
 }
