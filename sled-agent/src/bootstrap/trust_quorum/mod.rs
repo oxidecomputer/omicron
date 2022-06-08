@@ -4,40 +4,16 @@
 
 //! The entry point for the trust quorum code
 //!
-//! The Trust quorum relies on IPv6 multicast discovery, rack secret handling,
-//! and the SPDM protocol.
-//!
-//! Below is the trust quorum protocol for share retrieval over TCP.
-//!
-//! The following protocol is shown between two sleds only, but multicast
-//! discovery and share requests will continue to run until enough shares
-//! have been received to recreate the rack secret.
-//!
-//! Sled1                                      Sled2
-//! =====                                      =====
-//!  ||  ------- Multicast Discovery ---------  ||
-//!  ||                                         ||
-//!  ||  ---- Connect to TrustQuorum port --->  ||
-//!  ||                                         ||
-//!  ||  --------- SPDM Requests ------------>  ||
-//!  ||                                         ||
-//!  ||  <-------- SPDM Responses ------------  ||
-//!  ||                                         ||
-//!  ||  ----- SPDM Channel Established ------  ||
-//!  ||                                         ||
-//!  ||  --------- Request Share ------------>  ||
-//!  ||                                         ||
-//!  ||  <----------- Share ------------------  ||
+//! This module only provides the trust quorum primitives: the rack secret and
+//! its associated machinery (splitting into shares, verification, etc.).
+//! Distribution and retrieval of shares is the responsibility of the
+//! bootstrap-agent, which uses sprockets to secure communications between
+//! sleds.
 
-mod client;
 mod error;
-mod msgs;
 mod rack_secret;
-mod server;
 mod share_distribution;
 
-pub use client::Client;
 pub use error::TrustQuorumError;
 pub use rack_secret::RackSecret;
-pub use server::{Server, PORT};
 pub use share_distribution::ShareDistribution;

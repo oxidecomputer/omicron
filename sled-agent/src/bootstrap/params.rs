@@ -9,13 +9,6 @@ use omicron_common::address::{Ipv6Subnet, SLED_PREFIX};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 
-/// Identity signed by local RoT and Oxide certificate chain.
-#[derive(Serialize, Deserialize)]
-pub struct ShareRequest {
-    // TODO-completeness: format TBD; currently opaque.
-    pub identity: Vec<u8>,
-}
-
 /// Configuration information for launching a Sled Agent.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct SledAgentRequest {
