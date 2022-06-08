@@ -3159,7 +3159,6 @@ dependencies = [
  "sp-sim",
  "spdm",
  "sprockets-host",
- "sprockets-proxy",
  "structopt",
  "subprocess",
  "tar",
@@ -5292,18 +5291,6 @@ dependencies = [
  "slog",
  "sprockets-common",
  "sprockets-session",
- "thiserror",
- "tokio",
-]
-
-[[package]]
-name = "sprockets-proxy"
-version = "0.1.0"
-source = "git+http://github.com/oxidecomputer/sprockets?rev=0361fd13ff19cda6696242fe40f1325fca30d3d1#0361fd13ff19cda6696242fe40f1325fca30d3d1"
-dependencies = [
- "serde",
- "slog",
- "sprockets-host",
  "thiserror",
  "tokio",
 ]

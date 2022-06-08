@@ -16,10 +16,7 @@ use omicron_common::backoff::internal_service_policy;
 use omicron_common::backoff::retry_notify;
 use omicron_common::backoff::BackoffError;
 use slog::Logger;
-use std::net::SocketAddr;
 use std::net::SocketAddrV6;
-use std::time::Duration;
-use thiserror::Error;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -64,111 +61,22 @@ impl RssHandle {
     }
 }
 
-#[derive(Debug, Error)]
-enum InitializeSledAgentError {
-    #[error("Failed to construct an HTTP client: {0}")]
-    HttpClient(#[from] reqwest::Error),
-
-    #[error("Failed to start sprockets proxy: {0}")]
-    SprocketsProxy(#[from] sprockets_proxy::Error),
-
-    #[error("Error making HTTP request to Bootstrap Agent: {0}")]
-    BootstrapApi(
-        #[from]
-        bootstrap_agent_client::Error<bootstrap_agent_client::types::Error>,
-    ),
-}
-
 async fn initialize_sled_agent(
     log: &Logger,
     bootstrap_addr: SocketAddrV6,
     request: &SledAgentRequest,
     sp: &Option<SpHandle>,
-) -> Result<(), InitializeSledAgentError> {
-    let dur = std::time::Duration::from_secs(60);
-
-    let client = reqwest::ClientBuilder::new()
-        .connect_timeout(dur)
-        .timeout(dur)
-        .build()?;
-
-    let (url, _proxy_task) = if let Some(sp) = sp.as_ref() {
-        // We have an SP; spawn a sprockets proxy for this connection.
-        let proxy_config = sprockets_proxy::Config {
-            bind_address: "[::1]:0".parse().unwrap(),
-            target_address: SocketAddr::V6(bootstrap_addr),
-            role: sprockets_proxy::Role::Client,
-        };
-        // TODO-cleanup The `Duration` passed to `Proxy::new()` is the timeout
-        // for communicating with the RoT. Currently it can be set to anything
-        // at all (our simulated RoT always responds immediately). Should the
-        // value move to our config?
-        let proxy = sprockets_proxy::Proxy::new(
-            &proxy_config,
-            sp.manufacturing_public_key(),
-            sp.rot_handle(),
-            sp.rot_certs(),
-            Duration::from_secs(5),
-            log.new(o!("BootstrapAgentClientSprocketsProxy"
-                        => proxy_config.target_address)),
-        )
-        .await?;
-
-        let proxy_addr = proxy.local_addr();
-
-        let proxy_task = tokio::spawn(async move {
-            // TODO-robustness `proxy.run()` only fails if `accept()`ing on our
-            // already-bound listening socket fails, which means something has
-            // gone very wrong. Do we have any recourse other than panicking?
-            // What does dropshot do if `accept()` fails?
-            proxy.run().await.expect("sprockets client proxy failed");
-        });
-
-        // Wrap `proxy_task` in `AbortOnDrop`, which will abort it (shutting
-        // down the proxy) when we return.
-        let proxy_task = AbortOnDrop(proxy_task);
-
-        info!(
-            log, "Sending request to peer agent via sprockets proxy";
-            "peer" => %bootstrap_addr,
-            "sprockets_proxy" => %proxy_addr,
-        );
-        (format!("http://{}", proxy_addr), Some(proxy_task))
-    } else {
-        // We have no SP; connect directly.
-        info!(
-            log, "Sending request to peer agent";
-            "peer" => %bootstrap_addr,
-        );
-        (format!("http://{}", bootstrap_addr), None)
-    };
-
-    let client = bootstrap_agent_client::Client::new_with_client(
-        &url,
-        client,
-        log.new(o!("BootstrapAgentClient" => url.clone())),
+) -> Result<(), bootstrap_agent_client::Error> {
+    let client = bootstrap_agent_client::Client::new(
+        bootstrap_addr,
+        sp,
+        log.new(o!("BootstrapAgentClient" => bootstrap_addr.to_string())),
     );
 
     let sled_agent_initialize = || async {
-        client
-            .start_sled(&bootstrap_agent_client::types::SledAgentRequest {
-                subnet: bootstrap_agent_client::types::Ipv6Subnet {
-                    net: bootstrap_agent_client::types::Ipv6Net(
-                        request.subnet.net().to_string(),
-                    ),
-                },
-            })
-            .await
-            .map_err(BackoffError::transient)?;
+        client.start_sled(request).await.map_err(BackoffError::transient)?;
 
-        Ok::<
-            (),
-            BackoffError<
-                bootstrap_agent_client::Error<
-                    bootstrap_agent_client::types::Error,
-                >,
-            >,
-        >(())
+        Ok::<(), BackoffError<bootstrap_agent_client::Error>>(())
     };
 
     let log_failure = |error, _| {
