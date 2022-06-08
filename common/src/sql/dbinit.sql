@@ -48,6 +48,15 @@ CREATE TABLE omicron.public.rack (
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
 
+    /*
+     * Identifies if rack management has been transferred from RSS -> Nexus.
+     * If "false", RSS is still managing sleds, services, and DNS records.
+     *
+     * This value is set to "true" when RSS calls the
+     * "rack_initialization_complete" endpoint on Nexus' internal interface.
+     *
+     * See RFD 278 for more detail.
+     */
     initialized BOOL NOT NULL,
 
     /* Used to configure the updates service URL */

@@ -45,7 +45,7 @@ use crate::db::queries::vpc_subnet::FilterConflictingVpcSubnetRangesQuery;
 use crate::db::queries::vpc_subnet::SubnetError;
 use crate::db::{
     self,
-    error::{public_error_from_diesel_pool, ErrorHandler, TransactionError},
+    error::{public_error_from_diesel_create, public_error_from_diesel_lookup, public_error_from_diesel_pool, ErrorHandler, TransactionError},
     model::{
         ConsoleSession, Dataset, DatasetKind, Disk, DiskRuntimeState,
         Generation, GlobalImage, IncompleteNetworkInterface, Instance,
@@ -177,16 +177,97 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         rack_id: Uuid,
+        services: Vec<Service>,
     ) -> UpdateResult<Rack> {
-        use db::schema::rack::dsl;
+        use db::schema::rack::dsl as rack_dsl;
+        use db::schema::service::dsl as service_dsl;
 
-        diesel::update(dsl::rack)
-            .filter(dsl::id.eq(rack_id))
-            .set((dsl::initialized.eq(true), dsl::time_modified.eq(Utc::now())))
-            .returning(Rack::as_returning())
-            .get_result_async(self.pool_authorized(opctx).await?)
+
+        #[derive(Debug)]
+        enum RackInitError {
+            ServiceInsert {
+                err: SyncInsertError,
+                sled_id: Uuid,
+                svc_id: Uuid,
+            },
+            RackUpdate(diesel::result::Error),
+        }
+        type TxnError = TransactionError<RackInitError>;
+
+        // NOTE: This operation could likely be optimized with a CTE, but given
+        // the low-frequency of calls, this optimization has been deferred.
+        self.pool_authorized(opctx)
+            .await?
+            .transaction(move |conn| {
+                // Early exit if the rack has already been initialized.
+                let rack = rack_dsl::rack
+                    .filter(rack_dsl::id.eq(rack_id))
+                    .select(Rack::as_select())
+                    .get_result(conn)
+                    .map_err(|e| TxnError::CustomError(RackInitError::RackUpdate(e)))?;
+                if rack.initialized {
+                    return Ok(rack);
+                }
+
+                // Otherwise, insert services and set rack.initialized = true.
+                for svc in services {
+                    let sled_id = svc.sled_id;
+                    <Sled as DatastoreCollection<Service>>::insert_resource(
+                        sled_id,
+                        diesel::insert_into(service_dsl::service)
+                            .values(svc.clone())
+                            .on_conflict(service_dsl::id)
+                            .do_update()
+                            .set((
+                                service_dsl::time_modified.eq(Utc::now()),
+                                service_dsl::sled_id.eq(excluded(service_dsl::sled_id)),
+                                service_dsl::ip.eq(excluded(service_dsl::ip)),
+                                service_dsl::kind.eq(excluded(service_dsl::kind)),
+                            )),
+                    )
+                    .insert_and_get_result(conn)
+                    .map_err(|err| TxnError::CustomError(RackInitError::ServiceInsert {
+                        err,
+                        sled_id,
+                        svc_id: svc.id(),
+                    }))?;
+                }
+                diesel::update(rack_dsl::rack)
+                    .filter(rack_dsl::id.eq(rack_id))
+                    .set((rack_dsl::initialized.eq(true), rack_dsl::time_modified.eq(Utc::now())))
+                    .returning(Rack::as_returning())
+                    .get_result::<Rack>(conn)
+                    .map_err(|e| TxnError::CustomError(RackInitError::RackUpdate(e)))
+
+            })
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| match e {
+                TxnError::CustomError(RackInitError::ServiceInsert { err, sled_id, svc_id }) => {
+                    match err {
+                        SyncInsertError::CollectionNotFound => Error::ObjectNotFound {
+                            type_name: ResourceType::Sled,
+                            lookup_type: LookupType::ById(sled_id),
+                        },
+                        SyncInsertError::DatabaseError(e) => {
+                            public_error_from_diesel_create(
+                                e,
+                                ResourceType::Service,
+                                &svc_id.to_string(),
+                            )
+                        }
+                    }
+                },
+                TxnError::CustomError(RackInitError::RackUpdate(err)) => {
+                    public_error_from_diesel_lookup(
+                        err,
+                        ResourceType::Rack,
+                        &LookupType::ById(rack_id),
+                    )
+                },
+                TxnError::Pool(e) => {
+                    Error::internal_error(&format!("Transaction error: {}", e))
+                }
+            })
     }
 
     /// Stores a new sled in the database.
@@ -4226,18 +4307,18 @@ mod test {
         assert_eq!(result.initialized, false);
 
         // Re-insert the Rack (check for idempotency).
-        datastore.rack_insert(&opctx, &rack).await.unwrap();
+        let result = datastore.rack_insert(&opctx, &rack).await.unwrap();
         assert_eq!(result.id(), rack.id());
         assert_eq!(result.initialized, false);
 
         // Initialize the Rack.
         let result =
-            datastore.rack_set_initialized(&opctx, rack.id()).await.unwrap();
+            datastore.rack_set_initialized(&opctx, rack.id(), vec![]).await.unwrap();
         assert!(result.initialized);
 
         // Re-initialize the rack (check for idempotency)
         let result =
-            datastore.rack_set_initialized(&opctx, rack.id()).await.unwrap();
+            datastore.rack_set_initialized(&opctx, rack.id(), vec![]).await.unwrap();
         assert!(result.initialized);
 
         db.cleanup().await.unwrap();

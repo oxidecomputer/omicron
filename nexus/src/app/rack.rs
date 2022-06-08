@@ -7,7 +7,6 @@
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
-use crate::db::lookup::LookupPath;
 use crate::internal_api::params::ServicePutRequest;
 use futures::future::ready;
 use futures::StreamExt;
@@ -74,40 +73,12 @@ impl super::Nexus {
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
-        let (.., db_rack) = LookupPath::new(opctx, &self.db_datastore)
-            .rack_id(rack_id)
-            .fetch()
-            .await?;
+        // Convert from parameter -> DB type.
+        let services: Vec<_> = services.into_iter().map(|svc| {
+            db::model::Service::new(svc.service_id, svc.sled_id, svc.address, svc.kind.into())
+        }).collect();
 
-        // TODO-concurrency: Technically, this initialization is not atomic.
-        // We check if the rack is initialized, upsert each service, then
-        // set the rack to be initialized.
-        //
-        // However, this should practically be safe for a few reasons:
-        //
-        // 1. There should only be a single RSS process executing at once.
-        // 2. Once the RSS propagates information about services to Nexus,
-        // they should be recorded to a local plan that does not change.
-        // 3. Once the rack is initialized, it cannot be uninitialized.
-        //
-        // If any of these invariants change, this sequence of operations
-        // should be moved into a transaction.
-        if db_rack.initialized {
-            return Ok(());
-        }
-
-        for svc in &services {
-            self.upsert_service(
-                opctx,
-                svc.service_id,
-                svc.sled_id,
-                svc.address,
-                svc.kind.into(),
-            )
-            .await?;
-        }
-
-        self.db_datastore.rack_set_initialized(opctx, rack_id).await?;
+        self.db_datastore.rack_set_initialized(opctx, rack_id, services).await?;
 
         Ok(())
     }
