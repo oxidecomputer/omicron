@@ -9,8 +9,6 @@ use std::borrow::Cow;
 use omicron_common::address::{Ipv6Subnet, SLED_PREFIX};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_repr::Deserialize_repr;
-use serde_repr::Serialize_repr;
 
 /// Identity signed by local RoT and Oxide certificate chain.
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -26,12 +24,6 @@ pub struct SledAgentRequest {
     pub subnet: Ipv6Subnet<SLED_PREFIX>,
 }
 
-#[derive(Clone, Copy, Debug, Serialize_repr, Deserialize_repr, PartialEq)]
-#[repr(u32)]
-pub enum Version {
-    V1 = 1,
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum Request<'a> {
     /// Send configuration information for launching a Sled Agent.
@@ -43,6 +35,10 @@ pub enum Request<'a> {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct RequestEnvelope<'a> {
-    pub version: Version,
+    pub version: u32,
     pub request: Request<'a>,
+}
+
+pub(super) mod version {
+    pub(crate) const V1: u32 = 1;
 }

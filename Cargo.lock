@@ -2992,7 +2992,6 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "serde_repr",
  "serial_test",
  "sled-agent-client",
  "slog",

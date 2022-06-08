@@ -6,9 +6,9 @@
 
 use super::agent::Agent;
 use super::config::Config;
+use super::params::version;
 use super::params::Request;
 use super::params::RequestEnvelope;
-use super::params::Version;
 use super::views::Response;
 use super::views::ResponseEnvelope;
 use crate::config::Config as SledConfig;
@@ -202,7 +202,8 @@ async fn serve_single_request(
     // Currently we only have one version, so there's nothing to do in this
     // match, but we leave it here as a breadcrumb for future changes.
     match envelope.version {
-        Version::V1 => (),
+        version::V1 => (),
+        other => return Err(format!("Unsupported version: {other}")),
     }
 
     // Handle request.
@@ -222,7 +223,7 @@ async fn serve_single_request(
     };
 
     // Build and serialize response.
-    let envelope = ResponseEnvelope { version: Version::V1, response };
+    let envelope = ResponseEnvelope { version: version::V1, response };
     buf.clear();
     serde_json::to_writer(&mut buf, &envelope)
         .map_err(|err| format!("Failed to serialize response: {err}"))?;

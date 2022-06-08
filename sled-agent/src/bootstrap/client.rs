@@ -4,10 +4,10 @@
 
 //! Interface for making API requests to a Sled Agent's Bootstrap API.
 
+use super::params::version;
 use super::params::Request;
 use super::params::RequestEnvelope;
 use super::params::SledAgentRequest;
-use super::params::Version;
 use super::views::SledAgentResponse;
 use crate::bootstrap::views::Response;
 use crate::bootstrap::views::ResponseEnvelope;
@@ -53,6 +53,9 @@ pub(crate) enum Error {
 
     #[error("Failed deserializing response: {0}")]
     Deserialize(serde_json::Error),
+
+    #[error("Unsupported version: {0}")]
+    UnsupportedVersion(u32),
 
     #[error("Request failed: {0}")]
     ServerFailure(String),
@@ -117,7 +120,7 @@ impl<'a> Client<'a> {
         .map_err(|err| Error::SprocketsSession(err.to_string()))?;
 
         // Build and serialize our request.
-        let envelope = RequestEnvelope { version: Version::V1, request };
+        let envelope = RequestEnvelope { version: version::V1, request };
         let mut buf =
             serde_json::to_vec(&envelope).map_err(Error::Serialize)?;
         let request_length = u32::try_from(buf.len())
@@ -146,10 +149,9 @@ impl<'a> Client<'a> {
         let envelope: ResponseEnvelope =
             serde_json::from_slice(&buf).map_err(Error::Deserialize)?;
 
-        // Currently we only have one version, so there's nothing to do in this
-        // match, but we leave it here as a breadcrumb for future changes.
         match envelope.version {
-            Version::V1 => (),
+            version::V1 => (),
+            other => return Err(Error::UnsupportedVersion(other)),
         }
 
         envelope.response.map_err(Error::ServerFailure)

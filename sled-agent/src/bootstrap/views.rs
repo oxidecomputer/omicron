@@ -4,7 +4,6 @@
 
 //! Response types for the bootstrap agent
 
-use super::params::Version;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -32,6 +31,6 @@ pub enum Response {
 
 #[derive(Serialize, Deserialize, PartialEq)]
 pub struct ResponseEnvelope {
-    pub version: Version,
+    pub version: u32,
     pub response: Result<Response, String>,
 }
