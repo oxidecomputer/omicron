@@ -52,4 +52,3 @@ pub struct SamlIdentityProvider {
     pub public_cert: Option<String>,
     pub private_key: Option<String>,
 }
-
