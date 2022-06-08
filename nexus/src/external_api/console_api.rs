@@ -106,7 +106,7 @@ pub struct LoginToProviderPathParam {
    path = "/login/{silo_name}/{provider_name}",
    tags = ["login"],
 }]
-pub async fn ask_user_to_login_to_provider(
+pub async fn login(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<LoginToProviderPathParam>,
 ) -> Result<Response<Body>, HttpError> {
@@ -156,7 +156,7 @@ pub async fn ask_user_to_login_to_provider(
    path = "/login/{silo_name}/{provider_name}",
    tags = ["login"],
 }]
-pub async fn consume_credentials_and_authn_user(
+pub async fn consume_credentials(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<LoginToProviderPathParam>,
 ) -> Result<Response<Body>, HttpError> {

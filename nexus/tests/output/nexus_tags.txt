@@ -50,8 +50,8 @@ project_instances_post                   /organizations/{organization_name}/proj
 
 API operations found with tag "login"
 OPERATION ID                             URL PATH
-ask_user_to_login_to_provider            /login/{silo_name}/{provider_name}
-consume_credentials_and_authn_user       /login/{silo_name}/{provider_name}
+consume_credentials                      /login/{silo_name}/{provider_name}
+login                                    /login/{silo_name}/{provider_name}
 
 API operations found with tag "metrics"
 OPERATION ID                             URL PATH

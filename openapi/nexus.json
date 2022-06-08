@@ -411,7 +411,7 @@
         ],
         "summary": "Ask the user to login to their identity provider",
         "description": "Either display a page asking a user for their credentials, or redirect them to their identity provider.",
-        "operationId": "ask_user_to_login_to_provider",
+        "operationId": "login",
         "parameters": [
           {
             "in": "path",
@@ -449,7 +449,7 @@
         ],
         "summary": "Consume some sort of credentials, and authenticate a user.",
         "description": "Either receive a username and password, or some sort of identity provider data (like a SAMLResponse). Use these to set the user's session cookie.",
-        "operationId": "consume_credentials_and_authn_user",
+        "operationId": "consume_credentials",
         "parameters": [
           {
             "in": "path",

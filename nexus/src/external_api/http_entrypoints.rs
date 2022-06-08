@@ -203,8 +203,8 @@ pub fn external_api() -> NexusApiDescription {
         api.register(console_api::console_page)?;
         api.register(console_api::asset)?;
 
-        api.register(console_api::ask_user_to_login_to_provider)?;
-        api.register(console_api::consume_credentials_and_authn_user)?;
+        api.register(console_api::login)?;
+        api.register(console_api::consume_credentials)?;
 
         Ok(())
     }
