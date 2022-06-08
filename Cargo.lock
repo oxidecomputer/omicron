@@ -2342,6 +2342,7 @@ dependencies = [
 name = "internal-dns-client"
 version = "0.1.0"
 dependencies = [
+ "futures",
  "omicron-common",
  "progenitor",
  "reqwest",

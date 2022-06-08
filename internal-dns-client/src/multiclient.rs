@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::types::{DnsKv, DnsRecord, DnsRecordKey, Srv};
+use futures::stream::{self, StreamExt, TryStreamExt};
 use omicron_common::address::{
     Ipv6Subnet, ReservedRackSubnet, AZ_PREFIX, DNS_PORT, DNS_SERVER_PORT,
 };
@@ -96,10 +97,15 @@ impl Updater {
         &'a self,
         body: &'a Vec<crate::types::DnsKv>,
     ) -> Result<(), DnsError> {
-        // TODO: Could be sent concurrently.
-        for client in &self.clients {
-            client.dns_records_set(body).await?;
-        }
+        stream::iter(&self.clients)
+            .map(Ok::<_, DnsError>)
+            .try_for_each_concurrent(
+                None,
+                |client| async move {
+                    client.dns_records_set(body).await?;
+                    Ok(())
+                }
+            ).await?;
 
         Ok(())
     }
@@ -111,10 +117,16 @@ impl Updater {
         &'a self,
         body: &'a Vec<crate::types::DnsRecordKey>,
     ) -> Result<(), DnsError> {
-        // TODO: Could be sent concurrently
-        for client in &self.clients {
-            client.dns_records_delete(body).await?;
-        }
+        stream::iter(&self.clients)
+            .map(Ok::<_, DnsError>)
+            .try_for_each_concurrent(
+                None,
+                |client| async move {
+                    client.dns_records_delete(body).await?;
+                    Ok(())
+                }
+            ).await?;
+
         Ok(())
     }
 }
