@@ -14,7 +14,6 @@ use crate::bootstrap::views::ResponseEnvelope;
 use crate::sp::SpHandle;
 use crate::sp::SprocketsRole;
 use slog::Logger;
-use vsss_rs::Share;
 use std::borrow::Cow;
 use std::io;
 use std::net::SocketAddrV6;
@@ -22,6 +21,7 @@ use thiserror::Error;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
+use vsss_rs::Share;
 
 #[derive(Debug, Error)]
 pub enum Error {

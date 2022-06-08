@@ -217,15 +217,13 @@ async fn serve_single_request(
                 }
             }
         }
-        Request::ShareRequest => {
-            match bootstrap_agent.secret_share().await {
-                Some(share) => Ok(Response::ShareResponse(share)),
-                None => {
-                    warn!(log, "Share requested before we have one");
-                    Err(format!("Share request failed: share unavailable"))
-                }
+        Request::ShareRequest => match bootstrap_agent.secret_share().await {
+            Some(share) => Ok(Response::ShareResponse(share)),
+            None => {
+                warn!(log, "Share requested before we have one");
+                Err(format!("Share request failed: share unavailable"))
             }
-        }
+        },
     };
 
     // Build and serialize response.
