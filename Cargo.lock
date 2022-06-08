@@ -1171,7 +1171,7 @@ dependencies = [
  "pq-sys",
  "r2d2",
  "serde_json",
- "uuid 1.1.0",
+ "uuid 0.8.2",
 ]
 
 [[package]]
@@ -1183,7 +1183,7 @@ dependencies = [
  "lock_api",
  "serde",
  "usdt",
- "uuid 1.1.0",
+ "uuid 0.8.2",
 ]
 
 [[package]]
@@ -1296,7 +1296,7 @@ checksum = "1435fa1053d8b2fbbe9be7e97eca7f33d37b28409959813daefc1446a14247f1"
 [[package]]
 name = "dropshot"
 version = "0.7.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#1da9d81a052a66bbbbb65e4bd3be1cb34d57ff2c"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#a6069664f89af0069b4a2f59501c16af67b9074e"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -1335,7 +1335,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.7.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#1da9d81a052a66bbbbb65e4bd3be1cb34d57ff2c"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#a6069664f89af0069b4a2f59501c16af67b9074e"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2275,9 +2275,9 @@ dependencies = [
 
 [[package]]
 name = "indexmap"
-version = "1.8.1"
+version = "1.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f647032dfaa1f8b6dc29bd3edb7bbef4861b8b8007ebb118d6db284fd59f6ee"
+checksum = "e6012d540c5baa3589337a98ce73408de9b5a25ec9fc2c6fd6be8f0d39e0ca5a"
 dependencies = [
  "autocfg 1.1.0",
  "hashbrown 0.11.2",
@@ -6297,6 +6297,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bc5cf98d8186244414c848017f0e2676b3fcb46807f6668a97dfe67359a3c4b7"
 dependencies = [
  "getrandom 0.2.6",
+ "serde",
 ]
 
 [[package]]
