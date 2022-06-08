@@ -56,7 +56,8 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         volume_id -> Uuid,
         url -> Nullable<Text>,
-        version -> Nullable<Text>,
+        distribution -> Text,
+        version -> Text,
         digest -> Nullable<Text>,
         block_size -> crate::db::model::BlockSizeEnum,
         size_bytes -> Int8,
@@ -127,9 +128,10 @@ table! {
         instance_id -> Uuid,
         vpc_id -> Uuid,
         subnet_id -> Uuid,
-        mac -> Text,
+        mac -> Int8,
         ip -> Inet,
         slot -> Int2,
+        is_primary -> Bool,
     }
 }
 

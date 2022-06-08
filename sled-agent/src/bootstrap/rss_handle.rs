@@ -9,13 +9,16 @@ use super::discovery::PeerMonitorObserver;
 use super::params::SledAgentRequest;
 use crate::rack_setup::config::SetupServiceConfig;
 use crate::rack_setup::service::Service;
+use crate::sp::SpHandle;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use omicron_common::backoff::internal_service_policy;
 use omicron_common::backoff::retry_notify;
 use omicron_common::backoff::BackoffError;
 use slog::Logger;
+use std::net::SocketAddr;
 use std::net::SocketAddrV6;
+use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
@@ -43,6 +46,7 @@ impl RssHandle {
         log: &Logger,
         config: SetupServiceConfig,
         peer_monitor: PeerMonitorObserver,
+        sp: Option<SpHandle>,
     ) -> Self {
         let (tx, rx) = rss_channel();
 
@@ -54,7 +58,7 @@ impl RssHandle {
         );
         let log = log.new(o!("component" => "BootstrapAgentRssHandler"));
         let task = tokio::spawn(async move {
-            rx.initialize_sleds(&log).await;
+            rx.initialize_sleds(&log, &sp).await;
         });
         Self { _rss: rss, task }
     }
@@ -64,6 +68,9 @@ impl RssHandle {
 enum InitializeSledAgentError {
     #[error("Failed to construct an HTTP client: {0}")]
     HttpClient(#[from] reqwest::Error),
+
+    #[error("Failed to start sprockets proxy: {0}")]
+    SprocketsProxy(#[from] sprockets_proxy::Error),
 
     #[error("Error making HTTP request to Bootstrap Agent: {0}")]
     BootstrapApi(
@@ -76,6 +83,7 @@ async fn initialize_sled_agent(
     log: &Logger,
     bootstrap_addr: SocketAddrV6,
     request: &SledAgentRequest,
+    sp: &Option<SpHandle>,
 ) -> Result<(), InitializeSledAgentError> {
     let dur = std::time::Duration::from_secs(60);
 
@@ -84,8 +92,57 @@ async fn initialize_sled_agent(
         .timeout(dur)
         .build()?;
 
-    let url = format!("http://{}", bootstrap_addr);
-    info!(log, "Sending request to peer agent: {}", url);
+    let (url, _proxy_task) = if let Some(sp) = sp.as_ref() {
+        // We have an SP; spawn a sprockets proxy for this connection.
+        let proxy_config = sprockets_proxy::Config {
+            bind_address: "[::1]:0".parse().unwrap(),
+            target_address: SocketAddr::V6(bootstrap_addr),
+            role: sprockets_proxy::Role::Client,
+        };
+        // TODO-cleanup The `Duration` passed to `Proxy::new()` is the timeout
+        // for communicating with the RoT. Currently it can be set to anything
+        // at all (our simulated RoT always responds immediately). Should the
+        // value move to our config?
+        let proxy = sprockets_proxy::Proxy::new(
+            &proxy_config,
+            sp.manufacturing_public_key(),
+            sp.rot_handle(),
+            sp.rot_certs(),
+            Duration::from_secs(5),
+            log.new(o!("BootstrapAgentClientSprocketsProxy"
+                        => proxy_config.target_address)),
+        )
+        .await?;
+
+        let proxy_addr = proxy.local_addr();
+
+        let proxy_task = tokio::spawn(async move {
+            // TODO-robustness `proxy.run()` only fails if `accept()`ing on our
+            // already-bound listening socket fails, which means something has
+            // gone very wrong. Do we have any recourse other than panicking?
+            // What does dropshot do if `accept()` fails?
+            proxy.run().await.expect("sprockets client proxy failed");
+        });
+
+        // Wrap `proxy_task` in `AbortOnDrop`, which will abort it (shutting
+        // down the proxy) when we return.
+        let proxy_task = AbortOnDrop(proxy_task);
+
+        info!(
+            log, "Sending request to peer agent via sprockets proxy";
+            "peer" => %bootstrap_addr,
+            "sprockets_proxy" => %proxy_addr,
+        );
+        (format!("http://{}", proxy_addr), Some(proxy_task))
+    } else {
+        // We have no SP; connect directly.
+        info!(
+            log, "Sending request to peer agent";
+            "peer" => %bootstrap_addr,
+        );
+        (format!("http://{}", bootstrap_addr), None)
+    };
+
     let client = bootstrap_agent_client::Client::new_with_client(
         &url,
         client,
@@ -119,7 +176,7 @@ async fn initialize_sled_agent(
     };
     retry_notify(internal_service_policy(), sled_agent_initialize, log_failure)
         .await?;
-    info!(log, "Peer agent at {} initialized", url);
+    info!(log, "Peer agent initialized"; "peer" => %bootstrap_addr);
     Ok(())
 }
 
@@ -178,7 +235,7 @@ struct BootstrapAgentHandleReceiver {
 }
 
 impl BootstrapAgentHandleReceiver {
-    async fn initialize_sleds(mut self, log: &Logger) {
+    async fn initialize_sleds(mut self, log: &Logger, sp: &Option<SpHandle>) {
         let (requests, tx_response) = match self.inner.recv().await {
             Some(requests) => requests,
             None => {
@@ -201,7 +258,7 @@ impl BootstrapAgentHandleReceiver {
                     "target_sled" => %bootstrap_addr,
                 );
 
-                initialize_sled_agent(log, bootstrap_addr, &request)
+                initialize_sled_agent(log, bootstrap_addr, &request, sp)
                     .await
                     .map_err(|err| {
                         format!(
@@ -239,5 +296,13 @@ impl BootstrapAgentHandleReceiver {
 
         // All init requests succeeded; inform RSS of completion.
         tx_response.send(Ok(())).unwrap();
+    }
+}
+
+struct AbortOnDrop<T>(JoinHandle<T>);
+
+impl<T> Drop for AbortOnDrop<T> {
+    fn drop(&mut self) {
+        self.0.abort();
     }
 }

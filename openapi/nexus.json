@@ -281,7 +281,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ImageCreate"
+                "$ref": "#/components/schemas/GlobalImageCreate"
               }
             }
           },
@@ -2209,6 +2209,7 @@
           "instances"
         ],
         "summary": "Detach a network interface from an instance.",
+        "description": "Note that the primary interface for an instance cannot be deleted if there are any secondary interfaces. A new primary interface must be designated first. The primary interface can be deleted if there are no secondary interfaces.",
         "operationId": "instance_network_interfaces_delete_interface",
         "parameters": [
           {
@@ -5655,6 +5656,13 @@
           }
         ]
       },
+      "Distribution": {
+        "title": "OS image distribution",
+        "description": "Distribution must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'.",
+        "type": "string",
+        "pattern": "[a-z](|[a-zA-Z0-9-]*[a-zA-Z0-9])",
+        "maxLength": 63
+      },
       "Error": {
         "description": "Error information from a response.",
         "type": "object",
@@ -5783,6 +5791,10 @@
               }
             ]
           },
+          "distribution": {
+            "description": "Image distribution",
+            "type": "string"
+          },
           "id": {
             "description": "unique, immutable, system-controlled identifier for each resource",
             "type": "string",
@@ -5820,19 +5832,68 @@
             "type": "string"
           },
           "version": {
-            "nullable": true,
-            "description": "Version of this, if any",
+            "description": "Image version",
             "type": "string"
           }
         },
         "required": [
           "block_size",
           "description",
+          "distribution",
           "id",
           "name",
           "size",
           "time_created",
-          "time_modified"
+          "time_modified",
+          "version"
+        ]
+      },
+      "GlobalImageCreate": {
+        "description": "Create-time parameters for an [`GlobalImage`](omicron_common::api::external::GlobalImage)",
+        "type": "object",
+        "properties": {
+          "block_size": {
+            "description": "block size in bytes",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BlockSize"
+              }
+            ]
+          },
+          "description": {
+            "type": "string"
+          },
+          "distribution": {
+            "description": "OS image distribution",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Distribution"
+              }
+            ]
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "source": {
+            "description": "The source of the image's contents.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ImageSource"
+              }
+            ]
+          },
+          "version": {
+            "description": "image version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "block_size",
+          "description",
+          "distribution",
+          "name",
+          "source",
+          "version"
         ]
       },
       "GlobalImageResultsPage": {
@@ -6007,25 +6068,25 @@
           {
             "type": "object",
             "properties": {
-              "src": {
-                "type": "string"
-              },
               "type": {
                 "type": "string",
                 "enum": [
                   "url"
                 ]
+              },
+              "url": {
+                "type": "string"
               }
             },
             "required": [
-              "src",
-              "type"
+              "type",
+              "url"
             ]
           },
           {
             "type": "object",
             "properties": {
-              "src": {
+              "id": {
                 "type": "string",
                 "format": "uuid"
               },
@@ -6037,7 +6098,22 @@
               }
             },
             "required": [
-              "src",
+              "id",
+              "type"
+            ]
+          },
+          {
+            "description": "Boot the Alpine ISO that ships with the Propolis zone. Intended for development purposes only.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "you_can_boot_anything_as_long_as_its_alpine"
+                ]
+              }
+            },
+            "required": [
               "type"
             ]
           }
@@ -6253,20 +6329,20 @@
         "description": "Migration parameters for an [`Instance`](omicron_common::api::external::Instance)",
         "type": "object",
         "properties": {
-          "dst_sled_uuid": {
+          "dst_sled_id": {
             "type": "string",
             "format": "uuid"
           }
         },
         "required": [
-          "dst_sled_uuid"
+          "dst_sled_id"
         ]
       },
       "InstanceNetworkInterfaceAttachment": {
         "description": "Describes an attachment of a `NetworkInterface` to an `Instance`, at the time the instance is created.",
         "oneOf": [
           {
-            "description": "Create one or more `NetworkInterface`s for the `Instance`",
+            "description": "Create one or more `NetworkInterface`s for the `Instance`.\n\nIf more than one interface is provided, then the first will be designated the primary interface for the instance.",
             "type": "object",
             "properties": {
               "params": {
@@ -6288,7 +6364,7 @@
             ]
           },
           {
-            "description": "Default networking setup, which creates a single interface with an auto-assigned IP address from project's \"default\" VPC and \"default\" VPC Subnet.",
+            "description": "The default networking configuration for an instance is to create a single primary interface with an automatically-assigned IP address. The IP will be pulled from the Project's default VPC / VPC Subnet.",
             "type": "object",
             "properties": {
               "type": {
@@ -6467,6 +6543,10 @@
               }
             ]
           },
+          "primary": {
+            "description": "True if this interface is the primary for the instance to which it's attached.",
+            "type": "boolean"
+          },
           "subnet_id": {
             "description": "The subnet to which the interface belongs.",
             "type": "string",
@@ -6495,6 +6575,7 @@
           "ip",
           "mac",
           "name",
+          "primary",
           "subnet_id",
           "time_created",
           "time_modified",

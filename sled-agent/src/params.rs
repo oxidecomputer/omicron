@@ -79,7 +79,7 @@ pub struct InstanceEnsureBody {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceMigrateParams {
-    pub src_propolis_uuid: Uuid,
+    pub src_propolis_id: Uuid,
     pub src_propolis_addr: SocketAddr,
 }
 
@@ -214,7 +214,7 @@ pub struct DatasetEnsureBody {
     // The UUID of the dataset, as well as the service using it directly.
     pub id: Uuid,
     // The name (and UUID) of the Zpool which we are inserting into.
-    pub zpool_uuid: Uuid,
+    pub zpool_id: Uuid,
     // The type of the filesystem.
     pub dataset_kind: DatasetKind,
     // The address on which the zone will listen for requests.
@@ -232,7 +232,7 @@ pub struct DatasetEnsureBody {
 impl From<DatasetEnsureBody> for sled_agent_client::types::DatasetEnsureBody {
     fn from(p: DatasetEnsureBody) -> Self {
         Self {
-            zpool_uuid: p.zpool_uuid,
+            zpool_id: p.zpool_id,
             dataset_kind: p.dataset_kind.into(),
             address: p.address.to_string(),
             id: p.id,

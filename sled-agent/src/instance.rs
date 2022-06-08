@@ -4,9 +4,7 @@
 
 //! API for controlling a single instance.
 
-use crate::common::instance::{
-    Action as InstanceAction, InstanceStates, PROPOLIS_PORT,
-};
+use crate::common::instance::{Action as InstanceAction, InstanceStates};
 use crate::illumos::running_zone::{
     InstalledZone, RunCommandError, RunningZone,
 };
@@ -23,6 +21,7 @@ use crate::params::{
 };
 use anyhow::anyhow;
 use futures::lock::{Mutex, MutexGuard};
+use omicron_common::address::PROPOLIS_PORT;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::backoff;
 use propolis_client::api::DiskRequest;
@@ -299,12 +298,12 @@ impl InstanceInner {
         let migrate = match migrate {
             Some(params) => {
                 let migration_id =
-                    self.state.current().migration_uuid.ok_or_else(|| {
+                    self.state.current().migration_id.ok_or_else(|| {
                         Error::Migration(anyhow!("Missing Migration UUID"))
                     })?;
                 Some(propolis_client::api::InstanceMigrateInitiateRequest {
                     src_addr: params.src_propolis_addr,
-                    src_uuid: params.src_propolis_uuid,
+                    src_uuid: params.src_propolis_id,
                     migration_id,
                 })
             }
@@ -448,7 +447,7 @@ impl Instance {
                 // InstanceCpuCount here, to avoid any casting...
                 vcpus: initial.runtime.ncpus.0 as u8,
             },
-            propolis_id: initial.runtime.propolis_uuid,
+            propolis_id: initial.runtime.propolis_id,
             propolis_ip: initial.runtime.propolis_addr.unwrap().ip(),
             vnic_allocator,
             underlay_addr,
@@ -748,11 +747,11 @@ mod test {
         InstanceHardware {
             runtime: InstanceRuntimeState {
                 run_state: InstanceState::Creating,
-                sled_uuid: Uuid::new_v4(),
-                propolis_uuid: test_propolis_uuid(),
-                dst_propolis_uuid: None,
+                sled_id: Uuid::new_v4(),
+                propolis_id: test_propolis_uuid(),
+                dst_propolis_id: None,
                 propolis_addr: Some("[fd00:1de::74]:12400".parse().unwrap()),
-                migration_uuid: None,
+                migration_id: None,
                 ncpus: InstanceCpuCount(2),
                 memory: ByteCount::from_mebibytes_u32(512),
                 hostname: "myvm".to_string(),

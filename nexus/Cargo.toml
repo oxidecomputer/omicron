@@ -70,9 +70,6 @@ features = [ "usdt-probes" ]
 [dependencies.omicron-common]
 path = "../common"
 
-[dependencies.omicron-sled-agent]
-path = "../sled-agent"
-
 [dependencies.oximeter]
 version = "0.1.0"
 path = "../oximeter/oximeter"

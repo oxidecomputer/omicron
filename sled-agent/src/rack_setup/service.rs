@@ -54,6 +54,9 @@ pub enum SetupServiceError {
     #[error("Failed to construct an HTTP client: {0}")]
     HttpClient(reqwest::Error),
 
+    #[error("Failed to construct a sprockets proxy: {0}")]
+    SprocketsProxy(#[from] sprockets_proxy::Error),
+
     // XXX CLEAN UP
     #[error(transparent)]
     Dns(#[from] internal_dns_client::Error<internal_dns_client::types::Error>),
@@ -404,7 +407,7 @@ impl ServiceInner {
                         );
                         request.datasets.push(DatasetEnsureBody {
                             id: Uuid::new_v4(),
-                            zpool_uuid: dataset.zpool_uuid,
+                            zpool_id: dataset.zpool_uuid,
                             dataset_kind:
                                 crate::params::DatasetKind::CockroachDb {
                                     all_addresses: vec![address],

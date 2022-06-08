@@ -14,9 +14,6 @@ use omicron_common::api::external::InstanceState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use propolis_client::api::InstanceState as PropolisInstanceState;
 
-/// The port propolis-server listens on inside the propolis zone.
-pub const PROPOLIS_PORT: u16 = 12400;
-
 /// Action to be taken on behalf of state transition.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
@@ -275,8 +272,8 @@ impl InstanceStates {
         match self.current.run_state {
             // Valid states for a migration request
             InstanceState::Running => {
-                self.current.dst_propolis_uuid = Some(dst_propolis_id);
-                self.current.migration_uuid = Some(migration_id);
+                self.current.dst_propolis_id = Some(dst_propolis_id);
+                self.current.migration_id = Some(migration_id);
                 self.transition(
                     InstanceState::Migrating,
                     Some(InstanceStateRequested::Running),
@@ -286,9 +283,9 @@ impl InstanceStates {
                 // via a followup request to sled agent.
                 Ok(None)
             }
-            InstanceState::Migrating => match self.current.migration_uuid {
+            InstanceState::Migrating => match self.current.migration_id {
                 Some(id) if id == migration_id => {
-                    match self.current.dst_propolis_uuid {
+                    match self.current.dst_propolis_id {
                         // We're already performing the given migration to the
                         // given propolis instance: no-op
                         Some(id) if id == dst_propolis_id => Ok(None),
@@ -370,11 +367,11 @@ mod test {
     fn make_instance() -> InstanceStates {
         InstanceStates::new(InstanceRuntimeState {
             run_state: State::Creating,
-            sled_uuid: Uuid::new_v4(),
-            propolis_uuid: Uuid::new_v4(),
-            dst_propolis_uuid: None,
+            sled_id: Uuid::new_v4(),
+            propolis_id: Uuid::new_v4(),
+            dst_propolis_id: None,
             propolis_addr: None,
-            migration_uuid: None,
+            migration_id: None,
             ncpus: InstanceCpuCount(2),
             memory: ByteCount::from_mebibytes_u32(512),
             hostname: "myvm".to_string(),
@@ -616,11 +613,11 @@ mod test {
         verify_state(&instance, State::Migrating, Some(Requested::Running));
         assert_eq!(
             migrating_req.migration_params.map(|m| m.migration_id),
-            instance.current().migration_uuid,
+            instance.current().migration_id,
         );
         assert_eq!(
             migrating_req.migration_params.map(|m| m.dst_propolis_id),
-            instance.current().dst_propolis_uuid,
+            instance.current().dst_propolis_id,
         );
     }
 
@@ -758,7 +755,7 @@ mod test {
 
         // Instance is currently marked as 'Migrating' but we'll
         // remove the destination propolis ID
-        instance.current_mut().dst_propolis_uuid = None;
+        instance.current_mut().dst_propolis_id = None;
 
         // A subsequent migrate request that would've been a no-op
         // otherwise should fail in this case
@@ -770,7 +767,7 @@ mod test {
 
         // Instance is still marked as 'Migrating' but we'll
         // remove the Migration ID as well
-        instance.current_mut().migration_uuid = None;
+        instance.current_mut().migration_id = None;
 
         // A subsequent migrate request that would've been a no-op
         // otherwise should fail in this case

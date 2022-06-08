@@ -8,6 +8,8 @@ use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use serde::Deserialize;
 use serde::Serialize;
+use sp_sim::config::GimletConfig;
+use std::net::SocketAddrV6;
 use uuid::Uuid;
 
 pub const BOOTSTRAP_AGENT_PORT: u16 = 12346;
@@ -20,4 +22,10 @@ pub struct Config {
     pub log: ConfigLogging,
 
     pub rss_config: Option<crate::rack_setup::config::SetupServiceConfig>,
+
+    // If present, `dropshot` should bind to a localhost address, and we'll
+    // configure a sprockets-proxy pointed to it that listens on this
+    // (non-localhost) address.
+    pub sprockets_proxy_bind_addr: Option<SocketAddrV6>,
+    pub sp_config: Option<GimletConfig>,
 }
