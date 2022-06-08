@@ -25,6 +25,8 @@ pub struct Updater {
 }
 
 impl Updater {
+    /// Creates a new "Updater", capable of communicating with all
+    /// DNS servers within the AZ.
     pub fn new(subnet: Ipv6Subnet<AZ_PREFIX>, log: Logger) -> Self {
         let clients = ReservedRackSubnet::new(subnet)
             .get_dns_subnets()
