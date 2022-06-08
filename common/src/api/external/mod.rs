@@ -336,50 +336,54 @@ impl JsonSchema for RoleName {
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct ByteCount(u64);
 
-const KB: u64 = 1024;
-const MB: u64 = KB * 1024;
-const GB: u64 = MB * 1024;
-const TB: u64 = GB * 1024;
+#[allow(non_upper_case_globals)]
+const KiB: u64 = 1024;
+#[allow(non_upper_case_globals)]
+const MiB: u64 = KiB * 1024;
+#[allow(non_upper_case_globals)]
+const GiB: u64 = MiB * 1024;
+#[allow(non_upper_case_globals)]
+const TiB: u64 = GiB * 1024;
 
 impl ByteCount {
     pub fn from_kibibytes_u32(kibibytes: u32) -> ByteCount {
-        ByteCount::try_from(KB * u64::from(kibibytes)).unwrap()
+        ByteCount::try_from(KiB * u64::from(kibibytes)).unwrap()
     }
 
     pub fn from_mebibytes_u32(mebibytes: u32) -> ByteCount {
-        ByteCount::try_from(MB * u64::from(mebibytes)).unwrap()
+        ByteCount::try_from(MiB * u64::from(mebibytes)).unwrap()
     }
 
     pub fn from_gibibytes_u32(gibibytes: u32) -> ByteCount {
-        ByteCount::try_from(GB * u64::from(gibibytes)).unwrap()
+        ByteCount::try_from(GiB * u64::from(gibibytes)).unwrap()
     }
 
     pub fn to_bytes(&self) -> u64 {
         self.0
     }
     pub fn to_whole_kibibytes(&self) -> u64 {
-        self.to_bytes() / KB
+        self.to_bytes() / KiB
     }
     pub fn to_whole_mebibytes(&self) -> u64 {
-        self.to_bytes() / MB
+        self.to_bytes() / MiB
     }
     pub fn to_whole_gibibytes(&self) -> u64 {
-        self.to_bytes() / GB
+        self.to_bytes() / GiB
     }
     pub fn to_whole_tebibytes(&self) -> u64 {
-        self.to_bytes() / TB
+        self.to_bytes() / TiB
     }
 }
 
 impl Display for ByteCount {
     fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
-        if self.to_bytes() >= TB && self.to_bytes() % TB == 0 {
+        if self.to_bytes() >= TiB && self.to_bytes() % TiB == 0 {
             write!(f, "{} TiB", self.to_whole_tebibytes())
-        } else if self.to_bytes() >= GB && self.to_bytes() % GB == 0 {
+        } else if self.to_bytes() >= GiB && self.to_bytes() % GiB == 0 {
             write!(f, "{} GiB", self.to_whole_gibibytes())
-        } else if self.to_bytes() >= MB && self.to_bytes() % MB == 0 {
+        } else if self.to_bytes() >= MiB && self.to_bytes() % MiB == 0 {
             write!(f, "{} MiB", self.to_whole_mebibytes())
-        } else if self.to_bytes() >= KB && self.to_bytes() % KB == 0 {
+        } else if self.to_bytes() >= KiB && self.to_bytes() % KiB == 0 {
             write!(f, "{} KiB", self.to_whole_kibibytes())
         } else {
             write!(f, "{} B", self.to_bytes())
