@@ -7,14 +7,13 @@
 use crate::nexus::NexusClient;
 use crate::params::{
     DiskStateRequested, InstanceHardware, InstanceRuntimeStateRequested,
+    InstanceSerialConsoleData,
 };
 use crate::serial::ByteOffset;
 use futures::lock::Mutex;
 use omicron_common::api::external::Error;
+use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
-use omicron_common::api::internal::nexus::{
-    DiskRuntimeState, InstanceSerialConsoleData,
-};
 use slog::Logger;
 use std::sync::Arc;
 use uuid::Uuid;

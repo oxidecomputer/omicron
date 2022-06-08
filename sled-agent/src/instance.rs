@@ -18,14 +18,13 @@ use crate::opte::OptePortAllocator;
 use crate::params::NetworkInterface;
 use crate::params::{
     InstanceHardware, InstanceMigrateParams, InstanceRuntimeStateRequested,
+    InstanceSerialConsoleData,
 };
 use crate::serial::{ByteOffset, SerialConsoleBuffer};
 use anyhow::anyhow;
 use futures::lock::{Mutex, MutexGuard};
 use omicron_common::address::PROPOLIS_PORT;
-use omicron_common::api::internal::nexus::{
-    InstanceRuntimeState, InstanceSerialConsoleData,
-};
+use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::backoff;
 use propolis_client::api::DiskRequest;
 use propolis_client::Client as PropolisClient;

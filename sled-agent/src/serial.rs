@@ -157,7 +157,7 @@ pub(crate) struct SerialConsoleBuffer {
 }
 
 impl SerialConsoleBuffer {
-    /// Create a SerialConsoleBuffer and spawn a thread to receive data from the given websocket to
+    /// Create a SerialConsoleBuffer and spawn a task to receive data from the given websocket to
     /// populate the buffer.
     pub(crate) fn new(ws_uri: String, log: Logger) -> Self {
         let data = Arc::new(RwLock::new(BufferData::new(TTY_BUFFER_SIZE)));

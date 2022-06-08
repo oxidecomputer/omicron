@@ -58,9 +58,6 @@ use omicron_common::api::external::RouterRouteUpdateParams;
 use omicron_common::api::external::Saga;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
-use omicron_common::api::internal::nexus::{
-    InstanceSerialConsoleData, InstanceSerialConsoleRequest,
-};
 use omicron_common::{
     api::external::http_pagination::data_page_params_for, bail_unless,
 };
@@ -1433,8 +1430,8 @@ async fn project_instances_instance_stop(
 async fn project_instances_instance_serial_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstancePathParam>,
-    query_params: Query<InstanceSerialConsoleRequest>,
-) -> Result<HttpResponseOk<InstanceSerialConsoleData>, HttpError> {
+    query_params: Query<params::InstanceSerialConsoleRequest>,
+) -> Result<HttpResponseOk<params::InstanceSerialConsoleData>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();

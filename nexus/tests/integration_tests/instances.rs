@@ -39,7 +39,6 @@ use nexus_test_utils::resource_helpers::{
 };
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
-use omicron_common::api::internal::nexus::InstanceSerialConsoleData;
 
 static ORGANIZATION_NAME: &str = "test-org";
 static PROJECT_NAME: &str = "springfield-squidport";
@@ -2289,7 +2288,7 @@ async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
             > instance.runtime.time_run_state_updated
     );
 
-    let serial_data: InstanceSerialConsoleData =
+    let serial_data: params::InstanceSerialConsoleData =
         NexusRequest::object_get(client, &instance_serial_url)
             .authn_as(AuthnMode::PrivilegedUser)
             .execute()

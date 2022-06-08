@@ -894,8 +894,8 @@ impl super::Nexus {
         organization_name: &Name,
         project_name: &Name,
         instance_name: &Name,
-        params: &nexus::InstanceSerialConsoleRequest,
-    ) -> Result<nexus::InstanceSerialConsoleData, Error> {
+        params: &params::InstanceSerialConsoleRequest,
+    ) -> Result<params::InstanceSerialConsoleData, Error> {
         let db_instance = self
             .instance_fetch(
                 opctx,
@@ -917,7 +917,7 @@ impl super::Nexus {
             .await?;
         let sa_data: sled_agent_client::types::InstanceSerialConsoleData =
             data.into_inner();
-        Ok(nexus::InstanceSerialConsoleData {
+        Ok(params::InstanceSerialConsoleData {
             data: sa_data.data,
             last_byte_offset: sa_data.last_byte_offset,
         })

@@ -10,11 +10,10 @@ use crate::nexus::NexusClient;
 use crate::opte::OptePortAllocator;
 use crate::params::{
     InstanceHardware, InstanceMigrateParams, InstanceRuntimeStateRequested,
+    InstanceSerialConsoleData,
 };
 use crate::serial::ByteOffset;
-use omicron_common::api::internal::nexus::{
-    InstanceRuntimeState, InstanceSerialConsoleData,
-};
+use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::net::Ipv6Addr;

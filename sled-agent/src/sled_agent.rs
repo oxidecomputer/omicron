@@ -14,11 +14,11 @@ use crate::instance_manager::InstanceManager;
 use crate::nexus::NexusClient;
 use crate::params::{
     DatasetKind, DiskStateRequested, InstanceHardware, InstanceMigrateParams,
-    InstanceRuntimeStateRequested, ServiceEnsureBody,
+    InstanceRuntimeStateRequested, InstanceSerialConsoleData,
+    ServiceEnsureBody,
 };
 use crate::services::ServiceManager;
 use crate::storage_manager::StorageManager;
-use omicron_common::api::internal::nexus::InstanceSerialConsoleData;
 use omicron_common::api::{
     internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
     internal::nexus::UpdateArtifact,
