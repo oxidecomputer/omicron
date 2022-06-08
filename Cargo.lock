@@ -2342,12 +2342,16 @@ dependencies = [
 name = "internal-dns-client"
 version = "0.1.0"
 dependencies = [
+ "omicron-common",
  "progenitor",
  "reqwest",
  "serde",
  "serde_json",
  "slog",
  "structopt",
+ "trust-dns-proto",
+ "trust-dns-resolver",
+ "uuid",
 ]
 
 [[package]]
