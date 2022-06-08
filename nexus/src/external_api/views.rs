@@ -72,12 +72,6 @@ impl Into<IdentityProvider> for model::IdentityProvider {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct DerEncodedKeyPair {
-    /// request signing public certificate (base64 encoded der file)
-    pub public_cert: String,
-}
-
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SamlIdentityProvider {
     #[serde(flatten)]
@@ -98,8 +92,8 @@ pub struct SamlIdentityProvider {
     /// customer's technical contact for saml configuration
     pub technical_contact_email: String,
 
-    /// optional request signing key pair
-    pub signing_keypair: Option<DerEncodedKeyPair>,
+    /// optional request signing public certificate (base64 encoded der file)
+    pub public_cert: Option<String>,
 }
 
 impl From<model::SamlIdentityProvider> for SamlIdentityProvider {
@@ -111,9 +105,7 @@ impl From<model::SamlIdentityProvider> for SamlIdentityProvider {
             acs_url: saml_idp.acs_url,
             slo_url: saml_idp.slo_url,
             technical_contact_email: saml_idp.technical_contact_email,
-            signing_keypair: saml_idp
-                .public_cert
-                .map(|x| DerEncodedKeyPair { public_cert: x }),
+            public_cert: saml_idp.public_cert,
         }
     }
 }
