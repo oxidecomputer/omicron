@@ -68,7 +68,7 @@ pub struct ConsoleConfig {
 impl ServerContext {
     /// Create a new context with the given rack id and log.  This creates the
     /// underlying nexus as well.
-    pub async fn new(
+    pub fn new(
         rack_id: Uuid,
         log: Logger,
         config: &config::Config,

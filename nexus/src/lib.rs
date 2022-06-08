@@ -90,7 +90,7 @@ impl Server {
 
         let ctxlog = log.new(o!("component" => "ServerContext"));
 
-        let apictx = ServerContext::new(rack_id, ctxlog, &config).await?;
+        let apictx = ServerContext::new(rack_id, ctxlog, &config)?;
 
         let http_server_starter_external = dropshot::HttpServerStarter::new(
             &config.runtime.dropshot_external,

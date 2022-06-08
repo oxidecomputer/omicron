@@ -152,7 +152,7 @@ pub struct Config {
 }
 
 impl Config {
-    /// Load a `PackageConfig` from the given TOML file
+    /// Load a `Config` from the given TOML file
     ///
     /// This config object can then be used to create a new `Nexus`.
     /// The format is described in the README.
