@@ -53,7 +53,7 @@ impl Into<IdentityProviderType> for model::IdentityProviderType {
     }
 }
 
-/// Client view of an ['IdentityProvider']
+/// Client view of an [`IdentityProvider`]
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct IdentityProvider {
     #[serde(flatten)]

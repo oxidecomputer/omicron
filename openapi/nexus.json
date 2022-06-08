@@ -6181,7 +6181,7 @@
         ]
       },
       "IdentityProvider": {
-        "description": "Client view of an ['IdentityProvider']",
+        "description": "Client view of an [`IdentityProvider`]",
         "type": "object",
         "properties": {
           "description": {
