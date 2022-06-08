@@ -877,6 +877,26 @@ async fn test_instance_create_delete_network_interface(
     );
     let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
+    // Create the VPC Subnet for the secondary interface
+    let secondary_subnet = params::VpcSubnetCreate {
+        identity: IdentityMetadataCreateParams {
+            name: Name::try_from(String::from("secondary")).unwrap(),
+            description: String::from("A secondary VPC subnet"),
+        },
+        ipv4_block: Ipv4Net("172.31.0.0/24".parse().unwrap()),
+        ipv6_block: None,
+    };
+    let url_vpc_subnets = format!(
+        "/organizations/{}/projects/{}/vpcs/{}/subnets",
+        ORGANIZATION_NAME, PROJECT_NAME, "default",
+    );
+    let _response =
+        NexusRequest::objects_post(client, &url_vpc_subnets, &secondary_subnet)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .expect("Failed to create secondary VPC Subnet");
+
     // Create an instance with no network interfaces
     let instance_params = params::InstanceCreate {
         identity: IdentityMetadataCreateParams {
@@ -935,8 +955,8 @@ async fn test_instance_create_delete_network_interface(
                 description: String::from("a new nic"),
             },
             vpc_name: "default".parse().unwrap(),
-            subnet_name: "default".parse().unwrap(),
-            ip: Some("172.30.0.11".parse().unwrap()),
+            subnet_name: secondary_subnet.identity.name.clone(),
+            ip: Some("172.31.0.11".parse().unwrap()),
         },
     ];
 

@@ -742,13 +742,14 @@ CREATE UNIQUE INDEX ON omicron.public.network_interface (
 
 /*
  * Index used to verify that an Instance's networking is contained
- * within a single VPC.
+ * within a single VPC, and that all interfaces are in unique VPC
+ * Subnets.
  */
 CREATE UNIQUE INDEX ON omicron.public.network_interface (
     instance_id,
     name
 )
-STORING (vpc_id)
+STORING (vpc_id, subnet_id)
 WHERE
     time_deleted IS NULL;
 

@@ -247,7 +247,7 @@
           "dataset_kind": {
             "$ref": "#/components/schemas/DatasetKind"
           },
-          "zpool_uuid": {
+          "zpool_id": {
             "type": "string",
             "format": "uuid"
           }
@@ -255,7 +255,7 @@
         "required": [
           "address",
           "dataset_kind",
-          "zpool_uuid"
+          "zpool_id"
         ]
       },
       "DatasetKind": {
@@ -697,21 +697,21 @@
           "src_propolis_addr": {
             "type": "string"
           },
-          "src_propolis_uuid": {
+          "src_propolis_id": {
             "type": "string",
             "format": "uuid"
           }
         },
         "required": [
           "src_propolis_addr",
-          "src_propolis_uuid"
+          "src_propolis_id"
         ]
       },
       "InstanceRuntimeState": {
         "description": "Runtime state of the Instance, including the actual running state and minimal metadata\n\nThis state is owned by the sled agent running that Instance.",
         "type": "object",
         "properties": {
-          "dst_propolis_uuid": {
+          "dst_propolis_id": {
             "nullable": true,
             "description": "the target propolis-server during a migration of this Instance",
             "type": "string",
@@ -737,7 +737,7 @@
               }
             ]
           },
-          "migration_uuid": {
+          "migration_id": {
             "nullable": true,
             "description": "migration id (if one in process)",
             "type": "string",
@@ -756,7 +756,7 @@
             "description": "address of propolis-server running this Instance",
             "type": "string"
           },
-          "propolis_uuid": {
+          "propolis_id": {
             "description": "which propolis-server is running this Instance",
             "type": "string",
             "format": "uuid"
@@ -769,7 +769,7 @@
               }
             ]
           },
-          "sled_uuid": {
+          "sled_id": {
             "description": "which sled is running this Instance",
             "type": "string",
             "format": "uuid"
@@ -785,9 +785,9 @@
           "hostname",
           "memory",
           "ncpus",
-          "propolis_uuid",
+          "propolis_id",
           "run_state",
-          "sled_uuid",
+          "sled_id",
           "time_updated"
         ]
       },

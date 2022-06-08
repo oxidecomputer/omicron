@@ -1057,7 +1057,7 @@ impl DataStore {
             .filter(
                 dsl::migration_id
                     .is_null()
-                    .or(dsl::target_propolis_id.eq(new_runtime.propolis_uuid)),
+                    .or(dsl::target_propolis_id.eq(new_runtime.propolis_id)),
             )
             .set(new_runtime.clone())
             .check_if_exists::<Instance>(*instance_id)
