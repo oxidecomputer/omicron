@@ -6708,13 +6708,13 @@
         "description": "Migration parameters for an [`Instance`](omicron_common::api::external::Instance)",
         "type": "object",
         "properties": {
-          "dst_sled_uuid": {
+          "dst_sled_id": {
             "type": "string",
             "format": "uuid"
           }
         },
         "required": [
-          "dst_sled_uuid"
+          "dst_sled_id"
         ]
       },
       "InstanceNetworkInterfaceAttachment": {

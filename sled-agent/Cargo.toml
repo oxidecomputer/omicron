@@ -35,6 +35,9 @@ slog = { version = "2.5", features = [ "max_level_trace", "release_max_level_deb
 slog-dtrace = "0.2"
 smf = "0.2"
 spdm = { git = "https://github.com/oxidecomputer/spdm", rev = "9742f6e" }
+sp-sim = { path = "../sp-sim" }
+sprockets-host = { git = "http://github.com/oxidecomputer/sprockets", rev = "0361fd13ff19cda6696242fe40f1325fca30d3d1" }
+sprockets-proxy = { git = "http://github.com/oxidecomputer/sprockets", rev = "0361fd13ff19cda6696242fe40f1325fca30d3d1" }
 socket2 = { version = "0.4", features = [ "all" ] }
 structopt = "0.3"
 tar = "0.4"

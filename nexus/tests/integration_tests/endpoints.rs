@@ -852,7 +852,7 @@ lazy_static! {
             allowed_methods: vec![
                 AllowedMethod::Post(serde_json::to_value(
                     params::InstanceMigrate {
-                        dst_sled_uuid: uuid::Uuid::new_v4(),
+                        dst_sled_id: uuid::Uuid::new_v4(),
                     }
                 ).unwrap()),
             ],
