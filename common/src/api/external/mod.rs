@@ -374,13 +374,13 @@ impl ByteCount {
 impl Display for ByteCount {
     fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
         if self.to_bytes() >= TB && self.to_bytes() % TB == 0 {
-            write!(f, "{} TB", self.to_whole_tebibytes())
+            write!(f, "{} TiB", self.to_whole_tebibytes())
         } else if self.to_bytes() >= GB && self.to_bytes() % GB == 0 {
-            write!(f, "{} GB", self.to_whole_gibibytes())
+            write!(f, "{} GiB", self.to_whole_gibibytes())
         } else if self.to_bytes() >= MB && self.to_bytes() % MB == 0 {
-            write!(f, "{} MB", self.to_whole_mebibytes())
+            write!(f, "{} MiB", self.to_whole_mebibytes())
         } else if self.to_bytes() >= KB && self.to_bytes() % KB == 0 {
-            write!(f, "{} KB", self.to_whole_kibibytes())
+            write!(f, "{} KiB", self.to_whole_kibibytes())
         } else {
             write!(f, "{} B", self.to_bytes())
         }
@@ -2108,12 +2108,24 @@ mod test {
     fn test_bytecount_display() {
         assert_eq!(format!("{}", ByteCount::from(0u32)), "0 B".to_string());
         assert_eq!(format!("{}", ByteCount::from(1023)), "1023 B".to_string());
-        assert_eq!(format!("{}", ByteCount::from(1024)), "1 KB".to_string());
+        assert_eq!(format!("{}", ByteCount::from(1024)), "1 KiB".to_string());
         assert_eq!(format!("{}", ByteCount::from(1025)), "1025 B".to_string());
-        assert_eq!(format!("{}", ByteCount::from(1024 * 100)), "100 KB".to_string());
-        assert_eq!(format!("{}", ByteCount::from_mebibytes_u32(1)), "1 MB".to_string());
-        assert_eq!(format!("{}", ByteCount::from_gibibytes_u32(1)), "1 GB".to_string());
-        assert_eq!(format!("{}", ByteCount::from_gibibytes_u32(1024)), "1 TB".to_string());
+        assert_eq!(
+            format!("{}", ByteCount::from(1024 * 100)),
+            "100 KiB".to_string()
+        );
+        assert_eq!(
+            format!("{}", ByteCount::from_mebibytes_u32(1)),
+            "1 MiB".to_string()
+        );
+        assert_eq!(
+            format!("{}", ByteCount::from_gibibytes_u32(1)),
+            "1 GiB".to_string()
+        );
+        assert_eq!(
+            format!("{}", ByteCount::from_gibibytes_u32(1024)),
+            "1 TiB".to_string()
+        );
     }
 
     #[test]
