@@ -36,6 +36,80 @@ impl Into<Silo> for model::Silo {
     }
 }
 
+// IDENTITY PROVIDER
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum IdentityProviderType {
+    /// SAML identity provider
+    Saml,
+}
+
+impl Into<IdentityProviderType> for model::IdentityProviderType {
+    fn into(self) -> IdentityProviderType {
+        match self {
+            model::IdentityProviderType::Saml => IdentityProviderType::Saml,
+        }
+    }
+}
+
+/// Client view of an [`IdentityProvider`]
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct IdentityProvider {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    /// Identity provider type
+    pub provider_type: IdentityProviderType,
+}
+
+impl Into<IdentityProvider> for model::IdentityProvider {
+    fn into(self) -> IdentityProvider {
+        IdentityProvider {
+            identity: self.identity(),
+            provider_type: self.provider_type.into(),
+        }
+    }
+}
+
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SamlIdentityProvider {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    /// idp's entity id
+    pub idp_entity_id: String,
+
+    /// sp's client id
+    pub sp_client_id: String,
+
+    /// service provider endpoint where the response will be sent
+    pub acs_url: String,
+
+    /// service provider endpoint where the idp should send log out requests
+    pub slo_url: String,
+
+    /// customer's technical contact for saml configuration
+    pub technical_contact_email: String,
+
+    /// optional request signing public certificate (base64 encoded der file)
+    pub public_cert: Option<String>,
+}
+
+impl From<model::SamlIdentityProvider> for SamlIdentityProvider {
+    fn from(saml_idp: model::SamlIdentityProvider) -> Self {
+        Self {
+            identity: saml_idp.identity(),
+            idp_entity_id: saml_idp.idp_entity_id,
+            sp_client_id: saml_idp.sp_client_id,
+            acs_url: saml_idp.acs_url,
+            slo_url: saml_idp.slo_url,
+            technical_contact_email: saml_idp.technical_contact_email,
+            public_cert: saml_idp.public_cert,
+        }
+    }
+}
+
 // ORGANIZATIONS
 
 /// Client view of an [`Organization`]
