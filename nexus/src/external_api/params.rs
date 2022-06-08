@@ -144,7 +144,7 @@ where
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum IdpMetadataSource {
     Url { url: String },
-    Base64EncodedXML { data: String },
+    Base64EncodedXml { data: String },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]

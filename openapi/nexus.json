@@ -6292,7 +6292,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "base64_encoded_x_m_l"
+                  "base64_encoded_xml"
                 ]
               }
             },

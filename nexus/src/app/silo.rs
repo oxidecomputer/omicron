@@ -271,7 +271,7 @@ impl super::Nexus {
                 })?
             }
 
-            params::IdpMetadataSource::Base64EncodedXML { data } => {
+            params::IdpMetadataSource::Base64EncodedXml { data } => {
                 let bytes =
                     base64::decode(data).map_err(|e| Error::InvalidValue {
                         label: String::from("data"),

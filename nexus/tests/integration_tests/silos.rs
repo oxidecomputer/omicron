@@ -853,7 +853,7 @@ async fn test_saml_idp_metadata_data_valid(
                 description: "a demo provider".to_string(),
             },
 
-            idp_metadata_source: params::IdpMetadataSource::Base64EncodedXML {
+            idp_metadata_source: params::IdpMetadataSource::Base64EncodedXml {
                 data: base64::encode(SAML_IDP_DESCRIPTOR.to_string()),
             },
 
@@ -914,7 +914,7 @@ async fn test_saml_idp_metadata_data_truncated(
                 description: "a demo provider".to_string(),
             },
 
-            idp_metadata_source: params::IdpMetadataSource::Base64EncodedXML {
+            idp_metadata_source: params::IdpMetadataSource::Base64EncodedXml {
                 data: base64::encode({
                     let mut saml_idp_descriptor =
                         SAML_IDP_DESCRIPTOR.to_string();
@@ -964,7 +964,7 @@ async fn test_saml_idp_metadata_data_invalid(
                 description: "a demo provider".to_string(),
             },
 
-            idp_metadata_source: params::IdpMetadataSource::Base64EncodedXML {
+            idp_metadata_source: params::IdpMetadataSource::Base64EncodedXml {
                 data: "bad data".to_string(),
             },
 
