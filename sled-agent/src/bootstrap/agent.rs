@@ -210,13 +210,14 @@ impl Agent {
                 )?,
             )
             .map_err(|err| BootstrapError::Toml { path: request_path, err })?;
-            agent.request_agent(sled_request).await?;
+            agent.request_agent(&sled_request).await?;
         }
 
         Ok(agent)
     }
 
     /// Implements the "request share" API.
+    #[allow(dead_code)] // Currently uncalled; will be used soon!
     pub async fn request_share(
         &self,
         identity: Vec<u8>,
@@ -234,7 +235,7 @@ impl Agent {
     /// been initialized.
     pub async fn request_agent(
         &self,
-        request: SledAgentRequest,
+        request: &SledAgentRequest,
     ) -> Result<SledAgentResponse, BootstrapError> {
         info!(&self.log, "Loading Sled Agent: {:?}", request);
 

@@ -397,7 +397,7 @@ impl<'a> Root<'a> {
 lookup_resource! {
     name = "Silo",
     ancestors = [],
-    children = [ "Organization" ],
+    children = [ "Organization", "IdentityProvider", "SamlIdentityProvider" ],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -410,6 +410,29 @@ lookup_resource! {
     lookup_by_name = false,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "IdentityProvider",
+    ancestors = [ "Silo" ],
+    children = [],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [
+        { column_name = "silo_id", rust_type = Uuid },
+        { column_name = "id", rust_type = Uuid }
+    ]
+}
+
+lookup_resource! {
+    name = "SamlIdentityProvider",
+    ancestors = [ "Silo" ],
+    children = [],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [
+        { column_name = "id", rust_type = Uuid },
+    ]
 }
 
 lookup_resource! {

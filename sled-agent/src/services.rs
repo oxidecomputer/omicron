@@ -316,10 +316,12 @@ impl ServiceManager {
                         id: service.id,
                         dropshot_external: ConfigDropshot {
                             bind_address: SocketAddr::V6(external_address),
+                            request_body_max_bytes: 1048576,
                             ..Default::default()
                         },
                         dropshot_internal: ConfigDropshot {
                             bind_address: SocketAddr::V6(internal_address),
+                            request_body_max_bytes: 1048576,
                             ..Default::default()
                         },
                         subnet: Ipv6Subnet::<RACK_PREFIX>::new(

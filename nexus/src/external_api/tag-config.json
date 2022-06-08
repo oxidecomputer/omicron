@@ -38,6 +38,12 @@
         "url": "http://oxide.computer/docs/#xxx"
       }
     },
+    "login": {
+      "description": "Authentication endpoints",
+      "external_docs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
     "metrics": {
       "description": "Metrics provide insight into the operation of the Oxide deployment. These include telemetry on hardware and software components that can be used to understand the current state as well as to diagnose issues.",
       "external_docs": {

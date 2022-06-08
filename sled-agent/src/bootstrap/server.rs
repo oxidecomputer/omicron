@@ -6,23 +6,30 @@
 
 use super::agent::Agent;
 use super::config::Config;
-use super::http_entrypoints::ba_api as http_api;
+use super::params::version;
+use super::params::Request;
+use super::params::RequestEnvelope;
+use super::views::Response;
+use super::views::ResponseEnvelope;
 use crate::config::Config as SledConfig;
 use crate::sp::SpHandle;
-use dropshot::HttpServer;
+use crate::sp::SprocketsRole;
 use slog::Drain;
 use slog::Logger;
 use std::net::Ipv6Addr;
-use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
-use std::time::Duration;
+use tokio::io::AsyncReadExt;
+use tokio::io::AsyncWriteExt;
+use tokio::net::TcpListener;
+use tokio::net::TcpStream;
+use tokio::task::JoinHandle;
 
 /// Wraps a [Agent] object, and provides helper methods for exposing it
 /// via an HTTP interface.
 pub struct Server {
     bootstrap_agent: Arc<Agent>,
-    http_server: dropshot::HttpServer<Arc<Agent>>,
+    inner: JoinHandle<Result<(), String>>,
 }
 
 impl Server {
@@ -58,38 +65,18 @@ impl Server {
         );
 
         let ba = Arc::clone(&bootstrap_agent);
-        let dropshot_log = log.new(o!("component" => "dropshot (Bootstrap)"));
-        let http_server = dropshot::HttpServerStarter::new(
-            &config.dropshot,
-            http_api(),
-            ba,
-            &dropshot_log,
-        )
-        .map_err(|error| format!("initializing server: {}", error))?
-        .start();
+        let ba_log = log.new(o!("component" => "BootstrapAgentServer"));
+        let inner =
+            Inner::start(config.bind_address, sp.clone(), ba, ba_log).await?;
 
-        // Are connections to our bootstrap dropshot server being tunneled
-        // through a sprockets proxy? If so, start up our half.
-        if let Some(sprockets_proxy_bind_addr) =
-            config.sprockets_proxy_bind_addr
-        {
-            spawn_sprockets_proxy(
-                &sp,
-                &http_server,
-                sprockets_proxy_bind_addr,
-                &log,
-            )
-            .await?;
-        }
-
-        let server = Server { bootstrap_agent, http_server };
+        let server = Server { bootstrap_agent, inner };
 
         // Initialize the bootstrap agent *after* the server has started.
         // This ordering allows the bootstrap agent to communicate with
         // other bootstrap agents on the rack during the initialization
         // process.
         if let Err(e) = server.bootstrap_agent.initialize(&config).await {
-            let _ = server.close().await;
+            server.inner.abort();
             return Err(e.to_string());
         }
 
@@ -97,75 +84,165 @@ impl Server {
     }
 
     pub async fn wait_for_finish(self) -> Result<(), String> {
-        self.http_server.await
+        match self.inner.await {
+            Ok(result) => result,
+            Err(err) => {
+                if err.is_cancelled() {
+                    // We control cancellation of `inner`, which only happens if
+                    // we intentionally abort it in `close()`; that should not
+                    // result in an error here.
+                    Ok(())
+                } else {
+                    Err(format!("Join on server tokio task failed: {err}"))
+                }
+            }
+        }
     }
 
     pub async fn close(self) -> Result<(), String> {
-        self.http_server.close().await
+        self.inner.abort();
+        self.wait_for_finish().await
     }
 }
 
-pub fn run_openapi() -> Result<(), String> {
-    http_api()
-        .openapi("Oxide Bootstrap Agent API", "0.0.1")
-        .description("API for interacting with bootstrapping agents")
-        .contact_url("https://oxide.computer")
-        .contact_email("api@oxide.computer")
-        .write(&mut std::io::stdout())
-        .map_err(|e| e.to_string())
+struct Inner {
+    listener: TcpListener,
+    sp: Option<SpHandle>,
+    bootstrap_agent: Arc<Agent>,
+    log: Logger,
 }
 
-async fn spawn_sprockets_proxy(
-    sp: &Option<SpHandle>,
-    http_server: &HttpServer<Arc<Agent>>,
-    sprockets_proxy_bind_addr: SocketAddrV6,
+impl Inner {
+    async fn start(
+        bind_address: SocketAddrV6,
+        sp: Option<SpHandle>,
+        bootstrap_agent: Arc<Agent>,
+        log: Logger,
+    ) -> Result<JoinHandle<Result<(), String>>, String> {
+        let listener =
+            TcpListener::bind(bind_address).await.map_err(|err| {
+                format!("could not bind to {bind_address}: {err}")
+            })?;
+        info!(log, "Started listening"; "local_addr" => %bind_address);
+        let inner = Inner { listener, sp, bootstrap_agent, log };
+        Ok(tokio::spawn(inner.run()))
+    }
+
+    // Run our sprockets server. The only `.await` point is when `accept()`ing
+    // on our bound socket, so we can be cleanly shut down by our caller
+    // `.abort()`ing our task, which will not affect any already-accepted
+    // sockets (which are spawned onto detached tokio tasks).
+    async fn run(self) -> Result<(), String> {
+        loop {
+            let (stream, remote_addr) =
+                self.listener.accept().await.map_err(|err| {
+                    format!("accept() on already-bound socket failed: {err}")
+                })?;
+
+            let log = self.log.new(o!("remote_addr" => remote_addr));
+            info!(log, "Accepted connection");
+
+            let sp = self.sp.clone();
+            let ba = Arc::clone(&self.bootstrap_agent);
+            tokio::spawn(async move {
+                match serve_single_request(stream, sp, ba, &log).await {
+                    Ok(()) => info!(log, "Connection closed"),
+                    Err(err) => warn!(log, "Connection failed"; "err" => err),
+                }
+            });
+        }
+    }
+}
+
+async fn serve_single_request(
+    stream: TcpStream,
+    sp: Option<SpHandle>,
+    bootstrap_agent: Arc<Agent>,
     log: &Logger,
 ) -> Result<(), String> {
-    // We can only start a sprockets proxy if we have an SP.
-    let sp = sp.as_ref().ok_or(
-        "Misconfiguration: cannot start a sprockets proxy without an SP",
-    )?;
+    // Bound to avoid allocating an unreasonable amount of memory from a bogus
+    // length prefix from a client. We authenticate clients via sprockets before
+    // allocating based on the length prefix they send, so it should be fine to
+    // be a little sloppy here and just pick something far larger than we ever
+    // expect to see.
+    const MAX_REQUEST_LEN: u32 = 128 << 20;
 
-    // If we're running a sprockets proxy, our dropshot server should be
-    // listening on localhost.
-    let dropshot_addr = http_server.local_addr();
-    if !dropshot_addr.ip().is_loopback() {
-        return Err(concat!(
-            "Misconfiguration: bootstrap dropshot IP address should ",
-            "be loopback when using a sprockets proxy"
-        )
-        .into());
+    // Establish sprockets session (if we have an SP).
+    let mut stream =
+        crate::sp::maybe_wrap_stream(stream, &sp, SprocketsRole::Server, log)
+            .await
+            .map_err(|err| {
+                format!("Failed to establish sprockets session: {err}")
+            })?;
+
+    // Read request, length prefix first.
+    let request_length = stream
+        .read_u32()
+        .await
+        .map_err(|err| format!("Failed to read length prefix: {err}"))?;
+
+    // Sanity check / guard against malformed lengths
+    if request_length > MAX_REQUEST_LEN {
+        return Err(format!(
+            "Rejecting incoming message with enormous length {request_length}"
+        ));
     }
 
-    let proxy_config = sprockets_proxy::Config {
-        bind_address: SocketAddr::V6(sprockets_proxy_bind_addr),
-        target_address: dropshot_addr,
-        role: sprockets_proxy::Role::Server,
+    let mut buf = vec![0; request_length as usize];
+    stream.read_exact(&mut buf).await.map_err(|err| {
+        format!("Failed to read message of length {request_length}: {err}")
+    })?;
+
+    // Deserialize request.
+    let envelope: RequestEnvelope =
+        serde_json::from_slice(&buf).map_err(|err| {
+            format!("Failed to deserialize request envelope: {err}")
+        })?;
+
+    // Currently we only have one version, so there's nothing to do in this
+    // match, but we leave it here as a breadcrumb for future changes.
+    match envelope.version {
+        version::V1 => (),
+        other => return Err(format!("Unsupported version: {other}")),
+    }
+
+    // Handle request.
+    let response = match envelope.request {
+        Request::SledAgentRequest(request) => {
+            match bootstrap_agent.request_agent(&*request).await {
+                Ok(response) => Ok(Response::SledAgentResponse(response)),
+                Err(err) => {
+                    warn!(log, "Sled agent request failed"; "err" => %err);
+                    Err(format!("Sled agent request failed: {err}"))
+                }
+            }
+        }
+        Request::ShareRequest => {
+            Err("share request currently unsupported".to_string())
+        }
     };
-    let proxy_log = log.new(o!("component" => "sprockets-proxy (Bootstrap)"));
 
-    // TODO-cleanup The `Duration` passed to `Proxy::new()` is the timeout
-    // for communicating with the RoT. Currently it can be set to anything
-    // at all (our simulated RoT always responds immediately). Should the
-    // value move to our config?
-    let proxy = sprockets_proxy::Proxy::new(
-        &proxy_config,
-        sp.manufacturing_public_key(),
-        sp.rot_handle(),
-        sp.rot_certs(),
-        Duration::from_secs(5),
-        proxy_log,
-    )
-    .await
-    .map_err(|err| format!("Failed to start sprockets proxy: {err}"))?;
+    // Build and serialize response.
+    let envelope = ResponseEnvelope { version: version::V1, response };
+    buf.clear();
+    serde_json::to_writer(&mut buf, &envelope)
+        .map_err(|err| format!("Failed to serialize response: {err}"))?;
 
-    tokio::spawn(async move {
-        // TODO-robustness `proxy.run()` only fails if `accept()`ing on our
-        // already-bound listening socket fails, which means something has
-        // gone very wrong. Do we have any recourse other than panicking?
-        // What does dropshot do if `accept()` fails?
-        proxy.run().await.expect("sprockets server proxy failed");
-    });
+    // Write response, length prefix first.
+    let response_length = u32::try_from(buf.len())
+        .expect("serialized bootstrap-agent response length overflowed u32");
+
+    stream.write_u32(response_length).await.map_err(|err| {
+        format!("Failed to write response length prefix: {err}")
+    })?;
+    stream
+        .write_all(&buf)
+        .await
+        .map_err(|err| format!("Failed to write response body: {err}"))?;
+    stream
+        .flush()
+        .await
+        .map_err(|err| format!("Failed to flush response body: {err}"))?;
 
     Ok(())
 }

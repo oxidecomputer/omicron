@@ -183,15 +183,13 @@ CREATE TABLE omicron.public.volume (
 CREATE TABLE omicron.public.silo (
     /* Identity metadata */
     id UUID PRIMARY KEY,
-
     name STRING(128) NOT NULL,
     description STRING(512) NOT NULL,
-
-    discoverable BOOL NOT NULL,
-
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
+
+    discoverable BOOL NOT NULL,
 
     /* child resource generation number, per RFD 192 */
     rcgen INT NOT NULL
@@ -206,7 +204,6 @@ CREATE UNIQUE INDEX ON omicron.public.silo (
  * Silo users
  */
 CREATE TABLE omicron.public.silo_user (
-    /* silo user id */
     id UUID PRIMARY KEY,
 
     silo_id UUID NOT NULL,
@@ -220,6 +217,70 @@ CREATE TABLE omicron.public.silo_user (
 CREATE INDEX ON omicron.public.silo_user (
     silo_id,
     id
+) WHERE
+    time_deleted IS NULL;
+
+CREATE TYPE omicron.public.provider_type AS ENUM (
+  'saml'
+);
+
+/*
+ * Silo identity provider list
+ */
+CREATE TABLE omicron.public.identity_provider (
+    /* Identity metadata */
+    id UUID PRIMARY KEY,
+    name STRING(128) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+
+    silo_id UUID NOT NULL,
+    provider_type omicron.public.provider_type NOT NULL
+);
+
+CREATE INDEX ON omicron.public.identity_provider (
+    id,
+    silo_id
+) WHERE
+    time_deleted IS NULL;
+
+CREATE INDEX ON omicron.public.identity_provider (
+    name,
+    silo_id
+) WHERE
+    time_deleted IS NULL;
+
+/*
+ * Silo SAML identity provider
+ */
+CREATE TABLE omicron.public.saml_identity_provider (
+    /* Identity metadata */
+    id UUID PRIMARY KEY,
+    name STRING(128) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+
+    silo_id UUID NOT NULL,
+
+    idp_metadata_document_string TEXT NOT NULL,
+
+    idp_entity_id TEXT NOT NULL,
+    sp_client_id TEXT NOT NULL,
+    acs_url TEXT NOT NULL,
+    slo_url TEXT NOT NULL,
+    technical_contact_email TEXT NOT NULL,
+
+    public_cert TEXT,
+    private_key TEXT
+);
+
+CREATE INDEX ON omicron.public.saml_identity_provider (
+    id,
+    silo_id
 ) WHERE
     time_deleted IS NULL;
 

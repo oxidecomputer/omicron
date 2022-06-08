@@ -49,9 +49,6 @@ pub enum SetupServiceError {
 
     #[error("Failed to construct an HTTP client: {0}")]
     HttpClient(reqwest::Error),
-
-    #[error("Failed to construct a sprockets proxy: {0}")]
-    SprocketsProxy(#[from] sprockets_proxy::Error),
 }
 
 // The workload / information allocated to a single sled.
