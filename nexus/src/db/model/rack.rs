@@ -4,16 +4,25 @@
 
 use crate::db::schema::rack;
 use db_macros::Asset;
+use uuid::Uuid;
 
-// NOTE: This object is not currently stored in the database.
-//
-// However, it likely will be in the future - for the single-rack
-// case, however, it is synthesized.
+/// Information about a local rack.
 #[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
 #[diesel(table_name = rack)]
 pub struct Rack {
     #[diesel(embed)]
     pub identity: RackIdentity,
 
+    pub initialized: bool,
     pub tuf_base_url: Option<String>,
+}
+
+impl Rack {
+    pub fn new(id: Uuid) -> Self {
+        Self {
+            identity: RackIdentity::new(id),
+            initialized: false,
+            tuf_base_url: None,
+        }
+    }
 }

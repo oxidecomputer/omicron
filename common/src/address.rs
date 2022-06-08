@@ -46,6 +46,9 @@ const _ANYCAST_ADDRESS_INDEX: usize = 0;
 const DNS_ADDRESS_INDEX: usize = 1;
 const GZ_ADDRESS_INDEX: usize = 2;
 
+/// The maximum number of addresses per sled reserved for RSS.
+pub const RSS_RESERVED_ADDRESSES: u16 = 10;
+
 /// Wraps an [`Ipv6Network`] with a compile-time prefix length.
 #[derive(Debug, Clone, Copy, JsonSchema, Serialize, Deserialize, PartialEq)]
 pub struct Ipv6Subnet<const N: u8> {

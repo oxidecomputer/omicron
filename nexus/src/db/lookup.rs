@@ -9,7 +9,7 @@ use super::identity::Asset;
 use super::identity::Resource;
 use super::model;
 use crate::{
-    authz::{self},
+    authz,
     context::OpContext,
     db,
     db::error::{public_error_from_diesel_pool, ErrorHandler},
@@ -320,6 +320,11 @@ impl<'a> LookupPath<'a> {
         }
     }
 
+    /// Select a resource of type Rack, identified by its id
+    pub fn rack_id(self, id: Uuid) -> Rack<'a> {
+        Rack { key: RackKey::PrimaryKey(Root { lookup_root: self }, id) }
+    }
+
     /// Select a resource of type Sled, identified by its id
     pub fn sled_id(self, id: Uuid) -> Sled<'a> {
         Sled { key: SledKey::PrimaryKey(Root { lookup_root: self }, id) }
@@ -548,6 +553,15 @@ lookup_resource! {
         { column_name = "resource_type", rust_type = String },
         { column_name = "role_name", rust_type = String },
     ]
+}
+
+lookup_resource! {
+    name = "Rack",
+    ancestors = [],
+    children = [],
+    lookup_by_name = false,
+    soft_deletes = false,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
 }
 
 lookup_resource! {
