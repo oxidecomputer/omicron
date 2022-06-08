@@ -2,11 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::db::identity::Resource;
 use crate::db::model::impl_enum_type;
 use crate::db::schema::{identity_provider, saml_identity_provider};
 use db_macros::Resource;
-use omicron_common::api::external;
 
 use serde::{Deserialize, Serialize};
 use std::io::Write;
@@ -55,17 +53,3 @@ pub struct SamlIdentityProvider {
     pub private_key: Option<String>,
 }
 
-impl Into<external::SamlIdentityProvider> for SamlIdentityProvider {
-    fn into(self) -> external::SamlIdentityProvider {
-        external::SamlIdentityProvider {
-            identity: self.identity(),
-            idp_entity_id: self.idp_entity_id.clone(),
-            sp_client_id: self.sp_client_id.clone(),
-            acs_url: self.acs_url.clone(),
-            slo_url: self.slo_url.clone(),
-            technical_contact_email: self.technical_contact_email.clone(),
-            public_cert: self.public_cert,
-            private_key: self.private_key,
-        }
-    }
-}

@@ -4,12 +4,12 @@
 
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use omicron_common::api::external::{
-    IdentityMetadataCreateParams, Name, SamlIdentityProvider,
+    IdentityMetadataCreateParams, Name,
 };
 use omicron_nexus::authn::silos::IdentityProviderType;
 use omicron_nexus::external_api::params;
 use omicron_nexus::external_api::views::{
-    self, IdentityProvider, Organization, Silo,
+    self, IdentityProvider, SamlIdentityProvider, Organization, Silo,
 };
 use omicron_nexus::TestInterfaces as _;
 use std::collections::HashSet;

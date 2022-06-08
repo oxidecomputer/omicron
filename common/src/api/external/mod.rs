@@ -1869,34 +1869,6 @@ impl std::fmt::Display for Digest {
     }
 }
 
-/// A SAML configuration specifies both identity provider and service provider
-/// details
-#[derive(Clone, Debug, Serialize, JsonSchema, Deserialize)]
-pub struct SamlIdentityProvider {
-    #[serde(flatten)]
-    pub identity: IdentityMetadata,
-
-    /// identity provider's entity id
-    pub idp_entity_id: String,
-
-    /// service provider's client id
-    pub sp_client_id: String,
-
-    /// service provider endpoint where the response will be sent
-    pub acs_url: String,
-
-    /// service provider endpoint where the identity provider should send log out requests
-    pub slo_url: String,
-
-    /// customer's technical contact for SAML configuration
-    pub technical_contact_email: String,
-
-    /// optional request signing key pair (base64 encoded der files)
-    pub public_cert: Option<String>,
-    #[serde(skip_serializing)]
-    pub private_key: Option<String>,
-}
-
 #[cfg(test)]
 mod test {
     use super::IpNet;
