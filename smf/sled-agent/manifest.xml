@@ -28,6 +28,10 @@
     type='service'>
     <service_fmri value='svc:/milestone/devices' />
   </dependency>
+  <dependency name='network' grouping='require_all' restart_on='none'
+    type='service'>
+  <service_fmri value='svc:/milestone/network:default' />
+  </dependency>
 
   <method_context>
     <method_environment>

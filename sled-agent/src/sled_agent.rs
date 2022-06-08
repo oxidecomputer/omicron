@@ -16,7 +16,7 @@ use crate::params::{
     DatasetKind, DiskStateRequested, InstanceHardware, InstanceMigrateParams,
     InstanceRuntimeStateRequested, ServiceEnsureBody,
 };
-use crate::services::ServiceManager;
+use crate::services::{self, ServiceManager};
 use crate::storage_manager::StorageManager;
 use omicron_common::api::{
     internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
@@ -245,7 +245,7 @@ impl SledAgent {
             etherstub.clone(),
             etherstub_vnic.clone(),
             *sled_address.ip(),
-            None,
+            services::Config::default(),
         )
         .await?;
 

@@ -2798,6 +2798,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-postgres",
+ "toml",
  "uuid",
 ]
 

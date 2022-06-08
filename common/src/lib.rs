@@ -24,7 +24,8 @@ pub mod address;
 pub mod api;
 pub mod backoff;
 pub mod cmd;
-pub mod config;
+pub mod nexus_config;
+pub mod postgres_config;
 
 #[macro_export]
 macro_rules! generate_logging_api {

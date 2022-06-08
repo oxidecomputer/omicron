@@ -29,12 +29,12 @@ pub struct SetupServiceConfig {
     pub rack_subnet: Ipv6Addr,
 
     #[serde(default, rename = "request")]
-    pub requests: Vec<SledRequest>,
+    pub requests: Vec<HardcodedSledRequest>,
 }
 
 /// A request to initialize a sled.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
-pub struct SledRequest {
+pub struct HardcodedSledRequest {
     /// Datasets to be created.
     #[serde(default, rename = "dataset")]
     pub datasets: Vec<DatasetEnsureBody>,

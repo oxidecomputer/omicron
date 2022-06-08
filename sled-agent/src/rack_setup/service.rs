@@ -4,13 +4,15 @@
 
 //! Rack Setup Service implementation
 
-use super::config::{SetupServiceConfig as Config, SledRequest};
-use crate::bootstrap::config::BOOTSTRAP_AGENT_PORT;
-use crate::bootstrap::discovery::PeerMonitorObserver;
-use crate::bootstrap::params::SledAgentRequest;
-use crate::bootstrap::rss_handle::BootstrapAgentHandle;
-use crate::params::ServiceRequest;
-use omicron_common::address::{get_sled_address, ReservedRackSubnet};
+use super::config::{HardcodedSledRequest, SetupServiceConfig as Config};
+use crate::bootstrap::{
+    config::BOOTSTRAP_AGENT_PORT, discovery::PeerMonitorObserver,
+    params::SledAgentRequest, rss_handle::BootstrapAgentHandle,
+};
+use crate::params::{ServiceRequest, ServiceType};
+use omicron_common::address::{
+    get_sled_address, ReservedRackSubnet, DNS_PORT, DNS_SERVER_PORT,
+};
 use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
 };
@@ -21,6 +23,7 @@ use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::path::PathBuf;
 use thiserror::Error;
 use tokio::sync::Mutex;
+use uuid::Uuid;
 
 /// Describes errors which may occur while operating the setup service.
 #[derive(Error, Debug)]
@@ -55,7 +58,7 @@ pub enum SetupServiceError {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 struct SledAllocation {
     initialization_request: SledAgentRequest,
-    services_request: SledRequest,
+    services_request: HardcodedSledRequest,
 }
 
 /// The interface to the Rack Setup Service.
@@ -192,7 +195,7 @@ impl ServiceInner {
     async fn initialize_services(
         &self,
         sled_address: SocketAddr,
-        services: &Vec<crate::params::ServiceRequest>,
+        services: &Vec<ServiceRequest>,
     ) -> Result<(), SetupServiceError> {
         let dur = std::time::Duration::from_secs(60);
         let client = reqwest::ClientBuilder::new()
@@ -284,18 +287,31 @@ impl ServiceInner {
                     if idx < config.requests.len() {
                         config.requests[idx].clone()
                     } else {
-                        SledRequest::default()
+                        HardcodedSledRequest::default()
                     }
                 };
 
-                // The first enumerated addresses get assigned the additional
+                // The first enumerated sleds get assigned the additional
                 // responsibility of being internal DNS servers.
                 if idx < dns_subnets.len() {
                     let dns_subnet = &dns_subnets[idx];
+                    let dns_addr = dns_subnet.dns_address().ip();
                     request.dns_services.push(ServiceRequest {
+                        id: Uuid::new_v4(),
                         name: "internal-dns".to_string(),
-                        addresses: vec![dns_subnet.dns_address().ip()],
+                        addresses: vec![dns_addr],
                         gz_addresses: vec![dns_subnet.gz_address().ip()],
+                        service_type: ServiceType::InternalDns {
+                            server_address: SocketAddrV6::new(
+                                dns_addr,
+                                DNS_SERVER_PORT,
+                                0,
+                                0,
+                            ),
+                            dns_address: SocketAddrV6::new(
+                                dns_addr, DNS_PORT, 0, 0,
+                            ),
+                        },
                     });
                 }
 
@@ -331,8 +347,10 @@ impl ServiceInner {
         }
 
         // Once we've constructed a plan, write it down to durable storage.
-        let serialized_plan = toml::Value::try_from(&plan)
-            .expect("Cannot serialize configuration");
+        let serialized_plan =
+            toml::Value::try_from(&plan).unwrap_or_else(|e| {
+                panic!("Cannot serialize configuration: {:#?}: {}", plan, e)
+            });
         let plan_str = toml::to_string(&serialized_plan)
             .expect("Cannot turn config to string");
 
