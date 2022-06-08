@@ -74,11 +74,21 @@ impl super::Nexus {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
         // Convert from parameter -> DB type.
-        let services: Vec<_> = services.into_iter().map(|svc| {
-            db::model::Service::new(svc.service_id, svc.sled_id, svc.address, svc.kind.into())
-        }).collect();
+        let services: Vec<_> = services
+            .into_iter()
+            .map(|svc| {
+                db::model::Service::new(
+                    svc.service_id,
+                    svc.sled_id,
+                    svc.address,
+                    svc.kind.into(),
+                )
+            })
+            .collect();
 
-        self.db_datastore.rack_set_initialized(opctx, rack_id, services).await?;
+        self.db_datastore
+            .rack_set_initialized(opctx, rack_id, services)
+            .await?;
 
         Ok(())
     }

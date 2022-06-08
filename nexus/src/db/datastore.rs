@@ -45,7 +45,10 @@ use crate::db::queries::vpc_subnet::FilterConflictingVpcSubnetRangesQuery;
 use crate::db::queries::vpc_subnet::SubnetError;
 use crate::db::{
     self,
-    error::{public_error_from_diesel_create, public_error_from_diesel_lookup, public_error_from_diesel_pool, ErrorHandler, TransactionError},
+    error::{
+        public_error_from_diesel_create, public_error_from_diesel_lookup,
+        public_error_from_diesel_pool, ErrorHandler, TransactionError,
+    },
     model::{
         ConsoleSession, Dataset, DatasetKind, Disk, DiskRuntimeState,
         Generation, GlobalImage, IncompleteNetworkInterface, Instance,
@@ -182,14 +185,9 @@ impl DataStore {
         use db::schema::rack::dsl as rack_dsl;
         use db::schema::service::dsl as service_dsl;
 
-
         #[derive(Debug)]
         enum RackInitError {
-            ServiceInsert {
-                err: SyncInsertError,
-                sled_id: Uuid,
-                svc_id: Uuid,
-            },
+            ServiceInsert { err: SyncInsertError, sled_id: Uuid, svc_id: Uuid },
             RackUpdate(diesel::result::Error),
         }
         type TxnError = TransactionError<RackInitError>;
@@ -204,7 +202,9 @@ impl DataStore {
                     .filter(rack_dsl::id.eq(rack_id))
                     .select(Rack::as_select())
                     .get_result(conn)
-                    .map_err(|e| TxnError::CustomError(RackInitError::RackUpdate(e)))?;
+                    .map_err(|e| {
+                        TxnError::CustomError(RackInitError::RackUpdate(e))
+                    })?;
                 if rack.initialized {
                     return Ok(rack);
                 }
@@ -220,41 +220,53 @@ impl DataStore {
                             .do_update()
                             .set((
                                 service_dsl::time_modified.eq(Utc::now()),
-                                service_dsl::sled_id.eq(excluded(service_dsl::sled_id)),
+                                service_dsl::sled_id
+                                    .eq(excluded(service_dsl::sled_id)),
                                 service_dsl::ip.eq(excluded(service_dsl::ip)),
-                                service_dsl::kind.eq(excluded(service_dsl::kind)),
+                                service_dsl::kind
+                                    .eq(excluded(service_dsl::kind)),
                             )),
                     )
                     .insert_and_get_result(conn)
-                    .map_err(|err| TxnError::CustomError(RackInitError::ServiceInsert {
-                        err,
-                        sled_id,
-                        svc_id: svc.id(),
-                    }))?;
+                    .map_err(|err| {
+                        TxnError::CustomError(RackInitError::ServiceInsert {
+                            err,
+                            sled_id,
+                            svc_id: svc.id(),
+                        })
+                    })?;
                 }
                 diesel::update(rack_dsl::rack)
                     .filter(rack_dsl::id.eq(rack_id))
-                    .set((rack_dsl::initialized.eq(true), rack_dsl::time_modified.eq(Utc::now())))
+                    .set((
+                        rack_dsl::initialized.eq(true),
+                        rack_dsl::time_modified.eq(Utc::now()),
+                    ))
                     .returning(Rack::as_returning())
                     .get_result::<Rack>(conn)
-                    .map_err(|e| TxnError::CustomError(RackInitError::RackUpdate(e)))
-
+                    .map_err(|e| {
+                        TxnError::CustomError(RackInitError::RackUpdate(e))
+                    })
             })
             .await
             .map_err(|e| match e {
-                TxnError::CustomError(RackInitError::ServiceInsert { err, sled_id, svc_id }) => {
-                    match err {
-                        SyncInsertError::CollectionNotFound => Error::ObjectNotFound {
+                TxnError::CustomError(RackInitError::ServiceInsert {
+                    err,
+                    sled_id,
+                    svc_id,
+                }) => match err {
+                    SyncInsertError::CollectionNotFound => {
+                        Error::ObjectNotFound {
                             type_name: ResourceType::Sled,
                             lookup_type: LookupType::ById(sled_id),
-                        },
-                        SyncInsertError::DatabaseError(e) => {
-                            public_error_from_diesel_create(
-                                e,
-                                ResourceType::Service,
-                                &svc_id.to_string(),
-                            )
                         }
+                    }
+                    SyncInsertError::DatabaseError(e) => {
+                        public_error_from_diesel_create(
+                            e,
+                            ResourceType::Service,
+                            &svc_id.to_string(),
+                        )
                     }
                 },
                 TxnError::CustomError(RackInitError::RackUpdate(err)) => {
@@ -263,7 +275,7 @@ impl DataStore {
                         ResourceType::Rack,
                         &LookupType::ById(rack_id),
                     )
-                },
+                }
                 TxnError::Pool(e) => {
                     Error::internal_error(&format!("Transaction error: {}", e))
                 }
@@ -4312,13 +4324,17 @@ mod test {
         assert_eq!(result.initialized, false);
 
         // Initialize the Rack.
-        let result =
-            datastore.rack_set_initialized(&opctx, rack.id(), vec![]).await.unwrap();
+        let result = datastore
+            .rack_set_initialized(&opctx, rack.id(), vec![])
+            .await
+            .unwrap();
         assert!(result.initialized);
 
         // Re-initialize the rack (check for idempotency)
-        let result =
-            datastore.rack_set_initialized(&opctx, rack.id(), vec![]).await.unwrap();
+        let result = datastore
+            .rack_set_initialized(&opctx, rack.id(), vec![])
+            .await
+            .unwrap();
         assert!(result.initialized);
 
         db.cleanup().await.unwrap();

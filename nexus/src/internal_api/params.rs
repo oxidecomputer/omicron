@@ -128,6 +128,7 @@ impl FromStr for ServiceKind {
         match s {
             "nexus" => Ok(Nexus),
             "oximeter" => Ok(Oximeter),
+            "internal_dns" => Ok(InternalDNS),
             _ => Err(Self::Err::InternalError {
                 internal_message: format!("Unknown service kind: {}", s),
             }),

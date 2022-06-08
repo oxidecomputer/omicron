@@ -128,11 +128,7 @@ pub fn public_error_from_diesel_pool(
             )
         }
         ErrorHandler::NotFoundByLookup(resource_type, lookup_type) => {
-            public_error_from_diesel_lookup(
-                error,
-                resource_type,
-                &lookup_type,
-            )
+            public_error_from_diesel_lookup(error, resource_type, &lookup_type)
         }
         ErrorHandler::Conflict(resource_type, object_name) => {
             public_error_from_diesel_create(error, resource_type, object_name)
@@ -172,7 +168,7 @@ where
 
 /// Converts a Diesel error to an external error, handling "NotFound" using
 /// `make_not_found_error`.
-pub (crate) fn public_error_from_diesel_lookup(
+pub(crate) fn public_error_from_diesel_lookup(
     error: DieselError,
     resource_type: ResourceType,
     lookup_type: &LookupType,
@@ -197,7 +193,7 @@ pub (crate) fn public_error_from_diesel_lookup(
 
 /// Converts a Diesel error to an external error, when requested as
 /// part of a creation operation.
-pub (crate) fn public_error_from_diesel_create(
+pub(crate) fn public_error_from_diesel_create(
     error: DieselError,
     resource_type: ResourceType,
     object_name: &str,
