@@ -336,33 +336,54 @@ impl JsonSchema for RoleName {
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct ByteCount(u64);
 
+const KB: u64 = 1024;
+const MB: u64 = KB * 1024;
+const GB: u64 = MB * 1024;
+const TB: u64 = GB * 1024;
+
 impl ByteCount {
     pub fn from_kibibytes_u32(kibibytes: u32) -> ByteCount {
-        ByteCount::try_from(1024 * u64::from(kibibytes)).unwrap()
+        ByteCount::try_from(KB * u64::from(kibibytes)).unwrap()
     }
 
     pub fn from_mebibytes_u32(mebibytes: u32) -> ByteCount {
-        ByteCount::try_from(1024 * 1024 * u64::from(mebibytes)).unwrap()
+        ByteCount::try_from(MB * u64::from(mebibytes)).unwrap()
     }
 
     pub fn from_gibibytes_u32(gibibytes: u32) -> ByteCount {
-        ByteCount::try_from(1024 * 1024 * 1024 * u64::from(gibibytes)).unwrap()
+        ByteCount::try_from(GB * u64::from(gibibytes)).unwrap()
     }
 
     pub fn to_bytes(&self) -> u64 {
         self.0
     }
     pub fn to_whole_kibibytes(&self) -> u64 {
-        self.to_bytes() / 1024
+        self.to_bytes() / KB
     }
     pub fn to_whole_mebibytes(&self) -> u64 {
-        self.to_bytes() / 1024 / 1024
+        self.to_bytes() / MB
     }
     pub fn to_whole_gibibytes(&self) -> u64 {
-        self.to_bytes() / 1024 / 1024 / 1024
+        self.to_bytes() / GB
     }
     pub fn to_whole_tebibytes(&self) -> u64 {
-        self.to_bytes() / 1024 / 1024 / 1024 / 1024
+        self.to_bytes() / TB
+    }
+}
+
+impl Display for ByteCount {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
+        if self.to_bytes() >= TB && self.to_bytes() % TB == 0 {
+            write!(f, "{} TB", self.to_whole_tebibytes())
+        } else if self.to_bytes() >= GB && self.to_bytes() % GB == 0 {
+            write!(f, "{} GB", self.to_whole_gibibytes())
+        } else if self.to_bytes() >= MB && self.to_bytes() % MB == 0 {
+            write!(f, "{} MB", self.to_whole_mebibytes())
+        } else if self.to_bytes() >= KB && self.to_bytes() % KB == 0 {
+            write!(f, "{} KB", self.to_whole_kibibytes())
+        } else {
+            write!(f, "{} B", self.to_bytes())
+        }
     }
 }
 
@@ -2081,6 +2102,18 @@ mod test {
         assert_eq!(3 * 1024 * 1024, tib3.to_whole_mebibytes());
         assert_eq!(3 * 1024, tib3.to_whole_gibibytes());
         assert_eq!(3, tib3.to_whole_tebibytes());
+    }
+
+    #[test]
+    fn test_bytecount_display() {
+        assert_eq!(format!("{}", ByteCount::from(0u32)), "0 B".to_string());
+        assert_eq!(format!("{}", ByteCount::from(1023)), "1023 B".to_string());
+        assert_eq!(format!("{}", ByteCount::from(1024)), "1 KB".to_string());
+        assert_eq!(format!("{}", ByteCount::from(1025)), "1025 B".to_string());
+        assert_eq!(format!("{}", ByteCount::from(1024 * 100)), "100 KB".to_string());
+        assert_eq!(format!("{}", ByteCount::from_mebibytes_u32(1)), "1 MB".to_string());
+        assert_eq!(format!("{}", ByteCount::from_gibibytes_u32(1)), "1 GB".to_string());
+        assert_eq!(format!("{}", ByteCount::from_gibibytes_u32(1024)), "1 TB".to_string());
     }
 
     #[test]
