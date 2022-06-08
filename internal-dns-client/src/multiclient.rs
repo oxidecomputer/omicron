@@ -101,13 +101,11 @@ impl Updater {
     ) -> Result<(), DnsError> {
         stream::iter(&self.clients)
             .map(Ok::<_, DnsError>)
-            .try_for_each_concurrent(
-                None,
-                |client| async move {
-                    client.dns_records_set(body).await?;
-                    Ok(())
-                }
-            ).await?;
+            .try_for_each_concurrent(None, |client| async move {
+                client.dns_records_set(body).await?;
+                Ok(())
+            })
+            .await?;
 
         Ok(())
     }
@@ -121,13 +119,11 @@ impl Updater {
     ) -> Result<(), DnsError> {
         stream::iter(&self.clients)
             .map(Ok::<_, DnsError>)
-            .try_for_each_concurrent(
-                None,
-                |client| async move {
-                    client.dns_records_delete(body).await?;
-                    Ok(())
-                }
-            ).await?;
+            .try_for_each_concurrent(None, |client| async move {
+                client.dns_records_delete(body).await?;
+                Ok(())
+            })
+            .await?;
 
         Ok(())
     }
