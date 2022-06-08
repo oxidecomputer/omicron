@@ -275,7 +275,8 @@ table! {
         id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
-        tuf_base_url -> Text,
+        initialized -> Bool,
+        tuf_base_url -> Nullable<Text>,
     }
 }
 
@@ -299,6 +300,18 @@ table! {
         ip -> Inet,
         port -> Int4,
         last_used_address -> Inet,
+    }
+}
+
+table! {
+    service (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+
+        sled_id -> Uuid,
+        ip -> Inet,
+        kind -> crate::db::model::ServiceKindEnum,
     }
 }
 
@@ -503,12 +516,14 @@ allow_tables_to_appear_in_same_query!(
     organization,
     oximeter,
     project,
+    rack,
     region,
     saga,
     saga_node_event,
     silo,
     identity_provider,
     console_session,
+    service,
     sled,
     router_route,
     vpc,

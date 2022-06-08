@@ -48,6 +48,17 @@ CREATE TABLE omicron.public.rack (
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
 
+    /*
+     * Identifies if rack management has been transferred from RSS -> Nexus.
+     * If "false", RSS is still managing sleds, services, and DNS records.
+     *
+     * This value is set to "true" when RSS calls the
+     * "rack_initialization_complete" endpoint on Nexus' internal interface.
+     *
+     * See RFD 278 for more detail.
+     */
+    initialized BOOL NOT NULL,
+
     /* Used to configure the updates service URL */
     tuf_base_url STRING(512)
 );
@@ -70,6 +81,35 @@ CREATE TABLE omicron.public.sled (
 
     /* The last address allocated to an Oxide service on this sled. */
     last_used_address INET NOT NULL
+);
+
+/*
+ * Services
+ */
+
+CREATE TYPE omicron.public.service_kind AS ENUM (
+  'internal_dns',
+  'nexus',
+  'oximeter'
+);
+
+CREATE TABLE omicron.public.service (
+    /* Identity metadata (asset) */
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+
+    /* FK into the Sled table */
+    sled_id UUID NOT NULL,
+    /* The IP address of the service. */
+    ip INET NOT NULL,
+    /* Indicates the type of service. */
+    kind omicron.public.service_kind NOT NULL
+);
+
+/* Add an index which lets us look up the services on a sled */
+CREATE INDEX ON omicron.public.service (
+    sled_id
 );
 
 /*

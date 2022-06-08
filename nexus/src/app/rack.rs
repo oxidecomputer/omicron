@@ -7,6 +7,7 @@
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
+use crate::internal_api::params::ServicePutRequest;
 use futures::future::ready;
 use futures::StreamExt;
 use omicron_common::api::external::DataPageParams;
@@ -21,6 +22,7 @@ impl super::Nexus {
     pub(crate) fn as_rack(&self) -> db::model::Rack {
         db::model::Rack {
             identity: self.api_rack_identity.clone(),
+            initialized: true,
             tuf_base_url: None,
         }
     }
@@ -58,5 +60,36 @@ impl super::Nexus {
         } else {
             Err(Error::not_found_by_id(ResourceType::Rack, rack_id))
         }
+    }
+
+    /// Marks the rack as initialized with a set of services.
+    ///
+    /// This function is a no-op if the rack has already been initialized.
+    pub async fn rack_initialize(
+        &self,
+        opctx: &OpContext,
+        rack_id: Uuid,
+        services: Vec<ServicePutRequest>,
+    ) -> Result<(), Error> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
+        // Convert from parameter -> DB type.
+        let services: Vec<_> = services
+            .into_iter()
+            .map(|svc| {
+                db::model::Service::new(
+                    svc.service_id,
+                    svc.sled_id,
+                    svc.address,
+                    svc.kind.into(),
+                )
+            })
+            .collect();
+
+        self.db_datastore
+            .rack_set_initialized(opctx, rack_id, services)
+            .await?;
+
+        Ok(())
     }
 }
