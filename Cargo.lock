@@ -3086,7 +3086,7 @@ checksum = "624a8340c38c1b80fd549087862da4ba43e08858af025b236e509b6649fc13d5"
 [[package]]
 name = "openapi-lint"
 version = "0.2.0"
-source = "git+https://github.com/oxidecomputer/openapi-lint?branch=main#9b20f893f3ed53049bf2d0feddb6ff269401aa5f"
+source = "git+https://github.com/oxidecomputer/openapi-lint?branch=main#2609285115892882aa9a178c92a5d54377f1c51b"
 dependencies = [
  "heck 0.4.0",
  "indexmap",
@@ -5861,7 +5861,7 @@ version = "1.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
 dependencies = [
- "cfg-if 1.0.0",
+ "cfg-if 0.1.10",
  "rand 0.8.5",
  "static_assertions",
 ]
