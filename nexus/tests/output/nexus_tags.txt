@@ -39,6 +39,7 @@ instance_network_interfaces_delete_interface /organizations/{organization_name}/
 instance_network_interfaces_get          /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces
 instance_network_interfaces_get_interface /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}
 instance_network_interfaces_post         /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces
+instance_network_interfaces_put_interface /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}
 project_instances_delete_instance        /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}
 project_instances_get                    /organizations/{organization_name}/projects/{project_name}/instances
 project_instances_get_instance           /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}

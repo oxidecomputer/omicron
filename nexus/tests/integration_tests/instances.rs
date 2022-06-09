@@ -16,6 +16,7 @@ use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::IdentityMetadataCreateParams;
+use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::InstanceState;
@@ -1124,6 +1125,407 @@ async fn test_instance_create_delete_network_interface(
         .expect(
             "Failed to delete sole primary interface from stopped instance",
         );
+}
+
+#[nexus_test]
+async fn test_instance_update_network_interfaces(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.apictx.nexus;
+
+    // Create test organization and project
+    create_organization(&client, ORGANIZATION_NAME).await;
+    let url_instances = format!(
+        "/organizations/{}/projects/{}/instances",
+        ORGANIZATION_NAME, PROJECT_NAME
+    );
+    let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
+
+    // Create the VPC Subnet for the secondary interface
+    let secondary_subnet = params::VpcSubnetCreate {
+        identity: IdentityMetadataCreateParams {
+            name: Name::try_from(String::from("secondary")).unwrap(),
+            description: String::from("A secondary VPC subnet"),
+        },
+        ipv4_block: Ipv4Net("172.31.0.0/24".parse().unwrap()),
+        ipv6_block: None,
+    };
+    let url_vpc_subnets = format!(
+        "/organizations/{}/projects/{}/vpcs/{}/subnets",
+        ORGANIZATION_NAME, PROJECT_NAME, "default",
+    );
+    let _response =
+        NexusRequest::objects_post(client, &url_vpc_subnets, &secondary_subnet)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .expect("Failed to create secondary VPC Subnet");
+
+    // Create an instance with no network interfaces
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: Name::try_from(String::from("nic-update-test-inst")).unwrap(),
+            description: String::from("instance to test updatin nics"),
+        },
+        ncpus: InstanceCpuCount::try_from(2).unwrap(),
+        memory: ByteCount::from_mebibytes_u32(4),
+        hostname: String::from("nic-test"),
+        user_data: vec![],
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::None,
+        disks: vec![],
+    };
+    let response =
+        NexusRequest::objects_post(client, &url_instances, &instance_params)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .expect("Failed to create instance with two network interfaces");
+    let instance = response.parsed_body::<Instance>().unwrap();
+    let url_instance =
+        format!("{}/{}", url_instances, instance.identity.name.as_str());
+    let url_interfaces = format!(
+        "/organizations/{}/projects/{}/instances/{}/network-interfaces",
+        ORGANIZATION_NAME, PROJECT_NAME, instance.identity.name,
+    );
+
+    // Parameters for each interface to try to modify.
+    let if_params = vec![
+        params::NetworkInterfaceCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "if0".parse().unwrap(),
+                description: String::from("a new nic"),
+            },
+            vpc_name: "default".parse().unwrap(),
+            subnet_name: "default".parse().unwrap(),
+            ip: Some("172.30.0.10".parse().unwrap()),
+        },
+        params::NetworkInterfaceCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "if1".parse().unwrap(),
+                description: String::from("a new nic"),
+            },
+            vpc_name: "default".parse().unwrap(),
+            subnet_name: secondary_subnet.identity.name.clone(),
+            ip: Some("172.31.0.11".parse().unwrap()),
+        },
+    ];
+
+    // Stop the instance
+    let instance =
+        instance_post(client, url_instance.as_str(), InstanceOp::Stop).await;
+    instance_simulate(nexus, &instance.identity.id).await;
+
+    // Create the first interface on the instance.
+    let primary_iface = NexusRequest::objects_post(
+        client,
+        url_interfaces.as_str(),
+        &if_params[0],
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Failed to create network interface on stopped instance")
+    .parsed_body::<NetworkInterface>()
+    .unwrap();
+    assert_eq!(primary_iface.identity.name, if_params[0].identity.name);
+    assert_eq!(primary_iface.ip, if_params[0].ip.unwrap());
+    assert!(primary_iface.primary, "The first interface should be primary");
+
+    // Restart the instance, to ensure we can only modify things when it's
+    // stopped.
+    let instance =
+        instance_post(client, url_instance.as_str(), InstanceOp::Start).await;
+    instance_simulate(nexus, &instance.identity.id).await;
+
+    // We'll the interface's name and description
+    let new_name = Name::try_from(String::from("new-if0")).unwrap();
+    let new_description = String::from("new description");
+    let updates = params::NetworkInterfaceUpdate {
+        identity: IdentityMetadataUpdateParams {
+            name: Some(new_name.clone()),
+            description: Some(new_description.clone()),
+        },
+        make_primary: false,
+    };
+
+    // Verify we fail to update the NIC when the instance is running
+    //
+    // NOTE: Need to use RequestBuilder manually because `expect_failure` does
+    // not allow setting the body.
+    let url_interface =
+        format!("{}/{}", url_interfaces, primary_iface.identity.name.as_str());
+    let builder =
+        RequestBuilder::new(client, http::Method::PUT, url_interface.as_str())
+            .body(Some(&updates))
+            .expect_status(Some(http::StatusCode::BAD_REQUEST));
+    let err = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Should not be able to update network interface on running instance")
+        .parsed_body::<HttpErrorResponseBody>()
+        .expect("Failed to parse error response body");
+    assert_eq!(
+        err.message,
+        "Instance must be stopped to update its network interfaces",
+        "Expected an InvalidRequest response when modifying an interface on a running instance"
+    );
+
+    // Stop the instance again, and now verify that the update works.
+    let instance =
+        instance_post(client, url_instance.as_str(), InstanceOp::Stop).await;
+    instance_simulate(nexus, &instance.identity.id).await;
+    let updated_primary_iface = NexusRequest::object_put(
+        client,
+        format!("{}/{}", url_interfaces.as_str(), primary_iface.identity.name)
+            .as_str(),
+        Some(&updates),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Failed to update an interface")
+    .parsed_body::<NetworkInterface>()
+    .unwrap();
+
+    // Verify the modifications have taken effect, updating the name,
+    // description, and modification time.
+    assert_eq!(updated_primary_iface.identity.name, new_name);
+    assert_eq!(updated_primary_iface.identity.description, new_description);
+    assert!(
+        primary_iface.identity.time_modified
+            < updated_primary_iface.identity.time_modified
+    );
+
+    // Nothing else about the primary interface should have changed
+    assert_eq!(
+        primary_iface.identity.time_created,
+        updated_primary_iface.identity.time_created
+    );
+    assert!(updated_primary_iface.primary);
+    assert_eq!(primary_iface.ip, updated_primary_iface.ip);
+    assert_eq!(primary_iface.mac, updated_primary_iface.mac);
+    assert_eq!(primary_iface.subnet_id, updated_primary_iface.subnet_id);
+    assert_eq!(primary_iface.vpc_id, updated_primary_iface.vpc_id);
+    assert_eq!(primary_iface.instance_id, updated_primary_iface.instance_id);
+
+    // Try with the same request again, but this time only changing
+    // `make_primary`. This should have no effect.
+    let updates = params::NetworkInterfaceUpdate {
+        identity: IdentityMetadataUpdateParams {
+            name: None,
+            description: None,
+        },
+        make_primary: true,
+    };
+    let updated_primary_iface1 = NexusRequest::object_put(
+        client,
+        format!(
+            "{}/{}",
+            url_interfaces.as_str(),
+            updated_primary_iface.identity.name
+        )
+        .as_str(),
+        Some(&updates),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Failed to update an interface")
+    .parsed_body::<NetworkInterface>()
+    .unwrap();
+
+    // Everything should still be the same, except the modification time.
+    assert!(
+        updated_primary_iface.identity.time_modified
+            < updated_primary_iface1.identity.time_modified
+    );
+    assert_eq!(
+        updated_primary_iface.identity.name,
+        updated_primary_iface1.identity.name
+    );
+    assert_eq!(
+        updated_primary_iface.identity.description,
+        updated_primary_iface1.identity.description
+    );
+    assert_eq!(
+        updated_primary_iface.identity.time_created,
+        updated_primary_iface1.identity.time_created
+    );
+    assert!(updated_primary_iface1.primary);
+    assert_eq!(updated_primary_iface.ip, updated_primary_iface1.ip);
+    assert_eq!(updated_primary_iface.mac, updated_primary_iface1.mac);
+    assert_eq!(
+        updated_primary_iface.subnet_id,
+        updated_primary_iface1.subnet_id
+    );
+    assert_eq!(updated_primary_iface.vpc_id, updated_primary_iface1.vpc_id);
+    assert_eq!(
+        updated_primary_iface.instance_id,
+        updated_primary_iface1.instance_id
+    );
+
+    // Add a secondary interface to the instance. We'll use this to check
+    // behavior related to making a new primary interface for the instance.
+    // Create the first interface on the instance.
+    let secondary_iface = NexusRequest::objects_post(
+        client,
+        url_interfaces.as_str(),
+        &if_params[1],
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Failed to create network interface on stopped instance")
+    .parsed_body::<NetworkInterface>()
+    .unwrap();
+    assert_eq!(secondary_iface.identity.name, if_params[1].identity.name);
+    assert_eq!(secondary_iface.ip, if_params[1].ip.unwrap());
+    assert!(
+        !secondary_iface.primary,
+        "Only the first interface should be primary"
+    );
+
+    // Restart the instance, and verify that we can't update either interface.
+    let instance =
+        instance_post(client, url_instance.as_str(), InstanceOp::Start).await;
+    instance_simulate(nexus, &instance.identity.id).await;
+
+    for if_name in
+        [&updated_primary_iface.identity.name, &secondary_iface.identity.name]
+    {
+        let url_interface = format!("{}/{}", url_interfaces, if_name.as_str());
+        let builder = RequestBuilder::new(
+            client,
+            http::Method::PUT,
+            url_interface.as_str(),
+        )
+        .body(Some(&updates))
+        .expect_status(Some(http::StatusCode::BAD_REQUEST));
+        let err = NexusRequest::new(builder)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .expect("Should not be able to update network interface on running instance")
+            .parsed_body::<HttpErrorResponseBody>()
+            .expect("Failed to parse error response body");
+        assert_eq!(
+            err.message,
+            "Instance must be stopped to update its network interfaces",
+            "Expected an InvalidRequest response when modifying an interface on a running instance"
+        );
+    }
+
+    // Stop the instance again.
+    let instance =
+        instance_post(client, url_instance.as_str(), InstanceOp::Stop).await;
+    instance_simulate(nexus, &instance.identity.id).await;
+
+    // Verify that we can set the secondary as the new primary, and that nothing
+    // else changes about the NICs.
+    let updates = params::NetworkInterfaceUpdate {
+        identity: IdentityMetadataUpdateParams {
+            name: None,
+            description: None,
+        },
+        make_primary: true,
+    };
+    let new_primary_iface = NexusRequest::object_put(
+        client,
+        format!(
+            "{}/{}",
+            url_interfaces.as_str(),
+            secondary_iface.identity.name
+        )
+        .as_str(),
+        Some(&updates),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Failed to update an interface")
+    .parsed_body::<NetworkInterface>()
+    .unwrap();
+
+    // It should now be the primary and have an updated modification time
+    assert!(new_primary_iface.primary, "Failed to set the new primary");
+    assert!(
+        new_primary_iface.identity.time_modified
+            > secondary_iface.identity.time_modified
+    );
+
+    // Nothing else about the new primary should have changed
+    assert_eq!(new_primary_iface.identity.name, secondary_iface.identity.name);
+    assert_eq!(
+        new_primary_iface.identity.description,
+        secondary_iface.identity.description
+    );
+    assert_eq!(new_primary_iface.identity.id, secondary_iface.identity.id);
+    assert_eq!(
+        new_primary_iface.identity.time_created,
+        secondary_iface.identity.time_created
+    );
+    assert_eq!(new_primary_iface.subnet_id, secondary_iface.subnet_id);
+    assert_eq!(new_primary_iface.vpc_id, secondary_iface.vpc_id);
+    assert_eq!(new_primary_iface.instance_id, secondary_iface.instance_id);
+    assert_eq!(new_primary_iface.mac, secondary_iface.mac);
+    assert_eq!(new_primary_iface.ip, secondary_iface.ip);
+
+    // Get the newly-made secondary interface to test
+    let new_secondary_iface = NexusRequest::object_get(
+        client,
+        format!(
+            "{}/{}",
+            url_interfaces.as_str(),
+            updated_primary_iface.identity.name
+        )
+        .as_str(),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Failed to get the old primary / new secondary interface")
+    .parsed_body::<NetworkInterface>()
+    .unwrap();
+
+    // The now-secondary interface should be, well, secondary
+    assert!(
+        !new_secondary_iface.primary,
+        "The old primary interface should now be a seconary"
+    );
+
+    // The modification time should have changed
+    assert!(
+        new_secondary_iface.identity.time_modified
+            > updated_primary_iface.identity.time_modified
+    );
+
+    // Nothing else about the old primary should have changed
+    assert_eq!(
+        new_secondary_iface.identity.name,
+        updated_primary_iface.identity.name
+    );
+    assert_eq!(
+        new_secondary_iface.identity.description,
+        updated_primary_iface.identity.description
+    );
+    assert_eq!(
+        new_secondary_iface.identity.id,
+        updated_primary_iface.identity.id
+    );
+    assert_eq!(
+        new_secondary_iface.identity.time_created,
+        updated_primary_iface.identity.time_created
+    );
+    assert_eq!(new_secondary_iface.subnet_id, updated_primary_iface.subnet_id);
+    assert_eq!(new_secondary_iface.vpc_id, updated_primary_iface.vpc_id);
+    assert_eq!(
+        new_secondary_iface.instance_id,
+        updated_primary_iface.instance_id
+    );
+    assert_eq!(new_secondary_iface.mac, updated_primary_iface.mac);
+    assert_eq!(new_secondary_iface.ip, updated_primary_iface.ip);
 }
 
 /// This test specifically creates two NICs, the second of which will fail the

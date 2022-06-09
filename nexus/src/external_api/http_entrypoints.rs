@@ -155,6 +155,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(instance_network_interfaces_post)?;
         api.register(instance_network_interfaces_get)?;
         api.register(instance_network_interfaces_get_interface)?;
+        api.register(instance_network_interfaces_put_interface)?;
         api.register(instance_network_interfaces_delete_interface)?;
 
         api.register(vpc_routers_get)?;
@@ -1875,8 +1876,6 @@ pub struct NetworkInterfacePathParam {
 /// are any secondary interfaces. A new primary interface must be designated
 /// first. The primary interface can be deleted if there are no secondary
 /// interfaces.
-// TODO-completeness: Add API for modifying an interface, including setting as
-// new primary. See https://github.com/oxidecomputer/omicron/issues/1153.
 #[endpoint {
     method = DELETE,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}",
@@ -1935,6 +1934,42 @@ async fn instance_network_interfaces_get_interface(
                 project_name,
                 instance_name,
                 interface_name,
+            )
+            .await?;
+        Ok(HttpResponseOk(NetworkInterface::from(interface)))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Update information about an instance's network interface
+#[endpoint {
+    method = PUT,
+    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}",
+    tags = ["instances"],
+}]
+async fn instance_network_interfaces_put_interface(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<NetworkInterfacePathParam>,
+    updated_iface: TypedBody<params::NetworkInterfaceUpdate>,
+) -> Result<HttpResponseOk<NetworkInterface>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
+    let project_name = &path.project_name;
+    let instance_name = &path.instance_name;
+    let interface_name = &path.interface_name;
+    let updated_iface = updated_iface.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let interface = nexus
+            .network_interface_update(
+                &opctx,
+                organization_name,
+                project_name,
+                instance_name,
+                interface_name,
+                updated_iface,
             )
             .await?;
         Ok(HttpResponseOk(NetworkInterface::from(interface)))
