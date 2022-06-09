@@ -4,7 +4,6 @@
 
 //! Silos, Users, and SSH Keys.
 
-use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::Resource;
@@ -13,6 +12,7 @@ use crate::db::model::Name;
 use crate::db::model::SshKey;
 use crate::external_api::params;
 use crate::external_api::shared;
+use crate::{authn, authz};
 use anyhow::Context;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -197,5 +197,141 @@ impl super::Nexus {
                 .await?;
         assert_eq!(authz_user.id(), silo_user_id);
         self.db_datastore.ssh_key_delete(opctx, &authz_ssh_key).await
+    }
+
+    // identity providers
+
+    pub async fn identity_provider_list(
+        &self,
+        opctx: &OpContext,
+        silo_name: &Name,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<db::model::IdentityProvider> {
+        let (authz_silo, ..) = LookupPath::new(opctx, &self.db_datastore)
+            .silo_name(silo_name)
+            .fetch()
+            .await?;
+        self.db_datastore
+            .identity_provider_list(opctx, &authz_silo, pagparams)
+            .await
+    }
+
+    // Silo authn identity providers
+
+    pub async fn saml_identity_provider_create(
+        &self,
+        opctx: &OpContext,
+        silo_name: &Name,
+        params: params::SamlIdentityProviderCreate,
+    ) -> CreateResult<db::model::SamlIdentityProvider> {
+        let (authz_silo, db_silo) = LookupPath::new(opctx, &self.db_datastore)
+            .silo_name(silo_name)
+            .fetch_for(authz::Action::CreateChild)
+            .await?;
+
+        let idp_metadata_document_string = match &params.idp_metadata_source {
+            params::IdpMetadataSource::Url { url } => {
+                // Download the SAML IdP descriptor, and write it into the DB. This is
+                // so that it can be deserialized later.
+                //
+                // Importantly, do this only once and store it. It would introduce
+                // attack surface to download it each time it was required.
+                let dur = std::time::Duration::from_secs(5);
+                let client = reqwest::ClientBuilder::new()
+                    .connect_timeout(dur)
+                    .timeout(dur)
+                    .build()
+                    .map_err(|e| {
+                        Error::internal_error(&format!(
+                            "failed to build reqwest client: {}",
+                            e
+                        ))
+                    })?;
+
+                let response = client.get(url).send().await.map_err(|e| {
+                    Error::InvalidValue {
+                        label: String::from("url"),
+                        message: format!("error querying url: {}", e),
+                    }
+                })?;
+
+                if !response.status().is_success() {
+                    return Err(Error::InvalidValue {
+                        label: String::from("url"),
+                        message: format!(
+                            "querying url returned: {}",
+                            response.status()
+                        ),
+                    });
+                }
+
+                response.text().await.map_err(|e| Error::InvalidValue {
+                    label: String::from("url"),
+                    message: format!("error getting text from url: {}", e),
+                })?
+            }
+
+            params::IdpMetadataSource::Base64EncodedXml { data } => {
+                let bytes =
+                    base64::decode(data).map_err(|e| Error::InvalidValue {
+                        label: String::from("data"),
+                        message: format!(
+                            "error getting decoding base64 data: {}",
+                            e
+                        ),
+                    })?;
+                String::from_utf8_lossy(&bytes).into_owned()
+            }
+        };
+
+        let provider = db::model::SamlIdentityProvider {
+            identity: db::model::SamlIdentityProviderIdentity::new(
+                Uuid::new_v4(),
+                params.identity,
+            ),
+            silo_id: db_silo.id(),
+
+            idp_metadata_document_string,
+
+            idp_entity_id: params.idp_entity_id,
+            sp_client_id: params.sp_client_id,
+            acs_url: params.acs_url,
+            slo_url: params.slo_url,
+            technical_contact_email: params.technical_contact_email,
+            public_cert: params
+                .signing_keypair
+                .as_ref()
+                .map(|x| x.public_cert.clone()),
+            private_key: params
+                .signing_keypair
+                .as_ref()
+                .map(|x| x.private_key.clone()),
+        };
+
+        let _authn_provider: authn::silos::SamlIdentityProvider =
+            provider.clone().try_into().map_err(|e: anyhow::Error|
+                // If an error is encountered converting from the model to the
+                // authn type here, this is a request error: something about the
+                // parameters of this request doesn't work.
+                Error::invalid_request(&e.to_string()))?;
+
+        self.db_datastore
+            .saml_identity_provider_create(opctx, &authz_silo, provider)
+            .await
+    }
+
+    pub async fn saml_identity_provider_fetch(
+        &self,
+        opctx: &OpContext,
+        silo_name: &Name,
+        provider_name: &Name,
+    ) -> LookupResult<db::model::SamlIdentityProvider> {
+        let (.., saml_identity_provider) =
+            LookupPath::new(opctx, &self.datastore())
+                .silo_name(silo_name)
+                .saml_identity_provider_name(provider_name)
+                .fetch()
+                .await?;
+        Ok(saml_identity_provider)
     }
 }

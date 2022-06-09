@@ -31,6 +31,9 @@ pub const DNS_PORT: u16 = 53;
 pub const DNS_SERVER_PORT: u16 = 5353;
 pub const SLED_AGENT_PORT: u16 = 12345;
 
+/// The port propolis-server listens on inside the propolis zone.
+pub const PROPOLIS_PORT: u16 = 12400;
+
 // Anycast is a mechanism in which a single IP address is shared by multiple
 // devices, and the destination is located based on routing distance.
 //
@@ -42,6 +45,9 @@ pub const SLED_AGENT_PORT: u16 = 12345;
 const _ANYCAST_ADDRESS_INDEX: usize = 0;
 const DNS_ADDRESS_INDEX: usize = 1;
 const GZ_ADDRESS_INDEX: usize = 2;
+
+/// The maximum number of addresses per sled reserved for RSS.
+pub const RSS_RESERVED_ADDRESSES: u16 = 10;
 
 /// Wraps an [`Ipv6Network`] with a compile-time prefix length.
 #[derive(Debug, Clone, Copy, JsonSchema, Serialize, Deserialize, PartialEq)]

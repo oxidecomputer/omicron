@@ -16,6 +16,7 @@ use crate::config::Config as SledConfig;
 use crate::illumos::dladm::{self, Dladm, PhysicalLink};
 use crate::illumos::zone::Zones;
 use crate::server::Server as SledServer;
+use crate::sp::SpHandle;
 use omicron_common::address::get_sled_address;
 use omicron_common::api::external::{Error as ExternalError, MacAddr};
 use omicron_common::backoff::{
@@ -93,6 +94,7 @@ pub(crate) struct Agent {
     rss: Mutex<Option<RssHandle>>,
     sled_agent: Mutex<Option<SledServer>>,
     sled_config: SledConfig,
+    sp: Option<SpHandle>,
 }
 
 fn get_sled_agent_request_path() -> PathBuf {
@@ -132,6 +134,7 @@ impl Agent {
         log: Logger,
         sled_config: SledConfig,
         address: Ipv6Addr,
+        sp: Option<SpHandle>,
     ) -> Result<Self, BootstrapError> {
         let ba_log = log.new(o!(
             "component" => "BootstrapAgent",
@@ -190,6 +193,7 @@ impl Agent {
             rss: Mutex::new(None),
             sled_agent: Mutex::new(None),
             sled_config,
+            sp,
         };
 
         let request_path = get_sled_agent_request_path();
@@ -206,13 +210,14 @@ impl Agent {
                 )?,
             )
             .map_err(|err| BootstrapError::Toml { path: request_path, err })?;
-            agent.request_agent(sled_request).await?;
+            agent.request_agent(&sled_request).await?;
         }
 
         Ok(agent)
     }
 
     /// Implements the "request share" API.
+    #[allow(dead_code)] // Currently uncalled; will be used soon!
     pub async fn request_share(
         &self,
         identity: Vec<u8>,
@@ -230,7 +235,7 @@ impl Agent {
     /// been initialized.
     pub async fn request_agent(
         &self,
-        request: SledAgentRequest,
+        request: &SledAgentRequest,
     ) -> Result<SledAgentResponse, BootstrapError> {
         info!(&self.log, "Loading Sled Agent: {:?}", request);
 
@@ -405,6 +410,7 @@ impl Agent {
                 &self.parent_log,
                 rss_config.clone(),
                 self.peer_monitor.observer().await,
+                self.sp.clone(),
             );
             self.rss.lock().await.replace(rss);
         }

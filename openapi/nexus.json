@@ -404,6 +404,84 @@
         }
       }
     },
+    "/login/{silo_name}/{provider_name}": {
+      "get": {
+        "tags": [
+          "login"
+        ],
+        "summary": "Ask the user to login to their identity provider",
+        "description": "Either display a page asking a user for their credentials, or redirect them to their identity provider.",
+        "operationId": "login",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "silo_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "login"
+        ],
+        "summary": "Consume some sort of credentials, and authenticate a user.",
+        "description": "Either receive a username and password, or some sort of identity provider data (like a SAMLResponse). Use these to set the user's session cookie.",
+        "operationId": "consume_credentials",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "silo_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/logout": {
       "post": {
         "tags": [
@@ -2209,6 +2287,7 @@
           "instances"
         ],
         "summary": "Detach a network interface from an instance.",
+        "description": "Note that the primary interface for an instance cannot be deleted if there are any secondary interfaces. A new primary interface must be designated first. The primary interface can be deleted if there are no secondary interfaces.",
         "operationId": "instance_network_interfaces_delete_interface",
         "parameters": [
           {
@@ -4979,6 +5058,76 @@
         }
       }
     },
+    "/silos/{silo_name}/identity_providers": {
+      "get": {
+        "tags": [
+          "silos"
+        ],
+        "summary": "List Silo identity providers",
+        "operationId": "silos_get_identity_providers",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "silo_name",
+            "description": "The silo's unique name.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameSortMode"
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentityProviderResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      }
+    },
     "/silos/{silo_name}/policy": {
       "get": {
         "tags": [
@@ -5052,6 +5201,104 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SiloRolesPolicy"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/silos/{silo_name}/saml_identity_providers": {
+      "post": {
+        "tags": [
+          "silos"
+        ],
+        "summary": "Create a new SAML identity provider for a silo.",
+        "operationId": "silo_saml_idp_create",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "silo_name",
+            "description": "The silo's unique name.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SamlIdentityProviderCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SamlIdentityProvider"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/silos/{silo_name}/saml_identity_providers/{provider_name}": {
+      "get": {
+        "tags": [
+          "silos"
+        ],
+        "summary": "GET a silo's SAML identity provider",
+        "operationId": "silo_saml_idp_fetch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_name",
+            "description": "The SAML identity provider's name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "silo_name",
+            "description": "The silo's unique name.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SamlIdentityProvider"
                 }
               }
             }
@@ -5279,6 +5526,23 @@
           "cumulative_f64",
           "histogram_i64",
           "histogram_f64"
+        ]
+      },
+      "DerEncodedKeyPair": {
+        "type": "object",
+        "properties": {
+          "private_key": {
+            "description": "request signing private key (base64 encoded der file)",
+            "type": "string"
+          },
+          "public_cert": {
+            "description": "request signing public certificate (base64 encoded der file)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "private_key",
+          "public_cert"
         ]
       },
       "Digest": {
@@ -5916,11 +6180,127 @@
           "items"
         ]
       },
+      "IdentityProvider": {
+        "description": "Client view of an [`IdentityProvider`]",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "provider_type": {
+            "description": "Identity provider type",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IdentityProviderType"
+              }
+            ]
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "description",
+          "id",
+          "name",
+          "provider_type",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "IdentityProviderResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IdentityProvider"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "IdentityProviderType": {
+        "type": "string",
+        "enum": [
+          "saml"
+        ]
+      },
       "IdentityType": {
         "description": "Describes what kind of identity is described by an id",
         "type": "string",
         "enum": [
           "silo_user"
+        ]
+      },
+      "IdpMetadataSource": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "url"
+                ]
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "url"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "base64_encoded_xml"
+                ]
+              }
+            },
+            "required": [
+              "data",
+              "type"
+            ]
+          }
         ]
       },
       "Image": {
@@ -6328,20 +6708,20 @@
         "description": "Migration parameters for an [`Instance`](omicron_common::api::external::Instance)",
         "type": "object",
         "properties": {
-          "dst_sled_uuid": {
+          "dst_sled_id": {
             "type": "string",
             "format": "uuid"
           }
         },
         "required": [
-          "dst_sled_uuid"
+          "dst_sled_id"
         ]
       },
       "InstanceNetworkInterfaceAttachment": {
         "description": "Describes an attachment of a `NetworkInterface` to an `Instance`, at the time the instance is created.",
         "oneOf": [
           {
-            "description": "Create one or more `NetworkInterface`s for the `Instance`",
+            "description": "Create one or more `NetworkInterface`s for the `Instance`.\n\nIf more than one interface is provided, then the first will be designated the primary interface for the instance.",
             "type": "object",
             "properties": {
               "params": {
@@ -6363,7 +6743,7 @@
             ]
           },
           {
-            "description": "Default networking setup, which creates a single interface with an auto-assigned IP address from project's \"default\" VPC and \"default\" VPC Subnet.",
+            "description": "The default networking configuration for an instance is to create a single primary interface with an automatically-assigned IP address. The IP will be pulled from the Project's default VPC / VPC Subnet.",
             "type": "object",
             "properties": {
               "type": {
@@ -6542,6 +6922,10 @@
               }
             ]
           },
+          "primary": {
+            "description": "True if this interface is the primary for the instance to which it's attached.",
+            "type": "boolean"
+          },
           "subnet_id": {
             "description": "The subnet to which the interface belongs.",
             "type": "string",
@@ -6570,6 +6954,7 @@
           "ip",
           "mac",
           "name",
+          "primary",
           "subnet_id",
           "time_created",
           "time_modified",
@@ -7533,6 +7918,135 @@
               "state"
             ]
           }
+        ]
+      },
+      "SamlIdentityProvider": {
+        "description": "Identity-related metadata that's included in nearly all public API objects",
+        "type": "object",
+        "properties": {
+          "acs_url": {
+            "description": "service provider endpoint where the response will be sent",
+            "type": "string"
+          },
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "idp_entity_id": {
+            "description": "idp's entity id",
+            "type": "string"
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "public_cert": {
+            "nullable": true,
+            "description": "optional request signing public certificate (base64 encoded der file)",
+            "type": "string"
+          },
+          "slo_url": {
+            "description": "service provider endpoint where the idp should send log out requests",
+            "type": "string"
+          },
+          "sp_client_id": {
+            "description": "sp's client id",
+            "type": "string"
+          },
+          "technical_contact_email": {
+            "description": "customer's technical contact for saml configuration",
+            "type": "string"
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "acs_url",
+          "description",
+          "id",
+          "idp_entity_id",
+          "name",
+          "slo_url",
+          "sp_client_id",
+          "technical_contact_email",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "SamlIdentityProviderCreate": {
+        "description": "Create-time identity-related parameters",
+        "type": "object",
+        "properties": {
+          "acs_url": {
+            "description": "service provider endpoint where the response will be sent",
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "idp_entity_id": {
+            "description": "idp's entity id",
+            "type": "string"
+          },
+          "idp_metadata_source": {
+            "description": "the source of an identity provider metadata descriptor",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IdpMetadataSource"
+              }
+            ]
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "signing_keypair": {
+            "nullable": true,
+            "description": "optional request signing key pair",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DerEncodedKeyPair"
+              }
+            ]
+          },
+          "slo_url": {
+            "description": "service provider endpoint where the idp should send log out requests",
+            "type": "string"
+          },
+          "sp_client_id": {
+            "description": "sp's client id",
+            "type": "string"
+          },
+          "technical_contact_email": {
+            "description": "customer's technical contact for saml configuration",
+            "type": "string"
+          }
+        },
+        "required": [
+          "acs_url",
+          "description",
+          "idp_entity_id",
+          "idp_metadata_source",
+          "name",
+          "slo_url",
+          "sp_client_id",
+          "technical_contact_email"
         ]
       },
       "SessionUser": {
@@ -8974,6 +9488,13 @@
     {
       "name": "instances",
       "description": "Virtual machine instances are the basic unit of computation. These operations are used for provisioning, controlling, and destroying instances.",
+      "externalDocs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    {
+      "name": "login",
+      "description": "Authentication endpoints",
       "externalDocs": {
         "url": "http://oxide.computer/docs/#xxx"
       }

@@ -67,7 +67,7 @@ async fn filesystem_put(
     let sa = rqctx.context();
     let body_args = body.into_inner();
     sa.filesystem_ensure(
-        body_args.zpool_uuid,
+        body_args.zpool_id,
         body_args.dataset_kind,
         body_args.address,
     )

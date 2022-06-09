@@ -12,8 +12,10 @@ omicron-sled-agent = { path = "../sled-agent" }
 omicron-package = { path = "../package" }
 serde = { version = "1.0", features = [ "derive" ] }
 serde_derive = "1.0"
+sp-sim = { path = "../sp-sim" }
 structopt = "0.3"
 thiserror = "1.0"
+toml = "0.5.9"
 
 # Disable doc builds by default for our binaries to work around issue
 # rust-lang/cargo#8373.  These docs would not be very useful anyway.

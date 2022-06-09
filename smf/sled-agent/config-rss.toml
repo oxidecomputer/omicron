@@ -11,22 +11,22 @@ rack_subnet = "fd00:1122:3344:0100::"
 # TODO(https://github.com/oxidecomputer/omicron/issues/732): Nexus
 # should allocate crucible datasets.
 [[request.dataset]]
-zpool_uuid = "d462a7f7-b628-40fe-80ff-4e4189e2d62b"
+zpool_id = "d462a7f7-b628-40fe-80ff-4e4189e2d62b"
 address = "[fd00:1122:3344:0101::6]:32345"
 dataset_kind.type = "crucible"
 
 [[request.dataset]]
-zpool_uuid = "e4b4dc87-ab46-49fb-a4b4-d361ae214c03"
+zpool_id = "e4b4dc87-ab46-49fb-a4b4-d361ae214c03"
 address = "[fd00:1122:3344:0101::7]:32345"
 dataset_kind.type = "crucible"
 
 [[request.dataset]]
-zpool_uuid = "f4b4dc87-ab46-49fb-a4b4-d361ae214c03"
+zpool_id = "f4b4dc87-ab46-49fb-a4b4-d361ae214c03"
 address = "[fd00:1122:3344:0101::8]:32345"
 dataset_kind.type = "crucible"
 
 [[request.dataset]]
-zpool_uuid = "d462a7f7-b628-40fe-80ff-4e4189e2d62b"
+zpool_id = "d462a7f7-b628-40fe-80ff-4e4189e2d62b"
 address = "[fd00:1122:3344:0101::2]:32221"
 dataset_kind.type = "cockroach_db"
 dataset_kind.all_addresses = [ "[fd00:1122:3344:0101::2]:32221" ]
@@ -34,7 +34,7 @@ dataset_kind.all_addresses = [ "[fd00:1122:3344:0101::2]:32221" ]
 # TODO(https://github.com/oxidecomputer/omicron/issues/732): Nexus
 # should allocate clickhouse datasets.
 [[request.dataset]]
-zpool_uuid = "d462a7f7-b628-40fe-80ff-4e4189e2d62b"
+zpool_id = "d462a7f7-b628-40fe-80ff-4e4189e2d62b"
 address = "[fd00:1122:3344:0101::5]:8123"
 dataset_kind.type = "clickhouse"
 

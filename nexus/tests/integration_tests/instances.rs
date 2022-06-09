@@ -182,7 +182,10 @@ async fn test_instances_create_reboot_halt(
             .items;
     assert_eq!(network_interfaces.len(), 1);
     assert_eq!(network_interfaces[0].instance_id, instance.identity.id);
-    assert_eq!(network_interfaces[0].identity.name, "default");
+    assert_eq!(
+        network_interfaces[0].identity.name,
+        omicron_nexus::defaults::DEFAULT_PRIMARY_NIC_NAME
+    );
 
     // Now, simulate completion of instance boot and check the state reported.
     instance_simulate(nexus, &instance.identity.id).await;
@@ -874,6 +877,26 @@ async fn test_instance_create_delete_network_interface(
     );
     let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
+    // Create the VPC Subnet for the secondary interface
+    let secondary_subnet = params::VpcSubnetCreate {
+        identity: IdentityMetadataCreateParams {
+            name: Name::try_from(String::from("secondary")).unwrap(),
+            description: String::from("A secondary VPC subnet"),
+        },
+        ipv4_block: Ipv4Net("172.31.0.0/24".parse().unwrap()),
+        ipv6_block: None,
+    };
+    let url_vpc_subnets = format!(
+        "/organizations/{}/projects/{}/vpcs/{}/subnets",
+        ORGANIZATION_NAME, PROJECT_NAME, "default",
+    );
+    let _response =
+        NexusRequest::objects_post(client, &url_vpc_subnets, &secondary_subnet)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .expect("Failed to create secondary VPC Subnet");
+
     // Create an instance with no network interfaces
     let instance_params = params::InstanceCreate {
         identity: IdentityMetadataCreateParams {
@@ -915,18 +938,27 @@ async fn test_instance_create_delete_network_interface(
         "Expected no network interfaces for instance"
     );
 
-    // Parameters for the interface to create/attach
-    let if_params = params::NetworkInterfaceCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "if0".parse().unwrap(),
-            description: String::from("a new nic"),
+    // Parameters for the interfaces to create/attach
+    let if_params = vec![
+        params::NetworkInterfaceCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "if0".parse().unwrap(),
+                description: String::from("a new nic"),
+            },
+            vpc_name: "default".parse().unwrap(),
+            subnet_name: "default".parse().unwrap(),
+            ip: Some("172.30.0.10".parse().unwrap()),
         },
-        vpc_name: "default".parse().unwrap(),
-        subnet_name: "default".parse().unwrap(),
-        ip: Some("172.30.0.10".parse().unwrap()),
-    };
-    let url_interface =
-        format!("{}/{}", url_interfaces, if_params.identity.name.as_str());
+        params::NetworkInterfaceCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "if1".parse().unwrap(),
+                description: String::from("a new nic"),
+            },
+            vpc_name: "default".parse().unwrap(),
+            subnet_name: secondary_subnet.identity.name.clone(),
+            ip: Some("172.31.0.11".parse().unwrap()),
+        },
+    ];
 
     // We should not be able to create an interface while the instance is running.
     //
@@ -937,7 +969,7 @@ async fn test_instance_create_delete_network_interface(
         http::Method::POST,
         url_interfaces.as_str(),
     )
-    .body(Some(&if_params))
+    .body(Some(&if_params[0]))
     .expect_status(Some(http::StatusCode::BAD_REQUEST));
     let err = NexusRequest::new(builder)
         .authn_as(AuthnMode::PrivilegedUser)
@@ -957,33 +989,83 @@ async fn test_instance_create_delete_network_interface(
         instance_post(client, url_instance.as_str(), InstanceOp::Stop).await;
     instance_simulate(nexus, &instance.identity.id).await;
 
-    // Verify we can now make the request again
-    let response =
-        NexusRequest::objects_post(client, url_interfaces.as_str(), &if_params)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .expect("Failed to create network interface on stopped instance");
-    let iface = response.parsed_body::<NetworkInterface>().unwrap();
-    assert_eq!(iface.identity.name, if_params.identity.name);
-    assert_eq!(iface.ip, if_params.ip.unwrap());
+    // Verify we can now make the requests again
+    let mut interfaces = Vec::with_capacity(2);
+    for (i, params) in if_params.iter().enumerate() {
+        let response = NexusRequest::objects_post(
+            client,
+            url_interfaces.as_str(),
+            &params,
+        )
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Failed to create network interface on stopped instance");
+        let iface = response.parsed_body::<NetworkInterface>().unwrap();
+        assert_eq!(iface.identity.name, params.identity.name);
+        assert_eq!(iface.ip, params.ip.unwrap());
+        assert_eq!(
+            iface.primary,
+            i == 0,
+            "Only the first interface should be primary"
+        );
+        interfaces.push(iface);
+    }
 
-    // Restart the instance, verify the interface is still correct.
+    // Restart the instance, verify the interfaces are still correct.
     let instance =
         instance_post(client, url_instance.as_str(), InstanceOp::Start).await;
     instance_simulate(nexus, &instance.identity.id).await;
 
-    let iface0 = NexusRequest::object_get(client, url_interface.as_str())
+    for iface in interfaces.iter() {
+        let url_interface =
+            format!("{}/{}", url_interfaces, iface.identity.name.as_str());
+        let iface0 = NexusRequest::object_get(client, url_interface.as_str())
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .expect("Failed to get interface")
+            .parsed_body::<NetworkInterface>()
+            .expect("Failed to parse network interface from body");
+        assert_eq!(iface.identity.id, iface0.identity.id);
+        assert_eq!(iface.ip, iface0.ip);
+        assert_eq!(iface.primary, iface0.primary);
+    }
+
+    // Verify we cannot delete either interface while the instance is running
+    for iface in interfaces.iter() {
+        let url_interface =
+            format!("{}/{}", url_interfaces, iface.identity.name.as_str());
+        let err = NexusRequest::expect_failure(
+            client,
+            http::StatusCode::BAD_REQUEST,
+            http::Method::DELETE,
+            url_interface.as_str(),
+        )
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
-        .expect("Failed to get interface")
-        .parsed_body::<NetworkInterface>()
-        .expect("Failed to parse network interface from body");
-    assert_eq!(iface.identity.id, iface0.identity.id);
-    assert_eq!(iface.ip, iface0.ip);
+        .expect(
+            "Should not be able to delete network interface on running instance",
+        )
+        .parsed_body::<HttpErrorResponseBody>()
+        .expect("Failed to parse error response body");
+        assert_eq!(
+            err.message,
+            "Instance must be stopped to detach a network interface",
+            "Expected an InvalidRequest response when detaching an interface from a running instance"
+        );
+    }
 
-    // Verify we cannot delete the interface while the instance is running
+    // Stop the instance and verify we can delete the interface
+    let instance =
+        instance_post(client, url_instance.as_str(), InstanceOp::Stop).await;
+    instance_simulate(nexus, &instance.identity.id).await;
+
+    // We should not be able to delete the primary interface, while the
+    // secondary still exists
+    let url_interface =
+        format!("{}/{}", url_interfaces, interfaces[0].identity.name.as_str());
     let err = NexusRequest::expect_failure(
         client,
         http::StatusCode::BAD_REQUEST,
@@ -994,25 +1076,40 @@ async fn test_instance_create_delete_network_interface(
     .execute()
     .await
     .expect(
-        "Should not be able to delete network interface on running instance",
+        "Should not be able to delete the primary network interface \
+        while secondary interfaces still exist",
     )
     .parsed_body::<HttpErrorResponseBody>()
     .expect("Failed to parse error response body");
     assert_eq!(
         err.message,
-        "Instance must be stopped to detach a network interface",
-        "Expected an InvalidRequest response when detaching an interface from a running instance"
+        "The primary interface for an instance \
+        may not be deleted while secondary interfaces \
+        are still attached",
+        "Expected an InvalidRequest response when detaching \
+        the primary interface from an instance with at least one \
+        secondary interface",
     );
 
-    // Stop the instance and verify we can delete the interface
-    let instance =
-        instance_post(client, url_instance.as_str(), InstanceOp::Stop).await;
-    instance_simulate(nexus, &instance.identity.id).await;
+    // Verify that we can delete the secondary.
+    let url_interface =
+        format!("{}/{}", url_interfaces, interfaces[1].identity.name.as_str());
     NexusRequest::object_delete(client, url_interface.as_str())
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
-        .expect("Failed to delete interface from stopped instance");
+        .expect("Failed to delete secondary interface from stopped instance");
+
+    // Now verify that we can delete the primary
+    let url_interface =
+        format!("{}/{}", url_interfaces, interfaces[0].identity.name.as_str());
+    NexusRequest::object_delete(client, url_interface.as_str())
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect(
+            "Failed to delete sole primary interface from stopped instance",
+        );
 }
 
 /// This test specifically creates two NICs, the second of which will fail the

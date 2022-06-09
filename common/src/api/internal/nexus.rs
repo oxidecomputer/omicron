@@ -36,15 +36,15 @@ pub struct InstanceRuntimeState {
     /// runtime state of the Instance
     pub run_state: InstanceState,
     /// which sled is running this Instance
-    pub sled_uuid: Uuid,
+    pub sled_id: Uuid,
     /// which propolis-server is running this Instance
-    pub propolis_uuid: Uuid,
+    pub propolis_id: Uuid,
     /// the target propolis-server during a migration of this Instance
-    pub dst_propolis_uuid: Option<Uuid>,
+    pub dst_propolis_id: Option<Uuid>,
     /// address of propolis-server running this Instance
     pub propolis_addr: Option<SocketAddr>,
     /// migration id (if one in process)
-    pub migration_uuid: Option<Uuid>,
+    pub migration_id: Option<Uuid>,
     /// number of CPUs allocated for this Instance
     pub ncpus: InstanceCpuCount,
     /// memory allocated for this Instance

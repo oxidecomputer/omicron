@@ -21,6 +21,10 @@ pub const MIN_VPC_IPV4_SUBNET_PREFIX: u8 = 8;
 /// The number of reserved addresses at the beginning of a subnet range.
 pub const NUM_INITIAL_RESERVED_IP_ADDRESSES: usize = 5;
 
+/// The name provided for a default primary network interface for a guest
+/// instance.
+pub const DEFAULT_PRIMARY_NIC_NAME: &str = "net0";
+
 lazy_static! {
     /// The default IPv4 subnet range assigned to the default VPC Subnet, when
     /// the VPC is created, if one is not provided in the request. See

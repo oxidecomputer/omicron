@@ -211,7 +211,8 @@ lazy_static! {
         };
 
     // The instance needs a network interface, too.
-    pub static ref DEMO_INSTANCE_NIC_NAME: Name = "default".parse().unwrap();
+    pub static ref DEMO_INSTANCE_NIC_NAME: Name =
+        omicron_nexus::defaults::DEFAULT_PRIMARY_NIC_NAME.parse().unwrap();
     pub static ref DEMO_INSTANCE_NIC_URL: String =
         format!("{}/{}", *DEMO_INSTANCE_NICS_URL, *DEMO_INSTANCE_NIC_NAME);
     pub static ref DEMO_INSTANCE_NIC_CREATE: params::NetworkInterfaceCreate =
@@ -269,6 +270,33 @@ lazy_static! {
                 description: String::from(""),
             },
             disk: DEMO_DISK_NAME.clone(),
+        };
+}
+
+lazy_static! {
+    // Identity providers
+    pub static ref IDENTITY_PROVIDERS_URL: String = format!("/silos/default-silo/identity_providers");
+    pub static ref SAML_IDENTITY_PROVIDERS_URL: String = format!("/silos/default-silo/saml_identity_providers");
+
+    pub static ref DEMO_SAML_IDENTITY_PROVIDER_NAME: Name = "demo-saml-provider".parse().unwrap();
+    pub static ref SPECIFIC_SAML_IDENTITY_PROVIDER_URL: String = format!("{}/{}", *SAML_IDENTITY_PROVIDERS_URL, *DEMO_SAML_IDENTITY_PROVIDER_NAME);
+
+    pub static ref SAML_IDENTITY_PROVIDER: params::SamlIdentityProviderCreate =
+        params::SamlIdentityProviderCreate {
+            identity: IdentityMetadataCreateParams {
+                name: DEMO_SAML_IDENTITY_PROVIDER_NAME.clone(),
+                description: "a demo provider".to_string(),
+            },
+
+            idp_metadata_source: params::IdpMetadataSource::Url { url: HTTP_SERVER.url("/descriptor").to_string() },
+
+            idp_entity_id: "entity_id".to_string(),
+            sp_client_id: "client_id".to_string(),
+            acs_url: "http://acs".to_string(),
+            slo_url: "http://slo".to_string(),
+            technical_contact_email: "technical@fake".to_string(),
+
+            signing_keypair: None,
         };
 }
 
@@ -824,7 +852,7 @@ lazy_static! {
             allowed_methods: vec![
                 AllowedMethod::Post(serde_json::to_value(
                     params::InstanceMigrate {
-                        dst_sled_uuid: uuid::Uuid::new_v4(),
+                        dst_sled_id: uuid::Uuid::new_v4(),
                     }
                 ).unwrap()),
             ],
@@ -952,6 +980,30 @@ lazy_static! {
                 AllowedMethod::Get,
                 AllowedMethod::Delete,
             ],
+        },
+
+        /* Silo identity providers */
+
+        /*
+        VerifyEndpoint {
+            url: &*IDENTITY_PROVIDERS_URL, // in ignore list
+            visibility: Visibility::Public,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
+        */
+        VerifyEndpoint {
+            url: &*SAML_IDENTITY_PROVIDERS_URL,
+            visibility: Visibility::Public,
+            allowed_methods: vec![AllowedMethod::Post(
+                serde_json::to_value(&*SAML_IDENTITY_PROVIDER).unwrap(),
+            )],
+        },
+        VerifyEndpoint {
+            url: &*SPECIFIC_SAML_IDENTITY_PROVIDER_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![AllowedMethod::Get],
         },
     ];
 }

@@ -9,6 +9,7 @@ use super::discovery::PeerMonitorObserver;
 use super::params::SledAgentRequest;
 use crate::rack_setup::config::SetupServiceConfig;
 use crate::rack_setup::service::Service;
+use crate::sp::SpHandle;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use omicron_common::backoff::internal_service_policy;
@@ -16,7 +17,6 @@ use omicron_common::backoff::retry_notify;
 use omicron_common::backoff::BackoffError;
 use slog::Logger;
 use std::net::SocketAddrV6;
-use thiserror::Error;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -43,6 +43,7 @@ impl RssHandle {
         log: &Logger,
         config: SetupServiceConfig,
         peer_monitor: PeerMonitorObserver,
+        sp: Option<SpHandle>,
     ) -> Self {
         let (tx, rx) = rss_channel();
 
@@ -54,64 +55,28 @@ impl RssHandle {
         );
         let log = log.new(o!("component" => "BootstrapAgentRssHandler"));
         let task = tokio::spawn(async move {
-            rx.initialize_sleds(&log).await;
+            rx.initialize_sleds(&log, &sp).await;
         });
         Self { _rss: rss, task }
     }
-}
-
-#[derive(Debug, Error)]
-enum InitializeSledAgentError {
-    #[error("Failed to construct an HTTP client: {0}")]
-    HttpClient(#[from] reqwest::Error),
-
-    #[error("Error making HTTP request to Bootstrap Agent: {0}")]
-    BootstrapApi(
-        #[from]
-        bootstrap_agent_client::Error<bootstrap_agent_client::types::Error>,
-    ),
 }
 
 async fn initialize_sled_agent(
     log: &Logger,
     bootstrap_addr: SocketAddrV6,
     request: &SledAgentRequest,
-) -> Result<(), InitializeSledAgentError> {
-    let dur = std::time::Duration::from_secs(60);
-
-    let client = reqwest::ClientBuilder::new()
-        .connect_timeout(dur)
-        .timeout(dur)
-        .build()?;
-
-    let url = format!("http://{}", bootstrap_addr);
-    info!(log, "Sending request to peer agent: {}", url);
-    let client = bootstrap_agent_client::Client::new_with_client(
-        &url,
-        client,
-        log.new(o!("BootstrapAgentClient" => url.clone())),
+    sp: &Option<SpHandle>,
+) -> Result<(), bootstrap_agent_client::Error> {
+    let client = bootstrap_agent_client::Client::new(
+        bootstrap_addr,
+        sp,
+        log.new(o!("BootstrapAgentClient" => bootstrap_addr.to_string())),
     );
 
     let sled_agent_initialize = || async {
-        client
-            .start_sled(&bootstrap_agent_client::types::SledAgentRequest {
-                subnet: bootstrap_agent_client::types::Ipv6Subnet {
-                    net: bootstrap_agent_client::types::Ipv6Net(
-                        request.subnet.net().to_string(),
-                    ),
-                },
-            })
-            .await
-            .map_err(BackoffError::transient)?;
+        client.start_sled(request).await.map_err(BackoffError::transient)?;
 
-        Ok::<
-            (),
-            BackoffError<
-                bootstrap_agent_client::Error<
-                    bootstrap_agent_client::types::Error,
-                >,
-            >,
-        >(())
+        Ok::<(), BackoffError<bootstrap_agent_client::Error>>(())
     };
 
     let log_failure = |error, _| {
@@ -119,7 +84,7 @@ async fn initialize_sled_agent(
     };
     retry_notify(internal_service_policy(), sled_agent_initialize, log_failure)
         .await?;
-    info!(log, "Peer agent at {} initialized", url);
+    info!(log, "Peer agent initialized"; "peer" => %bootstrap_addr);
     Ok(())
 }
 
@@ -178,7 +143,7 @@ struct BootstrapAgentHandleReceiver {
 }
 
 impl BootstrapAgentHandleReceiver {
-    async fn initialize_sleds(mut self, log: &Logger) {
+    async fn initialize_sleds(mut self, log: &Logger, sp: &Option<SpHandle>) {
         let (requests, tx_response) = match self.inner.recv().await {
             Some(requests) => requests,
             None => {
@@ -201,7 +166,7 @@ impl BootstrapAgentHandleReceiver {
                     "target_sled" => %bootstrap_addr,
                 );
 
-                initialize_sled_agent(log, bootstrap_addr, &request)
+                initialize_sled_agent(log, bootstrap_addr, &request, sp)
                     .await
                     .map_err(|err| {
                         format!(
@@ -239,5 +204,13 @@ impl BootstrapAgentHandleReceiver {
 
         // All init requests succeeded; inform RSS of completion.
         tx_response.send(Ok(())).unwrap();
+    }
+}
+
+struct AbortOnDrop<T>(JoinHandle<T>);
+
+impl<T> Drop for AbortOnDrop<T> {
+    fn drop(&mut self) {
+        self.0.abort();
     }
 }

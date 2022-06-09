@@ -4,8 +4,6 @@
 
 //! Executable program to run the sled agent
 
-use dropshot::ConfigDropshot;
-use omicron_common::api::external::Error;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
 use omicron_sled_agent::bootstrap::{
@@ -14,30 +12,9 @@ use omicron_sled_agent::bootstrap::{
 };
 use omicron_sled_agent::rack_setup::config::SetupServiceConfig as RssConfig;
 use omicron_sled_agent::{config::Config as SledConfig, server as sled_server};
-use std::net::SocketAddr;
+use sp_sim::config::GimletConfig;
 use std::path::PathBuf;
 use structopt::StructOpt;
-
-#[derive(Debug)]
-enum ApiRequest {
-    Bootstrap,
-    Sled,
-}
-
-impl std::str::FromStr for ApiRequest {
-    type Err = Error;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "bootstrap" => Ok(ApiRequest::Bootstrap),
-            "sled" => Ok(ApiRequest::Sled),
-            _ => Err(Error::InvalidValue {
-                label: s.to_string(),
-                message: "Invalid value: try one of {bootstrap, sled}"
-                    .to_string(),
-            }),
-        }
-    }
-}
 
 #[derive(Debug, StructOpt)]
 #[structopt(
@@ -46,10 +23,7 @@ impl std::str::FromStr for ApiRequest {
 )]
 enum Args {
     /// Generates the OpenAPI specification.
-    Openapi {
-        #[structopt(name = "api_type", parse(try_from_str))]
-        api_requested: ApiRequest,
-    },
+    Openapi,
     /// Runs the Sled Agent server.
     Run {
         #[structopt(name = "CONFIG_FILE_PATH", parse(from_os_str))]
@@ -70,14 +44,7 @@ async fn do_run() -> Result<(), CmdError> {
     })?;
 
     match args {
-        Args::Openapi { api_requested } => match api_requested {
-            ApiRequest::Bootstrap => {
-                bootstrap_server::run_openapi().map_err(CmdError::Failure)
-            }
-            ApiRequest::Sled => {
-                sled_server::run_openapi().map_err(CmdError::Failure)
-            }
-        },
+        Args::Openapi => sled_server::run_openapi().map_err(CmdError::Failure),
         Args::Run { config_path } => {
             let config = SledConfig::from_file(&config_path)
                 .map_err(|e| CmdError::Failure(e.to_string()))?;
@@ -108,6 +75,20 @@ async fn do_run() -> Result<(), CmdError> {
             } else {
                 None
             };
+            let sp_config_path = {
+                let mut sp_config_path = config_path.clone();
+                sp_config_path.pop();
+                sp_config_path.push("config-sp.toml");
+                sp_config_path
+            };
+            let sp_config = if sp_config_path.exists() {
+                Some(
+                    GimletConfig::from_file(sp_config_path)
+                        .map_err(|e| CmdError::Failure(e.to_string()))?,
+                )
+            } else {
+                None
+            };
 
             // Derive the bootstrap address from the data link's MAC address.
             let link = config
@@ -119,13 +100,10 @@ async fn do_run() -> Result<(), CmdError> {
             // Configure and run the Bootstrap server.
             let bootstrap_config = BootstrapConfig {
                 id: config.id,
-                dropshot: ConfigDropshot {
-                    bind_address: SocketAddr::V6(bootstrap_address),
-                    request_body_max_bytes: 1024 * 1024,
-                    ..Default::default()
-                },
+                bind_address: bootstrap_address,
                 log: config.log.clone(),
                 rss_config,
+                sp_config,
             };
 
             // TODO: It's a little silly to pass the config this way - namely,

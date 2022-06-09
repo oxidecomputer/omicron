@@ -116,13 +116,24 @@ impl super::Nexus {
                     serde_json::to_string(&volume_construction_request)?;
 
                 // use reqwest to query url for size
-                let response =
-                    reqwest::Client::new().head(url).send().await.map_err(
-                        |e| Error::InvalidValue {
-                            label: String::from("url"),
-                            message: format!("error querying url: {}", e),
-                        },
-                    )?;
+                let dur = std::time::Duration::from_secs(5);
+                let client = reqwest::ClientBuilder::new()
+                    .connect_timeout(dur)
+                    .timeout(dur)
+                    .build()
+                    .map_err(|e| {
+                        Error::internal_error(&format!(
+                            "failed to build reqwest client: {}",
+                            e
+                        ))
+                    })?;
+
+                let response = client.head(url).send().await.map_err(|e| {
+                    Error::InvalidValue {
+                        label: String::from("url"),
+                        message: format!("error querying url: {}", e),
+                    }
+                })?;
 
                 if !response.status().is_success() {
                     return Err(Error::InvalidValue {
