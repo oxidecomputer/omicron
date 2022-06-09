@@ -1205,7 +1205,8 @@ CREATE TABLE omicron.public.role_builtin (
 
 CREATE TYPE omicron.public.identity_type AS ENUM (
   'user_builtin',
-  'silo_user'
+  'silo_user',
+  'api_client'
 );
 
 CREATE TABLE omicron.public.role_assignment (

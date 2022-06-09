@@ -93,7 +93,11 @@ pub struct ClientToken {
 }
 
 impl ClientToken {
-    pub fn new(client_id: Uuid, device_code: String, silo_user_id: Uuid) -> Self {
+    pub fn new(
+        client_id: Uuid,
+        device_code: String,
+        silo_user_id: Uuid,
+    ) -> Self {
         Self {
             token: generate_token(),
             client_id,

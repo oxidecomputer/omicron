@@ -16,6 +16,7 @@ use crate::saga_interface::SagaContext;
 use async_trait::async_trait;
 use authn::external::session_cookie::HttpAuthnSessionCookie;
 use authn::external::spoof::HttpAuthnSpoof;
+use authn::external::token::HttpAuthnToken;
 use authn::external::HttpAuthnScheme;
 use chrono::{DateTime, Duration, Utc};
 use omicron_common::api::external::Error;
@@ -83,6 +84,7 @@ impl ServerContext {
                     config::SchemeName::SessionCookie => {
                         Box::new(HttpAuthnSessionCookie)
                     }
+                    config::SchemeName::ClientToken => Box::new(HttpAuthnToken),
                 }
             })
             .collect();
@@ -501,13 +503,24 @@ mod test {
 }
 
 #[async_trait]
-impl authn::external::spoof::SpoofContext for Arc<ServerContext> {
+impl authn::external::SiloContext for Arc<ServerContext> {
     async fn silo_user_silo(
         &self,
         silo_user_id: Uuid,
     ) -> Result<Uuid, authn::Reason> {
         let opctx = self.nexus.opctx_external_authn();
         self.nexus.lookup_silo_for_authn(opctx, silo_user_id).await
+    }
+}
+
+#[async_trait]
+impl authn::external::token::TokenContext for Arc<ServerContext> {
+    async fn token_actor(
+        &self,
+        token: String,
+    ) -> Result<authn::Actor, authn::Reason> {
+        let opctx = self.nexus.opctx_external_authn();
+        self.nexus.client_lookup_for_authn(opctx, token).await
     }
 }
 

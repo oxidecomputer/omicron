@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Custom, test-only authn scheme that trusts whatever the client says
+//! Client tokens
 
 use super::super::Details;
 use super::HttpAuthnScheme;
@@ -10,161 +10,114 @@ use super::Reason;
 use super::SchemeResult;
 use super::SiloContext;
 use crate::authn;
-use crate::authn::Actor;
-use anyhow::anyhow;
 use anyhow::Context;
 use async_trait::async_trait;
 use headers::authorization::{Authorization, Bearer};
 use headers::HeaderMapExt;
-use lazy_static::lazy_static;
-use uuid::Uuid;
 
-// This scheme is intended for demos, development, and testing until we have a
-// more automatable identity provider that can be used for those purposes.
+// This scheme is intended for clients such as the API, CLI, etc.
 //
 // For ease of integration into existing clients, we use RFC 6750 bearer tokens.
 // This mechanism in turn uses HTTP's "Authorization" header.  In practice, it
 // looks like this:
 //
-//     Authorization: Bearer oxide-spoof-001de000-05e4-4000-8000-000000060001
+//     Authorization: Bearer oxide-token-d21e423290606003a183c2738a7b03212bcc9510"
 //     ^^^^^^^^^^^^^  ^^^^^^ ^^^^^^^^^^^ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 //     |              |      |           |
-//     |              |      |           +--- specifies the actor id
-//     |              |      +--------------- specifies this "spoof" mechanism
+//     |              |      |           +--- specifies the token itself
+//     |              |      +--------------- specifies this "token" mechanism
 //     |              +---------------------- specifies RFC 6750 bearer tokens
 //     +------------------------------------- standard HTTP authentication hdr
 //
 // (That's not a typo -- the "authorization" header is generally used to specify
 // _authentication_ information.  Similarly, the "Unauthorized" HTTP response
 // code usually describes an _authentication_ error.)
-//
-// This mechanism trusts (without verification) that the client is whoever
-// they say they are.  That's true of any bearer token, but this one is
-// particularly dangerous because the tokens are long-lived and not secret.
 
-pub const SPOOF_SCHEME_NAME: authn::SchemeName = authn::SchemeName("spoof");
+pub const TOKEN_SCHEME_NAME: authn::SchemeName = authn::SchemeName("token");
 
-/// Magic value to produce a "no such actor" error
-const SPOOF_RESERVED_BAD_ACTOR: &str = "Jack-Donaghy";
-/// Magic value to produce a "bad credentials" error
-const SPOOF_RESERVED_BAD_CREDS: &str = "this-fake-ID-it-is-truly-excellent";
 /// Prefix used on the bearer token to identify this scheme
 // RFC 6750 expects bearer tokens to be opaque base64-encoded data.  In our
-// case, the data we want to represent (this prefix, plus valid uuids) are
+// case, the data we want to represent (this prefix, plus valid tokens) are
 // subsets of the base64 character set, so we do not bother encoding them.
-const SPOOF_PREFIX: &str = "oxide-spoof-";
+const TOKEN_PREFIX: &str = "oxide-token-";
 
-lazy_static! {
-    /// Actor (id) used for the special "bad credentials" error
-    static ref SPOOF_RESERVED_BAD_CREDS_ACTOR: Actor = Actor::UserBuiltin {
-        user_builtin_id: "22222222-2222-2222-2222-222222222222".parse().unwrap(),
-    };
-    /// Complete HTTP header value to trigger the "bad actor" error
-    pub static ref SPOOF_HEADER_BAD_ACTOR: Authorization<Bearer> =
-        make_header_value_str(SPOOF_RESERVED_BAD_ACTOR).unwrap();
-    /// Complete HTTP header value to trigger the "bad creds" error
-    pub static ref SPOOF_HEADER_BAD_CREDS: Authorization<Bearer> =
-        make_header_value_str(SPOOF_RESERVED_BAD_CREDS).unwrap();
-}
-
-/// Implements a (test-only) authentication scheme where the client simply
-/// provides the actor information in a custom bearer token and we always trust
-/// it.  This is useful for testing the rest of the authn facilities since we
-/// can very easily and precisely control its output.
+/// Implements a bearer-token-based authentication scheme.
 #[derive(Debug)]
-pub struct HttpAuthnSpoof;
+pub struct HttpAuthnToken;
 
 #[async_trait]
-impl<T> HttpAuthnScheme<T> for HttpAuthnSpoof
+impl<T> HttpAuthnScheme<T> for HttpAuthnToken
 where
-    T: SiloContext + Send + Sync + 'static,
+    T: SiloContext + TokenContext + Send + Sync + 'static,
 {
     fn name(&self) -> authn::SchemeName {
-        SPOOF_SCHEME_NAME
+        TOKEN_SCHEME_NAME
     }
 
     async fn authn(
         &self,
         ctx: &T,
-        log: &slog::Logger,
+        _log: &slog::Logger,
         request: &http::Request<hyper::Body>,
     ) -> SchemeResult {
         let headers = request.headers();
-        match authn_spoof_parse_id(headers.typed_get().as_ref()) {
+        match parse_token(headers.typed_get().as_ref()) {
             Err(error) => SchemeResult::Failed(error),
             Ok(None) => SchemeResult::NotRequested,
-            Ok(Some(silo_user_id)) => {
-                debug!(
-                    log,
-                    "looking up silo for user";
-                    "silo_user_id" => silo_user_id.to_string()
-                );
-                match ctx.silo_user_silo(silo_user_id).await {
-                    Err(error) => SchemeResult::Failed(error),
-                    Ok(silo_id) => {
-                        let actor = Actor::SiloUser { silo_id, silo_user_id };
-                        SchemeResult::Authenticated(Details { actor })
-                    }
-                }
-            }
+            Ok(Some(token)) => match ctx.token_actor(token).await {
+                Err(error) => SchemeResult::Failed(error),
+                Ok(actor) => SchemeResult::Authenticated(Details { actor }),
+            },
         }
     }
 }
 
-fn authn_spoof_parse_id(
+fn parse_token(
     raw_value: Option<&Authorization<Bearer>>,
-) -> Result<Option<Uuid>, Reason> {
+) -> Result<Option<String>, Reason> {
     let token = match raw_value {
         None => return Ok(None),
         Some(bearer) => bearer.token(),
     };
 
-    if !token.starts_with(SPOOF_PREFIX) {
+    if !token.starts_with(TOKEN_PREFIX) {
         // This is some other kind of bearer token.  Maybe another scheme knows
         // how to deal with it.
         return Ok(None);
     }
 
-    let str_value = &token[SPOOF_PREFIX.len()..];
-    if str_value == SPOOF_RESERVED_BAD_ACTOR {
-        return Err(Reason::UnknownActor { actor: str_value.to_owned() });
-    }
-
-    if str_value == SPOOF_RESERVED_BAD_CREDS {
-        return Err(Reason::BadCredentials {
-            actor: *SPOOF_RESERVED_BAD_CREDS_ACTOR,
-            source: anyhow!("do not sell to the people on this list"),
-        });
-    }
-
-    Uuid::parse_str(str_value)
-        .context("parsing header value as UUID")
-        .map(|silo_user_id| Some(silo_user_id))
-        .map_err(|source| Reason::BadFormat { source })
+    Ok(Some(token[TOKEN_PREFIX.len()..].to_string()))
 }
 
 /// Returns a value of the `Authorization` header for this actor that will be
 /// accepted using this scheme
-pub fn make_header_value(id: Uuid) -> Authorization<Bearer> {
-    make_header_value_str(&id.to_string()).unwrap()
+pub fn make_header_value(token: &str) -> Authorization<Bearer> {
+    make_header_value_str(&token.to_string()).unwrap()
 }
 
 /// Returns a value of the `Authorization` header with `str` in the place where
-/// the actor id goes
+/// the token goes
 ///
-/// Unlike `make_header_value`, this can is not guaranteed to work, as the
+/// Unlike `make_header_value`, this is not guaranteed to work, as the
 /// string may contain non-base64 characters.  Unlike `make_header_value_raw`,
 /// this returns a typed value and so cannot be used to make various kinds of
 /// invalid headers.
 fn make_header_value_str(
     s: &str,
 ) -> Result<Authorization<Bearer>, anyhow::Error> {
-    Authorization::bearer(&format!("{}{}", SPOOF_PREFIX, s))
+    Authorization::bearer(&format!("{}{}", TOKEN_PREFIX, s))
         .context("not a valid HTTP header value")
 }
 
+/// A context that can look up a Silo user and client ID from a token.
+#[async_trait]
+pub trait TokenContext {
+    async fn token_actor(&self, token: String) -> Result<authn::Actor, Reason>;
+}
+
+/*
 /// Returns a value of the `Authorization` header with `data` in the place where
-/// the actor id goes
+/// the token goes
 ///
 /// This is only intended for the test suite for cases where the input might not
 /// be a valid Uuid and might not even be valid UTF-8.  Use `make_header_value`
@@ -172,7 +125,7 @@ fn make_header_value_str(
 pub fn make_header_value_raw(
     data: &[u8],
 ) -> Result<http::HeaderValue, anyhow::Error> {
-    let mut v: Vec<u8> = "Bearer oxide-spoof-".as_bytes().to_vec();
+    let mut v: Vec<u8> = "Bearer oxide-token-".as_bytes().to_vec();
     v.extend(data);
     http::HeaderValue::from_bytes(&v).context("not a valid HTTP header value")
 }
@@ -328,3 +281,4 @@ mod test {
         ));
     }
 }
+*/

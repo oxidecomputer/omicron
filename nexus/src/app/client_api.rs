@@ -4,6 +4,7 @@
 
 //! Client authentication and token granting.
 
+use crate::authn::{Actor, Reason};
 use crate::context::OpContext;
 use crate::db::model::{ClientAuthentication, ClientToken};
 use crate::external_api::client_api::TokenResponse;
@@ -57,6 +58,20 @@ impl super::Nexus {
             Ok(token) => Ok(TokenResponse::Granted(token)),
             Err(_) => Ok(TokenResponse::Pending),
             // TODO: TokenResponse::Denied
+        }
+    }
+
+    pub async fn client_lookup_for_authn(
+        &self,
+        opctx: &OpContext,
+        token: String,
+    ) -> Result<Actor, Reason> {
+        match self.db_datastore.client_get_actor(opctx, token).await {
+            Ok(actor) => Ok(actor),
+            // TODO: better error handling
+            Err(_) => Err(Reason::UnknownActor {
+                actor: String::from("from bearer token"),
+            }),
         }
     }
 }

@@ -25,7 +25,7 @@ use super::error::diesel_pool_result_optional;
 use super::identity::{Asset, Resource};
 use super::pool::DbConnection;
 use super::Pool;
-use crate::authn;
+use crate::authn::{self, Actor};
 use crate::authz::{self, ApiResource};
 use crate::context::OpContext;
 use crate::db::collection_attach::{AttachError, DatastoreAttachTarget};
@@ -3757,6 +3757,39 @@ impl DataStore {
                 // TODO-correctness: better error (not found)
                 public_error_from_diesel_pool(e, ErrorHandler::Server)
             })
+    }
+
+    pub async fn client_get_actor(
+        &self,
+        opctx: &OpContext,
+        token: String,
+    ) -> LookupResult<Actor> {
+        use db::schema::client_token::dsl;
+        use db::schema::silo_user::dsl as silo_user_dsl;
+
+        let pool = self.pool_authorized(opctx).await?;
+        let token = dsl::client_token
+            .filter(dsl::token.eq(token))
+            .select(ClientToken::as_select())
+            .get_result_async(pool)
+            .await
+            .map_err(|e| {
+                // TODO-correctness: better error (not found)
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            })?;
+        let client_id = token.client_id;
+        let silo_user_id = token.silo_user_id;
+        let silo_id = silo_user_dsl::silo_user
+            .filter(silo_user_dsl::id.eq(silo_user_id))
+            .select(SiloUser::as_select())
+            .get_result_async(pool)
+            .await
+            .map_err(|e| {
+                // TODO-correctness: better error (not found)
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            })?
+            .silo_id;
+        Ok(Actor::ApiClient { silo_user_id, silo_id, client_id })
     }
 
     // Test interfaces
