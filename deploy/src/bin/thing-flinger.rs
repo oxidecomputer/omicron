@@ -33,7 +33,6 @@ struct Server {
 #[derive(Deserialize, Debug)]
 struct Deployment {
     rss_server: String,
-    rack_secret_threshold: usize,
     staging_dir: PathBuf,
 }
 
@@ -483,11 +482,10 @@ fn overlay_sled_agent(
     let cmd = format!(
         "sh -c 'for dir in {}; do mkdir -p $dir; done' && \
             cd {} && \
-            cargo run {} --bin sled-agent-overlay-files -- --threshold {} --directories {}",
+            cargo run {} --bin sled-agent-overlay-files -- --directories {}",
         dirs,
         config.builder.omicron_path.to_string_lossy(),
         config.release_arg(),
-        config.deployment.rack_secret_threshold,
         dirs
     );
     ssh_exec(builder, &cmd, false)

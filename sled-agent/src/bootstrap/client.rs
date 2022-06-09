@@ -21,9 +21,10 @@ use thiserror::Error;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
+use vsss_rs::Share;
 
 #[derive(Debug, Error)]
-pub(crate) enum Error {
+pub enum Error {
     #[error("Could not connect to {addr}: {err}")]
     Connect { addr: SocketAddrV6, err: io::Error },
 
@@ -79,6 +80,10 @@ impl<'a> Client<'a> {
         Self { addr, sp, log }
     }
 
+    pub(crate) fn addr(&self) -> SocketAddrV6 {
+        self.addr
+    }
+
     pub(crate) async fn start_sled(
         &self,
         request: &SledAgentRequest,
@@ -90,6 +95,18 @@ impl<'a> Client<'a> {
             Response::ShareResponse(_) => Err(Error::InvalidResponse {
                 expected: "SledAgentResponse",
                 received: "ShareResponse",
+            }),
+        }
+    }
+
+    pub(crate) async fn request_share(&self) -> Result<Share, Error> {
+        let request = Request::ShareRequest;
+
+        match self.request_response(request).await? {
+            Response::ShareResponse(response) => Ok(response),
+            Response::SledAgentResponse(_) => Err(Error::InvalidResponse {
+                expected: "ShareResponse",
+                received: "SledAgentResponse",
             }),
         }
     }

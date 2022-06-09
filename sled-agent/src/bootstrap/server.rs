@@ -217,9 +217,13 @@ async fn serve_single_request(
                 }
             }
         }
-        Request::ShareRequest => {
-            Err("share request currently unsupported".to_string())
-        }
+        Request::ShareRequest => match bootstrap_agent.secret_share().await {
+            Some(share) => Ok(Response::ShareResponse(share)),
+            None => {
+                warn!(log, "Share requested before we have one");
+                Err("Share request failed: share unavailable".to_string())
+            }
+        },
     };
 
     // Build and serialize response.
