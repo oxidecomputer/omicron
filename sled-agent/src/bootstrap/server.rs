@@ -221,7 +221,7 @@ async fn serve_single_request(
             Some(share) => Ok(Response::ShareResponse(share)),
             None => {
                 warn!(log, "Share requested before we have one");
-                Err(format!("Share request failed: share unavailable"))
+                Err("Share request failed: share unavailable".to_string())
             }
         },
     };
