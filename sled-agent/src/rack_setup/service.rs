@@ -271,38 +271,17 @@ impl ServiceInner {
         bootstrap_addrs: Vec<Ipv6Addr>,
     ) -> Result<HashMap<SocketAddrV6, SledAllocation>, SetupServiceError> {
         // Create a rack secret, unless we're in the single-sled case.
-        let mut rack_secret_shares = if bootstrap_addrs.len() > 1 {
-            let total_shares = bootstrap_addrs.len();
-            if config.rack_secret_threshold > 1 {
-                let secret = RackSecret::new();
-                let (shares, verifier) = secret
-                    .split(config.rack_secret_threshold, total_shares)
-                    .map_err(SetupServiceError::SplitRackSecret)?;
+        let mut maybe_rack_secret_shares = generate_rack_secret(
+            config.rack_secret_threshold,
+            bootstrap_addrs.len(),
+            &self.log,
+        )?;
 
-                // Sanity check that `split` returned the expected number of
-                // shares (one per bootstrap agent)
-                assert_eq!(shares.len(), total_shares);
-
-                Some(shares.into_iter().map(move |share| ShareDistribution {
-                    threshold: config.rack_secret_threshold,
-                    total_shares,
-                    verifier: verifier.clone(),
-                    share,
-                }))
-            } else {
-                warn!(
-                    self.log,
-                    concat!(
-                        "Skipping rack secret creation due to config",
-                        " (despite discovery of {} bootstrap agents)"
-                    ),
-                    total_shares,
-                );
-                None
-            }
-        } else {
-            None
-        };
+        // Sanity check that the returned iterator (if we got one) is the length
+        // we expect.
+        if let Some(rack_secret_shares) = maybe_rack_secret_shares.as_ref() {
+            assert_eq!(rack_secret_shares.len(), bootstrap_addrs.len());
+        }
 
         let bootstrap_addrs = bootstrap_addrs.into_iter().enumerate();
         let reserved_rack_subnet = ReservedRackSubnet::new(config.az_subnet());
@@ -354,15 +333,15 @@ impl ServiceInner {
                 SledAllocation {
                     initialization_request: SledAgentRequest {
                         subnet,
-                        trust_quorum_share: rack_secret_shares.as_mut().map(
-                            |shares_iter| {
+                        trust_quorum_share: maybe_rack_secret_shares
+                            .as_mut()
+                            .map(|shares_iter| {
                                 // We asserted when creating
-                                // `rack_secret_shares` that it contained
+                                // `maybe_rack_secret_shares` that it contained
                                 // exactly the number of shares as we have
                                 // bootstrap addrs, so we can unwrap here.
                                 shares_iter.next().unwrap()
-                            },
-                        ),
+                            }),
                     },
                     services_request: request,
                 },
@@ -614,5 +593,95 @@ impl ServiceInner {
         // it get a /64?
 
         Ok(())
+    }
+}
+
+fn generate_rack_secret(
+    rack_secret_threshold: usize,
+    total_shares: usize,
+    log: &Logger,
+) -> Result<
+    Option<impl ExactSizeIterator<Item = ShareDistribution>>,
+    SetupServiceError,
+> {
+    // We do not generate a rack secret if we only have a single sled or if our
+    // config specifies that the threshold for unlock is only a single sled.
+    if total_shares <= 1 {
+        info!(log, "Skipping rack secret creation (only one sled present)");
+        return Ok(None);
+    }
+
+    if rack_secret_threshold <= 1 {
+        warn!(
+            log,
+            concat!(
+                "Skipping rack secret creation due to config",
+                " (despite discovery of {} bootstrap agents)"
+            ),
+            total_shares,
+        );
+        return Ok(None);
+    }
+
+    let secret = RackSecret::new();
+    let (shares, verifier) = secret
+        .split(rack_secret_threshold, total_shares)
+        .map_err(SetupServiceError::SplitRackSecret)?;
+
+    Ok(Some(shares.into_iter().map(move |share| ShareDistribution {
+        threshold: rack_secret_threshold,
+        total_shares,
+        verifier: verifier.clone(),
+        share,
+    })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use omicron_test_utils::dev::test_setup_log;
+
+    #[test]
+    fn test_generate_rack_secret() {
+        let logctx = test_setup_log("test_generate_rack_secret");
+
+        // No secret generated if total_shares <= 1
+        let maybe_shares = generate_rack_secret(10, 1, &logctx.log).unwrap();
+        assert!(maybe_shares.is_none());
+
+        // No secret generated if threshold <= 1
+        let maybe_shares = generate_rack_secret(1, 10, &logctx.log).unwrap();
+        assert!(maybe_shares.is_none());
+
+        // Secret generation fails if threshold > total shares
+        let maybe_shares = generate_rack_secret(10, 5, &logctx.log);
+        assert!(matches!(
+            maybe_shares,
+            Err(SetupServiceError::SplitRackSecret(_))
+        ));
+
+        // Secret generation succeeds if threshold <= total shares and both are
+        // > 1, and the returned iterator satifies:
+        //
+        // * total length == total shares
+        // * each share is distinct
+        for total_shares in 2..=32 {
+            for threshold in 2..=total_shares {
+                let shares =
+                    generate_rack_secret(threshold, total_shares, &logctx.log)
+                        .unwrap()
+                        .unwrap();
+
+                assert_eq!(shares.len(), total_shares);
+
+                // `Share` doesn't implement `Hash`, but it's a newtype around
+                // `Vec<u8>` (which does). Unwrap the newtype to check that all
+                // shares are distinct.
+                let shares_set = shares
+                    .map(|share_dist| share_dist.share.0)
+                    .collect::<HashSet<_>>();
+                assert_eq!(shares_set.len(), total_shares);
+            }
+        }
     }
 }
