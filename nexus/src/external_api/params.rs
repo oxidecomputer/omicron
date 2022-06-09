@@ -14,7 +14,6 @@ use serde::{
     Deserialize, Deserializer, Serialize,
 };
 use std::net::IpAddr;
-use std::str::FromStr;
 use uuid::Uuid;
 
 // Silos

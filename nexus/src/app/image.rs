@@ -201,7 +201,7 @@ impl super::Nexus {
                     ),
                     volume_id: volume.id(),
                     url: Some(url.clone()),
-                    distribution: params.distribution.name,
+                    distribution: params.distribution.name.to_string(),
                     version: params.distribution.version,
                     digest: None, // not computed for URL type
                     block_size: db_block_size,
