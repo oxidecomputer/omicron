@@ -617,7 +617,7 @@ pub enum ImageSource {
 }
 
 /// OS image distribution
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Distribution {
     /// The name of the distribution (e.g. "alpine" or "ubuntu")
     pub name: Name,
