@@ -32,7 +32,7 @@ pub mod rack_setup;
 pub mod server;
 mod services;
 mod sled_agent;
-mod sp;
+pub mod sp;
 mod storage_manager;
 mod updates;
 

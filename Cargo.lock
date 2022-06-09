@@ -2964,6 +2964,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "sp-sim",
+ "sprockets-rot",
  "structopt",
  "thiserror",
  "toml",

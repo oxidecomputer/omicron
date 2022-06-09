@@ -4,10 +4,10 @@
 
 //! Interfaces for working with bootstrap agent configuration
 
+use crate::sp::SimSpConfig;
 use dropshot::ConfigLogging;
 use serde::Deserialize;
 use serde::Serialize;
-use sp_sim::config::GimletConfig;
 use std::net::SocketAddrV6;
 use uuid::Uuid;
 
@@ -22,5 +22,5 @@ pub struct Config {
 
     pub rss_config: Option<crate::rack_setup::config::SetupServiceConfig>,
 
-    pub sp_config: Option<GimletConfig>,
+    pub sp_config: Option<SimSpConfig>,
 }

@@ -5,16 +5,20 @@
 //! Interface to a (currently simulated) SP / RoT.
 
 use crate::config::Config as SledConfig;
+use crate::config::ConfigError;
 use crate::illumos;
 use crate::illumos::dladm::CreateVnicError;
 use crate::illumos::dladm::Dladm;
 use crate::zone::EnsureGzAddressError;
 use crate::zone::Zones;
+use serde::Deserialize;
+use serde::Serialize;
 use slog::Logger;
 use sp_sim::config::GimletConfig;
 use sp_sim::RotRequestV1;
 use sp_sim::RotResponseV1;
 use sp_sim::SimulatedSp as SpSimSimulatedSp;
+use sprockets_host::Ed25519Certificate;
 use sprockets_host::Ed25519Certificates;
 use sprockets_host::Ed25519PublicKey;
 use sprockets_host::RotManager;
@@ -26,6 +30,7 @@ use sprockets_host::Session;
 use sprockets_host::SessionHandshakeError;
 use std::collections::VecDeque;
 use std::net::Ipv6Addr;
+use std::path::Path;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
@@ -33,6 +38,23 @@ use std::time::Instant;
 use thiserror::Error;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncWrite;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SimSpConfig {
+    pub local_sp: GimletConfig,
+    pub trust_quorum_members: Vec<Ed25519Certificate>,
+}
+
+impl SimSpConfig {
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, ConfigError> {
+        let path = path.as_ref();
+        let contents = std::fs::read_to_string(&path)
+            .map_err(|err| ConfigError::Io { path: path.into(), err })?;
+        let config = toml::from_str(&contents)
+            .map_err(|err| ConfigError::Parse { path: path.into(), err })?;
+        Ok(config)
+    }
+}
 
 // These error cases are mostly simulation-specific; the list will grow once we
 // have real hardware (and may shrink if/when we remove or collapse simulated
@@ -68,12 +90,13 @@ impl SpHandle {
     ///
     /// A return value of `Ok(None)` means no SP is available.
     pub async fn detect(
-        sp_config: &Option<GimletConfig>,
+        sp_config: &Option<SimSpConfig>,
         sled_config: &SledConfig,
         log: &Logger,
     ) -> Result<Option<Self>, SpError> {
         let inner = if let Some(config) = sp_config.as_ref() {
-            let sim_sp = start_simulated_sp(config, sled_config, log).await?;
+            let sim_sp =
+                start_simulated_sp(&config.local_sp, sled_config, log).await?;
             Some(Inner::SimulatedSp(sim_sp))
         } else {
             None
