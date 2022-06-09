@@ -683,5 +683,7 @@ mod tests {
                 assert_eq!(shares_set.len(), total_shares);
             }
         }
+
+        logctx.cleanup_successful();
     }
 }
