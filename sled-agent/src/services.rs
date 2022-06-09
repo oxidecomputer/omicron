@@ -10,8 +10,7 @@ use crate::illumos::vnic::VnicAllocator;
 use crate::illumos::zone::AddressRequest;
 use crate::params::{ServiceEnsureBody, ServiceRequest};
 use crate::zone::Zones;
-use ipnetwork::Ipv6Network;
-use omicron_common::address::{AZ_PREFIX, DNS_PORT, DNS_SERVER_PORT};
+use omicron_common::address::{DNS_PORT, DNS_SERVER_PORT};
 use slog::Logger;
 use std::collections::HashSet;
 use std::iter::FromIterator;
@@ -229,7 +228,7 @@ impl ServiceManager {
                 })?;
             }
 
-            let gz_route_subnet = if !service.gz_addresses.is_empty() {
+            let gateway = if !service.gz_addresses.is_empty() {
                 // If this service supplies its own GZ address, add a route.
                 //
                 // This is currently being used for the DNS service.
@@ -238,16 +237,18 @@ impl ServiceManager {
                 // can be supplied - now that we're actively using it, we
                 // aren't really handling the "many GZ addresses" case, and it
                 // doesn't seem necessary now.
-                Ipv6Network::new(service.gz_addresses[0], AZ_PREFIX).unwrap()
+                service.gz_addresses[0]
             } else {
-                // Otherwise, add a route to the global Zone's sled address for
-                // everything within the AZ.
-                Ipv6Network::new(self.underlay_address, AZ_PREFIX).unwrap()
+                self.underlay_address
             };
-            running_zone.add_route(gz_route_subnet).await.map_err(|err| {
+
+            running_zone.add_default_route(gateway).await.map_err(|err| {
                 Error::ZoneCommand { intent: "Adding Route".to_string(), err }
             })?;
 
+            // TODO: Related to
+            // https://github.com/oxidecomputer/omicron/pull/1124 , should we
+            // avoid importing this manifest?
             debug!(self.log, "importing manifest");
 
             running_zone

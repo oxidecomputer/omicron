@@ -26,6 +26,8 @@ pub struct NetworkInterface {
     // If neither is specified, auto-assign one of each?
     pub ip: ipnetwork::IpNetwork,
     pub slot: i16,
+    #[diesel(column_name = is_primary)]
+    pub primary: bool,
 }
 
 impl From<NetworkInterface> for external::NetworkInterface {
@@ -37,6 +39,7 @@ impl From<NetworkInterface> for external::NetworkInterface {
             subnet_id: iface.subnet_id,
             ip: iface.ip.ip(),
             mac: *iface.mac,
+            primary: iface.primary,
         }
     }
 }

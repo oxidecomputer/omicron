@@ -15,9 +15,7 @@ use crate::params::DatasetKind;
 use futures::stream::FuturesOrdered;
 use futures::FutureExt;
 use futures::StreamExt;
-use ipnetwork::Ipv6Network;
 use nexus_client::types::{DatasetPutRequest, ZpoolPutRequest};
-use omicron_common::address::AZ_PREFIX;
 use omicron_common::api::external::{ByteCount, ByteCountRangeError};
 use omicron_common::backoff;
 use schemars::JsonSchema;
@@ -497,9 +495,10 @@ async fn ensure_running_zone(
 
             zone.ensure_address(address_request).await?;
 
-            let gz_subnet =
-                Ipv6Network::new(underlay_address, AZ_PREFIX).unwrap();
-            zone.add_route(gz_subnet).await.map_err(Error::ZoneCommand)?;
+            let gateway = underlay_address;
+            zone.add_default_route(gateway)
+                .await
+                .map_err(Error::ZoneCommand)?;
 
             dataset_info
                 .start_zone(log, &zone, dataset_info.address, do_format)

@@ -5,10 +5,10 @@
 //! Handler functions (entrypoints) for external HTTP APIs
 
 use super::{
-    console_api, params,
+    console_api, params, views,
     views::{
-        GlobalImage, Image, Organization, Project, Rack, Role, Silo, Sled,
-        Snapshot, SshKey, User, Vpc, VpcRouter, VpcSubnet,
+        GlobalImage, IdentityProvider, Image, Organization, Project, Rack,
+        Role, Silo, Sled, Snapshot, SshKey, User, Vpc, VpcRouter, VpcSubnet,
     },
 };
 use crate::authz;
@@ -80,8 +80,12 @@ pub fn external_api() -> NexusApiDescription {
         api.register(silos_post)?;
         api.register(silos_get_silo)?;
         api.register(silos_delete_silo)?;
+        api.register(silos_get_identity_providers)?;
         api.register(silos_get_silo_policy)?;
         api.register(silos_put_silo_policy)?;
+
+        api.register(silo_saml_idp_create)?;
+        api.register(silo_saml_idp_fetch)?;
 
         api.register(organizations_get)?;
         api.register(organizations_post)?;
@@ -198,6 +202,9 @@ pub fn external_api() -> NexusApiDescription {
         api.register(console_api::logout)?;
         api.register(console_api::console_page)?;
         api.register(console_api::asset)?;
+
+        api.register(console_api::login)?;
+        api.register(console_api::consume_credentials)?;
 
         Ok(())
     }
@@ -451,6 +458,111 @@ async fn silos_put_silo_policy(
         let policy =
             nexus.silo_update_policy(&opctx, silo_name, &new_policy).await?;
         Ok(HttpResponseOk(policy))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+// Silo identity providers
+
+/// List Silo identity providers
+#[endpoint {
+    method = GET,
+    path = "/silos/{silo_name}/identity_providers",
+    tags = ["silos"],
+}]
+async fn silos_get_identity_providers(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<SiloPathParam>,
+    query_params: Query<PaginatedByName>,
+) -> Result<HttpResponseOk<ResultsPage<IdentityProvider>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let silo_name = &path.silo_name;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let query = query_params.into_inner();
+        let pagination_params = data_page_params_for(&rqctx, &query)?
+            .map_name(|n| Name::ref_cast(n));
+        let identity_providers = nexus
+            .identity_provider_list(&opctx, &silo_name, &pagination_params)
+            .await?
+            .into_iter()
+            .map(|x| x.into())
+            .collect();
+        Ok(HttpResponseOk(ScanByName::results_page(
+            &query,
+            identity_providers,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+// Silo SAML identity providers
+
+/// Create a new SAML identity provider for a silo.
+#[endpoint {
+    method = POST,
+    path = "/silos/{silo_name}/saml_identity_providers",
+    tags = ["silos"],
+}]
+async fn silo_saml_idp_create(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<SiloPathParam>,
+    new_provider: TypedBody<params::SamlIdentityProviderCreate>,
+) -> Result<HttpResponseCreated<views::SamlIdentityProvider>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let provider = nexus
+            .saml_identity_provider_create(
+                &opctx,
+                &path_params.into_inner().silo_name,
+                new_provider.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseCreated(provider.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Path parameters for Silo SAML identity provider requests
+#[derive(Deserialize, JsonSchema)]
+struct SiloSamlPathParam {
+    /// The silo's unique name.
+    silo_name: Name,
+    /// The SAML identity provider's name
+    provider_name: Name,
+}
+
+/// GET a silo's SAML identity provider
+#[endpoint {
+    method = GET,
+    path = "/silos/{silo_name}/saml_identity_providers/{provider_name}",
+    tags = ["silos"],
+}]
+async fn silo_saml_idp_fetch(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<SiloSamlPathParam>,
+) -> Result<HttpResponseOk<views::SamlIdentityProvider>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+
+    let path_params = path_params.into_inner();
+
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let provider = nexus
+            .saml_identity_provider_fetch(
+                &opctx,
+                &path_params.silo_name,
+                &path_params.provider_name,
+            )
+            .await?;
+
+        Ok(HttpResponseOk(provider.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1758,6 +1870,13 @@ pub struct NetworkInterfacePathParam {
 }
 
 /// Detach a network interface from an instance.
+///
+/// Note that the primary interface for an instance cannot be deleted if there
+/// are any secondary interfaces. A new primary interface must be designated
+/// first. The primary interface can be deleted if there are no secondary
+/// interfaces.
+// TODO-completeness: Add API for modifying an interface, including setting as
+// new primary. See https://github.com/oxidecomputer/omicron/issues/1153.
 #[endpoint {
     method = DELETE,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}",

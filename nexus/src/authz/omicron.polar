@@ -117,6 +117,7 @@ resource Silo {
 	    "modify",
 	    "read",
 	    "create_child",
+	    "list_identity_providers",
 	];
 	roles = [ "admin", "collaborator", "viewer" ];
 
@@ -127,6 +128,7 @@ resource Silo {
 	# Permissions granted directly by roles on this resource
 	"list_children" if "viewer";
 	"read" if "viewer";
+
 	"create_child" if "collaborator";
 	"modify" if "admin";
 
@@ -154,6 +156,13 @@ has_relation(fleet: Fleet, "parent_fleet", silo: Silo)
 #
 # It's unclear what else would break if users couldn't see their own Silo.
 has_permission(actor: AuthenticatedActor, "read", silo: Silo)
+	# TODO-security TODO-coverage We should have a test that exercises this
+	# syntax.
+	if silo in actor.silo;
+
+# Any authenticated user should be allowed to list the identity providers of
+# their silo.
+has_permission(actor: AuthenticatedActor, "list_identity_providers", silo: Silo)
 	# TODO-security TODO-coverage We should have a test that exercises this
 	# syntax.
 	if silo in actor.silo;
@@ -246,6 +255,44 @@ resource SshKey {
 has_relation(user: SiloUser, "silo_user", ssh_key: SshKey)
 	if ssh_key.silo_user = user;
 
+resource IdentityProvider {
+	permissions = [
+	    "read",
+	    "modify",
+	    "create_child",
+	    "list_children",
+	];
+	relations = { parent_silo: Silo };
+
+	"read" if "viewer" on "parent_silo";
+	"list_children" if "viewer" on "parent_silo";
+
+	# Only silo admins can create silo identity providers
+	"modify" if "admin" on "parent_silo";
+	"create_child" if "admin" on "parent_silo";
+}
+has_relation(silo: Silo, "parent_silo", identity_provider: IdentityProvider)
+	if identity_provider.silo = silo;
+
+resource SamlIdentityProvider {
+	permissions = [
+	    "read",
+	    "modify",
+	    "create_child",
+	    "list_children",
+	];
+	relations = { parent_silo: Silo };
+
+	# Only silo admins have permissions for specific identity provider details
+	"read" if "admin" on "parent_silo";
+	"list_children" if "admin" on "parent_silo";
+
+	"modify" if "admin" on "parent_silo";
+	"create_child" if "admin" on "parent_silo";
+}
+has_relation(silo: Silo, "parent_silo", saml_identity_provider: SamlIdentityProvider)
+	if saml_identity_provider.silo = silo;
+
 #
 # SYNTHETIC RESOURCES OUTSIDE THE SILO HIERARCHY
 #
@@ -288,12 +335,24 @@ has_relation(fleet: Fleet, "parent_fleet", collection: ConsoleSessionList)
 # These rules grants the external authenticator role the permissions it needs to
 # read silo users and modify their sessions.  This is necessary for login to
 # work.
+has_permission(actor: AuthenticatedActor, "read", silo: Silo)
+	if has_role(actor, "external-authenticator", silo.fleet);
 has_permission(actor: AuthenticatedActor, "read", user: SiloUser)
 	if has_role(actor, "external-authenticator", user.silo.fleet);
 has_permission(actor: AuthenticatedActor, "read", session: ConsoleSession)
 	if has_role(actor, "external-authenticator", session.fleet);
 has_permission(actor: AuthenticatedActor, "modify", session: ConsoleSession)
 	if has_role(actor, "external-authenticator", session.fleet);
+
+has_permission(actor: AuthenticatedActor, "read", identity_provider: IdentityProvider)
+	if has_role(actor, "external-authenticator", identity_provider.silo.fleet);
+has_permission(actor: AuthenticatedActor, "list_identity_providers", identity_provider: IdentityProvider)
+	if has_role(actor, "external-authenticator", identity_provider.silo.fleet);
+
+has_permission(actor: AuthenticatedActor, "read", saml_identity_provider: SamlIdentityProvider)
+	if has_role(actor, "external-authenticator", saml_identity_provider.silo.fleet);
+has_permission(actor: AuthenticatedActor, "list_identity_providers", saml_identity_provider: SamlIdentityProvider)
+	if has_role(actor, "external-authenticator", saml_identity_provider.silo.fleet);
 
 
 # Describes the policy for who can access the internal database.
