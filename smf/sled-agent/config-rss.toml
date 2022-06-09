@@ -6,8 +6,8 @@
 #              |...............| <- This /56 is the Rack Subnet
 rack_subnet = "fd00:1122:3344:0100::"
 
-# [[request]]
-#
+[[request]]
+
 # TODO(https://github.com/oxidecomputer/omicron/issues/732): Nexus
 # should allocate crucible datasets.
 # [[request.dataset]]

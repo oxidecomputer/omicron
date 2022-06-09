@@ -957,6 +957,15 @@ impl StorageManager {
         Ok(())
     }
 
+    pub async fn get_zpools(&self) -> Result<Vec<crate::params::Zpool>, Error> {
+        let pools = self.pools.lock().await;
+        Ok(pools.keys().map(|zpool| {
+            crate::params::Zpool {
+                id: zpool.id()
+            }
+        }).collect())
+    }
+
     pub async fn upsert_filesystem(
         &self,
         zpool_id: Uuid,

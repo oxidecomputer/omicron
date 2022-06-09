@@ -177,6 +177,33 @@
           }
         }
       }
+    },
+    "/zpools": {
+      "get": {
+        "operationId": "zpools_get",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_Zpool",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Zpool"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1218,6 +1245,18 @@
               "type"
             ]
           }
+        ]
+      },
+      "Zpool": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "id"
         ]
       }
     }

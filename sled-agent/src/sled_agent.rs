@@ -14,7 +14,7 @@ use crate::instance_manager::InstanceManager;
 use crate::nexus::NexusClient;
 use crate::params::{
     DatasetKind, DiskStateRequested, InstanceHardware, InstanceMigrateParams,
-    InstanceRuntimeStateRequested, ServiceEnsureBody,
+    InstanceRuntimeStateRequested, ServiceEnsureBody, Zpool
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::StorageManager;
@@ -272,6 +272,15 @@ impl SledAgent {
     ) -> Result<(), Error> {
         self.services.ensure(requested_services).await?;
         Ok(())
+    }
+
+    pub async fn zpools_get(
+        &self
+    ) -> Result<Vec<Zpool>, Error> {
+        let zpools = self.storage
+            .get_zpools()
+            .await?;
+        Ok(zpools)
     }
 
     /// Ensures that a filesystem type exists within the zpool.

@@ -156,6 +156,11 @@ pub struct InstanceRuntimeStateRequested {
     pub migration_params: Option<InstanceRuntimeStateMigrateParams>,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct Zpool {
+    pub id: Uuid,
+}
+
 /// The type of a dataset, and an auxiliary information necessary
 /// to successfully launch a zone managing the associated data.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
@@ -198,7 +203,7 @@ impl std::fmt::Display for DatasetKind {
         use DatasetKind::*;
         let s = match self {
             Crucible => "crucible",
-            CockroachDb { .. } => "cockroach",
+            CockroachDb { .. } => "cockroachdb",
             Clickhouse => "clickhouse",
         };
         write!(f, "{}", s)

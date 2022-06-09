@@ -5,7 +5,6 @@
 //! Interfaces for working with RSS config.
 
 use crate::config::ConfigError;
-use crate::params::{DatasetEnsureBody, ServiceRequest};
 use omicron_common::address::{
     get_64_subnet, Ipv6Subnet, AZ_PREFIX, RACK_PREFIX, SLED_PREFIX,
 };
@@ -27,26 +26,6 @@ use std::path::Path;
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct SetupServiceConfig {
     pub rack_subnet: Ipv6Addr,
-
-    // TODO: REMOVE!
-    #[serde(default, rename = "request")]
-    pub requests: Vec<HardcodedSledRequest>,
-}
-
-/// A request to initialize a sled.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
-pub struct HardcodedSledRequest {
-    /// Datasets to be created.
-    #[serde(default, rename = "dataset")]
-    pub datasets: Vec<DatasetEnsureBody>,
-
-    /// Services to be instantiated.
-    #[serde(default, rename = "service")]
-    pub services: Vec<ServiceRequest>,
-
-    /// DNS Services to be instantiated.
-    #[serde(default, rename = "dns_service")]
-    pub dns_services: Vec<ServiceRequest>,
 }
 
 impl SetupServiceConfig {
@@ -82,7 +61,6 @@ mod test {
     fn test_subnets() {
         let cfg = SetupServiceConfig {
             rack_subnet: "fd00:1122:3344:0100::".parse().unwrap(),
-            requests: vec![],
         };
 
         assert_eq!(
