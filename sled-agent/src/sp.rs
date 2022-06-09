@@ -4,7 +4,6 @@
 
 //! Interface to a (currently simulated) SP / RoT.
 
-use crate::config::Config as SledConfig;
 use crate::illumos;
 use crate::illumos::dladm::CreateVnicError;
 use crate::illumos::dladm::Dladm;
@@ -69,11 +68,10 @@ impl SpHandle {
     /// A return value of `Ok(None)` means no SP is available.
     pub async fn detect(
         sp_config: &Option<GimletConfig>,
-        sled_config: &SledConfig,
         log: &Logger,
     ) -> Result<Option<Self>, SpError> {
         let inner = if let Some(config) = sp_config.as_ref() {
-            let sim_sp = start_simulated_sp(config, sled_config, log).await?;
+            let sim_sp = start_simulated_sp(config, log).await?;
             Some(Inner::SimulatedSp(sim_sp))
         } else {
             None
@@ -199,7 +197,6 @@ struct SimulatedSp {
 
 async fn start_simulated_sp(
     sp_config: &GimletConfig,
-    sled_config: &SledConfig,
     log: &Logger,
 ) -> Result<SimulatedSp, SpError> {
     // Is our simulated SP going to bind to addresses (acting like management
@@ -240,7 +237,6 @@ async fn start_simulated_sp(
     info!(log, "starting simulated gimlet SP");
     let sp_log = log.new(o!(
         "component" => "sp-sim",
-        "server" => sled_config.id.clone().to_string(),
     ));
     let sp = Arc::new(
         sp_sim::Gimlet::spawn(&sp_config, sp_log)
@@ -252,7 +248,6 @@ async fn start_simulated_sp(
     info!(log, "starting simulated gimlet RoT");
     let rot_log = log.new(o!(
         "component" => "rot-sim",
-        "server" => sled_config.id.clone().to_string(),
     ));
     let transport =
         SimRotTransport { sp: Arc::clone(&sp), responses: VecDeque::new() };

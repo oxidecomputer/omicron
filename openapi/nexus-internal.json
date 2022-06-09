@@ -249,11 +249,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "title": "Array_of_ServicePutRequest",
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/ServicePutRequest"
-                }
+                "$ref": "#/components/schemas/RackInitializationRequest"
               }
             }
           },
@@ -666,6 +662,27 @@
         "required": [
           "start_time",
           "value"
+        ]
+      },
+      "DatasetCreateRequest": {
+        "type": "object",
+        "properties": {
+          "dataset_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "request": {
+            "$ref": "#/components/schemas/DatasetPutRequest"
+          },
+          "zpool_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "dataset_id",
+          "request",
+          "zpool_id"
         ]
       },
       "DatasetKind": {
@@ -1703,6 +1720,27 @@
               "status"
             ]
           }
+        ]
+      },
+      "RackInitializationRequest": {
+        "type": "object",
+        "properties": {
+          "datasets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DatasetCreateRequest"
+            }
+          },
+          "services": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServicePutRequest"
+            }
+          }
+        },
+        "required": [
+          "datasets",
+          "services"
         ]
       },
       "Sample": {

@@ -1,9 +1,6 @@
 # Sled Agent Configuration
 
-id = "fb0f7546-4d46-40ca-9d56-cbb810684ca7"
-
 # TODO: Remove this address
-
 # Internal address of Nexus
 nexus_address = "[fd00:1122:3344:0101::3]:12221"
 

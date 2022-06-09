@@ -11,13 +11,10 @@ use dropshot::ConfigLogging;
 use serde::Deserialize;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use uuid::Uuid;
 
 /// Configuration for a sled agent
 #[derive(Clone, Debug, Deserialize)]
 pub struct Config {
-    /// Unique id for the sled
-    pub id: Uuid,
     /// Address of Nexus instance
     pub nexus_address: SocketAddr,
     /// Configuration for the sled agent debug log

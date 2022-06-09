@@ -112,10 +112,9 @@ impl SledAgent {
         config: &Config,
         log: Logger,
         nexus_client: Arc<NexusClient>,
+        id: Uuid,
         sled_address: SocketAddrV6,
     ) -> Result<SledAgent, Error> {
-        let id = &config.id;
-
         // Pass the "parent_log" to all subcomponents that want to set their own
         // "component" value.
         let parent_log = log.clone();
@@ -218,7 +217,7 @@ impl SledAgent {
 
         let storage = StorageManager::new(
             &parent_log,
-            *id,
+            id,
             nexus_client.clone(),
             etherstub.clone(),
             *sled_address.ip(),
@@ -250,7 +249,7 @@ impl SledAgent {
         .await?;
 
         Ok(SledAgent {
-            id: config.id,
+            id,
             storage,
             instances,
             nexus_client,

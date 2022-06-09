@@ -7,7 +7,7 @@
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
-use crate::internal_api::params::ServicePutRequest;
+use crate::internal_api::params::RackInitializationRequest;
 use futures::future::ready;
 use futures::StreamExt;
 use omicron_common::api::external::DataPageParams;
@@ -69,12 +69,12 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         rack_id: Uuid,
-        services: Vec<ServicePutRequest>,
+        request: RackInitializationRequest,
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
         // Convert from parameter -> DB type.
-        let services: Vec<_> = services
+        let services: Vec<_> = request.services
             .into_iter()
             .map(|svc| {
                 db::model::Service::new(
@@ -86,8 +86,19 @@ impl super::Nexus {
             })
             .collect();
 
+        let datasets: Vec<_> = request.datasets
+            .into_iter()
+            .map(|dataset| {
+                db::model::Dataset::new(
+                    dataset.dataset_id,
+                    dataset.zpool_id,
+                    dataset.request.address,
+                    dataset.request.kind.into(),
+                )
+            })
+            .collect();
         self.db_datastore
-            .rack_set_initialized(opctx, rack_id, services)
+            .rack_set_initialized(opctx, rack_id, services, datasets)
             .await?;
 
         Ok(())

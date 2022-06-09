@@ -149,6 +149,19 @@ pub struct ServicePutRequest {
     pub kind: ServiceKind,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct DatasetCreateRequest {
+    pub zpool_id: Uuid,
+    pub dataset_id: Uuid,
+    pub request: DatasetPutRequest,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct RackInitializationRequest {
+    pub services: Vec<ServicePutRequest>,
+    pub datasets: Vec<DatasetCreateRequest>,
+}
+
 /// Message used to notify Nexus that this oximeter instance is up and running.
 #[derive(Debug, Clone, Copy, JsonSchema, Serialize, Deserialize)]
 pub struct OximeterInfo {

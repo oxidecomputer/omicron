@@ -53,7 +53,7 @@ impl Server {
         }
 
         info!(log, "detecting (real or simulated) SP");
-        let sp = SpHandle::detect(&config.sp_config, &sled_config, &log)
+        let sp = SpHandle::detect(&config.sp_config, &log)
             .await
             .map_err(|err| format!("Failed to detect local SP: {err}"))?;
 
