@@ -462,6 +462,23 @@ async fn run_test<T: RoleAssignmentTest>(
     .await
     .unwrap();
 
+    // policy with duplicates 500s
+    let mut policy_with_duplicates = initial_policy.clone();
+    policy_with_duplicates.role_assignments.push(role_assignment.clone());
+    policy_with_duplicates.role_assignments.push(role_assignment.clone());
+
+    NexusRequest::expect_failure_with_body(
+        client,
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Method::PUT,
+        &policy_url,
+        &policy_with_duplicates,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
     // Check that it really didn't work.  The policy did not change, and the
     // enforcement behavior did not change.
     let current_policy = policy_fetch::<T::RoleType>(client, &policy_url).await;
