@@ -6,59 +6,59 @@
 #              |...............| <- This /56 is the Rack Subnet
 rack_subnet = "fd00:1122:3344:0100::"
 
-[[request]]
-
+# [[request]]
+#
 # TODO(https://github.com/oxidecomputer/omicron/issues/732): Nexus
 # should allocate crucible datasets.
-[[request.dataset]]
-id = "09a9a25f-2602-4e2f-9630-31af9c492c3e"
-zpool_id = "d462a7f7-b628-40fe-80ff-4e4189e2d62b"
-address = "[fd00:1122:3344:0101::6]:32345"
-dataset_kind.type = "crucible"
+# [[request.dataset]]
+# id = "09a9a25f-2602-4e2f-9630-31af9c492c3e"
+# zpool_id = "d462a7f7-b628-40fe-80ff-4e4189e2d62b"
+# address = "[fd00:1122:3344:0101::6]:32345"
+# dataset_kind.type = "crucible"
+#
+# [[request.dataset]]
+# id = "2713b37a-3043-4ed5-aaff-f38200e45cfb"
+# zpool_id = "e4b4dc87-ab46-49fb-a4b4-d361ae214c03"
+# address = "[fd00:1122:3344:0101::7]:32345"
+# dataset_kind.type = "crucible"
+#
+# [[request.dataset]]
+# id = "ffd16cad-e5d5-495e-9c59-4312a3857d91"
+# zpool_id = "f4b4dc87-ab46-49fb-a4b4-d361ae214c03"
+# address = "[fd00:1122:3344:0101::8]:32345"
+# dataset_kind.type = "crucible"
 
-[[request.dataset]]
-id = "2713b37a-3043-4ed5-aaff-f38200e45cfb"
-zpool_id = "e4b4dc87-ab46-49fb-a4b4-d361ae214c03"
-address = "[fd00:1122:3344:0101::7]:32345"
-dataset_kind.type = "crucible"
-
-[[request.dataset]]
-id = "ffd16cad-e5d5-495e-9c59-4312a3857d91"
-zpool_id = "f4b4dc87-ab46-49fb-a4b4-d361ae214c03"
-address = "[fd00:1122:3344:0101::8]:32345"
-dataset_kind.type = "crucible"
-
-[[request.dataset]]
-id = "4d08fc19-3d5f-4f6b-9c48-925f8eac7255"
-zpool_id = "d462a7f7-b628-40fe-80ff-4e4189e2d62b"
-address = "[fd00:1122:3344:0101::2]:32221"
-dataset_kind.type = "cockroach_db"
-dataset_kind.all_addresses = [ "[fd00:1122:3344:0101::2]:32221" ]
+# [[request.dataset]]
+# id = "4d08fc19-3d5f-4f6b-9c48-925f8eac7255"
+# zpool_id = "d462a7f7-b628-40fe-80ff-4e4189e2d62b"
+# address = "[fd00:1122:3344:0101::2]:32221"
+# dataset_kind.type = "cockroach_db"
+# dataset_kind.all_addresses = [ "[fd00:1122:3344:0101::2]:32221" ]
 
 # TODO(https://github.com/oxidecomputer/omicron/issues/732): Nexus
 # should allocate clickhouse datasets.
-[[request.dataset]]
-id = "a3505b41-a592-420b-84f2-3d76bf0e0a81"
-zpool_id = "d462a7f7-b628-40fe-80ff-4e4189e2d62b"
-address = "[fd00:1122:3344:0101::5]:8123"
-dataset_kind.type = "clickhouse"
+# [[request.dataset]]
+# id = "a3505b41-a592-420b-84f2-3d76bf0e0a81"
+# zpool_id = "d462a7f7-b628-40fe-80ff-4e4189e2d62b"
+# address = "[fd00:1122:3344:0101::5]:8123"
+# dataset_kind.type = "clickhouse"
 
-[[request.service]]
-id = "e6bff1ff-24fb-49dc-a54e-c6a350cd4d6c"
-name = "nexus"
-addresses = [ "fd00:1122:3344:0101::3" ]
-gz_addresses = []
-[request.service.service_type]
-type = "nexus"
-internal_address = "[fd00:1122:3344:0101::3]:12221"
-external_address = "[fd00:1122:3344:0101::3]:12220"
+# [[request.service]]
+# id = "e6bff1ff-24fb-49dc-a54e-c6a350cd4d6c"
+# name = "nexus"
+# addresses = [ "fd00:1122:3344:0101::3" ]
+# gz_addresses = []
+# [request.service.service_type]
+# type = "nexus"
+# internal_address = "[fd00:1122:3344:0101::3]:12221"
+# external_address = "[fd00:1122:3344:0101::3]:12220"
 
 # TODO(https://github.com/oxidecomputer/omicron/issues/732): Nexus
 # should allocate Oximeter services.
-[[request.service]]
-id = "1da65e5b-210c-4859-a7d7-200c1e659972"
-name = "oximeter"
-addresses = [ "fd00:1122:3344:0101::4" ]
-gz_addresses = []
-[request.service.service_type]
-type = "oximeter"
+# [[request.service]]
+# id = "1da65e5b-210c-4859-a7d7-200c1e659972"
+# name = "oximeter"
+# addresses = [ "fd00:1122:3344:0101::4" ]
+# gz_addresses = []
+# [request.service.service_type]
+# type = "oximeter"

@@ -28,6 +28,7 @@ use std::path::Path;
 pub struct SetupServiceConfig {
     pub rack_subnet: Ipv6Addr,
 
+    // TODO: REMOVE!
     #[serde(default, rename = "request")]
     pub requests: Vec<HardcodedSledRequest>,
 }

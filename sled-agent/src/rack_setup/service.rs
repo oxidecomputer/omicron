@@ -4,14 +4,15 @@
 
 //! Rack Setup Service implementation
 
-use super::config::{HardcodedSledRequest, SetupServiceConfig as Config};
+use super::config::SetupServiceConfig as Config;
 use crate::bootstrap::{
     config::BOOTSTRAP_AGENT_PORT, discovery::PeerMonitorObserver,
     params::SledAgentRequest, rss_handle::BootstrapAgentHandle,
 };
-use crate::params::{ServiceRequest, ServiceType};
+use crate::params::{DatasetEnsureBody, ServiceRequest, ServiceType};
 use omicron_common::address::{
     get_sled_address, ReservedRackSubnet, DNS_PORT, DNS_SERVER_PORT,
+    NEXUS_EXTERNAL_PORT, NEXUS_INTERNAL_PORT, RSS_RESERVED_ADDRESSES,
 };
 use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
@@ -22,8 +23,11 @@ use std::collections::{HashMap, HashSet};
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::path::PathBuf;
 use thiserror::Error;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, OnceCell};
 use uuid::Uuid;
+
+// The number of Nexus instances to create from RSS.
+const NEXUS_COUNT: usize = 1;
 
 /// Describes errors which may occur while operating the setup service.
 #[derive(Error, Debug)]
@@ -49,13 +53,32 @@ pub enum SetupServiceError {
 
     #[error("Failed to construct an HTTP client: {0}")]
     HttpClient(reqwest::Error),
+
+    // XXX CLEAN UP
+    #[error(transparent)]
+    Dns(#[from] internal_dns_client::Error<internal_dns_client::types::Error>),
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+pub struct SledRequest {
+    /// Datasets to be created.
+    #[serde(default, rename = "dataset")]
+    pub datasets: Vec<DatasetEnsureBody>,
+
+    /// Services to be instantiated.
+    #[serde(default, rename = "service")]
+    pub services: Vec<ServiceRequest>,
+
+    /// DNS Services to be instantiated.
+    #[serde(default, rename = "dns_service")]
+    pub dns_services: Vec<ServiceRequest>,
 }
 
 // The workload / information allocated to a single sled.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 struct SledAllocation {
     initialization_request: SledAgentRequest,
-    services_request: HardcodedSledRequest,
+    services_request: SledRequest,
 }
 
 /// The interface to the Rack Setup Service.
@@ -130,15 +153,42 @@ enum PeerExpectation {
     CreateNewPlan(usize),
 }
 
+struct AddressBumpAllocator {
+    last_addr: Ipv6Addr,
+}
+
+// TODO: Testable?
+// TODO: Could exist in another file?
+impl AddressBumpAllocator {
+    fn new(sled_addr: Ipv6Addr) -> Self {
+        Self { last_addr: sled_addr }
+    }
+
+    fn next(&mut self) -> Option<Ipv6Addr> {
+        let mut segments: [u16; 8] = self.last_addr.segments();
+        segments[7] = segments[7].checked_add(1)?;
+        if segments[7] > RSS_RESERVED_ADDRESSES {
+            return None;
+        }
+        self.last_addr = Ipv6Addr::from(segments);
+        Some(self.last_addr)
+    }
+}
+
 /// The implementation of the Rack Setup Service.
 struct ServiceInner {
     log: Logger,
     peer_monitor: Mutex<PeerMonitorObserver>,
+    dns_servers: OnceCell<internal_dns_client::multiclient::Updater>,
 }
 
 impl ServiceInner {
     fn new(log: Logger, peer_monitor: PeerMonitorObserver) -> Self {
-        ServiceInner { log, peer_monitor: Mutex::new(peer_monitor) }
+        ServiceInner {
+            log,
+            peer_monitor: Mutex::new(peer_monitor),
+            dns_servers: OnceCell::new(),
+        }
     }
 
     async fn initialize_datasets(
@@ -277,16 +327,61 @@ impl ServiceInner {
 
         let requests_and_sleds =
             bootstrap_addrs.map(|(idx, bootstrap_addr)| {
-                // If a sled was explicitly requested from the RSS configuration,
-                // use that. Otherwise, just give it a "default" (empty) set of
-                // services.
-                let mut request = {
-                    if idx < config.requests.len() {
-                        config.requests[idx].clone()
-                    } else {
-                        HardcodedSledRequest::default()
+                let sled_subnet_index =
+                    u8::try_from(idx + 1).expect("Too many peers!");
+                let subnet = config.sled_subnet(sled_subnet_index);
+                let mut addr_alloc =
+                    AddressBumpAllocator::new(*get_sled_address(subnet).ip());
+
+                let mut request = SledRequest::default();
+
+                // The first enumerated sleds get assigned the responsibility
+                // of hosting Nexus.
+                if idx < NEXUS_COUNT {
+                    let address = addr_alloc.next().expect("Not enough addrs");
+                    request.services.push(ServiceRequest {
+                        id: Uuid::new_v4(),
+                        name: "nexus".to_string(),
+                        addresses: vec![address],
+                        gz_addresses: vec![],
+                        service_type: ServiceType::Nexus {
+                            internal_address: SocketAddrV6::new(
+                                address,
+                                NEXUS_INTERNAL_PORT,
+                                0,
+                                0,
+                            ),
+                            external_address: SocketAddrV6::new(
+                                address,
+                                NEXUS_EXTERNAL_PORT,
+                                0,
+                                0,
+                            ),
+                        },
+                    })
+                }
+
+                // The first enumerated sleds host the CRDB datasets, using
+                // zpools described from the underlying config file.
+                if idx < config.requests.len() {
+                    for dataset in &config.requests[idx].datasets {
+                        let address = SocketAddrV6::new(
+                            addr_alloc.next().expect("Not enough addrs"),
+                            omicron_common::address::COCKROACH_PORT,
+                            0,
+                            0,
+                        );
+                        request.datasets.push(DatasetEnsureBody {
+                            id: Uuid::new_v4(),
+                            zpool_id: dataset.zpool_id,
+                            dataset_kind:
+                                crate::params::DatasetKind::CockroachDb {
+                                    all_addresses: vec![address],
+                                },
+                            address,
+                        });
                     }
-                };
+                }
 
                 // The first enumerated sleds get assigned the additional
                 // responsibility of being internal DNS servers.
@@ -516,6 +611,15 @@ impl ServiceInner {
         .await
         .into_iter()
         .collect::<Result<_, SetupServiceError>>()?;
+
+        let dns_servers = internal_dns_client::multiclient::Updater::new(
+            config.az_subnet(),
+            self.log.new(o!("client" => "DNS")),
+        );
+        self.dns_servers
+            .set(dns_servers)
+            .map_err(|_| ())
+            .expect("Already set DNS servers");
 
         // Issue the dataset initialization requests to all sleds.
         futures::future::join_all(plan.iter().map(

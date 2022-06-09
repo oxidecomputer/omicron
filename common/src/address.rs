@@ -33,6 +33,11 @@ pub const SLED_AGENT_PORT: u16 = 12345;
 
 /// The port propolis-server listens on inside the propolis zone.
 pub const PROPOLIS_PORT: u16 = 12400;
+pub const COCKROACH_PORT: u16 = 32221;
+pub const CRUCIBLE_PORT: u16 = 32345;
+
+pub const NEXUS_EXTERNAL_PORT: u16 = 12220;
+pub const NEXUS_INTERNAL_PORT: u16 = 12221;
 
 // Anycast is a mechanism in which a single IP address is shared by multiple
 // devices, and the destination is located based on routing distance.
