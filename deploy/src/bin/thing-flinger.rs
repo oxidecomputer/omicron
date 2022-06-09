@@ -34,6 +34,7 @@ struct Server {
 struct Deployment {
     rss_server: String,
     staging_dir: PathBuf,
+    servers: BTreeSet<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -146,20 +147,17 @@ enum SshStrategy {
     // Forward agent and source .profile
     Forward,
 
-    // Forward agent and don't source profile
-    ForwardNoProfile,
-
-    // Don't agent, but source profile,
+    // Don't forward agent, but source .profile
     NoForward,
 
-    // Don't forward agent and don't source profile
+    // Don't forward agent and don't source .profile
     NoForwardNoProfile,
 }
 
 impl SshStrategy {
     fn forward_agent(&self) -> bool {
         match self {
-            SshStrategy::Forward | SshStrategy::ForwardNoProfile => true,
+            SshStrategy::Forward => true,
             _ => false,
         }
     }
@@ -198,7 +196,7 @@ fn rsync_common() -> Command {
     let mut cmd = Command::new("rsync");
     cmd.arg("-az")
         .arg("-e")
-        .arg("ssh")
+        .arg("ssh -o StrictHostKeyChecking=no")
         .arg("--delete")
         .arg("--progress")
         .arg("--out-format")
@@ -303,7 +301,7 @@ fn do_install_prereqs(config: &Config) -> Result<()> {
         }
     }
 
-    // run install_prereqs on each server
+    // Create a set of servers to install prereqs to
     let builder = &config.servers[&config.builder.server];
     let all_servers = config
         .servers
@@ -319,7 +317,11 @@ fn do_install_prereqs(config: &Config) -> Result<()> {
     println!("install builder prerequisites on {}", builder.addr);
     ssh_exec(builder, &cmd, false)?;
 
+    // run install_prereqs on each server
     for (server, root_path) in all_servers {
+        // First install rustup
+        install_rustup(server)?;
+
         // -y: assume yes instead of prompting
         let cmd = format!(
             "cd {} && mkdir -p out && pfexec ./tools/install_runner_prerequisites.sh -y",
@@ -330,6 +332,12 @@ fn do_install_prereqs(config: &Config) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn install_rustup(server: &Server) -> Result<()> {
+    // TODO: Is this idempotent?
+    let cmd = "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | bash -s -- -y";
+    ssh_exec(server, &cmd, SshStrategy::NoForwardNoProfile)
 }
 
 // Build omicron-package and omicron-deploy on the builder
@@ -420,7 +428,7 @@ fn do_install(config: &Config, artifact_dir: &Path, install_dir: &Path) {
             Vec::<(String, ScopedJoinHandle<'_, Result<()>>)>::new();
 
         // Spawn a thread for each server install
-        for server_name in config.servers.keys() {
+        for server_name in config.deployment.servers.iter() {
             handles.push((
                 server_name.to_owned(),
                 s.spawn(move |_| -> Result<()> {
