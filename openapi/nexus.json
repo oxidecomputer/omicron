@@ -386,7 +386,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/LoginParams"
+                "$ref": "#/components/schemas/SpoofLoginBody"
               }
             }
           },
@@ -6856,17 +6856,6 @@
         "minLength": 1,
         "maxLength": 11
       },
-      "LoginParams": {
-        "type": "object",
-        "properties": {
-          "username": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "username"
-        ]
-      },
       "MacAddr": {
         "example": "ff:ff:ff:ff:ff:ff",
         "title": "A MAC address",
@@ -8356,6 +8345,17 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "SpoofLoginBody": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "username"
         ]
       },
       "SshKey": {
