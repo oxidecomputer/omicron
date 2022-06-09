@@ -228,9 +228,10 @@ impl Agent {
             }
 
             // Bail out if this request includes a trust quorum share that
-            // doesn't match ours. TODO-correctness Need to handle a
+            // doesn't match ours. TODO-correctness Do we need to handle a
             // partially-initialized rack where we may have a share from a
-            // previously-started-but-not-completed init process.
+            // previously-started-but-not-completed init process? If rerunning
+            // it produces different shares this check will fail.
             if request.trust_quorum_share != *self.share.lock().await {
                 let err_str = concat!(
                     "Sled Agent already running with",
@@ -284,7 +285,7 @@ impl Agent {
     /// sufficiently unlocked.
     async fn establish_sled_quorum(
         &self,
-        share: &ShareDistribution,
+        share: ShareDistribution,
     ) -> Result<RackSecret, BootstrapError> {
         let rack_secret = retry_notify(
             internal_service_policy(),
@@ -407,8 +408,8 @@ impl Agent {
     ) -> Result<(), BootstrapError> {
         info!(&self.log, "bootstrap service initializing");
 
-        let maybe_share = self.share.lock().await;
-        if let Some(share) = &*maybe_share {
+        let maybe_share = self.share.lock().await.clone();
+        if let Some(share) = maybe_share {
             self.establish_sled_quorum(share).await?;
         }
 
