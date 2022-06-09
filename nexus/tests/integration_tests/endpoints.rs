@@ -257,7 +257,7 @@ lazy_static! {
             distribution: params::Distribution {
                 name: "alpine".parse().unwrap(),
                 version: String::from("edge"),
-            }
+            },
             block_size: params::BlockSize::try_from(4096).unwrap(),
         };
 
