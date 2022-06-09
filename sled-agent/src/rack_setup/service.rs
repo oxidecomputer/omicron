@@ -17,6 +17,7 @@ use omicron_common::backoff::{
 };
 use serde::{Deserialize, Serialize};
 use slog::Logger;
+use sprockets_host::Ed25519Certificate;
 use std::collections::{HashMap, HashSet};
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::path::PathBuf;
@@ -80,11 +81,20 @@ impl Service {
         config: Config,
         peer_monitor: PeerMonitorObserver,
         local_bootstrap_agent: BootstrapAgentHandle,
+        // TODO-cleanup: We should be collecting the device ID certs of all
+        // trust quorum members over the management network. Currently we don't
+        // have a management network, so we hard-code the list of members and
+        // accept it as a parameter instead.
+        member_device_id_certs: Vec<Ed25519Certificate>,
     ) -> Self {
         let handle = tokio::task::spawn(async move {
             let svc = ServiceInner::new(log.clone(), peer_monitor);
             if let Err(e) = svc
-                .inject_rack_setup_requests(&config, local_bootstrap_agent)
+                .inject_rack_setup_requests(
+                    &config,
+                    local_bootstrap_agent,
+                    &member_device_id_certs,
+                )
                 .await
             {
                 warn!(log, "RSS injection failed: {}", e);
@@ -269,11 +279,13 @@ impl ServiceInner {
         &self,
         config: &Config,
         bootstrap_addrs: Vec<Ipv6Addr>,
+        member_device_id_certs: &[Ed25519Certificate],
     ) -> Result<HashMap<SocketAddrV6, SledAllocation>, SetupServiceError> {
         // Create a rack secret, unless we're in the single-sled case.
         let mut maybe_rack_secret_shares = generate_rack_secret(
             config.rack_secret_threshold,
             bootstrap_addrs.len(),
+            member_device_id_certs,
             &self.log,
         )?;
 
@@ -441,6 +453,7 @@ impl ServiceInner {
         &self,
         config: &Config,
         local_bootstrap_agent: BootstrapAgentHandle,
+        member_device_id_certs: &[Ed25519Certificate],
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Injecting RSS configuration: {:#?}", config);
 
@@ -484,7 +497,7 @@ impl ServiceInner {
             plan
         } else {
             info!(self.log, "Creating new allocation plan");
-            self.create_plan(config, addrs).await?
+            self.create_plan(config, addrs, member_device_id_certs).await?
         };
 
         // Forward the sled initialization requests to our sled-agent.
@@ -596,12 +609,13 @@ impl ServiceInner {
     }
 }
 
-fn generate_rack_secret(
+fn generate_rack_secret<'a>(
     rack_secret_threshold: usize,
     total_shares: usize,
+    member_device_id_certs: &'a [Ed25519Certificate],
     log: &Logger,
 ) -> Result<
-    Option<impl ExactSizeIterator<Item = ShareDistribution>>,
+    Option<impl ExactSizeIterator<Item = ShareDistribution> + 'a>,
     SetupServiceError,
 > {
     // We do not generate a rack secret if we only have a single sled or if our
@@ -633,6 +647,7 @@ fn generate_rack_secret(
         total_shares,
         verifier: verifier.clone(),
         share,
+        member_device_id_certs: member_device_id_certs.to_vec(),
     })))
 }
 

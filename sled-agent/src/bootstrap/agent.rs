@@ -26,7 +26,6 @@ use std::net::{Ipv6Addr, SocketAddrV6};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 use tokio::sync::Mutex;
-use vsss_rs::Share;
 
 /// Describes errors which may occur while operating the bootstrap service.
 #[derive(Error, Debug)]
@@ -195,12 +194,11 @@ impl Agent {
     }
 
     /// Returns our share of the rack secret, if we have one.
-    pub async fn secret_share(&self) -> Option<Share> {
+    pub async fn secret_share(&self) -> Option<ShareDistribution> {
         self.share
             .lock()
             .await
-            .as_ref()
-            .map(|share_dist| share_dist.share.clone())
+            .clone()
     }
 
     /// Initializes the Sled Agent on behalf of the RSS, if one has not already
@@ -324,6 +322,7 @@ impl Agent {
                         BootstrapAgentClient::new(
                             addr,
                             &self.sp,
+                            &share.member_device_id_certs,
                             self.log.new(o!(
                                 "BootstrapAgentClient" => addr.to_string()),
                             ),
@@ -390,6 +389,13 @@ impl Agent {
                 rss_config.clone(),
                 self.peer_monitor.observer().await,
                 self.sp.clone(),
+                // TODO-cleanup: Remove this arg once RSS can discover the trust
+                // quorum members over the management network.
+                config
+                    .sp_config
+                    .as_ref()
+                    .map(|sp_config| sp_config.trust_quorum_members.clone())
+                    .unwrap_or_default(),
             );
             self.rss.lock().await.replace(rss);
         }

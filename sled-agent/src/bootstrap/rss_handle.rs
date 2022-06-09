@@ -16,6 +16,7 @@ use omicron_common::backoff::internal_service_policy;
 use omicron_common::backoff::retry_notify;
 use omicron_common::backoff::BackoffError;
 use slog::Logger;
+use sprockets_host::Ed25519Certificate;
 use std::net::SocketAddrV6;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
@@ -44,6 +45,7 @@ impl RssHandle {
         config: SetupServiceConfig,
         peer_monitor: PeerMonitorObserver,
         sp: Option<SpHandle>,
+        member_device_id_certs: Vec<Ed25519Certificate>,
     ) -> Self {
         let (tx, rx) = rss_channel();
 
@@ -52,6 +54,7 @@ impl RssHandle {
             config,
             peer_monitor,
             tx,
+            member_device_id_certs,
         );
         let log = log.new(o!("component" => "BootstrapAgentRssHandler"));
         let task = tokio::spawn(async move {
@@ -70,6 +73,10 @@ async fn initialize_sled_agent(
     let client = bootstrap_agent_client::Client::new(
         bootstrap_addr,
         sp,
+        request
+            .trust_quorum_share
+            .as_ref()
+            .map_or(&[], |share| share.member_device_id_certs.as_slice()),
         log.new(o!("BootstrapAgentClient" => bootstrap_addr.to_string())),
     );
 
