@@ -254,8 +254,10 @@ lazy_static! {
                 description: String::from(""),
             },
             source: params::ImageSource::Url { url: HTTP_SERVER.url("/image.raw").to_string() },
-            distribution: params::Distribution::try_from(String::from("alpine")).unwrap(),
-            version: String::from("edge"),
+            distribution: params::Distribution {
+                name: "alpine".parse().unwrap(),
+                version: String::from("edge"),
+            }
             block_size: params::BlockSize::try_from(4096).unwrap(),
         };
 
