@@ -77,9 +77,15 @@ if [[ "${HOST_OS}" == "Linux" ]]; then
     'xmlsec1'
     'libxmlsec1-dev'
     'libxmlsec1-openssl'
+    'libclang-dev'
+    'libsqlite3-dev'
   )
   sudo apt-get update
-  confirm "Install (or update) [${packages[*]}]?" && sudo apt-get install ${packages[@]}
+  if [[ "${ASSUME_YES}" == "true" ]]; then
+    sudo apt-get install -y ${packages[@]}
+  else
+      confirm "Install (or update) [${packages[*]}]?" && sudo apt-get install ${packages[@]}
+  fi
 elif [[ "${HOST_OS}" == "SunOS" ]]; then
   packages=(
     'pkg:/package/pkg'
