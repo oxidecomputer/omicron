@@ -1789,7 +1789,7 @@ async fn test_disks_detached_when_instance_destroyed(
 // Tests that an instance is rejected if the memory is less than
 // MIN_MEMORY_SIZE_BYTES
 #[nexus_test]
-async fn test_instances_memory_less_than_one_gibibyte(
+async fn test_instances_memory_rejected_less_than_min_memory_size(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
@@ -1813,7 +1813,7 @@ async fn test_instances_memory_less_than_one_gibibyte(
         disks: vec![],
     };
 
-    NexusRequest::new(
+    let error = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &instances_url)
             .body(Some(&instance))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
@@ -1821,7 +1821,17 @@ async fn test_instances_memory_less_than_one_gibibyte(
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
+    .unwrap()
+    .parsed_body::<dropshot::HttpErrorResponseBody>()
     .unwrap();
+
+    assert_eq!(
+        error.message,
+        format!(
+            "unsupported value for \"size\": memory must be at least {}",
+            ByteCount::from(params::MIN_MEMORY_SIZE_BYTES)
+        ),
+    );
 }
 
 // Test that an instance is rejected if memory is not divisible by
@@ -1851,7 +1861,7 @@ async fn test_instances_memory_not_divisible_by_min_memory_size(
         disks: vec![],
     };
 
-    NexusRequest::new(
+    let error = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &instances_url)
             .body(Some(&instance))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
@@ -1859,7 +1869,17 @@ async fn test_instances_memory_not_divisible_by_min_memory_size(
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
+    .unwrap()
+    .parsed_body::<dropshot::HttpErrorResponseBody>()
     .unwrap();
+
+    assert_eq!(
+        error.message,
+        format!(
+            "unsupported value for \"size\": memory must be divisible by {}",
+            ByteCount::from(params::MIN_MEMORY_SIZE_BYTES)
+        ),
+    );
 }
 
 async fn instance_get(
