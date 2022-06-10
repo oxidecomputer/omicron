@@ -225,7 +225,7 @@ async fn serve_single_request(
         stream,
         &sp,
         SprocketsRole::Server,
-        current_trust_quorum_members.as_ref().map(|v| v.as_slice()),
+        current_trust_quorum_members.as_deref(),
         log,
     )
     .await
