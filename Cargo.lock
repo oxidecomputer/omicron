@@ -1171,7 +1171,7 @@ dependencies = [
  "pq-sys",
  "r2d2",
  "serde_json",
- "uuid 1.1.0",
+ "uuid 0.8.2",
 ]
 
 [[package]]
@@ -1183,7 +1183,7 @@ dependencies = [
  "lock_api",
  "serde",
  "usdt",
- "uuid 1.1.0",
+ "uuid 0.8.2",
 ]
 
 [[package]]
@@ -3975,7 +3975,7 @@ dependencies = [
 [[package]]
 name = "progenitor"
 version = "0.1.2-dev"
-source = "git+https://github.com/oxidecomputer/progenitor#24fb7b9611300656cbd0dce52385c2e91c769d76"
+source = "git+https://github.com/oxidecomputer/progenitor#8687a635e91d389aa4e7720d262751b69b005429"
 dependencies = [
  "anyhow",
  "getopts",
@@ -3990,7 +3990,7 @@ dependencies = [
 [[package]]
 name = "progenitor-client"
 version = "0.1.2-dev"
-source = "git+https://github.com/oxidecomputer/progenitor#24fb7b9611300656cbd0dce52385c2e91c769d76"
+source = "git+https://github.com/oxidecomputer/progenitor#8687a635e91d389aa4e7720d262751b69b005429"
 dependencies = [
  "bytes",
  "futures-core",
@@ -4003,7 +4003,7 @@ dependencies = [
 [[package]]
 name = "progenitor-impl"
 version = "0.1.2-dev"
-source = "git+https://github.com/oxidecomputer/progenitor#24fb7b9611300656cbd0dce52385c2e91c769d76"
+source = "git+https://github.com/oxidecomputer/progenitor#8687a635e91d389aa4e7720d262751b69b005429"
 dependencies = [
  "getopts",
  "heck 0.4.0",
@@ -4025,7 +4025,7 @@ dependencies = [
 [[package]]
 name = "progenitor-macro"
 version = "0.1.2-dev"
-source = "git+https://github.com/oxidecomputer/progenitor#24fb7b9611300656cbd0dce52385c2e91c769d76"
+source = "git+https://github.com/oxidecomputer/progenitor#8687a635e91d389aa4e7720d262751b69b005429"
 dependencies = [
  "openapiv3",
  "proc-macro2",
@@ -6079,7 +6079,7 @@ version = "1.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
 dependencies = [
- "cfg-if 1.0.0",
+ "cfg-if 0.1.10",
  "rand 0.8.5",
  "static_assertions",
 ]
@@ -6297,6 +6297,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bc5cf98d8186244414c848017f0e2676b3fcb46807f6668a97dfe67359a3c4b7"
 dependencies = [
  "getrandom 0.2.6",
+ "serde",
 ]
 
 [[package]]
