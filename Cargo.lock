@@ -107,6 +107,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "api_identity"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/omicron?branch=main#4716bf4e46d4d0c5c17308d22311ffeea43aa570"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "arc-swap"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -813,18 +823,21 @@ dependencies = [
 [[package]]
 name = "crucible"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=cd74a23ea42ce5e673923a00faf31b0a920191cc#cd74a23ea42ce5e673923a00faf31b0a920191cc"
+source = "git+https://github.com/oxidecomputer/crucible?rev=8314eeddd228ec0d76cefa40c4a41d3e2611ac18#8314eeddd228ec0d76cefa40c4a41d3e2611ac18"
 dependencies = [
  "aes-gcm-siv",
  "anyhow",
  "base64",
  "bytes",
+ "chrono",
  "crucible-common",
  "crucible-protocol",
- "crucible-scope",
  "dropshot",
  "futures",
  "futures-core",
+ "omicron-common 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
+ "oximeter 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
+ "oximeter-producer 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
  "reqwest",
@@ -846,7 +859,7 @@ dependencies = [
 [[package]]
 name = "crucible-agent-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=cd74a23ea42ce5e673923a00faf31b0a920191cc#cd74a23ea42ce5e673923a00faf31b0a920191cc"
+source = "git+https://github.com/oxidecomputer/crucible?rev=8314eeddd228ec0d76cefa40c4a41d3e2611ac18#8314eeddd228ec0d76cefa40c4a41d3e2611ac18"
 dependencies = [
  "anyhow",
  "chrono",
@@ -861,7 +874,7 @@ dependencies = [
 [[package]]
 name = "crucible-common"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=cd74a23ea42ce5e673923a00faf31b0a920191cc#cd74a23ea42ce5e673923a00faf31b0a920191cc"
+source = "git+https://github.com/oxidecomputer/crucible?rev=8314eeddd228ec0d76cefa40c4a41d3e2611ac18#8314eeddd228ec0d76cefa40c4a41d3e2611ac18"
 dependencies = [
  "anyhow",
  "rusqlite",
@@ -879,7 +892,7 @@ dependencies = [
 [[package]]
 name = "crucible-protocol"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=cd74a23ea42ce5e673923a00faf31b0a920191cc#cd74a23ea42ce5e673923a00faf31b0a920191cc"
+source = "git+https://github.com/oxidecomputer/crucible?rev=8314eeddd228ec0d76cefa40c4a41d3e2611ac18#8314eeddd228ec0d76cefa40c4a41d3e2611ac18"
 dependencies = [
  "anyhow",
  "bincode",
@@ -888,21 +901,6 @@ dependencies = [
  "serde",
  "tokio-util 0.7.2",
  "uuid 1.1.0",
-]
-
-[[package]]
-name = "crucible-scope"
-version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=cd74a23ea42ce5e673923a00faf31b0a920191cc#cd74a23ea42ce5e673923a00faf31b0a920191cc"
-dependencies = [
- "anyhow",
- "futures",
- "futures-core",
- "serde",
- "serde_json",
- "tokio",
- "tokio-util 0.7.2",
- "toml",
 ]
 
 [[package]]
@@ -1782,7 +1780,7 @@ dependencies = [
  "futures",
  "gateway-client",
  "libc",
- "omicron-common",
+ "omicron-common 0.1.0",
  "slog",
  "slog-async",
  "slog-term",
@@ -1796,7 +1794,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "futures",
- "omicron-common",
+ "omicron-common 0.1.0",
  "progenitor",
  "reqwest",
  "serde",
@@ -1824,7 +1822,7 @@ dependencies = [
  "gateway-messages",
  "http",
  "hyper",
- "omicron-common",
+ "omicron-common 0.1.0",
  "omicron-test-utils",
  "once_cell",
  "ringbuffer",
@@ -2748,7 +2746,22 @@ name = "nexus-client"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "omicron-common",
+ "omicron-common 0.1.0",
+ "progenitor",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "slog",
+ "uuid 1.1.0",
+]
+
+[[package]]
+name = "nexus-client"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/omicron?branch=main#4716bf4e46d4d0c5c17308d22311ffeea43aa570"
+dependencies = [
+ "chrono",
+ "omicron-common 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
  "progenitor",
  "reqwest",
  "serde",
@@ -2768,14 +2781,14 @@ dependencies = [
  "headers",
  "http",
  "hyper",
- "omicron-common",
+ "omicron-common 0.1.0",
  "omicron-nexus",
  "omicron-sled-agent",
  "omicron-test-utils",
- "oximeter",
+ "oximeter 0.1.0",
  "oximeter-client",
  "oximeter-collector",
- "oximeter-producer",
+ "oximeter-producer 0.1.0",
  "parse-display",
  "serde",
  "serde_json",
@@ -2922,7 +2935,7 @@ name = "omicron-common"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "api_identity",
+ "api_identity 0.1.0",
  "backoff",
  "chrono",
  "dropshot",
@@ -2942,6 +2955,41 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "serde_urlencoded",
+ "serde_with",
+ "slog",
+ "smf",
+ "steno",
+ "structopt",
+ "thiserror",
+ "tokio",
+ "tokio-postgres",
+ "uuid 1.1.0",
+]
+
+[[package]]
+name = "omicron-common"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/omicron?branch=main#4716bf4e46d4d0c5c17308d22311ffeea43aa570"
+dependencies = [
+ "anyhow",
+ "api_identity 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
+ "backoff",
+ "chrono",
+ "dropshot",
+ "futures",
+ "http",
+ "hyper",
+ "ipnetwork",
+ "macaddr",
+ "parse-display",
+ "progenitor",
+ "rand 0.8.5",
+ "reqwest",
+ "ring",
+ "schemars",
+ "serde",
+ "serde_derive",
+ "serde_json",
  "serde_with",
  "slog",
  "smf",
@@ -2982,7 +3030,7 @@ dependencies = [
  "hex",
  "http",
  "hyper",
- "omicron-common",
+ "omicron-common 0.1.0",
  "omicron-test-utils",
  "openapi-lint",
  "openapiv3",
@@ -3007,7 +3055,7 @@ name = "omicron-nexus"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "api_identity",
+ "api_identity 0.1.0",
  "async-bb8-diesel",
  "async-trait",
  "authz-macros",
@@ -3038,7 +3086,7 @@ dependencies = [
  "nexus-test-utils",
  "nexus-test-utils-macros",
  "num-integer",
- "omicron-common",
+ "omicron-common 0.1.0",
  "omicron-rpaths",
  "omicron-test-utils",
  "openapi-lint",
@@ -3047,11 +3095,11 @@ dependencies = [
  "openssl-probe",
  "openssl-sys",
  "oso",
- "oximeter",
+ "oximeter 0.1.0",
  "oximeter-client",
  "oximeter-db",
  "oximeter-instruments",
- "oximeter-producer",
+ "oximeter-producer 0.1.0",
  "parse-display",
  "pq-sys",
  "rand 0.8.5",
@@ -3091,7 +3139,7 @@ dependencies = [
  "futures",
  "hex",
  "indicatif",
- "omicron-common",
+ "omicron-common 0.1.0",
  "omicron-sled-agent",
  "omicron-zone-package",
  "rayon",
@@ -3132,8 +3180,8 @@ dependencies = [
  "libc",
  "macaddr",
  "mockall",
- "nexus-client",
- "omicron-common",
+ "nexus-client 0.1.0",
+ "omicron-common 0.1.0",
  "omicron-test-utils",
  "openapi-lint",
  "openapiv3",
@@ -3181,7 +3229,7 @@ dependencies = [
  "expectorate",
  "futures",
  "libc",
- "omicron-common",
+ "omicron-common 0.1.0",
  "postgres-protocol",
  "signal-hook",
  "signal-hook-tokio",
@@ -3361,7 +3409,7 @@ dependencies = [
  "bytes",
  "chrono",
  "num-traits",
- "oximeter-macro-impl",
+ "oximeter-macro-impl 0.1.0",
  "schemars",
  "serde",
  "thiserror",
@@ -3370,11 +3418,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "oximeter"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/omicron?branch=main#4716bf4e46d4d0c5c17308d22311ffeea43aa570"
+dependencies = [
+ "bytes",
+ "chrono",
+ "num-traits",
+ "oximeter-macro-impl 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
+ "schemars",
+ "serde",
+ "thiserror",
+ "uuid 1.1.0",
+]
+
+[[package]]
 name = "oximeter-client"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "omicron-common",
+ "omicron-common 0.1.0",
  "progenitor",
  "reqwest",
  "serde",
@@ -3388,12 +3451,12 @@ version = "0.1.0"
 dependencies = [
  "dropshot",
  "expectorate",
- "nexus-client",
- "omicron-common",
+ "nexus-client 0.1.0",
+ "omicron-common 0.1.0",
  "omicron-test-utils",
  "openapi-lint",
  "openapiv3",
- "oximeter",
+ "oximeter 0.1.0",
  "oximeter-db",
  "reqwest",
  "serde",
@@ -3419,7 +3482,7 @@ dependencies = [
  "dropshot",
  "itertools",
  "omicron-test-utils",
- "oximeter",
+ "oximeter 0.1.0",
  "regex",
  "reqwest",
  "schemars",
@@ -3443,7 +3506,7 @@ dependencies = [
  "dropshot",
  "futures",
  "http",
- "oximeter",
+ "oximeter 0.1.0",
  "uuid 1.1.0",
 ]
 
@@ -3458,14 +3521,45 @@ dependencies = [
 ]
 
 [[package]]
+name = "oximeter-macro-impl"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/omicron?branch=main#4716bf4e46d4d0c5c17308d22311ffeea43aa570"
+dependencies = [
+ "bytes",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "oximeter-producer"
 version = "0.1.0"
 dependencies = [
  "chrono",
  "dropshot",
- "nexus-client",
- "omicron-common",
- "oximeter",
+ "nexus-client 0.1.0",
+ "omicron-common 0.1.0",
+ "oximeter 0.1.0",
+ "reqwest",
+ "schemars",
+ "serde",
+ "slog",
+ "slog-dtrace",
+ "thiserror",
+ "tokio",
+ "uuid 1.1.0",
+]
+
+[[package]]
+name = "oximeter-producer"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/omicron?branch=main#4716bf4e46d4d0c5c17308d22311ffeea43aa570"
+dependencies = [
+ "chrono",
+ "dropshot",
+ "nexus-client 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
+ "omicron-common 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
+ "oximeter 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
  "reqwest",
  "schemars",
  "serde",
@@ -4040,7 +4134,6 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=1538f78c1656bd3ac8ef816f6177ae9b1bef348a#1538f78c1656bd3ac8ef816f6177ae9b1bef348a"
 dependencies = [
  "crucible",
  "reqwest",
@@ -5014,7 +5107,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
- "omicron-common",
+ "omicron-common 0.1.0",
  "progenitor",
  "reqwest",
  "serde",
@@ -5217,7 +5310,7 @@ dependencies = [
  "futures",
  "gateway-messages",
  "hex",
- "omicron-common",
+ "omicron-common 0.1.0",
  "serde",
  "slog",
  "slog-dtrace",
