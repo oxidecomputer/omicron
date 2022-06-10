@@ -73,6 +73,15 @@ async fn initialize_sled_agent(
     let client = bootstrap_agent_client::Client::new(
         bootstrap_addr,
         sp,
+        // TODO-cleanup: Creating a bootstrap client requires the list of trust
+        // quorum members (as clients should always know the set of possible
+        // servers they can connect to), but `request.trust_quorum_share` is
+        // optional for now because we don't yet require trust quorum in all
+        // sled-agent deployments. We use `.map_or(&[], ...)` here to pass an
+        // empty set of trust quorum members if we're in such a
+        // trust-quorum-free deployment. This would cause any sprockets
+        // connections to fail with unknown peers, but in a trust-quorum-free
+        // deployment we don't actually wrap connections in sprockets.
         request
             .trust_quorum_share
             .as_ref()

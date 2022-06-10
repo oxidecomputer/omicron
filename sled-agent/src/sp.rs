@@ -98,7 +98,7 @@ impl SpHandle {
         log: &Logger,
     ) -> Result<Option<Self>, SpError> {
         let inner = if let Some(config) = sp_config {
-            let sim_sp = start_simulated_sp(&config, sled_config, log).await?;
+            let sim_sp = start_simulated_sp(config, sled_config, log).await?;
             Some(Inner::SimulatedSp(sim_sp))
         } else {
             None

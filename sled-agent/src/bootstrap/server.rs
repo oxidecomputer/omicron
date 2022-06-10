@@ -308,7 +308,7 @@ async fn serve_single_request(
             Some(dist) => {
                 // We should never return a secret share without having verified
                 // the peer is a member of our trust quorum.
-                // `bootstrap_agent.secret_share()` should be none if we don't
+                // `bootstrap_agent.secret_share()` should be `None` if we don't
                 // know our peers (implying we haven't yet received our initial
                 // sled-agent request); assert here to be sure.
                 assert!(
