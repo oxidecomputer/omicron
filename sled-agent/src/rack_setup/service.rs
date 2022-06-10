@@ -289,10 +289,22 @@ impl ServiceInner {
             &self.log,
         )?;
 
-        // Sanity check that the returned iterator (if we got one) is the length
-        // we expect.
+        // Confirm that the returned iterator (if we got one) is the length we
+        // expect.
         if let Some(rack_secret_shares) = maybe_rack_secret_shares.as_ref() {
-            assert_eq!(rack_secret_shares.len(), bootstrap_addrs.len());
+            // TODO-cleanup Asserting here seems fine as long as
+            // `member_device_id_certs` is hard-coded from a config file, but
+            // once we start collecting them over the management network we
+            // should probably attach them at the type level to the bootstrap
+            // addrs, which would remove the need for this assertion.
+            assert_eq!(
+                rack_secret_shares.len(),
+                bootstrap_addrs.len(),
+                concat!(
+                    "Number of trust quorum members does not match ",
+                    "number of bootstrap addresses"
+                )
+            );
         }
 
         let bootstrap_addrs = bootstrap_addrs.into_iter().enumerate();
