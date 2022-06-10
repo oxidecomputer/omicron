@@ -15,10 +15,15 @@ use super::rack_secret::Verifier;
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct ShareDistribution {
     pub threshold: usize,
-    pub total_shares: usize,
     pub verifier: Verifier,
     pub share: Share,
     pub member_device_id_certs: Vec<Ed25519Certificate>,
+}
+
+impl ShareDistribution {
+    pub fn total_shares(&self) -> usize {
+        self.member_device_id_certs.len()
+    }
 }
 
 // We don't want to risk debug-logging the actual share contents, so implement
@@ -27,7 +32,6 @@ impl fmt::Debug for ShareDistribution {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ShareDistribution")
             .field("threshold", &self.threshold)
-            .field("total_shares", &self.total_shares)
             .field("verifier", &"Verifier")
             .field("share", &"Share")
             .field("member_device_id_certs", &self.member_device_id_certs)

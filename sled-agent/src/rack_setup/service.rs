@@ -284,7 +284,6 @@ impl ServiceInner {
         // Create a rack secret, unless we're in the single-sled case.
         let mut maybe_rack_secret_shares = generate_rack_secret(
             config.rack_secret_threshold,
-            bootstrap_addrs.len(),
             member_device_id_certs,
             &self.log,
         )?;
@@ -623,7 +622,6 @@ impl ServiceInner {
 
 fn generate_rack_secret<'a>(
     rack_secret_threshold: usize,
-    total_shares: usize,
     member_device_id_certs: &'a [Ed25519Certificate],
     log: &Logger,
 ) -> Result<
@@ -632,6 +630,7 @@ fn generate_rack_secret<'a>(
 > {
     // We do not generate a rack secret if we only have a single sled or if our
     // config specifies that the threshold for unlock is only a single sled.
+    let total_shares = member_device_id_certs.len();
     if total_shares <= 1 {
         info!(log, "Skipping rack secret creation (only one sled present)");
         return Ok(None);
@@ -656,7 +655,6 @@ fn generate_rack_secret<'a>(
 
     Ok(Some(shares.into_iter().map(move |share| ShareDistribution {
         threshold: rack_secret_threshold,
-        total_shares,
         verifier: verifier.clone(),
         share,
         member_device_id_certs: member_device_id_certs.to_vec(),
@@ -667,23 +665,38 @@ fn generate_rack_secret<'a>(
 mod tests {
     use super::*;
     use omicron_test_utils::dev::test_setup_log;
+    use sprockets_common::certificates::Ed25519Signature;
+    use sprockets_common::certificates::KeyType;
+
+    fn dummy_certs(n: usize) -> Vec<Ed25519Certificate> {
+        vec![
+            Ed25519Certificate {
+                subject_key_type: KeyType::DeviceId,
+                subject_public_key: sprockets_host::Ed25519PublicKey([0; 32]),
+                signer_key_type: KeyType::Manufacturing,
+                signature: Ed25519Signature([0; 64]),
+            };
+            n
+        ]
+    }
 
     #[test]
     fn test_generate_rack_secret() {
         let logctx = test_setup_log("test_generate_rack_secret");
 
-        // No secret generated if total_shares <= 1
-        let maybe_shares = generate_rack_secret(10, 1, &logctx.log).unwrap();
-        assert!(maybe_shares.is_none());
+        // No secret generated if we have <= 1 sled
+        assert!(generate_rack_secret(10, &dummy_certs(1), &logctx.log)
+            .unwrap()
+            .is_none());
 
         // No secret generated if threshold <= 1
-        let maybe_shares = generate_rack_secret(1, 10, &logctx.log).unwrap();
-        assert!(maybe_shares.is_none());
+        assert!(generate_rack_secret(1, &dummy_certs(10), &logctx.log)
+            .unwrap()
+            .is_none());
 
-        // Secret generation fails if threshold > total shares
-        let maybe_shares = generate_rack_secret(10, 5, &logctx.log);
+        // Secret generation fails if threshold > total sleds
         assert!(matches!(
-            maybe_shares,
+            generate_rack_secret(10, &dummy_certs(5), &logctx.log),
             Err(SetupServiceError::SplitRackSecret(_))
         ));
 
@@ -694,8 +707,9 @@ mod tests {
         // * each share is distinct
         for total_shares in 2..=32 {
             for threshold in 2..=total_shares {
+                let certs = dummy_certs(total_shares);
                 let shares =
-                    generate_rack_secret(threshold, total_shares, &logctx.log)
+                    generate_rack_secret(threshold, &certs, &logctx.log)
                         .unwrap()
                         .unwrap();
 

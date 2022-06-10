@@ -3159,6 +3159,7 @@ dependencies = [
  "socket2",
  "sp-sim",
  "spdm",
+ "sprockets-common",
  "sprockets-host",
  "structopt",
  "subprocess",

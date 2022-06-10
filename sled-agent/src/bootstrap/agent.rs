@@ -345,7 +345,7 @@ impl Agent {
                 }
                 let rack_secret = RackSecret::combine_shares(
                     share.threshold,
-                    share.total_shares,
+                    share.total_shares(),
                     &shares,
                 )
                 .map_err(|e| {
