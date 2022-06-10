@@ -85,6 +85,8 @@ impl Plan {
     ) -> Result<Self, PlanError> {
         let bootstrap_addrs = bootstrap_addrs.into_iter().enumerate();
 
+        let rack_id = Uuid::new_v4();
+
         let allocations = bootstrap_addrs.map(|(idx, bootstrap_addr)| {
             info!(
                 log,
@@ -100,7 +102,8 @@ impl Plan {
                 bootstrap_addr,
                 SledAgentRequest {
                     id: Uuid::new_v4(),
-                    subnet
+                    subnet,
+                    rack_id,
                 },
             )
         });
@@ -113,7 +116,7 @@ impl Plan {
         }
 
         let plan = Self {
-            rack_id: Uuid::new_v4(),
+            rack_id,
             sleds,
         };
 

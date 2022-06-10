@@ -11,7 +11,7 @@ use crate::illumos::zfs::{
 };
 use crate::illumos::{execute, PFEXEC};
 use crate::instance_manager::InstanceManager;
-use crate::nexus::NexusClient;
+use crate::nexus::LazyNexusClient;
 use crate::params::{
     DatasetKind, DiskStateRequested, InstanceHardware, InstanceMigrateParams,
     InstanceRuntimeStateRequested, ServiceEnsureBody, Zpool
@@ -24,7 +24,6 @@ use omicron_common::api::{
 };
 use slog::Logger;
 use std::net::SocketAddrV6;
-use std::sync::Arc;
 use uuid::Uuid;
 
 #[cfg(not(test))]
@@ -100,7 +99,7 @@ pub struct SledAgent {
     // Component of Sled Agent responsible for managing Propolis instances.
     instances: InstanceManager,
 
-    nexus_client: Arc<NexusClient>,
+    lazy_nexus_client: LazyNexusClient,
 
     // Other Oxide-controlled services running on this Sled.
     services: ServiceManager,
@@ -111,9 +110,10 @@ impl SledAgent {
     pub async fn new(
         config: &Config,
         log: Logger,
-        nexus_client: Arc<NexusClient>,
+        lazy_nexus_client: LazyNexusClient,
         id: Uuid,
         sled_address: SocketAddrV6,
+        rack_id: Uuid,
     ) -> Result<SledAgent, Error> {
         // Pass the "parent_log" to all subcomponents that want to set their own
         // "component" value.
@@ -218,7 +218,7 @@ impl SledAgent {
         let storage = StorageManager::new(
             &parent_log,
             id,
-            nexus_client.clone(),
+            lazy_nexus_client.clone(),
             etherstub.clone(),
             *sled_address.ip(),
         )
@@ -235,7 +235,7 @@ impl SledAgent {
         }
         let instances = InstanceManager::new(
             parent_log.clone(),
-            nexus_client.clone(),
+            lazy_nexus_client.clone(),
             etherstub.clone(),
             *sled_address.ip(),
         );
@@ -245,6 +245,7 @@ impl SledAgent {
             etherstub_vnic.clone(),
             *sled_address.ip(),
             services::Config::default(),
+            rack_id,
         )
         .await?;
 
@@ -252,7 +253,7 @@ impl SledAgent {
             id,
             storage,
             instances,
-            nexus_client,
+            lazy_nexus_client,
             services,
         })
     }
@@ -327,7 +328,11 @@ impl SledAgent {
         &self,
         artifact: UpdateArtifact,
     ) -> Result<(), Error> {
-        crate::updates::download_artifact(artifact, self.nexus_client.as_ref())
+        let nexus_client = self.lazy_nexus_client.get()
+            .await
+            // TODO: Handle error
+            .unwrap();
+        crate::updates::download_artifact(artifact, &nexus_client)
             .await?;
         Ok(())
     }

@@ -160,7 +160,7 @@ impl ServerContext {
                 let address = response.iter().next().ok_or_else(|| {
                     "no addresses returned from DNS resolver".to_string()
                 })?;
-                info!(log, "DB addreess: {}", address);
+                info!(log, "DB address: {}", address);
                 PostgresConfigWithUrl::from_str(&format!(
                     "postgresql://root@[{}]:{}/omicron?sslmode=disable",
                     address, COCKROACH_PORT
@@ -169,15 +169,31 @@ impl ServerContext {
             }
         };
         let pool = db::Pool::new(&db::Config { url });
+        let nexus =  Nexus::new_with_id(
+            rack_id,
+            log.new(o!("component" => "nexus")),
+            pool,
+            config,
+            Arc::clone(&authz),
+        );
+
+        // Do not return until a rack exists in the DB with the provided UUID.
+        let populate_ctx = nexus.opctx_for_background();
+        loop {
+            let result = nexus.rack_insert(&populate_ctx, rack_id)
+                .await;
+            if let Err(e) = result {
+                info!(log, "Failed to create initial rack: {}", e);
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            } else {
+                info!(log, "Rack with UUID {} exists in the database", rack_id);
+                nexus.rack_lookup(&populate_ctx, &rack_id).await.unwrap();
+                break;
+            }
+        }
 
         Ok(Arc::new(ServerContext {
-            nexus: Nexus::new_with_id(
-                rack_id,
-                log.new(o!("component" => "nexus")),
-                pool,
-                config,
-                Arc::clone(&authz),
-            ),
+            nexus,
             log,
             external_authn,
             internal_authn,

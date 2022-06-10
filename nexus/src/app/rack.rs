@@ -7,59 +7,61 @@
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::lookup::LookupPath;
 use crate::internal_api::params::RackInitializationRequest;
-use futures::future::ready;
-use futures::StreamExt;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::ListResult;
+use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
-use omicron_common::api::external::LookupType;
-use omicron_common::api::external::ResourceType;
 use uuid::Uuid;
 
 impl super::Nexus {
-    pub(crate) fn as_rack(&self) -> db::model::Rack {
-        db::model::Rack {
-            identity: self.api_rack_identity.clone(),
-            initialized: true,
-            tuf_base_url: None,
-        }
-    }
-
     pub async fn racks_list(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResult<db::model::Rack> {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-
-        if let Some(marker) = pagparams.marker {
-            if *marker >= self.rack_id {
-                return Ok(futures::stream::empty().boxed());
-            }
-        }
-
-        Ok(futures::stream::once(ready(Ok(self.as_rack()))).boxed())
+    ) -> ListResultVec<db::model::Rack> {
+        self.db_datastore.rack_list(&opctx, pagparams).await
     }
+
+    // TODO: Use this, instead of the manual one.
+    //
+    // Note that this will require insertion of the rack to occur
+    // during the "populate" steps.
+    /*
+    pub async fn rack_lookup(
+        &self,
+        opctx: &OpContext,
+        rack_id: &Uuid,
+    ) -> LookupResult<db::model::Rack> {
+        let (.., db_rack) = LookupPath::new(opctx, &self.db_datastore)
+            .rack_id(*rack_id)
+            .fetch()
+            .await?;
+        Ok(db_rack)
+    }
+    */
 
     pub async fn rack_lookup(
         &self,
         opctx: &OpContext,
         rack_id: &Uuid,
     ) -> LookupResult<db::model::Rack> {
-        let authz_rack = authz::Rack::new(
-            authz::FLEET,
-            *rack_id,
-            LookupType::ById(*rack_id),
-        );
-        opctx.authorize(authz::Action::Read, &authz_rack).await?;
+        self.db_datastore.rack_lookup_manual(opctx, *rack_id).await
+    }
 
-        if *rack_id == self.rack_id {
-            Ok(self.as_rack())
-        } else {
-            Err(Error::not_found_by_id(ResourceType::Rack, rack_id))
-        }
+    /// Ensures that a rack exists in the DB.
+    ///
+    /// If the rack already exists, this function is a no-op.
+    pub async fn rack_insert(
+        &self,
+        opctx: &OpContext,
+        rack_id: Uuid,
+    ) -> Result<(), Error> {
+        self.datastore()
+            .rack_insert(opctx, &db::model::Rack::new(rack_id))
+            .await?;
+        Ok(())
     }
 
     /// Marks the rack as initialized with a set of services.

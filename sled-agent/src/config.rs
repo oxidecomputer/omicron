@@ -9,14 +9,11 @@ use crate::illumos::dladm::{self, Dladm, PhysicalLink};
 use crate::illumos::zpool::ZpoolName;
 use dropshot::ConfigLogging;
 use serde::Deserialize;
-use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 /// Configuration for a sled agent
 #[derive(Clone, Debug, Deserialize)]
 pub struct Config {
-    /// Address of Nexus instance
-    pub nexus_address: SocketAddr,
     /// Configuration for the sled agent debug log
     pub log: ConfigLogging,
     /// Optional VLAN ID to be used for tagging guest VNICs.

@@ -12,7 +12,7 @@ use crate::illumos::svc::wait_for_service;
 use crate::illumos::vnic::VnicAllocator;
 use crate::illumos::zone::{AddressRequest, PROPOLIS_ZONE_PREFIX};
 use crate::instance_manager::InstanceTicket;
-use crate::nexus::NexusClient;
+use crate::nexus::LazyNexusClient;
 use crate::opte::OptePort;
 use crate::opte::OptePortAllocator;
 use crate::params::NetworkInterface;
@@ -214,7 +214,7 @@ struct InstanceInner {
     running_state: Option<RunningState>,
 
     // Connection to Nexus
-    nexus_client: Arc<NexusClient>,
+    lazy_nexus_client: LazyNexusClient,
 }
 
 impl InstanceInner {
@@ -243,7 +243,11 @@ impl InstanceInner {
         );
 
         // Notify Nexus of the state change.
-        self.nexus_client
+        self.lazy_nexus_client
+            .get()
+            .await
+            // TODO: Handle me
+            .unwrap()
             .cpapi_instances_put(
                 self.id(),
                 &nexus_client::types::InstanceRuntimeState::from(
@@ -388,7 +392,7 @@ mockall::mock! {
             underlay_addr: Ipv6Addr,
             port_allocator: OptePortAllocator,
             initial: InstanceHardware,
-            nexus_client: Arc<NexusClient>,
+            lazy_nexus_client: LazyNexusClient,
         ) -> Result<Self, Error>;
         pub async fn start(
             &self,
@@ -420,7 +424,7 @@ impl Instance {
     /// * `port_allocator`: A unique (to the sled) ID generator to
     /// refer to an OPTE port for the guest network interfaces.
     /// * `initial`: State of the instance at initialization time.
-    /// * `nexus_client`: Connection to Nexus, used for sending notifications.
+    /// * `lazy_nexus_client`: Connection to Nexus, used for sending notifications.
     // TODO: This arg list is getting a little long; can we clean this up?
     pub fn new(
         log: Logger,
@@ -429,7 +433,7 @@ impl Instance {
         underlay_addr: Ipv6Addr,
         port_allocator: OptePortAllocator,
         initial: InstanceHardware,
-        nexus_client: Arc<NexusClient>,
+        lazy_nexus_client: LazyNexusClient,
     ) -> Result<Self, Error> {
         info!(log, "Instance::new w/initial HW: {:?}", initial);
         let instance = InstanceInner {
@@ -457,7 +461,7 @@ impl Instance {
             cloud_init_bytes: initial.cloud_init_bytes,
             state: InstanceStates::new(initial.runtime),
             running_state: None,
-            nexus_client,
+            lazy_nexus_client,
         };
 
         let inner = Arc::new(Mutex::new(instance));

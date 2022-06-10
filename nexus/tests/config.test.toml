@@ -39,6 +39,7 @@ max_vpc_ipv4_subnet_prefix = 29
 # Identifier for this instance of Nexus.
 # NOTE: The test suite always overrides this.
 id = "e6bff1ff-24fb-49dc-a54e-c6a350cd4d6c"
+rack_id = "f6bff1ff-24fb-49dc-a54e-c6a350cd4d6c"
 
 #
 # NOTE: for the test suite, the port MUST be 0 (in order to bind to any

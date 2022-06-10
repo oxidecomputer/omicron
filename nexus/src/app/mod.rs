@@ -54,14 +54,11 @@ pub struct Nexus {
     /// uuid for this nexus instance.
     id: Uuid,
 
-    /// uuid for this rack (TODO should also be in persistent storage)
+    /// uuid for this rack
     rack_id: Uuid,
 
     /// general server log
     log: Logger,
-
-    /// cached rack identity metadata
-    api_rack_identity: db::model::RackIdentity,
 
     /// persistent storage for resources in the control plane
     db_datastore: Arc<db::DataStore>,
@@ -146,7 +143,6 @@ impl Nexus {
             id: config.runtime.id,
             rack_id,
             log: log.new(o!()),
-            api_rack_identity: db::model::RackIdentity::new(rack_id),
             db_datastore: Arc::clone(&db_datastore),
             authz: Arc::clone(&authz),
             sec_client: Arc::clone(&sec_client),
@@ -215,6 +211,18 @@ impl Nexus {
                 }
             };
         }
+    }
+
+    /// Returns an [`OpContext`] used for background tasks.
+    // TODO: dap@ recommends using a different user for this, other than
+    // "internal_db_init".
+    pub fn opctx_for_background(&self) -> OpContext {
+        OpContext::for_background(
+            self.log.new(o!("component" => "Background Work")),
+            Arc::clone(&self.authz),
+            authn::Context::internal_db_init(),
+            Arc::clone(&self.datastore()),
+        )
     }
 
     /// Returns an [`OpContext`] used for authenticating external requests

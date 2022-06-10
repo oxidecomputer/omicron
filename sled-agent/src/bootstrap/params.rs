@@ -26,6 +26,9 @@ pub struct SledAgentRequest {
 
     /// Portion of the IP space to be managed by the Sled Agent.
     pub subnet: Ipv6Subnet<SLED_PREFIX>,
+
+    /// Uuid of the rack to which this sled agent belongs.
+    pub rack_id: Uuid,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

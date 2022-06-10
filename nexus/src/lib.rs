@@ -36,7 +36,6 @@ use external_api::http_entrypoints::external_api;
 use internal_api::http_entrypoints::internal_api;
 use slog::Logger;
 use std::sync::Arc;
-use uuid::Uuid;
 
 #[macro_use]
 extern crate slog;
@@ -82,7 +81,6 @@ impl Server {
     /// Start a nexus server.
     pub async fn start(
         config: &Config,
-        rack_id: Uuid,
         log: &Logger,
     ) -> Result<Server, String> {
         let log = log.new(o!("name" => config.runtime.id.to_string()));
@@ -90,15 +88,7 @@ impl Server {
 
         let ctxlog = log.new(o!("component" => "ServerContext"));
 
-        let apictx = ServerContext::new(rack_id, ctxlog, &config).await?;
-
-        let http_server_starter_external = dropshot::HttpServerStarter::new(
-            &config.runtime.dropshot_external,
-            external_api(),
-            Arc::clone(&apictx),
-            &log.new(o!("component" => "dropshot_external")),
-        )
-        .map_err(|error| format!("initializing external server: {}", error))?;
+        let apictx = ServerContext::new(config.runtime.rack_id, ctxlog, &config).await?;
 
         let http_server_starter_internal = dropshot::HttpServerStarter::new(
             &config.runtime.dropshot_internal,
@@ -107,9 +97,34 @@ impl Server {
             &log.new(o!("component" => "dropshot_internal")),
         )
         .map_err(|error| format!("initializing internal server: {}", error))?;
-
-        let http_server_external = http_server_starter_external.start();
         let http_server_internal = http_server_starter_internal.start();
+
+        // Wait until RSS handoff completes.
+        let opctx = apictx.nexus.opctx_for_background();
+        loop {
+            let result = apictx.nexus.rack_lookup(&opctx, &config.runtime.rack_id).await;
+            match result {
+                Ok(rack) => {
+                    if rack.initialized {
+                        break;
+                    }
+                    info!(log, "Still waiting for rack initialization: {:?}", rack);
+                },
+                Err(e) => {
+                    warn!(log, "Cannot look up rack: {}", e);
+                },
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        }
+
+        let http_server_starter_external = dropshot::HttpServerStarter::new(
+            &config.runtime.dropshot_external,
+            external_api(),
+            Arc::clone(&apictx),
+            &log.new(o!("component" => "dropshot_external")),
+        )
+        .map_err(|error| format!("initializing external server: {}", error))?;
+        let http_server_external = http_server_starter_external.start();
 
         Ok(Server { apictx, http_server_external, http_server_internal })
     }
@@ -167,8 +182,7 @@ pub async fn run_server(config: &Config) -> Result<(), String> {
     } else {
         debug!(log, "registered DTrace probes");
     }
-    let rack_id = Uuid::new_v4();
-    let server = Server::start(config, rack_id, &log).await?;
+    let server = Server::start(config, &log).await?;
     server.register_as_producer().await;
     server.wait_for_finish().await
 }

@@ -327,6 +327,7 @@ mod test {
             max_vpc_ipv4_subnet_prefix = 27
             [runtime]
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
+            rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
             [runtime.dropshot_external]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
@@ -346,6 +347,7 @@ mod test {
             Config {
                 runtime: RuntimeConfig {
                     id: "28b90dc4-c22a-65ba-f49a-f051fe01208f".parse().unwrap(),
+                    rack_id: "38b90dc4-c22a-65ba-f49a-f051fe01208f".parse().unwrap(),
                     dropshot_external: ConfigDropshot {
                         bind_address: "10.1.2.3:4567"
                             .parse::<SocketAddr>()
@@ -405,6 +407,7 @@ mod test {
             address = "[::1]:8123"
             [runtime]
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
+            rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
             [runtime.dropshot_external]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
@@ -446,6 +449,7 @@ mod test {
             address = "[::1]:8123"
             [runtime]
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
+            rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
             [runtime.dropshot_external]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
@@ -501,6 +505,7 @@ mod test {
             max_vpc_ipv4_subnet_prefix = 100
             [runtime]
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
+            rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
             [runtime.dropshot_external]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024

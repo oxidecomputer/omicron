@@ -175,6 +175,21 @@ impl DataStore {
             })
     }
 
+    pub async fn rack_lookup_manual(
+        &self,
+        _opctx: &OpContext,
+        rack_id: Uuid,
+    ) -> LookupResult<Rack> {
+        use db::schema::rack::dsl;
+
+        dsl::rack
+            .filter(dsl::id.eq(rack_id))
+            .select(Rack::as_select())
+            .get_result_async(self.pool())
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
     /// Update a rack to mark that it has been initialized
     pub async fn rack_set_initialized(
         &self,
@@ -195,6 +210,7 @@ impl DataStore {
 
         // NOTE: This operation could likely be optimized with a CTE, but given
         // the low-frequency of calls, this optimization has been deferred.
+        let log = opctx.log.clone();
         self.pool_authorized(opctx)
             .await?
             .transaction(move |conn| {
@@ -207,6 +223,7 @@ impl DataStore {
                         TxnError::CustomError(RackInitError::RackUpdate(e))
                     })?;
                 if rack.initialized {
+                    info!(log, "Early exit: Rack already initialized");
                     return Ok(rack);
                 }
 
@@ -236,6 +253,7 @@ impl DataStore {
                         })
                     })?;
                 }
+                info!(log, "Inserted services");
                 for dataset in datasets {
                     use db::schema::dataset::dsl;
                     let zpool_id = dataset.pool_id;
@@ -262,9 +280,10 @@ impl DataStore {
                         })
                     })?;
                 }
+                info!(log, "Inserted datasets");
 
                 // Set the rack to "initialized" once the handoff is complete
-                diesel::update(rack_dsl::rack)
+                let rack = diesel::update(rack_dsl::rack)
                     .filter(rack_dsl::id.eq(rack_id))
                     .set((
                         rack_dsl::initialized.eq(true),
@@ -274,7 +293,9 @@ impl DataStore {
                     .get_result::<Rack>(conn)
                     .map_err(|e| {
                         TxnError::CustomError(RackInitError::RackUpdate(e))
-                    })
+                    })?;
+                info!(log, "Updated rack (set initialized to true)");
+                Ok(rack)
             })
             .await
             .map_err(|e| match e {
@@ -327,6 +348,20 @@ impl DataStore {
                     Error::internal_error(&format!("Transaction error: {}", e))
                 }
             })
+    }
+
+    pub async fn rack_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<Rack> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        use db::schema::rack::dsl;
+        paginated(dsl::rack, dsl::id, pagparams)
+            .select(Rack::as_select())
+            .load_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     /// Stores a new sled in the database.
