@@ -96,7 +96,7 @@ sha256 = "73ee7befea2d7709fe3baa358abc11faf6922d315a33b26e752363c5abcff91c"
 service_name = "propolis-server"
 zone = true
 [external_package.propolis-server.source]
-type = "prebuild"
+type = "prebuilt"
 repo = "propolis"
 commit = "1538f78c1656bd3ac8ef816f6177ae9b1bef348a"
 # The SHA256 digest is automatically posted to:
