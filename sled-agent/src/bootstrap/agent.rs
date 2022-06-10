@@ -195,10 +195,7 @@ impl Agent {
 
     /// Returns our share of the rack secret, if we have one.
     pub async fn secret_share(&self) -> Option<ShareDistribution> {
-        self.share
-            .lock()
-            .await
-            .clone()
+        self.share.lock().await.clone()
     }
 
     /// Initializes the Sled Agent on behalf of the RSS, if one has not already
