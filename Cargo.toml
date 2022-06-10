@@ -74,8 +74,8 @@ panic = "abort"
 #dropshot = { path = "../dropshot/dropshot" }
 #[patch."https://github.com/oxidecomputer/steno"]
 #steno = { path = "../steno" }
-[patch."https://github.com/oxidecomputer/propolis"]
-propolis-client = { path = "../propolis/client" }
+#[patch."https://github.com/oxidecomputer/propolis"]
+#propolis-client = { path = "../propolis/client" }
 #propolis-server = { path = "../propolis/server" }
 #[patch."https://github.com/oxidecomputer/crucible"]
 #crucible = { path = "../crucible/upstairs" }
