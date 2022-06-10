@@ -57,7 +57,7 @@ impl Config {
         }
     }
 
-    fn deployment_servers<'a>(&'a self) -> impl Iterator<Item = &'a Server> {
+    fn deployment_servers(&self) -> impl Iterator<Item = &Server> {
         self.servers.iter().filter_map(|(name, s)| {
             if self.deployment.servers.contains(name) {
                 Some(s)
@@ -336,12 +336,25 @@ fn do_install_prereqs(config: &Config) -> Result<()> {
     let builder = &config.servers[&config.builder.server];
     let build_server = (builder, &config.builder.omicron_path);
     let all_servers = std::iter::once(build_server).chain(
-        config
-            .deployment_servers()
-            .map(|server| (server, &config.deployment.staging_dir)),
+        config.deployment_servers().filter_map(|server| {
+            // Don't duplicate the builder
+            if server.addr != builder.addr {
+                Some((server, &config.deployment.staging_dir))
+            } else {
+                None
+            }
+        }),
     );
-    let server_names = std::iter::once(&config.builder.server)
-        .chain(config.deployment.servers.iter());
+
+    let server_names = std::iter::once(&config.builder.server).chain(
+        config.deployment.servers.iter().filter_map(|s| {
+            if *s != config.builder.server {
+                Some(s)
+            } else {
+                None
+            }
+        }),
+    );
 
     // Install functions to run in parallel on each server
     let fns = all_servers
