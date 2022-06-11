@@ -2356,7 +2356,6 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "structopt",
 ]
 
 [[package]]
