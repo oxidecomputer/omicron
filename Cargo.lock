@@ -2992,7 +2992,6 @@ dependencies = [
  "slog",
  "slog-dtrace",
  "sp-sim",
- "structopt",
  "subprocess",
  "thiserror",
  "tokio",
