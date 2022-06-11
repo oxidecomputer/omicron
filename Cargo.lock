@@ -2946,7 +2946,6 @@ dependencies = [
  "slog",
  "smf",
  "steno",
- "structopt",
  "thiserror",
  "tokio",
  "tokio-postgres",
