@@ -3087,6 +3087,7 @@ name = "omicron-package"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "clap 3.1.18",
  "futures",
  "hex",
  "indicatif",
@@ -3099,7 +3100,6 @@ dependencies = [
  "serde",
  "serde_derive",
  "smf",
- "structopt",
  "tar",
  "tempfile",
  "thiserror",
