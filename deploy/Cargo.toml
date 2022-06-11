@@ -7,13 +7,13 @@ license = "MPL-2.0"
 
 [dependencies]
 anyhow = "1.0"
+clap = { version = "3.1", features = ["derive"] }
 crossbeam = "0.8"
 omicron-sled-agent = { path = "../sled-agent" }
 omicron-package = { path = "../package" }
 serde = { version = "1.0", features = [ "derive" ] }
 serde_derive = "1.0"
 sp-sim = { path = "../sp-sim" }
-structopt = "0.3"
 thiserror = "1.0"
 toml = "0.5.9"
 

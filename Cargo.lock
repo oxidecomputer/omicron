@@ -2957,13 +2957,13 @@ name = "omicron-deploy"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "clap 3.1.18",
  "crossbeam",
  "omicron-package",
  "omicron-sled-agent",
  "serde",
  "serde_derive",
  "sp-sim",
- "structopt",
  "thiserror",
  "toml",
 ]
