@@ -3173,6 +3173,7 @@ name = "omicron-test-utils"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "clap 3.1.18",
  "dropshot",
  "expectorate",
  "futures",
@@ -3182,7 +3183,6 @@ dependencies = [
  "signal-hook",
  "signal-hook-tokio",
  "slog",
- "structopt",
  "subprocess",
  "tempfile",
  "thiserror",
