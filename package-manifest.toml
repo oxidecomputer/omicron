@@ -98,7 +98,7 @@ zone = true
 [external_package.propolis-server.source]
 type = "prebuilt"
 repo = "propolis"
-commit = "1538f78c1656bd3ac8ef816f6177ae9b1bef348a"
+commit = "d2b8184d11d5d5f56424fe0bee13ca03d576604e"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/propolis/image/<commit>/propolis-server.sha256.txt
-sha256 = "1e21d95a1254f6796a2a7fee3a49f14988beb5646505fc7c9d669ef49f6a50f3"
+sha256 = "b192fbaaee850e63adaf9f7fe5ff2054a9de338d70198b1d1670285057a047be"
