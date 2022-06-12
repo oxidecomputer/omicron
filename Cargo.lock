@@ -2337,7 +2337,6 @@ dependencies = [
  "slog-async",
  "slog-envlogger",
  "slog-term",
- "structopt",
  "subprocess",
  "tempdir",
  "tokio",
@@ -2357,7 +2356,6 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "structopt",
 ]
 
 [[package]]
@@ -2946,7 +2944,6 @@ dependencies = [
  "slog",
  "smf",
  "steno",
- "structopt",
  "thiserror",
  "tokio",
  "tokio-postgres",
@@ -2958,13 +2955,13 @@ name = "omicron-deploy"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "clap 3.1.18",
  "crossbeam",
  "omicron-package",
  "omicron-sled-agent",
  "serde",
  "serde_derive",
  "sp-sim",
- "structopt",
  "thiserror",
  "toml",
 ]
@@ -2993,7 +2990,6 @@ dependencies = [
  "slog",
  "slog-dtrace",
  "sp-sim",
- "structopt",
  "subprocess",
  "thiserror",
  "tokio",
@@ -3014,6 +3010,7 @@ dependencies = [
  "base64",
  "bb8",
  "chrono",
+ "clap 3.1.18",
  "cookie",
  "criterion",
  "crucible-agent-client",
@@ -3069,7 +3066,6 @@ dependencies = [
  "slog",
  "slog-dtrace",
  "steno",
- "structopt",
  "strum",
  "subprocess",
  "tempfile",
@@ -3088,6 +3084,7 @@ name = "omicron-package"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "clap 3.1.18",
  "futures",
  "hex",
  "indicatif",
@@ -3100,7 +3097,6 @@ dependencies = [
  "serde",
  "serde_derive",
  "smf",
- "structopt",
  "tar",
  "tempfile",
  "thiserror",
@@ -3123,6 +3119,7 @@ dependencies = [
  "bytes",
  "cfg-if 1.0.0",
  "chrono",
+ "clap 3.1.18",
  "crucible-agent-client",
  "dropshot",
  "expectorate",
@@ -3159,7 +3156,6 @@ dependencies = [
  "sp-sim",
  "spdm",
  "sprockets-host",
- "structopt",
  "subprocess",
  "tar",
  "tempfile",
@@ -3177,6 +3173,7 @@ name = "omicron-test-utils"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "clap 3.1.18",
  "dropshot",
  "expectorate",
  "futures",
@@ -3186,7 +3183,6 @@ dependencies = [
  "signal-hook",
  "signal-hook-tokio",
  "slog",
- "structopt",
  "subprocess",
  "tempfile",
  "thiserror",
@@ -3386,6 +3382,7 @@ dependencies = [
 name = "oximeter-collector"
 version = "0.1.0"
 dependencies = [
+ "clap 3.1.18",
  "dropshot",
  "expectorate",
  "nexus-client",
@@ -3400,7 +3397,6 @@ dependencies = [
  "serde_json",
  "slog",
  "slog-dtrace",
- "structopt",
  "subprocess",
  "thiserror",
  "tokio",
@@ -3416,6 +3412,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "chrono",
+ "clap 3.1.18",
  "dropshot",
  "itertools",
  "omicron-test-utils",
@@ -3429,7 +3426,6 @@ dependencies = [
  "slog-async",
  "slog-dtrace",
  "slog-term",
- "structopt",
  "thiserror",
  "tokio",
  "uuid",
@@ -5213,6 +5209,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "clap 3.1.18",
  "dropshot",
  "futures",
  "gateway-messages",
@@ -5222,7 +5219,6 @@ dependencies = [
  "slog",
  "slog-dtrace",
  "sprockets-rot",
- "structopt",
  "thiserror",
  "tokio",
  "toml",

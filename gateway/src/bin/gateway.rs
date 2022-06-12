@@ -4,22 +4,22 @@
 
 //! Executable program to run gateway, the management gateway service
 
+use clap::Parser;
 use omicron_common::cmd::{fatal, CmdError};
 use omicron_gateway::{run_openapi, run_server, Config};
 use std::path::PathBuf;
-use structopt::StructOpt;
 
-#[derive(Debug, StructOpt)]
-#[structopt(name = "gateway", about = "See README.adoc for more information")]
+#[derive(Debug, Parser)]
+#[clap(name = "gateway", about = "See README.adoc for more information")]
 struct Args {
-    #[structopt(
-        short = "O",
+    #[clap(
+        short = 'O',
         long = "openapi",
         help = "Print the external OpenAPI Spec document and exit"
     )]
     openapi: bool,
 
-    #[structopt(name = "CONFIG_FILE_PATH", parse(from_os_str))]
+    #[clap(name = "CONFIG_FILE_PATH", parse(from_os_str))]
     config_file_path: PathBuf,
 }
 
@@ -31,9 +31,7 @@ async fn main() {
 }
 
 async fn do_run() -> Result<(), CmdError> {
-    let args = Args::from_args_safe().map_err(|err| {
-        CmdError::Usage(format!("parsing arguments: {}", err.message))
-    })?;
+    let args = Args::parse();
 
     let config = Config::from_file(args.config_file_path)
         .map_err(|e| CmdError::Failure(e.to_string()))?;

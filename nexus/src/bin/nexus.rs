@@ -13,6 +13,7 @@
 //   worker, max connect-in-progress sockets, shutdown_timeout (server shutdown
 //   timeout)
 
+use clap::Parser;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
 use omicron_nexus::run_openapi_external;
@@ -20,26 +21,25 @@ use omicron_nexus::run_openapi_internal;
 use omicron_nexus::run_server;
 use omicron_nexus::Config;
 use std::path::PathBuf;
-use structopt::StructOpt;
 
-#[derive(Debug, StructOpt)]
-#[structopt(name = "nexus", about = "See README.adoc for more information")]
+#[derive(Debug, Parser)]
+#[clap(name = "nexus", about = "See README.adoc for more information")]
 struct Args {
-    #[structopt(
-        short = "O",
+    #[clap(
+        short = 'O',
         long = "openapi",
         help = "Print the external OpenAPI Spec document and exit"
     )]
     openapi: bool,
 
-    #[structopt(
-        short = "I",
+    #[clap(
+        short = 'I',
         long = "openapi-internal",
         help = "Print the internal OpenAPI Spec document and exit"
     )]
     openapi_internal: bool,
 
-    #[structopt(name = "CONFIG_FILE_PATH", parse(from_os_str))]
+    #[clap(name = "CONFIG_FILE_PATH", parse(from_os_str))]
     config_file_path: PathBuf,
 }
 
@@ -51,9 +51,7 @@ async fn main() {
 }
 
 async fn do_run() -> Result<(), CmdError> {
-    let args = Args::from_args_safe().map_err(|err| {
-        CmdError::Usage(format!("parsing arguments: {}", err.message))
-    })?;
+    let args = Args::parse();
 
     let config = Config::from_file(args.config_file_path)
         .map_err(|e| CmdError::Failure(e.to_string()))?;
