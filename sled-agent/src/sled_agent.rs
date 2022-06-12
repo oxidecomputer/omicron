@@ -14,7 +14,7 @@ use crate::instance_manager::InstanceManager;
 use crate::nexus::LazyNexusClient;
 use crate::params::{
     DatasetKind, DiskStateRequested, InstanceHardware, InstanceMigrateParams,
-    InstanceRuntimeStateRequested, ServiceEnsureBody, Zpool
+    InstanceRuntimeStateRequested, ServiceEnsureBody, Zpool,
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::StorageManager;
@@ -249,13 +249,7 @@ impl SledAgent {
         )
         .await?;
 
-        Ok(SledAgent {
-            id,
-            storage,
-            instances,
-            lazy_nexus_client,
-            services,
-        })
+        Ok(SledAgent { id, storage, instances, lazy_nexus_client, services })
     }
 
     pub fn id(&self) -> Uuid {
@@ -274,12 +268,8 @@ impl SledAgent {
         Ok(())
     }
 
-    pub async fn zpools_get(
-        &self
-    ) -> Result<Vec<Zpool>, Error> {
-        let zpools = self.storage
-            .get_zpools()
-            .await?;
+    pub async fn zpools_get(&self) -> Result<Vec<Zpool>, Error> {
+        let zpools = self.storage.get_zpools().await?;
         Ok(zpools)
     }
 
@@ -328,12 +318,13 @@ impl SledAgent {
         &self,
         artifact: UpdateArtifact,
     ) -> Result<(), Error> {
-        let nexus_client = self.lazy_nexus_client.get()
+        let nexus_client = self
+            .lazy_nexus_client
+            .get()
             .await
             // TODO: Handle error
             .unwrap();
-        crate::updates::download_artifact(artifact, &nexus_client)
-            .await?;
+        crate::updates::download_artifact(artifact, &nexus_client).await?;
         Ok(())
     }
 }

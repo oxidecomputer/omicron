@@ -6,23 +6,19 @@
 
 use super::config::SetupServiceConfig as Config;
 use crate::bootstrap::{
-    discovery::PeerMonitorObserver,
-    params::SledAgentRequest, rss_handle::BootstrapAgentHandle,
+    discovery::PeerMonitorObserver, params::SledAgentRequest,
+    rss_handle::BootstrapAgentHandle,
 };
 use crate::params::{DatasetEnsureBody, ServiceRequest, ServiceType};
 use crate::rack_setup::plan::service::{
-    PlanError as ServicePlanError,
-    Plan as ServicePlan,
+    Plan as ServicePlan, PlanError as ServicePlanError,
 };
 use crate::rack_setup::plan::sled::{
-    PlanError as SledPlanError,
-    Plan as SledPlan,
+    Plan as SledPlan, PlanError as SledPlanError,
 };
 use internal_dns_client::names::{AAAA, SRV};
 use nexus_client::{
-    Client as NexusClient,
-    Error as NexusError,
-    types as NexusTypes,
+    types as NexusTypes, Client as NexusClient, Error as NexusError,
 };
 use omicron_common::address::{get_sled_address, NEXUS_INTERNAL_PORT};
 use omicron_common::backoff::{
@@ -30,9 +26,7 @@ use omicron_common::backoff::{
 };
 use serde::{Deserialize, Serialize};
 use sled_agent_client::{
-    Client as SledAgentClient,
-    Error as SledAgentError,
-    types as SledAgentTypes,
+    types as SledAgentTypes, Client as SledAgentClient, Error as SledAgentError,
 };
 use slog::Logger;
 use std::collections::{HashMap, HashSet};
@@ -199,7 +193,9 @@ impl ServiceInner {
                 crate::params::DatasetKind::CockroachDb { .. }
             )
         }) {
-            return Err(SetupServiceError::BadConfig("RSS should only initialize CRDB services".into()));
+            return Err(SetupServiceError::BadConfig(
+                "RSS should only initialize CRDB services".into(),
+            ));
         }
 
         let dur = std::time::Duration::from_secs(60);
@@ -222,14 +218,7 @@ impl ServiceInner {
                     .filesystem_put(&dataset.clone().into())
                     .await
                     .map_err(BackoffError::transient)?;
-                Ok::<
-                    (),
-                    BackoffError<
-                        SledAgentError<
-                            SledAgentTypes::Error,
-                        >,
-                    >,
-                >(())
+                Ok::<(), BackoffError<SledAgentError<SledAgentTypes::Error>>>(())
             };
             let log_failure = |error, _| {
                 warn!(self.log, "failed to create filesystem"; "error" => ?error);
@@ -248,12 +237,7 @@ impl ServiceInner {
 
         let aaaa = datasets
             .iter()
-            .map(|dataset| {
-                (
-                    AAAA::Zone(dataset.id),
-                    dataset.address,
-                )
-            })
+            .map(|dataset| (AAAA::Zone(dataset.id), dataset.address))
             .collect::<Vec<_>>();
         let srv_key = SRV::Service("cockroachdb".into());
 
@@ -295,12 +279,7 @@ impl ServiceInner {
                 })
                 .await
                 .map_err(BackoffError::transient)?;
-            Ok::<
-                (),
-                BackoffError<
-                    SledAgentError<SledAgentTypes::Error>,
-                >,
-            >(())
+            Ok::<(), BackoffError<SledAgentError<SledAgentTypes::Error>>>(())
         };
         let log_failure = |error, _| {
             warn!(self.log, "failed to initialize services"; "error" => ?error);
@@ -308,11 +287,16 @@ impl ServiceInner {
         retry_notify(internal_service_policy(), services_put, log_failure)
             .await?;
 
-
         // Initialize DNS records for the Nexus service.
-        let services: Vec<_> = services.iter().filter(|svc| {
-            matches!(svc.service_type, crate::params::ServiceType::Nexus { .. })
-        }).collect();
+        let services: Vec<_> = services
+            .iter()
+            .filter(|svc| {
+                matches!(
+                    svc.service_type,
+                    crate::params::ServiceType::Nexus { .. }
+                )
+            })
+            .collect();
 
         // Early-exit for non-Nexus case
         if services.is_empty() {
@@ -330,7 +314,7 @@ impl ServiceInner {
                         NEXUS_INTERNAL_PORT,
                         0,
                         0,
-                    )
+                    ),
                 )
             })
             .collect::<Vec<_>>();
@@ -395,23 +379,25 @@ impl ServiceInner {
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Handing off control to Nexus");
 
-        let resolver = internal_dns_client::multiclient::create_resolver(config.az_subnet())
-            .expect("Failed to create DNS resolver");
-        let response = resolver.lookup_ip(
-            &SRV::Service("nexus".to_string()).to_string()
-        ).await.expect("Failed to lookup IP");
+        let resolver = internal_dns_client::multiclient::create_resolver(
+            config.az_subnet(),
+        )
+        .expect("Failed to create DNS resolver");
+        let response = resolver
+            .lookup_ip(&SRV::Service("nexus".to_string()).to_string())
+            .await
+            .expect("Failed to lookup IP");
 
-        let nexus_address = response.iter()
+        let nexus_address = response
+            .iter()
             .next()
-            .map(|addr| {
-                SocketAddr::new(addr, NEXUS_INTERNAL_PORT)
-            })
+            .map(|addr| SocketAddr::new(addr, NEXUS_INTERNAL_PORT))
             .expect("no addresses returned from DNS resolver");
         info!(self.log, "Nexus address: {}", nexus_address.to_string());
 
         let nexus_client = NexusClient::new(
             &format!("http://{}", nexus_address),
-            self.log.new(o!("component" => "NexusClient"))
+            self.log.new(o!("component" => "NexusClient")),
         );
 
         // Ensure we can quickly look up "Sled Agent Address" -> "UUID of sled".
@@ -419,7 +405,8 @@ impl ServiceInner {
         // We need the ID when passing info to Nexus.
         let mut id_map = HashMap::new();
         for (_, sled_request) in sled_plan.sleds.iter() {
-            id_map.insert(get_sled_address(sled_request.subnet), sled_request.id);
+            id_map
+                .insert(get_sled_address(sled_request.subnet), sled_request.id);
         }
 
         // Convert all the information we have about services and datasets into
@@ -427,63 +414,59 @@ impl ServiceInner {
         let mut services: Vec<NexusTypes::ServicePutRequest> = vec![];
         let mut datasets: Vec<NexusTypes::DatasetCreateRequest> = vec![];
         for (addr, service_request) in service_plan.services.iter() {
-            let sled_id = *id_map.get(addr)
+            let sled_id = *id_map
+                .get(addr)
                 .expect("Sled address in service plan, but not sled plan");
 
-            for svc in service_request.services.iter().chain(service_request.dns_services.iter()) {
+            for svc in service_request
+                .services
+                .iter()
+                .chain(service_request.dns_services.iter())
+            {
                 let kind = match svc.service_type {
                     ServiceType::Nexus { .. } => NexusTypes::ServiceKind::Nexus,
-                    ServiceType::InternalDns { .. } => NexusTypes::ServiceKind::InternalDNS,
+                    ServiceType::InternalDns { .. } => {
+                        NexusTypes::ServiceKind::InternalDNS
+                    }
                     ServiceType::Oximeter => NexusTypes::ServiceKind::Oximeter,
                 };
 
-                services.push(
-                    NexusTypes::ServicePutRequest {
-                        service_id: svc.id,
-                        sled_id,
-                        // TODO: Should this be a vec, or a single value?
-                        address: svc.addresses[0],
-                        kind,
-                    }
-                )
+                services.push(NexusTypes::ServicePutRequest {
+                    service_id: svc.id,
+                    sled_id,
+                    // TODO: Should this be a vec, or a single value?
+                    address: svc.addresses[0],
+                    kind,
+                })
             }
 
             for dataset in service_request.datasets.iter() {
-                datasets.push(
-                    NexusTypes::DatasetCreateRequest {
-                        zpool_id: dataset.zpool_id,
-                        dataset_id: dataset.id,
-                        request: NexusTypes::DatasetPutRequest {
-                            address: dataset.address.to_string(),
-                            kind: dataset.dataset_kind.clone().into()
-                        },
-                    }
-                )
+                datasets.push(NexusTypes::DatasetCreateRequest {
+                    zpool_id: dataset.zpool_id,
+                    dataset_id: dataset.id,
+                    request: NexusTypes::DatasetPutRequest {
+                        address: dataset.address.to_string(),
+                        kind: dataset.dataset_kind.clone().into(),
+                    },
+                })
             }
         }
 
-        let request = NexusTypes::RackInitializationRequest {
-            services,
-            datasets,
-        };
+        let request =
+            NexusTypes::RackInitializationRequest { services, datasets };
 
         let notify_nexus = || async {
-            nexus_client.rack_initialization_complete(
-                &sled_plan.rack_id,
-                &request,
-            )
-            .await
-            .map_err(BackoffError::transient)
+            nexus_client
+                .rack_initialization_complete(&sled_plan.rack_id, &request)
+                .await
+                .map_err(BackoffError::transient)
         };
         let log_failure = |err, _| {
             info!(self.log, "Failed to handoff to nexus: {err}");
         };
 
-        retry_notify(
-            internal_service_policy(),
-            notify_nexus,
-            log_failure,
-        ).await?;
+        retry_notify(internal_service_policy(), notify_nexus, log_failure)
+            .await?;
 
         info!(self.log, "Handoff to Nexus is complete");
         Ok(())
@@ -533,15 +516,13 @@ impl ServiceInner {
                 "RSS configuration looks like it has already been applied",
             );
 
-            let sled_plan = SledPlan::load(&self.log).await?
+            let sled_plan = SledPlan::load(&self.log)
+                .await?
                 .expect("Sled plan should exist if completed marker exists");
-            let service_plan = ServicePlan::load(&self.log).await?
+            let service_plan = ServicePlan::load(&self.log)
+                .await?
                 .expect("Service plan should exist if completed marker exists");
-            self.handoff_to_nexus(
-                &config,
-                &sled_plan,
-                &service_plan
-            ).await?;
+            self.handoff_to_nexus(&config, &sled_plan, &service_plan).await?;
 
             return Ok(());
         } else {
@@ -553,7 +534,9 @@ impl ServiceInner {
         // - Enough peers to create a new plan (if one does not exist)
         let maybe_sled_plan = SledPlan::load(&self.log).await?;
         let expectation = if let Some(plan) = &maybe_sled_plan {
-            PeerExpectation::LoadOldPlan(plan.sleds.keys().map(|a| *a.ip()).collect())
+            PeerExpectation::LoadOldPlan(
+                plan.sleds.keys().map(|a| *a.ip()).collect(),
+            )
         } else {
             PeerExpectation::CreateNewPlan(MINIMUM_SLED_COUNT)
         };
@@ -577,37 +560,38 @@ impl ServiceInner {
         // Forward the sled initialization requests to our sled-agent.
         local_bootstrap_agent
             .initialize_sleds(
-                plan.sleds.iter()
+                plan.sleds
+                    .iter()
                     .map(|(bootstrap_addr, initialization_request)| {
-                        (
-                            *bootstrap_addr,
-                            initialization_request.clone(),
-                        )
+                        (*bootstrap_addr, initialization_request.clone())
                     })
                     .collect(),
             )
             .await
             .map_err(SetupServiceError::SledInitialization)?;
 
-        let sled_addresses: Vec<_> = plan.sleds.iter()
+        let sled_addresses: Vec<_> = plan
+            .sleds
+            .iter()
             .map(|(_, initialization_request)| {
-                get_sled_address(
-                    initialization_request.subnet,
-                )
+                get_sled_address(initialization_request.subnet)
             })
             .collect();
 
         // Now that sled agents have been initialized, we can create
         // a service allocation plan.
-        let service_plan = if let Some(plan) = ServicePlan::load(&self.log).await? {
-            plan
-        } else {
-            ServicePlan::create(&self.log, &config, &sled_addresses).await?
-        };
+        let service_plan =
+            if let Some(plan) = ServicePlan::load(&self.log).await? {
+                plan
+            } else {
+                ServicePlan::create(&self.log, &config, &sled_addresses).await?
+            };
 
         // Set up internal DNS services.
         futures::future::join_all(
-            service_plan.services.iter()
+            service_plan
+                .services
+                .iter()
                 .filter(|(_, service_request)| {
                     // Only send requests to sleds that are supposed to be running
                     // DNS services.
@@ -638,11 +622,8 @@ impl ServiceInner {
         // Issue the crdb initialization requests to all sleds.
         futures::future::join_all(service_plan.services.iter().map(
             |(sled_address, services_request)| async move {
-                self.initialize_crdb(
-                    *sled_address,
-                    &services_request.datasets,
-                )
-                .await?;
+                self.initialize_crdb(*sled_address, &services_request.datasets)
+                    .await?;
                 Ok(())
             },
         ))
@@ -687,9 +668,7 @@ impl ServiceInner {
         // the requests on the next iteration.
         tokio::fs::File::create(&rss_completed_plan_path).await.map_err(
             |err| SetupServiceError::Io {
-                message: format!(
-                    "creating {rss_completed_plan_path:?}"
-                ),
+                message: format!("creating {rss_completed_plan_path:?}"),
                 err,
             },
         )?;
@@ -697,11 +676,7 @@ impl ServiceInner {
         // At this point, even if we reboot, we must not try to manage sleds,
         // services, or DNS records.
 
-        self.handoff_to_nexus(
-            &config,
-            &plan,
-            &service_plan
-        ).await?;
+        self.handoff_to_nexus(&config, &plan, &service_plan).await?;
 
         // TODO Questions to consider:
         // - What if a sled comes online *right after* this setup? How does

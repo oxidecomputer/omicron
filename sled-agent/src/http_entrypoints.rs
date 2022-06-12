@@ -66,11 +66,7 @@ async fn zpools_get(
     rqctx: Arc<RequestContext<SledAgent>>,
 ) -> Result<HttpResponseOk<Vec<Zpool>>, HttpError> {
     let sa = rqctx.context();
-    Ok(HttpResponseOk(
-        sa.zpools_get()
-            .await
-            .map_err(|e| Error::from(e))?
-    ))
+    Ok(HttpResponseOk(sa.zpools_get().await.map_err(|e| Error::from(e))?))
 }
 
 #[endpoint {

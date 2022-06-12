@@ -175,21 +175,6 @@ impl DataStore {
             })
     }
 
-    pub async fn rack_lookup_manual(
-        &self,
-        _opctx: &OpContext,
-        rack_id: Uuid,
-    ) -> LookupResult<Rack> {
-        use db::schema::rack::dsl;
-
-        dsl::rack
-            .filter(dsl::id.eq(rack_id))
-            .select(Rack::as_select())
-            .get_result_async(self.pool())
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
-    }
-
     /// Update a rack to mark that it has been initialized
     pub async fn rack_set_initialized(
         &self,
@@ -202,8 +187,16 @@ impl DataStore {
 
         #[derive(Debug)]
         enum RackInitError {
-            ServiceInsert { err: SyncInsertError, sled_id: Uuid, svc_id: Uuid },
-            DatasetInsert { err: SyncInsertError, zpool_id: Uuid, dataset_id: Uuid },
+            ServiceInsert {
+                err: SyncInsertError,
+                sled_id: Uuid,
+                svc_id: Uuid,
+            },
+            DatasetInsert {
+                err: SyncInsertError,
+                zpool_id: Uuid,
+                dataset_id: Uuid,
+            },
             RackUpdate(diesel::result::Error),
         }
         type TxnError = TransactionError<RackInitError>;
@@ -2948,6 +2941,7 @@ impl DataStore {
         let builtin_users = [
             // Note: "db_init" is also a builtin user, but that one by necessity
             // is created with the database.
+            &*authn::USER_BACKGROUND_WORK,
             &*authn::USER_INTERNAL_API,
             &*authn::USER_INTERNAL_READ,
             &*authn::USER_EXTERNAL_AUTHN,

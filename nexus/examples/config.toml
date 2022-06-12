@@ -36,6 +36,7 @@ address = "[::1]:8123"
 [runtime]
 # Identifier for this instance of Nexus
 id = "e6bff1ff-24fb-49dc-a54e-c6a350cd4d6c"
+rack_id = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc"
 
 [runtime.dropshot_external]
 # IP address and TCP port on which to listen for the external API

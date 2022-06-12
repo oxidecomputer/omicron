@@ -88,7 +88,8 @@ impl Server {
 
         let ctxlog = log.new(o!("component" => "ServerContext"));
 
-        let apictx = ServerContext::new(config.runtime.rack_id, ctxlog, &config).await?;
+        let apictx =
+            ServerContext::new(config.runtime.rack_id, ctxlog, &config).await?;
 
         let http_server_starter_internal = dropshot::HttpServerStarter::new(
             &config.runtime.dropshot_internal,
@@ -100,6 +101,15 @@ impl Server {
         let http_server_internal = http_server_starter_internal.start();
 
         // Wait until RSS handoff completes.
+        // TODO: This messes up the tests. Should we make this a config option?
+        //
+        // TODO: This actually raises a question; what triggers background tasks
+        // to execute?
+        //
+        //  - Perhaps the API is exposed to tests?
+        //  - Perhaps the invocation of that API is controlled by config
+        //  options?
+        /*
         let opctx = apictx.nexus.opctx_for_background();
         loop {
             let result = apictx.nexus.rack_lookup(&opctx, &config.runtime.rack_id).await;
@@ -116,6 +126,7 @@ impl Server {
             }
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         }
+        */
 
         let http_server_starter_external = dropshot::HttpServerStarter::new(
             &config.runtime.dropshot_external,

@@ -19,9 +19,7 @@ use authn::external::spoof::HttpAuthnSpoof;
 use authn::external::HttpAuthnScheme;
 use chrono::{DateTime, Duration, Utc};
 use internal_dns_client::names::SRV;
-use omicron_common::address::{
-    Ipv6Subnet, AZ_PREFIX, COCKROACH_PORT,
-};
+use omicron_common::address::{Ipv6Subnet, AZ_PREFIX, COCKROACH_PORT};
 use omicron_common::api::external::Error;
 use omicron_common::nexus_config;
 use omicron_common::postgres_config::PostgresConfigWithUrl;
@@ -154,7 +152,9 @@ impl ServerContext {
             nexus_config::Database::FromDns => {
                 info!(log, "Accessing DB url from DNS");
                 let response = resolver
-                    .lookup_ip(&SRV::Service("cockroachdb".to_string()).to_string())
+                    .lookup_ip(
+                        &SRV::Service("cockroachdb".to_string()).to_string(),
+                    )
                     .await
                     .map_err(|e| format!("Failed to lookup IP: {}", e))?;
                 let address = response.iter().next().ok_or_else(|| {
@@ -169,28 +169,13 @@ impl ServerContext {
             }
         };
         let pool = db::Pool::new(&db::Config { url });
-        let nexus =  Nexus::new_with_id(
+        let nexus = Nexus::new_with_id(
             rack_id,
             log.new(o!("component" => "nexus")),
             pool,
             config,
             Arc::clone(&authz),
         );
-
-        // Do not return until a rack exists in the DB with the provided UUID.
-        let populate_ctx = nexus.opctx_for_background();
-        loop {
-            let result = nexus.rack_insert(&populate_ctx, rack_id)
-                .await;
-            if let Err(e) = result {
-                info!(log, "Failed to create initial rack: {}", e);
-                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-            } else {
-                info!(log, "Rack with UUID {} exists in the database", rack_id);
-                nexus.rack_lookup(&populate_ctx, &rack_id).await.unwrap();
-                break;
-            }
-        }
 
         Ok(Arc::new(ServerContext {
             nexus,

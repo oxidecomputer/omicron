@@ -46,10 +46,16 @@ impl Server {
 
         let lazy_nexus_client = LazyNexusClient::new(client_log, *addr.ip());
 
-        let sled_agent =
-            SledAgent::new(&config, log.clone(), lazy_nexus_client.clone(), sled_id, addr, rack_id)
-                .await
-                .map_err(|e| e.to_string())?;
+        let sled_agent = SledAgent::new(
+            &config,
+            log.clone(),
+            lazy_nexus_client.clone(),
+            sled_id,
+            addr,
+            rack_id,
+        )
+        .await
+        .map_err(|e| e.to_string())?;
 
         let mut dropshot_config = dropshot::ConfigDropshot::default();
         dropshot_config.request_body_max_bytes = 1024 * 1024;
@@ -77,7 +83,8 @@ impl Server {
                     log,
                     "contacting server nexus, registering sled: {}", sled_id
                 );
-                let nexus_client = lazy_nexus_client.get()
+                let nexus_client = lazy_nexus_client
+                    .get()
                     .await
                     .map_err(|err| BackoffError::transient(err.to_string()))?;
                 nexus_client
@@ -97,7 +104,9 @@ impl Server {
                 );
             };
             retry_notify(
-                internal_service_policy_with_max(std::time::Duration::from_secs(5)),
+                internal_service_policy_with_max(
+                    std::time::Duration::from_secs(5),
+                ),
                 notify_nexus,
                 log_notification_failure,
             )

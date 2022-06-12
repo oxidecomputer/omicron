@@ -17,8 +17,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 fn rss_sled_plan_path() -> PathBuf {
-    Path::new(omicron_common::OMICRON_CONFIG_PATH)
-        .join("rss-sled-plan.toml")
+    Path::new(omicron_common::OMICRON_CONFIG_PATH).join("rss-sled-plan.toml")
 }
 
 /// Describes errors which may occur while generating a plan for sleds.
@@ -39,7 +38,6 @@ pub enum PlanError {
 pub struct Plan {
     pub rack_id: Uuid,
     pub sleds: HashMap<SocketAddrV6, SledAgentRequest>,
-
     // TODO: Consider putting the rack subnet here? This may be operator-driven
     // in the future, so it should exist in the "plan".
     //
@@ -48,30 +46,24 @@ pub struct Plan {
 }
 
 impl Plan {
-    pub async fn load(
-        log: &Logger,
-    ) -> Result<Option<Self>, PlanError> {
+    pub async fn load(log: &Logger) -> Result<Option<Self>, PlanError> {
         // If we already created a plan for this RSS to allocate
         // subnets/requests to sleds, re-use that existing plan.
         let rss_sled_plan_path = rss_sled_plan_path();
         if rss_sled_plan_path.exists() {
             info!(log, "RSS plan already created, loading from file");
 
-            let plan: Self =
-                toml::from_str(
-                    &tokio::fs::read_to_string(&rss_sled_plan_path).await.map_err(
-                        |err| PlanError::Io {
-                            message: format!(
-                                "Loading RSS plan {rss_sled_plan_path:?}"
-                            ),
-                            err,
-                        },
-                    )?,
-                )
-                .map_err(|err| PlanError::Toml {
-                    path: rss_sled_plan_path,
-                    err,
-                })?;
+            let plan: Self = toml::from_str(
+                &tokio::fs::read_to_string(&rss_sled_plan_path).await.map_err(
+                    |err| PlanError::Io {
+                        message: format!(
+                            "Loading RSS plan {rss_sled_plan_path:?}"
+                        ),
+                        err,
+                    },
+                )?,
+            )
+            .map_err(|err| PlanError::Toml { path: rss_sled_plan_path, err })?;
             Ok(Some(plan))
         } else {
             Ok(None)
@@ -88,10 +80,7 @@ impl Plan {
         let rack_id = Uuid::new_v4();
 
         let allocations = bootstrap_addrs.map(|(idx, bootstrap_addr)| {
-            info!(
-                log,
-                "Creating plan for the sled at {:?}", bootstrap_addr
-            );
+            info!(log, "Creating plan for the sled at {:?}", bootstrap_addr);
             let bootstrap_addr =
                 SocketAddrV6::new(bootstrap_addr, BOOTSTRAP_AGENT_PORT, 0, 0);
             let sled_subnet_index =
@@ -100,11 +89,7 @@ impl Plan {
 
             (
                 bootstrap_addr,
-                SledAgentRequest {
-                    id: Uuid::new_v4(),
-                    subnet,
-                    rack_id,
-                },
+                SledAgentRequest { id: Uuid::new_v4(), subnet, rack_id },
             )
         });
 
@@ -115,10 +100,7 @@ impl Plan {
             sleds.insert(addr, allocation);
         }
 
-        let plan = Self {
-            rack_id,
-            sleds,
-        };
+        let plan = Self { rack_id, sleds };
 
         // Once we've constructed a plan, write it down to durable storage.
         let serialized_plan =

@@ -15,9 +15,7 @@ use omicron_common::backoff::{
 };
 use serde::{Deserialize, Serialize};
 use sled_agent_client::{
-    Client as SledAgentClient,
-    Error as SledAgentError,
-    types as SledAgentTypes,
+    types as SledAgentTypes, Client as SledAgentClient, Error as SledAgentError,
 };
 use slog::Logger;
 use std::collections::HashMap;
@@ -33,8 +31,7 @@ const NEXUS_COUNT: usize = 1;
 const CRDB_COUNT: usize = 1;
 
 fn rss_service_plan_path() -> PathBuf {
-    Path::new(omicron_common::OMICRON_CONFIG_PATH)
-        .join("rss-service-plan.toml")
+    Path::new(omicron_common::OMICRON_CONFIG_PATH).join("rss-service-plan.toml")
 }
 
 /// Describes errors which may occur while generating a plan for services.
@@ -81,31 +78,27 @@ pub struct Plan {
 }
 
 impl Plan {
-    pub async fn load(
-        log: &Logger,
-    ) -> Result<Option<Plan>, PlanError>
-    {
+    pub async fn load(log: &Logger) -> Result<Option<Plan>, PlanError> {
         // If we already created a plan for this RSS to allocate
         // services to sleds, re-use that existing plan.
         let rss_service_plan_path = rss_service_plan_path();
         if rss_service_plan_path.exists() {
             info!(log, "RSS plan already created, loading from file");
 
-            let plan: Self =
-                toml::from_str(
-                    &tokio::fs::read_to_string(&rss_service_plan_path).await.map_err(
-                        |err| PlanError::Io {
-                            message: format!(
-                                "Loading RSS plan {rss_service_plan_path:?}"
-                            ),
-                            err,
-                        },
-                    )?,
-                )
-                .map_err(|err| PlanError::Toml {
-                    path: rss_service_plan_path,
-                    err,
-                })?;
+            let plan: Self = toml::from_str(
+                &tokio::fs::read_to_string(&rss_service_plan_path)
+                    .await
+                    .map_err(|err| PlanError::Io {
+                        message: format!(
+                            "Loading RSS plan {rss_service_plan_path:?}"
+                        ),
+                        err,
+                    })?,
+            )
+            .map_err(|err| PlanError::Toml {
+                path: rss_service_plan_path,
+                err,
+            })?;
             Ok(Some(plan))
         } else {
             Ok(None)
@@ -134,20 +127,21 @@ impl Plan {
                 .zpools_get()
                 .await
                 .map(|response| {
-                    response.into_inner()
+                    response
+                        .into_inner()
                         .into_iter()
                         .map(|zpool| zpool.id)
                         .collect()
                 })
                 .map_err(|err| {
-                    BackoffError::transient(
-                        PlanError::SledApi(err)
-                    )
+                    BackoffError::transient(PlanError::SledApi(err))
                 })?;
 
             if zpools.is_empty() {
                 return Err(BackoffError::transient(
-                    PlanError::SledInitialization("Awaiting zpools".to_string())
+                    PlanError::SledInitialization(
+                        "Awaiting zpools".to_string(),
+                    ),
                 ));
             }
 
@@ -156,12 +150,9 @@ impl Plan {
         let log_failure = |error, _| {
             warn!(log, "failed to get zpools"; "error" => ?error);
         };
-        let zpools = retry_notify(
-            internal_service_policy(),
-            get_zpools,
-            log_failure,
-        )
-        .await?;
+        let zpools =
+            retry_notify(internal_service_policy(), get_zpools, log_failure)
+                .await?;
 
         Ok(zpools[0])
     }
@@ -215,7 +206,8 @@ impl Plan {
             // The first enumerated sleds host the CRDB datasets, using
             // zpools described from the underlying config file.
             if idx < CRDB_COUNT {
-                let zpool_id = Self::get_a_zpool_from_sled(log, sled_address).await?;
+                let zpool_id =
+                    Self::get_a_zpool_from_sled(log, sled_address).await?;
 
                 let address = SocketAddrV6::new(
                     addr_alloc.next().expect("Not enough addrs"),
@@ -226,10 +218,9 @@ impl Plan {
                 request.datasets.push(DatasetEnsureBody {
                     id: Uuid::new_v4(),
                     zpool_id,
-                    dataset_kind:
-                        crate::params::DatasetKind::CockroachDb {
-                            all_addresses: vec![address],
-                        },
+                    dataset_kind: crate::params::DatasetKind::CockroachDb {
+                        all_addresses: vec![address],
+                    },
                     address,
                 });
             }
@@ -258,10 +249,7 @@ impl Plan {
                 });
             }
 
-            allocations.push((
-                sled_address,
-                request
-            ));
+            allocations.push((sled_address, request));
         }
 
         let mut services = std::collections::HashMap::new();
@@ -269,9 +257,7 @@ impl Plan {
             services.insert(addr, allocation);
         }
 
-        let plan = Self {
-            services
-        };
+        let plan = Self { services };
 
         // Once we've constructed a plan, write it down to durable storage.
         let serialized_plan =
@@ -316,4 +302,3 @@ impl AddressBumpAllocator {
         Some(self.last_addr)
     }
 }
-

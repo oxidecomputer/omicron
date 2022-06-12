@@ -10,6 +10,7 @@ use crate::config;
 use crate::context::OpContext;
 use crate::db;
 use crate::populate::populate_start;
+use crate::populate::PopulateArgs;
 use crate::populate::PopulateStatus;
 use crate::saga_interface::SagaContext;
 use anyhow::anyhow;
@@ -89,6 +90,9 @@ pub struct Nexus {
 
     /// Operational context used for external request authentication
     opctx_external_authn: OpContext,
+
+    /// Operational context used for Nexus-driven background tasks
+    opctx_background_work: OpContext,
 }
 
 // TODO Is it possible to make some of these operations more generic?  A
@@ -136,8 +140,13 @@ impl Nexus {
             authn::Context::internal_db_init(),
             Arc::clone(&db_datastore),
         );
-        let populate_status =
-            populate_start(populate_ctx, Arc::clone(&db_datastore));
+
+        let populate_args = PopulateArgs::new(rack_id);
+        let populate_status = populate_start(
+            populate_ctx,
+            Arc::clone(&db_datastore),
+            populate_args,
+        );
 
         let nexus = Nexus {
             id: config.runtime.id,
@@ -161,6 +170,12 @@ impl Nexus {
                 log.new(o!("component" => "ExternalAuthn")),
                 Arc::clone(&authz),
                 authn::Context::external_authn(),
+                Arc::clone(&db_datastore),
+            ),
+            opctx_background_work: OpContext::for_background(
+                log.new(o!("component" => "Background Work")),
+                Arc::clone(&authz),
+                authn::Context::internal_db_background(),
                 Arc::clone(&db_datastore),
             ),
         };
@@ -213,21 +228,14 @@ impl Nexus {
         }
     }
 
-    /// Returns an [`OpContext`] used for background tasks.
-    // TODO: dap@ recommends using a different user for this, other than
-    // "internal_db_init".
-    pub fn opctx_for_background(&self) -> OpContext {
-        OpContext::for_background(
-            self.log.new(o!("component" => "Background Work")),
-            Arc::clone(&self.authz),
-            authn::Context::internal_db_init(),
-            Arc::clone(&self.datastore()),
-        )
-    }
-
     /// Returns an [`OpContext`] used for authenticating external requests
     pub fn opctx_external_authn(&self) -> &OpContext {
         &self.opctx_external_authn
+    }
+
+    /// Returns an [`OpContext`] used for background tasks.
+    pub fn opctx_for_background(&self) -> &OpContext {
+        &self.opctx_background_work
     }
 
     /// Used as the body of a "stub" endpoint -- one that's currently

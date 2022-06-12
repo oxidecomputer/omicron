@@ -30,6 +30,7 @@ pub mod silos;
 
 pub use crate::db::fixed_data::silo_user::USER_TEST_PRIVILEGED;
 pub use crate::db::fixed_data::silo_user::USER_TEST_UNPRIVILEGED;
+pub use crate::db::fixed_data::user_builtin::USER_BACKGROUND_WORK;
 pub use crate::db::fixed_data::user_builtin::USER_DB_INIT;
 pub use crate::db::fixed_data::user_builtin::USER_EXTERNAL_AUTHN;
 pub use crate::db::fixed_data::user_builtin::USER_INTERNAL_API;
@@ -170,6 +171,11 @@ impl Context {
         Context::context_for_builtin_user(USER_DB_INIT.id)
     }
 
+    /// Returns an authenticated context for Nexus-driven db work.
+    pub fn internal_db_background() -> Context {
+        Context::context_for_builtin_user(USER_BACKGROUND_WORK.id)
+    }
+
     fn context_for_builtin_user(user_builtin_id: Uuid) -> Context {
         Context {
             kind: Kind::Authenticated(Details {
@@ -213,6 +219,7 @@ impl Context {
 #[cfg(test)]
 mod test {
     use super::Context;
+    use super::USER_BACKGROUND_WORK;
     use super::USER_DB_INIT;
     use super::USER_INTERNAL_API;
     use super::USER_INTERNAL_READ;
@@ -250,6 +257,10 @@ mod test {
         let authn = Context::internal_db_init();
         let actor = authn.actor().unwrap();
         assert_eq!(actor.actor_id(), USER_DB_INIT.id);
+
+        let authn = Context::internal_db_background();
+        let actor = authn.actor().unwrap();
+        assert_eq!(actor.actor_id(), USER_BACKGROUND_WORK.id);
 
         let authn = Context::internal_saga_recovery();
         let actor = authn.actor().unwrap();

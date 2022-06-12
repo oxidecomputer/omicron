@@ -719,7 +719,7 @@ impl Instance {
 mod test {
     use super::*;
     use crate::illumos::dladm::Etherstub;
-    use crate::mocks::MockNexusClient;
+    use crate::nexus::LazyNexusClient;
     use crate::opte::OptePortAllocator;
     use crate::params::InstanceStateRequested;
     use chrono::Utc;
@@ -792,7 +792,8 @@ mod test {
             Etherstub("mylink".to_string()),
         );
         let port_allocator = OptePortAllocator::new();
-        let nexus_client = MockNexusClient::default();
+        let lazy_nexus_client =
+            LazyNexusClient::new(log.clone(), std::net::Ipv6Addr::LOCALHOST);
 
         let inst = Instance::new(
             log.clone(),
@@ -803,7 +804,7 @@ mod test {
             ),
             port_allocator,
             new_initial_instance(),
-            Arc::new(nexus_client),
+            lazy_nexus_client,
         )
         .unwrap();
 

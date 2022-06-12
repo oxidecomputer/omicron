@@ -103,9 +103,8 @@ pub async fn test_setup_with_config(
         nexus_config::Database::FromUrl { url: database.pg_config().clone() };
     config.pkg.timeseries_db.address.set_port(clickhouse.port());
 
-    let server = omicron_nexus::Server::start(&config, &logctx.log)
-        .await
-        .unwrap();
+    let server =
+        omicron_nexus::Server::start(&config, &logctx.log).await.unwrap();
     server
         .apictx
         .nexus

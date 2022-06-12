@@ -5,5 +5,5 @@
 //! Rack Setup Service
 
 pub mod config;
-pub mod service;
 mod plan;
+pub mod service;

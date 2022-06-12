@@ -522,9 +522,7 @@ async fn ensure_running_zone(
     }
 }
 
-type NotifyFut = dyn futures::Future<
-        Output = Result<(), String>
-    > + Send;
+type NotifyFut = dyn futures::Future<Output = Result<(), String>> + Send;
 
 #[derive(Debug)]
 struct NewFilesystemRequest {
@@ -639,10 +637,14 @@ impl StorageWorker {
                 lazy_nexus_client
                     .get()
                     .await
-                    .map_err(|e| backoff::BackoffError::transient(e.to_string()))?
+                    .map_err(|e| {
+                        backoff::BackoffError::transient(e.to_string())
+                    })?
                     .zpool_put(&sled_id, &pool_id, &zpool_request)
                     .await
-                    .map_err(|e| backoff::BackoffError::transient(e.to_string()))?;
+                    .map_err(|e| {
+                        backoff::BackoffError::transient(e.to_string())
+                    })?;
                 Ok(())
             }
         };
@@ -684,10 +686,14 @@ impl StorageWorker {
                     lazy_nexus_client
                         .get()
                         .await
-                        .map_err(|e| backoff::BackoffError::transient(e.to_string()))?
+                        .map_err(|e| {
+                            backoff::BackoffError::transient(e.to_string())
+                        })?
                         .dataset_put(&pool_id, &id, &request)
                         .await
-                        .map_err(|e| backoff::BackoffError::transient(e.to_string()))?;
+                        .map_err(|e| {
+                            backoff::BackoffError::transient(e.to_string())
+                        })?;
                 }
 
                 Ok(())
@@ -955,11 +961,10 @@ impl StorageManager {
 
     pub async fn get_zpools(&self) -> Result<Vec<crate::params::Zpool>, Error> {
         let pools = self.pools.lock().await;
-        Ok(pools.keys().map(|zpool| {
-            crate::params::Zpool {
-                id: zpool.id()
-            }
-        }).collect())
+        Ok(pools
+            .keys()
+            .map(|zpool| crate::params::Zpool { id: zpool.id() })
+            .collect())
     }
 
     pub async fn upsert_filesystem(

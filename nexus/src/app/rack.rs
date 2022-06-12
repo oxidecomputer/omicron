@@ -24,11 +24,6 @@ impl super::Nexus {
         self.db_datastore.rack_list(&opctx, pagparams).await
     }
 
-    // TODO: Use this, instead of the manual one.
-    //
-    // Note that this will require insertion of the rack to occur
-    // during the "populate" steps.
-    /*
     pub async fn rack_lookup(
         &self,
         opctx: &OpContext,
@@ -39,15 +34,6 @@ impl super::Nexus {
             .fetch()
             .await?;
         Ok(db_rack)
-    }
-    */
-
-    pub async fn rack_lookup(
-        &self,
-        opctx: &OpContext,
-        rack_id: &Uuid,
-    ) -> LookupResult<db::model::Rack> {
-        self.db_datastore.rack_lookup_manual(opctx, *rack_id).await
     }
 
     /// Ensures that a rack exists in the DB.
@@ -76,7 +62,8 @@ impl super::Nexus {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
         // Convert from parameter -> DB type.
-        let services: Vec<_> = request.services
+        let services: Vec<_> = request
+            .services
             .into_iter()
             .map(|svc| {
                 db::model::Service::new(
@@ -88,7 +75,8 @@ impl super::Nexus {
             })
             .collect();
 
-        let datasets: Vec<_> = request.datasets
+        let datasets: Vec<_> = request
+            .datasets
             .into_iter()
             .map(|dataset| {
                 db::model::Dataset::new(

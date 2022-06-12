@@ -347,7 +347,9 @@ mod test {
             Config {
                 runtime: RuntimeConfig {
                     id: "28b90dc4-c22a-65ba-f49a-f051fe01208f".parse().unwrap(),
-                    rack_id: "38b90dc4-c22a-65ba-f49a-f051fe01208f".parse().unwrap(),
+                    rack_id: "38b90dc4-c22a-65ba-f49a-f051fe01208f"
+                        .parse()
+                        .unwrap(),
                     dropshot_external: ConfigDropshot {
                         bind_address: "10.1.2.3:4567"
                             .parse::<SocketAddr>()

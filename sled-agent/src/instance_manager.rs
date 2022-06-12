@@ -199,7 +199,7 @@ mod test {
     use crate::illumos::dladm::Etherstub;
     use crate::illumos::{dladm::MockDladm, zone::MockZones};
     use crate::instance::MockInstance;
-    use crate::mocks::MockNexusClient;
+    use crate::nexus::LazyNexusClient;
     use crate::params::InstanceStateRequested;
     use chrono::Utc;
     use omicron_common::api::external::{
@@ -246,7 +246,8 @@ mod test {
     #[serial_test::serial]
     async fn ensure_instance() {
         let log = logger();
-        let nexus_client = Arc::new(MockNexusClient::default());
+        let lazy_nexus_client =
+            LazyNexusClient::new(log.clone(), std::net::Ipv6Addr::LOCALHOST);
 
         // Creation of the instance manager incurs some "global" system
         // checks: cleanup of existing zones + vnics.
@@ -259,7 +260,7 @@ mod test {
 
         let im = InstanceManager::new(
             log,
-            nexus_client,
+            lazy_nexus_client,
             Etherstub("mylink".to_string()),
             std::net::Ipv6Addr::new(
                 0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
@@ -329,7 +330,8 @@ mod test {
     #[serial_test::serial]
     async fn ensure_instance_repeatedly() {
         let log = logger();
-        let nexus_client = Arc::new(MockNexusClient::default());
+        let lazy_nexus_client =
+            LazyNexusClient::new(log.clone(), std::net::Ipv6Addr::LOCALHOST);
 
         // Instance Manager creation.
 
@@ -341,7 +343,7 @@ mod test {
 
         let im = InstanceManager::new(
             log,
-            nexus_client,
+            lazy_nexus_client,
             Etherstub("mylink".to_string()),
             std::net::Ipv6Addr::new(
                 0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
