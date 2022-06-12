@@ -66,23 +66,27 @@ pub fn run_openapi_internal() -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
-/// Packages up a [`Nexus`], running both external and internal HTTP API servers
-/// wired up to Nexus
-pub struct Server {
+/// A partially-initialized Nexus server, which exposes an internal interface,
+/// but is not ready to receive external requests.
+pub struct InternalServer<'a> {
     /// shared state used by API request handlers
     pub apictx: Arc<ServerContext>,
-    /// dropshot server for external API
-    pub http_server_external: dropshot::HttpServer<Arc<ServerContext>>,
     /// dropshot server for internal API
     pub http_server_internal: dropshot::HttpServer<Arc<ServerContext>>,
+
+    config: &'a Config,
+    log: Logger,
 }
 
-impl Server {
-    /// Start a nexus server.
+impl<'a> InternalServer<'a> {
+    /// Creates a Nexus instance with only the internal API exposed.
+    ///
+    /// This is often used as an argument when creating a [`Server`],
+    /// which also exposes the external API.
     pub async fn start(
-        config: &Config,
+        config: &'a Config,
         log: &Logger,
-    ) -> Result<Server, String> {
+    ) -> Result<InternalServer<'a>, String> {
         let log = log.new(o!("name" => config.runtime.id.to_string()));
         info!(log, "setting up nexus server");
 
@@ -100,33 +104,67 @@ impl Server {
         .map_err(|error| format!("initializing internal server: {}", error))?;
         let http_server_internal = http_server_starter_internal.start();
 
+        Ok(Self { apictx, http_server_internal, config, log })
+    }
+}
+
+/// Packages up a [`Nexus`], running both external and internal HTTP API servers
+/// wired up to Nexus
+pub struct Server {
+    /// shared state used by API request handlers
+    pub apictx: Arc<ServerContext>,
+    /// dropshot server for external API
+    pub http_server_external: dropshot::HttpServer<Arc<ServerContext>>,
+    /// dropshot server for internal API
+    pub http_server_internal: dropshot::HttpServer<Arc<ServerContext>>,
+}
+
+impl Server {
+    pub async fn start<'a>(
+        internal: InternalServer<'a>,
+    ) -> Result<Self, String> {
+        let apictx = internal.apictx;
+        let http_server_internal = internal.http_server_internal;
+        let log = internal.log;
+        let config = internal.config;
+
         // Wait until RSS handoff completes.
-        // TODO: This messes up the tests. Should we make this a config option?
-        //
-        // TODO: This actually raises a question; what triggers background tasks
-        // to execute?
-        //
-        //  - Perhaps the API is exposed to tests?
-        //  - Perhaps the invocation of that API is controlled by config
-        //  options?
-        /*
         let opctx = apictx.nexus.opctx_for_background();
         loop {
-            let result = apictx.nexus.rack_lookup(&opctx, &config.runtime.rack_id).await;
+            let result =
+                apictx.nexus.rack_lookup(&opctx, &config.runtime.rack_id).await;
             match result {
                 Ok(rack) => {
                     if rack.initialized {
                         break;
                     }
-                    info!(log, "Still waiting for rack initialization: {:?}", rack);
-                },
+                    info!(
+                        log,
+                        "Still waiting for rack initialization: {:?}", rack
+                    );
+                }
                 Err(e) => {
                     warn!(log, "Cannot look up rack: {}", e);
-                },
+                }
             }
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         }
-        */
+
+        // TODO: What triggers background tasks to execute?
+        //
+        //  - Perhaps the API is exposed to tests?
+        //  - Perhaps the invocation of that API is controlled by config
+        //  options?
+        //
+        // TODO: services we need to start:
+        //
+        // Datasets:
+        // - Crucible (as a dataset on each unique zpool)
+        // - Clickhouse (as a dataset on a zpool)
+        // - CRDB (prolly just check it exists, period)
+        //
+        // - Oximeter (as a service)
+        // - Nexus (again, maybe just check it exists at all)
 
         let http_server_starter_external = dropshot::HttpServerStarter::new(
             &config.runtime.dropshot_external,
@@ -193,7 +231,8 @@ pub async fn run_server(config: &Config) -> Result<(), String> {
     } else {
         debug!(log, "registered DTrace probes");
     }
-    let server = Server::start(config, &log).await?;
+    let internal_server = InternalServer::start(config, &log).await?;
+    let server = Server::start(internal_server).await?;
     server.register_as_producer().await;
     server.wait_for_finish().await
 }
