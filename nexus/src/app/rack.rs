@@ -77,7 +77,7 @@ impl super::Nexus {
         let services: Vec<_> = services
             .into_iter()
             .map(|svc| {
-                db::model::Service::new(
+                db::model::ServiceInstance::new(
                     svc.service_id,
                     svc.sled_id,
                     svc.address,

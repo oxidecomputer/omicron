@@ -55,7 +55,7 @@ use crate::db::{
         Instance, InstanceRuntimeState, Name, NetworkInterface, Organization,
         OrganizationUpdate, OximeterInfo, ProducerEndpoint, Project,
         ProjectUpdate, Rack, Region, RoleAssignment, RoleBuiltin, RouterRoute,
-        RouterRouteUpdate, Service, Silo, SiloUser, Sled, SshKey,
+        RouterRouteUpdate, ServiceInstance, Silo, SiloUser, Sled, SshKey,
         UpdateAvailableArtifact, UserBuiltin, Volume, Vpc, VpcFirewallRule,
         VpcRouter, VpcRouterUpdate, VpcSubnet, VpcSubnetUpdate, VpcUpdate,
         Zpool,
@@ -180,7 +180,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         rack_id: Uuid,
-        services: Vec<Service>,
+        services: Vec<ServiceInstance>,
     ) -> UpdateResult<Rack> {
         use db::schema::rack::dsl as rack_dsl;
         use db::schema::service::dsl as service_dsl;
@@ -212,7 +212,7 @@ impl DataStore {
                 // Otherwise, insert services and set rack.initialized = true.
                 for svc in services {
                     let sled_id = svc.sled_id;
-                    <Sled as DatastoreCollection<Service>>::insert_resource(
+                    <Sled as DatastoreCollection<ServiceInstance>>::insert_resource(
                         sled_id,
                         diesel::insert_into(service_dsl::service)
                             .values(svc.clone())
@@ -403,15 +403,15 @@ impl DataStore {
     pub async fn service_upsert(
         &self,
         opctx: &OpContext,
-        service: Service,
-    ) -> CreateResult<Service> {
+        service_instance: ServiceInstance,
+    ) -> CreateResult<ServiceInstance> {
         use db::schema::service::dsl;
 
-        let sled_id = service.sled_id;
+        let sled_id = service_instance.sled_id;
         Sled::insert_resource(
             sled_id,
             diesel::insert_into(dsl::service)
-                .values(service.clone())
+                .values(service_instance.clone())
                 .on_conflict(dsl::id)
                 .do_update()
                 .set((
@@ -433,7 +433,7 @@ impl DataStore {
                     e,
                     ErrorHandler::Conflict(
                         ResourceType::Service,
-                        &service.id().to_string(),
+                        &service_instance.id().to_string(),
                     ),
                 )
             }
@@ -4403,12 +4403,15 @@ mod test {
         let addr = Ipv6Addr::LOCALHOST;
         let kind = ServiceKind::Nexus;
 
-        let service = Service::new(service_id, sled_id, addr, kind);
-        let result =
-            datastore.service_upsert(&opctx, service.clone()).await.unwrap();
-        assert_eq!(service.id(), result.id());
-        assert_eq!(service.ip, result.ip);
-        assert_eq!(service.kind, result.kind);
+        let service_instance =
+            ServiceInstance::new(service_id, sled_id, addr, kind);
+        let result = datastore
+            .service_upsert(&opctx, service_instance.clone())
+            .await
+            .unwrap();
+        assert_eq!(service_instance.id(), result.id());
+        assert_eq!(service_instance.ip, result.ip);
+        assert_eq!(service_instance.kind, result.kind);
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();

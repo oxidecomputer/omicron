@@ -162,8 +162,9 @@ impl super::Nexus {
             "service_id" => id.to_string(),
             "address" => address.to_string(),
         );
-        let service = db::model::Service::new(id, sled_id, address, kind);
-        self.db_datastore.service_upsert(opctx, service).await?;
+        let service_instance =
+            db::model::ServiceInstance::new(id, sled_id, address, kind);
+        self.db_datastore.service_upsert(opctx, service_instance).await?;
         Ok(())
     }
 }

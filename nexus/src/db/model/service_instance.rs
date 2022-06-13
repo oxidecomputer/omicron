@@ -12,16 +12,16 @@ use uuid::Uuid;
 /// Representation of services which may run on Sleds.
 #[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
 #[diesel(table_name = service)]
-pub struct Service {
+pub struct ServiceInstance {
     #[diesel(embed)]
-    identity: ServiceIdentity,
+    identity: ServiceInstanceIdentity,
 
     pub sled_id: Uuid,
     pub ip: ipv6::Ipv6Addr,
     pub kind: ServiceKind,
 }
 
-impl Service {
+impl ServiceInstance {
     pub fn new(
         id: Uuid,
         sled_id: Uuid,
@@ -29,7 +29,7 @@ impl Service {
         kind: ServiceKind,
     ) -> Self {
         Self {
-            identity: ServiceIdentity::new(id),
+            identity: ServiceInstanceIdentity::new(id),
             sled_id,
             ip: addr.into(),
             kind,

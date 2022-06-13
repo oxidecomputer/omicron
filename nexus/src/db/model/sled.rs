@@ -66,7 +66,7 @@ impl DatastoreCollection<super::Zpool> for Sled {
     type CollectionIdColumn = zpool::dsl::sled_id;
 }
 
-impl DatastoreCollection<super::Service> for Sled {
+impl DatastoreCollection<super::ServiceInstance> for Sled {
     type CollectionId = Uuid;
     type GenerationNumberColumn = sled::dsl::rcgen;
     type CollectionTimeDeletedColumn = sled::dsl::time_deleted;
