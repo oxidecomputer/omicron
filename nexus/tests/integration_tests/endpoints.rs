@@ -225,6 +225,15 @@ lazy_static! {
             subnet_name: DEMO_VPC_SUBNET_NAME.clone(),
             ip: None,
         };
+    pub static ref DEMO_INSTANCE_NIC_PUT: params::NetworkInterfaceUpdate = {
+        params::NetworkInterfaceUpdate {
+            identity: IdentityMetadataUpdateParams {
+                name: None,
+                description: Some(String::from("an updated description")),
+            },
+            make_primary: false,
+        }
+    };
 }
 
 // Separate lazy_static! blocks to avoid hitting some recursion limit when compiling
@@ -875,6 +884,9 @@ lazy_static! {
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Delete,
+                AllowedMethod::Put(
+                    serde_json::to_value(&*DEMO_INSTANCE_NIC_PUT).unwrap()
+                ),
             ],
         },
 

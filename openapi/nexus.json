@@ -2282,6 +2282,79 @@
           }
         }
       },
+      "put": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "Update information about an instance's network interface",
+        "operationId": "instance_network_interfaces_put_interface",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "interface_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "organization_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "project_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NetworkInterfaceUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NetworkInterface"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
       "delete": {
         "tags": [
           "instances"
@@ -7010,6 +7083,29 @@
         "required": [
           "items"
         ]
+      },
+      "NetworkInterfaceUpdate": {
+        "description": "Parameters for updating a [`NetworkInterface`](omicron_common::api::external::NetworkInterface).\n\nNote that modifying IP addresses for an interface is not yet supported, a new interface must be created instead.",
+        "type": "object",
+        "properties": {
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "make_primary": {
+            "description": "Make a secondary interface the instance's primary interface.\n\nIf applied to a secondary interface, that interface will become the primary on the next reboot of the instance. Note that this may have implications for routing between instances, as the new primary interface will be on a distinct subnet from the previous primary interface.\n\nNote that this can only be used to select a new primary interface for an instance. Requests to change the primary interface into a secondary will return an error.",
+            "default": false,
+            "type": "boolean"
+          },
+          "name": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          }
+        }
       },
       "Organization": {
         "description": "Client view of an [`Organization`]",

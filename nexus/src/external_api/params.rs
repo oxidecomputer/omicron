@@ -284,6 +284,33 @@ pub struct NetworkInterfaceCreate {
     pub ip: Option<IpAddr>,
 }
 
+/// Parameters for updating a
+/// [`NetworkInterface`](omicron_common::api::external::NetworkInterface).
+///
+/// Note that modifying IP addresses for an interface is not yet supported, a
+/// new interface must be created instead.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct NetworkInterfaceUpdate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParams,
+
+    /// Make a secondary interface the instance's primary interface.
+    ///
+    /// If applied to a secondary interface, that interface will become the
+    /// primary on the next reboot of the instance. Note that this may have
+    /// implications for routing between instances, as the new primary interface
+    /// will be on a distinct subnet from the previous primary interface.
+    ///
+    /// Note that this can only be used to select a new primary interface for an
+    /// instance. Requests to change the primary interface into a secondary will
+    /// return an error.
+    // TODO-completeness TODO-docs: When we get there, this should note that a
+    // change in the primary interface will result in changes to the DNS records
+    // for the instance, though not the name.
+    #[serde(default)]
+    pub make_primary: bool,
+}
+
 // INSTANCES
 
 pub const MIN_MEMORY_SIZE_BYTES: u32 = 1 << 30; // 1 GiB

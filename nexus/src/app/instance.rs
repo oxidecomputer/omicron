@@ -751,6 +751,37 @@ impl super::Nexus {
         Ok(db_interface)
     }
 
+    /// Update a network interface for the given instance.
+    pub async fn network_interface_update(
+        &self,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
+        instance_name: &Name,
+        interface_name: &Name,
+        updates: params::NetworkInterfaceUpdate,
+    ) -> UpdateResult<db::model::NetworkInterface> {
+        let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .instance_name(instance_name)
+            .lookup_for(authz::Action::Modify)
+            .await?;
+        let (.., authz_interface) = LookupPath::new(opctx, &self.db_datastore)
+            .instance_id(authz_instance.id())
+            .network_interface_name(interface_name)
+            .lookup_for(authz::Action::Modify)
+            .await?;
+        self.db_datastore
+            .instance_update_network_interface(
+                opctx,
+                &authz_instance,
+                &authz_interface,
+                db::model::NetworkInterfaceUpdate::from(updates),
+            )
+            .await
+    }
+
     /// Delete a network interface from the provided instance.
     ///
     /// Note that the primary interface for an instance cannot be deleted if
