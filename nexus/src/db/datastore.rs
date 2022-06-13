@@ -1956,36 +1956,20 @@ impl DataStore {
     ) -> UpdateResult<NetworkInterface> {
         use crate::db::schema::network_interface::dsl;
 
-        // This database operation is surprisingly subtle, and I don't believe
-        // it's possible to express in a single query.
+        // This database operation is surprisingly subtle. It's possible to
+        // express this in a single query, with multiple common-table
+        // expressions for the updated rows. For example, if we're setting a new
+        // primary interface, we need to set the `is_primary` column to false
+        // for the current primary, and then set it to true, along with any
+        // other updates, for the new primary.
         //
-        // First, we need to check whether the instance is stopped. We do that
-        // in other cases with a CTE designed to fail if that's not true, but
-        // we're forced into a transaction by other considerations below.
+        // That's feasible, but there's a CRDB bug that affects some queries
+        // with multiple update statements. It's possible that this query isn't
+        // in that bucket, but we'll still avoid it for now. Instead, we'll bite
+        // the bullet and use a transaction.
         //
-        // More importantly, setting a new primary interface is a pretty complex
-        // operation, and depends on the identity of the target. There are four
-        // cases, the truth table for (make_primary, target_is_primary)
-        //  - (false, _) => In this case, we only need to update a single row,
-        //  and we can apply the updates requested, minus the make_primary
-        //  value, unconditionally. This is pretty straightforward.
-        //
-        //  - (true, true) => This is also pretty simple, since we can just
-        //  apply the updates directly.
-        //
-        //  - (true, false) => This one is complicated. We need to apply all
-        //  updates to the target row, and then set the `is_primary` column of
-        //  the old primary to false. This isn't a single query.
-        //
-        //  The issue is that for the latter two cases, we don't know which
-        //  we're taking until we make a query to the database. We need to
-        //  figure out if the target is the primary first, and then apply one or
-        //  two updates accordingly.
-        //
-        //  This is all pretty complicated, with a number of branches and
-        //  additional consistency checks, such as the fact that the instance
-        //  has to be stopped. For now, we'll just bite the bullet and run this
-        //  all in a transaction.
+        // See https://github.com/oxidecomputer/omicron/issues/1204 for the
+        // issue tracking the work to move this into a CTE.
 
         // Build up some of the queries first, outside the transaction.
         //
