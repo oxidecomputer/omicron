@@ -93,4 +93,37 @@ impl super::Nexus {
 
         Ok(())
     }
+
+    /// Awaits the initialization of the rack.
+    ///
+    /// This will occur by either:
+    /// 1. RSS invoking the internal API, handing off responsibility, or
+    /// 2. Re-reading a value from the DB, if the rack has already been
+    ///    initialized.
+    ///
+    /// See RFD 278 for additional context.
+    pub async fn await_rack_initialization(
+        &self,
+        opctx: &OpContext
+    ) {
+        loop {
+            let result = self.rack_lookup(&opctx, &self.rack_id).await;
+            match result {
+                Ok(rack) => {
+                    if rack.initialized {
+                        return;
+                    }
+                    info!(
+                        self.log,
+                        "Still waiting for rack initialization: {:?}", rack
+                    );
+                }
+                Err(e) => {
+                    warn!(self.log, "Cannot look up rack: {}", e);
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        }
+
+    }
 }

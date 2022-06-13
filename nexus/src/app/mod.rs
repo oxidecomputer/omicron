@@ -14,6 +14,7 @@ use crate::populate::PopulateArgs;
 use crate::populate::PopulateStatus;
 use crate::saga_interface::SagaContext;
 use anyhow::anyhow;
+use omicron_common::address::{Ipv6Subnet, RACK_PREFIX};
 use omicron_common::api::external::Error;
 use slog::Logger;
 use std::sync::Arc;
@@ -39,6 +40,9 @@ mod vpc;
 mod vpc_router;
 mod vpc_subnet;
 
+// Background tasks exist in the "background" module.
+mod background;
+
 // Sagas are not part of the "Nexus" implementation, but they are
 // application logic.
 mod sagas;
@@ -57,6 +61,9 @@ pub struct Nexus {
 
     /// uuid for this rack
     rack_id: Uuid,
+
+    /// subnet of this rack
+    rack_subnet: Ipv6Subnet<RACK_PREFIX>,
 
     /// general server log
     log: Logger,
@@ -151,6 +158,7 @@ impl Nexus {
         let nexus = Nexus {
             id: config.runtime.id,
             rack_id,
+            rack_subnet: config.runtime.subnet,
             log: log.new(o!()),
             db_datastore: Arc::clone(&db_datastore),
             authz: Arc::clone(&authz),
@@ -234,6 +242,9 @@ impl Nexus {
     }
 
     /// Returns an [`OpContext`] used for background tasks.
+    // TODO: Probably should be making a *new* opctx here?
+    //
+    // I think there should be one-per-"op", to get better metrics on bg ops.
     pub fn opctx_for_background(&self) -> &OpContext {
         &self.opctx_background_work
     }

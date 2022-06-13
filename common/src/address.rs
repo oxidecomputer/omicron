@@ -20,12 +20,12 @@ pub const SLED_PREFIX: u8 = 64;
 /// The amount of redundancy for DNS servers.
 ///
 /// Must be less than MAX_DNS_REDUNDANCY.
-pub const DNS_REDUNDANCY: usize = 1;
+pub const DNS_REDUNDANCY: u32 = 1;
 /// The maximum amount of redundancy for DNS servers.
 ///
 /// This determines the number of addresses which are
 /// reserved for DNS servers.
-pub const MAX_DNS_REDUNDANCY: usize = 5;
+pub const MAX_DNS_REDUNDANCY: u32 = 5;
 
 pub const DNS_PORT: u16 = 53;
 pub const DNS_SERVER_PORT: u16 = 5353;

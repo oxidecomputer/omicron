@@ -55,7 +55,7 @@ use crate::db::{
         Instance, InstanceRuntimeState, Name, NetworkInterface, Organization,
         OrganizationUpdate, OximeterInfo, ProducerEndpoint, Project,
         ProjectUpdate, Rack, Region, RoleAssignment, RoleBuiltin, RouterRoute,
-        RouterRouteUpdate, Service, Silo, SiloUser, Sled, SshKey,
+        RouterRouteUpdate, Service, ServiceKind, Silo, SiloUser, Sled, SshKey,
         UpdateAvailableArtifact, UserBuiltin, Volume, Vpc, VpcFirewallRule,
         VpcRouter, VpcRouterUpdate, VpcSubnet, VpcSubnetUpdate, VpcUpdate,
         Zpool,
@@ -393,6 +393,63 @@ impl DataStore {
         paginated(dsl::sled, dsl::id, pagparams)
             .select(Sled::as_select())
             .load_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    // TODO: de-duplicate with sled_list?
+    pub async fn sled_list_with_limit(
+        &self,
+        opctx: &OpContext,
+        limit: u32,
+    ) -> ListResultVec<Sled> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        use db::schema::sled::dsl;
+        dsl::sled
+            .filter(dsl::time_deleted.is_null())
+            .limit(limit as i64)
+            .select(Sled::as_select())
+            .load_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    // TODO-correctness: Filter the sleds by rack ID!
+    // This filtering will feasible when Sleds store a FK for
+    // the rack on which they're stored.
+    pub async fn sled_and_service_list(
+        &self,
+        opctx: &OpContext,
+        kind: ServiceKind,
+        _rack_id: Uuid,
+    ) -> ListResultVec<(Sled, Option<Service>)> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        use db::schema::service::dsl as svc_dsl;
+        use db::schema::sled::dsl as sled_dsl;
+
+        db::schema::sled::table
+            .filter(sled_dsl::time_deleted.is_null())
+            .left_outer_join(db::schema::service::table.on(
+                svc_dsl::id.eq(svc_dsl::sled_id)
+            ))
+            .filter(svc_dsl::kind.eq(kind))
+            .select(<(Sled, Option<Service>)>::as_select())
+            .get_results_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    pub async fn dns_service_list(
+        &self,
+        opctx: &OpContext,
+    ) -> ListResultVec<Service> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        use db::schema::service::dsl as svc;
+
+        svc::service
+            .filter(svc::kind.eq(ServiceKind::InternalDNS))
+            .select(Service::as_select())
+            .get_results_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }

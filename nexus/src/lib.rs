@@ -130,25 +130,7 @@ impl Server {
 
         // Wait until RSS handoff completes.
         let opctx = apictx.nexus.opctx_for_background();
-        loop {
-            let result =
-                apictx.nexus.rack_lookup(&opctx, &config.runtime.rack_id).await;
-            match result {
-                Ok(rack) => {
-                    if rack.initialized {
-                        break;
-                    }
-                    info!(
-                        log,
-                        "Still waiting for rack initialization: {:?}", rack
-                    );
-                }
-                Err(e) => {
-                    warn!(log, "Cannot look up rack: {}", e);
-                }
-            }
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-        }
+        apictx.nexus.await_rack_initialization(&opctx).await;
 
         // TODO: What triggers background tasks to execute?
         //
