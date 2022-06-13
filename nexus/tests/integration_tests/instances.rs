@@ -580,7 +580,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
             description: String::from("instance to test saga unwind"),
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
-        memory: ByteCount::from_gibibytes_u32(1),
+        memory: ByteCount::from_gibibytes_u32(4),
         hostname: String::from("inst"),
         user_data: vec![],
         network_interfaces: interface_params.clone(),
@@ -602,7 +602,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
             description: String::from("instance to test saga unwind 2"),
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
-        memory: ByteCount::from_gibibytes_u32(1),
+        memory: ByteCount::from_gibibytes_u32(4),
         hostname: String::from("inst2"),
         user_data: vec![],
         network_interfaces: interface_params,
@@ -688,7 +688,7 @@ async fn test_instance_with_single_explicit_ip_address(
             description: String::from("instance to test multiple nics"),
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
-        memory: ByteCount::from_gibibytes_u32(1),
+        memory: ByteCount::from_gibibytes_u32(4),
         hostname: String::from("nic-test"),
         user_data: vec![],
         network_interfaces: interface_params,
@@ -805,7 +805,7 @@ async fn test_instance_with_new_custom_network_interfaces(
             description: String::from("instance to test multiple nics"),
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
-        memory: ByteCount::from_gibibytes_u32(1),
+        memory: ByteCount::from_gibibytes_u32(4),
         hostname: String::from("nic-test"),
         user_data: vec![],
         network_interfaces: interface_params,
@@ -919,7 +919,7 @@ async fn test_instance_create_delete_network_interface(
             description: String::from("instance to test attaching new nic"),
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
-        memory: ByteCount::from_gibibytes_u32(1),
+        memory: ByteCount::from_gibibytes_u32(4),
         hostname: String::from("nic-test"),
         user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::None,
@@ -1169,7 +1169,7 @@ async fn test_instance_update_network_interfaces(
             description: String::from("instance to test updatin nics"),
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
-        memory: ByteCount::from_mebibytes_u32(4),
+        memory: ByteCount::from_gibibytes_u32(4),
         hostname: String::from("nic-test"),
         user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::None,
@@ -1238,7 +1238,7 @@ async fn test_instance_update_network_interfaces(
         instance_post(client, url_instance.as_str(), InstanceOp::Start).await;
     instance_simulate(nexus, &instance.identity.id).await;
 
-    // We'll the interface's name and description
+    // We'll change the interface's name and description
     let new_name = Name::try_from(String::from("new-if0")).unwrap();
     let new_description = String::from("new description");
     let updates = params::NetworkInterfaceUpdate {
@@ -1293,22 +1293,28 @@ async fn test_instance_update_network_interfaces(
     // description, and modification time.
     assert_eq!(updated_primary_iface.identity.name, new_name);
     assert_eq!(updated_primary_iface.identity.description, new_description);
-    assert!(
-        primary_iface.identity.time_modified
-            < updated_primary_iface.identity.time_modified
-    );
-
-    // Nothing else about the primary interface should have changed
-    assert_eq!(
-        primary_iface.identity.time_created,
-        updated_primary_iface.identity.time_created
-    );
     assert!(updated_primary_iface.primary);
-    assert_eq!(primary_iface.ip, updated_primary_iface.ip);
-    assert_eq!(primary_iface.mac, updated_primary_iface.mac);
-    assert_eq!(primary_iface.subnet_id, updated_primary_iface.subnet_id);
-    assert_eq!(primary_iface.vpc_id, updated_primary_iface.vpc_id);
-    assert_eq!(primary_iface.instance_id, updated_primary_iface.instance_id);
+
+    // Helper to check that most attributes are unchanged when updating an
+    // interface, and that the modification time for the new is later than the
+    // old.
+    let verify_unchanged_attributes =
+        |original_iface: &NetworkInterface, new_iface: &NetworkInterface| {
+            assert_eq!(
+                original_iface.identity.time_created,
+                new_iface.identity.time_created
+            );
+            assert!(
+                original_iface.identity.time_modified
+                    < new_iface.identity.time_modified
+            );
+            assert_eq!(original_iface.ip, new_iface.ip);
+            assert_eq!(original_iface.mac, new_iface.mac);
+            assert_eq!(original_iface.subnet_id, new_iface.subnet_id);
+            assert_eq!(original_iface.vpc_id, new_iface.vpc_id);
+            assert_eq!(original_iface.instance_id, new_iface.instance_id);
+        };
+    verify_unchanged_attributes(&primary_iface, &updated_primary_iface);
 
     // Try with the same request again, but this time only changing
     // `make_primary`. This should have no effect.
@@ -1337,10 +1343,6 @@ async fn test_instance_update_network_interfaces(
     .unwrap();
 
     // Everything should still be the same, except the modification time.
-    assert!(
-        updated_primary_iface.identity.time_modified
-            < updated_primary_iface1.identity.time_modified
-    );
     assert_eq!(
         updated_primary_iface.identity.name,
         updated_primary_iface1.identity.name
@@ -1349,21 +1351,10 @@ async fn test_instance_update_network_interfaces(
         updated_primary_iface.identity.description,
         updated_primary_iface1.identity.description
     );
-    assert_eq!(
-        updated_primary_iface.identity.time_created,
-        updated_primary_iface1.identity.time_created
-    );
-    assert!(updated_primary_iface1.primary);
-    assert_eq!(updated_primary_iface.ip, updated_primary_iface1.ip);
-    assert_eq!(updated_primary_iface.mac, updated_primary_iface1.mac);
-    assert_eq!(
-        updated_primary_iface.subnet_id,
-        updated_primary_iface1.subnet_id
-    );
-    assert_eq!(updated_primary_iface.vpc_id, updated_primary_iface1.vpc_id);
-    assert_eq!(
-        updated_primary_iface.instance_id,
-        updated_primary_iface1.instance_id
+    assert_eq!(updated_primary_iface.primary, updated_primary_iface1.primary);
+    verify_unchanged_attributes(
+        &updated_primary_iface,
+        &updated_primary_iface1,
     );
 
     // Add a secondary interface to the instance. We'll use this to check
@@ -1450,10 +1441,6 @@ async fn test_instance_update_network_interfaces(
 
     // It should now be the primary and have an updated modification time
     assert!(new_primary_iface.primary, "Failed to set the new primary");
-    assert!(
-        new_primary_iface.identity.time_modified
-            > secondary_iface.identity.time_modified
-    );
 
     // Nothing else about the new primary should have changed
     assert_eq!(new_primary_iface.identity.name, secondary_iface.identity.name);
@@ -1461,16 +1448,7 @@ async fn test_instance_update_network_interfaces(
         new_primary_iface.identity.description,
         secondary_iface.identity.description
     );
-    assert_eq!(new_primary_iface.identity.id, secondary_iface.identity.id);
-    assert_eq!(
-        new_primary_iface.identity.time_created,
-        secondary_iface.identity.time_created
-    );
-    assert_eq!(new_primary_iface.subnet_id, secondary_iface.subnet_id);
-    assert_eq!(new_primary_iface.vpc_id, secondary_iface.vpc_id);
-    assert_eq!(new_primary_iface.instance_id, secondary_iface.instance_id);
-    assert_eq!(new_primary_iface.mac, secondary_iface.mac);
-    assert_eq!(new_primary_iface.ip, secondary_iface.ip);
+    verify_unchanged_attributes(&secondary_iface, &new_primary_iface);
 
     // Get the newly-made secondary interface to test
     let new_secondary_iface = NexusRequest::object_get(
@@ -1495,12 +1473,6 @@ async fn test_instance_update_network_interfaces(
         "The old primary interface should now be a seconary"
     );
 
-    // The modification time should have changed
-    assert!(
-        new_secondary_iface.identity.time_modified
-            > updated_primary_iface.identity.time_modified
-    );
-
     // Nothing else about the old primary should have changed
     assert_eq!(
         new_secondary_iface.identity.name,
@@ -1510,22 +1482,7 @@ async fn test_instance_update_network_interfaces(
         new_secondary_iface.identity.description,
         updated_primary_iface.identity.description
     );
-    assert_eq!(
-        new_secondary_iface.identity.id,
-        updated_primary_iface.identity.id
-    );
-    assert_eq!(
-        new_secondary_iface.identity.time_created,
-        updated_primary_iface.identity.time_created
-    );
-    assert_eq!(new_secondary_iface.subnet_id, updated_primary_iface.subnet_id);
-    assert_eq!(new_secondary_iface.vpc_id, updated_primary_iface.vpc_id);
-    assert_eq!(
-        new_secondary_iface.instance_id,
-        updated_primary_iface.instance_id
-    );
-    assert_eq!(new_secondary_iface.mac, updated_primary_iface.mac);
-    assert_eq!(new_secondary_iface.ip, updated_primary_iface.ip);
+    verify_unchanged_attributes(&updated_primary_iface, &new_secondary_iface);
 }
 
 /// This test specifically creates two NICs, the second of which will fail the
@@ -1578,7 +1535,7 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
             description: String::from("instance to test multiple bad nics"),
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
-        memory: ByteCount::from_gibibytes_u32(1),
+        memory: ByteCount::from_gibibytes_u32(4),
         hostname: String::from("nic-test"),
         user_data: vec![],
         network_interfaces: interface_params,
@@ -1652,7 +1609,7 @@ async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
             description: String::from("probably serving data"),
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
-        memory: ByteCount::from_gibibytes_u32(1),
+        memory: ByteCount::from_gibibytes_u32(4),
         hostname: String::from("nfs"),
         user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
@@ -1748,7 +1705,7 @@ async fn test_attach_eight_disks_to_instance(
             description: String::from("probably serving data"),
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
-        memory: ByteCount::from_gibibytes_u32(1),
+        memory: ByteCount::from_gibibytes_u32(4),
         hostname: String::from("nfs"),
         user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
@@ -1854,7 +1811,7 @@ async fn test_cannot_attach_nine_disks_to_instance(
             description: String::from("probably serving data"),
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
-        memory: ByteCount::from_gibibytes_u32(1),
+        memory: ByteCount::from_gibibytes_u32(4),
         hostname: String::from("nfs"),
         user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
@@ -1981,7 +1938,7 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
             description: String::from("probably serving data"),
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
-        memory: ByteCount::from_gibibytes_u32(1),
+        memory: ByteCount::from_gibibytes_u32(4),
         hostname: String::from("nfs"),
         user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
@@ -2093,7 +2050,7 @@ async fn test_disks_detached_when_instance_destroyed(
             description: String::from("probably serving data"),
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
-        memory: ByteCount::from_gibibytes_u32(1),
+        memory: ByteCount::from_gibibytes_u32(4),
         hostname: String::from("nfs"),
         user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,

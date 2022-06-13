@@ -1999,7 +1999,7 @@ impl DataStore {
             .select(NetworkInterface::as_select());
 
         // This returns the state of the associated instance.
-        let stopped_instance_query = db::schema::instance::dsl::instance
+        let instance_query = db::schema::instance::dsl::instance
             .filter(db::schema::instance::dsl::id.eq(instance_id))
             .filter(db::schema::instance::dsl::time_deleted.is_null())
             .select(Instance::as_select());
@@ -2025,10 +2025,8 @@ impl DataStore {
         let pool = self.pool_authorized(opctx).await?;
         if make_primary {
             pool.transaction(move |conn| {
-                let instance_state = stopped_instance_query
-                    .get_result(conn)?
-                    .runtime_state
-                    .state;
+                let instance_state =
+                    instance_query.get_result(conn)?.runtime_state.state;
                 if instance_state != stopped {
                     return Err(TxnError::CustomError(
                         NetworkInterfaceUpdateError::InstanceNotStopped,
@@ -2065,10 +2063,8 @@ impl DataStore {
             // we're only hitting a single row. Note that we still need to
             // verify the instance is stopped.
             pool.transaction(move |conn| {
-                let instance_state = stopped_instance_query
-                    .get_result(conn)?
-                    .runtime_state
-                    .state;
+                let instance_state =
+                    instance_query.get_result(conn)?.runtime_state.state;
                 if instance_state != stopped {
                     return Err(TxnError::CustomError(
                         NetworkInterfaceUpdateError::InstanceNotStopped,
