@@ -22,12 +22,17 @@ use sprockets_host::RotManagerHandle;
 use sprockets_host::RotOpV1;
 use sprockets_host::RotResultV1;
 use sprockets_host::RotTransport;
+use sprockets_host::Session;
+use sprockets_host::SessionHandshakeError;
 use std::collections::VecDeque;
 use std::net::Ipv6Addr;
 use std::sync::Arc;
 use std::thread;
+use std::time::Duration;
 use std::time::Instant;
 use thiserror::Error;
+use tokio::io::AsyncRead;
+use tokio::io::AsyncWrite;
 
 // These error cases are mostly simulation-specific; the list will grow once we
 // have real hardware (and may shrink if/when we remove or collapse simulated
@@ -82,8 +87,8 @@ impl SpHandle {
         }
     }
 
-    // TODO The error type here leaks that we only currently support simulated
-    // SPs and will need work once we support a real SP.
+    // TODO-cleanup The error type here leaks that we only currently support
+    // simulated SPs and will need work once we support a real SP.
     pub fn rot_handle(&self) -> RotManagerHandle<SimRotTransportError> {
         match &self.inner {
             Inner::SimulatedSp(sim) => sim.rot_handle.clone(),
@@ -93,6 +98,89 @@ impl SpHandle {
     pub fn rot_certs(&self) -> Ed25519Certificates {
         match &self.inner {
             Inner::SimulatedSp(sim) => sim.rot_certs,
+        }
+    }
+
+    // TODO-cleanup The error type here leaks that we only currently support
+    // simulated SPs and will need work once we support a real SP.
+    pub(crate) async fn wrap_stream<T: AsyncReadWrite + 'static>(
+        &self,
+        stream: T,
+        role: SprocketsRole,
+        log: &Logger,
+    ) -> Result<Session<T>, SessionHandshakeError<SimRotTransportError>> {
+        // TODO-cleanup Do we want this timeout to be configurable?
+        const ROT_TIMEOUT: Duration = Duration::from_secs(30);
+
+        let session = match role {
+            SprocketsRole::Client => {
+                sprockets_host::Session::new_client(
+                    stream,
+                    self.manufacturing_public_key(),
+                    self.rot_handle(),
+                    self.rot_certs(),
+                    ROT_TIMEOUT,
+                )
+                .await?
+            }
+            SprocketsRole::Server => {
+                sprockets_host::Session::new_server(
+                    stream,
+                    self.manufacturing_public_key(),
+                    self.rot_handle(),
+                    self.rot_certs(),
+                    ROT_TIMEOUT,
+                )
+                .await?
+            }
+        };
+
+        let remote_identity = session.remote_identity();
+        // TODO-correctness We must check `remote_identity` against the list
+        // of devices expected in our trust quorum (once we have such a
+        // list!).
+
+        info!(
+            log, "Negotiated sprockets session";
+            "peer_serial_number" => ?remote_identity.certs.serial_number,
+        );
+        Ok(session)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum SprocketsRole {
+    Client,
+    Server,
+}
+
+pub(crate) trait AsyncReadWrite:
+    AsyncRead + AsyncWrite + Send + Unpin
+{
+}
+impl<T> AsyncReadWrite for T where T: AsyncRead + AsyncWrite + Send + Unpin {}
+
+/// Helper function to wrap a stream in a sprockets session if we have an SP, or
+/// return it wrapped in an unauthenticated `BufStream` if not.
+///
+/// TODO-cleanup This function should be removed when we start requiring an SP
+/// (even if simulated) to be present.
+pub(crate) async fn maybe_wrap_stream<T: AsyncReadWrite + 'static>(
+    stream: T,
+    sp: &Option<SpHandle>,
+    role: SprocketsRole,
+    log: &Logger,
+) -> Result<Box<dyn AsyncReadWrite>, SessionHandshakeError<SimRotTransportError>>
+{
+    match sp.as_ref() {
+        Some(sp) => {
+            info!(log, "SP available; establishing sprockets session");
+            let session = sp.wrap_stream(stream, role, log).await?;
+            Ok(Box::new(session))
+        }
+        None => {
+            info!(log, "No SP available; proceeding without sprockets auth");
+            Ok(Box::new(tokio::io::BufStream::new(stream)))
         }
     }
 }

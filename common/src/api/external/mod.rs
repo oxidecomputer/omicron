@@ -336,33 +336,58 @@ impl JsonSchema for RoleName {
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct ByteCount(u64);
 
+#[allow(non_upper_case_globals)]
+const KiB: u64 = 1024;
+#[allow(non_upper_case_globals)]
+const MiB: u64 = KiB * 1024;
+#[allow(non_upper_case_globals)]
+const GiB: u64 = MiB * 1024;
+#[allow(non_upper_case_globals)]
+const TiB: u64 = GiB * 1024;
+
 impl ByteCount {
     pub fn from_kibibytes_u32(kibibytes: u32) -> ByteCount {
-        ByteCount::try_from(1024 * u64::from(kibibytes)).unwrap()
+        ByteCount::try_from(KiB * u64::from(kibibytes)).unwrap()
     }
 
     pub fn from_mebibytes_u32(mebibytes: u32) -> ByteCount {
-        ByteCount::try_from(1024 * 1024 * u64::from(mebibytes)).unwrap()
+        ByteCount::try_from(MiB * u64::from(mebibytes)).unwrap()
     }
 
     pub fn from_gibibytes_u32(gibibytes: u32) -> ByteCount {
-        ByteCount::try_from(1024 * 1024 * 1024 * u64::from(gibibytes)).unwrap()
+        ByteCount::try_from(GiB * u64::from(gibibytes)).unwrap()
     }
 
     pub fn to_bytes(&self) -> u64 {
         self.0
     }
     pub fn to_whole_kibibytes(&self) -> u64 {
-        self.to_bytes() / 1024
+        self.to_bytes() / KiB
     }
     pub fn to_whole_mebibytes(&self) -> u64 {
-        self.to_bytes() / 1024 / 1024
+        self.to_bytes() / MiB
     }
     pub fn to_whole_gibibytes(&self) -> u64 {
-        self.to_bytes() / 1024 / 1024 / 1024
+        self.to_bytes() / GiB
     }
     pub fn to_whole_tebibytes(&self) -> u64 {
-        self.to_bytes() / 1024 / 1024 / 1024 / 1024
+        self.to_bytes() / TiB
+    }
+}
+
+impl Display for ByteCount {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
+        if self.to_bytes() >= TiB && self.to_bytes() % TiB == 0 {
+            write!(f, "{} TiB", self.to_whole_tebibytes())
+        } else if self.to_bytes() >= GiB && self.to_bytes() % GiB == 0 {
+            write!(f, "{} GiB", self.to_whole_gibibytes())
+        } else if self.to_bytes() >= MiB && self.to_bytes() % MiB == 0 {
+            write!(f, "{} MiB", self.to_whole_mebibytes())
+        } else if self.to_bytes() >= KiB && self.to_bytes() % KiB == 0 {
+            write!(f, "{} KiB", self.to_whole_kibibytes())
+        } else {
+            write!(f, "{} B", self.to_bytes())
+        }
     }
 }
 
@@ -489,6 +514,8 @@ pub enum ResourceType {
     Fleet,
     Silo,
     SiloUser,
+    IdentityProvider,
+    SamlIdentityProvider,
     SshKey,
     ConsoleSession,
     GlobalImage,
@@ -500,6 +527,7 @@ pub enum ResourceType {
     Instance,
     NetworkInterface,
     Rack,
+    Service,
     Sled,
     SagaDbg,
     Snapshot,
@@ -2081,6 +2109,30 @@ mod test {
         assert_eq!(3 * 1024 * 1024, tib3.to_whole_mebibytes());
         assert_eq!(3 * 1024, tib3.to_whole_gibibytes());
         assert_eq!(3, tib3.to_whole_tebibytes());
+    }
+
+    #[test]
+    fn test_bytecount_display() {
+        assert_eq!(format!("{}", ByteCount::from(0u32)), "0 B".to_string());
+        assert_eq!(format!("{}", ByteCount::from(1023)), "1023 B".to_string());
+        assert_eq!(format!("{}", ByteCount::from(1024)), "1 KiB".to_string());
+        assert_eq!(format!("{}", ByteCount::from(1025)), "1025 B".to_string());
+        assert_eq!(
+            format!("{}", ByteCount::from(1024 * 100)),
+            "100 KiB".to_string()
+        );
+        assert_eq!(
+            format!("{}", ByteCount::from_mebibytes_u32(1)),
+            "1 MiB".to_string()
+        );
+        assert_eq!(
+            format!("{}", ByteCount::from_gibibytes_u32(1)),
+            "1 GiB".to_string()
+        );
+        assert_eq!(
+            format!("{}", ByteCount::from_gibibytes_u32(1024)),
+            "1 TiB".to_string()
+        );
     }
 
     #[test]

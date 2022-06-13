@@ -9,13 +9,14 @@ use crate::db;
 use crate::db::identity::Asset;
 use crate::db::lookup::LookupPath;
 use crate::db::model::DatasetKind;
+use crate::db::model::ServiceKind;
 use crate::internal_api::params::ZpoolPutRequest;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use sled_agent_client::Client as SledAgentClient;
-use std::net::{SocketAddr, SocketAddrV6};
+use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -140,6 +141,29 @@ impl super::Nexus {
         info!(self.log, "upserting dataset"; "zpool_id" => zpool_id.to_string(), "dataset_id" => id.to_string(), "address" => address.to_string());
         let dataset = db::model::Dataset::new(id, zpool_id, address, kind);
         self.db_datastore.dataset_upsert(dataset).await?;
+        Ok(())
+    }
+
+    // Services
+
+    /// Upserts a Service into the database, updating it if it already exists.
+    pub async fn upsert_service(
+        &self,
+        opctx: &OpContext,
+        id: Uuid,
+        sled_id: Uuid,
+        address: Ipv6Addr,
+        kind: ServiceKind,
+    ) -> Result<(), Error> {
+        info!(
+            self.log,
+            "upserting service";
+            "sled_id" => sled_id.to_string(),
+            "service_id" => id.to_string(),
+            "address" => address.to_string(),
+        );
+        let service = db::model::Service::new(id, sled_id, address, kind);
+        self.db_datastore.service_upsert(opctx, service).await?;
         Ok(())
     }
 }

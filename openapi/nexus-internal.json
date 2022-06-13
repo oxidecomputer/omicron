@@ -228,6 +228,50 @@
         }
       }
     },
+    "/racks/{rack_id}/initialization_complete": {
+      "put": {
+        "summary": "Report that the Rack Setup Service initialization is complete",
+        "description": "See RFD 278 for more details.",
+        "operationId": "rack_initialization_complete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rack_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "title": "Array_of_ServicePutRequest",
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ServicePutRequest"
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/sled_agents/{sled_id}": {
       "post": {
         "summary": "Report that the sled agent for the specified sled has come online.",
@@ -1368,7 +1412,7 @@
         "description": "Runtime state of the Instance, including the actual running state and minimal metadata\n\nThis state is owned by the sled agent running that Instance.",
         "type": "object",
         "properties": {
-          "dst_propolis_uuid": {
+          "dst_propolis_id": {
             "nullable": true,
             "description": "the target propolis-server during a migration of this Instance",
             "type": "string",
@@ -1394,7 +1438,7 @@
               }
             ]
           },
-          "migration_uuid": {
+          "migration_id": {
             "nullable": true,
             "description": "migration id (if one in process)",
             "type": "string",
@@ -1413,7 +1457,7 @@
             "description": "address of propolis-server running this Instance",
             "type": "string"
           },
-          "propolis_uuid": {
+          "propolis_id": {
             "description": "which propolis-server is running this Instance",
             "type": "string",
             "format": "uuid"
@@ -1426,7 +1470,7 @@
               }
             ]
           },
-          "sled_uuid": {
+          "sled_id": {
             "description": "which sled is running this Instance",
             "type": "string",
             "format": "uuid"
@@ -1442,9 +1486,9 @@
           "hostname",
           "memory",
           "ncpus",
-          "propolis_uuid",
+          "propolis_id",
           "run_state",
-          "sled_uuid",
+          "sled_id",
           "time_updated"
         ]
       },
@@ -1689,6 +1733,48 @@
           "metric",
           "target",
           "timeseries_name"
+        ]
+      },
+      "ServiceKind": {
+        "description": "Describes the purpose of the service.",
+        "type": "string",
+        "enum": [
+          "internal_d_n_s",
+          "nexus",
+          "oximeter"
+        ]
+      },
+      "ServicePutRequest": {
+        "description": "Describes a service on a sled",
+        "type": "object",
+        "properties": {
+          "address": {
+            "description": "Address on which a service is responding to requests.",
+            "type": "string",
+            "format": "ipv6"
+          },
+          "kind": {
+            "description": "Type of service being inserted.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ServiceKind"
+              }
+            ]
+          },
+          "service_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sled_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "address",
+          "kind",
+          "service_id",
+          "sled_id"
         ]
       },
       "SledAgentStartupInfo": {

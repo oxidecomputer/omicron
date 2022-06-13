@@ -628,14 +628,14 @@ async fn sic_create_instance_record(
 
     let runtime = InstanceRuntimeState {
         run_state: InstanceState::Creating,
-        sled_uuid,
-        propolis_uuid,
-        dst_propolis_uuid: None,
+        sled_id: sled_uuid,
+        propolis_id: propolis_uuid,
+        dst_propolis_id: None,
         propolis_addr: Some(std::net::SocketAddr::new(
             propolis_addr.into(),
             12400,
         )),
-        migration_uuid: None,
+        migration_id: None,
         hostname: params.create_params.hostname.clone(),
         memory: params.create_params.memory,
         ncpus: params.create_params.ncpus,

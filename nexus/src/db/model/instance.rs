@@ -100,15 +100,15 @@ pub struct InstanceRuntimeState {
     /// which sled is running this Instance
     // TODO: should this be optional?
     #[diesel(column_name = active_server_id)]
-    pub sled_uuid: Uuid,
+    pub sled_id: Uuid,
     #[diesel(column_name = active_propolis_id)]
-    pub propolis_uuid: Uuid,
+    pub propolis_id: Uuid,
     #[diesel(column_name = active_propolis_ip)]
     pub propolis_ip: Option<ipnetwork::IpNetwork>,
     #[diesel(column_name = target_propolis_id)]
-    pub dst_propolis_uuid: Option<Uuid>,
+    pub dst_propolis_id: Option<Uuid>,
     #[diesel(column_name = migration_id)]
-    pub migration_uuid: Option<Uuid>,
+    pub migration_id: Option<Uuid>,
     #[diesel(column_name = ncpus)]
     pub ncpus: InstanceCpuCount,
     #[diesel(column_name = memory)]
@@ -124,13 +124,13 @@ impl From<InstanceRuntimeState>
     fn from(s: InstanceRuntimeState) -> Self {
         Self {
             run_state: s.state.into(),
-            sled_uuid: s.sled_uuid,
-            propolis_uuid: s.propolis_uuid,
-            dst_propolis_uuid: s.dst_propolis_uuid,
+            sled_id: s.sled_id,
+            propolis_id: s.propolis_id,
+            dst_propolis_id: s.dst_propolis_id,
             propolis_addr: s
                 .propolis_ip
                 .map(|ip| SocketAddr::new(ip.ip(), PROPOLIS_PORT).to_string()),
-            migration_uuid: s.migration_uuid,
+            migration_id: s.migration_id,
             ncpus: s.ncpus.into(),
             memory: s.memory.into(),
             hostname: s.hostname,
@@ -155,11 +155,11 @@ impl From<internal::nexus::InstanceRuntimeState> for InstanceRuntimeState {
     fn from(state: internal::nexus::InstanceRuntimeState) -> Self {
         Self {
             state: InstanceState::new(state.run_state),
-            sled_uuid: state.sled_uuid,
-            propolis_uuid: state.propolis_uuid,
-            dst_propolis_uuid: state.dst_propolis_uuid,
+            sled_id: state.sled_id,
+            propolis_id: state.propolis_id,
+            dst_propolis_id: state.dst_propolis_id,
             propolis_ip: state.propolis_addr.map(|addr| addr.ip().into()),
-            migration_uuid: state.migration_uuid,
+            migration_id: state.migration_id,
             ncpus: state.ncpus.into(),
             memory: state.memory.into(),
             hostname: state.hostname,
@@ -174,13 +174,13 @@ impl Into<internal::nexus::InstanceRuntimeState> for InstanceRuntimeState {
     fn into(self) -> internal::nexus::InstanceRuntimeState {
         internal::nexus::InstanceRuntimeState {
             run_state: *self.state.state(),
-            sled_uuid: self.sled_uuid,
-            propolis_uuid: self.propolis_uuid,
-            dst_propolis_uuid: self.dst_propolis_uuid,
+            sled_id: self.sled_id,
+            propolis_id: self.propolis_id,
+            dst_propolis_id: self.dst_propolis_id,
             propolis_addr: self
                 .propolis_ip
                 .map(|ip| SocketAddr::new(ip.ip(), PROPOLIS_PORT)),
-            migration_uuid: self.migration_uuid,
+            migration_id: self.migration_id,
             ncpus: self.ncpus.into(),
             memory: self.memory.into(),
             hostname: self.hostname,

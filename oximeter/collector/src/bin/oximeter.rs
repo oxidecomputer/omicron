@@ -5,11 +5,11 @@
 //! Main entry point to run an `oximeter` server in the control plane.
 // Copyright 2021 Oxide Computer Company
 
+use clap::Parser;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
 use oximeter_collector::{oximeter_api, Config, Oximeter};
 use std::path::PathBuf;
-use structopt::StructOpt;
 
 pub fn run_openapi() -> Result<(), String> {
     oximeter_api()
@@ -22,18 +22,18 @@ pub fn run_openapi() -> Result<(), String> {
 }
 
 /// Run an oximeter metric collection server in the Oxide Control Plane.
-#[derive(StructOpt)]
-#[structopt(name = "oximeter", about = "See README.adoc for more information")]
+#[derive(Parser)]
+#[clap(name = "oximeter", about = "See README.adoc for more information")]
 struct Args {
-    #[structopt(
-        short = "O",
+    #[clap(
+        short = 'O',
         long = "openapi",
         help = "Print the external OpenAPI Spec document and exit"
     )]
     openapi: bool,
 
     /// Path to TOML file with configuration for the server
-    #[structopt(name = "CONFIG_FILE", parse(from_os_str))]
+    #[clap(name = "CONFIG_FILE", parse(from_os_str))]
     config_file: PathBuf,
 }
 
@@ -45,9 +45,7 @@ async fn main() {
 }
 
 async fn do_run() -> Result<(), CmdError> {
-    let args = Args::from_args_safe().map_err(|err| {
-        CmdError::Usage(format!("parsing arguments: {}", err.message))
-    })?;
+    let args = Args::parse();
     let config = Config::from_file(args.config_file).unwrap();
     if args.openapi {
         run_openapi().map_err(CmdError::Failure)

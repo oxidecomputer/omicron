@@ -39,22 +39,24 @@ use crate::db::fixed_data::silo::DEFAULT_SILO;
 use crate::db::lookup::LookupPath;
 use crate::db::model::DatabaseString;
 use crate::db::model::IncompleteVpc;
-use crate::db::model::Vpc;
 use crate::db::queries::network_interface;
 use crate::db::queries::vpc::InsertVpcQuery;
 use crate::db::queries::vpc_subnet::FilterConflictingVpcSubnetRangesQuery;
 use crate::db::queries::vpc_subnet::SubnetError;
 use crate::db::{
     self,
-    error::{public_error_from_diesel_pool, ErrorHandler, TransactionError},
+    error::{
+        public_error_from_diesel_create, public_error_from_diesel_lookup,
+        public_error_from_diesel_pool, ErrorHandler, TransactionError,
+    },
     model::{
         ConsoleSession, Dataset, DatasetKind, Disk, DiskRuntimeState,
-        Generation, GlobalImage, IncompleteNetworkInterface, Instance,
-        InstanceRuntimeState, Name, NetworkInterface, Organization,
+        Generation, GlobalImage, IdentityProvider, IncompleteNetworkInterface,
+        Instance, InstanceRuntimeState, Name, NetworkInterface, Organization,
         OrganizationUpdate, OximeterInfo, ProducerEndpoint, Project,
-        ProjectUpdate, Region, RoleAssignment, RoleBuiltin, RouterRoute,
-        RouterRouteUpdate, Silo, SiloUser, Sled, SshKey,
-        UpdateAvailableArtifact, UserBuiltin, Volume, VpcFirewallRule,
+        ProjectUpdate, Rack, Region, RoleAssignment, RoleBuiltin, RouterRoute,
+        RouterRouteUpdate, Service, Silo, SiloUser, Sled, SshKey,
+        UpdateAvailableArtifact, UserBuiltin, Volume, Vpc, VpcFirewallRule,
         VpcRouter, VpcRouterUpdate, VpcSubnet, VpcSubnetUpdate, VpcUpdate,
         Zpool,
     },
@@ -141,6 +143,143 @@ impl DataStore {
     ) -> Result<&bb8::Pool<ConnectionManager<DbConnection>>, Error> {
         opctx.authorize(authz::Action::Query, &authz::DATABASE).await?;
         Ok(self.pool.pool())
+    }
+
+    /// Stores a new rack in the database.
+    ///
+    /// This function is a no-op if the rack already exists.
+    pub async fn rack_insert(
+        &self,
+        opctx: &OpContext,
+        rack: &Rack,
+    ) -> Result<Rack, Error> {
+        use db::schema::rack::dsl;
+
+        diesel::insert_into(dsl::rack)
+            .values(rack.clone())
+            .on_conflict(dsl::id)
+            .do_update()
+            // This is a no-op, since we conflicted on the ID.
+            .set(dsl::id.eq(excluded(dsl::id)))
+            .returning(Rack::as_returning())
+            .get_result_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::Conflict(
+                        ResourceType::Rack,
+                        &rack.id().to_string(),
+                    ),
+                )
+            })
+    }
+
+    /// Update a rack to mark that it has been initialized
+    pub async fn rack_set_initialized(
+        &self,
+        opctx: &OpContext,
+        rack_id: Uuid,
+        services: Vec<Service>,
+    ) -> UpdateResult<Rack> {
+        use db::schema::rack::dsl as rack_dsl;
+        use db::schema::service::dsl as service_dsl;
+
+        #[derive(Debug)]
+        enum RackInitError {
+            ServiceInsert { err: SyncInsertError, sled_id: Uuid, svc_id: Uuid },
+            RackUpdate(diesel::result::Error),
+        }
+        type TxnError = TransactionError<RackInitError>;
+
+        // NOTE: This operation could likely be optimized with a CTE, but given
+        // the low-frequency of calls, this optimization has been deferred.
+        self.pool_authorized(opctx)
+            .await?
+            .transaction(move |conn| {
+                // Early exit if the rack has already been initialized.
+                let rack = rack_dsl::rack
+                    .filter(rack_dsl::id.eq(rack_id))
+                    .select(Rack::as_select())
+                    .get_result(conn)
+                    .map_err(|e| {
+                        TxnError::CustomError(RackInitError::RackUpdate(e))
+                    })?;
+                if rack.initialized {
+                    return Ok(rack);
+                }
+
+                // Otherwise, insert services and set rack.initialized = true.
+                for svc in services {
+                    let sled_id = svc.sled_id;
+                    <Sled as DatastoreCollection<Service>>::insert_resource(
+                        sled_id,
+                        diesel::insert_into(service_dsl::service)
+                            .values(svc.clone())
+                            .on_conflict(service_dsl::id)
+                            .do_update()
+                            .set((
+                                service_dsl::time_modified.eq(Utc::now()),
+                                service_dsl::sled_id
+                                    .eq(excluded(service_dsl::sled_id)),
+                                service_dsl::ip.eq(excluded(service_dsl::ip)),
+                                service_dsl::kind
+                                    .eq(excluded(service_dsl::kind)),
+                            )),
+                    )
+                    .insert_and_get_result(conn)
+                    .map_err(|err| {
+                        TxnError::CustomError(RackInitError::ServiceInsert {
+                            err,
+                            sled_id,
+                            svc_id: svc.id(),
+                        })
+                    })?;
+                }
+                diesel::update(rack_dsl::rack)
+                    .filter(rack_dsl::id.eq(rack_id))
+                    .set((
+                        rack_dsl::initialized.eq(true),
+                        rack_dsl::time_modified.eq(Utc::now()),
+                    ))
+                    .returning(Rack::as_returning())
+                    .get_result::<Rack>(conn)
+                    .map_err(|e| {
+                        TxnError::CustomError(RackInitError::RackUpdate(e))
+                    })
+            })
+            .await
+            .map_err(|e| match e {
+                TxnError::CustomError(RackInitError::ServiceInsert {
+                    err,
+                    sled_id,
+                    svc_id,
+                }) => match err {
+                    SyncInsertError::CollectionNotFound => {
+                        Error::ObjectNotFound {
+                            type_name: ResourceType::Sled,
+                            lookup_type: LookupType::ById(sled_id),
+                        }
+                    }
+                    SyncInsertError::DatabaseError(e) => {
+                        public_error_from_diesel_create(
+                            e,
+                            ResourceType::Service,
+                            &svc_id.to_string(),
+                        )
+                    }
+                },
+                TxnError::CustomError(RackInitError::RackUpdate(err)) => {
+                    public_error_from_diesel_lookup(
+                        err,
+                        ResourceType::Rack,
+                        &LookupType::ById(rack_id),
+                    )
+                }
+                TxnError::Pool(e) => {
+                    Error::internal_error(&format!("Transaction error: {}", e))
+                }
+            })
     }
 
     /// Stores a new sled in the database.
@@ -254,6 +393,47 @@ impl DataStore {
                     ErrorHandler::Conflict(
                         ResourceType::Dataset,
                         &dataset.id().to_string(),
+                    ),
+                )
+            }
+        })
+    }
+
+    /// Stores a new service in the database.
+    pub async fn service_upsert(
+        &self,
+        opctx: &OpContext,
+        service: Service,
+    ) -> CreateResult<Service> {
+        use db::schema::service::dsl;
+
+        let sled_id = service.sled_id;
+        Sled::insert_resource(
+            sled_id,
+            diesel::insert_into(dsl::service)
+                .values(service.clone())
+                .on_conflict(dsl::id)
+                .do_update()
+                .set((
+                    dsl::time_modified.eq(Utc::now()),
+                    dsl::sled_id.eq(excluded(dsl::sled_id)),
+                    dsl::ip.eq(excluded(dsl::ip)),
+                    dsl::kind.eq(excluded(dsl::kind)),
+                )),
+        )
+        .insert_and_get_result_async(self.pool_authorized(opctx).await?)
+        .await
+        .map_err(|e| match e {
+            AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
+                type_name: ResourceType::Sled,
+                lookup_type: LookupType::ById(sled_id),
+            },
+            AsyncInsertError::DatabaseError(e) => {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::Conflict(
+                        ResourceType::Service,
+                        &service.id().to_string(),
                     ),
                 )
             }
@@ -970,7 +1150,7 @@ impl DataStore {
             .filter(
                 dsl::migration_id
                     .is_null()
-                    .or(dsl::target_propolis_id.eq(new_runtime.propolis_uuid)),
+                    .or(dsl::target_propolis_id.eq(new_runtime.propolis_id)),
             )
             .set(new_runtime.clone())
             .check_if_exists::<Instance>(*instance_id)
@@ -3118,7 +3298,115 @@ impl DataStore {
 
         info!(opctx.log, "deleted {} silo users for silo {}", updated_rows, id);
 
+        // delete all silo identity providers
+        use db::schema::identity_provider::dsl as idp_dsl;
+
+        let updated_rows = diesel::update(idp_dsl::identity_provider)
+            .filter(idp_dsl::silo_id.eq(id))
+            .filter(idp_dsl::time_deleted.is_null())
+            .set(idp_dsl::time_deleted.eq(Utc::now()))
+            .execute_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_silo),
+                )
+            })?;
+
+        info!(opctx.log, "deleted {} silo IdPs for silo {}", updated_rows, id);
+
+        use db::schema::saml_identity_provider::dsl as saml_idp_dsl;
+
+        let updated_rows = diesel::update(saml_idp_dsl::saml_identity_provider)
+            .filter(saml_idp_dsl::silo_id.eq(id))
+            .filter(saml_idp_dsl::time_deleted.is_null())
+            .set(saml_idp_dsl::time_deleted.eq(Utc::now()))
+            .execute_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_silo),
+                )
+            })?;
+
+        info!(
+            opctx.log,
+            "deleted {} silo saml IdPs for silo {}", updated_rows, id
+        );
+
         Ok(())
+    }
+
+    pub async fn identity_provider_list(
+        &self,
+        opctx: &OpContext,
+        authz_silo: &authz::Silo,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<IdentityProvider> {
+        opctx
+            .authorize(authz::Action::ListIdentityProviders, authz_silo)
+            .await?;
+
+        use db::schema::identity_provider::dsl;
+        paginated(dsl::identity_provider, dsl::name, pagparams)
+            .filter(dsl::silo_id.eq(authz_silo.id()))
+            .filter(dsl::time_deleted.is_null())
+            .select(IdentityProvider::as_select())
+            .load_async::<IdentityProvider>(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    pub async fn saml_identity_provider_create(
+        &self,
+        opctx: &OpContext,
+        authz_silo: &authz::Silo,
+        provider: db::model::SamlIdentityProvider,
+    ) -> CreateResult<db::model::SamlIdentityProvider> {
+        opctx.authorize(authz::Action::CreateChild, authz_silo).await?;
+
+        let name = provider.identity().name.to_string();
+        self.pool_authorized(opctx)
+            .await?
+            .transaction(move |conn| {
+                // insert silo identity provider record with type Saml
+                use db::schema::identity_provider::dsl as idp_dsl;
+                diesel::insert_into(idp_dsl::identity_provider)
+                    .values(db::model::IdentityProvider {
+                        identity: db::model::IdentityProviderIdentity {
+                            id: provider.identity.id,
+                            name: provider.identity.name.clone(),
+                            description: provider.identity.description.clone(),
+                            time_created: provider.identity.time_created,
+                            time_modified: provider.identity.time_modified,
+                            time_deleted: provider.identity.time_deleted,
+                        },
+                        silo_id: provider.silo_id,
+                        provider_type: db::model::IdentityProviderType::Saml,
+                    })
+                    .execute(conn)?;
+
+                // insert silo saml identity provider record
+                use db::schema::saml_identity_provider::dsl;
+                let result = diesel::insert_into(dsl::saml_identity_provider)
+                    .values(provider)
+                    .returning(db::model::SamlIdentityProvider::as_returning())
+                    .get_result(conn)?;
+
+                Ok(result)
+            })
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::Conflict(
+                        ResourceType::SamlIdentityProvider,
+                        &name,
+                    ),
+                )
+            })
     }
 
     /// Return the next available IPv6 address for an Oxide service running on
@@ -3454,7 +3742,7 @@ mod test {
     use crate::db::fixed_data::silo::SILO_ID;
     use crate::db::identity::Resource;
     use crate::db::lookup::LookupPath;
-    use crate::db::model::{ConsoleSession, DatasetKind, Project};
+    use crate::db::model::{ConsoleSession, DatasetKind, Project, ServiceKind};
     use crate::external_api::params;
     use chrono::{Duration, Utc};
     use nexus_test_utils::db::test_setup_database;
@@ -3968,7 +4256,7 @@ mod test {
     // Test sled-specific IPv6 address allocation
     #[tokio::test]
     async fn test_sled_ipv6_address_allocation() {
-        use crate::db::model::STATIC_IPV6_ADDRESS_OFFSET;
+        use omicron_common::address::RSS_RESERVED_ADDRESSES as STATIC_IPV6_ADDRESS_OFFSET;
         use std::net::Ipv6Addr;
 
         let logctx = dev::test_setup_log("test_sled_ipv6_address_allocation");
@@ -4097,6 +4385,66 @@ mod test {
         datastore.ssh_key_delete(&opctx, &authz_ssh_key).await.unwrap();
 
         // Clean up.
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_service_upsert() {
+        let logctx = dev::test_setup_log("test_service_upsert");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        // Create a sled on which the service should exist.
+        let sled_id = create_test_sled(&datastore).await;
+
+        // Create a new service to exist on this sled.
+        let service_id = Uuid::new_v4();
+        let addr = Ipv6Addr::LOCALHOST;
+        let kind = ServiceKind::Nexus;
+
+        let service = Service::new(service_id, sled_id, addr, kind);
+        let result =
+            datastore.service_upsert(&opctx, service.clone()).await.unwrap();
+        assert_eq!(service.id(), result.id());
+        assert_eq!(service.ip, result.ip);
+        assert_eq!(service.kind, result.kind);
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_rack_initialize_is_idempotent() {
+        let logctx = dev::test_setup_log("test_rack_initialize_is_idempotent");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        // Create a Rack, insert it into the DB.
+        let rack = Rack::new(Uuid::new_v4());
+        let result = datastore.rack_insert(&opctx, &rack).await.unwrap();
+        assert_eq!(result.id(), rack.id());
+        assert_eq!(result.initialized, false);
+
+        // Re-insert the Rack (check for idempotency).
+        let result = datastore.rack_insert(&opctx, &rack).await.unwrap();
+        assert_eq!(result.id(), rack.id());
+        assert_eq!(result.initialized, false);
+
+        // Initialize the Rack.
+        let result = datastore
+            .rack_set_initialized(&opctx, rack.id(), vec![])
+            .await
+            .unwrap();
+        assert!(result.initialized);
+
+        // Re-initialize the rack (check for idempotency)
+        let result = datastore
+            .rack_set_initialized(&opctx, rack.id(), vec![])
+            .await
+            .unwrap();
+        assert!(result.initialized);
+
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

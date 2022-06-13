@@ -31,6 +31,10 @@ jobs:
       if: ${{ github.ref != 'refs/heads/main' }}
     - name: Report cargo version
       run: cargo --version
+    - name: Update PATH
+      run: echo "$PWD/out/cockroachdb/bin:$PWD/out/clickhouse" >> "$GITHUB_PATH"
+    - name: Install Pre-Requisites
+      run: ./tools/install_prerequisites.sh -y
     - name: Check build of deployed Omicron packages
       run: cargo run --bin omicron-package -- check
 
@@ -45,6 +49,10 @@ jobs:
       run: cargo --version
     - name: Report Clippy version
       run: cargo clippy -- --version
+    - name: Update PATH
+      run: echo "$PWD/out/cockroachdb/bin:$PWD/out/clickhouse" >> "$GITHUB_PATH"
+    - name: Install Pre-Requisites
+      run: ./tools/install_prerequisites.sh -y
     - name: Run Clippy Lints
       #
       # Clippy's style nits are useful, but not worth keeping in CI.  This
@@ -64,6 +72,10 @@ jobs:
       if: ${{ github.ref != 'refs/heads/main' }}
     - name: Report cargo version
       run: cargo --version
+    - name: Update PATH
+      run: echo "$PWD/out/cockroachdb/bin:$PWD/out/clickhouse" >> "$GITHUB_PATH"
+    - name: Install Pre-Requisites
+      run: ./tools/install_prerequisites.sh -y
     - name: Test build documentation
       run: cargo doc
 

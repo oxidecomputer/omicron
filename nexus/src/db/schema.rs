@@ -140,10 +140,11 @@ table! {
         id -> Uuid,
         name -> Text,
         description -> Text,
-        discoverable -> Bool,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
+
+        discoverable -> Bool,
         rcgen -> Int8,
     }
 }
@@ -156,6 +157,43 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
+    }
+}
+
+table! {
+    identity_provider (silo_id, id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+
+        silo_id -> Uuid,
+        provider_type -> crate::db::model::IdentityProviderTypeEnum,
+    }
+}
+
+table! {
+    saml_identity_provider (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+
+        silo_id -> Uuid,
+
+        idp_metadata_document_string -> Text,
+
+        idp_entity_id -> Text,
+        sp_client_id -> Text,
+        acs_url -> Text,
+        slo_url -> Text,
+        technical_contact_email -> Text,
+        public_cert -> Nullable<Text>,
+        private_key -> Nullable<Text>,
     }
 }
 
@@ -237,7 +275,8 @@ table! {
         id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
-        tuf_base_url -> Text,
+        initialized -> Bool,
+        tuf_base_url -> Nullable<Text>,
     }
 }
 
@@ -261,6 +300,18 @@ table! {
         ip -> Inet,
         port -> Int4,
         last_used_address -> Inet,
+    }
+}
+
+table! {
+    service (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+
+        sled_id -> Uuid,
+        ip -> Inet,
+        kind -> crate::db::model::ServiceKindEnum,
     }
 }
 
@@ -465,10 +516,14 @@ allow_tables_to_appear_in_same_query!(
     organization,
     oximeter,
     project,
+    rack,
     region,
     saga,
     saga_node_event,
+    silo,
+    identity_provider,
     console_session,
+    service,
     sled,
     router_route,
     vpc,

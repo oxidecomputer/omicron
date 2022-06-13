@@ -141,21 +141,21 @@ async fn sim_instance_migrate(
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
 
     let migration_id = sagactx.lookup::<Uuid>("migrate_id")?;
-    let dst_sled_uuid = params.migrate_params.dst_sled_uuid;
-    let dst_propolis_uuid = sagactx.lookup::<Uuid>("dst_propolis_id")?;
+    let dst_sled_id = params.migrate_params.dst_sled_id;
+    let dst_propolis_id = sagactx.lookup::<Uuid>("dst_propolis_id")?;
     let (instance_id, old_runtime) =
         sagactx.lookup::<(Uuid, InstanceRuntimeState)>("migrate_instance")?;
 
     // Allocate an IP address the destination sled for the new Propolis server.
     let propolis_addr = osagactx
         .datastore()
-        .next_ipv6_address(&opctx, dst_sled_uuid)
+        .next_ipv6_address(&opctx, dst_sled_id)
         .await
         .map_err(ActionError::action_failed)?;
 
     let runtime = InstanceRuntimeState {
-        sled_uuid: dst_sled_uuid,
-        propolis_uuid: dst_propolis_uuid,
+        sled_id: dst_sled_id,
+        propolis_id: dst_propolis_id,
         propolis_addr: Some(std::net::SocketAddr::new(
             propolis_addr.into(),
             12400,
@@ -175,11 +175,11 @@ async fn sim_instance_migrate(
         run_state: InstanceStateRequested::Migrating,
         migration_params: Some(InstanceRuntimeStateMigrateParams {
             migration_id,
-            dst_propolis_id: dst_propolis_uuid,
+            dst_propolis_id,
         }),
     };
 
-    let src_propolis_uuid = old_runtime.propolis_uuid;
+    let src_propolis_id = old_runtime.propolis_id;
     let src_propolis_addr = old_runtime.propolis_addr.ok_or_else(|| {
         ActionError::action_failed(Error::invalid_request(
             "expected source propolis-addr",
@@ -187,7 +187,7 @@ async fn sim_instance_migrate(
     })?;
 
     let dst_sa = osagactx
-        .sled_client(&dst_sled_uuid)
+        .sled_client(&dst_sled_id)
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -199,7 +199,7 @@ async fn sim_instance_migrate(
                 target,
                 migrate: Some(InstanceMigrateParams {
                     src_propolis_addr: src_propolis_addr.to_string(),
-                    src_propolis_uuid,
+                    src_propolis_id,
                 }),
             },
         )

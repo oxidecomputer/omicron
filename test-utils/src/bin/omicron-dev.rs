@@ -6,6 +6,8 @@
 
 use anyhow::bail;
 use anyhow::Context;
+use clap::Args;
+use clap::Parser;
 use futures::stream::StreamExt;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
@@ -13,13 +15,10 @@ use omicron_test_utils::dev;
 use signal_hook::consts::signal::SIGINT;
 use signal_hook_tokio::Signals;
 use std::path::PathBuf;
-use structopt::StructOpt;
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
-    let subcmd = OmicronDb::from_args_safe().unwrap_or_else(|err| {
-        fatal(CmdError::Usage(format!("parsing arguments: {}", err.message)))
-    });
+    let subcmd = OmicronDb::parse();
     let result = match subcmd {
         OmicronDb::DbRun { ref args } => cmd_db_run(args).await,
         OmicronDb::DbPopulate { ref args } => cmd_db_populate(args).await,
@@ -33,38 +32,39 @@ async fn main() -> Result<(), anyhow::Error> {
 }
 
 /// Manage a local CockroachDB database for Omicron development
-#[derive(Debug, StructOpt)]
+#[derive(Debug, Parser)]
+#[clap(version)]
 enum OmicronDb {
     /// Start a CockroachDB cluster for development
     DbRun {
-        #[structopt(flatten)]
+        #[clap(flatten)]
         args: DbRunArgs,
     },
 
     /// Populate an existing CockroachDB cluster with the Omicron schema
     DbPopulate {
-        #[structopt(flatten)]
+        #[clap(flatten)]
         args: DbPopulateArgs,
     },
 
     /// Wipe the Omicron schema (and all data) from an existing CockroachDB
     /// cluster
     DbWipe {
-        #[structopt(flatten)]
+        #[clap(flatten)]
         args: DbWipeArgs,
     },
 
     /// Run a ClickHouse database server for development
     ChRun {
-        #[structopt(flatten)]
+        #[clap(flatten)]
         args: ChRunArgs,
     },
 }
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, Args)]
 struct DbRunArgs {
     /// Path to store database data (default: temp dir cleaned up on exit)
-    #[structopt(long, parse(from_os_str))]
+    #[clap(long, parse(from_os_str))]
     store_dir: Option<PathBuf>,
 
     /// Database (SQL) listen port.  Use `0` to request any available port.
@@ -72,13 +72,13 @@ struct DbRunArgs {
     // CockroachDB port to avoid conflicting.  We don't use 0 because this port
     // is specified in a few other places, like the default Nexus config file.
     // TODO We could load that file at compile time and use the value there.
-    #[structopt(long, default_value = "32221")]
+    #[clap(long, default_value = "32221")]
     listen_port: u16,
 
-    // This unusual structopt configuration makes "populate" default to true,
+    // This unusual clap configuration makes "populate" default to true,
     // allowing a --no-populate override on the CLI.
     /// Do not populate the database with any schema
-    #[structopt(long = "--no-populate", parse(from_flag = std::ops::Not::not))]
+    #[clap(long = "--no-populate", parse(from_flag = std::ops::Not::not))]
     populate: bool,
 }
 
@@ -168,14 +168,14 @@ async fn cmd_db_run(args: &DbRunArgs) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, Args)]
 struct DbPopulateArgs {
     /// URL for connecting to the database (postgresql:///...)
-    #[structopt(long)]
+    #[clap(long)]
     database_url: String,
 
     /// Wipe any existing schema (and data!) before populating
-    #[structopt(long)]
+    #[clap(long)]
     wipe: bool,
 }
 
@@ -200,10 +200,10 @@ async fn cmd_db_populate(args: &DbPopulateArgs) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, Args)]
 struct DbWipeArgs {
     /// URL for connecting to the database (postgresql:///...)
-    #[structopt(long)]
+    #[clap(long)]
     database_url: String,
 }
 
@@ -223,10 +223,10 @@ async fn cmd_db_wipe(args: &DbWipeArgs) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, Args)]
 struct ChRunArgs {
     /// The HTTP port on which the server will listen
-    #[structopt(short, long, default_value = "8123")]
+    #[clap(short, long, default_value = "8123")]
     port: u16,
 }
 

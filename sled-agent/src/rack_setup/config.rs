@@ -30,6 +30,12 @@ pub struct SetupServiceConfig {
 
     #[serde(default, rename = "request")]
     pub requests: Vec<SledRequest>,
+
+    /// The minimum number of sleds required to unlock the rack secret.
+    ///
+    /// If this value is less than 2, no rack secret will be created on startup;
+    /// this is the typical case for single-server test/development.
+    pub rack_secret_threshold: usize,
 }
 
 /// A request to initialize a sled.
@@ -82,6 +88,7 @@ mod test {
         let cfg = SetupServiceConfig {
             rack_subnet: "fd00:1122:3344:0100::".parse().unwrap(),
             requests: vec![],
+            rack_secret_threshold: 0,
         };
 
         assert_eq!(

@@ -74,8 +74,18 @@ if [[ "${HOST_OS}" == "Linux" ]]; then
   packages=(
     'libpq-dev'
     'pkg-config'
+    'xmlsec1'
+    'libxmlsec1-dev'
+    'libxmlsec1-openssl'
+    'libclang-dev'
+    'libsqlite3-dev'
   )
-  confirm "Install (or update) [${packages[*]}]?" && sudo apt-get install ${packages[@]}
+  sudo apt-get update
+  if [[ "${ASSUME_YES}" == "true" ]]; then
+    sudo apt-get install -y ${packages[@]}
+  else
+      confirm "Install (or update) [${packages[*]}]?" && sudo apt-get install ${packages[@]}
+  fi
 elif [[ "${HOST_OS}" == "SunOS" ]]; then
   packages=(
     'pkg:/package/pkg'
@@ -83,6 +93,9 @@ elif [[ "${HOST_OS}" == "SunOS" ]]; then
     'library/postgresql-13'
     'pkg-config'
     'brand/omicron1/tools'
+    'library/libxmlsec1'
+    # "bindgen leverages libclang to preprocess, parse, and type check C and C++ header files."
+    'pkg:/ooce/developer/clang-120'
   )
 
   # Install/update the set of packages.
@@ -102,6 +115,7 @@ elif [[ "${HOST_OS}" == "Darwin" ]]; then
   packages=(
     'postgresql'
     'pkg-config'
+    'libxmlsec1'
   )
   confirm "Install (or update) [${packages[*]}]?" && brew install ${packages[@]}
 else

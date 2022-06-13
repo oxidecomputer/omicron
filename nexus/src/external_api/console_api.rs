@@ -8,7 +8,9 @@
 //! external API, but in order to avoid CORS issues for now, we are serving
 //! these routes directly from the external API.
 use super::views;
-use crate::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
+use crate::authn::{
+    silos::IdentityProviderType, USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED,
+};
 use crate::context::OpContext;
 use crate::ServerContext;
 use crate::{
@@ -35,7 +37,7 @@ use std::{collections::HashSet, ffi::OsString, path::PathBuf, sync::Arc};
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct LoginParams {
+pub struct SpoofLoginBody {
     pub username: String,
 }
 
@@ -51,7 +53,7 @@ pub struct LoginParams {
 }]
 pub async fn spoof_login(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    params: TypedBody<LoginParams>,
+    params: TypedBody<SpoofLoginBody>,
 ) -> Result<Response<Body>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -87,6 +89,103 @@ pub async fn spoof_login(
             ),
         )
         .body("ok".into())?) // TODO: what do we return from login?
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct LoginToProviderPathParam {
+    pub silo_name: crate::db::model::Name,
+    pub provider_name: crate::db::model::Name,
+}
+
+/// Ask the user to login to their identity provider
+///
+/// Either display a page asking a user for their credentials, or redirect them
+/// to their identity provider.
+#[endpoint {
+   method = GET,
+   path = "/login/{silo_name}/{provider_name}",
+   tags = ["login"],
+}]
+pub async fn login(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<LoginToProviderPathParam>,
+) -> Result<Response<Body>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path_params = path_params.into_inner();
+
+        // Use opctx_external_authn because this request will be
+        // unauthenticated.
+        let opctx = nexus.opctx_external_authn();
+
+        let identity_provider = IdentityProviderType::lookup(
+            &nexus.datastore(),
+            &opctx,
+            &path_params.silo_name,
+            &path_params.provider_name,
+        )
+        .await?;
+
+        match identity_provider {
+            IdentityProviderType::Saml(saml_identity_provider) => {
+                let relay_state = None;
+                let sign_in_url =
+                    saml_identity_provider.sign_in_url(relay_state).map_err(
+                        |e| HttpError::for_internal_error(e.to_string()),
+                    )?;
+
+                Ok(Response::builder()
+                    .status(StatusCode::FOUND)
+                    .header(http::header::LOCATION, sign_in_url)
+                    .body("".into())?)
+            }
+        }
+    };
+    // TODO this doesn't work because the response is Response<Body>
+    //apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+    handler.await
+}
+
+/// Consume some sort of credentials, and authenticate a user.
+///
+/// Either receive a username and password, or some sort of identity provider
+/// data (like a SAMLResponse). Use these to set the user's session cookie.
+#[endpoint {
+   method = POST,
+   path = "/login/{silo_name}/{provider_name}",
+   tags = ["login"],
+}]
+pub async fn consume_credentials(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<LoginToProviderPathParam>,
+) -> Result<Response<Body>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path_params = path_params.into_inner();
+
+        // Use opctx_external_authn because this request will be
+        // unauthenticated.
+        let opctx = nexus.opctx_external_authn();
+
+        let identity_provider = IdentityProviderType::lookup(
+            &nexus.datastore(),
+            &opctx,
+            &path_params.silo_name,
+            &path_params.provider_name,
+        )
+        .await?;
+
+        match identity_provider {
+            IdentityProviderType::Saml(_saml_identity_provider) => {
+                todo!()
+            }
+        }
+    };
+    // TODO this doesn't work because the response is Response<Body>
+    //apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+    handler.await
 }
 
 // Log user out of web console by deleting session in both server and browser
