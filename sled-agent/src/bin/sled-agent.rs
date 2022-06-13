@@ -4,6 +4,7 @@
 
 //! Executable program to run the sled agent
 
+use clap::Parser;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
 use omicron_sled_agent::bootstrap::{
@@ -14,19 +15,19 @@ use omicron_sled_agent::rack_setup::config::SetupServiceConfig as RssConfig;
 use omicron_sled_agent::sp::SimSpConfig;
 use omicron_sled_agent::{config::Config as SledConfig, server as sled_server};
 use std::path::PathBuf;
-use structopt::StructOpt;
 
-#[derive(Debug, StructOpt)]
-#[structopt(
+#[derive(Debug, Parser)]
+#[clap(
     name = "sled_agent",
-    about = "See README.adoc for more information"
+    about = "See README.adoc for more information",
+    version
 )]
 enum Args {
     /// Generates the OpenAPI specification.
     Openapi,
     /// Runs the Sled Agent server.
     Run {
-        #[structopt(name = "CONFIG_FILE_PATH", parse(from_os_str))]
+        #[clap(name = "CONFIG_FILE_PATH", parse(from_os_str))]
         config_path: PathBuf,
     },
 }
@@ -39,9 +40,7 @@ async fn main() {
 }
 
 async fn do_run() -> Result<(), CmdError> {
-    let args = Args::from_args_safe().map_err(|err| {
-        CmdError::Usage(format!("parsing arguments: {}", err.message))
-    })?;
+    let args = Args::parse();
 
     match args {
         Args::Openapi => sled_server::run_openapi().map_err(CmdError::Failure),

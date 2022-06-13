@@ -7,7 +7,8 @@
 //! used for the trust quourm here. We generate a shared secret then split it,
 //! distributing each share to the appropriate server.
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
+use clap::Parser;
 use omicron_sled_agent::sp::SimSpConfig;
 use sp_sim::config::GimletConfig;
 use sp_sim::config::SpCommonConfig;
@@ -15,16 +16,15 @@ use sprockets_rot::common::certificates::SerialNumber;
 use sprockets_rot::salty;
 use sprockets_rot::RotConfig;
 use std::path::PathBuf;
-use structopt::StructOpt;
 
-#[derive(Debug, StructOpt)]
-#[structopt(
+#[derive(Debug, Parser)]
+#[clap(
     name = "sled-agent-overlay-files",
     about = "Generate server unique files for deployment"
 )]
 struct Args {
     /// A directory per server where the files are output
-    #[structopt(short, long)]
+    #[clap(short, long)]
     directories: Vec<PathBuf>,
 }
 
@@ -87,7 +87,7 @@ fn overlay_sp_configs(server_dirs: &[PathBuf]) -> Result<()> {
 }
 
 fn main() -> Result<()> {
-    let args = Args::from_args_safe().map_err(|err| anyhow!(err))?;
+    let args = Args::try_parse()?;
     overlay_sp_configs(&args.directories)?;
     Ok(())
 }
