@@ -2750,7 +2750,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "uuid 1.1.0",
+ "uuid",
 ]
 
 [[package]]
@@ -2995,7 +2995,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-postgres",
- "uuid 1.1.0",
+ "uuid",
 ]
 
 [[package]]
@@ -3325,9 +3325,9 @@ checksum = "ff011a302c396a5197692431fc1948019154afc178baf7d8e37367442a4601cf"
 
 [[package]]
 name = "openssl-sys"
-version = "0.9.72"
+version = "0.9.74"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e46109c383602735fa0a2e48dd2b7c892b048e1bf69e5c3b1d804b7d9c203cb"
+checksum = "835363342df5fba8354c5b453325b110ffd54044e588c539cf2f20a8014e4cb1"
 dependencies = [
  "autocfg 1.1.0",
  "cc",
@@ -3425,7 +3425,7 @@ dependencies = [
  "schemars",
  "serde",
  "thiserror",
- "uuid 1.1.0",
+ "uuid",
 ]
 
 [[package]]
@@ -3502,7 +3502,7 @@ dependencies = [
  "dropshot",
  "futures",
  "http",
- "oximeter",
+ "oximeter 0.1.0",
  "uuid",
 ]
 
@@ -3543,7 +3543,7 @@ dependencies = [
  "slog-dtrace",
  "thiserror",
  "tokio",
- "uuid 1.1.0",
+ "uuid",
 ]
 
 [[package]]
