@@ -1,7 +1,7 @@
-oximeter: parsing arguments: error: The following required arguments were not provided:
+error: The following required arguments were not provided:
     <CONFIG_FILE>
 
 USAGE:
-    oximeter [FLAGS] <CONFIG_FILE>
+    oximeter [OPTIONS] <CONFIG_FILE>
 
 For more information try --help
