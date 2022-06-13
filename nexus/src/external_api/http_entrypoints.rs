@@ -7,8 +7,8 @@
 use super::{
     console_api, params,
     views::{
-        GlobalImage, Image, Organization, Project, Rack, Role, Silo, Sled,
-        Snapshot, SshKey, User, Vpc, VpcRouter, VpcSubnet,
+        GlobalImage, Image, NetworkInterfaces, Organization, Project, Rack,
+        Role, Silo, Sled, Snapshot, SshKey, User, Vpc, VpcRouter, VpcSubnet,
     },
 };
 use crate::authz;
@@ -1686,12 +1686,10 @@ async fn project_images_delete_image(
 }]
 async fn instance_network_interfaces_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    query_params: Query<PaginatedByName>,
     path_params: Path<InstancePathParam>,
-) -> Result<HttpResponseOk<ResultsPage<NetworkInterface>>, HttpError> {
+) -> Result<HttpResponseOk<NetworkInterfaces>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
     let path = path_params.into_inner();
     let organization_name = &path.organization_name;
     let project_name = &path.project_name;
@@ -1705,11 +1703,13 @@ async fn instance_network_interfaces_get(
                 &project_name,
                 &instance_name,
             )
-            .await?
-            .into_iter()
-            .map(|d| d.into())
-            .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(&query, interfaces)?))
+            .await?;
+        Ok(HttpResponseOk(NetworkInterfaces {
+            interfaces: interfaces
+                .into_iter()
+                .map(|interface| interface.into())
+                .collect(),
+        }))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

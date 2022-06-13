@@ -10,7 +10,7 @@ use crate::db::model;
 use api_identity::ObjectIdentity;
 use omicron_common::api::external::{
     ByteCount, Digest, IdentityMetadata, Ipv4Net, Ipv6Net, Name,
-    ObjectIdentity, RoleName,
+    NetworkInterface, ObjectIdentity, RoleName,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -344,4 +344,12 @@ impl From<model::SshKey> for SshKey {
             public_key: ssh_key.public_key,
         }
     }
+}
+
+// NETWORK INTERFACES
+
+/// Collection of an [`Instance`]'s network interfaces
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct NetworkInterfaces {
+    pub interfaces: Vec<NetworkInterface>,
 }
