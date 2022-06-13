@@ -16,6 +16,7 @@ use crate::db::model::Name;
 use crate::db::queries::network_interface;
 use crate::external_api::params;
 use omicron_common::api::external;
+use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -54,6 +55,32 @@ impl super::Nexus {
                 "cannot attach more than {} disks to instance!",
                 MAX_DISKS_PER_INSTANCE
             )));
+        }
+
+        // Reject instances where the memory is not at least
+        // MIN_MEMORY_SIZE_BYTES
+        if params.memory.to_bytes() < params::MIN_MEMORY_SIZE_BYTES as u64 {
+            return Err(Error::InvalidValue {
+                label: String::from("size"),
+                message: format!(
+                    "memory must be at least {}",
+                    ByteCount::from(params::MIN_MEMORY_SIZE_BYTES)
+                ),
+            });
+        }
+
+        // Reject instances where the memory is not divisible by
+        // MIN_MEMORY_SIZE_BYTES
+        if (params.memory.to_bytes() % params::MIN_MEMORY_SIZE_BYTES as u64)
+            != 0
+        {
+            return Err(Error::InvalidValue {
+                label: String::from("size"),
+                message: format!(
+                    "memory must be divisible by {}",
+                    ByteCount::from(params::MIN_MEMORY_SIZE_BYTES)
+                ),
+            });
         }
 
         let saga_params = Arc::new(sagas::instance_create::Params {
