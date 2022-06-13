@@ -210,6 +210,12 @@
             "nullable": true,
             "type": "string"
           },
+          "flush_timeout": {
+            "nullable": true,
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
           "key": {
             "nullable": true,
             "type": "string"
@@ -220,6 +226,14 @@
           },
           "lossy": {
             "type": "boolean"
+          },
+          "metric_collect": {
+            "nullable": true,
+            "type": "string"
+          },
+          "metric_register": {
+            "nullable": true,
+            "type": "string"
           },
           "root_cert_pem": {
             "nullable": true,
