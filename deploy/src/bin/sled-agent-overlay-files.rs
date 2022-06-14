@@ -20,7 +20,7 @@ use std::path::PathBuf;
 )]
 struct Args {
     /// A directory per server where the files are output
-    #[clap(short, long)]
+    #[clap(short, long, action)]
     directories: Vec<PathBuf>,
 }
 
