@@ -19,16 +19,16 @@ use std::sync::Arc;
 
 #[derive(Parser, Debug)]
 struct Args {
-    #[clap(long)]
+    #[clap(long, action)]
     config_file: PathBuf,
 
-    #[clap(long)]
+    #[clap(long, action)]
     server_address: SocketAddrV6,
 
-    #[clap(long)]
+    #[clap(long, action)]
     dns_address: SocketAddrV6,
 
-    #[clap(long)]
+    #[clap(long, action)]
     dns_zone: String,
 }
 

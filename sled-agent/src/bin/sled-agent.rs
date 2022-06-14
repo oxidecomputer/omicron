@@ -27,7 +27,7 @@ enum Args {
     Openapi,
     /// Runs the Sled Agent server.
     Run {
-        #[clap(name = "CONFIG_FILE_PATH", parse(from_os_str))]
+        #[clap(name = "CONFIG_FILE_PATH", action)]
         config_path: PathBuf,
     },
 }

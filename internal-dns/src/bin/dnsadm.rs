@@ -14,10 +14,10 @@ use std::net::Ipv6Addr;
 #[derive(Debug, Parser)]
 #[clap(name = "dnsadm", about = "Administer DNS records")]
 struct Opt {
-    #[clap(short, long)]
+    #[clap(short, long, action)]
     address: Option<String>,
 
-    #[clap(short, long)]
+    #[clap(short, long, action)]
     port: Option<usize>,
 
     #[clap(subcommand)]
@@ -34,21 +34,29 @@ enum SubCommand {
 
 #[derive(Debug, Args)]
 struct AddAAAACommand {
+    #[clap(action)]
     name: String,
+    #[clap(action)]
     addr: Ipv6Addr,
 }
 
 #[derive(Debug, Args)]
 struct AddSRVCommand {
+    #[clap(action)]
     name: String,
+    #[clap(action)]
     prio: u16,
+    #[clap(action)]
     weight: u16,
+    #[clap(action)]
     port: u16,
+    #[clap(action)]
     target: String,
 }
 
 #[derive(Debug, Args)]
 struct DeleteRecordCommand {
+    #[clap(action)]
     name: String,
 }
 

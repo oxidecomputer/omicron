@@ -32,19 +32,19 @@ fn parse_sim_mode(src: &str) -> Result<SimMode, String> {
 struct Args {
     #[clap(
         long = "sim-mode",
-        parse(try_from_str = parse_sim_mode),
+        value_parser = parse_sim_mode,
         default_value = "auto",
         help = "Automatically simulate transitions",
     )]
     sim_mode: SimMode,
 
-    #[clap(name = "SA_UUID", parse(try_from_str))]
+    #[clap(name = "SA_UUID", action)]
     uuid: Uuid,
 
-    #[clap(name = "SA_IP:PORT", parse(try_from_str))]
+    #[clap(name = "SA_IP:PORT", action)]
     sled_agent_addr: SocketAddrV6,
 
-    #[clap(name = "NEXUS_IP:PORT", parse(try_from_str))]
+    #[clap(name = "NEXUS_IP:PORT", action)]
     nexus_addr: SocketAddr,
 }
 
