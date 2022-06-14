@@ -38,11 +38,12 @@ pub struct Dataset {
     ip: ipnetwork::IpNetwork,
     port: SqlU16,
 
-    kind: DatasetKind,
+    pub kind: DatasetKind,
     pub size_used: Option<i64>,
 }
 
 impl Dataset {
+    // TODO: Only operate on SocketAddrV6
     pub fn new(
         id: Uuid,
         pool_id: Uuid,

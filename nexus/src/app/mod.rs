@@ -18,6 +18,7 @@ use omicron_common::address::{Ipv6Subnet, RACK_PREFIX};
 use omicron_common::api::external::Error;
 use slog::Logger;
 use std::sync::Arc;
+use tokio::sync::OnceCell;
 use uuid::Uuid;
 
 // The implementation of Nexus is large, and split into a number of submodules
@@ -83,6 +84,9 @@ pub struct Nexus {
     /// Status of background task to populate database
     populate_status: tokio::sync::watch::Receiver<PopulateStatus>,
 
+    /// Background task for Nexus.
+    background_task_runner: OnceCell<background::TaskRunner>,
+
     /// Client to the timeseries database.
     timeseries_client: oximeter_db::Client,
 
@@ -97,9 +101,6 @@ pub struct Nexus {
 
     /// Operational context used for external request authentication
     opctx_external_authn: OpContext,
-
-    /// Operational context used for Nexus-driven background tasks
-    opctx_background_work: OpContext,
 }
 
 // TODO Is it possible to make some of these operations more generic?  A
@@ -165,6 +166,7 @@ impl Nexus {
             sec_client: Arc::clone(&sec_client),
             recovery_task: std::sync::Mutex::new(None),
             populate_status,
+            background_task_runner: OnceCell::new(),
             timeseries_client,
             updates_config: config.pkg.updates.clone(),
             tunables: config.pkg.tunables.clone(),
@@ -178,12 +180,6 @@ impl Nexus {
                 log.new(o!("component" => "ExternalAuthn")),
                 Arc::clone(&authz),
                 authn::Context::external_authn(),
-                Arc::clone(&db_datastore),
-            ),
-            opctx_background_work: OpContext::for_background(
-                log.new(o!("component" => "Background Work")),
-                Arc::clone(&authz),
-                authn::Context::internal_db_background(),
                 Arc::clone(&db_datastore),
             ),
         };
@@ -236,6 +232,13 @@ impl Nexus {
         }
     }
 
+    pub fn start_background_tasks(self: &Arc<Nexus>) -> Result<(), anyhow::Error> {
+        let nexus = self.clone();
+        self.background_task_runner.set(
+            background::TaskRunner::new(nexus)
+        ).map_err(|error| anyhow!(error.to_string()))
+    }
+
     /// Returns an [`OpContext`] used for authenticating external requests
     pub fn opctx_external_authn(&self) -> &OpContext {
         &self.opctx_external_authn
@@ -245,8 +248,13 @@ impl Nexus {
     // TODO: Probably should be making a *new* opctx here?
     //
     // I think there should be one-per-"op", to get better metrics on bg ops.
-    pub fn opctx_for_background(&self) -> &OpContext {
-        &self.opctx_background_work
+    pub fn opctx_for_background(&self) -> OpContext {
+        OpContext::for_background(
+            self.log.new(o!("component" => "BackgroundWork")),
+            Arc::clone(&self.authz),
+            authn::Context::internal_db_background(),
+            Arc::clone(&self.db_datastore),
+        )
     }
 
     /// Used as the body of a "stub" endpoint -- one that's currently

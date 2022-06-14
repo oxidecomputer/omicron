@@ -131,6 +131,9 @@ impl Server {
         // Wait until RSS handoff completes.
         let opctx = apictx.nexus.opctx_for_background();
         apictx.nexus.await_rack_initialization(&opctx).await;
+        apictx.nexus
+            .start_background_tasks()
+            .map_err(|e| e.to_string())?;
 
         // TODO: What triggers background tasks to execute?
         //

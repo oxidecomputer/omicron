@@ -6,6 +6,7 @@ use super::impl_enum_type;
 use crate::internal_api;
 use serde::{Deserialize, Serialize};
 use std::io::Write;
+use omicron_common::address::{COCKROACH_PORT, CRUCIBLE_PORT, CLICKHOUSE_PORT};
 
 impl_enum_type!(
     #[derive(SqlType, Debug, QueryId)]
@@ -21,6 +22,16 @@ impl_enum_type!(
     Cockroach => b"cockroach"
     Clickhouse => b"clickhouse"
 );
+
+impl DatasetKind {
+    pub fn port(&self) -> u16 {
+        match self {
+            DatasetKind::Crucible => CRUCIBLE_PORT,
+            DatasetKind::Cockroach => COCKROACH_PORT,
+            DatasetKind::Clickhouse => CLICKHOUSE_PORT,
+        }
+    }
+}
 
 impl From<internal_api::params::DatasetKind> for DatasetKind {
     fn from(k: internal_api::params::DatasetKind) -> Self {

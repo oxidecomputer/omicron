@@ -6,15 +6,23 @@
 
 use crate::Nexus;
 use crate::context::OpContext;
+use crate::db::datastore::DatasetRedundancy;
 use crate::db::identity::Asset;
+use crate::db::model::Dataset;
 use crate::db::model::DatasetKind;
+use crate::db::model::Service;
 use crate::db::model::ServiceKind;
+use crate::db::model::Sled;
+use crate::db::model::Zpool;
 use omicron_common::api::external::Error;
-use omicron_common::address::{DNS_REDUNDANCY, ReservedRackSubnet};
+use omicron_common::address::{
+    DNS_REDUNDANCY, NEXUS_INTERNAL_PORT, NEXUS_EXTERNAL_PORT, DNS_SERVER_PORT, DNS_PORT
+};
+use sled_agent_client::types as SledAgentTypes;
 use slog::Logger;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::net::Ipv6Addr;
-use uuid::Uuid;
+use std::net::{Ipv6Addr, SocketAddrV6};
 
 // Policy for the number of services to be provisioned.
 #[derive(Debug)]
@@ -49,206 +57,13 @@ const EXPECTED_SERVICES: [ExpectedService; 3] = [
     },
 ];
 
-pub struct ServiceWorker {
-    log: Logger,
-    nexus: Arc<Nexus>,
-}
-
-impl ServiceWorker {
-    async fn ensure_rack_svc(
-        &self,
-        opctx: &OpContext,
-        expected_svc: &ExpectedService,
-        desired_count: u32,
-    ) -> Result<(), Error> {
-        // Look up all the sleds, both with and without the service.
-        let sleds_and_maybe_svcs = self.nexus
-            .datastore()
-            .sled_and_service_list(
-                opctx,
-                expected_svc.kind.clone(),
-                self.nexus.rack_id,
-            )
-            .await?;
-        let (sleds_with_svc, sleds_without_svc): (Vec<_>, Vec<_>) =
-            sleds_and_maybe_svcs
-            .iter()
-            .partition(|(_, maybe_svc)| {
-                maybe_svc.is_some()
-            });
-        let mut sleds_without_svc = sleds_without_svc.into_iter()
-            .map(|(sled, _)| sled);
-        let mut actual_count = sleds_with_svc.len() as u32;
-
-        // Add services to sleds, in-order, until we've met a
-        // number sufficient for our redundancy.
-        while desired_count < actual_count {
-            let sled = sleds_without_svc.next().ok_or_else(|| {
-                Error::internal_error("Not enough sleds to deploy service")
-            })?;
-            let svc_id = Uuid::new_v4();
-            let address = self.nexus.datastore()
-                .next_ipv6_address(&opctx, sled.id())
-                .await?;
-
-            self.nexus.upsert_service(
-                    &opctx,
-                    svc_id,
-                    sled.id(),
-                    address,
-                    expected_svc.kind.clone()
-                )
-                .await?;
-
-            actual_count += 1;
-        }
-
-        // TODO: Actually deploy service
-
-        Ok(())
-    }
-
-    async fn ensure_dns_svc(
-        &self,
-        opctx: &OpContext,
-        expected_svc: &ExpectedService,
-        desired_count: u32,
-    ) -> Result<(), Error> {
-        if !matches!(expected_svc.kind, ServiceKind::InternalDNS) {
-            // NOTE: This is a constraint on how we allocate IP addresses
-            // within the AZ - however, as DNS is the only existing
-            // AZ-wide service, support for this has been punted.
-            return Err(Error::internal_error(
-                &format!("DNS is the only suppoted svc ({:?} is not supported)", expected_svc),
-            ));
-        }
-
-        // Look up all existing DNS services.
-        //
-        // Note that we should not look up "all services" - as internal DNS servers
-        // are rack-wide, this would be too expensive of an operation.
-        let existing_services = self.nexus
-            .datastore()
-            .dns_service_list(opctx)
-            .await?;
-
-        let mut actual_count = existing_services.len() as u32;
-
-        // Get all subnets not allocated to existing services.
-        let mut usable_dns_subnets = ReservedRackSubnet(self.nexus.rack_subnet)
-            .get_dns_subnets()
-            .into_iter()
-            .filter(|subnet| {
-                // This address is only usable if none of the existing
-                // DNS services are using it.
-                existing_services.iter()
-                    .all(|svc| Ipv6Addr::from(svc.ip) != subnet.dns_address().ip())
-            });
-
-        // Get all sleds which aren't already running DNS services.
-        let mut target_sleds = self.nexus
-            .datastore()
-            .sled_list_with_limit(opctx, desired_count)
-            .await?
-            .into_iter()
-            .filter(|sled| {
-                // The target sleds are only considered if they aren't already
-                // running a DNS service.
-                existing_services.iter()
-                    .all(|svc| svc.sled_id != sled.id())
-            });
-
-        while desired_count < actual_count {
-            let sled = target_sleds.next().ok_or_else(|| {
-                    Error::internal_error("Not enough sleds to deploy service")
-                })?;
-            let svc_id = Uuid::new_v4();
-            let dns_subnet = usable_dns_subnets.next().ok_or_else(|| {
-                    Error::internal_error("Not enough IPs to deploy service")
-                })?;
-            let address = dns_subnet
-                .dns_address()
-                .ip();
-
-            self.nexus.upsert_service(
-                    &opctx,
-                    svc_id,
-                    sled.id(),
-                    address,
-                    expected_svc.kind.clone()
-                )
-                .await?;
-
-            actual_count += 1;
-        }
-
-        // TODO: actually deploy service
-
-        Ok(())
-    }
-
-    // Provides a single point-in-time evaluation and adjustment of
-    // the services provisioned within the rack.
-    //
-    // May adjust the provisioned services to meet the redundancy of the
-    // rack, if necessary.
-    //
-    // TODO: Can we:
-    //  - [ ] Put these steps in a saga, to ensure they happen
-    //  - [ ] Use a state variable on the rack to ensure mutual exclusion
-    //        of service re-balancing. It's an involved operation; it would
-    //        be nice to not be conflicting with anyone else while operating -
-    //        and also helps us avoid using transactions.
-    pub async fn ensure_services_provisioned(
-        &self,
-        opctx: &OpContext,
-    ) -> Result<(), Error> {
-        for expected_svc in &EXPECTED_SERVICES {
-            info!(
-                self.log,
-                "Ensuring service {:?} exists according to redundancy {:?}",
-                expected_svc.kind,
-                expected_svc.redundancy,
-            );
-            match expected_svc.redundancy {
-                ServiceRedundancy::PerRack(desired_count) => {
-                    self.ensure_rack_svc(opctx, expected_svc, desired_count).await?;
-                },
-                ServiceRedundancy::DnsPerAz(desired_count) => {
-                    self.ensure_dns_svc(opctx, expected_svc, desired_count).await?;
-                }
-            }
-        }
-
-        // Strategy:
-        //
-        // TODO Step 1. In a transaction:
-        // - Look up all sleds within the Rack
-        // - Look up all the services of a particular kind (e.g., Oximeter)
-        // - IF enough exist, exit early.
-        // - ELSE assign services to sleds. Write to Db.
-        //
-        // Step 2. As follow-up: request those svcs execute on sleds.
-
-        Ok(())
-
-    }
-}
-
-// Redundancy for the number of datasets to be provisioned.
-enum DatasetRedundancy {
-    // The dataset should exist on all zpools.
-    OnAll,
-    // The dataset should exist on at least this many zpools.
-    PerRack(u32),
-}
-
+#[derive(Debug)]
 struct ExpectedDataset {
     kind: DatasetKind,
     redundancy: DatasetRedundancy,
 }
 
-const EXPECTED_DATASERT: [ExpectedDataset; 3] = [
+const EXPECTED_DATASETS: [ExpectedDataset; 3] = [
     ExpectedDataset {
         kind: DatasetKind::Crucible,
         redundancy: DatasetRedundancy::OnAll,
@@ -263,23 +78,233 @@ const EXPECTED_DATASERT: [ExpectedDataset; 3] = [
     },
 ];
 
-fn ensure_datasets_provisioned() {
-    // TODO:
-    // - [ ] Each zpool has Crucible
-    // - [ ] Clickhouse exists on N zpools
-    // - [ ] CRDB exists on N zpools
+pub struct ServiceBalancer {
+    log: Logger,
+    nexus: Arc<Nexus>,
+}
 
-    // Strategy:
-    //
-    // Step 1. In a transaction:
-    // - Look up all sleds within the Rack
-    // - Look up all zpools within those sleds
-    //
-    // - Look up all the services of a particular kind (e.g., Oximeter)
-    // - IF enough exist, exit early.
-    // - ELSE assign services to sleds. Write to Db.
-    //
-    // Step 2. As follow-up: request those datasets exist on sleds.
+impl ServiceBalancer {
+    pub fn new(log: Logger, nexus: Arc<Nexus>) -> Self {
+        Self {
+            log,
+            nexus,
+        }
+    }
 
+    // Reaches out to all sled agents implied in "services", and
+    // requests that the desired services are executing.
+    async fn instantiate_services(
+        &self,
+        opctx: &OpContext,
+        services: Vec<Service>
+    ) -> Result<(), Error> {
+        let mut sled_ids = HashSet::new();
+        for svc in &services {
+            sled_ids.insert(svc.sled_id);
+        }
 
+        // For all sleds requiring an update, request all services be
+        // instantiated.
+        for sled_id in &sled_ids {
+            // TODO: This interface kinda sucks; ideally we would
+            // only insert the *new* services.
+            //
+            // Inserting the old ones too is costing us an extra query.
+            let services = self.nexus.datastore().service_list(opctx, *sled_id).await?;
+            let sled_client = self.nexus.sled_client(sled_id).await?;
+
+            sled_client.services_put(&SledAgentTypes::ServiceEnsureBody {
+                services: services.iter().map(|s| {
+                    let address = Ipv6Addr::from(s.ip);
+                    let (name, service_type) = Self::get_service_name_and_type(address, s.kind.clone());
+
+                    SledAgentTypes::ServiceRequest {
+                        id: s.id(),
+                        name: name.to_string(),
+                        addresses: vec![address],
+                        gz_addresses: vec![],
+                        service_type,
+                    }
+                }).collect()
+            }).await?;
+        }
+        Ok(())
+    }
+
+    // Translates (address, db kind) to Sled Agent client types.
+    fn get_service_name_and_type(
+        address: Ipv6Addr,
+        kind: ServiceKind
+    ) -> (String, SledAgentTypes::ServiceType) {
+        match kind {
+            ServiceKind::Nexus => {
+                (
+                    "nexus".to_string(),
+                    SledAgentTypes::ServiceType::Nexus {
+                        internal_address: SocketAddrV6::new(address, NEXUS_INTERNAL_PORT, 0, 0).to_string(),
+                        external_address: SocketAddrV6::new(address, NEXUS_EXTERNAL_PORT, 0, 0).to_string(),
+                    }
+                )
+            },
+            ServiceKind::InternalDNS => {
+                (
+                    "internal-dns".to_string(),
+                    SledAgentTypes::ServiceType::InternalDns {
+                        server_address: SocketAddrV6::new(address, DNS_SERVER_PORT, 0, 0).to_string(),
+                        dns_address: SocketAddrV6::new(address, DNS_PORT, 0, 0).to_string(),
+                    },
+                )
+            },
+            ServiceKind::Oximeter => {
+                (
+                    "oximeter".to_string(),
+                    SledAgentTypes::ServiceType::Oximeter,
+                )
+            },
+        }
+    }
+
+    async fn ensure_rack_service(
+        &self,
+        opctx: &OpContext,
+        kind: ServiceKind,
+        desired_count: u32,
+    ) -> Result<(), Error> {
+        // Provision the services within the database.
+        let new_services = self.nexus
+            .datastore()
+            .ensure_rack_service(
+                opctx,
+                self.nexus.rack_id,
+                kind,
+                desired_count,
+            )
+            .await?;
+
+        // Actually instantiate those services.
+        self.instantiate_services(opctx, new_services).await
+    }
+
+    async fn ensure_dns_service(
+        &self,
+        opctx: &OpContext,
+        desired_count: u32,
+    ) -> Result<(), Error> {
+        // Provision the services within the database.
+        let new_services = self.nexus
+            .datastore()
+            .ensure_dns_service(opctx, self.nexus.rack_subnet, desired_count)
+            .await?;
+
+        // Actually instantiate those services.
+        self.instantiate_services(opctx, new_services).await
+    }
+
+    // TODO: Consider using sagas to ensure the rollout of services happens.
+    // Not using sagas *happens* to be fine because these operations are
+    // re-tried periodically, but that's kind forcing a dependency on the
+    // caller.
+    async fn ensure_services_provisioned(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<(), Error> {
+        for expected_svc in &EXPECTED_SERVICES {
+            info!(self.log, "Ensuring service {:?} exists", expected_svc);
+            match expected_svc.redundancy {
+                ServiceRedundancy::PerRack(desired_count) => {
+                    self.ensure_rack_service(opctx, expected_svc.kind.clone(), desired_count).await?;
+                },
+                ServiceRedundancy::DnsPerAz(desired_count) => {
+                    self.ensure_dns_service(opctx, desired_count).await?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn ensure_rack_dataset(
+        &self,
+        opctx: &OpContext,
+        kind: DatasetKind,
+        redundancy: DatasetRedundancy,
+    ) -> Result<(), Error> {
+        // Provision the datasets within the database.
+        let new_datasets = self.nexus
+            .datastore()
+            .ensure_rack_dataset(
+                opctx,
+                self.nexus.rack_id,
+                kind,
+                redundancy,
+            )
+            .await?;
+
+        // Actually instantiate those datasets.
+        self.instantiate_datasets(new_datasets).await
+    }
+
+    // Reaches out to all sled agents implied in "services", and
+    // requests that the desired services are executing.
+    async fn instantiate_datasets(
+        &self,
+        datasets: Vec<(Sled, Zpool, Dataset)>
+    ) -> Result<(), Error> {
+        let mut sled_clients = HashMap::new();
+
+        for (sled, zpool, dataset) in &datasets {
+            let sled_client = {
+                match sled_clients.get(&sled.id()) {
+                    Some(client) => client,
+                    None => {
+                        let sled_client = self.nexus.sled_client(&sled.id()).await?;
+                        sled_clients.insert(sled.id(), sled_client);
+                        sled_clients.get(&sled.id()).unwrap()
+                    }
+                }
+            };
+
+            let dataset_kind = match dataset.kind {
+                // TODO: This set of "all addresses" isn't right.
+                // TODO: ... should we even be using "all addresses" to contact CRDB?
+                DatasetKind::Cockroach => SledAgentTypes::DatasetKind::CockroachDb(vec![]),
+                DatasetKind::Crucible => SledAgentTypes::DatasetKind::Crucible,
+                DatasetKind::Clickhouse => SledAgentTypes::DatasetKind::Clickhouse,
+            };
+
+            // Instantiate each dataset.
+            sled_client.filesystem_put(&SledAgentTypes::DatasetEnsureBody {
+                id: dataset.id(),
+                zpool_id: zpool.id(),
+                dataset_kind,
+                address: dataset.address().to_string(),
+            }).await?;
+        }
+
+        Ok(())
+    }
+
+    async fn ensure_datasets_provisioned(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<(), Error> {
+        for expected_dataset in &EXPECTED_DATASETS {
+            info!(self.log, "Ensuring dataset {:?} exists", expected_dataset);
+            self.ensure_rack_dataset(opctx, expected_dataset.kind.clone(), expected_dataset.redundancy).await?
+        }
+        Ok(())
+    }
+
+    // Provides a single point-in-time evaluation and adjustment of
+    // the services provisioned within the rack.
+    //
+    // May adjust the provisioned services to meet the redundancy of the
+    // rack, if necessary.
+    pub async fn balance_services(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<(), Error> {
+        self.ensure_datasets_provisioned(opctx).await?;
+        self.ensure_services_provisioned(opctx).await?;
+        Ok(())
+    }
 }

@@ -74,6 +74,9 @@ use diesel::query_builder::{QueryFragment, QueryId};
 use diesel::query_dsl::methods::LoadQuery;
 use diesel::upsert::excluded;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
+use omicron_common::address::{
+    RACK_PREFIX, Ipv6Subnet, ReservedRackSubnet,
+};
 use omicron_common::api;
 use omicron_common::api::external;
 use omicron_common::api::external::DataPageParams;
@@ -90,7 +93,7 @@ use omicron_common::api::external::{
 use omicron_common::bail_unless;
 use sled_agent_client::types as sled_client_types;
 use std::convert::{TryFrom, TryInto};
-use std::net::Ipv6Addr;
+use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -117,6 +120,15 @@ impl<U, T> RunnableQuery<U> for T where
         + LoadQuery<'static, DbConnection, U>
         + QueryId
 {
+}
+
+// Redundancy for the number of datasets to be provisioned.
+#[derive(Clone, Copy, Debug)]
+pub enum DatasetRedundancy {
+    // The dataset should exist on all zpools.
+    OnAll,
+    // The dataset should exist on at least this many zpools.
+    PerRack(u32),
 }
 
 pub struct DataStore {
@@ -397,18 +409,28 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    // TODO: de-duplicate with sled_list?
-    pub async fn sled_list_with_limit(
-        &self,
-        opctx: &OpContext,
+    pub fn sled_list_with_limit_sync(
+        conn: &mut DbConnection,
         limit: u32,
-    ) -> ListResultVec<Sled> {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+    ) -> Result<Vec<Sled>, diesel::result::Error> {
         use db::schema::sled::dsl;
         dsl::sled
             .filter(dsl::time_deleted.is_null())
             .limit(limit as i64)
             .select(Sled::as_select())
+            .load(conn)
+    }
+
+    pub async fn service_list(
+        &self,
+        opctx: &OpContext,
+        sled_id: Uuid,
+    ) -> Result<Vec<Service>, Error> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        use db::schema::service::dsl;
+        dsl::service
+            .filter(dsl::sled_id.eq(sled_id))
+            .select(Service::as_select())
             .load_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
@@ -417,41 +439,307 @@ impl DataStore {
     // TODO-correctness: Filter the sleds by rack ID!
     // This filtering will feasible when Sleds store a FK for
     // the rack on which they're stored.
-    pub async fn sled_and_service_list(
-        &self,
-        opctx: &OpContext,
-        kind: ServiceKind,
+    pub fn sled_and_service_list_sync(
+        conn: &mut DbConnection,
         _rack_id: Uuid,
-    ) -> ListResultVec<(Sled, Option<Service>)> {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        kind: ServiceKind,
+    ) -> Result<Vec<(Sled, Option<Service>)>, diesel::result::Error> {
         use db::schema::service::dsl as svc_dsl;
         use db::schema::sled::dsl as sled_dsl;
 
         db::schema::sled::table
             .filter(sled_dsl::time_deleted.is_null())
             .left_outer_join(db::schema::service::table.on(
-                svc_dsl::id.eq(svc_dsl::sled_id)
+                svc_dsl::sled_id.eq(sled_dsl::id)
             ))
             .filter(svc_dsl::kind.eq(kind))
             .select(<(Sled, Option<Service>)>::as_select())
-            .get_results_async(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .get_results(conn)
     }
 
-    pub async fn dns_service_list(
+    pub async fn ensure_rack_service(
         &self,
         opctx: &OpContext,
-    ) -> ListResultVec<Service> {
+        rack_id: Uuid,
+        kind: ServiceKind,
+        redundancy: u32,
+    ) -> Result<Vec<Service>, Error> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+        #[derive(Debug)]
+        enum ServiceError {
+            NotEnoughSleds,
+            Other(Error),
+        }
+        type TxnError = TransactionError<ServiceError>;
+
+        self.pool()
+            .transaction(move |conn| {
+                let sleds_and_maybe_svcs = Self::sled_and_service_list_sync(
+                        conn,
+                        rack_id,
+                        kind.clone(),
+                    )?;
+
+                // Split the set of returned sleds into "those with" and "those
+                // without" the requested service.
+                let (sleds_with_svc, sleds_without_svc): (Vec<_>, Vec<_>) =
+                    sleds_and_maybe_svcs
+                    .iter()
+                    .partition(|(_, maybe_svc)| {
+                        maybe_svc.is_some()
+                    });
+                let mut sleds_without_svc = sleds_without_svc.into_iter()
+                    .map(|(sled, _)| sled);
+                let existing_count = sleds_with_svc.len();
+
+                // Add services to sleds, in-order, until we've met a
+                // number sufficient for our redundancy.
+                //
+                // The selection of "which sleds run this service" is completely
+                // arbitrary.
+                let mut new_svcs = vec![];
+                while (redundancy as usize) < existing_count + new_svcs.len() {
+                    let sled = sleds_without_svc.next().ok_or_else(|| {
+                        TxnError::CustomError(ServiceError::NotEnoughSleds)
+                    })?;
+                    let svc_id = Uuid::new_v4();
+                    let address = Self::next_ipv6_address_sync(conn, sled.id())
+                        .map_err(|e| TxnError::CustomError(ServiceError::Other(e)))?;
+
+                    let service = db::model::Service::new(
+                        svc_id,
+                        sled.id(),
+                        address,
+                        kind.clone()
+                    );
+
+                    // TODO: Can we insert all the services at the same time?
+                    let svc = Self::service_upsert_sync(conn, service)
+                        .map_err(|e| TxnError::CustomError(ServiceError::Other(e)))?;
+                    new_svcs.push(svc);
+                }
+
+                return Ok(new_svcs);
+            })
+            .await
+            .map_err(|e| match e {
+                TxnError::CustomError(ServiceError::NotEnoughSleds) => {
+                    Error::unavail("Not enough sleds for service allocation")
+                },
+                TxnError::CustomError(ServiceError::Other(e)) => e,
+                TxnError::Pool(e) => public_error_from_diesel_pool(e, ErrorHandler::Server)
+            })
+    }
+
+    pub async fn ensure_dns_service(
+        &self,
+        opctx: &OpContext,
+        rack_subnet: Ipv6Subnet<RACK_PREFIX>,
+        redundancy: u32,
+    ) -> Result<Vec<Service>, Error> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+        #[derive(Debug)]
+        enum ServiceError {
+            NotEnoughSleds,
+            NotEnoughIps,
+            Other(Error),
+        }
+        type TxnError = TransactionError<ServiceError>;
+
+        self.pool()
+            .transaction(move |conn| {
+                let existing_services = Self::dns_service_list_sync(conn)?;
+                let existing_count = existing_services.len();
+
+                // Get all subnets not allocated to existing services.
+                let mut usable_dns_subnets = ReservedRackSubnet(rack_subnet)
+                    .get_dns_subnets()
+                    .into_iter()
+                    .filter(|subnet| {
+                        // This address is only usable if none of the existing
+                        // DNS services are using it.
+                        existing_services.iter()
+                            .all(|svc| Ipv6Addr::from(svc.ip) != subnet.dns_address().ip())
+                    });
+
+
+                // Get all sleds which aren't already running DNS services.
+                let mut target_sleds = Self::sled_list_with_limit_sync(conn, redundancy)?
+                    .into_iter()
+                    .filter(|sled| {
+                        // The target sleds are only considered if they aren't already
+                        // running a DNS service.
+                        existing_services.iter()
+                            .all(|svc| svc.sled_id != sled.id())
+                    });
+
+                let mut new_svcs = vec![];
+                while (redundancy as usize) < existing_count + new_svcs.len() {
+                    let sled = target_sleds.next().ok_or_else(|| {
+                            TxnError::CustomError(ServiceError::NotEnoughSleds)
+                        })?;
+                    let svc_id = Uuid::new_v4();
+                    let dns_subnet = usable_dns_subnets.next().ok_or_else(|| {
+                            TxnError::CustomError(ServiceError::NotEnoughIps)
+                        })?;
+                    let address = dns_subnet
+                        .dns_address()
+                        .ip();
+
+                    let service = db::model::Service::new(
+                        svc_id,
+                        sled.id(),
+                        address,
+                        ServiceKind::InternalDNS,
+                    );
+
+                    // TODO: Can we insert all the services at the same time?
+                    let svc = Self::service_upsert_sync(conn, service)
+                        .map_err(|e| TxnError::CustomError(ServiceError::Other(e)))?;
+
+                    new_svcs.push(svc);
+                }
+                return Ok(new_svcs);
+            })
+            .await
+            .map_err(|e| match e {
+                TxnError::CustomError(ServiceError::NotEnoughSleds) => {
+                    Error::unavail("Not enough sleds for service allocation")
+                },
+                TxnError::CustomError(ServiceError::NotEnoughIps) => {
+                    Error::unavail("Not enough IP addresses for service allocation")
+                },
+                TxnError::CustomError(ServiceError::Other(e)) => e,
+                TxnError::Pool(e) => public_error_from_diesel_pool(e, ErrorHandler::Server)
+            })
+    }
+
+    fn dns_service_list_sync(
+        conn: &mut DbConnection,
+    ) -> Result<Vec<Service>, diesel::result::Error> {
         use db::schema::service::dsl as svc;
 
         svc::service
             .filter(svc::kind.eq(ServiceKind::InternalDNS))
             .select(Service::as_select())
-            .get_results_async(self.pool_authorized(opctx).await?)
+            .get_results(conn)
+    }
+
+    // TODO: Filter by rack ID
+    pub fn sled_zpool_and_dataset_list_sync(
+        conn: &mut DbConnection,
+        _rack_id: Uuid,
+        kind: DatasetKind,
+    ) -> Result<Vec<(Sled, Zpool, Option<Dataset>)>, diesel::result::Error> {
+        use db::schema::sled::dsl as sled_dsl;
+        use db::schema::zpool::dsl as zpool_dsl;
+        use db::schema::dataset::dsl as dataset_dsl;
+
+        db::schema::sled::table
+            .filter(sled_dsl::time_deleted.is_null())
+            .inner_join(db::schema::zpool::table.on(
+                zpool_dsl::sled_id.eq(sled_dsl::id)
+            ))
+            .filter(zpool_dsl::time_deleted.is_null())
+            .left_outer_join(db::schema::dataset::table.on(
+                dataset_dsl::pool_id.eq(zpool_dsl::id)
+            ))
+            .filter(dataset_dsl::kind.eq(kind))
+            .select(<(Sled, Zpool, Option<Dataset>)>::as_select())
+            .get_results(conn)
+    }
+
+    pub async fn ensure_rack_dataset(
+        &self,
+        opctx: &OpContext,
+        rack_id: Uuid,
+        kind: DatasetKind,
+        redundancy: DatasetRedundancy,
+    ) -> Result<Vec<(Sled, Zpool, Dataset)>, Error> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+        #[derive(Debug)]
+        enum DatasetError {
+            NotEnoughZpools,
+            Other(Error),
+        }
+        type TxnError = TransactionError<DatasetError>;
+
+        self.pool()
+            .transaction(move |conn| {
+                let sleds_zpools_and_maybe_datasets = Self::sled_zpool_and_dataset_list_sync(
+                        conn,
+                        rack_id,
+                        kind.clone(),
+                    )?;
+
+                // Split the set of returned zpools into "those with" and "those
+                // without" the requested dataset.
+                let (zpools_with_dataset, zpools_without_dataset): (Vec<_>, Vec<_>) =
+                    sleds_zpools_and_maybe_datasets
+                    .into_iter()
+                    .partition(|(_, _, maybe_dataset)| {
+                        maybe_dataset.is_some()
+                    });
+                let mut zpools_without_dataset = zpools_without_dataset.into_iter()
+                    .map(|(sled, zpool, _)| (sled, zpool))
+                    .peekable();
+                let existing_count = zpools_with_dataset.len();
+
+                // Add services to zpools, in-order, until we've met a
+                // number sufficient for our redundancy.
+                //
+                // The selection of "which zpools run this service" is completely
+                // arbitrary.
+                let mut new_datasets = vec![];
+
+                loop {
+                    match redundancy {
+                        DatasetRedundancy::OnAll => {
+                            if zpools_without_dataset.peek().is_none() {
+                                break;
+                            }
+                        },
+                        DatasetRedundancy::PerRack(count) => {
+                            if (count as usize) >= existing_count + new_datasets.len() {
+                                break;
+                            }
+                        },
+                    };
+
+                    let (sled, zpool) = zpools_without_dataset.next().ok_or_else(|| {
+                        TxnError::CustomError(DatasetError::NotEnoughZpools)
+                    })?;
+                    let dataset_id = Uuid::new_v4();
+                    let address = Self::next_ipv6_address_sync(conn, sled.id())
+                        .map_err(|e| TxnError::CustomError(DatasetError::Other(e)))
+                        .map(|ip| SocketAddr::V6(SocketAddrV6::new(ip, kind.port(), 0, 0)))?;
+
+                    let dataset = db::model::Dataset::new(
+                        dataset_id,
+                        zpool.id(),
+                        address,
+                        kind.clone()
+                    );
+
+                    // TODO: Can we insert all the datasets at the same time?
+                    let dataset = Self::dataset_upsert_sync(conn, dataset)
+                        .map_err(|e| TxnError::CustomError(DatasetError::Other(e)))?;
+                    new_datasets.push((sled, zpool, dataset));
+                }
+
+                return Ok(new_datasets);
+            })
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| match e {
+                TxnError::CustomError(DatasetError::NotEnoughZpools) => {
+                    Error::unavail("Not enough sleds for dataset allocation")
+                },
+                TxnError::CustomError(DatasetError::Other(e)) => e,
+                TxnError::Pool(e) => public_error_from_diesel_pool(e, ErrorHandler::Server)
+            })
     }
 
     /// Stores a new zpool in the database.
@@ -531,6 +819,44 @@ impl DataStore {
         })
     }
 
+    /// Stores a new dataset in the database.
+    pub fn dataset_upsert_sync(
+        conn: &mut DbConnection,
+        dataset: Dataset,
+    ) -> CreateResult<Dataset> {
+        use db::schema::dataset::dsl;
+
+        let zpool_id = dataset.pool_id;
+        Zpool::insert_resource(
+            zpool_id,
+            diesel::insert_into(dsl::dataset)
+                .values(dataset.clone())
+                .on_conflict(dsl::id)
+                .do_update()
+                .set((
+                    dsl::time_modified.eq(Utc::now()),
+                    dsl::pool_id.eq(excluded(dsl::pool_id)),
+                    dsl::ip.eq(excluded(dsl::ip)),
+                    dsl::port.eq(excluded(dsl::port)),
+                    dsl::kind.eq(excluded(dsl::kind)),
+                )),
+        )
+        .insert_and_get_result(conn)
+        .map_err(|e| match e {
+            SyncInsertError::CollectionNotFound => Error::ObjectNotFound {
+                type_name: ResourceType::Zpool,
+                lookup_type: LookupType::ById(zpool_id),
+            },
+            SyncInsertError::DatabaseError(e) => {
+                public_error_from_diesel_create(
+                    e,
+                    ResourceType::Dataset,
+                    &dataset.id().to_string(),
+                )
+            }
+        })
+    }
+
     /// Stores a new service in the database.
     pub async fn service_upsert(
         &self,
@@ -567,6 +893,42 @@ impl DataStore {
                         ResourceType::Service,
                         &service.id().to_string(),
                     ),
+                )
+            }
+        })
+    }
+
+    pub fn service_upsert_sync(
+        conn: &mut DbConnection,
+        service: Service,
+    ) -> CreateResult<Service> {
+        use db::schema::service::dsl;
+
+        let sled_id = service.sled_id;
+        Sled::insert_resource(
+            sled_id,
+            diesel::insert_into(dsl::service)
+                .values(service.clone())
+                .on_conflict(dsl::id)
+                .do_update()
+                .set((
+                    dsl::time_modified.eq(Utc::now()),
+                    dsl::sled_id.eq(excluded(dsl::sled_id)),
+                    dsl::ip.eq(excluded(dsl::ip)),
+                    dsl::kind.eq(excluded(dsl::kind)),
+                )),
+        )
+        .insert_and_get_result(conn)
+        .map_err(|e| match e {
+            SyncInsertError::CollectionNotFound => Error::ObjectNotFound {
+                type_name: ResourceType::Sled,
+                lookup_type: LookupType::ById(sled_id),
+            },
+            SyncInsertError::DatabaseError(e) => {
+                public_error_from_diesel_create(
+                    e,
+                    ResourceType::Service,
+                    &service.id().to_string(),
                 )
             }
         })
@@ -3575,6 +3937,36 @@ impl DataStore {
             _ => Err(Error::InternalError {
                 internal_message: String::from("Sled IP address must be IPv6"),
             }),
+        }
+    }
+
+    /// Return the next available IPv6 address for an Oxide service running on
+    /// the provided sled.
+    pub fn next_ipv6_address_sync(
+        conn: &mut DbConnection,
+        sled_id: Uuid,
+    ) -> Result<Ipv6Addr, Error> {
+        use db::schema::sled::dsl;
+        let net = diesel::update(
+            dsl::sled.find(sled_id).filter(dsl::time_deleted.is_null()),
+        )
+        .set(dsl::last_used_address.eq(dsl::last_used_address + 1))
+        .returning(dsl::last_used_address)
+        .get_result(conn)
+        .map_err(|e| {
+            public_error_from_diesel_lookup(
+                e,
+                ResourceType::Sled,
+                &LookupType::ById(sled_id),
+            )
+        })?;
+
+        // TODO-correctness: We could ensure that this address is actually
+        // within the sled's underlay prefix, once that's included in the
+        // database record.
+        match net {
+            ipnetwork::IpNetwork::V6(net) => Ok(net.ip()),
+            _ => panic!("Sled IP must be IPv6"),
         }
     }
 
