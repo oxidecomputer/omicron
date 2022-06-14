@@ -3010,6 +3010,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "sp-sim",
+ "sprockets-rot",
  "thiserror",
  "toml",
 ]
@@ -3203,6 +3204,7 @@ dependencies = [
  "socket2",
  "sp-sim",
  "spdm",
+ "sprockets-common",
  "sprockets-host",
  "subprocess",
  "tar",

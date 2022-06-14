@@ -482,13 +482,13 @@ fn overlay_sled_agent(
     // names have spaces
     let dirs = sled_agent_dirs
         .iter()
-        .map(|dir| format!("{} ", dir.display()))
+        .map(|dir| format!(" --directories {}", dir.display()))
         .collect::<String>();
 
     let cmd = format!(
         "sh -c 'for dir in {}; do mkdir -p $dir; done' && \
             cd {} && \
-            cargo run {} --bin sled-agent-overlay-files -- --directories {}",
+            cargo run {} --bin sled-agent-overlay-files -- {}",
         dirs,
         config.builder.omicron_path.to_string_lossy(),
         config.release_arg(),

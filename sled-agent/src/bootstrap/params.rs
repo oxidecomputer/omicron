@@ -23,6 +23,10 @@ pub struct SledAgentRequest {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+// Clippy wants us to put the SledAgentRequest in a Box, but (a) it's not _that_
+// big (a couple hundred bytes), and (b) that makes matching annoying.
+// `Request`s are relatively rare over the life of a sled agent.
+#[allow(clippy::large_enum_variant)]
 pub enum Request<'a> {
     /// Send configuration information for launching a Sled Agent.
     SledAgentRequest(Cow<'a, SledAgentRequest>),

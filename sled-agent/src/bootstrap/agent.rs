@@ -9,6 +9,7 @@ use super::config::{Config, BOOTSTRAP_AGENT_PORT};
 use super::discovery;
 use super::params::SledAgentRequest;
 use super::rss_handle::RssHandle;
+use super::server::TrustQuorumMembership;
 use super::trust_quorum::{RackSecret, ShareDistribution, TrustQuorumError};
 use super::views::SledAgentResponse;
 use crate::config::Config as SledConfig;
@@ -24,9 +25,9 @@ use omicron_common::backoff::{
 use slog::Logger;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::Mutex;
-use vsss_rs::Share;
 
 /// Describes errors which may occur while operating the bootstrap service.
 #[derive(Error, Debug)]
@@ -113,7 +114,7 @@ impl Agent {
         sled_config: SledConfig,
         address: Ipv6Addr,
         sp: Option<SpHandle>,
-    ) -> Result<Self, BootstrapError> {
+    ) -> Result<(Self, TrustQuorumMembership), BootstrapError> {
         let ba_log = log.new(o!(
             "component" => "BootstrapAgent",
             "server" => sled_config.id.to_string(),
@@ -175,7 +176,7 @@ impl Agent {
         };
 
         let request_path = get_sled_agent_request_path();
-        if request_path.exists() {
+        let trust_quorum = if request_path.exists() {
             info!(agent.log, "Sled already configured, loading sled agent");
             let sled_request: SledAgentRequest = toml::from_str(
                 &tokio::fs::read_to_string(&request_path).await.map_err(
@@ -189,18 +190,14 @@ impl Agent {
             )
             .map_err(|err| BootstrapError::Toml { path: request_path, err })?;
             agent.request_agent(&sled_request).await?;
-        }
+            TrustQuorumMembership::Known(Arc::new(
+                sled_request.trust_quorum_share,
+            ))
+        } else {
+            TrustQuorumMembership::Uninitialized
+        };
 
-        Ok(agent)
-    }
-
-    /// Returns our share of the rack secret, if we have one.
-    pub async fn secret_share(&self) -> Option<Share> {
-        self.share
-            .lock()
-            .await
-            .as_ref()
-            .map(|share_dist| share_dist.share.clone())
+        Ok((agent, trust_quorum))
     }
 
     /// Initializes the Sled Agent on behalf of the RSS, if one has not already
@@ -258,7 +255,6 @@ impl Agent {
         maybe_agent.replace(server);
         info!(&self.log, "Sled Agent loaded; recording configuration");
 
-        // Remember our share, allowing us to respond to `request_share()`.
         *self.share.lock().await = request.trust_quorum_share.clone();
 
         // Record this request so the sled agent can be automatically
@@ -324,6 +320,7 @@ impl Agent {
                         BootstrapAgentClient::new(
                             addr,
                             &self.sp,
+                            &share.member_device_id_certs,
                             self.log.new(o!(
                                 "BootstrapAgentClient" => addr.to_string()),
                             ),
@@ -349,7 +346,7 @@ impl Agent {
                 }
                 let rack_secret = RackSecret::combine_shares(
                     share.threshold,
-                    share.total_shares,
+                    share.total_shares(),
                     &shares,
                 )
                 .map_err(|e| {
@@ -390,6 +387,13 @@ impl Agent {
                 rss_config.clone(),
                 self.peer_monitor.observer().await,
                 self.sp.clone(),
+                // TODO-cleanup: Remove this arg once RSS can discover the trust
+                // quorum members over the management network.
+                config
+                    .sp_config
+                    .as_ref()
+                    .map(|sp_config| sp_config.trust_quorum_members.clone())
+                    .unwrap_or_default(),
             );
             self.rss.lock().await.replace(rss);
         }
