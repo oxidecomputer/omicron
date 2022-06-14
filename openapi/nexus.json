@@ -6085,11 +6085,26 @@
         ]
       },
       "Distribution": {
-        "title": "OS image distribution",
-        "description": "Distribution must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'.",
-        "type": "string",
-        "pattern": "[a-z](|[a-zA-Z0-9-]*[a-zA-Z0-9])",
-        "maxLength": 63
+        "description": "OS image distribution",
+        "type": "object",
+        "properties": {
+          "name": {
+            "description": "The name of the distribution (e.g. \"alpine\" or \"ubuntu\")",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "version": {
+            "description": "The version of the distribution (e.g. \"3.10\" or \"18.04\")",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "version"
+        ]
       },
       "Error": {
         "description": "Error information from a response.",
@@ -6309,10 +6324,6 @@
                 "$ref": "#/components/schemas/ImageSource"
               }
             ]
-          },
-          "version": {
-            "description": "image version",
-            "type": "string"
           }
         },
         "required": [
@@ -6320,8 +6331,7 @@
           "description",
           "distribution",
           "name",
-          "source",
-          "version"
+          "source"
         ]
       },
       "GlobalImageResultsPage": {
