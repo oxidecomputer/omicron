@@ -3209,6 +3209,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+ "tokio-tungstenite",
  "tokio-util 0.7.3",
  "toml",
  "uuid",

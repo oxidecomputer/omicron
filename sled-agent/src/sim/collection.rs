@@ -301,6 +301,11 @@ impl<S: Simulatable + 'static> SimCollection<S> {
         }
         rv
     }
+
+    pub async fn sim_contains(self: &Arc<Self>, id: &Uuid) -> bool {
+        let objects = self.objects.lock().await;
+        objects.contains_key(id)
+    }
 }
 
 #[cfg(test)]

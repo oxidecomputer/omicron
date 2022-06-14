@@ -885,4 +885,41 @@ impl super::Nexus {
             }
         }
     }
+
+    /// Returns the requested range of serial console output bytes,
+    /// provided they are still in the sled-agent's cache.
+    pub(crate) async fn instance_serial_console_data(
+        &self,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
+        instance_name: &Name,
+        params: &params::InstanceSerialConsoleRequest,
+    ) -> Result<params::InstanceSerialConsoleData, Error> {
+        let db_instance = self
+            .instance_fetch(
+                opctx,
+                organization_name,
+                project_name,
+                instance_name,
+            )
+            .await?;
+
+        let sa = self.instance_sled(&db_instance).await?;
+        let data = sa
+            .instance_serial_get(
+                &db_instance.identity().id,
+                // these parameters are all the same type; OpenAPI puts them in alphabetical order.
+                params.from_start,
+                params.max_bytes,
+                params.most_recent,
+            )
+            .await?;
+        let sa_data: sled_agent_client::types::InstanceSerialConsoleData =
+            data.into_inner();
+        Ok(params::InstanceSerialConsoleData {
+            data: sa_data.data,
+            last_byte_offset: sa_data.last_byte_offset,
+        })
+    }
 }
