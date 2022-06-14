@@ -543,9 +543,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "3.1.18"
+version = "3.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2dbdf4bdacb33466e854ce889eee8dfd5729abf7ccd7664d0a2d60cd384440b"
+checksum = "a836566fa5f52f7ddf909a8a2f9029b9f78ca584cd95cf7e87f8073110f4c5c9"
 dependencies = [
  "atty",
  "bitflags",
@@ -560,9 +560,9 @@ dependencies = [
 
 [[package]]
 name = "clap_derive"
-version = "3.1.18"
+version = "3.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25320346e922cffe59c0bbc5410c8d8784509efb321488971081313cb1e1a33c"
+checksum = "986fd75d1dfd2c34eb8c9275ae38ad87ea9478c9b79e87f1801f7d866dfb1e37"
 dependencies = [
  "heck 0.4.0",
  "proc-macro-error",
@@ -573,9 +573,9 @@ dependencies = [
 
 [[package]]
 name = "clap_lex"
-version = "0.2.0"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a37c35f1112dad5e6e0b1adaff798507497a18fceeb30cceb3bae7d1427b9213"
+checksum = "5538cd660450ebeb4234cfecf8f2284b844ffc4c50531e66d584ad5b91293613"
 dependencies = [
  "os_str_bytes",
 ]
@@ -848,7 +848,7 @@ dependencies = [
  "structopt",
  "tokio",
  "tokio-rustls",
- "tokio-util 0.7.3",
+ "tokio-util",
  "toml",
  "tracing",
  "usdt",
@@ -878,7 +878,7 @@ source = "git+https://github.com/oxidecomputer/crucible?rev=8314eeddd228ec0d76ce
 dependencies = [
  "anyhow",
  "rusqlite",
- "rustls-pemfile 1.0.0",
+ "rustls-pemfile",
  "serde",
  "serde_json",
  "tempfile",
@@ -899,7 +899,7 @@ dependencies = [
  "bytes",
  "crucible-common",
  "serde",
- "tokio-util 0.7.3",
+ "tokio-util",
  "uuid",
 ]
 
@@ -1312,7 +1312,7 @@ dependencies = [
  "percent-encoding",
  "proc-macro2",
  "rustls",
- "rustls-pemfile 1.0.0",
+ "rustls-pemfile",
  "schemars",
  "serde",
  "serde_json",
@@ -1776,7 +1776,7 @@ name = "gateway-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 3.1.18",
+ "clap 3.2.1",
  "futures",
  "gateway-client",
  "libc",
@@ -1933,7 +1933,7 @@ dependencies = [
  "indexmap",
  "slab",
  "tokio",
- "tokio-util 0.7.3",
+ "tokio-util",
  "tracing",
 ]
 
@@ -2318,7 +2318,7 @@ name = "internal-dns"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 3.1.18",
+ "clap 3.2.1",
  "dropshot",
  "expectorate",
  "internal-dns-client",
@@ -2750,7 +2750,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "uuid 1.1.0",
+ "uuid",
 ]
 
 [[package]]
@@ -2995,7 +2995,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-postgres",
- "uuid 1.1.0",
+ "uuid",
 ]
 
 [[package]]
@@ -3003,7 +3003,7 @@ name = "omicron-deploy"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 3.1.18",
+ "clap 3.2.1",
  "crossbeam",
  "omicron-package",
  "omicron-sled-agent",
@@ -3018,7 +3018,7 @@ dependencies = [
 name = "omicron-gateway"
 version = "0.1.0"
 dependencies = [
- "clap 3.1.18",
+ "clap 3.2.1",
  "dropshot",
  "expectorate",
  "futures",
@@ -3058,7 +3058,7 @@ dependencies = [
  "base64",
  "bb8",
  "chrono",
- "clap 3.1.18",
+ "clap 3.2.1",
  "cookie",
  "criterion",
  "crucible-agent-client",
@@ -3132,7 +3132,7 @@ name = "omicron-package"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 3.1.18",
+ "clap 3.2.1",
  "futures",
  "hex",
  "indicatif",
@@ -3167,7 +3167,7 @@ dependencies = [
  "bytes",
  "cfg-if 1.0.0",
  "chrono",
- "clap 3.1.18",
+ "clap 3.2.1",
  "crucible-agent-client",
  "dropshot",
  "expectorate",
@@ -3210,7 +3210,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-tungstenite",
- "tokio-util 0.7.3",
+ "tokio-util",
  "toml",
  "uuid",
  "vsss-rs",
@@ -3222,7 +3222,7 @@ name = "omicron-test-utils"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 3.1.18",
+ "clap 3.2.1",
  "dropshot",
  "expectorate",
  "futures",
@@ -3426,7 +3426,7 @@ dependencies = [
  "schemars",
  "serde",
  "thiserror",
- "uuid 1.1.0",
+ "uuid",
 ]
 
 [[package]]
@@ -3446,7 +3446,7 @@ dependencies = [
 name = "oximeter-collector"
 version = "0.1.0"
 dependencies = [
- "clap 3.1.18",
+ "clap 3.2.1",
  "dropshot",
  "expectorate",
  "nexus-client 0.1.0",
@@ -3476,7 +3476,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "chrono",
- "clap 3.1.18",
+ "clap 3.2.1",
  "dropshot",
  "itertools",
  "omicron-test-utils",
@@ -3503,7 +3503,7 @@ dependencies = [
  "dropshot",
  "futures",
  "http",
- "oximeter",
+ "oximeter 0.1.0",
  "uuid",
 ]
 
@@ -3544,7 +3544,7 @@ dependencies = [
  "slog-dtrace",
  "thiserror",
  "tokio",
- "uuid 1.1.0",
+ "uuid",
 ]
 
 [[package]]
@@ -4403,9 +4403,9 @@ dependencies = [
 
 [[package]]
 name = "reqwest"
-version = "0.11.10"
+version = "0.11.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46a1f7aa4f35e5e8b4160449f51afc758f0ce6454315a9fa7d0d113e958c41eb"
+checksum = "b75aa69a3f06bbcc66ede33af2af253c6f7a86b1ca0033f60c580a27074fbf92"
 dependencies = [
  "base64",
  "bytes",
@@ -4427,14 +4427,15 @@ dependencies = [
  "percent-encoding",
  "pin-project-lite",
  "rustls",
- "rustls-pemfile 0.3.0",
+ "rustls-pemfile",
  "serde",
  "serde_json",
  "serde_urlencoded",
  "tokio",
  "tokio-native-tls",
  "tokio-rustls",
- "tokio-util 0.6.9",
+ "tokio-util",
+ "tower-service",
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -4567,15 +4568,6 @@ dependencies = [
  "ring",
  "sct",
  "webpki",
-]
-
-[[package]]
-name = "rustls-pemfile"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ee86d63972a7c661d1536fefe8c3c8407321c3df668891286de28abcd087360"
-dependencies = [
- "base64",
 ]
 
 [[package]]
@@ -5305,7 +5297,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "clap 3.1.18",
+ "clap 3.2.1",
  "dropshot",
  "futures",
  "gateway-messages",
@@ -5374,7 +5366,7 @@ version = "0.1.0"
 source = "git+http://github.com/oxidecomputer/sprockets?rev=0361fd13ff19cda6696242fe40f1325fca30d3d1#0361fd13ff19cda6696242fe40f1325fca30d3d1"
 dependencies = [
  "anyhow",
- "clap 3.1.18",
+ "clap 3.2.1",
  "derive_more",
  "futures",
  "pin-project",
@@ -5872,7 +5864,7 @@ dependencies = [
  "postgres-types",
  "socket2",
  "tokio",
- "tokio-util 0.7.3",
+ "tokio-util",
 ]
 
 [[package]]
@@ -5907,20 +5899,6 @@ dependencies = [
  "log",
  "tokio",
  "tungstenite",
-]
-
-[[package]]
-name = "tokio-util"
-version = "0.6.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e99e1983e5d376cd8eb4b66604d2e99e79f5bd988c3055891dcd8c9e2604cc0"
-dependencies = [
- "bytes",
- "futures-core",
- "futures-sink",
- "log",
- "pin-project-lite",
- "tokio",
 ]
 
 [[package]]
