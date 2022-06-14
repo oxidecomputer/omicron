@@ -200,7 +200,7 @@ impl Inner {
             // our quorum share.
             let (stream, remote_addr) = tokio::select! {
                 share = rx_share.recv() => {
-                    // `rx_share` can never be `None`, as we're holding
+                    // `share` can never be `None`, as we're holding
                     // `tx_share`; we can `.unwrap()` it.
                     return Ok(Arc::new(share.unwrap()));
                 }
@@ -253,15 +253,14 @@ async fn serve_request_before_quorum_initialization(
         Request::SledAgentRequest(request) => {
             match bootstrap_agent.request_agent(&*request).await {
                 Ok(response) => {
-                    // Bootstrap agent successfully initialized our sled; tell
-                    // `wait_for_sled_initialization()` what our trust quorum
-                    // share is. It doesn't return until we tell it our share
-                    // (unless something has gone wrong with the socket), so
-                    // it's fine to unwrap this send.
-                    tx_share
+                    // If this send fails, it means our caller already received
+                    // our share from a different
+                    // `serve_request_before_quorum_initialization()` task
+                    // (i.e., from another incoming request from RSS). We'll
+                    // ignore such failures.
+                    let _ = tx_share
                         .send(request.trust_quorum_share.clone())
-                        .await
-                        .unwrap();
+                        .await;
 
                     Ok(Response::SledAgentResponse(response))
                 }
