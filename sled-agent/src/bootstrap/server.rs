@@ -258,9 +258,8 @@ async fn serve_request_before_quorum_initialization(
                     // `serve_request_before_quorum_initialization()` task
                     // (i.e., from another incoming request from RSS). We'll
                     // ignore such failures.
-                    let _ = tx_share
-                        .send(request.trust_quorum_share.clone())
-                        .await;
+                    let _ =
+                        tx_share.send(request.trust_quorum_share.clone()).await;
 
                     Ok(Response::SledAgentResponse(response))
                 }
