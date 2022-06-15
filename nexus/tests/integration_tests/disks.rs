@@ -688,7 +688,8 @@ async fn test_disk_invalid_block_size_rejected(
     .unwrap();
 }
 
-// Tests that a disk is rejected if the total size isn't divided by the block size
+// Tests that a disk is rejected if the total size isn't divided by the
+// block size
 #[nexus_test]
 async fn test_disk_reject_total_size_not_divisible_by_block_size(
     cptestctx: &ControlPlaneTestContext,
@@ -730,6 +731,93 @@ async fn test_disk_reject_total_size_not_divisible_by_block_size(
     .execute()
     .await
     .unwrap();
+}
+
+// Tests that a disk is rejected if the total size is less than MIN_DISK_SIZE
+#[nexus_test]
+async fn test_disk_reject_total_size_less_than_one_gibibyte(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    create_org_and_project(client).await;
+
+    let disk_size = ByteCount::from(params::MIN_DISK_SIZE_BYTES / 2);
+
+    // Attempt to allocate the disk, observe a server error.
+    let disks_url = get_disks_url();
+    let new_disk = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: DISK_NAME.parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
+        size: disk_size,
+    };
+
+    let error = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&new_disk))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<dropshot::HttpErrorResponseBody>()
+    .unwrap();
+    assert_eq!(
+        error.message,
+        format!(
+            "unsupported value for \"size\": total size must be at least {}",
+            ByteCount::from(params::MIN_DISK_SIZE_BYTES)
+        )
+    );
+}
+
+// Tests that a disk is rejected if the total size isn't divisible by
+// MIN_DISK_SIZE_BYTES
+#[nexus_test]
+async fn test_disk_reject_total_size_not_divisible_by_min_disk_size(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    create_org_and_project(client).await;
+
+    let disk_size = ByteCount::from(1024 * 1024 * 1024 + 512);
+
+    // Attempt to allocate the disk, observe a server error.
+    let disks_url = get_disks_url();
+    let new_disk = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: DISK_NAME.parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
+        size: disk_size,
+    };
+
+    let error = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&new_disk))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<dropshot::HttpErrorResponseBody>()
+    .unwrap();
+    assert_eq!(
+        error.message,
+        format!(
+            "unsupported value for \"size\": total size must be a multiple of {}",
+            ByteCount::from(params::MIN_DISK_SIZE_BYTES)
+        )
+    );
 }
 
 async fn disk_get(client: &ClientTestContext, disk_url: &str) -> Disk {

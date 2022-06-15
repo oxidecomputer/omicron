@@ -4,22 +4,14 @@
 
 //! Request types for the bootstrap agent
 
-use std::borrow::Cow;
-
+use super::trust_quorum::ShareDistribution;
 use omicron_common::address::{Ipv6Subnet, SLED_PREFIX};
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use uuid::Uuid;
 
-/// Identity signed by local RoT and Oxide certificate chain.
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct ShareRequest {
-    // TODO-completeness: format TBD; currently opaque.
-    pub identity: Vec<u8>,
-}
-
 /// Configuration information for launching a Sled Agent.
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct SledAgentRequest {
     /// Uuid of the Sled Agent to be created.
     pub id: Uuid,
@@ -29,9 +21,19 @@ pub struct SledAgentRequest {
 
     /// Uuid of the rack to which this sled agent belongs.
     pub rack_id: Uuid,
+
+    /// Share of the rack secret for this Sled Agent.
+    // TODO-cleanup This is currently optional because we don't do trust quorum
+    // shares for single-node deployments (i.e., most dev/test environments),
+    // but eventually this should be required.
+    pub trust_quorum_share: Option<ShareDistribution>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+// Clippy wants us to put the SledAgentRequest in a Box, but (a) it's not _that_
+// big (a couple hundred bytes), and (b) that makes matching annoying.
+// `Request`s are relatively rare over the life of a sled agent.
+#[allow(clippy::large_enum_variant)]
 pub enum Request<'a> {
     /// Send configuration information for launching a Sled Agent.
     SledAgentRequest(Cow<'a, SledAgentRequest>),

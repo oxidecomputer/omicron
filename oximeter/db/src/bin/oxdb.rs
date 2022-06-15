@@ -7,6 +7,7 @@
 
 use anyhow::{bail, Context};
 use chrono::{DateTime, Utc};
+use clap::{Args, Parser};
 use oximeter::{
     types::{Cumulative, Sample},
     Metric, Target,
@@ -14,7 +15,6 @@ use oximeter::{
 use oximeter_db::{query, Client, DbWrite};
 use slog::{debug, info, o, Drain, Level, Logger};
 use std::net::SocketAddr;
-use structopt::StructOpt;
 use uuid::Uuid;
 
 // Samples are inserted in chunks of this size, to avoid large allocations when inserting huge
@@ -51,52 +51,52 @@ fn level_from_str(s: &str) -> Result<Level, anyhow::Error> {
 }
 
 /// Tools for developing with the Oximeter timeseries database.
-#[derive(Debug, StructOpt)]
+#[derive(Debug, Parser)]
 struct OxDb {
     /// Port on which to connect to the database
-    #[structopt(short, long, default_value = "8123")]
+    #[clap(short, long, default_value = "8123", action)]
     port: u16,
 
     /// Logging level
-    #[structopt(short, long, default_value = "info", parse(try_from_str = level_from_str))]
+    #[clap(short, long, default_value = "info", value_parser = level_from_str)]
     log_level: Level,
 
-    #[structopt(subcommand)]
+    #[clap(subcommand)]
     cmd: Subcommand,
 }
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, Args)]
 struct PopulateArgs {
     /// The number of samples to generate, per timeseries
-    #[structopt(short = "n", long, default_value = "100")]
+    #[clap(short = 'n', long, default_value = "100", action)]
     n_samples: usize,
 
     /// Number of projects to simulate
-    #[structopt(short = "p", long, default_value = "2")]
+    #[clap(short = 'p', long, default_value = "2", action)]
     n_projects: usize,
 
     /// Number of VM instances to simulate, _per project_
-    #[structopt(short = "i", long, default_value = "2")]
+    #[clap(short = 'i', long, default_value = "2", action)]
     n_instances: usize,
 
     /// Number of vCPUs to simulate, per instance.
-    #[structopt(short = "c", long, default_value = "4")]
+    #[clap(short = 'c', long, default_value = "4", action)]
     n_cpus: usize,
 
     /// If true, generate data and report logs, but do not actually insert anything into the
     /// database.
-    #[structopt(short, long)]
+    #[clap(short, long, action)]
     dry_run: bool,
 }
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, clap::Subcommand)]
 enum Subcommand {
     /// Populate the database with test data
     ///
     /// This simulates CPU time data from one or more virtual machine instances. Use the `describe`
     /// subcommand to describe the schema of each timeseries.
     Populate {
-        #[structopt(flatten)]
+        #[clap(flatten)]
         populate_args: PopulateArgs,
     },
 
@@ -110,26 +110,27 @@ enum Subcommand {
     Query {
         /// The name of the timeseries to search for. (Currently only `virtual_machine:cpu_busy`
         /// makes any sense.)
+        #[clap(action)]
         timeseries_name: String,
 
         /// Filters applied to the timeseries's fields.
-        #[structopt(required = true, min_values(1))]
+        #[clap(required = true, min_values(1), action)]
         filters: Vec<String>,
 
         /// The start time to which the search is constrained, inclusive.
-        #[structopt(long)]
+        #[clap(long, action)]
         start: Option<DateTime<Utc>>,
 
         /// The start time to which the search is constrained, exclusive.
-        #[structopt(long, conflicts_with("start"))]
+        #[clap(long, conflicts_with("start"), action)]
         start_exclusive: Option<DateTime<Utc>>,
 
         /// The stop time to which the search is constrained, inclusive.
-        #[structopt(long)]
+        #[clap(long, action)]
         end: Option<DateTime<Utc>>,
 
         /// The start time to which the search is constrained, exclusive.
-        #[structopt(long, conflicts_with("end"))]
+        #[clap(long, conflicts_with("end"), action)]
         end_exclusive: Option<DateTime<Utc>>,
     },
 }
@@ -279,7 +280,7 @@ async fn query(
 
 #[tokio::main]
 async fn main() {
-    let args = OxDb::from_args();
+    let args = OxDb::parse();
     let decorator = slog_term::TermDecorator::new().build();
     let drain = slog_term::FullFormat::new(decorator)
         .build()

@@ -195,6 +195,8 @@ lazy_static! {
         format!("{}/detach", *DEMO_INSTANCE_DISKS_URL);
     pub static ref DEMO_INSTANCE_NICS_URL: String =
         format!("{}/network-interfaces", *DEMO_INSTANCE_URL);
+    pub static ref DEMO_INSTANCE_SERIAL_URL: String =
+        format!("{}/serial", *DEMO_INSTANCE_URL);
     pub static ref DEMO_INSTANCE_CREATE: params::InstanceCreate =
         params::InstanceCreate {
             identity: IdentityMetadataCreateParams {
@@ -225,6 +227,15 @@ lazy_static! {
             subnet_name: DEMO_VPC_SUBNET_NAME.clone(),
             ip: None,
         };
+    pub static ref DEMO_INSTANCE_NIC_PUT: params::NetworkInterfaceUpdate = {
+        params::NetworkInterfaceUpdate {
+            identity: IdentityMetadataUpdateParams {
+                name: None,
+                description: Some(String::from("an updated description")),
+            },
+            make_primary: false,
+        }
+    };
 }
 
 // Separate lazy_static! blocks to avoid hitting some recursion limit when compiling
@@ -254,8 +265,10 @@ lazy_static! {
                 description: String::from(""),
             },
             source: params::ImageSource::Url { url: HTTP_SERVER.url("/image.raw").to_string() },
-            distribution: params::Distribution::try_from(String::from("alpine")).unwrap(),
-            version: String::from("edge"),
+            distribution: params::Distribution {
+                name: "alpine".parse().unwrap(),
+                version: String::from("edge"),
+            },
             block_size: params::BlockSize::try_from(4096).unwrap(),
         };
 
@@ -857,6 +870,13 @@ lazy_static! {
                 ).unwrap()),
             ],
         },
+        VerifyEndpoint {
+            url: &*DEMO_INSTANCE_SERIAL_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::GetNonexistent // has required query parameters
+            ],
+        },
 
         /* Instance NICs */
         VerifyEndpoint {
@@ -875,6 +895,9 @@ lazy_static! {
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Delete,
+                AllowedMethod::Put(
+                    serde_json::to_value(&*DEMO_INSTANCE_NIC_PUT).unwrap()
+                ),
             ],
         },
 

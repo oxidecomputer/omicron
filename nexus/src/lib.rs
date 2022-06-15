@@ -87,16 +87,17 @@ impl<'a> InternalServer<'a> {
         config: &'a Config,
         log: &Logger,
     ) -> Result<InternalServer<'a>, String> {
-        let log = log.new(o!("name" => config.runtime.id.to_string()));
+        let log = log.new(o!("name" => config.deployment.id.to_string()));
         info!(log, "setting up nexus server");
 
         let ctxlog = log.new(o!("component" => "ServerContext"));
 
         let apictx =
-            ServerContext::new(config.runtime.rack_id, ctxlog, &config).await?;
+            ServerContext::new(config.deployment.rack_id, ctxlog, &config)
+                .await?;
 
         let http_server_starter_internal = dropshot::HttpServerStarter::new(
-            &config.runtime.dropshot_internal,
+            &config.deployment.dropshot_internal,
             internal_api(),
             Arc::clone(&apictx),
             &log.new(o!("component" => "dropshot_internal")),
@@ -134,7 +135,7 @@ impl Server {
         apictx.nexus.start_background_tasks().map_err(|e| e.to_string())?;
 
         let http_server_starter_external = dropshot::HttpServerStarter::new(
-            &config.runtime.dropshot_external,
+            &config.deployment.dropshot_external,
             external_api(),
             Arc::clone(&apictx),
             &log.new(o!("component" => "dropshot_external")),

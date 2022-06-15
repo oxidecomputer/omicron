@@ -5,11 +5,14 @@
 //! Plan generation for "how should sleds be initialized".
 
 use crate::bootstrap::{
-    config::BOOTSTRAP_AGENT_PORT, params::SledAgentRequest,
+    config::BOOTSTRAP_AGENT_PORT,
+    params::SledAgentRequest,
+    trust_quorum::{RackSecret, ShareDistribution},
 };
 use crate::rack_setup::config::SetupServiceConfig as Config;
 use serde::{Deserialize, Serialize};
 use slog::Logger;
+use sprockets_host::Ed25519Certificate;
 use std::collections::HashMap;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use std::path::{Path, PathBuf};
@@ -18,6 +21,47 @@ use uuid::Uuid;
 
 fn rss_sled_plan_path() -> PathBuf {
     Path::new(omicron_common::OMICRON_CONFIG_PATH).join("rss-sled-plan.toml")
+}
+
+fn generate_rack_secret<'a>(
+    rack_secret_threshold: usize,
+    member_device_id_certs: &'a [Ed25519Certificate],
+    log: &Logger,
+) -> Result<
+    Option<impl ExactSizeIterator<Item = ShareDistribution> + 'a>,
+    PlanError,
+> {
+    // We do not generate a rack secret if we only have a single sled or if our
+    // config specifies that the threshold for unlock is only a single sled.
+    let total_shares = member_device_id_certs.len();
+    if total_shares <= 1 {
+        info!(log, "Skipping rack secret creation (only one sled present)");
+        return Ok(None);
+    }
+
+    if rack_secret_threshold <= 1 {
+        warn!(
+            log,
+            concat!(
+                "Skipping rack secret creation due to config",
+                " (despite discovery of {} bootstrap agents)"
+            ),
+            total_shares,
+        );
+        return Ok(None);
+    }
+
+    let secret = RackSecret::new();
+    let (shares, verifier) = secret
+        .split(rack_secret_threshold, total_shares)
+        .map_err(PlanError::SplitRackSecret)?;
+
+    Ok(Some(shares.into_iter().map(move |share| ShareDistribution {
+        threshold: rack_secret_threshold,
+        verifier: verifier.clone(),
+        share,
+        member_device_id_certs: member_device_id_certs.to_vec(),
+    })))
 }
 
 /// Describes errors which may occur while generating a plan for sleds.
@@ -32,6 +76,9 @@ pub enum PlanError {
 
     #[error("Cannot deserialize TOML file at {path}: {err}")]
     Toml { path: PathBuf, err: toml::de::Error },
+
+    #[error("Failed to split rack secret: {0:?}")]
+    SplitRackSecret(vsss_rs::Error),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -73,12 +120,36 @@ impl Plan {
     pub async fn create(
         log: &Logger,
         config: &Config,
-        bootstrap_addrs: impl IntoIterator<Item = Ipv6Addr>,
+        bootstrap_addrs: Vec<Ipv6Addr>,
+        member_device_id_certs: &[Ed25519Certificate],
     ) -> Result<Self, PlanError> {
-        let bootstrap_addrs = bootstrap_addrs.into_iter().enumerate();
-
         let rack_id = Uuid::new_v4();
 
+        // Create a rack secret, unless we're in the single-sled case.
+        let mut maybe_rack_secret_shares = generate_rack_secret(
+            config.rack_secret_threshold,
+            member_device_id_certs,
+            log,
+        )?;
+        // Confirm that the returned iterator (if we got one) is the length we
+        // expect.
+        if let Some(rack_secret_shares) = maybe_rack_secret_shares.as_ref() {
+            // TODO-cleanup Asserting here seems fine as long as
+            // `member_device_id_certs` is hard-coded from a config file, but
+            // once we start collecting them over the management network we
+            // should probably attach them at the type level to the bootstrap
+            // addrs, which would remove the need for this assertion.
+            assert_eq!(
+                rack_secret_shares.len(),
+                bootstrap_addrs.len(),
+                concat!(
+                    "Number of trust quorum members does not match ",
+                    "number of bootstrap addresses"
+                )
+            );
+        }
+
+        let bootstrap_addrs = bootstrap_addrs.into_iter().enumerate();
         let allocations = bootstrap_addrs.map(|(idx, bootstrap_addr)| {
             info!(log, "Creating plan for the sled at {:?}", bootstrap_addr);
             let bootstrap_addr =
@@ -89,7 +160,20 @@ impl Plan {
 
             (
                 bootstrap_addr,
-                SledAgentRequest { id: Uuid::new_v4(), subnet, rack_id },
+                SledAgentRequest {
+                    id: Uuid::new_v4(),
+                    subnet,
+                    rack_id,
+                    trust_quorum_share: maybe_rack_secret_shares.as_mut().map(
+                        |shares_iter| {
+                            // We asserted when creating
+                            // `maybe_rack_secret_shares` that it contained
+                            // exactly the number of shares as we have
+                            // bootstrap addrs, so we can unwrap here.
+                            shares_iter.next().unwrap()
+                        },
+                    ),
+                },
             )
         });
 
@@ -121,5 +205,74 @@ impl Plan {
         info!(log, "Sled plan written to storage");
 
         Ok(plan)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use omicron_test_utils::dev::test_setup_log;
+    use sprockets_common::certificates::Ed25519Signature;
+    use sprockets_common::certificates::KeyType;
+    use std::collections::HashSet;
+
+    fn dummy_certs(n: usize) -> Vec<Ed25519Certificate> {
+        vec![
+            Ed25519Certificate {
+                subject_key_type: KeyType::DeviceId,
+                subject_public_key: sprockets_host::Ed25519PublicKey([0; 32]),
+                signer_key_type: KeyType::Manufacturing,
+                signature: Ed25519Signature([0; 64]),
+            };
+            n
+        ]
+    }
+
+    #[test]
+    fn test_generate_rack_secret() {
+        let logctx = test_setup_log("test_generate_rack_secret");
+
+        // No secret generated if we have <= 1 sled
+        assert!(generate_rack_secret(10, &dummy_certs(1), &logctx.log)
+            .unwrap()
+            .is_none());
+
+        // No secret generated if threshold <= 1
+        assert!(generate_rack_secret(1, &dummy_certs(10), &logctx.log)
+            .unwrap()
+            .is_none());
+
+        // Secret generation fails if threshold > total sleds
+        assert!(matches!(
+            generate_rack_secret(10, &dummy_certs(5), &logctx.log),
+            Err(PlanError::SplitRackSecret(_))
+        ));
+
+        // Secret generation succeeds if threshold <= total shares and both are
+        // > 1, and the returned iterator satifies:
+        //
+        // * total length == total shares
+        // * each share is distinct
+        for total_shares in 2..=32 {
+            for threshold in 2..=total_shares {
+                let certs = dummy_certs(total_shares);
+                let shares =
+                    generate_rack_secret(threshold, &certs, &logctx.log)
+                        .unwrap()
+                        .unwrap();
+
+                assert_eq!(shares.len(), total_shares);
+
+                // `Share` doesn't implement `Hash`, but it's a newtype around
+                // `Vec<u8>` (which does). Unwrap the newtype to check that all
+                // shares are distinct.
+                let shares_set = shares
+                    .map(|share_dist| share_dist.share.0)
+                    .collect::<HashSet<_>>();
+                assert_eq!(shares_set.len(), total_shares);
+            }
+        }
+
+        logctx.cleanup_successful();
     }
 }

@@ -6,8 +6,7 @@
 
 use super::config::SetupServiceConfig as Config;
 use crate::bootstrap::{
-    discovery::PeerMonitorObserver, params::SledAgentRequest,
-    rss_handle::BootstrapAgentHandle,
+    discovery::PeerMonitorObserver, rss_handle::BootstrapAgentHandle,
 };
 use crate::params::{DatasetEnsureBody, ServiceRequest, ServiceType};
 use crate::rack_setup::plan::service::{
@@ -24,11 +23,11 @@ use omicron_common::address::{get_sled_address, NEXUS_INTERNAL_PORT};
 use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
 };
-use serde::{Deserialize, Serialize};
 use sled_agent_client::{
     types as SledAgentTypes, Client as SledAgentClient, Error as SledAgentError,
 };
 use slog::Logger;
+use sprockets_host::Ed25519Certificate;
 use std::collections::{HashMap, HashSet};
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::path::{Path, PathBuf};
@@ -77,28 +76,6 @@ pub enum SetupServiceError {
     Dns(#[from] internal_dns_client::Error<internal_dns_client::types::Error>),
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
-pub struct SledRequest {
-    /// Datasets to be created.
-    #[serde(default, rename = "dataset")]
-    pub datasets: Vec<DatasetEnsureBody>,
-
-    /// Services to be instantiated.
-    #[serde(default, rename = "service")]
-    pub services: Vec<ServiceRequest>,
-
-    /// DNS Services to be instantiated.
-    #[serde(default, rename = "dns_service")]
-    pub dns_services: Vec<ServiceRequest>,
-}
-
-// The workload / information allocated to a single sled.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-struct SledAllocation {
-    initialization_request: SledAgentRequest,
-    services_request: SledRequest,
-}
-
 /// The interface to the Rack Setup Service.
 pub struct Service {
     handle: tokio::task::JoinHandle<Result<(), SetupServiceError>>,
@@ -120,11 +97,20 @@ impl Service {
         config: Config,
         peer_monitor: PeerMonitorObserver,
         local_bootstrap_agent: BootstrapAgentHandle,
+        // TODO-cleanup: We should be collecting the device ID certs of all
+        // trust quorum members over the management network. Currently we don't
+        // have a management network, so we hard-code the list of members and
+        // accept it as a parameter instead.
+        member_device_id_certs: Vec<Ed25519Certificate>,
     ) -> Self {
         let handle = tokio::task::spawn(async move {
             let svc = ServiceInner::new(log.clone(), peer_monitor);
             if let Err(e) = svc
-                .inject_rack_setup_requests(&config, local_bootstrap_agent)
+                .inject_rack_setup_requests(
+                    &config,
+                    local_bootstrap_agent,
+                    &member_device_id_certs,
+                )
                 .await
             {
                 warn!(log, "RSS injection failed: {}", e);
@@ -185,7 +171,7 @@ impl ServiceInner {
     async fn initialize_crdb(
         &self,
         sled_address: SocketAddrV6,
-        datasets: &Vec<crate::params::DatasetEnsureBody>,
+        datasets: &Vec<DatasetEnsureBody>,
     ) -> Result<(), SetupServiceError> {
         if datasets.iter().any(|dataset| {
             !matches!(
@@ -500,6 +486,7 @@ impl ServiceInner {
         &self,
         config: &Config,
         local_bootstrap_agent: BootstrapAgentHandle,
+        member_device_id_certs: &[Ed25519Certificate],
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Injecting RSS configuration: {:#?}", config);
 
@@ -554,7 +541,8 @@ impl ServiceInner {
             plan
         } else {
             info!(self.log, "Creating new allocation plan");
-            SledPlan::create(&self.log, &config, addrs).await?
+            SledPlan::create(&self.log, &config, addrs, member_device_id_certs)
+                .await?
         };
 
         // Forward the sled initialization requests to our sled-agent.

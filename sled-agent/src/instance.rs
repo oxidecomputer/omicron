@@ -18,7 +18,9 @@ use crate::opte::OptePortAllocator;
 use crate::params::NetworkInterface;
 use crate::params::{
     InstanceHardware, InstanceMigrateParams, InstanceRuntimeStateRequested,
+    InstanceSerialConsoleData,
 };
+use crate::serial::{ByteOffset, SerialConsoleBuffer};
 use anyhow::anyhow;
 use futures::lock::{Mutex, MutexGuard};
 use omicron_common::address::PROPOLIS_PORT;
@@ -79,6 +81,9 @@ pub enum Error {
 
     #[error(transparent)]
     Opte(#[from] crate::opte::Error),
+
+    #[error("Serial console buffer: {0}")]
+    Serial(#[from] crate::serial::Error),
 }
 
 // Issues read-only, idempotent HTTP requests at propolis until it responds with
@@ -213,6 +218,9 @@ struct InstanceInner {
     state: InstanceStates,
     running_state: Option<RunningState>,
 
+    // Task buffering the instance's serial console
+    serial_tty_task: Option<SerialConsoleBuffer>,
+
     // Connection to Nexus
     lazy_nexus_client: LazyNexusClient,
 }
@@ -335,6 +343,12 @@ impl InstanceInner {
             }
         }));
 
+        if self.serial_tty_task.is_none() {
+            let ws_uri = client.instance_serial_console_ws_uri();
+            self.serial_tty_task =
+                Some(SerialConsoleBuffer::new(ws_uri, self.log.clone()));
+        }
+
         self.running_state = Some(RunningState {
             client,
             ticket,
@@ -403,6 +417,11 @@ mockall::mock! {
             &self,
             target: InstanceRuntimeStateRequested,
         ) -> Result<InstanceRuntimeState, Error>;
+        pub async fn serial_console_buffer_data(
+            &self,
+            byte_offset: ByteOffset,
+            max_bytes: Option<usize>,
+        ) -> Result<InstanceSerialConsoleData, Error>;
     }
     impl Clone for Instance {
         fn clone(&self) -> Self;
@@ -462,6 +481,7 @@ impl Instance {
             state: InstanceStates::new(initial.runtime),
             running_state: None,
             lazy_nexus_client,
+            serial_tty_task: None,
         };
 
         let inner = Arc::new(Mutex::new(instance));
@@ -712,6 +732,24 @@ impl Instance {
             inner.take_action(action).await?;
         }
         Ok(inner.state.current().clone())
+    }
+
+    pub async fn serial_console_buffer_data(
+        &self,
+        byte_offset: ByteOffset,
+        max_bytes: Option<usize>,
+    ) -> Result<InstanceSerialConsoleData, Error> {
+        let inner = self.inner.lock().await;
+        if let Some(ttybuf) = &inner.serial_tty_task {
+            let (data, last_byte_offset) =
+                ttybuf.contents(byte_offset, max_bytes).await?;
+            Ok(InstanceSerialConsoleData {
+                data,
+                last_byte_offset: last_byte_offset as u64,
+            })
+        } else {
+            Err(crate::serial::Error::Existential.into())
+        }
     }
 }
 

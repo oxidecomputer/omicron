@@ -16,6 +16,7 @@ use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::IdentityMetadataCreateParams;
+use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::InstanceState;
@@ -41,6 +42,20 @@ use nexus_test_utils_macros::nexus_test;
 
 static ORGANIZATION_NAME: &str = "test-org";
 static PROJECT_NAME: &str = "springfield-squidport";
+
+fn get_project_url() -> String {
+    format!("/organizations/{}/projects/{}", ORGANIZATION_NAME, PROJECT_NAME)
+}
+
+fn get_instances_url() -> String {
+    format!("{}/instances", get_project_url())
+}
+
+async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
+    create_organization(&client, ORGANIZATION_NAME).await;
+    let project = create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
+    project.identity.id
+}
 
 #[nexus_test]
 async fn test_instances_access_before_create_returns_not_found(
@@ -128,7 +143,7 @@ async fn test_instances_create_reboot_halt(
     let InstanceCpuCount(nfoundcpus) = instance.ncpus;
     // These particulars are hardcoded in create_instance().
     assert_eq!(nfoundcpus, 4);
-    assert_eq!(instance.memory.to_whole_mebibytes(), 256);
+    assert_eq!(instance.memory.to_whole_gibibytes(), 1);
     assert_eq!(instance.hostname, "the_host");
     assert_eq!(instance.runtime.run_state, InstanceState::Starting);
 
@@ -565,7 +580,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
             description: String::from("instance to test saga unwind"),
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
-        memory: ByteCount::from_mebibytes_u32(4),
+        memory: ByteCount::from_gibibytes_u32(4),
         hostname: String::from("inst"),
         user_data: vec![],
         network_interfaces: interface_params.clone(),
@@ -587,7 +602,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
             description: String::from("instance to test saga unwind 2"),
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
-        memory: ByteCount::from_mebibytes_u32(4),
+        memory: ByteCount::from_gibibytes_u32(4),
         hostname: String::from("inst2"),
         user_data: vec![],
         network_interfaces: interface_params,
@@ -673,7 +688,7 @@ async fn test_instance_with_single_explicit_ip_address(
             description: String::from("instance to test multiple nics"),
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
-        memory: ByteCount::from_mebibytes_u32(4),
+        memory: ByteCount::from_gibibytes_u32(4),
         hostname: String::from("nic-test"),
         user_data: vec![],
         network_interfaces: interface_params,
@@ -790,7 +805,7 @@ async fn test_instance_with_new_custom_network_interfaces(
             description: String::from("instance to test multiple nics"),
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
-        memory: ByteCount::from_mebibytes_u32(4),
+        memory: ByteCount::from_gibibytes_u32(4),
         hostname: String::from("nic-test"),
         user_data: vec![],
         network_interfaces: interface_params,
@@ -904,7 +919,7 @@ async fn test_instance_create_delete_network_interface(
             description: String::from("instance to test attaching new nic"),
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
-        memory: ByteCount::from_mebibytes_u32(4),
+        memory: ByteCount::from_gibibytes_u32(4),
         hostname: String::from("nic-test"),
         user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::None,
@@ -1112,6 +1127,364 @@ async fn test_instance_create_delete_network_interface(
         );
 }
 
+#[nexus_test]
+async fn test_instance_update_network_interfaces(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.apictx.nexus;
+
+    // Create test organization and project
+    create_organization(&client, ORGANIZATION_NAME).await;
+    let url_instances = format!(
+        "/organizations/{}/projects/{}/instances",
+        ORGANIZATION_NAME, PROJECT_NAME
+    );
+    let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
+
+    // Create the VPC Subnet for the secondary interface
+    let secondary_subnet = params::VpcSubnetCreate {
+        identity: IdentityMetadataCreateParams {
+            name: Name::try_from(String::from("secondary")).unwrap(),
+            description: String::from("A secondary VPC subnet"),
+        },
+        ipv4_block: Ipv4Net("172.31.0.0/24".parse().unwrap()),
+        ipv6_block: None,
+    };
+    let url_vpc_subnets = format!(
+        "/organizations/{}/projects/{}/vpcs/{}/subnets",
+        ORGANIZATION_NAME, PROJECT_NAME, "default",
+    );
+    let _response =
+        NexusRequest::objects_post(client, &url_vpc_subnets, &secondary_subnet)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .expect("Failed to create secondary VPC Subnet");
+
+    // Create an instance with no network interfaces
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: Name::try_from(String::from("nic-update-test-inst")).unwrap(),
+            description: String::from("instance to test updatin nics"),
+        },
+        ncpus: InstanceCpuCount::try_from(2).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(4),
+        hostname: String::from("nic-test"),
+        user_data: vec![],
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::None,
+        disks: vec![],
+    };
+    let response =
+        NexusRequest::objects_post(client, &url_instances, &instance_params)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .expect("Failed to create instance with two network interfaces");
+    let instance = response.parsed_body::<Instance>().unwrap();
+    let url_instance =
+        format!("{}/{}", url_instances, instance.identity.name.as_str());
+    let url_interfaces = format!(
+        "/organizations/{}/projects/{}/instances/{}/network-interfaces",
+        ORGANIZATION_NAME, PROJECT_NAME, instance.identity.name,
+    );
+
+    // Parameters for each interface to try to modify.
+    let if_params = vec![
+        params::NetworkInterfaceCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "if0".parse().unwrap(),
+                description: String::from("a new nic"),
+            },
+            vpc_name: "default".parse().unwrap(),
+            subnet_name: "default".parse().unwrap(),
+            ip: Some("172.30.0.10".parse().unwrap()),
+        },
+        params::NetworkInterfaceCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "if1".parse().unwrap(),
+                description: String::from("a new nic"),
+            },
+            vpc_name: "default".parse().unwrap(),
+            subnet_name: secondary_subnet.identity.name.clone(),
+            ip: Some("172.31.0.11".parse().unwrap()),
+        },
+    ];
+
+    // Stop the instance
+    let instance =
+        instance_post(client, url_instance.as_str(), InstanceOp::Stop).await;
+    instance_simulate(nexus, &instance.identity.id).await;
+
+    // Create the first interface on the instance.
+    let primary_iface = NexusRequest::objects_post(
+        client,
+        url_interfaces.as_str(),
+        &if_params[0],
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Failed to create network interface on stopped instance")
+    .parsed_body::<NetworkInterface>()
+    .unwrap();
+    assert_eq!(primary_iface.identity.name, if_params[0].identity.name);
+    assert_eq!(primary_iface.ip, if_params[0].ip.unwrap());
+    assert!(primary_iface.primary, "The first interface should be primary");
+
+    // Restart the instance, to ensure we can only modify things when it's
+    // stopped.
+    let instance =
+        instance_post(client, url_instance.as_str(), InstanceOp::Start).await;
+    instance_simulate(nexus, &instance.identity.id).await;
+
+    // We'll change the interface's name and description
+    let new_name = Name::try_from(String::from("new-if0")).unwrap();
+    let new_description = String::from("new description");
+    let updates = params::NetworkInterfaceUpdate {
+        identity: IdentityMetadataUpdateParams {
+            name: Some(new_name.clone()),
+            description: Some(new_description.clone()),
+        },
+        make_primary: false,
+    };
+
+    // Verify we fail to update the NIC when the instance is running
+    //
+    // NOTE: Need to use RequestBuilder manually because `expect_failure` does
+    // not allow setting the body.
+    let url_interface =
+        format!("{}/{}", url_interfaces, primary_iface.identity.name.as_str());
+    let builder =
+        RequestBuilder::new(client, http::Method::PUT, url_interface.as_str())
+            .body(Some(&updates))
+            .expect_status(Some(http::StatusCode::BAD_REQUEST));
+    let err = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Should not be able to update network interface on running instance")
+        .parsed_body::<HttpErrorResponseBody>()
+        .expect("Failed to parse error response body");
+    assert_eq!(
+        err.message,
+        "Instance must be stopped to update its network interfaces",
+        "Expected an InvalidRequest response when modifying an interface on a running instance"
+    );
+
+    // Stop the instance again, and now verify that the update works.
+    let instance =
+        instance_post(client, url_instance.as_str(), InstanceOp::Stop).await;
+    instance_simulate(nexus, &instance.identity.id).await;
+    let updated_primary_iface = NexusRequest::object_put(
+        client,
+        format!("{}/{}", url_interfaces.as_str(), primary_iface.identity.name)
+            .as_str(),
+        Some(&updates),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Failed to update an interface")
+    .parsed_body::<NetworkInterface>()
+    .unwrap();
+
+    // Verify the modifications have taken effect, updating the name,
+    // description, and modification time.
+    assert_eq!(updated_primary_iface.identity.name, new_name);
+    assert_eq!(updated_primary_iface.identity.description, new_description);
+    assert!(updated_primary_iface.primary);
+
+    // Helper to check that most attributes are unchanged when updating an
+    // interface, and that the modification time for the new is later than the
+    // old.
+    let verify_unchanged_attributes =
+        |original_iface: &NetworkInterface, new_iface: &NetworkInterface| {
+            assert_eq!(
+                original_iface.identity.time_created,
+                new_iface.identity.time_created
+            );
+            assert!(
+                original_iface.identity.time_modified
+                    < new_iface.identity.time_modified
+            );
+            assert_eq!(original_iface.ip, new_iface.ip);
+            assert_eq!(original_iface.mac, new_iface.mac);
+            assert_eq!(original_iface.subnet_id, new_iface.subnet_id);
+            assert_eq!(original_iface.vpc_id, new_iface.vpc_id);
+            assert_eq!(original_iface.instance_id, new_iface.instance_id);
+        };
+    verify_unchanged_attributes(&primary_iface, &updated_primary_iface);
+
+    // Try with the same request again, but this time only changing
+    // `make_primary`. This should have no effect.
+    let updates = params::NetworkInterfaceUpdate {
+        identity: IdentityMetadataUpdateParams {
+            name: None,
+            description: None,
+        },
+        make_primary: true,
+    };
+    let updated_primary_iface1 = NexusRequest::object_put(
+        client,
+        format!(
+            "{}/{}",
+            url_interfaces.as_str(),
+            updated_primary_iface.identity.name
+        )
+        .as_str(),
+        Some(&updates),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Failed to update an interface")
+    .parsed_body::<NetworkInterface>()
+    .unwrap();
+
+    // Everything should still be the same, except the modification time.
+    assert_eq!(
+        updated_primary_iface.identity.name,
+        updated_primary_iface1.identity.name
+    );
+    assert_eq!(
+        updated_primary_iface.identity.description,
+        updated_primary_iface1.identity.description
+    );
+    assert_eq!(updated_primary_iface.primary, updated_primary_iface1.primary);
+    verify_unchanged_attributes(
+        &updated_primary_iface,
+        &updated_primary_iface1,
+    );
+
+    // Add a secondary interface to the instance. We'll use this to check
+    // behavior related to making a new primary interface for the instance.
+    // Create the first interface on the instance.
+    let secondary_iface = NexusRequest::objects_post(
+        client,
+        url_interfaces.as_str(),
+        &if_params[1],
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Failed to create network interface on stopped instance")
+    .parsed_body::<NetworkInterface>()
+    .unwrap();
+    assert_eq!(secondary_iface.identity.name, if_params[1].identity.name);
+    assert_eq!(secondary_iface.ip, if_params[1].ip.unwrap());
+    assert!(
+        !secondary_iface.primary,
+        "Only the first interface should be primary"
+    );
+
+    // Restart the instance, and verify that we can't update either interface.
+    let instance =
+        instance_post(client, url_instance.as_str(), InstanceOp::Start).await;
+    instance_simulate(nexus, &instance.identity.id).await;
+
+    for if_name in
+        [&updated_primary_iface.identity.name, &secondary_iface.identity.name]
+    {
+        let url_interface = format!("{}/{}", url_interfaces, if_name.as_str());
+        let builder = RequestBuilder::new(
+            client,
+            http::Method::PUT,
+            url_interface.as_str(),
+        )
+        .body(Some(&updates))
+        .expect_status(Some(http::StatusCode::BAD_REQUEST));
+        let err = NexusRequest::new(builder)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .expect("Should not be able to update network interface on running instance")
+            .parsed_body::<HttpErrorResponseBody>()
+            .expect("Failed to parse error response body");
+        assert_eq!(
+            err.message,
+            "Instance must be stopped to update its network interfaces",
+            "Expected an InvalidRequest response when modifying an interface on a running instance"
+        );
+    }
+
+    // Stop the instance again.
+    let instance =
+        instance_post(client, url_instance.as_str(), InstanceOp::Stop).await;
+    instance_simulate(nexus, &instance.identity.id).await;
+
+    // Verify that we can set the secondary as the new primary, and that nothing
+    // else changes about the NICs.
+    let updates = params::NetworkInterfaceUpdate {
+        identity: IdentityMetadataUpdateParams {
+            name: None,
+            description: None,
+        },
+        make_primary: true,
+    };
+    let new_primary_iface = NexusRequest::object_put(
+        client,
+        format!(
+            "{}/{}",
+            url_interfaces.as_str(),
+            secondary_iface.identity.name
+        )
+        .as_str(),
+        Some(&updates),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Failed to update an interface")
+    .parsed_body::<NetworkInterface>()
+    .unwrap();
+
+    // It should now be the primary and have an updated modification time
+    assert!(new_primary_iface.primary, "Failed to set the new primary");
+
+    // Nothing else about the new primary should have changed
+    assert_eq!(new_primary_iface.identity.name, secondary_iface.identity.name);
+    assert_eq!(
+        new_primary_iface.identity.description,
+        secondary_iface.identity.description
+    );
+    verify_unchanged_attributes(&secondary_iface, &new_primary_iface);
+
+    // Get the newly-made secondary interface to test
+    let new_secondary_iface = NexusRequest::object_get(
+        client,
+        format!(
+            "{}/{}",
+            url_interfaces.as_str(),
+            updated_primary_iface.identity.name
+        )
+        .as_str(),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Failed to get the old primary / new secondary interface")
+    .parsed_body::<NetworkInterface>()
+    .unwrap();
+
+    // The now-secondary interface should be, well, secondary
+    assert!(
+        !new_secondary_iface.primary,
+        "The old primary interface should now be a seconary"
+    );
+
+    // Nothing else about the old primary should have changed
+    assert_eq!(
+        new_secondary_iface.identity.name,
+        updated_primary_iface.identity.name
+    );
+    assert_eq!(
+        new_secondary_iface.identity.description,
+        updated_primary_iface.identity.description
+    );
+    verify_unchanged_attributes(&updated_primary_iface, &new_secondary_iface);
+}
+
 /// This test specifically creates two NICs, the second of which will fail the
 /// saga on purpose, since its IP address is the same. This is to verify that
 /// the initial NIC is also deleted.
@@ -1162,7 +1535,7 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
             description: String::from("instance to test multiple bad nics"),
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
-        memory: ByteCount::from_mebibytes_u32(4),
+        memory: ByteCount::from_gibibytes_u32(4),
         hostname: String::from("nic-test"),
         user_data: vec![],
         network_interfaces: interface_params,
@@ -1236,7 +1609,7 @@ async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
             description: String::from("probably serving data"),
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
-        memory: ByteCount::from_mebibytes_u32(4),
+        memory: ByteCount::from_gibibytes_u32(4),
         hostname: String::from("nfs"),
         user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
@@ -1332,7 +1705,7 @@ async fn test_attach_eight_disks_to_instance(
             description: String::from("probably serving data"),
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
-        memory: ByteCount::from_mebibytes_u32(4),
+        memory: ByteCount::from_gibibytes_u32(4),
         hostname: String::from("nfs"),
         user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
@@ -1438,7 +1811,7 @@ async fn test_cannot_attach_nine_disks_to_instance(
             description: String::from("probably serving data"),
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
-        memory: ByteCount::from_mebibytes_u32(4),
+        memory: ByteCount::from_gibibytes_u32(4),
         hostname: String::from("nfs"),
         user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
@@ -1565,7 +1938,7 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
             description: String::from("probably serving data"),
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
-        memory: ByteCount::from_mebibytes_u32(4),
+        memory: ByteCount::from_gibibytes_u32(4),
         hostname: String::from("nfs"),
         user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
@@ -1677,7 +2050,7 @@ async fn test_disks_detached_when_instance_destroyed(
             description: String::from("probably serving data"),
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
-        memory: ByteCount::from_mebibytes_u32(4),
+        memory: ByteCount::from_gibibytes_u32(4),
         hostname: String::from("nfs"),
         user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
@@ -1770,6 +2143,191 @@ async fn test_disks_detached_when_instance_destroyed(
     for disk in &disks {
         assert_eq!(disk.state, DiskState::Detached);
     }
+}
+
+// Tests that an instance is rejected if the memory is less than
+// MIN_MEMORY_SIZE_BYTES
+#[nexus_test]
+async fn test_instances_memory_rejected_less_than_min_memory_size(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    create_org_and_project(client).await;
+
+    // Attempt to create the instance, observe a server error.
+    let instances_url = get_instances_url();
+    let instance_name = "just-rainsticks";
+    let instance = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: instance_name.parse().unwrap(),
+            description: format!("instance {:?}", &instance_name),
+        },
+        ncpus: InstanceCpuCount(1),
+        memory: ByteCount::from(params::MIN_MEMORY_SIZE_BYTES / 2),
+        hostname: String::from("inst"),
+        user_data:
+            b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
+                .to_vec(),
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        disks: vec![],
+    };
+
+    let error = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &instances_url)
+            .body(Some(&instance))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<dropshot::HttpErrorResponseBody>()
+    .unwrap();
+
+    assert_eq!(
+        error.message,
+        format!(
+            "unsupported value for \"size\": memory must be at least {}",
+            ByteCount::from(params::MIN_MEMORY_SIZE_BYTES)
+        ),
+    );
+}
+
+// Test that an instance is rejected if memory is not divisible by
+// MIN_MEMORY_SIZE
+#[nexus_test]
+async fn test_instances_memory_not_divisible_by_min_memory_size(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    create_org_and_project(client).await;
+
+    // Attempt to create the instance, observe a server error.
+    let instances_url = get_instances_url();
+    let instance_name = "just-rainsticks";
+    let instance = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: instance_name.parse().unwrap(),
+            description: format!("instance {:?}", &instance_name),
+        },
+        ncpus: InstanceCpuCount(1),
+        memory: ByteCount::from(1024 * 1024 * 1024 + 300),
+        hostname: String::from("inst"),
+        user_data:
+            b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
+                .to_vec(),
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        disks: vec![],
+    };
+
+    let error = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &instances_url)
+            .body(Some(&instance))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<dropshot::HttpErrorResponseBody>()
+    .unwrap();
+
+    assert_eq!(
+        error.message,
+        format!(
+            "unsupported value for \"size\": memory must be divisible by {}",
+            ByteCount::from(params::MIN_MEMORY_SIZE_BYTES)
+        ),
+    );
+}
+
+#[nexus_test]
+async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let apictx = &cptestctx.server.apictx;
+    let nexus = &apictx.nexus;
+
+    // Create a project that we'll use for testing.
+    create_organization(&client, ORGANIZATION_NAME).await;
+    let url_instances = format!(
+        "/organizations/{}/projects/{}/instances",
+        ORGANIZATION_NAME, PROJECT_NAME
+    );
+    let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
+
+    // Make sure we get a 404 if we try to access the serial console before creation.
+    let instance_serial_url =
+        format!("{}/kris-picks/serial?from_start=0", url_instances);
+    let error: HttpErrorResponseBody = NexusRequest::expect_failure(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::GET,
+        &instance_serial_url,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+    assert_eq!(error.message, "not found: instance with name \"kris-picks\"");
+
+    // Create an instance.
+    let instance_url = format!("{}/kris-picks", url_instances);
+    let instance =
+        create_instance(client, ORGANIZATION_NAME, PROJECT_NAME, "kris-picks")
+            .await;
+
+    // Now, simulate completion of instance boot and check the state reported.
+    instance_simulate(nexus, &instance.identity.id).await;
+    let instance_next = instance_get(&client, &instance_url).await;
+    identity_eq(&instance.identity, &instance_next.identity);
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
+    assert!(
+        instance_next.runtime.time_run_state_updated
+            > instance.runtime.time_run_state_updated
+    );
+
+    let serial_data: params::InstanceSerialConsoleData =
+        NexusRequest::object_get(client, &instance_serial_url)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .expect("failed to make request")
+            .parsed_body()
+            .unwrap();
+
+    // FIXME: this is not necessarily going to always be the sled-agent-sim!
+    //  when it's reasonable to boot arbitrary images, perhaps we simply use one
+    //  that outputs something predictable like this
+    let expected = "This is simulated serial console output for ".as_bytes();
+    assert_eq!(&serial_data.data[..expected.len()], expected);
+
+    // Request a halt and verify both the immediate state and the finished state.
+    let instance = instance_next;
+    let instance_next =
+        instance_post(&client, &instance_url, InstanceOp::Stop).await;
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Stopping);
+    assert!(
+        instance_next.runtime.time_run_state_updated
+            > instance.runtime.time_run_state_updated
+    );
+
+    let instance = instance_next;
+    instance_simulate(nexus, &instance.identity.id).await;
+    let instance_next = instance_get(&client, &instance_url).await;
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Stopped);
+    assert!(
+        instance_next.runtime.time_run_state_updated
+            > instance.runtime.time_run_state_updated
+    );
+
+    // Delete the instance.
+    NexusRequest::object_delete(client, &instance_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
 }
 
 async fn instance_get(

@@ -121,7 +121,7 @@ impl Nexus {
         authz: Arc<authz::Authz>,
     ) -> Arc<Nexus> {
         let pool = Arc::new(pool);
-        let my_sec_id = db::SecId::from(config.runtime.id);
+        let my_sec_id = db::SecId::from(config.deployment.id);
         let db_datastore = Arc::new(db::DataStore::new(Arc::clone(&pool)));
         let sec_store = Arc::new(db::CockroachDbSecStore::new(
             my_sec_id,
@@ -157,9 +157,9 @@ impl Nexus {
         );
 
         let nexus = Nexus {
-            id: config.runtime.id,
+            id: config.deployment.id,
             rack_id,
-            rack_subnet: config.runtime.subnet,
+            rack_subnet: config.deployment.subnet,
             log: log.new(o!()),
             db_datastore: Arc::clone(&db_datastore),
             authz: Arc::clone(&authz),

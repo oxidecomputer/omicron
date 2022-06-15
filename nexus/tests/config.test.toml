@@ -35,7 +35,7 @@ address = "[::1]:0"
 # Allow small subnets, so we can test IP address exhaustion easily / quickly
 max_vpc_ipv4_subnet_prefix = 29
 
-[runtime]
+[deployment]
 # Identifier for this instance of Nexus.
 # NOTE: The test suite always overrides this.
 id = "e6bff1ff-24fb-49dc-a54e-c6a350cd4d6c"
@@ -46,22 +46,22 @@ rack_id = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc"
 # available port) because the test suite will be running many servers
 # concurrently.
 #
-[runtime.dropshot_external]
+[deployment.dropshot_external]
 bind_address = "127.0.0.1:0"
 request_body_max_bytes = 1048576
 
 # port must be 0. see above
-[runtime.dropshot_internal]
+[deployment.dropshot_internal]
 bind_address = "127.0.0.1:0"
 request_body_max_bytes = 1048576
 
-[runtime.subnet]
+[deployment.subnet]
 net = "fd00:1122:3344:0100::/56"
 
 #
 # NOTE: for the test suite, the database URL will be replaced with one
 # appropriate for the database that's started by the test runner.
 #
-[runtime.database]
+[deployment.database]
 type = "from_url"
 url = "postgresql://root@127.0.0.1:0/omicron?sslmode=disable"

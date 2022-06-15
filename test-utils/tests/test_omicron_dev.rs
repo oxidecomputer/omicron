@@ -295,7 +295,7 @@ async fn test_db_killed() {
 fn test_omicron_dev_no_args() {
     let exec = Exec::cmd(path_to_omicron_dev());
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
-    assert_exit_code(exit_status, EXIT_USAGE);
+    assert_exit_code(exit_status, EXIT_USAGE, &stderr_text);
     assert_contents("tests/output/cmd-omicron-dev-noargs-stdout", &stdout_text);
     assert_contents("tests/output/cmd-omicron-dev-noargs-stderr", &stderr_text);
 }
@@ -304,7 +304,7 @@ fn test_omicron_dev_no_args() {
 fn test_omicron_dev_bad_cmd() {
     let exec = Exec::cmd(path_to_omicron_dev()).arg("bogus-command");
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
-    assert_exit_code(exit_status, EXIT_USAGE);
+    assert_exit_code(exit_status, EXIT_USAGE, &stderr_text);
     assert_contents(
         "tests/output/cmd-omicron-dev-bad-cmd-stdout",
         &stdout_text,
@@ -319,7 +319,7 @@ fn test_omicron_dev_bad_cmd() {
 fn test_omicron_dev_db_populate_no_args() {
     let exec = Exec::cmd(path_to_omicron_dev()).arg("db-populate");
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
-    assert_exit_code(exit_status, EXIT_USAGE);
+    assert_exit_code(exit_status, EXIT_USAGE, &stderr_text);
     assert_contents(
         "tests/output/cmd-omicron-dev-db-populate-noargs-stdout",
         &stdout_text,
@@ -334,7 +334,7 @@ fn test_omicron_dev_db_populate_no_args() {
 fn test_omicron_dev_db_wipe_no_args() {
     let exec = Exec::cmd(path_to_omicron_dev()).arg("db-wipe");
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
-    assert_exit_code(exit_status, EXIT_USAGE);
+    assert_exit_code(exit_status, EXIT_USAGE, &stderr_text);
     assert_contents(
         "tests/output/cmd-omicron-dev-db-wipe-noargs-stdout",
         &stdout_text,

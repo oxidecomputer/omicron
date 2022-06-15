@@ -39,6 +39,8 @@ use crate::db::fixed_data::silo::DEFAULT_SILO;
 use crate::db::lookup::LookupPath;
 use crate::db::model::DatabaseString;
 use crate::db::model::IncompleteVpc;
+use crate::db::model::NetworkInterfaceUpdate;
+use crate::db::model::Vpc;
 use crate::db::queries::network_interface;
 use crate::db::queries::vpc::InsertVpcQuery;
 use crate::db::queries::vpc_subnet::FilterConflictingVpcSubnetRangesQuery;
@@ -56,7 +58,7 @@ use crate::db::{
         OrganizationUpdate, OximeterInfo, ProducerEndpoint, Project,
         ProjectUpdate, Rack, Region, RoleAssignment, RoleBuiltin, RouterRoute,
         RouterRouteUpdate, Service, ServiceKind, Silo, SiloUser, Sled, SshKey,
-        UpdateAvailableArtifact, UserBuiltin, Volume, Vpc, VpcFirewallRule,
+        UpdateAvailableArtifact, UserBuiltin, Volume, VpcFirewallRule,
         VpcRouter, VpcRouterUpdate, VpcSubnet, VpcSubnetUpdate, VpcUpdate,
         Zpool,
     },
@@ -2508,6 +2510,128 @@ impl DataStore {
             .load_async::<NetworkInterface>(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    /// Update a network interface associated with a given instance.
+    pub async fn instance_update_network_interface(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+        authz_interface: &authz::NetworkInterface,
+        updates: NetworkInterfaceUpdate,
+    ) -> UpdateResult<NetworkInterface> {
+        use crate::db::schema::network_interface::dsl;
+
+        // This database operation is surprisingly subtle. It's possible to
+        // express this in a single query, with multiple common-table
+        // expressions for the updated rows. For example, if we're setting a new
+        // primary interface, we need to set the `is_primary` column to false
+        // for the current primary, and then set it to true, along with any
+        // other updates, for the new primary.
+        //
+        // That's feasible, but there's a CRDB bug that affects some queries
+        // with multiple update statements. It's possible that this query isn't
+        // in that bucket, but we'll still avoid it for now. Instead, we'll bite
+        // the bullet and use a transaction.
+        //
+        // See https://github.com/oxidecomputer/omicron/issues/1204 for the
+        // issue tracking the work to move this into a CTE.
+
+        // Build up some of the queries first, outside the transaction.
+        //
+        // This selects the existing primary interface.
+        let instance_id = authz_instance.id();
+        let interface_id = authz_interface.id();
+        let find_primary_query = dsl::network_interface
+            .filter(dsl::instance_id.eq(instance_id))
+            .filter(dsl::is_primary.eq(true))
+            .filter(dsl::time_deleted.is_null())
+            .select(NetworkInterface::as_select());
+
+        // This returns the state of the associated instance.
+        let instance_query = db::schema::instance::dsl::instance
+            .filter(db::schema::instance::dsl::id.eq(instance_id))
+            .filter(db::schema::instance::dsl::time_deleted.is_null())
+            .select(Instance::as_select());
+        let stopped =
+            db::model::InstanceState::new(external::InstanceState::Stopped);
+
+        // This is the actual query to update the target interface.
+        let make_primary = matches!(updates.make_primary, Some(true));
+        let update_target_query = diesel::update(dsl::network_interface)
+            .filter(dsl::id.eq(interface_id))
+            .filter(dsl::time_deleted.is_null())
+            .set(updates)
+            .returning(NetworkInterface::as_returning());
+
+        // Errors returned from the below transactions.
+        #[derive(Debug)]
+        enum NetworkInterfaceUpdateError {
+            InstanceNotStopped,
+            FailedToUnsetPrimary(diesel::result::Error),
+        }
+        type TxnError = TransactionError<NetworkInterfaceUpdateError>;
+
+        let pool = self.pool_authorized(opctx).await?;
+        if make_primary {
+            pool.transaction(move |conn| {
+                let instance_state =
+                    instance_query.get_result(conn)?.runtime_state.state;
+                if instance_state != stopped {
+                    return Err(TxnError::CustomError(
+                        NetworkInterfaceUpdateError::InstanceNotStopped,
+                    ));
+                }
+
+                // First, get the primary interface
+                let primary_interface = find_primary_query.get_result(conn)?;
+
+                // If the target and primary are different, we need to toggle
+                // the primary into a secondary.
+                if primary_interface.identity.id != interface_id {
+                    if let Err(e) = diesel::update(dsl::network_interface)
+                        .filter(dsl::id.eq(primary_interface.identity.id))
+                        .filter(dsl::time_deleted.is_null())
+                        .set(dsl::is_primary.eq(false))
+                        .execute(conn)
+                    {
+                        return Err(TxnError::CustomError(
+                            NetworkInterfaceUpdateError::FailedToUnsetPrimary(
+                                e,
+                            ),
+                        ));
+                    }
+                }
+
+                // In any case, update the actual target
+                Ok(update_target_query.get_result(conn)?)
+            })
+        } else {
+            // In this case, we can just directly apply the updates. By
+            // construction, `updates.make_primary` is `None`, so nothing will
+            // be done there. The other columns always need to be updated, and
+            // we're only hitting a single row. Note that we still need to
+            // verify the instance is stopped.
+            pool.transaction(move |conn| {
+                let instance_state =
+                    instance_query.get_result(conn)?.runtime_state.state;
+                if instance_state != stopped {
+                    return Err(TxnError::CustomError(
+                        NetworkInterfaceUpdateError::InstanceNotStopped,
+                    ));
+                }
+                Ok(update_target_query.get_result(conn)?)
+            })
+        }
+        .await
+        .map_err(|e| match e {
+            TxnError::CustomError(
+                NetworkInterfaceUpdateError::InstanceNotStopped,
+            ) => Error::invalid_request(
+                "Instance must be stopped to update its network interfaces",
+            ),
+            _ => Error::internal_error(&format!("Transaction error: {:?}", e)),
+        })
     }
 
     // Create a record for a new Oximeter instance

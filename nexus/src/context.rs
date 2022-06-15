@@ -95,8 +95,10 @@ impl ServerContext {
         let internal_authn = Arc::new(authn::Context::internal_api());
         let authz = Arc::new(authz::Authz::new(&log));
         let create_tracker = |name: &str| {
-            let target =
-                HttpService { name: name.to_string(), id: config.runtime.id };
+            let target = HttpService {
+                name: name.to_string(),
+                id: config.deployment.id,
+            };
             const START_LATENCY_DECADE: i8 = -6;
             const END_LATENCY_DECADE: i8 = 3;
             LatencyTracker::with_latency_decades(
@@ -108,7 +110,7 @@ impl ServerContext {
         };
         let internal_latencies = create_tracker("nexus-internal");
         let external_latencies = create_tracker("nexus-external");
-        let producer_registry = ProducerRegistry::with_id(config.runtime.id);
+        let producer_registry = ProducerRegistry::with_id(config.deployment.id);
         producer_registry
             .register_producer(internal_latencies.clone())
             .unwrap();
@@ -140,14 +142,14 @@ impl ServerContext {
 
         // Set up DNS Client
         let az_subnet =
-            Ipv6Subnet::<AZ_PREFIX>::new(config.runtime.subnet.net().ip());
+            Ipv6Subnet::<AZ_PREFIX>::new(config.deployment.subnet.net().ip());
         info!(log, "Setting up resolver on subnet: {:?}", az_subnet);
         let resolver =
             internal_dns_client::multiclient::create_resolver(az_subnet)
                 .map_err(|e| format!("Failed to create DNS resolver: {}", e))?;
 
         // Set up DB pool
-        let url = match &config.runtime.database {
+        let url = match &config.deployment.database {
             nexus_config::Database::FromUrl { url } => url.clone(),
             nexus_config::Database::FromDns => {
                 info!(log, "Accessing DB url from DNS");

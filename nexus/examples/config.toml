@@ -33,26 +33,26 @@ mode = "stderr-terminal"
 [timeseries_db]
 address = "[::1]:8123"
 
-[runtime]
+[deployment]
 # Identifier for this instance of Nexus
 id = "e6bff1ff-24fb-49dc-a54e-c6a350cd4d6c"
 rack_id = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc"
 
-[runtime.dropshot_external]
+[deployment.dropshot_external]
 # IP address and TCP port on which to listen for the external API
 bind_address = "127.0.0.1:12220"
 # Allow larger request bodies (1MiB) to accomodate firewall endpoints (one
 # rule is ~500 bytes)
 request_body_max_bytes = 1048576
 
-[runtime.dropshot_internal]
+[deployment.dropshot_internal]
 # IP address and TCP port on which to listen for the internal API
 bind_address = "127.0.0.1:12221"
 
-[runtime.subnet]
+[deployment.subnet]
 net = "fd00:1122:3344:0100::/56"
 
-[runtime.database]
+[deployment.database]
 # URL for connecting to the database
 type = "from_url"
 url = "postgresql://root@127.0.0.1:32221/omicron?sslmode=disable"

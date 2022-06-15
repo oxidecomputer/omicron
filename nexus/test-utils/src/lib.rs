@@ -76,7 +76,7 @@ pub fn load_test_config() -> omicron_nexus::Config {
     let config_file_path = Path::new("tests/config.test.toml");
     let mut config = omicron_nexus::Config::from_file(config_file_path)
         .expect("failed to load config.test.toml");
-    config.runtime.id = Uuid::new_v4();
+    config.deployment.id = Uuid::new_v4();
     config
 }
 
@@ -99,7 +99,7 @@ pub async fn test_setup_with_config(
     let clickhouse = dev::clickhouse::ClickHouseInstance::new(0).await.unwrap();
 
     // Store actual address/port information for the databases after they start.
-    config.runtime.database =
+    config.deployment.database =
         nexus_config::Database::FromUrl { url: database.pg_config().clone() };
     config.pkg.timeseries_db.address.set_port(clickhouse.port());
 
@@ -124,7 +124,7 @@ pub async fn test_setup_with_config(
         .nexus
         .rack_initialize(
             &opctx,
-            config.runtime.rack_id,
+            config.deployment.rack_id,
             // NOTE: In the context of this test utility, we arguably do have an
             // instance of CRDB and Nexus running. However, as this info isn't
             // necessary for most tests, we pass no information here.

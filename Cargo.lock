@@ -60,7 +60,7 @@ version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fcb51a0695d8f838b1ee009b3fbf66bda078cd64590202a864a8f3e8c4315c47"
 dependencies = [
- "getrandom 0.2.6",
+ "getrandom 0.2.7",
  "once_cell",
  "version_check",
 ]
@@ -100,6 +100,16 @@ dependencies = [
 [[package]]
 name = "api_identity"
 version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "api_identity"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/omicron?branch=main#c458fddcb8660eeb78d4a0ffe34c9d21c2ebd3dc"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -225,7 +235,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b62ddb9cb1ec0a098ad4bbf9344d0713fa193ae1a80af55febcff2627b6a00c1"
 dependencies = [
  "futures-core",
- "getrandom 0.2.6",
+ "getrandom 0.2.7",
  "instant",
  "pin-project-lite",
  "rand 0.8.5",
@@ -533,16 +543,16 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "3.1.18"
+version = "3.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2dbdf4bdacb33466e854ce889eee8dfd5729abf7ccd7664d0a2d60cd384440b"
+checksum = "d53da17d37dba964b9b3ecb5c5a1f193a2762c700e6829201e645b9381c99dc7"
 dependencies = [
  "atty",
  "bitflags",
  "clap_derive",
  "clap_lex",
  "indexmap",
- "lazy_static",
+ "once_cell",
  "strsim 0.10.0",
  "termcolor",
  "textwrap 0.15.0",
@@ -550,9 +560,9 @@ dependencies = [
 
 [[package]]
 name = "clap_derive"
-version = "3.1.18"
+version = "3.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25320346e922cffe59c0bbc5410c8d8784509efb321488971081313cb1e1a33c"
+checksum = "c11d40217d16aee8508cc8e5fde8b4ff24639758608e5374e731b53f85749fb9"
 dependencies = [
  "heck 0.4.0",
  "proc-macro-error",
@@ -563,9 +573,9 @@ dependencies = [
 
 [[package]]
 name = "clap_lex"
-version = "0.2.0"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a37c35f1112dad5e6e0b1adaff798507497a18fceeb30cceb3bae7d1427b9213"
+checksum = "5538cd660450ebeb4234cfecf8f2284b844ffc4c50531e66d584ad5b91293613"
 dependencies = [
  "os_str_bytes",
 ]
@@ -618,7 +628,7 @@ version = "0.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "615f6e27d000a2bffbc7f2f6a8669179378fa27ee4d0a509e985dfc0a7defb40"
 dependencies = [
- "getrandom 0.2.6",
+ "getrandom 0.2.7",
  "lazy_static",
  "proc-macro-hack",
  "tiny-keccak",
@@ -813,18 +823,21 @@ dependencies = [
 [[package]]
 name = "crucible"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=cd74a23ea42ce5e673923a00faf31b0a920191cc#cd74a23ea42ce5e673923a00faf31b0a920191cc"
+source = "git+https://github.com/oxidecomputer/crucible?rev=8314eeddd228ec0d76cefa40c4a41d3e2611ac18#8314eeddd228ec0d76cefa40c4a41d3e2611ac18"
 dependencies = [
  "aes-gcm-siv",
  "anyhow",
  "base64",
  "bytes",
+ "chrono",
  "crucible-common",
  "crucible-protocol",
- "crucible-scope",
  "dropshot",
  "futures",
  "futures-core",
+ "omicron-common 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
+ "oximeter 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
+ "oximeter-producer 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
  "reqwest",
@@ -835,18 +848,18 @@ dependencies = [
  "structopt",
  "tokio",
  "tokio-rustls",
- "tokio-util 0.7.3",
+ "tokio-util",
  "toml",
  "tracing",
  "usdt",
- "uuid 1.1.1",
+ "uuid",
  "version_check",
 ]
 
 [[package]]
 name = "crucible-agent-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=cd74a23ea42ce5e673923a00faf31b0a920191cc#cd74a23ea42ce5e673923a00faf31b0a920191cc"
+source = "git+https://github.com/oxidecomputer/crucible?rev=8314eeddd228ec0d76cefa40c4a41d3e2611ac18#8314eeddd228ec0d76cefa40c4a41d3e2611ac18"
 dependencies = [
  "anyhow",
  "chrono",
@@ -861,11 +874,11 @@ dependencies = [
 [[package]]
 name = "crucible-common"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=cd74a23ea42ce5e673923a00faf31b0a920191cc#cd74a23ea42ce5e673923a00faf31b0a920191cc"
+source = "git+https://github.com/oxidecomputer/crucible?rev=8314eeddd228ec0d76cefa40c4a41d3e2611ac18#8314eeddd228ec0d76cefa40c4a41d3e2611ac18"
 dependencies = [
  "anyhow",
  "rusqlite",
- "rustls-pemfile 1.0.0",
+ "rustls-pemfile",
  "serde",
  "serde_json",
  "tempfile",
@@ -873,36 +886,21 @@ dependencies = [
  "tokio-rustls",
  "toml",
  "twox-hash",
- "uuid 1.1.1",
+ "uuid",
 ]
 
 [[package]]
 name = "crucible-protocol"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=cd74a23ea42ce5e673923a00faf31b0a920191cc#cd74a23ea42ce5e673923a00faf31b0a920191cc"
+source = "git+https://github.com/oxidecomputer/crucible?rev=8314eeddd228ec0d76cefa40c4a41d3e2611ac18#8314eeddd228ec0d76cefa40c4a41d3e2611ac18"
 dependencies = [
  "anyhow",
  "bincode",
  "bytes",
  "crucible-common",
  "serde",
- "tokio-util 0.7.3",
- "uuid 1.1.1",
-]
-
-[[package]]
-name = "crucible-scope"
-version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=cd74a23ea42ce5e673923a00faf31b0a920191cc#cd74a23ea42ce5e673923a00faf31b0a920191cc"
-dependencies = [
- "anyhow",
- "futures",
- "futures-core",
- "serde",
- "serde_json",
- "tokio",
- "tokio-util 0.7.3",
- "toml",
+ "tokio-util",
+ "uuid",
 ]
 
 [[package]]
@@ -1171,7 +1169,7 @@ dependencies = [
  "pq-sys",
  "r2d2",
  "serde_json",
- "uuid 1.1.1",
+ "uuid",
 ]
 
 [[package]]
@@ -1183,7 +1181,7 @@ dependencies = [
  "lock_api",
  "serde",
  "usdt",
- "uuid 1.1.1",
+ "uuid",
 ]
 
 [[package]]
@@ -1296,7 +1294,7 @@ checksum = "1435fa1053d8b2fbbe9be7e97eca7f33d37b28409959813daefc1446a14247f1"
 [[package]]
 name = "dropshot"
 version = "0.7.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#a6069664f89af0069b4a2f59501c16af67b9074e"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#188247c5aa37a23b8289d79e22e399b3dca1b534"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -1314,7 +1312,7 @@ dependencies = [
  "percent-encoding",
  "proc-macro2",
  "rustls",
- "rustls-pemfile 1.0.0",
+ "rustls-pemfile",
  "schemars",
  "serde",
  "serde_json",
@@ -1328,14 +1326,14 @@ dependencies = [
  "tokio-rustls",
  "toml",
  "usdt",
- "uuid 1.1.1",
+ "uuid",
  "version_check",
 ]
 
 [[package]]
 name = "dropshot_endpoint"
 version = "0.7.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#a6069664f89af0069b4a2f59501c16af67b9074e"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#188247c5aa37a23b8289d79e22e399b3dca1b534"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1641,9 +1639,9 @@ dependencies = [
 
 [[package]]
 name = "fragile"
-version = "1.2.0"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e9d758e60b45e8d749c89c1b389ad8aee550f86aa12e2b9298b546dda7a82ab1"
+checksum = "85dcb89d2b10c5f6133de2efd8c11959ce9dbb46a2f7a4cab208c4eeda6ce1ab"
 
 [[package]]
 name = "fs2"
@@ -1770,11 +1768,11 @@ name = "gateway-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 3.1.18",
+ "clap 3.2.5",
  "futures",
  "gateway-client",
  "libc",
- "omicron-common",
+ "omicron-common 0.1.0",
  "slog",
  "slog-async",
  "slog-term",
@@ -1788,13 +1786,13 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "futures",
- "omicron-common",
+ "omicron-common 0.1.0",
  "progenitor",
  "reqwest",
  "serde",
  "serde_json",
  "slog",
- "uuid 1.1.1",
+ "uuid",
 ]
 
 [[package]]
@@ -1816,7 +1814,7 @@ dependencies = [
  "gateway-messages",
  "http",
  "hyper",
- "omicron-common",
+ "omicron-common 0.1.0",
  "omicron-test-utils",
  "once_cell",
  "ringbuffer",
@@ -1828,7 +1826,7 @@ dependencies = [
  "tokio-stream",
  "tokio-tungstenite",
  "usdt",
- "uuid 1.1.1",
+ "uuid",
 ]
 
 [[package]]
@@ -1872,13 +1870,13 @@ dependencies = [
 
 [[package]]
 name = "getrandom"
-version = "0.2.6"
+version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9be70c98951c83b8d2f8f60d7065fa6d5146873094452a1008da8c2f1e4205ad"
+checksum = "4eb1a864a501629691edf6c15a593b7a51eebaa1e8468e9ddc623de7c9b58ec6"
 dependencies = [
  "cfg-if 1.0.0",
  "libc",
- "wasi 0.10.0+wasi-snapshot-preview1",
+ "wasi 0.11.0+wasi-snapshot-preview1",
 ]
 
 [[package]]
@@ -1889,9 +1887,9 @@ checksum = "9b919933a397b79c37e33b77bb2aa3dc8eb6e165ad809e58ff75bc7db2e34574"
 
 [[package]]
 name = "globset"
-version = "0.4.8"
+version = "0.4.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "10463d9ff00a2a068db14231982f5132edebad0d7660cd956a1c30292dbcbfbd"
+checksum = "0a1e17342619edbc21a964c2afbeb6c820c6a2560032872f397bb97ea127bd0a"
 dependencies = [
  "aho-corasick",
  "bstr",
@@ -1927,7 +1925,7 @@ dependencies = [
  "indexmap",
  "slab",
  "tokio",
- "tokio-util 0.7.3",
+ "tokio-util",
  "tracing",
 ]
 
@@ -2001,9 +1999,9 @@ dependencies = [
 
 [[package]]
 name = "heapless"
-version = "0.7.13"
+version = "0.7.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a08e755adbc0ad283725b29f4a4883deee15336f372d5f61fae59efec40f983"
+checksum = "065681e99f9ef7e0e813702a0326aedbcbbde7db5e55f097aedd1bf50b9dca43"
 dependencies = [
  "atomic-polyfill",
  "hash32",
@@ -2310,7 +2308,7 @@ name = "internal-dns"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 3.1.18",
+ "clap 3.2.5",
  "dropshot",
  "expectorate",
  "internal-dns-client",
@@ -2327,7 +2325,6 @@ dependencies = [
  "slog-async",
  "slog-envlogger",
  "slog-term",
- "structopt",
  "subprocess",
  "tempdir",
  "tokio",
@@ -2343,16 +2340,15 @@ name = "internal-dns-client"
 version = "0.1.0"
 dependencies = [
  "futures",
- "omicron-common",
+ "omicron-common 0.1.0",
  "progenitor",
  "reqwest",
  "serde",
  "serde_json",
  "slog",
- "structopt",
  "trust-dns-proto",
  "trust-dns-resolver",
- "uuid 1.1.1",
+ "uuid",
 ]
 
 [[package]]
@@ -2405,9 +2401,9 @@ checksum = "112c678d4050afce233f4f2852bb2eb519230b3cf12f33585275537d7e41578d"
 
 [[package]]
 name = "js-sys"
-version = "0.3.57"
+version = "0.3.58"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "671a26f820db17c2a2750743f1dd03bafd15b98c9f30c7c2628c024c05d73397"
+checksum = "c3fac17f7123a73ca62df411b1bf727ccc805daa070338fda671c86dac1bdc27"
 dependencies = [
  "wasm-bindgen",
 ]
@@ -2732,13 +2728,28 @@ name = "nexus-client"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "omicron-common",
+ "omicron-common 0.1.0",
  "progenitor",
  "reqwest",
  "serde",
  "serde_json",
  "slog",
- "uuid 1.1.1",
+ "uuid",
+]
+
+[[package]]
+name = "nexus-client"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/omicron?branch=main#c458fddcb8660eeb78d4a0ffe34c9d21c2ebd3dc"
+dependencies = [
+ "chrono",
+ "omicron-common 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
+ "progenitor",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "slog",
+ "uuid",
 ]
 
 [[package]]
@@ -2752,20 +2763,20 @@ dependencies = [
  "headers",
  "http",
  "hyper",
- "omicron-common",
+ "omicron-common 0.1.0",
  "omicron-nexus",
  "omicron-sled-agent",
  "omicron-test-utils",
- "oximeter",
+ "oximeter 0.1.0",
  "oximeter-client",
  "oximeter-collector",
- "oximeter-producer",
+ "oximeter-producer 0.1.0",
  "parse-display",
  "serde",
  "serde_json",
  "slog",
  "tokio",
- "uuid 1.1.1",
+ "uuid",
 ]
 
 [[package]]
@@ -2897,7 +2908,7 @@ name = "omicron-common"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "api_identity",
+ "api_identity 0.1.0",
  "backoff",
  "chrono",
  "dropshot",
@@ -2921,12 +2932,45 @@ dependencies = [
  "slog",
  "smf",
  "steno",
- "structopt",
  "thiserror",
  "tokio",
  "tokio-postgres",
  "toml",
- "uuid 1.1.1",
+ "uuid",
+]
+
+[[package]]
+name = "omicron-common"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/omicron?branch=main#c458fddcb8660eeb78d4a0ffe34c9d21c2ebd3dc"
+dependencies = [
+ "anyhow",
+ "api_identity 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
+ "backoff",
+ "chrono",
+ "dropshot",
+ "futures",
+ "http",
+ "hyper",
+ "ipnetwork",
+ "macaddr",
+ "parse-display",
+ "progenitor",
+ "rand 0.8.5",
+ "reqwest",
+ "ring",
+ "schemars",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "serde_with",
+ "slog",
+ "smf",
+ "steno",
+ "thiserror",
+ "tokio",
+ "tokio-postgres",
+ "uuid",
 ]
 
 [[package]]
@@ -2934,13 +2978,14 @@ name = "omicron-deploy"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "clap 3.2.5",
  "crossbeam",
  "omicron-package",
  "omicron-sled-agent",
  "serde",
  "serde_derive",
  "sp-sim",
- "structopt",
+ "sprockets-rot",
  "thiserror",
  "toml",
 ]
@@ -2949,7 +2994,7 @@ dependencies = [
 name = "omicron-gateway"
 version = "0.1.0"
 dependencies = [
- "clap 3.1.18",
+ "clap 3.2.5",
  "dropshot",
  "expectorate",
  "futures",
@@ -2958,7 +3003,7 @@ dependencies = [
  "hex",
  "http",
  "hyper",
- "omicron-common",
+ "omicron-common 0.1.0",
  "omicron-test-utils",
  "openapi-lint",
  "openapiv3",
@@ -2969,13 +3014,12 @@ dependencies = [
  "slog",
  "slog-dtrace",
  "sp-sim",
- "structopt",
  "subprocess",
  "thiserror",
  "tokio",
  "tokio-tungstenite",
  "toml",
- "uuid 1.1.1",
+ "uuid",
 ]
 
 [[package]]
@@ -2983,13 +3027,14 @@ name = "omicron-nexus"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "api_identity",
+ "api_identity 0.1.0",
  "async-bb8-diesel",
  "async-trait",
  "authz-macros",
  "base64",
  "bb8",
  "chrono",
+ "clap 3.2.5",
  "cookie",
  "criterion",
  "crucible-agent-client",
@@ -3015,7 +3060,7 @@ dependencies = [
  "nexus-test-utils",
  "nexus-test-utils-macros",
  "num-integer",
- "omicron-common",
+ "omicron-common 0.1.0",
  "omicron-rpaths",
  "omicron-test-utils",
  "openapi-lint",
@@ -3024,11 +3069,11 @@ dependencies = [
  "openssl-probe",
  "openssl-sys",
  "oso",
- "oximeter",
+ "oximeter 0.1.0",
  "oximeter-client",
  "oximeter-db",
  "oximeter-instruments",
- "oximeter-producer",
+ "oximeter-producer 0.1.0",
  "parse-display",
  "pq-sys",
  "rand 0.8.5",
@@ -3046,7 +3091,6 @@ dependencies = [
  "slog",
  "slog-dtrace",
  "steno",
- "structopt",
  "strum",
  "subprocess",
  "tempfile",
@@ -3057,7 +3101,7 @@ dependencies = [
  "toml",
  "tough",
  "usdt",
- "uuid 1.1.1",
+ "uuid",
 ]
 
 [[package]]
@@ -3065,10 +3109,11 @@ name = "omicron-package"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "clap 3.2.5",
  "futures",
  "hex",
  "indicatif",
- "omicron-common",
+ "omicron-common 0.1.0",
  "omicron-sled-agent",
  "omicron-zone-package",
  "rayon",
@@ -3077,7 +3122,6 @@ dependencies = [
  "serde",
  "serde_derive",
  "smf",
- "structopt",
  "tar",
  "tempfile",
  "thiserror",
@@ -3100,6 +3144,7 @@ dependencies = [
  "bytes",
  "cfg-if 1.0.0",
  "chrono",
+ "clap 3.2.5",
  "crucible-agent-client",
  "dropshot",
  "expectorate",
@@ -3110,8 +3155,8 @@ dependencies = [
  "libc",
  "macaddr",
  "mockall",
- "nexus-client",
- "omicron-common",
+ "nexus-client 0.1.0",
+ "omicron-common 0.1.0",
  "omicron-test-utils",
  "openapi-lint",
  "openapiv3",
@@ -3136,16 +3181,17 @@ dependencies = [
  "socket2",
  "sp-sim",
  "spdm",
+ "sprockets-common",
  "sprockets-host",
- "structopt",
  "subprocess",
  "tar",
  "tempfile",
  "thiserror",
  "tokio",
- "tokio-util 0.7.3",
+ "tokio-tungstenite",
+ "tokio-util",
  "toml",
- "uuid 1.1.1",
+ "uuid",
  "vsss-rs",
  "zone",
 ]
@@ -3155,16 +3201,16 @@ name = "omicron-test-utils"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "clap 3.2.5",
  "dropshot",
  "expectorate",
  "futures",
  "libc",
- "omicron-common",
+ "omicron-common 0.1.0",
  "postgres-protocol",
  "signal-hook",
  "signal-hook-tokio",
  "slog",
- "structopt",
  "subprocess",
  "tempfile",
  "thiserror",
@@ -3351,12 +3397,27 @@ dependencies = [
  "bytes",
  "chrono",
  "num-traits",
- "oximeter-macro-impl",
+ "oximeter-macro-impl 0.1.0",
  "schemars",
  "serde",
  "thiserror",
  "trybuild",
- "uuid 1.1.1",
+ "uuid",
+]
+
+[[package]]
+name = "oximeter"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/omicron?branch=main#c458fddcb8660eeb78d4a0ffe34c9d21c2ebd3dc"
+dependencies = [
+ "bytes",
+ "chrono",
+ "num-traits",
+ "oximeter-macro-impl 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
+ "schemars",
+ "serde",
+ "thiserror",
+ "uuid",
 ]
 
 [[package]]
@@ -3364,38 +3425,38 @@ name = "oximeter-client"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "omicron-common",
+ "omicron-common 0.1.0",
  "progenitor",
  "reqwest",
  "serde",
  "slog",
- "uuid 1.1.1",
+ "uuid",
 ]
 
 [[package]]
 name = "oximeter-collector"
 version = "0.1.0"
 dependencies = [
+ "clap 3.2.5",
  "dropshot",
  "expectorate",
- "nexus-client",
- "omicron-common",
+ "nexus-client 0.1.0",
+ "omicron-common 0.1.0",
  "omicron-test-utils",
  "openapi-lint",
  "openapiv3",
- "oximeter",
+ "oximeter 0.1.0",
  "oximeter-db",
  "reqwest",
  "serde",
  "serde_json",
  "slog",
  "slog-dtrace",
- "structopt",
  "subprocess",
  "thiserror",
  "tokio",
  "toml",
- "uuid 1.1.1",
+ "uuid",
 ]
 
 [[package]]
@@ -3406,10 +3467,11 @@ dependencies = [
  "async-trait",
  "bytes",
  "chrono",
+ "clap 3.2.5",
  "dropshot",
  "itertools",
  "omicron-test-utils",
- "oximeter",
+ "oximeter 0.1.0",
  "regex",
  "reqwest",
  "schemars",
@@ -3419,10 +3481,9 @@ dependencies = [
  "slog-async",
  "slog-dtrace",
  "slog-term",
- "structopt",
  "thiserror",
  "tokio",
- "uuid 1.1.1",
+ "uuid",
 ]
 
 [[package]]
@@ -3433,8 +3494,8 @@ dependencies = [
  "dropshot",
  "futures",
  "http",
- "oximeter",
- "uuid 1.1.1",
+ "oximeter 0.1.0",
+ "uuid",
 ]
 
 [[package]]
@@ -3448,14 +3509,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "oximeter-macro-impl"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/omicron?branch=main#c458fddcb8660eeb78d4a0ffe34c9d21c2ebd3dc"
+dependencies = [
+ "bytes",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "oximeter-producer"
 version = "0.1.0"
 dependencies = [
  "chrono",
  "dropshot",
- "nexus-client",
- "omicron-common",
- "oximeter",
+ "nexus-client 0.1.0",
+ "omicron-common 0.1.0",
+ "oximeter 0.1.0",
  "reqwest",
  "schemars",
  "serde",
@@ -3463,7 +3535,27 @@ dependencies = [
  "slog-dtrace",
  "thiserror",
  "tokio",
- "uuid 1.1.1",
+ "uuid",
+]
+
+[[package]]
+name = "oximeter-producer"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/omicron?branch=main#c458fddcb8660eeb78d4a0ffe34c9d21c2ebd3dc"
+dependencies = [
+ "chrono",
+ "dropshot",
+ "nexus-client 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
+ "omicron-common 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
+ "oximeter 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
+ "reqwest",
+ "schemars",
+ "serde",
+ "slog",
+ "slog-dtrace",
+ "thiserror",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -3838,7 +3930,7 @@ dependencies = [
  "postgres-protocol",
  "serde",
  "serde_json",
- "uuid 1.1.1",
+ "uuid",
 ]
 
 [[package]]
@@ -4020,7 +4112,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=1538f78c1656bd3ac8ef816f6177ae9b1bef348a#1538f78c1656bd3ac8ef816f6177ae9b1bef348a"
+source = "git+https://github.com/oxidecomputer/propolis?rev=d2b8184d11d5d5f56424fe0bee13ca03d576604e#d2b8184d11d5d5f56424fe0bee13ca03d576604e"
 dependencies = [
  "crucible",
  "reqwest",
@@ -4031,7 +4123,7 @@ dependencies = [
  "slog",
  "structopt",
  "thiserror",
- "uuid 1.1.1",
+ "uuid",
 ]
 
 [[package]]
@@ -4173,7 +4265,7 @@ version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d34f1408f55294453790c48b2f1ebbb1c5b4b7563eb1f418bcfcfdbb06ebb4e7"
 dependencies = [
- "getrandom 0.2.6",
+ "getrandom 0.2.7",
 ]
 
 [[package]]
@@ -4233,7 +4325,7 @@ version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b033d837a7cf162d7993aded9304e30a83213c648b6e389db233191f891e5c2b"
 dependencies = [
- "getrandom 0.2.6",
+ "getrandom 0.2.7",
  "redox_syscall",
  "thiserror",
 ]
@@ -4292,9 +4384,9 @@ dependencies = [
 
 [[package]]
 name = "reqwest"
-version = "0.11.10"
+version = "0.11.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46a1f7aa4f35e5e8b4160449f51afc758f0ce6454315a9fa7d0d113e958c41eb"
+checksum = "b75aa69a3f06bbcc66ede33af2af253c6f7a86b1ca0033f60c580a27074fbf92"
 dependencies = [
  "base64",
  "bytes",
@@ -4316,14 +4408,15 @@ dependencies = [
  "percent-encoding",
  "pin-project-lite",
  "rustls",
- "rustls-pemfile 0.3.0",
+ "rustls-pemfile",
  "serde",
  "serde_json",
  "serde_urlencoded",
  "tokio",
  "tokio-native-tls",
  "tokio-rustls",
- "tokio-util 0.6.10",
+ "tokio-util",
+ "tower-service",
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -4432,7 +4525,7 @@ version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bfa0f585226d2e68097d4f95d113b15b83a82e819ab25717ec0590d9584ef366"
 dependencies = [
- "semver 1.0.9",
+ "semver 1.0.10",
 ]
 
 [[package]]
@@ -4456,15 +4549,6 @@ dependencies = [
  "ring",
  "sct",
  "webpki",
-]
-
-[[package]]
-name = "rustls-pemfile"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ee86d63972a7c661d1536fefe8c3c8407321c3df668891286de28abcd087360"
-dependencies = [
- "base64",
 ]
 
 [[package]]
@@ -4520,7 +4604,7 @@ dependencies = [
 [[package]]
 name = "samael"
 version = "0.0.8"
-source = "git+https://github.com/oxidecomputer/samael?branch=dynamic#eba1ffd80f76afbf8159c356be296602f14c71e6"
+source = "git+https://github.com/oxidecomputer/samael?branch=dynamic#bf7284db9db33e2fdc73306d1638021e25e5d049"
 dependencies = [
  "base64",
  "bindgen",
@@ -4540,7 +4624,7 @@ dependencies = [
  "serde",
  "snafu 0.6.10",
  "url",
- "uuid 0.8.2",
+ "uuid",
 ]
 
 [[package]]
@@ -4583,7 +4667,7 @@ dependencies = [
  "schemars_derive",
  "serde",
  "serde_json",
- "uuid 1.1.1",
+ "uuid",
 ]
 
 [[package]]
@@ -4663,9 +4747,9 @@ dependencies = [
 
 [[package]]
 name = "semver"
-version = "1.0.9"
+version = "1.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8cb243bdfdb5936c8dc3c45762a19d12ab4550cdc753bc247637d4ec35a040fd"
+checksum = "a41d061efea015927ac527063765e73601444cdc344ba855bc7bd44578b25e1c"
 
 [[package]]
 name = "semver-parser"
@@ -4819,20 +4903,21 @@ dependencies = [
 
 [[package]]
 name = "serial_test"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e5bcc41d18f7a1d50525d080fd3e953be87c4f9f1a974f3c21798ca00d54ec15"
+checksum = "d19dbfb999a147cedbfe82f042eb9555f5b0fa4ef95ee4570b74349103d9c9f4"
 dependencies = [
  "lazy_static",
- "parking_lot 0.11.2",
+ "log",
+ "parking_lot 0.12.1",
  "serial_test_derive",
 ]
 
 [[package]]
 name = "serial_test_derive"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2881bccd7d60fb32dfa3d7b3136385312f8ad75e2674aab2852867a09790cae8"
+checksum = "cb9e2050b2be1d681f8f1c1a528bcfe4e00afa2d8995f713974f5333288659f2"
 dependencies = [
  "proc-macro-error",
  "proc-macro2",
@@ -4994,12 +5079,12 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
- "omicron-common",
+ "omicron-common 0.1.0",
  "progenitor",
  "reqwest",
  "serde",
  "slog",
- "uuid 1.1.1",
+ "uuid",
 ]
 
 [[package]]
@@ -5193,16 +5278,16 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "clap 3.2.5",
  "dropshot",
  "futures",
  "gateway-messages",
  "hex",
- "omicron-common",
+ "omicron-common 0.1.0",
  "serde",
  "slog",
  "slog-dtrace",
  "sprockets-rot",
- "structopt",
  "thiserror",
  "tokio",
  "toml",
@@ -5262,7 +5347,7 @@ version = "0.1.0"
 source = "git+http://github.com/oxidecomputer/sprockets?rev=0361fd13ff19cda6696242fe40f1325fca30d3d1#0361fd13ff19cda6696242fe40f1325fca30d3d1"
 dependencies = [
  "anyhow",
- "clap 3.1.18",
+ "clap 3.2.5",
  "derive_more",
  "futures",
  "pin-project",
@@ -5339,7 +5424,7 @@ dependencies = [
  "slog",
  "thiserror",
  "tokio",
- "uuid 1.1.1",
+ "uuid",
 ]
 
 [[package]]
@@ -5426,11 +5511,11 @@ dependencies = [
 
 [[package]]
 name = "strum"
-version = "0.24.0"
+version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e96acfc1b70604b8b2f1ffa4c57e59176c7dbb05d556c71ecd2f5498a1dee7f8"
+checksum = "063e6045c0e62079840579a7e47a355ae92f60eb74daaf156fb1e84ba164e63f"
 dependencies = [
- "strum_macros 0.24.0",
+ "strum_macros 0.24.1",
 ]
 
 [[package]]
@@ -5448,9 +5533,9 @@ dependencies = [
 
 [[package]]
 name = "strum_macros"
-version = "0.24.0"
+version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6878079b17446e4d3eba6192bb0a2950d5b14f0ed8424b852310e5a94345d0ef"
+checksum = "9550962e7cf70d9980392878dfaf1dcc3ece024f4cf3bf3c46b978d0bad61d6c"
 dependencies = [
  "heck 0.4.0",
  "proc-macro2",
@@ -5760,7 +5845,7 @@ dependencies = [
  "postgres-types",
  "socket2",
  "tokio",
- "tokio-util 0.7.3",
+ "tokio-util",
 ]
 
 [[package]]
@@ -5795,20 +5880,6 @@ dependencies = [
  "log",
  "tokio",
  "tungstenite",
-]
-
-[[package]]
-name = "tokio-util"
-version = "0.6.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "36943ee01a6d67977dd3f84a5a1d2efeb4ada3a1ae771cadfaa535d9d9fc6507"
-dependencies = [
- "bytes",
- "futures-core",
- "futures-sink",
- "log",
- "pin-project-lite",
- "tokio",
 ]
 
 [[package]]
@@ -6137,9 +6208,9 @@ checksum = "099b7128301d285f79ddd55b9a83d5e6b9e97c92e0ea0daebee7263e932de992"
 
 [[package]]
 name = "unicode-ident"
-version = "1.0.0"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d22af068fba1eb5edcb4aea19d382b2a3deb4c8f9d475c589b6ada9e0fd493ee"
+checksum = "5bd2fe26506023ed7b5e1e315add59d6f584c621d037f9368fea9cfb988f368c"
 
 [[package]]
 name = "unicode-normalization"
@@ -6266,20 +6337,11 @@ checksum = "09cc8ee72d2a9becf2f2febe0205bbed8fc6615b7cb429ad062dc7b7ddd036a9"
 
 [[package]]
 name = "uuid"
-version = "0.8.2"
+version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc5cf98d8186244414c848017f0e2676b3fcb46807f6668a97dfe67359a3c4b7"
+checksum = "dd6469f4314d5f1ffec476e05f17cc9a78bc7a27a6a857842170bdf8d6f98d2f"
 dependencies = [
- "getrandom 0.2.6",
-]
-
-[[package]]
-name = "uuid"
-version = "1.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c6d5d669b51467dcf7b2f1a796ce0f955f05f01cafda6c19d6e95f730df29238"
-dependencies = [
- "getrandom 0.2.6",
+ "getrandom 0.2.7",
  "serde",
 ]
 
@@ -6386,9 +6448,9 @@ checksum = "9c8d87e72b64a3b4db28d11ce29237c246188f4f51057d65a7eab63b7987e423"
 
 [[package]]
 name = "wasm-bindgen"
-version = "0.2.80"
+version = "0.2.81"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "27370197c907c55e3f1a9fbe26f44e937fe6451368324e009cba39e139dc08ad"
+checksum = "7c53b543413a17a202f4be280a7e5c62a1c69345f5de525ee64f8cfdbc954994"
 dependencies = [
  "cfg-if 1.0.0",
  "wasm-bindgen-macro",
@@ -6396,9 +6458,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-backend"
-version = "0.2.80"
+version = "0.2.81"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "53e04185bfa3a779273da532f5025e33398409573f348985af9a1cbf3774d3f4"
+checksum = "5491a68ab4500fa6b4d726bd67408630c3dbe9c4fe7bda16d5c82a1fd8c7340a"
 dependencies = [
  "bumpalo",
  "lazy_static",
@@ -6411,9 +6473,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-futures"
-version = "0.4.30"
+version = "0.4.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f741de44b75e14c35df886aff5f1eb73aa114fa5d4d00dcd37b5e01259bf3b2"
+checksum = "de9a9cec1733468a8c657e57fa2413d2ae2c0129b95e87c5b72b8ace4d13f31f"
 dependencies = [
  "cfg-if 1.0.0",
  "js-sys",
@@ -6423,9 +6485,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-macro"
-version = "0.2.80"
+version = "0.2.81"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "17cae7ff784d7e83a2fe7611cfe766ecf034111b49deb850a3dc7699c08251f5"
+checksum = "c441e177922bc58f1e12c022624b6216378e5febc2f0533e41ba443d505b80aa"
 dependencies = [
  "quote",
  "wasm-bindgen-macro-support",
@@ -6433,9 +6495,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-macro-support"
-version = "0.2.80"
+version = "0.2.81"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "99ec0dc7a4756fffc231aab1b9f2f578d23cd391390ab27f952ae0c9b3ece20b"
+checksum = "7d94ac45fcf608c1f45ef53e748d35660f168490c10b23704c7779ab8f5c3048"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6446,15 +6508,15 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-shared"
-version = "0.2.80"
+version = "0.2.81"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d554b7f530dee5964d9a9468d95c1f8b8acae4f282807e7d27d4b03099a46744"
+checksum = "6a89911bd99e5f3659ec4acf9c4d93b0a90fe4a2a11f15328472058edc5261be"
 
 [[package]]
 name = "web-sys"
-version = "0.3.57"
+version = "0.3.58"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b17e741662c70c8bd24ac5c5b18de314a2c26c32bf8346ee1e6f53de919c283"
+checksum = "2fed94beee57daf8dd7d51f2b15dc2bcde92d7a72304cdf662a4371008b71b90"
 dependencies = [
  "js-sys",
  "wasm-bindgen",

@@ -26,6 +26,12 @@ use std::path::Path;
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct SetupServiceConfig {
     pub rack_subnet: Ipv6Addr,
+
+    /// The minimum number of sleds required to unlock the rack secret.
+    ///
+    /// If this value is less than 2, no rack secret will be created on startup;
+    /// this is the typical case for single-server test/development.
+    pub rack_secret_threshold: usize,
 }
 
 impl SetupServiceConfig {
@@ -61,6 +67,7 @@ mod test {
     fn test_subnets() {
         let cfg = SetupServiceConfig {
             rack_subnet: "fd00:1122:3344:0100::".parse().unwrap(),
+            rack_secret_threshold: 0,
         };
 
         assert_eq!(
