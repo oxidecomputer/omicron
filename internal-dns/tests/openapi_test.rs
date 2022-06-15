@@ -15,8 +15,8 @@ const CMD_API_GEN: &str = env!("CARGO_BIN_EXE_apigen");
 #[test]
 fn test_internal_dns_openapi() {
     let exec = Exec::cmd(path_to_executable(CMD_API_GEN));
-    let (exit_status, stdout, _) = run_command(exec);
-    assert_exit_code(exit_status, EXIT_SUCCESS);
+    let (exit_status, stdout, stderr) = run_command(exec);
+    assert_exit_code(exit_status, EXIT_SUCCESS, &stderr);
 
     let spec: OpenAPI =
         serde_json::from_str(&stdout).expect("stdout was not valid OpenAPI");

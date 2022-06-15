@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Configuration parameters to Nexus that are usually only known
-//! at runtime.
+//! at deployment time.
 
 use super::address::{Ipv6Subnet, RACK_PREFIX};
 use super::postgres_config::PostgresConfigWithUrl;
@@ -99,7 +99,7 @@ pub enum Database {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct RuntimeConfig {
+pub struct DeploymentConfig {
     /// Uuid of the Nexus instance
     pub id: Uuid,
     /// Dropshot configuration for external API server
@@ -112,8 +112,8 @@ pub struct RuntimeConfig {
     pub database: Database,
 }
 
-impl RuntimeConfig {
-    /// Load a `RuntimeConfig` from the given TOML file
+impl DeploymentConfig {
+    /// Load a `DeploymentConfig` from the given TOML file
     ///
     /// This config object can then be used to create a new `Nexus`.
     /// The format is described in the README.

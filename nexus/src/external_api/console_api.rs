@@ -37,7 +37,7 @@ use std::{collections::HashSet, ffi::OsString, path::PathBuf, sync::Arc};
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct LoginParams {
+pub struct SpoofLoginBody {
     pub username: String,
 }
 
@@ -53,7 +53,7 @@ pub struct LoginParams {
 }]
 pub async fn spoof_login(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    params: TypedBody<LoginParams>,
+    params: TypedBody<SpoofLoginBody>,
 ) -> Result<Response<Body>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;

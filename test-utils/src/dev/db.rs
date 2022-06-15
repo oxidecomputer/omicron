@@ -13,6 +13,7 @@ use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::ops::Deref;
 use std::os::unix::ffi::OsStringExt;
+use std::os::unix::process::ExitStatusExt;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -308,10 +309,8 @@ impl CockroachStarter {
                 let exited = process_exited(&mut child_process);
                 let listen_url_file = self.listen_url_file.clone();
                 async move {
-                    if exited {
-                        return Err(poll::CondCheckError::Failed(
-                            CockroachStartError::Exited,
-                        ));
+                    if let Some(exit_error) = exited {
+                        return Err(poll::CondCheckError::Failed(exit_error));
                     }
 
                     // When ready, CockroachDB will write the URL on which it's
@@ -379,11 +378,23 @@ pub enum CockroachStartError {
         source: std::io::Error,
     },
 
-    #[error("wrong version of CockroachDB installed. expected '{expected:}', found: '{found:?}")]
+    #[error(
+        "wrong version of CockroachDB installed. expected '{expected:}', \
+        found: '{found:?}"
+    )]
     BadVersion { expected: String, found: Result<String, anyhow::Error> },
 
-    #[error("cockroach failed to start (see error output above)")]
-    Exited,
+    #[error(
+        "cockroach exited unexpectedly with status {exit_code} \
+        (see error output above)"
+    )]
+    Exited { exit_code: i32 },
+
+    #[error(
+        "cockroach unexpectedly terminated by signal {signal} \
+        (see error output above)"
+    )]
+    Signaled { signal: i32 },
 
     #[error("error parsing listen URL {listen_url:?}")]
     BadListenUrl {
@@ -398,6 +409,12 @@ pub enum CockroachStartError {
         may still exist)"
     )]
     TimedOut { pid: u32, time_waited: Duration },
+
+    #[error("unknown error waiting for cockroach to start")]
+    Unknown {
+        #[source]
+        source: anyhow::Error,
+    },
 }
 
 /// Manages a CockroachDB process running as a single-node cluster
@@ -590,10 +607,34 @@ pub async fn check_db_version() -> Result<(), CockroachStartError> {
 ///
 /// It seems we can infer that "the exit status is not available at this time"
 /// means that the process has not exited.  After all, if it _had_ exited, we'd
-/// fall into the first case.  It's not clear under what conditions this function
-/// could ever fail.  It's not clear from the source that it's even possible.
-fn process_exited(child_process: &mut tokio::process::Child) -> bool {
-    child_process.try_wait().unwrap().is_some()
+/// fall into the first case.  It's not clear under what conditions this
+/// function could ever fail.  It's not clear from the source that it's even
+/// possible.
+fn process_exited(
+    child_process: &mut tokio::process::Child,
+) -> Option<CockroachStartError> {
+    child_process.try_wait().unwrap().map(interpret_exit)
+}
+
+fn interpret_exit(
+    exit_status: std::process::ExitStatus,
+) -> CockroachStartError {
+    if let Some(exit_code) = exit_status.code() {
+        CockroachStartError::Exited { exit_code }
+    } else {
+        if let Some(signal) = exit_status.signal() {
+            CockroachStartError::Signaled { signal }
+        } else {
+            // This case should not be possible.
+            CockroachStartError::Unknown {
+                source: anyhow!(
+                    "process has an exit status, but no exit \
+                            code nor signal: {:?}",
+                    exit_status
+                ),
+            }
+        }
+    }
 }
 
 /// Populate a database with the Omicron schema and any initial objects
@@ -844,11 +885,13 @@ mod test {
     use super::CockroachStartError;
     use super::CockroachStarter;
     use super::CockroachStarterBuilder;
+    use crate::dev::db::process_exited;
     use crate::dev::poll;
     use crate::dev::process_running;
     use std::env;
     use std::path::Path;
     use std::path::PathBuf;
+    use std::process::Stdio;
     use std::time::Duration;
     use tempfile::tempdir;
     use tokio::fs;
@@ -1235,6 +1278,66 @@ mod test {
         assert!(error.contains(
             "unsupported PostgreSQL listen URL \
             (did not expect any of these fields: application_name)"
+        ));
+    }
+
+    // Tests the way `process_exited()` checks and interprets the exit status
+    // for normal process termination.
+    #[tokio::test]
+    async fn test_process_exit_normal() {
+        // Launch a process that exits with a known status code.
+        let mut child_process = tokio::process::Command::new("bash")
+            .args(&["-c", "exit 3"])
+            .spawn()
+            .expect("failed to invoke bash");
+        let pid = child_process.id().unwrap();
+        println!("launched child process {}", pid);
+
+        // The only way we have to wait for the process to exit also consumes
+        // its exit status.
+        let result = child_process
+            .wait()
+            .await
+            .expect("failed to wait for child process completion");
+        let exit_status = super::interpret_exit(result);
+
+        println!("process exited: {:?}", exit_status);
+        assert!(matches!(exit_status,
+            CockroachStartError::Exited { exit_code } if exit_code == 3
+        ));
+    }
+
+    // Tests the way `process_exited()` checks and interprets the exit status
+    // for abnormal process termination (by a signal).
+    #[tokio::test]
+    async fn test_process_exit_abnormal() {
+        // Launch a process that will hang until we can kill it with a known
+        // signal.
+        let mut child_process = tokio::process::Command::new("cat")
+            .stdin(Stdio::piped())
+            .spawn()
+            .expect("failed to invoke cat");
+        let pid = child_process.id().unwrap();
+        println!("launched child process {}", pid);
+
+        // The child must not have exited yet because it's waiting on stdin.
+        let exited = process_exited(&mut child_process);
+        assert!(exited.is_none());
+
+        // Kill the child process with a known signal.
+        child_process.start_kill().unwrap();
+
+        // The only way we have to wait for the process to exit also consumes
+        // its exit status.
+        let result = child_process
+            .wait()
+            .await
+            .expect("failed to wait for child process completion");
+        let exit_status = super::interpret_exit(result);
+
+        println!("process exited: {:?}", exit_status);
+        assert!(matches!(exit_status,
+            CockroachStartError::Signaled { signal } if signal == libc::SIGKILL
         ));
     }
 }

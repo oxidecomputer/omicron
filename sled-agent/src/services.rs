@@ -13,7 +13,9 @@ use crate::params::{ServiceEnsureBody, ServiceRequest, ServiceType};
 use crate::zone::Zones;
 use dropshot::ConfigDropshot;
 use omicron_common::address::{Ipv6Subnet, RACK_PREFIX};
-use omicron_common::nexus_config::{self, RuntimeConfig as NexusRuntimeConfig};
+use omicron_common::nexus_config::{
+    self, DeploymentConfig as NexusDeploymentConfig,
+};
 use omicron_common::postgres_config::PostgresConfigWithUrl;
 use slog::Logger;
 use std::collections::HashSet;
@@ -312,7 +314,7 @@ impl ServiceManager {
 
                     // Nexus takes a separate config file for parameters which
                     // cannot be known at packaging time.
-                    let runtime_config = NexusRuntimeConfig {
+                    let deployment_config = NexusDeploymentConfig {
                         id: service.id,
                         dropshot_external: ConfigDropshot {
                             bind_address: SocketAddr::V6(external_address),
@@ -351,10 +353,11 @@ impl ServiceManager {
                         })?;
 
                     // Serialize the configuration and append it into the file.
-                    let serialized_cfg = toml::Value::try_from(&runtime_config)
-                        .expect("Cannot serialize config");
+                    let serialized_cfg =
+                        toml::Value::try_from(&deployment_config)
+                            .expect("Cannot serialize config");
                     let mut map = toml::map::Map::new();
-                    map.insert("runtime".to_string(), serialized_cfg);
+                    map.insert("deployment".to_string(), serialized_cfg);
                     let config_str = toml::to_string(&map).map_err(|err| {
                         Error::TomlSerialize { path: config_path.clone(), err }
                     })?;
