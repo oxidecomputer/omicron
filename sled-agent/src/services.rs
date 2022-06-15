@@ -486,7 +486,7 @@ impl ServiceManager {
                     // that removal implicitly.
                     warn!(
                         self.log,
-                        "Cannot request services on this sled, differing configurations: {:?}",
+                        "Cannot request services on this sled, differing configurations: {:#?}",
                         known_set.symmetric_difference(&requested_set)
                     );
                     return Err(Error::ServicesAlreadyConfigured);

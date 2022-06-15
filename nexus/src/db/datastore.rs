@@ -480,11 +480,6 @@ impl DataStore {
                     kind.clone(),
                 )?;
 
-                eprintln!(
-                    "Observed sleds/services: {:?}",
-                    sleds_and_maybe_svcs
-                );
-
                 // Split the set of returned sleds into "those with" and "those
                 // without" the requested service.
                 let (sleds_with_svc, sleds_without_svc): (Vec<_>, Vec<_>) =
@@ -505,8 +500,6 @@ impl DataStore {
                         )
                     })
                     .collect();
-
-                eprintln!("Observed services: {:?}", svcs);
 
                 // Add services to sleds, in-order, until we've met a
                 // number sufficient for our redundancy.
@@ -572,7 +565,6 @@ impl DataStore {
             .transaction(move |conn| {
                 let mut svcs = Self::dns_service_list_sync(conn)?;
 
-                eprintln!("Observed DNS services: {:?}", svcs);
                 // Get all subnets not allocated to existing services.
                 let mut usable_dns_subnets = ReservedRackSubnet(rack_subnet)
                     .get_dns_subnets()
@@ -586,7 +578,6 @@ impl DataStore {
                     })
                     .collect::<Vec<_>>()
                     .into_iter();
-                eprintln!("Usable DNS services: {:?}", usable_dns_subnets);
 
                 // Get all sleds which aren't already running DNS services.
                 let mut target_sleds =
@@ -714,11 +705,6 @@ impl DataStore {
                         kind.clone(),
                     )?;
 
-                eprintln!(
-                    "Observed datasets: {:?}",
-                    sleds_zpools_and_maybe_datasets
-                );
-
                 // Split the set of returned zpools into "those with" and "those
                 // without" the requested dataset.
                 let (zpools_with_dataset, zpools_without_dataset): (
@@ -732,8 +718,6 @@ impl DataStore {
                     .map(|(sled, zpool, _)| (sled, zpool))
                     .peekable();
 
-                eprintln!("Dataset targets: {:?}", zpools_without_dataset);
-
                 let mut datasets: Vec<_> = zpools_with_dataset
                     .into_iter()
                     .map(|(sled, zpool, maybe_dataset)| {
@@ -744,7 +728,6 @@ impl DataStore {
                         )
                     })
                     .collect();
-                eprintln!("Existing datasets: {:?}", datasets);
 
                 // Add datasets to zpools, in-order, until we've met a
                 // number sufficient for our redundancy.

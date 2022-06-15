@@ -112,6 +112,8 @@ impl ServiceBalancer {
                 self.nexus.datastore().service_list(opctx, *sled_id).await?;
             let sled_client = self.nexus.sled_client(sled_id).await?;
 
+            info!(self.log, "instantiate_services: {:?}", services);
+
             sled_client
                 .services_put(&SledAgentTypes::ServiceEnsureBody {
                     services: services
@@ -124,11 +126,24 @@ impl ServiceBalancer {
                                     s.kind.clone(),
                                 );
 
+                            // TODO: This is hacky, specifically to inject
+                            // global zone addresses in the DNS service.
+                            let gz_addresses = match &s.kind {
+                                ServiceKind::InternalDNS => {
+                                    let mut octets = address.octets();
+                                    octets[15] = octets[15] + 1;
+                                    vec![Ipv6Addr::from(octets)]
+                                }
+                                _ => vec![],
+                            };
+
+                            // TODO: this is wrong for DNS service; needs the gz
+                            // addreess
                             SledAgentTypes::ServiceRequest {
                                 id: s.id(),
                                 name: name.to_string(),
                                 addresses: vec![address],
-                                gz_addresses: vec![],
+                                gz_addresses,
                                 service_type,
                             }
                         })
@@ -191,14 +206,14 @@ impl ServiceBalancer {
         desired_count: u32,
     ) -> Result<(), Error> {
         // Provision the services within the database.
-        let new_services = self
+        let services = self
             .nexus
             .datastore()
             .ensure_rack_service(opctx, self.nexus.rack_id, kind, desired_count)
             .await?;
 
         // Actually instantiate those services.
-        self.instantiate_services(opctx, new_services).await
+        self.instantiate_services(opctx, services).await
     }
 
     async fn ensure_dns_service(
@@ -207,14 +222,14 @@ impl ServiceBalancer {
         desired_count: u32,
     ) -> Result<(), Error> {
         // Provision the services within the database.
-        let new_services = self
+        let services = self
             .nexus
             .datastore()
             .ensure_dns_service(opctx, self.nexus.rack_subnet, desired_count)
             .await?;
 
         // Actually instantiate those services.
-        self.instantiate_services(opctx, new_services).await
+        self.instantiate_services(opctx, services).await
     }
 
     // TODO: Consider using sagas to ensure the rollout of services happens.
@@ -272,6 +287,7 @@ impl ServiceBalancer {
     ) -> Result<(), Error> {
         let mut sled_clients = HashMap::new();
 
+        // TODO: We could issue these requests concurrently
         for (sled, zpool, dataset) in &datasets {
             let sled_client = {
                 match sled_clients.get(&sled.id()) {
