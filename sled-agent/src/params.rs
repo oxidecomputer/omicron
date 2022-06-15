@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Display, Formatter, Result as FormatResult};
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
-use std::net::SocketAddr;
+use std::net::{SocketAddr, SocketAddrV6};
 use uuid::Uuid;
 
 /// Information required to construct a virtual network interface for a guest
@@ -81,7 +81,7 @@ pub struct InstanceEnsureBody {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceMigrateParams {
-    pub src_propolis_uuid: Uuid,
+    pub src_propolis_id: Uuid,
     pub src_propolis_addr: SocketAddr,
 }
 
@@ -158,6 +158,34 @@ pub struct InstanceRuntimeStateRequested {
     pub migration_params: Option<InstanceRuntimeStateMigrateParams>,
 }
 
+/// Request the contents of an Instance's serial console.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct InstanceSerialConsoleRequest {
+    /// Character index in the serial buffer from which to read, counting the bytes output since
+    /// instance start. If this is not provided, `most_recent` must be provided, and if this *is*
+    /// provided, `most_recent` must *not* be provided.
+    pub from_start: Option<u64>,
+    /// Character index in the serial buffer from which to read, counting *backward* from the most
+    /// recently buffered data retrieved from the instance. (See note on `from_start` about mutual
+    /// exclusivity)
+    pub most_recent: Option<u64>,
+    /// Maximum number of bytes of buffered serial console contents to return. If the requested
+    /// range runs to the end of the available buffer, the data returned will be shorter than
+    /// `max_bytes`.
+    pub max_bytes: Option<u64>,
+}
+
+/// Contents of an Instance's serial console buffer.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InstanceSerialConsoleData {
+    /// The bytes starting from the requested offset up to either the end of the buffer or the
+    /// request's `max_bytes`. Provided as a u8 array rather than a string, as it may not be UTF-8.
+    pub data: Vec<u8>,
+    /// The absolute offset since boot (suitable for use as `byte_offset` in a subsequent request)
+    /// of the last byte returned in `data`.
+    pub last_byte_offset: u64,
+}
+
 /// The type of a dataset, and an auxiliary information necessary
 /// to successfully launch a zone managing the associated data.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
@@ -214,11 +242,11 @@ impl std::fmt::Display for DatasetKind {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct DatasetEnsureBody {
     // The name (and UUID) of the Zpool which we are inserting into.
-    pub zpool_uuid: Uuid,
+    pub zpool_id: Uuid,
     // The type of the filesystem.
     pub dataset_kind: DatasetKind,
     // The address on which the zone will listen for requests.
-    pub address: SocketAddr,
+    pub address: SocketAddrV6,
     // NOTE: We could insert a UUID here, if we want that to be set by the
     // caller explicitly? Currently, the lack of a UUID implies that
     // "at most one dataset type" exists within a zpool.
@@ -232,7 +260,7 @@ pub struct DatasetEnsureBody {
 impl From<DatasetEnsureBody> for sled_agent_client::types::DatasetEnsureBody {
     fn from(p: DatasetEnsureBody) -> Self {
         Self {
-            zpool_uuid: p.zpool_uuid,
+            zpool_id: p.zpool_id,
             dataset_kind: p.dataset_kind.into(),
             address: p.address.to_string(),
         }

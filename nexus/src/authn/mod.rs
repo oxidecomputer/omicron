@@ -26,6 +26,7 @@
 
 pub mod external;
 pub mod saga;
+pub mod silos;
 
 pub use crate::db::fixed_data::silo_user::USER_TEST_PRIVILEGED;
 pub use crate::db::fixed_data::silo_user::USER_TEST_UNPRIVILEGED;

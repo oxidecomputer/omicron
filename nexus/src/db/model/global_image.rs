@@ -27,7 +27,8 @@ pub struct GlobalImage {
 
     pub volume_id: Uuid,
     pub url: Option<String>,
-    pub version: Option<String>,
+    pub distribution: String,
+    pub version: String,
     pub digest: Option<Digest>,
 
     pub block_size: BlockSize,
@@ -41,6 +42,7 @@ impl From<GlobalImage> for views::GlobalImage {
         Self {
             identity: image.identity(),
             url: image.url,
+            distribution: image.distribution,
             version: image.version,
             digest: image.digest.map(|x| x.into()),
             block_size: image.block_size.into(),

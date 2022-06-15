@@ -195,6 +195,8 @@ lazy_static! {
         format!("{}/detach", *DEMO_INSTANCE_DISKS_URL);
     pub static ref DEMO_INSTANCE_NICS_URL: String =
         format!("{}/network-interfaces", *DEMO_INSTANCE_URL);
+    pub static ref DEMO_INSTANCE_SERIAL_URL: String =
+        format!("{}/serial", *DEMO_INSTANCE_URL);
     pub static ref DEMO_INSTANCE_CREATE: params::InstanceCreate =
         params::InstanceCreate {
             identity: IdentityMetadataCreateParams {
@@ -211,7 +213,8 @@ lazy_static! {
         };
 
     // The instance needs a network interface, too.
-    pub static ref DEMO_INSTANCE_NIC_NAME: Name = "default".parse().unwrap();
+    pub static ref DEMO_INSTANCE_NIC_NAME: Name =
+        omicron_nexus::defaults::DEFAULT_PRIMARY_NIC_NAME.parse().unwrap();
     pub static ref DEMO_INSTANCE_NIC_URL: String =
         format!("{}/{}", *DEMO_INSTANCE_NICS_URL, *DEMO_INSTANCE_NIC_NAME);
     pub static ref DEMO_INSTANCE_NIC_CREATE: params::NetworkInterfaceCreate =
@@ -224,7 +227,19 @@ lazy_static! {
             subnet_name: DEMO_VPC_SUBNET_NAME.clone(),
             ip: None,
         };
+    pub static ref DEMO_INSTANCE_NIC_PUT: params::NetworkInterfaceUpdate = {
+        params::NetworkInterfaceUpdate {
+            identity: IdentityMetadataUpdateParams {
+                name: None,
+                description: Some(String::from("an updated description")),
+            },
+            make_primary: false,
+        }
+    };
+}
 
+// Separate lazy_static! blocks to avoid hitting some recursion limit when compiling
+lazy_static! {
     // Project Images
     pub static ref DEMO_IMAGE_NAME: Name = "demo-image".parse().unwrap();
     pub static ref DEMO_PROJECT_IMAGE_URL: String =
@@ -235,13 +250,27 @@ lazy_static! {
                 name: DEMO_IMAGE_NAME.clone(),
                 description: String::from(""),
             },
-            source: params::ImageSource::Url(HTTP_SERVER.url("/image.raw").to_string()),
+            source: params::ImageSource::Url { url: HTTP_SERVER.url("/image.raw").to_string() },
             block_size: params::BlockSize::try_from(4096).unwrap(),
         };
 
     // Global Images
+    pub static ref DEMO_GLOBAL_IMAGE_NAME: Name = "alpine-edge".parse().unwrap();
     pub static ref DEMO_GLOBAL_IMAGE_URL: String =
-        format!("/images/{}", *DEMO_IMAGE_NAME);
+        format!("/images/{}", *DEMO_GLOBAL_IMAGE_NAME);
+    pub static ref DEMO_GLOBAL_IMAGE_CREATE: params::GlobalImageCreate =
+        params::GlobalImageCreate {
+            identity: IdentityMetadataCreateParams {
+                name: DEMO_GLOBAL_IMAGE_NAME.clone(),
+                description: String::from(""),
+            },
+            source: params::ImageSource::Url { url: HTTP_SERVER.url("/image.raw").to_string() },
+            distribution: params::Distribution {
+                name: "alpine".parse().unwrap(),
+                version: String::from("edge"),
+            },
+            block_size: params::BlockSize::try_from(4096).unwrap(),
+        };
 
     // Snapshots
     pub static ref DEMO_SNAPSHOT_NAME: Name = "demo-snapshot".parse().unwrap();
@@ -254,6 +283,33 @@ lazy_static! {
                 description: String::from(""),
             },
             disk: DEMO_DISK_NAME.clone(),
+        };
+}
+
+lazy_static! {
+    // Identity providers
+    pub static ref IDENTITY_PROVIDERS_URL: String = format!("/silos/default-silo/identity_providers");
+    pub static ref SAML_IDENTITY_PROVIDERS_URL: String = format!("/silos/default-silo/saml_identity_providers");
+
+    pub static ref DEMO_SAML_IDENTITY_PROVIDER_NAME: Name = "demo-saml-provider".parse().unwrap();
+    pub static ref SPECIFIC_SAML_IDENTITY_PROVIDER_URL: String = format!("{}/{}", *SAML_IDENTITY_PROVIDERS_URL, *DEMO_SAML_IDENTITY_PROVIDER_NAME);
+
+    pub static ref SAML_IDENTITY_PROVIDER: params::SamlIdentityProviderCreate =
+        params::SamlIdentityProviderCreate {
+            identity: IdentityMetadataCreateParams {
+                name: DEMO_SAML_IDENTITY_PROVIDER_NAME.clone(),
+                description: "a demo provider".to_string(),
+            },
+
+            idp_metadata_source: params::IdpMetadataSource::Url { url: HTTP_SERVER.url("/descriptor").to_string() },
+
+            idp_entity_id: "entity_id".to_string(),
+            sp_client_id: "client_id".to_string(),
+            acs_url: "http://acs".to_string(),
+            slo_url: "http://slo".to_string(),
+            technical_contact_email: "technical@fake".to_string(),
+
+            signing_keypair: None,
         };
 }
 
@@ -809,9 +865,16 @@ lazy_static! {
             allowed_methods: vec![
                 AllowedMethod::Post(serde_json::to_value(
                     params::InstanceMigrate {
-                        dst_sled_uuid: uuid::Uuid::new_v4(),
+                        dst_sled_id: uuid::Uuid::new_v4(),
                     }
                 ).unwrap()),
+            ],
+        },
+        VerifyEndpoint {
+            url: &*DEMO_INSTANCE_SERIAL_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::GetNonexistent // has required query parameters
             ],
         },
 
@@ -832,6 +895,9 @@ lazy_static! {
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Delete,
+                AllowedMethod::Put(
+                    serde_json::to_value(&*DEMO_INSTANCE_NIC_PUT).unwrap()
+                ),
             ],
         },
 
@@ -925,7 +991,7 @@ lazy_static! {
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_IMAGE_CREATE).unwrap()
+                    serde_json::to_value(&*DEMO_GLOBAL_IMAGE_CREATE).unwrap()
                 ),
             ],
         },
@@ -937,6 +1003,30 @@ lazy_static! {
                 AllowedMethod::Get,
                 AllowedMethod::Delete,
             ],
+        },
+
+        /* Silo identity providers */
+
+        /*
+        VerifyEndpoint {
+            url: &*IDENTITY_PROVIDERS_URL, // in ignore list
+            visibility: Visibility::Public,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
+        */
+        VerifyEndpoint {
+            url: &*SAML_IDENTITY_PROVIDERS_URL,
+            visibility: Visibility::Public,
+            allowed_methods: vec![AllowedMethod::Post(
+                serde_json::to_value(&*SAML_IDENTITY_PROVIDER).unwrap(),
+            )],
+        },
+        VerifyEndpoint {
+            url: &*SPECIFIC_SAML_IDENTITY_PROVIDER_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![AllowedMethod::Get],
         },
     ];
 }

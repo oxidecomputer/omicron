@@ -24,6 +24,7 @@ use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::IdentityMetadataCreateParams;
+use omicron_common::api::external::Instance;
 use omicron_common::api::external::Name;
 use omicron_nexus::TestInterfaces as _;
 use omicron_nexus::{external_api::params, Nexus};
@@ -113,6 +114,30 @@ async fn test_disk_not_found_before_creation(
     );
 }
 
+async fn set_instance_state(
+    client: &ClientTestContext,
+    instance_url: &str,
+    state: &str,
+) -> Instance {
+    let url = format!("{}/{}", instance_url, state);
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &url)
+            .body(None as Option<&serde_json::Value>)
+            .expect_status(Some(StatusCode::ACCEPTED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap()
+}
+
+async fn instance_simulate(nexus: &Arc<Nexus>, id: &Uuid) {
+    let sa = nexus.instance_sled_by_id(id).await.unwrap();
+    sa.instance_finish_transition(id.clone()).await;
+}
+
 #[nexus_test]
 async fn test_disk_create_attach_detach_delete(
     cptestctx: &ControlPlaneTestContext,
@@ -157,6 +182,18 @@ async fn test_disk_create_attach_detach_delete(
     let instance =
         create_instance(&client, ORG_NAME, PROJECT_NAME, INSTANCE_NAME).await;
 
+    // TODO(https://github.com/oxidecomputer/omicron/issues/811):
+    //
+    // Instances must be stopped before disks can be attached - this
+    // is an artificial limitation without hotplug support.
+    let instance1_url = format!(
+        "/organizations/{}/projects/{}/instances/{}",
+        ORG_NAME, PROJECT_NAME, INSTANCE_NAME
+    );
+    let instance_next =
+        set_instance_state(&client, &instance1_url, "stop").await;
+    instance_simulate(nexus, &instance_next.identity.id).await;
+
     // Verify that there are no disks attached to the instance, and specifically
     // that our disk is not attached to this instance.
     let url_instance_disks =
@@ -179,22 +216,12 @@ async fn test_disk_create_attach_detach_delete(
     let instance_id = &instance.identity.id;
     assert_eq!(attached_disk.identity.name, disk.identity.name);
     assert_eq!(attached_disk.identity.id, disk.identity.id);
-    assert_eq!(attached_disk.state, DiskState::Attaching(instance_id.clone()));
-
-    // Finish simulation of the attachment and verify the new state, both on the
-    // attachment and the disk itself.
-    disk_simulate(nexus, &disk.identity.id).await;
-    let attached_disk: Disk = disk_get(&client, &disk_url).await;
-    assert_eq!(attached_disk.identity.name, disk.identity.name);
-    assert_eq!(attached_disk.identity.id, disk.identity.id);
     assert_eq!(attached_disk.state, DiskState::Attached(instance_id.clone()));
 
     // Attach the disk to the same instance.  This should complete immediately
     // with no state change.
     let disk =
         disk_post(client, &url_instance_attach_disk, disk.identity.name).await;
-    assert_eq!(disk.state, DiskState::Attached(instance_id.clone()));
-    let disk = disk_get(&client, &disk_url).await;
     assert_eq!(disk.state, DiskState::Attached(instance_id.clone()));
 
     // Begin detaching the disk.
@@ -204,13 +231,6 @@ async fn test_disk_create_attach_detach_delete(
         disk.identity.name.clone(),
     )
     .await;
-    assert_eq!(disk.state, DiskState::Detaching(instance_id.clone()));
-    let disk: Disk = disk_get(&client, &disk_url).await;
-    assert_eq!(disk.state, DiskState::Detaching(instance_id.clone()));
-
-    // Finish the detachment.
-    disk_simulate(nexus, &disk.identity.id).await;
-    let disk = disk_get(&client, &disk_url).await;
     assert_eq!(disk.state, DiskState::Detached);
 
     // Since detach is idempotent, we can detach it again.
@@ -314,6 +334,17 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     // Create an instance to attach the disk.
     let instance =
         create_instance(&client, ORG_NAME, PROJECT_NAME, INSTANCE_NAME).await;
+    // TODO(https://github.com/oxidecomputer/omicron/issues/811):
+    //
+    // Instances must be stopped before disks can be attached - this
+    // is an artificial limitation without hotplug support.
+    let instance_url = format!(
+        "/organizations/{}/projects/{}/instances/{}",
+        ORG_NAME, PROJECT_NAME, INSTANCE_NAME
+    );
+    let instance_next =
+        set_instance_state(&client, &instance_url, "stop").await;
+    instance_simulate(nexus, &instance_next.identity.id).await;
 
     // Verify that there are no disks attached to the instance, and specifically
     // that our disk is not attached to this instance.
@@ -337,14 +368,6 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     let instance_id = &instance.identity.id;
     assert_eq!(attached_disk.identity.name, disk.identity.name);
     assert_eq!(attached_disk.identity.id, disk.identity.id);
-    assert_eq!(attached_disk.state, DiskState::Attaching(instance_id.clone()));
-
-    // Finish simulation of the attachment and verify the new state, both on the
-    // attachment and the disk itself.
-    disk_simulate(nexus, &disk.identity.id).await;
-    let attached_disk: Disk = disk_get(&client, &disk_url).await;
-    assert_eq!(attached_disk.identity.name, disk.identity.name);
-    assert_eq!(attached_disk.identity.id, disk.identity.id);
     assert_eq!(attached_disk.state, DiskState::Attached(instance_id.clone()));
 
     // Attach the disk to the same instance.  This should complete immediately
@@ -357,6 +380,14 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     // fail and the disk should remain attached to the first instance.
     let instance2 =
         create_instance(&client, ORG_NAME, PROJECT_NAME, "instance2").await;
+    let instance2_url = format!(
+        "/organizations/{}/projects/{}/instances/{}",
+        ORG_NAME, PROJECT_NAME, "instance2"
+    );
+    let instance_next =
+        set_instance_state(&client, &instance2_url, "stop").await;
+    instance_simulate(nexus, &instance_next.identity.id).await;
+
     let url_instance2_attach_disk =
         get_disk_attach_url(instance2.identity.name.as_str());
     let url_instance2_detach_disk =
@@ -389,64 +420,11 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     // Begin detaching the disk.
     let disk =
         disk_post(client, &url_instance_detach_disk, disk.identity.name).await;
-    assert_eq!(disk.state, DiskState::Detaching(instance_id.clone()));
-    let disk = disk_get(&client, &disk_url).await;
-    assert_eq!(disk.state, DiskState::Detaching(instance_id.clone()));
+    assert_eq!(disk.state, DiskState::Detached);
 
-    // It's still illegal to attach this disk elsewhere.
-    let error: HttpErrorResponseBody = NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &url_instance2_attach_disk)
-            .body(Some(&params::DiskIdentifier {
-                name: disk.identity.name.clone(),
-            }))
-            .expect_status(Some(StatusCode::BAD_REQUEST)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap()
-    .parsed_body()
-    .unwrap();
-    assert_eq!(
-        error.message,
-        format!(
-            "cannot attach disk \"{}\": disk is attached to another instance",
-            DISK_NAME
-        )
-    );
-
-    // It's even illegal to attach this disk back to the same instance.
-    let error: HttpErrorResponseBody = NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &url_instance_attach_disk)
-            .body(Some(&params::DiskIdentifier {
-                name: disk.identity.name.clone(),
-            }))
-            .expect_status(Some(StatusCode::BAD_REQUEST)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap()
-    .parsed_body()
-    .unwrap();
-    assert_eq!(
-        error.message,
-        format!(
-            "cannot attach disk \"{}\": disk is attached to another instance",
-            DISK_NAME
-        )
-    );
-
-    // However, there's no problem attempting to detach it again.
+    // There's no problem attempting to detach it again.
     let disk =
         disk_post(client, &url_instance_detach_disk, disk.identity.name).await;
-    assert_eq!(disk.state, DiskState::Detaching(instance_id.clone()));
-    let disk = disk_get(&client, &disk_url).await;
-    assert_eq!(disk.state, DiskState::Detaching(instance_id.clone()));
-
-    // Finish the detachment.
-    disk_simulate(nexus, &disk.identity.id).await;
-    let disk = disk_get(&client, &disk_url).await;
     assert_eq!(disk.state, DiskState::Detached);
 
     // Since delete is idempotent, we can detach it again -- from either one.
@@ -467,10 +445,7 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     let instance2_id = &instance2.identity.id;
     assert_eq!(attached_disk.identity.name, disk.identity.name);
     assert_eq!(attached_disk.identity.id, disk.identity.id);
-    assert_eq!(attached_disk.state, DiskState::Attaching(instance2_id.clone()));
-
-    let disk = disk_get(&client, &disk_url).await;
-    assert_eq!(disk.state, DiskState::Attaching(instance2_id.clone()));
+    assert_eq!(attached_disk.state, DiskState::Attached(instance2_id.clone()));
 
     // At this point, it's not legal to attempt to attach it to a different
     // instance (the first one).
@@ -502,11 +477,9 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
         disk.identity.name.clone(),
     )
     .await;
-    assert_eq!(disk.state, DiskState::Attaching(instance2_id.clone()));
-    let disk = disk_get(&client, &disk_url).await;
-    assert_eq!(disk.state, DiskState::Attaching(instance2_id.clone()));
+    assert_eq!(disk.state, DiskState::Attached(instance2_id.clone()));
 
-    // It's not allowed to delete a disk that's attaching.
+    // It's not allowed to delete a disk that's attached.
     let error = NexusRequest::expect_failure(
         client,
         StatusCode::BAD_REQUEST,
@@ -519,37 +492,15 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     .expect("expected request to fail")
     .parsed_body::<dropshot::HttpErrorResponseBody>()
     .expect("cannot parse");
-    assert_eq!(error.message, "disk cannot be deleted in state \"attaching\"");
+    assert_eq!(error.message, "disk cannot be deleted in state \"attached\"");
 
-    // Now, begin a detach while the disk is still being attached.
+    // Now, begin a detach.
     let disk = disk_post(
         client,
         &url_instance2_detach_disk,
         disk.identity.name.clone(),
     )
     .await;
-    assert_eq!(disk.state, DiskState::Detaching(instance2_id.clone()));
-    let disk: Disk = disk_get(&client, &disk_url).await;
-    assert_eq!(disk.state, DiskState::Detaching(instance2_id.clone()));
-
-    // It's not allowed to delete a disk that's detaching, either.
-    let error = NexusRequest::expect_failure(
-        client,
-        StatusCode::BAD_REQUEST,
-        Method::DELETE,
-        &disk_url,
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("expected request to fail")
-    .parsed_body::<dropshot::HttpErrorResponseBody>()
-    .expect("cannot parse");
-    assert_eq!(error.message, "disk cannot be deleted in state \"detaching\"");
-
-    // Finish detachment.
-    disk_simulate(nexus, &disk.identity.id).await;
-    let disk = disk_get(&client, &disk_url).await;
     assert_eq!(disk.state, DiskState::Detached);
 
     // Now we can delete the disk.
@@ -737,7 +688,8 @@ async fn test_disk_invalid_block_size_rejected(
     .unwrap();
 }
 
-// Tests that a disk is rejected if the total size isn't divided by the block size
+// Tests that a disk is rejected if the total size isn't divided by the
+// block size
 #[nexus_test]
 async fn test_disk_reject_total_size_not_divisible_by_block_size(
     cptestctx: &ControlPlaneTestContext,
@@ -779,6 +731,93 @@ async fn test_disk_reject_total_size_not_divisible_by_block_size(
     .execute()
     .await
     .unwrap();
+}
+
+// Tests that a disk is rejected if the total size is less than MIN_DISK_SIZE
+#[nexus_test]
+async fn test_disk_reject_total_size_less_than_one_gibibyte(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    create_org_and_project(client).await;
+
+    let disk_size = ByteCount::from(params::MIN_DISK_SIZE_BYTES / 2);
+
+    // Attempt to allocate the disk, observe a server error.
+    let disks_url = get_disks_url();
+    let new_disk = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: DISK_NAME.parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
+        size: disk_size,
+    };
+
+    let error = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&new_disk))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<dropshot::HttpErrorResponseBody>()
+    .unwrap();
+    assert_eq!(
+        error.message,
+        format!(
+            "unsupported value for \"size\": total size must be at least {}",
+            ByteCount::from(params::MIN_DISK_SIZE_BYTES)
+        )
+    );
+}
+
+// Tests that a disk is rejected if the total size isn't divisible by
+// MIN_DISK_SIZE_BYTES
+#[nexus_test]
+async fn test_disk_reject_total_size_not_divisible_by_min_disk_size(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    create_org_and_project(client).await;
+
+    let disk_size = ByteCount::from(1024 * 1024 * 1024 + 512);
+
+    // Attempt to allocate the disk, observe a server error.
+    let disks_url = get_disks_url();
+    let new_disk = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: DISK_NAME.parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
+        size: disk_size,
+    };
+
+    let error = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&new_disk))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<dropshot::HttpErrorResponseBody>()
+    .unwrap();
+    assert_eq!(
+        error.message,
+        format!(
+            "unsupported value for \"size\": total size must be a multiple of {}",
+            ByteCount::from(params::MIN_DISK_SIZE_BYTES)
+        )
+    );
 }
 
 async fn disk_get(client: &ClientTestContext, disk_url: &str) -> Disk {
@@ -825,10 +864,4 @@ fn disks_eq(disk1: &Disk, disk2: &Disk) {
     assert_eq!(disk1.block_size.to_bytes(), disk2.block_size.to_bytes());
     assert_eq!(disk1.state, disk2.state);
     assert_eq!(disk1.device_path, disk2.device_path);
-}
-
-/// Simulate completion of an ongoing disk state transition.
-async fn disk_simulate(nexus: &Arc<Nexus>, id: &Uuid) {
-    let sa = nexus.disk_sled_by_id(id).await.unwrap();
-    sa.disk_finish_transition(id.clone()).await;
 }

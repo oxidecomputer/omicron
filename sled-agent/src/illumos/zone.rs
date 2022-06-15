@@ -10,9 +10,10 @@ use slog::Logger;
 use std::net::{IpAddr, Ipv6Addr};
 
 use crate::illumos::addrobj::AddrObject;
-use crate::illumos::dladm::{PhysicalLink, VNIC_PREFIX_CONTROL};
+use crate::illumos::dladm::{EtherstubVnic, VNIC_PREFIX_CONTROL};
 use crate::illumos::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use crate::illumos::{execute, PFEXEC};
+use omicron_common::address::SLED_PREFIX;
 
 const DLADM: &str = "/usr/sbin/dladm";
 const IPADM: &str = "/usr/sbin/ipadm";
@@ -98,13 +99,14 @@ pub struct EnsureAddressError {
 
 /// Errors from [`Zones::ensure_has_global_zone_v6_address`].
 #[derive(thiserror::Error, Debug)]
-#[error("Failed to create address {address} with name {name} in the GZ on {link:?}: {err}")]
+#[error("Failed to create address {address} with name {name} in the GZ on {link:?}: {err}. Note to developers: {extra_note}")]
 pub struct EnsureGzAddressError {
     address: Ipv6Addr,
-    link: PhysicalLink,
+    link: EtherstubVnic,
     name: String,
     #[source]
     err: anyhow::Error,
+    extra_note: String,
 }
 
 /// Describes the type of addresses which may be requested from a zone.
@@ -122,7 +124,7 @@ impl AddressRequest {
     pub fn new_static(ip: IpAddr, prefix: Option<u8>) -> Self {
         let prefix = prefix.unwrap_or_else(|| match ip {
             IpAddr::V4(_) => 24,
-            IpAddr::V6(_) => 64,
+            IpAddr::V6(_) => SLED_PREFIX,
         });
         let addr = IpNetwork::new(ip, prefix).unwrap();
         AddressRequest::Static(addr)
@@ -543,13 +545,13 @@ impl Zones {
     // should remove this function when Sled Agents are provided IPv6 addresses
     // from RSS.
     pub fn ensure_has_global_zone_v6_address(
-        link: PhysicalLink,
+        link: EtherstubVnic,
         address: Ipv6Addr,
         name: &str,
     ) -> Result<(), EnsureGzAddressError> {
         // Call the guts of this function within a closure to make it easier
         // to wrap the error with appropriate context.
-        |link: PhysicalLink, address, name| -> Result<(), anyhow::Error> {
+        |link: EtherstubVnic, address, name| -> Result<(), anyhow::Error> {
             let gz_link_local_addrobj = AddrObject::new(&link.0, "linklocal")
                 .map_err(|err| anyhow!(err))?;
             Self::ensure_has_link_local_v6_address(
@@ -582,6 +584,22 @@ impl Zones {
             link,
             name: name.to_string(),
             err,
+            extra_note:
+                r#"As of https://github.com/oxidecomputer/omicron/pull/1066, we are changing the
+                physical device on which Global Zone addresses are allocated.
+
+                Before this PR, we allocated addresses and VNICs directly on a physical link.
+                After this PR, we are allocating them on etherstubs.
+
+                As a result, however, if your machine previously ran Omicron, it
+                may have addresses on the physical link which we'd like to
+                allocate from the etherstub instead.
+
+                This can be fixed with the following commands:
+
+                $ pfexec ipadm delete-addr <your-link>/bootstrap6
+                $ pfexec ipadm delete-addr <your-link>/sled6
+                $ pfexec ipadm delete-addr <your-link>/internaldns"#.to_string()
         })?;
         Ok(())
     }

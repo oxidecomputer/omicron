@@ -9,7 +9,7 @@ use super::identity::Asset;
 use super::identity::Resource;
 use super::model;
 use crate::{
-    authz::{self},
+    authz,
     context::OpContext,
     db,
     db::error::{public_error_from_diesel_pool, ErrorHandler},
@@ -320,6 +320,11 @@ impl<'a> LookupPath<'a> {
         }
     }
 
+    /// Select a resource of type Rack, identified by its id
+    pub fn rack_id(self, id: Uuid) -> Rack<'a> {
+        Rack { key: RackKey::PrimaryKey(Root { lookup_root: self }, id) }
+    }
+
     /// Select a resource of type Sled, identified by its id
     pub fn sled_id(self, id: Uuid) -> Sled<'a> {
         Sled { key: SledKey::PrimaryKey(Root { lookup_root: self }, id) }
@@ -397,7 +402,7 @@ impl<'a> Root<'a> {
 lookup_resource! {
     name = "Silo",
     ancestors = [],
-    children = [ "Organization" ],
+    children = [ "Organization", "IdentityProvider", "SamlIdentityProvider" ],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -410,6 +415,29 @@ lookup_resource! {
     lookup_by_name = false,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "IdentityProvider",
+    ancestors = [ "Silo" ],
+    children = [],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [
+        { column_name = "silo_id", rust_type = Uuid },
+        { column_name = "id", rust_type = Uuid }
+    ]
+}
+
+lookup_resource! {
+    name = "SamlIdentityProvider",
+    ancestors = [ "Silo" ],
+    children = [],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [
+        { column_name = "id", rust_type = Uuid },
+    ]
 }
 
 lookup_resource! {
@@ -525,6 +553,15 @@ lookup_resource! {
         { column_name = "resource_type", rust_type = String },
         { column_name = "role_name", rust_type = String },
     ]
+}
+
+lookup_resource! {
+    name = "Rack",
+    ancestors = [],
+    children = [],
+    lookup_by_name = false,
+    soft_deletes = false,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
 }
 
 lookup_resource! {

@@ -8,5 +8,5 @@
 #[macro_use]
 mod next_item;
 pub mod network_interface;
-pub mod vni;
+pub mod vpc;
 pub mod vpc_subnet;

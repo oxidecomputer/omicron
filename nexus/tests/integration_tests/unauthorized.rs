@@ -6,6 +6,7 @@
 //! unauthorized users
 
 use super::endpoints::*;
+use crate::integration_tests::silos::SAML_IDP_DESCRIPTOR;
 use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use headers::authorization::Credentials;
@@ -139,6 +140,12 @@ lazy_static! {
                 ),
         );
 
+        server.expect(
+            Expectation::matching(request::method_path("GET", "/descriptor"))
+                .times(1..)
+                .respond_with(status_code(200).body(SAML_IDP_DESCRIPTOR)),
+        );
+
         server
     };
 
@@ -192,7 +199,12 @@ lazy_static! {
         // Create a GlobalImage
         SetupReq {
             url: "/images",
-            body: serde_json::to_value(&*DEMO_IMAGE_CREATE).unwrap(),
+            body: serde_json::to_value(&*DEMO_GLOBAL_IMAGE_CREATE).unwrap(),
+        },
+        // Create a SAML identity provider
+        SetupReq {
+            url: &*SAML_IDENTITY_PROVIDERS_URL,
+            body: serde_json::to_value(&*SAML_IDENTITY_PROVIDER).unwrap(),
         },
     ];
 }

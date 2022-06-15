@@ -5,7 +5,7 @@
 use super::{Generation, SqlU16};
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::ipv6;
-use crate::db::schema::{sled, zpool};
+use crate::db::schema::{service, sled, zpool};
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
 use std::net::Ipv6Addr;
@@ -29,19 +29,11 @@ pub struct Sled {
     pub last_used_address: ipv6::Ipv6Addr,
 }
 
-// TODO-correctness: We need a small offset here, while services and
-// their addresses are still hardcoded in the mock RSS config file at
-// `./smf/sled-agent/config-rss.toml`. This avoids conflicts with those
-// addresses, but should be removed when they are entirely under the
-// control of Nexus or RSS.
-//
-// See https://github.com/oxidecomputer/omicron/issues/732 for tracking issue.
-pub(crate) const STATIC_IPV6_ADDRESS_OFFSET: u16 = 20;
 impl Sled {
     pub fn new(id: Uuid, addr: SocketAddrV6) -> Self {
         let last_used_address = {
             let mut segments = addr.ip().segments();
-            segments[7] += STATIC_IPV6_ADDRESS_OFFSET;
+            segments[7] += omicron_common::address::RSS_RESERVED_ADDRESSES;
             ipv6::Ipv6Addr::from(Ipv6Addr::from(segments))
         };
         Self {
@@ -72,4 +64,11 @@ impl DatastoreCollection<super::Zpool> for Sled {
     type GenerationNumberColumn = sled::dsl::rcgen;
     type CollectionTimeDeletedColumn = sled::dsl::time_deleted;
     type CollectionIdColumn = zpool::dsl::sled_id;
+}
+
+impl DatastoreCollection<super::Service> for Sled {
+    type CollectionId = Uuid;
+    type GenerationNumberColumn = sled::dsl::rcgen;
+    type CollectionTimeDeletedColumn = sled::dsl::time_deleted;
+    type CollectionIdColumn = service::dsl::sled_id;
 }

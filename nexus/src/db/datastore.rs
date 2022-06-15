@@ -28,26 +28,37 @@ use super::Pool;
 use crate::authn;
 use crate::authz::{self, ApiResource};
 use crate::context::OpContext;
+use crate::db::collection_attach::{AttachError, DatastoreAttachTarget};
+use crate::db::collection_detach::{DatastoreDetachTarget, DetachError};
+use crate::db::collection_detach_many::{
+    DatastoreDetachManyTarget, DetachManyError,
+};
 use crate::db::fixed_data::role_assignment::BUILTIN_ROLE_ASSIGNMENTS;
 use crate::db::fixed_data::role_builtin::BUILTIN_ROLES;
 use crate::db::fixed_data::silo::DEFAULT_SILO;
 use crate::db::lookup::LookupPath;
 use crate::db::model::DatabaseString;
-use crate::db::queries::network_interface::InsertNetworkInterfaceQuery;
-use crate::db::queries::network_interface::NetworkInterfaceError;
+use crate::db::model::IncompleteVpc;
+use crate::db::model::NetworkInterfaceUpdate;
+use crate::db::model::Vpc;
+use crate::db::queries::network_interface;
+use crate::db::queries::vpc::InsertVpcQuery;
 use crate::db::queries::vpc_subnet::FilterConflictingVpcSubnetRangesQuery;
 use crate::db::queries::vpc_subnet::SubnetError;
 use crate::db::{
     self,
-    error::{public_error_from_diesel_pool, ErrorHandler, TransactionError},
+    error::{
+        public_error_from_diesel_create, public_error_from_diesel_lookup,
+        public_error_from_diesel_pool, ErrorHandler, TransactionError,
+    },
     model::{
         ConsoleSession, Dataset, DatasetKind, Disk, DiskRuntimeState,
-        Generation, GlobalImage, IncompleteNetworkInterface, Instance,
-        InstanceRuntimeState, Name, NetworkInterface, Organization,
+        Generation, GlobalImage, IdentityProvider, IncompleteNetworkInterface,
+        Instance, InstanceRuntimeState, Name, NetworkInterface, Organization,
         OrganizationUpdate, OximeterInfo, ProducerEndpoint, Project,
-        ProjectUpdate, Region, RoleAssignment, RoleBuiltin, RouterRoute,
-        RouterRouteUpdate, Silo, SiloUser, Sled, SshKey,
-        UpdateAvailableArtifact, UserBuiltin, Volume, Vpc, VpcFirewallRule,
+        ProjectUpdate, Rack, Region, RoleAssignment, RoleBuiltin, RouterRoute,
+        RouterRouteUpdate, Service, Silo, SiloUser, Sled, SshKey,
+        UpdateAvailableArtifact, UserBuiltin, Volume, VpcFirewallRule,
         VpcRouter, VpcRouterUpdate, VpcSubnet, VpcSubnetUpdate, VpcUpdate,
         Zpool,
     },
@@ -134,6 +145,143 @@ impl DataStore {
     ) -> Result<&bb8::Pool<ConnectionManager<DbConnection>>, Error> {
         opctx.authorize(authz::Action::Query, &authz::DATABASE).await?;
         Ok(self.pool.pool())
+    }
+
+    /// Stores a new rack in the database.
+    ///
+    /// This function is a no-op if the rack already exists.
+    pub async fn rack_insert(
+        &self,
+        opctx: &OpContext,
+        rack: &Rack,
+    ) -> Result<Rack, Error> {
+        use db::schema::rack::dsl;
+
+        diesel::insert_into(dsl::rack)
+            .values(rack.clone())
+            .on_conflict(dsl::id)
+            .do_update()
+            // This is a no-op, since we conflicted on the ID.
+            .set(dsl::id.eq(excluded(dsl::id)))
+            .returning(Rack::as_returning())
+            .get_result_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::Conflict(
+                        ResourceType::Rack,
+                        &rack.id().to_string(),
+                    ),
+                )
+            })
+    }
+
+    /// Update a rack to mark that it has been initialized
+    pub async fn rack_set_initialized(
+        &self,
+        opctx: &OpContext,
+        rack_id: Uuid,
+        services: Vec<Service>,
+    ) -> UpdateResult<Rack> {
+        use db::schema::rack::dsl as rack_dsl;
+        use db::schema::service::dsl as service_dsl;
+
+        #[derive(Debug)]
+        enum RackInitError {
+            ServiceInsert { err: SyncInsertError, sled_id: Uuid, svc_id: Uuid },
+            RackUpdate(diesel::result::Error),
+        }
+        type TxnError = TransactionError<RackInitError>;
+
+        // NOTE: This operation could likely be optimized with a CTE, but given
+        // the low-frequency of calls, this optimization has been deferred.
+        self.pool_authorized(opctx)
+            .await?
+            .transaction(move |conn| {
+                // Early exit if the rack has already been initialized.
+                let rack = rack_dsl::rack
+                    .filter(rack_dsl::id.eq(rack_id))
+                    .select(Rack::as_select())
+                    .get_result(conn)
+                    .map_err(|e| {
+                        TxnError::CustomError(RackInitError::RackUpdate(e))
+                    })?;
+                if rack.initialized {
+                    return Ok(rack);
+                }
+
+                // Otherwise, insert services and set rack.initialized = true.
+                for svc in services {
+                    let sled_id = svc.sled_id;
+                    <Sled as DatastoreCollection<Service>>::insert_resource(
+                        sled_id,
+                        diesel::insert_into(service_dsl::service)
+                            .values(svc.clone())
+                            .on_conflict(service_dsl::id)
+                            .do_update()
+                            .set((
+                                service_dsl::time_modified.eq(Utc::now()),
+                                service_dsl::sled_id
+                                    .eq(excluded(service_dsl::sled_id)),
+                                service_dsl::ip.eq(excluded(service_dsl::ip)),
+                                service_dsl::kind
+                                    .eq(excluded(service_dsl::kind)),
+                            )),
+                    )
+                    .insert_and_get_result(conn)
+                    .map_err(|err| {
+                        TxnError::CustomError(RackInitError::ServiceInsert {
+                            err,
+                            sled_id,
+                            svc_id: svc.id(),
+                        })
+                    })?;
+                }
+                diesel::update(rack_dsl::rack)
+                    .filter(rack_dsl::id.eq(rack_id))
+                    .set((
+                        rack_dsl::initialized.eq(true),
+                        rack_dsl::time_modified.eq(Utc::now()),
+                    ))
+                    .returning(Rack::as_returning())
+                    .get_result::<Rack>(conn)
+                    .map_err(|e| {
+                        TxnError::CustomError(RackInitError::RackUpdate(e))
+                    })
+            })
+            .await
+            .map_err(|e| match e {
+                TxnError::CustomError(RackInitError::ServiceInsert {
+                    err,
+                    sled_id,
+                    svc_id,
+                }) => match err {
+                    SyncInsertError::CollectionNotFound => {
+                        Error::ObjectNotFound {
+                            type_name: ResourceType::Sled,
+                            lookup_type: LookupType::ById(sled_id),
+                        }
+                    }
+                    SyncInsertError::DatabaseError(e) => {
+                        public_error_from_diesel_create(
+                            e,
+                            ResourceType::Service,
+                            &svc_id.to_string(),
+                        )
+                    }
+                },
+                TxnError::CustomError(RackInitError::RackUpdate(err)) => {
+                    public_error_from_diesel_lookup(
+                        err,
+                        ResourceType::Rack,
+                        &LookupType::ById(rack_id),
+                    )
+                }
+                TxnError::Pool(e) => {
+                    Error::internal_error(&format!("Transaction error: {}", e))
+                }
+            })
     }
 
     /// Stores a new sled in the database.
@@ -247,6 +395,47 @@ impl DataStore {
                     ErrorHandler::Conflict(
                         ResourceType::Dataset,
                         &dataset.id().to_string(),
+                    ),
+                )
+            }
+        })
+    }
+
+    /// Stores a new service in the database.
+    pub async fn service_upsert(
+        &self,
+        opctx: &OpContext,
+        service: Service,
+    ) -> CreateResult<Service> {
+        use db::schema::service::dsl;
+
+        let sled_id = service.sled_id;
+        Sled::insert_resource(
+            sled_id,
+            diesel::insert_into(dsl::service)
+                .values(service.clone())
+                .on_conflict(dsl::id)
+                .do_update()
+                .set((
+                    dsl::time_modified.eq(Utc::now()),
+                    dsl::sled_id.eq(excluded(dsl::sled_id)),
+                    dsl::ip.eq(excluded(dsl::ip)),
+                    dsl::kind.eq(excluded(dsl::kind)),
+                )),
+        )
+        .insert_and_get_result_async(self.pool_authorized(opctx).await?)
+        .await
+        .map_err(|e| match e {
+            AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
+                type_name: ResourceType::Sled,
+                lookup_type: LookupType::ById(sled_id),
+            },
+            AsyncInsertError::DatabaseError(e) => {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::Conflict(
+                        ResourceType::Service,
+                        &service.id().to_string(),
                     ),
                 )
             }
@@ -963,7 +1152,7 @@ impl DataStore {
             .filter(
                 dsl::migration_id
                     .is_null()
-                    .or(dsl::target_propolis_id.eq(new_runtime.propolis_uuid)),
+                    .or(dsl::target_propolis_id.eq(new_runtime.propolis_id)),
             )
             .set(new_runtime.clone())
             .check_if_exists::<Instance>(*instance_id)
@@ -996,47 +1185,65 @@ impl DataStore {
         // This is subject to change, but for now we're going to say that an
         // instance must be "stopped" or "failed" in order to delete it.  The
         // delete operation sets "time_deleted" (just like with other objects)
-        // and also sets the state to "destroyed".  By virtue of being
-        // "stopped", we assume there are no dependencies on this instance
-        // (e.g., disk attachments).  If that changes, we'll want to check for
-        // such dependencies here.
+        // and also sets the state to "destroyed".
         use api::external::InstanceState as ApiInstanceState;
         use db::model::InstanceState as DbInstanceState;
-        use db::schema::instance::dsl;
+        use db::schema::{disk, instance};
 
-        let now = Utc::now();
-
-        let destroyed = DbInstanceState::new(ApiInstanceState::Destroyed);
         let stopped = DbInstanceState::new(ApiInstanceState::Stopped);
         let failed = DbInstanceState::new(ApiInstanceState::Failed);
+        let destroyed = DbInstanceState::new(ApiInstanceState::Destroyed);
+        let ok_to_delete_instance_states = vec![stopped, failed];
 
-        let instance_id = authz_instance.id();
-        let result = diesel::update(dsl::instance)
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(instance_id))
-            .filter(dsl::state.eq_any(vec![stopped, failed]))
-            .set((dsl::state.eq(destroyed), dsl::time_deleted.eq(now)))
-            .check_if_exists::<Instance>(instance_id)
-            .execute_and_check(self.pool())
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByResource(authz_instance),
-                )
-            })?;
+        let detached_label = api::external::DiskState::Detached.label();
+        let ok_to_detach_disk_states =
+            vec![api::external::DiskState::Attached(authz_instance.id())];
+        let ok_to_detach_disk_state_labels: Vec<_> =
+            ok_to_detach_disk_states.iter().map(|s| s.label()).collect();
 
-        match result.status {
-            UpdateStatus::Updated => Ok(()),
-            UpdateStatus::NotUpdatedButExists => {
-                return Err(Error::InvalidRequest {
-                    message: format!(
+        let _instance = Instance::detach_resources(
+            authz_instance.id(),
+            instance::table.into_boxed().filter(
+                instance::dsl::state.eq_any(ok_to_delete_instance_states),
+            ),
+            disk::table.into_boxed().filter(
+                disk::dsl::disk_state.eq_any(ok_to_detach_disk_state_labels),
+            ),
+            diesel::update(instance::dsl::instance).set((
+                instance::dsl::state.eq(destroyed),
+                instance::dsl::time_deleted.eq(Utc::now()),
+            )),
+            diesel::update(disk::dsl::disk).set((
+                disk::dsl::disk_state.eq(detached_label),
+                disk::dsl::attach_instance_id.eq(Option::<Uuid>::None),
+            )),
+        )
+        .detach_and_get_result_async(self.pool_authorized(opctx).await?)
+        .await
+        .map_err(|e| match e {
+            DetachManyError::CollectionNotFound => Error::not_found_by_id(
+                ResourceType::Instance,
+                &authz_instance.id(),
+            ),
+            DetachManyError::NoUpdate { collection } => {
+                let instance_state = collection.runtime_state.state.state();
+                match instance_state {
+                    api::external::InstanceState::Stopped
+                    | api::external::InstanceState::Failed => {
+                        Error::internal_error("cannot delete instance")
+                    }
+                    _ => Error::invalid_request(&format!(
                         "instance cannot be deleted in state \"{}\"",
-                        result.found.runtime_state.state.state()
-                    ),
-                });
+                        instance_state,
+                    )),
+                }
             }
-        }
+            DetachManyError::DatabaseError(e) => {
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            }
+        })?;
+
+        Ok(())
     }
 
     // Disks
@@ -1110,6 +1317,270 @@ impl DataStore {
             .load_async::<Disk>(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    /// Attaches a disk to an instance, if both objects:
+    /// - Exist
+    /// - Are in valid states
+    /// - Are under the maximum "attach count" threshold
+    pub async fn instance_attach_disk(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+        authz_disk: &authz::Disk,
+        max_disks: u32,
+    ) -> Result<(Instance, Disk), Error> {
+        use db::schema::{disk, instance};
+
+        opctx.authorize(authz::Action::Modify, authz_instance).await?;
+        opctx.authorize(authz::Action::Modify, authz_disk).await?;
+
+        let ok_to_attach_disk_states = vec![
+            api::external::DiskState::Creating,
+            api::external::DiskState::Detached,
+        ];
+        let ok_to_attach_disk_state_labels: Vec<_> =
+            ok_to_attach_disk_states.iter().map(|s| s.label()).collect();
+
+        // TODO(https://github.com/oxidecomputer/omicron/issues/811):
+        // This list of instance attach states is more restrictive than it
+        // plausibly could be.
+        //
+        // We currently only permit attaching disks to stopped instances.
+        let ok_to_attach_instance_states = vec![
+            db::model::InstanceState(api::external::InstanceState::Creating),
+            db::model::InstanceState(api::external::InstanceState::Stopped),
+        ];
+
+        let attached_label =
+            api::external::DiskState::Attached(authz_instance.id()).label();
+
+        let (instance, disk) = Instance::attach_resource(
+            authz_instance.id(),
+            authz_disk.id(),
+            instance::table
+                .into_boxed()
+                .filter(instance::dsl::state.eq_any(ok_to_attach_instance_states)),
+            disk::table
+                .into_boxed()
+                .filter(disk::dsl::disk_state.eq_any(ok_to_attach_disk_state_labels)),
+            max_disks,
+            diesel::update(disk::dsl::disk)
+                .set((
+                    disk::dsl::disk_state.eq(attached_label),
+                    disk::dsl::attach_instance_id.eq(authz_instance.id())
+                ))
+        )
+        .attach_and_get_result_async(self.pool_authorized(opctx).await?)
+        .await
+        .or_else(|e| {
+            match e {
+                AttachError::CollectionNotFound => {
+                    Err(Error::not_found_by_id(
+                        ResourceType::Instance,
+                        &authz_instance.id(),
+                    ))
+                },
+                AttachError::ResourceNotFound => {
+                    Err(Error::not_found_by_id(
+                        ResourceType::Disk,
+                        &authz_disk.id(),
+                    ))
+                },
+                AttachError::NoUpdate { attached_count, resource, collection } => {
+                    let disk_state = resource.state().into();
+                    match disk_state {
+                        // Idempotent errors: We did not perform an update,
+                        // because we're already in the process of attaching.
+                        api::external::DiskState::Attached(id) if id == authz_instance.id() => {
+                            return Ok((collection, resource));
+                        }
+                        api::external::DiskState::Attaching(id) if id == authz_instance.id() => {
+                            return Ok((collection, resource));
+                        }
+                        // Ok-to-attach disk states: Inspect the state to infer
+                        // why we did not attach.
+                        api::external::DiskState::Creating |
+                        api::external::DiskState::Detached => {
+                            match collection.runtime_state.state.state() {
+                                // Ok-to-be-attached instance states:
+                                api::external::InstanceState::Creating |
+                                api::external::InstanceState::Stopped => {
+                                    // The disk is ready to be attached, and the
+                                    // instance is ready to be attached. Perhaps
+                                    // we are at attachment capacity?
+                                    if attached_count == i64::from(max_disks) {
+                                        return Err(Error::invalid_request(&format!(
+                                            "cannot attach more than {} disks to instance",
+                                            max_disks
+                                        )));
+                                    }
+
+                                    // We can't attach, but the error hasn't
+                                    // helped us infer why.
+                                    return Err(Error::internal_error(
+                                        "cannot attach disk"
+                                    ));
+                                }
+                                // Not okay-to-be-attached instance states:
+                                _ => {
+                                    Err(Error::invalid_request(&format!(
+                                        "cannot attach disk to instance in {} state",
+                                        collection.runtime_state.state.state(),
+                                    )))
+                                }
+                            }
+                        },
+                        // Not-okay-to-attach disk states: The disk is attached elsewhere.
+                        api::external::DiskState::Attached(_) |
+                        api::external::DiskState::Attaching(_) |
+                        api::external::DiskState::Detaching(_) => {
+                            Err(Error::invalid_request(&format!(
+                                "cannot attach disk \"{}\": disk is attached to another instance",
+                                resource.name().as_str(),
+                            )))
+                        }
+                        _ => {
+                            Err(Error::invalid_request(&format!(
+                                "cannot attach disk \"{}\": invalid state {}",
+                                resource.name().as_str(),
+                                disk_state,
+                            )))
+                        }
+                    }
+                },
+                AttachError::DatabaseError(e) => {
+                    Err(public_error_from_diesel_pool(e, ErrorHandler::Server))
+                },
+            }
+        })?;
+
+        Ok((instance, disk))
+    }
+
+    pub async fn instance_detach_disk(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+        authz_disk: &authz::Disk,
+    ) -> Result<Disk, Error> {
+        use db::schema::{disk, instance};
+
+        opctx.authorize(authz::Action::Modify, authz_instance).await?;
+        opctx.authorize(authz::Action::Modify, authz_disk).await?;
+
+        let ok_to_detach_disk_states =
+            vec![api::external::DiskState::Attached(authz_instance.id())];
+        let ok_to_detach_disk_state_labels: Vec<_> =
+            ok_to_detach_disk_states.iter().map(|s| s.label()).collect();
+
+        // TODO(https://github.com/oxidecomputer/omicron/issues/811):
+        // This list of instance detach states is more restrictive than it
+        // plausibly could be.
+        //
+        // We currently only permit detaching disks from stopped instances.
+        let ok_to_detach_instance_states = vec![
+            db::model::InstanceState(api::external::InstanceState::Creating),
+            db::model::InstanceState(api::external::InstanceState::Stopped),
+        ];
+
+        let detached_label = api::external::DiskState::Detached.label();
+
+        let disk = Instance::detach_resource(
+            authz_instance.id(),
+            authz_disk.id(),
+            instance::table
+                .into_boxed()
+                .filter(instance::dsl::state.eq_any(ok_to_detach_instance_states)),
+            disk::table
+                .into_boxed()
+                .filter(disk::dsl::disk_state.eq_any(ok_to_detach_disk_state_labels)),
+            diesel::update(disk::dsl::disk)
+                .set((
+                    disk::dsl::disk_state.eq(detached_label),
+                    disk::dsl::attach_instance_id.eq(Option::<Uuid>::None)
+                ))
+        )
+        .detach_and_get_result_async(self.pool_authorized(opctx).await?)
+        .await
+        .or_else(|e| {
+            match e {
+                DetachError::CollectionNotFound => {
+                    Err(Error::not_found_by_id(
+                        ResourceType::Instance,
+                        &authz_instance.id(),
+                    ))
+                },
+                DetachError::ResourceNotFound => {
+                    Err(Error::not_found_by_id(
+                        ResourceType::Disk,
+                        &authz_disk.id(),
+                    ))
+                },
+                DetachError::NoUpdate { resource, collection } => {
+                    let disk_state = resource.state().into();
+                    match disk_state {
+                        // Idempotent errors: We did not perform an update,
+                        // because we're already in the process of detaching.
+                        api::external::DiskState::Detached => {
+                            return Ok(resource);
+                        }
+                        api::external::DiskState::Detaching(id) if id == authz_instance.id() => {
+                            return Ok(resource);
+                        }
+                        // Ok-to-detach disk states: Inspect the state to infer
+                        // why we did not detach.
+                        api::external::DiskState::Attached(id) if id == authz_instance.id() => {
+                            match collection.runtime_state.state.state() {
+                                // Ok-to-be-detached instance states:
+                                api::external::InstanceState::Creating |
+                                api::external::InstanceState::Stopped => {
+                                    // We can't detach, but the error hasn't
+                                    // helped us infer why.
+                                    return Err(Error::internal_error(
+                                        "cannot detach disk"
+                                    ));
+                                }
+                                // Not okay-to-be-detached instance states:
+                                _ => {
+                                    Err(Error::invalid_request(&format!(
+                                        "cannot detach disk from instance in {} state",
+                                        collection.runtime_state.state.state(),
+                                    )))
+                                }
+                            }
+                        },
+                        api::external::DiskState::Attaching(id) if id == authz_instance.id() => {
+                            Err(Error::invalid_request(&format!(
+                                "cannot detach disk \"{}\": disk is currently being attached",
+                                resource.name().as_str(),
+                            )))
+                        },
+                        // Not-okay-to-detach disk states: The disk is attached elsewhere.
+                        api::external::DiskState::Attached(_) |
+                        api::external::DiskState::Attaching(_) |
+                        api::external::DiskState::Detaching(_) => {
+                            Err(Error::invalid_request(&format!(
+                                "cannot detach disk \"{}\": disk is attached to another instance",
+                                resource.name().as_str(),
+                            )))
+                        }
+                        _ => {
+                            Err(Error::invalid_request(&format!(
+                                "cannot detach disk \"{}\": invalid state {}",
+                                resource.name().as_str(),
+                                disk_state,
+                            )))
+                        }
+                    }
+                },
+                DetachError::DatabaseError(e) => {
+                    Err(public_error_from_diesel_pool(e, ErrorHandler::Server))
+                },
+            }
+        })?;
+
+        Ok(disk)
     }
 
     pub async fn disk_update_runtime(
@@ -1285,15 +1756,15 @@ impl DataStore {
         authz_subnet: &authz::VpcSubnet,
         authz_instance: &authz::Instance,
         interface: IncompleteNetworkInterface,
-    ) -> Result<NetworkInterface, NetworkInterfaceError> {
+    ) -> Result<NetworkInterface, network_interface::InsertError> {
         opctx
             .authorize(authz::Action::CreateChild, authz_instance)
             .await
-            .map_err(NetworkInterfaceError::External)?;
+            .map_err(network_interface::InsertError::External)?;
         opctx
             .authorize(authz::Action::CreateChild, authz_subnet)
             .await
-            .map_err(NetworkInterfaceError::External)?;
+            .map_err(network_interface::InsertError::External)?;
         self.instance_create_network_interface_raw(&opctx, interface).await
     }
 
@@ -1301,19 +1772,21 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         interface: IncompleteNetworkInterface,
-    ) -> Result<NetworkInterface, NetworkInterfaceError> {
+    ) -> Result<NetworkInterface, network_interface::InsertError> {
         use db::schema::network_interface::dsl;
-        let query = InsertNetworkInterfaceQuery::new(interface.clone());
+        let query = network_interface::InsertQuery::new(interface.clone());
         diesel::insert_into(dsl::network_interface)
             .values(query)
             .returning(NetworkInterface::as_returning())
             .get_result_async(
                 self.pool_authorized(opctx)
                     .await
-                    .map_err(NetworkInterfaceError::External)?,
+                    .map_err(network_interface::InsertError::External)?,
             )
             .await
-            .map_err(|e| NetworkInterfaceError::from_pool(e, &interface))
+            .map_err(|e| {
+                network_interface::InsertError::from_pool(e, &interface)
+            })
     }
 
     /// Delete all network interfaces attached to the given instance.
@@ -1344,27 +1817,33 @@ impl DataStore {
     }
 
     /// Delete a `NetworkInterface` attached to a provided instance.
+    ///
+    /// Note that the primary interface for an instance cannot be deleted if
+    /// there are any secondary interfaces.
     pub async fn instance_delete_network_interface(
         &self,
         opctx: &OpContext,
+        authz_instance: &authz::Instance,
         authz_interface: &authz::NetworkInterface,
-    ) -> DeleteResult {
-        opctx.authorize(authz::Action::Delete, authz_interface).await?;
-
-        use db::schema::network_interface::dsl;
-        let now = Utc::now();
-        let interface_id = authz_interface.id();
-        diesel::update(dsl::network_interface)
-            .filter(dsl::id.eq(interface_id))
-            .filter(dsl::time_deleted.is_null())
-            .set((dsl::time_deleted.eq(now),))
-            .execute_async(self.pool_authorized(opctx).await?)
+    ) -> Result<(), network_interface::DeleteError> {
+        opctx
+            .authorize(authz::Action::Delete, authz_interface)
+            .await
+            .map_err(network_interface::DeleteError::External)?;
+        let query = network_interface::DeleteQuery::new(
+            authz_instance.id(),
+            authz_interface.id(),
+        );
+        query
+            .clone()
+            .execute_async(
+                self.pool_authorized(opctx)
+                    .await
+                    .map_err(network_interface::DeleteError::External)?,
+            )
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByResource(authz_interface),
-                )
+                network_interface::DeleteError::from_pool(e, &query)
             })?;
         Ok(())
     }
@@ -1465,6 +1944,128 @@ impl DataStore {
             .load_async::<NetworkInterface>(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    /// Update a network interface associated with a given instance.
+    pub async fn instance_update_network_interface(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+        authz_interface: &authz::NetworkInterface,
+        updates: NetworkInterfaceUpdate,
+    ) -> UpdateResult<NetworkInterface> {
+        use crate::db::schema::network_interface::dsl;
+
+        // This database operation is surprisingly subtle. It's possible to
+        // express this in a single query, with multiple common-table
+        // expressions for the updated rows. For example, if we're setting a new
+        // primary interface, we need to set the `is_primary` column to false
+        // for the current primary, and then set it to true, along with any
+        // other updates, for the new primary.
+        //
+        // That's feasible, but there's a CRDB bug that affects some queries
+        // with multiple update statements. It's possible that this query isn't
+        // in that bucket, but we'll still avoid it for now. Instead, we'll bite
+        // the bullet and use a transaction.
+        //
+        // See https://github.com/oxidecomputer/omicron/issues/1204 for the
+        // issue tracking the work to move this into a CTE.
+
+        // Build up some of the queries first, outside the transaction.
+        //
+        // This selects the existing primary interface.
+        let instance_id = authz_instance.id();
+        let interface_id = authz_interface.id();
+        let find_primary_query = dsl::network_interface
+            .filter(dsl::instance_id.eq(instance_id))
+            .filter(dsl::is_primary.eq(true))
+            .filter(dsl::time_deleted.is_null())
+            .select(NetworkInterface::as_select());
+
+        // This returns the state of the associated instance.
+        let instance_query = db::schema::instance::dsl::instance
+            .filter(db::schema::instance::dsl::id.eq(instance_id))
+            .filter(db::schema::instance::dsl::time_deleted.is_null())
+            .select(Instance::as_select());
+        let stopped =
+            db::model::InstanceState::new(external::InstanceState::Stopped);
+
+        // This is the actual query to update the target interface.
+        let make_primary = matches!(updates.make_primary, Some(true));
+        let update_target_query = diesel::update(dsl::network_interface)
+            .filter(dsl::id.eq(interface_id))
+            .filter(dsl::time_deleted.is_null())
+            .set(updates)
+            .returning(NetworkInterface::as_returning());
+
+        // Errors returned from the below transactions.
+        #[derive(Debug)]
+        enum NetworkInterfaceUpdateError {
+            InstanceNotStopped,
+            FailedToUnsetPrimary(diesel::result::Error),
+        }
+        type TxnError = TransactionError<NetworkInterfaceUpdateError>;
+
+        let pool = self.pool_authorized(opctx).await?;
+        if make_primary {
+            pool.transaction(move |conn| {
+                let instance_state =
+                    instance_query.get_result(conn)?.runtime_state.state;
+                if instance_state != stopped {
+                    return Err(TxnError::CustomError(
+                        NetworkInterfaceUpdateError::InstanceNotStopped,
+                    ));
+                }
+
+                // First, get the primary interface
+                let primary_interface = find_primary_query.get_result(conn)?;
+
+                // If the target and primary are different, we need to toggle
+                // the primary into a secondary.
+                if primary_interface.identity.id != interface_id {
+                    if let Err(e) = diesel::update(dsl::network_interface)
+                        .filter(dsl::id.eq(primary_interface.identity.id))
+                        .filter(dsl::time_deleted.is_null())
+                        .set(dsl::is_primary.eq(false))
+                        .execute(conn)
+                    {
+                        return Err(TxnError::CustomError(
+                            NetworkInterfaceUpdateError::FailedToUnsetPrimary(
+                                e,
+                            ),
+                        ));
+                    }
+                }
+
+                // In any case, update the actual target
+                Ok(update_target_query.get_result(conn)?)
+            })
+        } else {
+            // In this case, we can just directly apply the updates. By
+            // construction, `updates.make_primary` is `None`, so nothing will
+            // be done there. The other columns always need to be updated, and
+            // we're only hitting a single row. Note that we still need to
+            // verify the instance is stopped.
+            pool.transaction(move |conn| {
+                let instance_state =
+                    instance_query.get_result(conn)?.runtime_state.state;
+                if instance_state != stopped {
+                    return Err(TxnError::CustomError(
+                        NetworkInterfaceUpdateError::InstanceNotStopped,
+                    ));
+                }
+                Ok(update_target_query.get_result(conn)?)
+            })
+        }
+        .await
+        .map_err(|e| match e {
+            TxnError::CustomError(
+                NetworkInterfaceUpdateError::InstanceNotStopped,
+            ) => Error::invalid_request(
+                "Instance must be stopped to update its network interfaces",
+            ),
+            _ => Error::internal_error(&format!("Transaction error: {:?}", e)),
+        })
     }
 
     // Create a record for a new Oximeter instance
@@ -1732,7 +2333,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_project: &authz::Project,
-        vpc: Vpc,
+        vpc: IncompleteVpc,
     ) -> Result<(authz::Vpc, Vpc), Error> {
         use db::schema::vpc::dsl;
 
@@ -1740,9 +2341,13 @@ impl DataStore {
         opctx.authorize(authz::Action::CreateChild, authz_project).await?;
 
         // TODO-correctness Shouldn't this use "insert_resource"?
-        let name = vpc.name().clone();
+        //
+        // Note that to do so requires adding an `rcgen` column to the project
+        // table.
+        let name = vpc.identity.name.clone();
+        let query = InsertVpcQuery::new(vpc);
         let vpc = diesel::insert_into(dsl::vpc)
-            .values(vpc)
+            .values(query)
             .returning(Vpc::as_returning())
             .get_result_async(self.pool())
             .await
@@ -2817,7 +3422,115 @@ impl DataStore {
 
         info!(opctx.log, "deleted {} silo users for silo {}", updated_rows, id);
 
+        // delete all silo identity providers
+        use db::schema::identity_provider::dsl as idp_dsl;
+
+        let updated_rows = diesel::update(idp_dsl::identity_provider)
+            .filter(idp_dsl::silo_id.eq(id))
+            .filter(idp_dsl::time_deleted.is_null())
+            .set(idp_dsl::time_deleted.eq(Utc::now()))
+            .execute_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_silo),
+                )
+            })?;
+
+        info!(opctx.log, "deleted {} silo IdPs for silo {}", updated_rows, id);
+
+        use db::schema::saml_identity_provider::dsl as saml_idp_dsl;
+
+        let updated_rows = diesel::update(saml_idp_dsl::saml_identity_provider)
+            .filter(saml_idp_dsl::silo_id.eq(id))
+            .filter(saml_idp_dsl::time_deleted.is_null())
+            .set(saml_idp_dsl::time_deleted.eq(Utc::now()))
+            .execute_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_silo),
+                )
+            })?;
+
+        info!(
+            opctx.log,
+            "deleted {} silo saml IdPs for silo {}", updated_rows, id
+        );
+
         Ok(())
+    }
+
+    pub async fn identity_provider_list(
+        &self,
+        opctx: &OpContext,
+        authz_silo: &authz::Silo,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<IdentityProvider> {
+        opctx
+            .authorize(authz::Action::ListIdentityProviders, authz_silo)
+            .await?;
+
+        use db::schema::identity_provider::dsl;
+        paginated(dsl::identity_provider, dsl::name, pagparams)
+            .filter(dsl::silo_id.eq(authz_silo.id()))
+            .filter(dsl::time_deleted.is_null())
+            .select(IdentityProvider::as_select())
+            .load_async::<IdentityProvider>(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    pub async fn saml_identity_provider_create(
+        &self,
+        opctx: &OpContext,
+        authz_silo: &authz::Silo,
+        provider: db::model::SamlIdentityProvider,
+    ) -> CreateResult<db::model::SamlIdentityProvider> {
+        opctx.authorize(authz::Action::CreateChild, authz_silo).await?;
+
+        let name = provider.identity().name.to_string();
+        self.pool_authorized(opctx)
+            .await?
+            .transaction(move |conn| {
+                // insert silo identity provider record with type Saml
+                use db::schema::identity_provider::dsl as idp_dsl;
+                diesel::insert_into(idp_dsl::identity_provider)
+                    .values(db::model::IdentityProvider {
+                        identity: db::model::IdentityProviderIdentity {
+                            id: provider.identity.id,
+                            name: provider.identity.name.clone(),
+                            description: provider.identity.description.clone(),
+                            time_created: provider.identity.time_created,
+                            time_modified: provider.identity.time_modified,
+                            time_deleted: provider.identity.time_deleted,
+                        },
+                        silo_id: provider.silo_id,
+                        provider_type: db::model::IdentityProviderType::Saml,
+                    })
+                    .execute(conn)?;
+
+                // insert silo saml identity provider record
+                use db::schema::saml_identity_provider::dsl;
+                let result = diesel::insert_into(dsl::saml_identity_provider)
+                    .values(provider)
+                    .returning(db::model::SamlIdentityProvider::as_returning())
+                    .get_result(conn)?;
+
+                Ok(result)
+            })
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::Conflict(
+                        ResourceType::SamlIdentityProvider,
+                        &name,
+                    ),
+                )
+            })
     }
 
     /// Return the next available IPv6 address for an Oxide service running on
@@ -3153,7 +3866,7 @@ mod test {
     use crate::db::fixed_data::silo::SILO_ID;
     use crate::db::identity::Resource;
     use crate::db::lookup::LookupPath;
-    use crate::db::model::{ConsoleSession, DatasetKind, Project};
+    use crate::db::model::{ConsoleSession, DatasetKind, Project, ServiceKind};
     use crate::external_api::params;
     use chrono::{Duration, Utc};
     use nexus_test_utils::db::test_setup_database;
@@ -3667,7 +4380,7 @@ mod test {
     // Test sled-specific IPv6 address allocation
     #[tokio::test]
     async fn test_sled_ipv6_address_allocation() {
-        use crate::db::model::STATIC_IPV6_ADDRESS_OFFSET;
+        use omicron_common::address::RSS_RESERVED_ADDRESSES as STATIC_IPV6_ADDRESS_OFFSET;
         use std::net::Ipv6Addr;
 
         let logctx = dev::test_setup_log("test_sled_ipv6_address_allocation");
@@ -3796,6 +4509,66 @@ mod test {
         datastore.ssh_key_delete(&opctx, &authz_ssh_key).await.unwrap();
 
         // Clean up.
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_service_upsert() {
+        let logctx = dev::test_setup_log("test_service_upsert");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        // Create a sled on which the service should exist.
+        let sled_id = create_test_sled(&datastore).await;
+
+        // Create a new service to exist on this sled.
+        let service_id = Uuid::new_v4();
+        let addr = Ipv6Addr::LOCALHOST;
+        let kind = ServiceKind::Nexus;
+
+        let service = Service::new(service_id, sled_id, addr, kind);
+        let result =
+            datastore.service_upsert(&opctx, service.clone()).await.unwrap();
+        assert_eq!(service.id(), result.id());
+        assert_eq!(service.ip, result.ip);
+        assert_eq!(service.kind, result.kind);
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_rack_initialize_is_idempotent() {
+        let logctx = dev::test_setup_log("test_rack_initialize_is_idempotent");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        // Create a Rack, insert it into the DB.
+        let rack = Rack::new(Uuid::new_v4());
+        let result = datastore.rack_insert(&opctx, &rack).await.unwrap();
+        assert_eq!(result.id(), rack.id());
+        assert_eq!(result.initialized, false);
+
+        // Re-insert the Rack (check for idempotency).
+        let result = datastore.rack_insert(&opctx, &rack).await.unwrap();
+        assert_eq!(result.id(), rack.id());
+        assert_eq!(result.initialized, false);
+
+        // Initialize the Rack.
+        let result = datastore
+            .rack_set_initialized(&opctx, rack.id(), vec![])
+            .await
+            .unwrap();
+        assert!(result.initialized);
+
+        // Re-initialize the rack (check for idempotency)
+        let result = datastore
+            .rack_set_initialized(&opctx, rack.id(), vec![])
+            .await
+            .unwrap();
+        assert!(result.initialized);
+
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

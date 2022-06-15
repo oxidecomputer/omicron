@@ -5,10 +5,11 @@
 //! Rack Setup Service implementation
 
 use super::config::{SetupServiceConfig as Config, SledRequest};
-use crate::bootstrap::{
-    client as bootstrap_agent_client, config::BOOTSTRAP_AGENT_PORT,
-    discovery::PeerMonitorObserver, params::SledAgentRequest,
-};
+use crate::bootstrap::config::BOOTSTRAP_AGENT_PORT;
+use crate::bootstrap::discovery::PeerMonitorObserver;
+use crate::bootstrap::params::SledAgentRequest;
+use crate::bootstrap::rss_handle::BootstrapAgentHandle;
+use crate::bootstrap::trust_quorum::{RackSecret, ShareDistribution};
 use crate::params::ServiceRequest;
 use omicron_common::address::{get_sled_address, ReservedRackSubnet};
 use omicron_common::backoff::{
@@ -16,6 +17,7 @@ use omicron_common::backoff::{
 };
 use serde::{Deserialize, Serialize};
 use slog::Logger;
+use sprockets_host::Ed25519Certificate;
 use std::collections::{HashMap, HashSet};
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::path::PathBuf;
@@ -32,11 +34,8 @@ pub enum SetupServiceError {
         err: std::io::Error,
     },
 
-    #[error("Error making HTTP request to Bootstrap Agent: {0}")]
-    BootstrapApi(
-        #[from]
-        bootstrap_agent_client::Error<bootstrap_agent_client::types::Error>,
-    ),
+    #[error("Error initializing sled via sled-agent: {0}")]
+    SledInitialization(String),
 
     #[error("Error making HTTP request to Sled Agent: {0}")]
     SledApi(#[from] sled_agent_client::Error<sled_agent_client::types::Error>),
@@ -49,6 +48,9 @@ pub enum SetupServiceError {
 
     #[error("Failed to construct an HTTP client: {0}")]
     HttpClient(reqwest::Error),
+
+    #[error("Failed to split rack secret: {0:?}")]
+    SplitRackSecret(vsss_rs::Error),
 }
 
 // The workload / information allocated to a single sled.
@@ -71,14 +73,30 @@ impl Service {
     /// - `config`: The config file, which is used to setup the rack.
     /// - `peer_monitor`: The mechanism by which the setup service discovers
     ///   bootstrap agents on nearby sleds.
-    pub fn new(
+    /// - `local_bootstrap_agent`: Communication channel by which we can send
+    ///   commands to our local bootstrap-agent (e.g., to initialize sled
+    ///   agents).
+    pub(crate) fn new(
         log: Logger,
         config: Config,
         peer_monitor: PeerMonitorObserver,
+        local_bootstrap_agent: BootstrapAgentHandle,
+        // TODO-cleanup: We should be collecting the device ID certs of all
+        // trust quorum members over the management network. Currently we don't
+        // have a management network, so we hard-code the list of members and
+        // accept it as a parameter instead.
+        member_device_id_certs: Vec<Ed25519Certificate>,
     ) -> Self {
         let handle = tokio::task::spawn(async move {
             let svc = ServiceInner::new(log.clone(), peer_monitor);
-            if let Err(e) = svc.inject_rack_setup_requests(&config).await {
+            if let Err(e) = svc
+                .inject_rack_setup_requests(
+                    &config,
+                    local_bootstrap_agent,
+                    &member_device_id_certs,
+                )
+                .await
+            {
                 warn!(log, "RSS injection failed: {}", e);
                 Err(e)
             } else {
@@ -132,62 +150,6 @@ struct ServiceInner {
 impl ServiceInner {
     fn new(log: Logger, peer_monitor: PeerMonitorObserver) -> Self {
         ServiceInner { log, peer_monitor: Mutex::new(peer_monitor) }
-    }
-
-    async fn initialize_sled_agent(
-        &self,
-        bootstrap_addr: SocketAddrV6,
-        request: &SledAgentRequest,
-    ) -> Result<(), SetupServiceError> {
-        let dur = std::time::Duration::from_secs(60);
-
-        let client = reqwest::ClientBuilder::new()
-            .connect_timeout(dur)
-            .timeout(dur)
-            .build()
-            .map_err(SetupServiceError::HttpClient)?;
-
-        let url = format!("http://{}", bootstrap_addr);
-        info!(self.log, "Sending request to peer agent: {}", url);
-        let client = bootstrap_agent_client::Client::new_with_client(
-            &url,
-            client,
-            self.log.new(o!("BootstrapAgentClient" => url.clone())),
-        );
-
-        let sled_agent_initialize = || async {
-            client
-                .start_sled(&bootstrap_agent_client::types::SledAgentRequest {
-                    subnet: bootstrap_agent_client::types::Ipv6Subnet {
-                        net: bootstrap_agent_client::types::Ipv6Net(
-                            request.subnet.net().to_string(),
-                        ),
-                    },
-                })
-                .await
-                .map_err(BackoffError::transient)?;
-
-            Ok::<
-                (),
-                BackoffError<
-                    bootstrap_agent_client::Error<
-                        bootstrap_agent_client::types::Error,
-                    >,
-                >,
-            >(())
-        };
-
-        let log_failure = |error, _| {
-            warn!(self.log, "failed to start sled agent"; "error" => ?error);
-        };
-        retry_notify(
-            internal_service_policy(),
-            sled_agent_initialize,
-            log_failure,
-        )
-        .await?;
-        info!(self.log, "Peer agent at {} initialized", url);
-        Ok(())
     }
 
     async fn initialize_datasets(
@@ -316,8 +278,34 @@ impl ServiceInner {
     async fn create_plan(
         &self,
         config: &Config,
-        bootstrap_addrs: impl IntoIterator<Item = Ipv6Addr>,
+        bootstrap_addrs: Vec<Ipv6Addr>,
+        member_device_id_certs: &[Ed25519Certificate],
     ) -> Result<HashMap<SocketAddrV6, SledAllocation>, SetupServiceError> {
+        // Create a rack secret, unless we're in the single-sled case.
+        let mut maybe_rack_secret_shares = generate_rack_secret(
+            config.rack_secret_threshold,
+            member_device_id_certs,
+            &self.log,
+        )?;
+
+        // Confirm that the returned iterator (if we got one) is the length we
+        // expect.
+        if let Some(rack_secret_shares) = maybe_rack_secret_shares.as_ref() {
+            // TODO-cleanup Asserting here seems fine as long as
+            // `member_device_id_certs` is hard-coded from a config file, but
+            // once we start collecting them over the management network we
+            // should probably attach them at the type level to the bootstrap
+            // addrs, which would remove the need for this assertion.
+            assert_eq!(
+                rack_secret_shares.len(),
+                bootstrap_addrs.len(),
+                concat!(
+                    "Number of trust quorum members does not match ",
+                    "number of bootstrap addresses"
+                )
+            );
+        }
+
         let bootstrap_addrs = bootstrap_addrs.into_iter().enumerate();
         let reserved_rack_subnet = ReservedRackSubnet::new(config.az_subnet());
         let dns_subnets = reserved_rack_subnet.get_dns_subnets();
@@ -366,7 +354,18 @@ impl ServiceInner {
             (
                 bootstrap_addr,
                 SledAllocation {
-                    initialization_request: SledAgentRequest { subnet },
+                    initialization_request: SledAgentRequest {
+                        subnet,
+                        trust_quorum_share: maybe_rack_secret_shares
+                            .as_mut()
+                            .map(|shares_iter| {
+                                // We asserted when creating
+                                // `maybe_rack_secret_shares` that it contained
+                                // exactly the number of shares as we have
+                                // bootstrap addrs, so we can unwrap here.
+                                shares_iter.next().unwrap()
+                            }),
+                    },
                     services_request: request,
                 },
             )
@@ -464,20 +463,10 @@ impl ServiceInner {
     async fn inject_rack_setup_requests(
         &self,
         config: &Config,
+        local_bootstrap_agent: BootstrapAgentHandle,
+        member_device_id_certs: &[Ed25519Certificate],
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Injecting RSS configuration: {:#?}", config);
-
-        // We expect this directory to exist - ensure that it does, before any
-        // subsequent operations which may write configs here.
-        tokio::fs::create_dir_all(omicron_common::OMICRON_CONFIG_PATH)
-            .await
-            .map_err(|err| SetupServiceError::Io {
-                message: format!(
-                    "Creating config directory {}",
-                    omicron_common::OMICRON_CONFIG_PATH
-                ),
-                err,
-            })?;
 
         // Check if a previous RSS plan has completed successfully.
         //
@@ -519,35 +508,23 @@ impl ServiceInner {
             plan
         } else {
             info!(self.log, "Creating new allocation plan");
-            self.create_plan(config, addrs).await?
+            self.create_plan(config, addrs, member_device_id_certs).await?
         };
 
-        // Issue the dataset initialization requests to all sleds.
-        futures::future::join_all(plan.iter().map(
-            |(bootstrap_addr, allocation)| async move {
-                info!(
-                    self.log,
-                    "Sending request: {:#?}", allocation.initialization_request
-                );
-
-                // First, connect to the Bootstrap Agent and tell it to
-                // initialize the Sled Agent with the specified subnet.
-                self.initialize_sled_agent(
-                    *bootstrap_addr,
-                    &allocation.initialization_request,
-                )
-                .await?;
-                info!(
-                    self.log,
-                    "Initialized sled agent on sled with bootstrap address: {}",
-                    bootstrap_addr
-                );
-                Ok(())
-            },
-        ))
-        .await
-        .into_iter()
-        .collect::<Result<_, SetupServiceError>>()?;
+        // Forward the sled initialization requests to our sled-agent.
+        local_bootstrap_agent
+            .initialize_sleds(
+                plan.iter()
+                    .map(|(bootstrap_addr, allocation)| {
+                        (
+                            *bootstrap_addr,
+                            allocation.initialization_request.clone(),
+                        )
+                    })
+                    .collect(),
+            )
+            .await
+            .map_err(SetupServiceError::SledInitialization)?;
 
         // Set up internal DNS services.
         futures::future::join_all(
@@ -640,5 +617,114 @@ impl ServiceInner {
         // it get a /64?
 
         Ok(())
+    }
+}
+
+fn generate_rack_secret<'a>(
+    rack_secret_threshold: usize,
+    member_device_id_certs: &'a [Ed25519Certificate],
+    log: &Logger,
+) -> Result<
+    Option<impl ExactSizeIterator<Item = ShareDistribution> + 'a>,
+    SetupServiceError,
+> {
+    // We do not generate a rack secret if we only have a single sled or if our
+    // config specifies that the threshold for unlock is only a single sled.
+    let total_shares = member_device_id_certs.len();
+    if total_shares <= 1 {
+        info!(log, "Skipping rack secret creation (only one sled present)");
+        return Ok(None);
+    }
+
+    if rack_secret_threshold <= 1 {
+        warn!(
+            log,
+            concat!(
+                "Skipping rack secret creation due to config",
+                " (despite discovery of {} bootstrap agents)"
+            ),
+            total_shares,
+        );
+        return Ok(None);
+    }
+
+    let secret = RackSecret::new();
+    let (shares, verifier) = secret
+        .split(rack_secret_threshold, total_shares)
+        .map_err(SetupServiceError::SplitRackSecret)?;
+
+    Ok(Some(shares.into_iter().map(move |share| ShareDistribution {
+        threshold: rack_secret_threshold,
+        verifier: verifier.clone(),
+        share,
+        member_device_id_certs: member_device_id_certs.to_vec(),
+    })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use omicron_test_utils::dev::test_setup_log;
+    use sprockets_common::certificates::Ed25519Signature;
+    use sprockets_common::certificates::KeyType;
+
+    fn dummy_certs(n: usize) -> Vec<Ed25519Certificate> {
+        vec![
+            Ed25519Certificate {
+                subject_key_type: KeyType::DeviceId,
+                subject_public_key: sprockets_host::Ed25519PublicKey([0; 32]),
+                signer_key_type: KeyType::Manufacturing,
+                signature: Ed25519Signature([0; 64]),
+            };
+            n
+        ]
+    }
+
+    #[test]
+    fn test_generate_rack_secret() {
+        let logctx = test_setup_log("test_generate_rack_secret");
+
+        // No secret generated if we have <= 1 sled
+        assert!(generate_rack_secret(10, &dummy_certs(1), &logctx.log)
+            .unwrap()
+            .is_none());
+
+        // No secret generated if threshold <= 1
+        assert!(generate_rack_secret(1, &dummy_certs(10), &logctx.log)
+            .unwrap()
+            .is_none());
+
+        // Secret generation fails if threshold > total sleds
+        assert!(matches!(
+            generate_rack_secret(10, &dummy_certs(5), &logctx.log),
+            Err(SetupServiceError::SplitRackSecret(_))
+        ));
+
+        // Secret generation succeeds if threshold <= total shares and both are
+        // > 1, and the returned iterator satifies:
+        //
+        // * total length == total shares
+        // * each share is distinct
+        for total_shares in 2..=32 {
+            for threshold in 2..=total_shares {
+                let certs = dummy_certs(total_shares);
+                let shares =
+                    generate_rack_secret(threshold, &certs, &logctx.log)
+                        .unwrap()
+                        .unwrap();
+
+                assert_eq!(shares.len(), total_shares);
+
+                // `Share` doesn't implement `Hash`, but it's a newtype around
+                // `Vec<u8>` (which does). Unwrap the newtype to check that all
+                // shares are distinct.
+                let shares_set = shares
+                    .map(|share_dist| share_dist.share.0)
+                    .collect::<HashSet<_>>();
+                assert_eq!(shares_set.len(), total_shares);
+            }
+        }
+
+        logctx.cleanup_successful();
     }
 }

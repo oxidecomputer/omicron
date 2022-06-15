@@ -104,6 +104,7 @@ pub async fn test_setup_database(
     log: &Logger,
     dir: &Path,
 ) -> db::CockroachInstance {
+    usdt::register_probes().expect("Failed to register USDT DTrace probes");
     setup_database(log, dir, StorageSource::CopyFromSeed).await
 }
 

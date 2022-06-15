@@ -5,10 +5,10 @@
 //! Handler functions (entrypoints) for external HTTP APIs
 
 use super::{
-    console_api, params,
+    console_api, params, views,
     views::{
-        GlobalImage, Image, Organization, Project, Rack, Role, Silo, Sled,
-        Snapshot, SshKey, User, Vpc, VpcRouter, VpcSubnet,
+        GlobalImage, IdentityProvider, Image, Organization, Project, Rack,
+        Role, Silo, Sled, Snapshot, SshKey, User, Vpc, VpcRouter, VpcSubnet,
     },
 };
 use crate::authz;
@@ -80,8 +80,12 @@ pub fn external_api() -> NexusApiDescription {
         api.register(silos_post)?;
         api.register(silos_get_silo)?;
         api.register(silos_delete_silo)?;
+        api.register(silos_get_identity_providers)?;
         api.register(silos_get_silo_policy)?;
         api.register(silos_put_silo_policy)?;
+
+        api.register(silo_saml_idp_create)?;
+        api.register(silo_saml_idp_fetch)?;
 
         api.register(organizations_get)?;
         api.register(organizations_post)?;
@@ -112,6 +116,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(project_instances_instance_reboot)?;
         api.register(project_instances_instance_start)?;
         api.register(project_instances_instance_stop)?;
+        api.register(project_instances_instance_serial_get)?;
 
         // Globally-scoped Images API
         api.register(images_get)?;
@@ -151,6 +156,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(instance_network_interfaces_post)?;
         api.register(instance_network_interfaces_get)?;
         api.register(instance_network_interfaces_get_interface)?;
+        api.register(instance_network_interfaces_put_interface)?;
         api.register(instance_network_interfaces_delete_interface)?;
 
         api.register(vpc_routers_get)?;
@@ -198,6 +204,9 @@ pub fn external_api() -> NexusApiDescription {
         api.register(console_api::logout)?;
         api.register(console_api::console_page)?;
         api.register(console_api::asset)?;
+
+        api.register(console_api::login)?;
+        api.register(console_api::consume_credentials)?;
 
         Ok(())
     }
@@ -451,6 +460,111 @@ async fn silos_put_silo_policy(
         let policy =
             nexus.silo_update_policy(&opctx, silo_name, &new_policy).await?;
         Ok(HttpResponseOk(policy))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+// Silo identity providers
+
+/// List Silo identity providers
+#[endpoint {
+    method = GET,
+    path = "/silos/{silo_name}/identity_providers",
+    tags = ["silos"],
+}]
+async fn silos_get_identity_providers(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<SiloPathParam>,
+    query_params: Query<PaginatedByName>,
+) -> Result<HttpResponseOk<ResultsPage<IdentityProvider>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let silo_name = &path.silo_name;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let query = query_params.into_inner();
+        let pagination_params = data_page_params_for(&rqctx, &query)?
+            .map_name(|n| Name::ref_cast(n));
+        let identity_providers = nexus
+            .identity_provider_list(&opctx, &silo_name, &pagination_params)
+            .await?
+            .into_iter()
+            .map(|x| x.into())
+            .collect();
+        Ok(HttpResponseOk(ScanByName::results_page(
+            &query,
+            identity_providers,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+// Silo SAML identity providers
+
+/// Create a new SAML identity provider for a silo.
+#[endpoint {
+    method = POST,
+    path = "/silos/{silo_name}/saml_identity_providers",
+    tags = ["silos"],
+}]
+async fn silo_saml_idp_create(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<SiloPathParam>,
+    new_provider: TypedBody<params::SamlIdentityProviderCreate>,
+) -> Result<HttpResponseCreated<views::SamlIdentityProvider>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let provider = nexus
+            .saml_identity_provider_create(
+                &opctx,
+                &path_params.into_inner().silo_name,
+                new_provider.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseCreated(provider.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Path parameters for Silo SAML identity provider requests
+#[derive(Deserialize, JsonSchema)]
+struct SiloSamlPathParam {
+    /// The silo's unique name.
+    silo_name: Name,
+    /// The SAML identity provider's name
+    provider_name: Name,
+}
+
+/// GET a silo's SAML identity provider
+#[endpoint {
+    method = GET,
+    path = "/silos/{silo_name}/saml_identity_providers/{provider_name}",
+    tags = ["silos"],
+}]
+async fn silo_saml_idp_fetch(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<SiloSamlPathParam>,
+) -> Result<HttpResponseOk<views::SamlIdentityProvider>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+
+    let path_params = path_params.into_inner();
+
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let provider = nexus
+            .saml_identity_provider_fetch(
+                &opctx,
+                &path_params.silo_name,
+                &path_params.provider_name,
+            )
+            .await?;
+
+        Ok(HttpResponseOk(provider.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1307,6 +1421,39 @@ async fn project_instances_instance_stop(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Get contents of an instance's serial console.
+#[endpoint {
+    method = GET,
+    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/serial",
+    tags = ["instances"],
+}]
+async fn project_instances_instance_serial_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<InstancePathParam>,
+    query_params: Query<params::InstanceSerialConsoleRequest>,
+) -> Result<HttpResponseOk<params::InstanceSerialConsoleData>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
+    let project_name = &path.project_name;
+    let instance_name = &path.instance_name;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let data = nexus
+            .instance_serial_console_data(
+                &opctx,
+                &organization_name,
+                &project_name,
+                &instance_name,
+                &query_params.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseOk(data))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /// List disks attached to this instance.
 // TODO-scalability needs to be paginated
 #[endpoint {
@@ -1456,15 +1603,14 @@ async fn images_get(
 }]
 async fn images_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    new_image: TypedBody<params::ImageCreate>,
+    new_image: TypedBody<params::GlobalImageCreate>,
 ) -> Result<HttpResponseCreated<GlobalImage>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
-    let new_image_params = &new_image.into_inner();
+    let new_image_params = new_image.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let image =
-            nexus.global_image_create(&opctx, &new_image_params).await?;
+        let image = nexus.global_image_create(&opctx, new_image_params).await?;
         Ok(HttpResponseCreated(image.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -1759,6 +1905,11 @@ pub struct NetworkInterfacePathParam {
 }
 
 /// Detach a network interface from an instance.
+///
+/// Note that the primary interface for an instance cannot be deleted if there
+/// are any secondary interfaces. A new primary interface must be designated
+/// first. The primary interface can be deleted if there are no secondary
+/// interfaces.
 #[endpoint {
     method = DELETE,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}",
@@ -1817,6 +1968,42 @@ async fn instance_network_interfaces_get_interface(
                 project_name,
                 instance_name,
                 interface_name,
+            )
+            .await?;
+        Ok(HttpResponseOk(NetworkInterface::from(interface)))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Update information about an instance's network interface
+#[endpoint {
+    method = PUT,
+    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}",
+    tags = ["instances"],
+}]
+async fn instance_network_interfaces_put_interface(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<NetworkInterfacePathParam>,
+    updated_iface: TypedBody<params::NetworkInterfaceUpdate>,
+) -> Result<HttpResponseOk<NetworkInterface>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
+    let project_name = &path.project_name;
+    let instance_name = &path.instance_name;
+    let interface_name = &path.interface_name;
+    let updated_iface = updated_iface.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let interface = nexus
+            .network_interface_update(
+                &opctx,
+                organization_name,
+                project_name,
+                instance_name,
+                interface_name,
+                updated_iface,
             )
             .await?;
         Ok(HttpResponseOk(NetworkInterface::from(interface)))

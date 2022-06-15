@@ -7,6 +7,7 @@ use omicron_common::api::external::ByteCount;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use std::str::FromStr;
@@ -96,6 +97,56 @@ pub struct DatasetPutResponse {
     /// A maximum quota on filesystem usage.
     /// Refer to ZFS native properties for more detail.
     pub quota: Option<ByteCount>,
+}
+
+/// Describes the purpose of the service.
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone, Copy, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ServiceKind {
+    InternalDNS,
+    Nexus,
+    Oximeter,
+}
+
+impl fmt::Display for ServiceKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use ServiceKind::*;
+        let s = match self {
+            InternalDNS => "internal_dns",
+            Nexus => "nexus",
+            Oximeter => "oximeter",
+        };
+        write!(f, "{}", s)
+    }
+}
+
+impl FromStr for ServiceKind {
+    type Err = omicron_common::api::external::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        use ServiceKind::*;
+        match s {
+            "nexus" => Ok(Nexus),
+            "oximeter" => Ok(Oximeter),
+            "internal_dns" => Ok(InternalDNS),
+            _ => Err(Self::Err::InternalError {
+                internal_message: format!("Unknown service kind: {}", s),
+            }),
+        }
+    }
+}
+
+/// Describes a service on a sled
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ServicePutRequest {
+    pub service_id: Uuid,
+    pub sled_id: Uuid,
+
+    /// Address on which a service is responding to requests.
+    pub address: Ipv6Addr,
+
+    /// Type of service being inserted.
+    pub kind: ServiceKind,
 }
 
 /// Message used to notify Nexus that this oximeter instance is up and running.

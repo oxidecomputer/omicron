@@ -48,6 +48,17 @@ CREATE TABLE omicron.public.rack (
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
 
+    /*
+     * Identifies if rack management has been transferred from RSS -> Nexus.
+     * If "false", RSS is still managing sleds, services, and DNS records.
+     *
+     * This value is set to "true" when RSS calls the
+     * "rack_initialization_complete" endpoint on Nexus' internal interface.
+     *
+     * See RFD 278 for more detail.
+     */
+    initialized BOOL NOT NULL,
+
     /* Used to configure the updates service URL */
     tuf_base_url STRING(512)
 );
@@ -70,6 +81,35 @@ CREATE TABLE omicron.public.sled (
 
     /* The last address allocated to an Oxide service on this sled. */
     last_used_address INET NOT NULL
+);
+
+/*
+ * Services
+ */
+
+CREATE TYPE omicron.public.service_kind AS ENUM (
+  'internal_dns',
+  'nexus',
+  'oximeter'
+);
+
+CREATE TABLE omicron.public.service (
+    /* Identity metadata (asset) */
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+
+    /* FK into the Sled table */
+    sled_id UUID NOT NULL,
+    /* The IP address of the service. */
+    ip INET NOT NULL,
+    /* Indicates the type of service. */
+    kind omicron.public.service_kind NOT NULL
+);
+
+/* Add an index which lets us look up the services on a sled */
+CREATE INDEX ON omicron.public.service (
+    sled_id
 );
 
 /*
@@ -183,15 +223,13 @@ CREATE TABLE omicron.public.volume (
 CREATE TABLE omicron.public.silo (
     /* Identity metadata */
     id UUID PRIMARY KEY,
-
     name STRING(128) NOT NULL,
     description STRING(512) NOT NULL,
-
-    discoverable BOOL NOT NULL,
-
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
+
+    discoverable BOOL NOT NULL,
 
     /* child resource generation number, per RFD 192 */
     rcgen INT NOT NULL
@@ -206,7 +244,6 @@ CREATE UNIQUE INDEX ON omicron.public.silo (
  * Silo users
  */
 CREATE TABLE omicron.public.silo_user (
-    /* silo user id */
     id UUID PRIMARY KEY,
 
     silo_id UUID NOT NULL,
@@ -220,6 +257,70 @@ CREATE TABLE omicron.public.silo_user (
 CREATE INDEX ON omicron.public.silo_user (
     silo_id,
     id
+) WHERE
+    time_deleted IS NULL;
+
+CREATE TYPE omicron.public.provider_type AS ENUM (
+  'saml'
+);
+
+/*
+ * Silo identity provider list
+ */
+CREATE TABLE omicron.public.identity_provider (
+    /* Identity metadata */
+    id UUID PRIMARY KEY,
+    name STRING(128) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+
+    silo_id UUID NOT NULL,
+    provider_type omicron.public.provider_type NOT NULL
+);
+
+CREATE INDEX ON omicron.public.identity_provider (
+    id,
+    silo_id
+) WHERE
+    time_deleted IS NULL;
+
+CREATE INDEX ON omicron.public.identity_provider (
+    name,
+    silo_id
+) WHERE
+    time_deleted IS NULL;
+
+/*
+ * Silo SAML identity provider
+ */
+CREATE TABLE omicron.public.saml_identity_provider (
+    /* Identity metadata */
+    id UUID PRIMARY KEY,
+    name STRING(128) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+
+    silo_id UUID NOT NULL,
+
+    idp_metadata_document_string TEXT NOT NULL,
+
+    idp_entity_id TEXT NOT NULL,
+    sp_client_id TEXT NOT NULL,
+    acs_url TEXT NOT NULL,
+    slo_url TEXT NOT NULL,
+    technical_contact_email TEXT NOT NULL,
+
+    public_cert TEXT,
+    private_key TEXT
+);
+
+CREATE INDEX ON omicron.public.saml_identity_provider (
+    id,
+    silo_id
 ) WHERE
     time_deleted IS NULL;
 
@@ -503,7 +604,8 @@ CREATE TABLE omicron.public.global_image (
     volume_id UUID NOT NULL,
 
     url STRING(8192),
-    version STRING(64),
+    distribution STRING(64) NOT NULL,
+    version STRING(64) NOT NULL,
     digest TEXT,
     block_size omicron.public.block_size NOT NULL,
     size_bytes INT NOT NULL
@@ -660,13 +762,28 @@ CREATE TABLE omicron.public.network_interface (
     vpc_id UUID NOT NULL,
     /* FK into VPCSubnet table. */
     subnet_id UUID NOT NULL,
-    mac STRING(17) NOT NULL, -- e.g., "ff:ff:ff:ff:ff:ff"
+
+    /*
+     * The EUI-48 MAC address of the guest interface.
+     *
+     * Note that we use the bytes of a 64-bit integer, in big-endian byte order
+     * to represent the MAC.
+     */
+    mac INT8 NOT NULL,
+
     ip INET NOT NULL,
     /*
      * Limited to 8 NICs per instance. This value must be kept in sync with
      * `crate::nexus::MAX_NICS_PER_INSTANCE`.
      */
-    slot INT2 NOT NULL CHECK (slot >= 0 AND slot < 8)
+    slot INT2 NOT NULL CHECK (slot >= 0 AND slot < 8),
+
+    /* True if this interface is the primary interface for the instance.
+     *
+     * The primary interface appears in DNS and its address is used for external
+     * connectivity for the instance.
+     */
+    is_primary BOOL NOT NULL
 );
 
 /* TODO-completeness
@@ -695,15 +812,21 @@ CREATE UNIQUE INDEX ON omicron.public.network_interface (
 
 /*
  * Index used to verify that an Instance's networking is contained
- * within a single VPC.
+ * within a single VPC, and that all interfaces are in unique VPC
+ * Subnets.
+ *
+ * This is also used to quickly find the primary interface for an
+ * instance, since we store the `is_primary` column. Such queries are
+ * mostly used when setting a new primary interface for an instance.
  */
 CREATE UNIQUE INDEX ON omicron.public.network_interface (
     instance_id,
     name
 )
-STORING (vpc_id)
+STORING (vpc_id, subnet_id, is_primary)
 WHERE
     time_deleted IS NULL;
+
 
 CREATE TYPE omicron.public.vpc_router_kind AS ENUM (
     'system',

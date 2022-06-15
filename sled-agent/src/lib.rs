@@ -29,9 +29,11 @@ mod nexus;
 mod opte;
 mod params;
 pub mod rack_setup;
+mod serial;
 pub mod server;
 mod services;
 mod sled_agent;
+pub mod sp;
 mod storage_manager;
 mod updates;
 

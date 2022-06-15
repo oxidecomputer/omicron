@@ -5,7 +5,7 @@
 //! API for controlling a single instance.
 
 use crate::illumos::dladm::{
-    CreateVnicError, DeleteVnicError, PhysicalLink, VNIC_PREFIX,
+    CreateVnicError, DeleteVnicError, Etherstub, VNIC_PREFIX,
     VNIC_PREFIX_CONTROL, VNIC_PREFIX_GUEST,
 };
 use omicron_common::api::external::MacAddr;
@@ -26,7 +26,7 @@ use crate::illumos::dladm::MockDladm as Dladm;
 pub struct VnicAllocator {
     value: Arc<AtomicU64>,
     scope: String,
-    data_link: PhysicalLink,
+    data_link: Etherstub,
 }
 
 impl VnicAllocator {
@@ -41,11 +41,11 @@ impl VnicAllocator {
     ///
     /// VnicAllocator::new("Storage") produces
     /// - oxControlStorage[NNN]
-    pub fn new<S: AsRef<str>>(scope: S, physical_link: PhysicalLink) -> Self {
+    pub fn new<S: AsRef<str>>(scope: S, etherstub: Etherstub) -> Self {
         Self {
             value: Arc::new(AtomicU64::new(0)),
             scope: scope.as_ref().to_string(),
-            data_link: physical_link,
+            data_link: etherstub,
         }
     }
 
@@ -171,7 +171,7 @@ mod test {
     #[test]
     fn test_allocate() {
         let allocator =
-            VnicAllocator::new("Foo", PhysicalLink("mylink".to_string()));
+            VnicAllocator::new("Foo", Etherstub("mystub".to_string()));
         assert_eq!("oxFoo0", allocator.next());
         assert_eq!("oxFoo1", allocator.next());
         assert_eq!("oxFoo2", allocator.next());
@@ -180,7 +180,7 @@ mod test {
     #[test]
     fn test_allocate_within_scopes() {
         let allocator =
-            VnicAllocator::new("Foo", PhysicalLink("mylink".to_string()));
+            VnicAllocator::new("Foo", Etherstub("mystub".to_string()));
         assert_eq!("oxFoo0", allocator.next());
         let allocator = allocator.new_superscope("Baz");
         assert_eq!("oxBazFoo1", allocator.next());

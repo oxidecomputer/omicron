@@ -23,10 +23,12 @@ url = "postgresql://root@[fd00:1122:3344:0101::2]:32221/omicron?sslmode=disable"
 [dropshot_external]
 # IP address and TCP port on which to listen for the external API
 bind_address = "[fd00:1122:3344:0101::3]:12220"
+request_body_max_bytes = 1048576
 
 [dropshot_internal]
 # IP address and TCP port on which to listen for the internal API
 bind_address = "[fd00:1122:3344:0101::3]:12221"
+request_body_max_bytes = 1048576
 
 [log]
 # Show log messages of this level and more severe

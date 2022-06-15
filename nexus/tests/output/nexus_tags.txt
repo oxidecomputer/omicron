@@ -39,14 +39,21 @@ instance_network_interfaces_delete_interface /organizations/{organization_name}/
 instance_network_interfaces_get          /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces
 instance_network_interfaces_get_interface /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}
 instance_network_interfaces_post         /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces
+instance_network_interfaces_put_interface /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}
 project_instances_delete_instance        /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}
 project_instances_get                    /organizations/{organization_name}/projects/{project_name}/instances
 project_instances_get_instance           /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}
 project_instances_instance_reboot        /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/reboot
+project_instances_instance_serial_get    /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/serial
 project_instances_instance_start         /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/start
 project_instances_instance_stop          /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/stop
 project_instances_migrate_instance       /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/migrate
 project_instances_post                   /organizations/{organization_name}/projects/{project_name}/instances
+
+API operations found with tag "login"
+OPERATION ID                             URL PATH
+consume_credentials                      /login/{silo_name}/{provider_name}
+login                                    /login/{silo_name}/{provider_name}
 
 API operations found with tag "metrics"
 OPERATION ID                             URL PATH
@@ -110,8 +117,11 @@ sagas_get_saga                           /sagas/{saga_id}
 
 API operations found with tag "silos"
 OPERATION ID                             URL PATH
+silo_saml_idp_create                     /silos/{silo_name}/saml_identity_providers
+silo_saml_idp_fetch                      /silos/{silo_name}/saml_identity_providers/{provider_name}
 silos_delete_silo                        /silos/{silo_name}
 silos_get                                /silos
+silos_get_identity_providers             /silos/{silo_name}/identity_providers
 silos_get_silo                           /silos/{silo_name}
 silos_get_silo_policy                    /silos/{silo_name}/policy
 silos_post                               /silos

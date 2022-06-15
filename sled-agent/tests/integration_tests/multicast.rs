@@ -40,8 +40,12 @@ async fn test_multicast_bootstrap_address() {
     // This modifies global state of the target machine, creating
     // an address named "testbootstrap6", akin to what the bootstrap
     // agent should do.
-    let link = dladm::Dladm::find_physical().unwrap();
-    let address = bootstrap::agent::bootstrap_address(link.clone()).unwrap();
+    let etherstub = dladm::Dladm::create_etherstub().unwrap();
+    let link = dladm::Dladm::create_etherstub_vnic(&etherstub).unwrap();
+
+    let phys_link = dladm::Dladm::find_physical().unwrap();
+    let address =
+        bootstrap::agent::bootstrap_address(phys_link.clone()).unwrap();
     let address_name = "testbootstrap6";
     let addrobj = AddrObject::new(&link.0, address_name).unwrap();
     zone::Zones::ensure_has_global_zone_v6_address(

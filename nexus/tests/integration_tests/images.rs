@@ -48,14 +48,20 @@ async fn test_global_image_create(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(global_images.len(), 0);
 
     // Create one!
-    let image_create_params = params::ImageCreate {
+    let image_create_params = params::GlobalImageCreate {
         identity: IdentityMetadataCreateParams {
             name: "alpine-edge".parse().unwrap(),
             description: String::from(
                 "you can boot any image, as long as it's alpine",
             ),
         },
-        source: params::ImageSource::Url(server.url("/image.raw").to_string()),
+        source: params::ImageSource::Url {
+            url: server.url("/image.raw").to_string(),
+        },
+        distribution: params::Distribution {
+            name: "alpine".parse().unwrap(),
+            version: "edge".into(),
+        },
         block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
@@ -88,14 +94,20 @@ async fn test_global_image_create_url_404(cptestctx: &ControlPlaneTestContext) {
             .respond_with(status_code(404)),
     );
 
-    let image_create_params = params::ImageCreate {
+    let image_create_params = params::GlobalImageCreate {
         identity: IdentityMetadataCreateParams {
             name: "alpine-edge".parse().unwrap(),
             description: String::from(
                 "you can boot any image, as long as it's alpine",
             ),
         },
-        source: params::ImageSource::Url(server.url("/image.raw").to_string()),
+        source: params::ImageSource::Url {
+            url: server.url("/image.raw").to_string(),
+        },
+        distribution: params::Distribution {
+            name: "alpine".parse().unwrap(),
+            version: "edge".into(),
+        },
         block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
@@ -121,14 +133,18 @@ async fn test_global_image_create_bad_url(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
 
-    let image_create_params = params::ImageCreate {
+    let image_create_params = params::GlobalImageCreate {
         identity: IdentityMetadataCreateParams {
             name: "alpine-edge".parse().unwrap(),
             description: String::from(
                 "you can boot any image, as long as it's alpine",
             ),
         },
-        source: params::ImageSource::Url("not_a_url".to_string()),
+        source: params::ImageSource::Url { url: "not_a_url".to_string() },
+        distribution: params::Distribution {
+            name: "alpine".parse().unwrap(),
+            version: "edge".into(),
+        },
         block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
@@ -165,14 +181,20 @@ async fn test_global_image_create_bad_content_length(
             ),
     );
 
-    let image_create_params = params::ImageCreate {
+    let image_create_params = params::GlobalImageCreate {
         identity: IdentityMetadataCreateParams {
             name: "alpine-edge".parse().unwrap(),
             description: String::from(
                 "you can boot any image, as long as it's alpine",
             ),
         },
-        source: params::ImageSource::Url(server.url("/image.raw").to_string()),
+        source: params::ImageSource::Url {
+            url: server.url("/image.raw").to_string(),
+        },
+        distribution: params::Distribution {
+            name: "alpine".parse().unwrap(),
+            version: "edge".into(),
+        },
         block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
@@ -210,14 +232,20 @@ async fn test_global_image_create_bad_image_size(
             )),
     );
 
-    let image_create_params = params::ImageCreate {
+    let image_create_params = params::GlobalImageCreate {
         identity: IdentityMetadataCreateParams {
             name: "alpine-edge".parse().unwrap(),
             description: String::from(
                 "you can boot any image, as long as it's alpine",
             ),
         },
-        source: params::ImageSource::Url(server.url("/image.raw").to_string()),
+        source: params::ImageSource::Url {
+            url: server.url("/image.raw").to_string(),
+        },
+        distribution: params::Distribution {
+            name: "alpine".parse().unwrap(),
+            version: "edge".into(),
+        },
         block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
@@ -255,16 +283,20 @@ async fn test_make_disk_from_global_image(cptestctx: &ControlPlaneTestContext) {
             ),
     );
 
-    let image_create_params = params::ImageCreate {
+    let image_create_params = params::GlobalImageCreate {
         identity: IdentityMetadataCreateParams {
             name: "alpine-edge".parse().unwrap(),
             description: String::from(
                 "you can boot any image, as long as it's alpine",
             ),
         },
-        source: params::ImageSource::Url(
-            server.url("/alpine/edge.raw").to_string(),
-        ),
+        source: params::ImageSource::Url {
+            url: server.url("/alpine/edge.raw").to_string(),
+        },
+        distribution: params::Distribution {
+            name: "alpine".parse().unwrap(),
+            version: "edge".into(),
+        },
         block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
@@ -321,16 +353,20 @@ async fn test_make_disk_from_global_image_too_small(
             ),
     );
 
-    let image_create_params = params::ImageCreate {
+    let image_create_params = params::GlobalImageCreate {
         identity: IdentityMetadataCreateParams {
             name: "alpine-edge".parse().unwrap(),
             description: String::from(
                 "you can boot any image, as long as it's alpine",
             ),
         },
-        source: params::ImageSource::Url(
-            server.url("/alpine/edge.raw").to_string(),
-        ),
+        source: params::ImageSource::Url {
+            url: server.url("/alpine/edge.raw").to_string(),
+        },
+        distribution: params::Distribution {
+            name: "alpine".parse().unwrap(),
+            version: "edge".into(),
+        },
         block_size: params::BlockSize::try_from(512).unwrap(),
     };
 

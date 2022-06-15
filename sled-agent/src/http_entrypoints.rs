@@ -5,11 +5,13 @@
 //! HTTP entrypoint functions for the sled agent's exposed API
 
 use crate::params::{
-    DatasetEnsureBody, DiskEnsureBody, InstanceEnsureBody, ServiceEnsureBody,
+    DatasetEnsureBody, DiskEnsureBody, InstanceEnsureBody,
+    InstanceSerialConsoleData, InstanceSerialConsoleRequest, ServiceEnsureBody,
 };
+use crate::serial::ByteOffset;
 use dropshot::{
     endpoint, ApiDescription, HttpError, HttpResponseOk,
-    HttpResponseUpdatedNoContent, Path, RequestContext, TypedBody,
+    HttpResponseUpdatedNoContent, Path, Query, RequestContext, TypedBody,
 };
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
@@ -32,6 +34,7 @@ pub fn api() -> SledApiDescription {
         api.register(instance_put)?;
         api.register(disk_put)?;
         api.register(update_artifact)?;
+        api.register(instance_serial_get)?;
         Ok(())
     }
 
@@ -67,7 +70,7 @@ async fn filesystem_put(
     let sa = rqctx.context();
     let body_args = body.into_inner();
     sa.filesystem_ensure(
-        body_args.zpool_uuid,
+        body_args.zpool_id,
         body_args.dataset_kind,
         body_args.address,
     )
@@ -146,4 +149,49 @@ async fn update_artifact(
     let sa = rqctx.context();
     sa.update_artifact(artifact.into_inner()).await.map_err(Error::from)?;
     Ok(HttpResponseUpdatedNoContent())
+}
+
+#[endpoint {
+    method = GET,
+    path = "/instances/{instance_id}/serial",
+}]
+async fn instance_serial_get(
+    rqctx: Arc<RequestContext<SledAgent>>,
+    path_params: Path<InstancePathParam>,
+    query: Query<InstanceSerialConsoleRequest>,
+) -> Result<HttpResponseOk<InstanceSerialConsoleData>, HttpError> {
+    // TODO: support websocket in dropshot, detect websocket upgrade header and proxy the data
+
+    let sa = rqctx.context();
+    let instance_id = path_params.into_inner().instance_id;
+    let query_params = query.into_inner();
+
+    let byte_offset = match query_params {
+        InstanceSerialConsoleRequest {
+            from_start: Some(offset),
+            most_recent: None,
+            ..
+        } => ByteOffset::FromStart(offset as usize),
+        InstanceSerialConsoleRequest {
+            from_start: None,
+            most_recent: Some(offset),
+            ..
+        } => ByteOffset::MostRecent(offset as usize),
+        _ => return Err(HttpError::for_bad_request(
+            None,
+            "Exactly one of 'from_start' or 'most_recent' must be specified."
+                .to_string(),
+        )),
+    };
+
+    let data = sa
+        .instance_serial_console_data(
+            instance_id,
+            byte_offset,
+            query_params.max_bytes.map(|x| x as usize),
+        )
+        .await
+        .map_err(Error::from)?;
+
+    Ok(HttpResponseOk(data))
 }

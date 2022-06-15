@@ -4,8 +4,13 @@
 
 use super::{MacAddr, VpcSubnet};
 use crate::db::identity::Resource;
+use crate::db::model::Name;
 use crate::db::schema::network_interface;
+use crate::external_api::params;
+use chrono::DateTime;
+use chrono::Utc;
 use db_macros::Resource;
+use diesel::AsChangeset;
 use omicron_common::api::external;
 use uuid::Uuid;
 
@@ -26,6 +31,8 @@ pub struct NetworkInterface {
     // If neither is specified, auto-assign one of each?
     pub ip: ipnetwork::IpNetwork,
     pub slot: i16,
+    #[diesel(column_name = is_primary)]
+    pub primary: bool,
 }
 
 impl From<NetworkInterface> for external::NetworkInterface {
@@ -37,6 +44,7 @@ impl From<NetworkInterface> for external::NetworkInterface {
             subnet_id: iface.subnet_id,
             ip: iface.ip.ip(),
             mac: *iface.mac,
+            primary: iface.primary,
         }
     }
 }
@@ -46,11 +54,9 @@ impl From<NetworkInterface> for external::NetworkInterface {
 #[derive(Clone, Debug)]
 pub struct IncompleteNetworkInterface {
     pub identity: NetworkInterfaceIdentity,
-
     pub instance_id: Uuid,
     pub vpc_id: Uuid,
     pub subnet: VpcSubnet,
-    pub mac: MacAddr,
     pub ip: Option<std::net::IpAddr>,
 }
 
@@ -60,7 +66,6 @@ impl IncompleteNetworkInterface {
         instance_id: Uuid,
         vpc_id: Uuid,
         subnet: VpcSubnet,
-        mac: MacAddr,
         identity: external::IdentityMetadataCreateParams,
         ip: Option<std::net::IpAddr>,
     ) -> Result<Self, external::Error> {
@@ -68,7 +73,29 @@ impl IncompleteNetworkInterface {
             subnet.check_requestable_addr(ip)?;
         };
         let identity = NetworkInterfaceIdentity::new(interface_id, identity);
+        Ok(Self { identity, instance_id, subnet, vpc_id, ip })
+    }
+}
 
-        Ok(Self { identity, instance_id, subnet, vpc_id, mac, ip })
+/// Describes a set of updates for the [`NetworkInterface`] model.
+#[derive(AsChangeset, Debug, Clone)]
+#[diesel(table_name = network_interface)]
+pub struct NetworkInterfaceUpdate {
+    pub name: Option<Name>,
+    pub description: Option<String>,
+    pub time_modified: DateTime<Utc>,
+    #[diesel(column_name = is_primary)]
+    pub make_primary: Option<bool>,
+}
+
+impl From<params::NetworkInterfaceUpdate> for NetworkInterfaceUpdate {
+    fn from(params: params::NetworkInterfaceUpdate) -> Self {
+        let make_primary = if params.make_primary { Some(true) } else { None };
+        Self {
+            name: params.identity.name.map(|n| n.into()),
+            description: params.identity.description,
+            time_modified: Utc::now(),
+            make_primary,
+        }
     }
 }

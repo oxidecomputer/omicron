@@ -89,10 +89,10 @@ impl super::Nexus {
     pub async fn global_image_create(
         self: &Arc<Self>,
         opctx: &OpContext,
-        params: &params::ImageCreate,
+        params: params::GlobalImageCreate,
     ) -> CreateResult<db::model::GlobalImage> {
         let new_image = match &params.source {
-            params::ImageSource::Url(url) => {
+            params::ImageSource::Url { url } => {
                 let db_block_size = db::model::BlockSize::try_from(
                     params.block_size,
                 )
@@ -116,13 +116,24 @@ impl super::Nexus {
                     serde_json::to_string(&volume_construction_request)?;
 
                 // use reqwest to query url for size
-                let response =
-                    reqwest::Client::new().head(url).send().await.map_err(
-                        |e| Error::InvalidValue {
-                            label: String::from("url"),
-                            message: format!("error querying url: {}", e),
-                        },
-                    )?;
+                let dur = std::time::Duration::from_secs(5);
+                let client = reqwest::ClientBuilder::new()
+                    .connect_timeout(dur)
+                    .timeout(dur)
+                    .build()
+                    .map_err(|e| {
+                        Error::internal_error(&format!(
+                            "failed to build reqwest client: {}",
+                            e
+                        ))
+                    })?;
+
+                let response = client.head(url).send().await.map_err(|e| {
+                    Error::InvalidValue {
+                        label: String::from("url"),
+                        message: format!("error querying url: {}", e),
+                    }
+                })?;
 
                 if !response.status().is_success() {
                     return Err(Error::InvalidValue {
@@ -178,13 +189,6 @@ impl super::Nexus {
                     });
                 }
 
-                // for images backed by a url, store the ETag as the version
-                let etag = response
-                    .headers()
-                    .get(reqwest::header::ETAG)
-                    .and_then(|x| x.to_str().ok())
-                    .map(|x| x.to_string());
-
                 let new_image_volume =
                     db::model::Volume::new(Uuid::new_v4(), volume_data);
                 let volume =
@@ -197,17 +201,75 @@ impl super::Nexus {
                     ),
                     volume_id: volume.id(),
                     url: Some(url.clone()),
-                    version: etag,
+                    distribution: params.distribution.name.to_string(),
+                    version: params.distribution.version,
                     digest: None, // not computed for URL type
                     block_size: db_block_size,
                     size: size.into(),
                 }
             }
 
-            params::ImageSource::Snapshot(_id) => {
+            params::ImageSource::Snapshot { id: _id } => {
                 return Err(Error::unavail(
                     &"creating images from snapshots not supported",
                 ));
+            }
+
+            params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine => {
+                // Each Propolis zone ships with an alpine.iso (it's part of the
+                // package-manifest.toml blobs), and for development purposes
+                // allow users to boot that. This should go away when that blob
+                // does.
+                let db_block_size = db::model::BlockSize::Traditional;
+                let block_size: u64 = db_block_size.to_bytes() as u64;
+
+                let volume_construction_request = sled_agent_client::types::VolumeConstructionRequest::Volume {
+                    block_size,
+                    sub_volumes: vec![
+                        sled_agent_client::types::VolumeConstructionRequest::File {
+                            block_size,
+                            path: "/opt/oxide/propolis-server/blob/alpine.iso".into(),
+                        }
+                    ],
+                    read_only_parent: None,
+                };
+
+                let volume_data =
+                    serde_json::to_string(&volume_construction_request)?;
+
+                // Nexus runs in its own zone so we can't ask the propolis zone
+                // image tar file for size of alpine.iso. Conservatively set the
+                // size to 100M (at the time of this comment, it's 41M). Any
+                // disk created from this image has to be larger than it.
+                let size: u64 = 100 * 1024 * 1024;
+                let size: external::ByteCount =
+                    size.try_into().map_err(|e| Error::InvalidValue {
+                        label: String::from("size"),
+                        message: format!("size is invalid: {}", e),
+                    })?;
+
+                let new_image_volume =
+                    db::model::Volume::new(Uuid::new_v4(), volume_data);
+                let volume =
+                    self.db_datastore.volume_create(new_image_volume).await?;
+
+                db::model::GlobalImage {
+                    identity: db::model::GlobalImageIdentity::new(
+                        Uuid::new_v4(),
+                        params.identity.clone(),
+                    ),
+                    volume_id: volume.id(),
+                    url: None,
+                    distribution: "alpine".parse().map_err(|_| {
+                        Error::internal_error(
+                            &"alpine is not a valid distribution?",
+                        )
+                    })?,
+                    version: "propolis-blob".into(),
+                    digest: None,
+                    block_size: db_block_size,
+                    size: size.into(),
+                }
             }
         };
 

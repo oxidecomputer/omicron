@@ -179,7 +179,7 @@ pub async fn create_instance_with_nics(
                 description: format!("instance {:?}", instance_name),
             },
             ncpus: InstanceCpuCount(4),
-            memory: ByteCount::from_mebibytes_u32(256),
+            memory: ByteCount::from_gibibytes_u32(1),
             hostname: String::from("the_host"),
             user_data:
                 b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"

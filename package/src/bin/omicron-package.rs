@@ -5,6 +5,7 @@
 //! Utility for bundling target binaries as tarfiles.
 
 use anyhow::{anyhow, bail, Context, Result};
+use clap::{Parser, Subcommand};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use omicron_package::{parse, BuildCommand, DeployCommand};
@@ -16,7 +17,6 @@ use std::env;
 use std::fs::create_dir_all;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use structopt::StructOpt;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 
@@ -24,29 +24,30 @@ use omicron_package::{Config, ExternalPackage, ExternalPackageSource};
 use omicron_zone_package::package::Progress;
 
 /// All packaging subcommands.
-#[derive(Debug, StructOpt)]
+#[derive(Debug, Subcommand)]
 enum SubCommand {
-    #[structopt(flatten)]
+    #[clap(flatten)]
     Build(BuildCommand),
-    #[structopt(flatten)]
+    #[clap(flatten)]
     Deploy(DeployCommand),
 }
 
-#[derive(Debug, StructOpt)]
-#[structopt(name = "packaging tool")]
+#[derive(Debug, Parser)]
+#[clap(name = "packaging tool")]
 struct Args {
     /// The path to the build manifest TOML file.
     ///
     /// Defaults to "package-manifest.toml".
-    #[structopt(
+    #[clap(
         short,
         long,
         default_value = "package-manifest.toml",
-        help = "Path to package manifest toml file"
+        help = "Path to package manifest toml file",
+        action
     )]
     manifest: PathBuf,
 
-    #[structopt(subcommand)]
+    #[clap(subcommand)]
     subcommand: SubCommand,
 }
 
@@ -526,7 +527,7 @@ impl ProgressUI {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let args = Args::from_args_safe().map_err(|err| anyhow!(err))?;
+    let args = Args::try_parse()?;
     let config = parse::<_, Config>(&args.manifest)?;
 
     // Use a CWD that is the root of the Omicron repository.

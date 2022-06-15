@@ -4,13 +4,15 @@
 
 //! API for controlling multiple instances on a sled.
 
-use crate::illumos::dladm::PhysicalLink;
+use crate::illumos::dladm::Etherstub;
 use crate::illumos::vnic::VnicAllocator;
 use crate::nexus::NexusClient;
 use crate::opte::OptePortAllocator;
 use crate::params::{
     InstanceHardware, InstanceMigrateParams, InstanceRuntimeStateRequested,
+    InstanceSerialConsoleData,
 };
+use crate::serial::ByteOffset;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use slog::Logger;
 use std::collections::BTreeMap;
@@ -27,6 +29,9 @@ use crate::instance::MockInstance as Instance;
 pub enum Error {
     #[error("Instance error: {0}")]
     Instance(#[from] crate::instance::Error),
+
+    #[error("No such instance ID: {0}")]
+    NoSuchInstance(Uuid),
 }
 
 struct InstanceManagerInternal {
@@ -54,7 +59,7 @@ impl InstanceManager {
     pub fn new(
         log: Logger,
         nexus_client: Arc<NexusClient>,
-        physical_link: PhysicalLink,
+        etherstub: Etherstub,
         underlay_addr: Ipv6Addr,
     ) -> InstanceManager {
         InstanceManager {
@@ -62,7 +67,7 @@ impl InstanceManager {
                 log: log.new(o!("component" => "InstanceManager")),
                 nexus_client,
                 instances: Mutex::new(BTreeMap::new()),
-                vnic_allocator: VnicAllocator::new("Instance", physical_link),
+                vnic_allocator: VnicAllocator::new("Instance", etherstub),
                 underlay_addr,
                 port_allocator: OptePortAllocator::new(),
             }),
@@ -84,7 +89,7 @@ impl InstanceManager {
             "instance_ensure {} -> {:?}", instance_id, target
         );
 
-        let target_propolis_id = initial_hardware.runtime.propolis_uuid;
+        let target_propolis_id = initial_hardware.runtime.propolis_id;
 
         let (instance, maybe_instance_ticket) = {
             let mut instances = self.inner.instances.lock().unwrap();
@@ -162,6 +167,25 @@ impl InstanceManager {
 
         instance.transition(target).await.map_err(|e| e.into())
     }
+
+    pub async fn instance_serial_console_buffer_data(
+        &self,
+        instance_id: Uuid,
+        byte_offset: ByteOffset,
+        max_bytes: Option<usize>,
+    ) -> Result<InstanceSerialConsoleData, Error> {
+        let instance = {
+            let instances = self.inner.instances.lock().unwrap();
+            let (_, instance) = instances
+                .get(&instance_id)
+                .ok_or(Error::NoSuchInstance(instance_id))?;
+            instance.clone()
+        };
+        instance
+            .serial_console_buffer_data(byte_offset, max_bytes)
+            .await
+            .map_err(Error::from)
+    }
 }
 
 /// Represents membership of an instance in the [`InstanceManager`].
@@ -196,7 +220,7 @@ impl Drop for InstanceTicket {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::illumos::dladm::PhysicalLink;
+    use crate::illumos::dladm::Etherstub;
     use crate::illumos::{dladm::MockDladm, zone::MockZones};
     use crate::instance::MockInstance;
     use crate::mocks::MockNexusClient;
@@ -225,11 +249,11 @@ mod test {
         InstanceHardware {
             runtime: InstanceRuntimeState {
                 run_state: InstanceState::Creating,
-                sled_uuid: Uuid::new_v4(),
-                propolis_uuid: Uuid::new_v4(),
-                dst_propolis_uuid: None,
+                sled_id: Uuid::new_v4(),
+                propolis_id: Uuid::new_v4(),
+                dst_propolis_id: None,
                 propolis_addr: None,
-                migration_uuid: None,
+                migration_id: None,
                 ncpus: InstanceCpuCount(2),
                 memory: ByteCount::from_mebibytes_u32(512),
                 hostname: "myvm".to_string(),
@@ -260,7 +284,7 @@ mod test {
         let im = InstanceManager::new(
             log,
             nexus_client,
-            PhysicalLink("mylink".to_string()),
+            Etherstub("mylink".to_string()),
             std::net::Ipv6Addr::new(
                 0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
             ),
@@ -342,7 +366,7 @@ mod test {
         let im = InstanceManager::new(
             log,
             nexus_client,
-            PhysicalLink("mylink".to_string()),
+            Etherstub("mylink".to_string()),
             std::net::Ipv6Addr::new(
                 0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
             ),

@@ -4,10 +4,10 @@
 
 //! API for controlling a single instance.
 
-use crate::common::instance::{
-    Action as InstanceAction, InstanceStates, PROPOLIS_PORT,
+use crate::common::instance::{Action as InstanceAction, InstanceStates};
+use crate::illumos::running_zone::{
+    InstalledZone, RunCommandError, RunningZone,
 };
-use crate::illumos::running_zone::{InstalledZone, RunningZone};
 use crate::illumos::svc::wait_for_service;
 use crate::illumos::vnic::VnicAllocator;
 use crate::illumos::zone::{AddressRequest, PROPOLIS_ZONE_PREFIX};
@@ -18,9 +18,12 @@ use crate::opte::OptePortAllocator;
 use crate::params::NetworkInterface;
 use crate::params::{
     InstanceHardware, InstanceMigrateParams, InstanceRuntimeStateRequested,
+    InstanceSerialConsoleData,
 };
+use crate::serial::{ByteOffset, SerialConsoleBuffer};
 use anyhow::anyhow;
 use futures::lock::{Mutex, MutexGuard};
+use omicron_common::address::PROPOLIS_PORT;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::backoff;
 use propolis_client::api::DiskRequest;
@@ -78,6 +81,9 @@ pub enum Error {
 
     #[error(transparent)]
     Opte(#[from] crate::opte::Error),
+
+    #[error("Serial console buffer: {0}")]
+    Serial(#[from] crate::serial::Error),
 }
 
 // Issues read-only, idempotent HTTP requests at propolis until it responds with
@@ -212,6 +218,9 @@ struct InstanceInner {
     state: InstanceStates,
     running_state: Option<RunningState>,
 
+    // Task buffering the instance's serial console
+    serial_tty_task: Option<SerialConsoleBuffer>,
+
     // Connection to Nexus
     nexus_client: Arc<NexusClient>,
 }
@@ -297,12 +306,12 @@ impl InstanceInner {
         let migrate = match migrate {
             Some(params) => {
                 let migration_id =
-                    self.state.current().migration_uuid.ok_or_else(|| {
+                    self.state.current().migration_id.ok_or_else(|| {
                         Error::Migration(anyhow!("Missing Migration UUID"))
                     })?;
                 Some(propolis_client::api::InstanceMigrateInitiateRequest {
                     src_addr: params.src_propolis_addr,
-                    src_uuid: params.src_propolis_uuid,
+                    src_uuid: params.src_propolis_id,
                     migration_id,
                 })
             }
@@ -329,6 +338,12 @@ impl InstanceInner {
                 Ok(()) => info!(log, "State monitoring task complete"),
             }
         }));
+
+        if self.serial_tty_task.is_none() {
+            let ws_uri = client.instance_serial_console_ws_uri();
+            self.serial_tty_task =
+                Some(SerialConsoleBuffer::new(ws_uri, self.log.clone()));
+        }
 
         self.running_state = Some(RunningState {
             client,
@@ -398,6 +413,11 @@ mockall::mock! {
             &self,
             target: InstanceRuntimeStateRequested,
         ) -> Result<InstanceRuntimeState, Error>;
+        pub async fn serial_console_buffer_data(
+            &self,
+            byte_offset: ByteOffset,
+            max_bytes: Option<usize>,
+        ) -> Result<InstanceSerialConsoleData, Error>;
     }
     impl Clone for Instance {
         fn clone(&self) -> Self;
@@ -446,7 +466,7 @@ impl Instance {
                 // InstanceCpuCount here, to avoid any casting...
                 vcpus: initial.runtime.ncpus.0 as u8,
             },
-            propolis_id: initial.runtime.propolis_uuid,
+            propolis_id: initial.runtime.propolis_id,
             propolis_ip: initial.runtime.propolis_addr.unwrap().ip(),
             vnic_allocator,
             underlay_addr,
@@ -457,6 +477,7 @@ impl Instance {
             state: InstanceStates::new(initial.runtime),
             running_state: None,
             nexus_client,
+            serial_tty_task: None,
         };
 
         let inner = Arc::new(Mutex::new(instance));
@@ -516,37 +537,79 @@ impl Instance {
         info!(inner.log, "Created address {} for zone: {}", network, zname);
 
         // Run Propolis in the Zone.
+        let smf_service_name = "svc:/system/illumos/propolis-server";
+        let instance_name = format!("vm-{}", inner.propolis_id());
+        let smf_instance_name =
+            format!("{}:{}", smf_service_name, instance_name);
         let server_addr = SocketAddr::new(inner.propolis_ip, PROPOLIS_PORT);
-        running_zone.run_cmd(&[
-            crate::illumos::zone::SVCCFG,
-            "import",
-            "/var/svc/manifest/site/propolis-server/manifest.xml",
-        ])?;
 
+        // We intentionally do not import the service - it is placed under
+        // `/var/svc/manifest`, and should automatically be imported by
+        // configd.
+        //
+        // Insteady, we re-try adding the instance until it succeeds.
+        // This implies that the service was added successfully.
+        info!(
+            inner.log, "Adding service"; "smf_name" => &smf_instance_name
+        );
+        backoff::retry_notify(
+            backoff::internal_service_policy(),
+            || async {
+                running_zone
+                    .run_cmd(&[
+                        crate::illumos::zone::SVCCFG,
+                        "-s",
+                        smf_service_name,
+                        "add",
+                        &instance_name,
+                    ])
+                    .map_err(|e| backoff::BackoffError::transient(e))
+            },
+            |err: RunCommandError, delay| {
+                warn!(
+                    inner.log,
+                    "Failed to add {} as a service (retrying in {:?}): {}",
+                    instance_name,
+                    delay,
+                    err.to_string()
+                );
+            },
+        )
+        .await?;
+
+        info!(inner.log, "Adding service property group 'config'");
         running_zone.run_cmd(&[
             crate::illumos::zone::SVCCFG,
             "-s",
-            "system/illumos/propolis-server",
+            &smf_instance_name,
+            "addpg",
+            "config",
+            "astring",
+        ])?;
+
+        info!(inner.log, "Setting server address property"; "address" => &server_addr);
+        running_zone.run_cmd(&[
+            crate::illumos::zone::SVCCFG,
+            "-s",
+            &smf_instance_name,
             "setprop",
             &format!("config/server_addr={}", server_addr),
         ])?;
 
+        info!(inner.log, "Refreshing instance");
         running_zone.run_cmd(&[
             crate::illumos::zone::SVCCFG,
             "-s",
-            "svc:/system/illumos/propolis-server",
-            "add",
-            &format!("vm-{}", inner.propolis_id()),
+            &smf_instance_name,
+            "refresh",
         ])?;
 
+        info!(inner.log, "Enabling instance");
         running_zone.run_cmd(&[
             crate::illumos::zone::SVCADM,
             "enable",
             "-t",
-            &format!(
-                "svc:/system/illumos/propolis-server:vm-{}",
-                inner.propolis_id()
-            ),
+            &smf_instance_name,
         ])?;
 
         info!(inner.log, "Started propolis in zone: {}", zname);
@@ -666,12 +729,30 @@ impl Instance {
         }
         Ok(inner.state.current().clone())
     }
+
+    pub async fn serial_console_buffer_data(
+        &self,
+        byte_offset: ByteOffset,
+        max_bytes: Option<usize>,
+    ) -> Result<InstanceSerialConsoleData, Error> {
+        let inner = self.inner.lock().await;
+        if let Some(ttybuf) = &inner.serial_tty_task {
+            let (data, last_byte_offset) =
+                ttybuf.contents(byte_offset, max_bytes).await?;
+            Ok(InstanceSerialConsoleData {
+                data,
+                last_byte_offset: last_byte_offset as u64,
+            })
+        } else {
+            Err(crate::serial::Error::Existential.into())
+        }
+    }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::illumos::dladm::PhysicalLink;
+    use crate::illumos::dladm::Etherstub;
     use crate::mocks::MockNexusClient;
     use crate::opte::OptePortAllocator;
     use crate::params::InstanceStateRequested;
@@ -704,11 +785,11 @@ mod test {
         InstanceHardware {
             runtime: InstanceRuntimeState {
                 run_state: InstanceState::Creating,
-                sled_uuid: Uuid::new_v4(),
-                propolis_uuid: test_propolis_uuid(),
-                dst_propolis_uuid: None,
+                sled_id: Uuid::new_v4(),
+                propolis_id: test_propolis_uuid(),
+                dst_propolis_id: None,
                 propolis_addr: Some("[fd00:1de::74]:12400".parse().unwrap()),
-                migration_uuid: None,
+                migration_id: None,
                 ncpus: InstanceCpuCount(2),
                 memory: ByteCount::from_mebibytes_u32(512),
                 hostname: "myvm".to_string(),
@@ -742,7 +823,7 @@ mod test {
         let log = logger();
         let vnic_allocator = VnicAllocator::new(
             "Test".to_string(),
-            PhysicalLink("mylink".to_string()),
+            Etherstub("mylink".to_string()),
         );
         let port_allocator = OptePortAllocator::new();
         let nexus_client = MockNexusClient::default();

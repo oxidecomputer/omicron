@@ -69,6 +69,8 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<Oso, anyhow::Error> {
         SshKey::init(),
         Silo::init(),
         SiloUser::init(),
+        IdentityProvider::init(),
+        SamlIdentityProvider::init(),
         Sled::init(),
         UpdateAvailableArtifact::init(),
         UserBuiltin::init(),
@@ -105,6 +107,7 @@ pub enum Action {
     ModifyPolicy,
     CreateChild,
     Delete,
+    ListIdentityProviders, // only used during [`Nexus::identity_provider_list`]
 }
 
 impl oso::PolarClass for Action {
@@ -133,6 +136,7 @@ pub enum Perm {
     Modify,
     ListChildren,
     CreateChild,
+    ListIdentityProviders, // only used during [`Nexus::identity_provider_list`]
 }
 
 impl From<&Action> for Perm {
@@ -146,6 +150,7 @@ impl From<&Action> for Perm {
             Action::Delete => Perm::Modify,
             Action::ListChildren => Perm::ListChildren,
             Action::CreateChild => Perm::CreateChild,
+            Action::ListIdentityProviders => Perm::ListIdentityProviders,
         }
     }
 }
@@ -160,6 +165,7 @@ impl fmt::Display for Perm {
             Perm::Modify => "modify",
             Perm::ListChildren => "list_children",
             Perm::CreateChild => "create_child",
+            Perm::ListIdentityProviders => "list_identity_providers",
         })
     }
 }
