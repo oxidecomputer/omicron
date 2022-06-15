@@ -357,6 +357,7 @@ impl ServiceInner {
                 (request, (idx, bootstrap_addr))
             });
 
+        let rack_id = Uuid::new_v4();
         let allocations = requests_and_sleds.map(|(request, sled)| {
             let (idx, bootstrap_addr) = sled;
             info!(
@@ -373,7 +374,9 @@ impl ServiceInner {
                 bootstrap_addr,
                 SledAllocation {
                     initialization_request: SledAgentRequest {
+                        id: Uuid::new_v4(),
                         subnet,
+                        rack_id,
                         trust_quorum_share: maybe_rack_secret_shares
                             .as_mut()
                             .map(|shares_iter| {

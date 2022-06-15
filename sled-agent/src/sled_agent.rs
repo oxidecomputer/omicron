@@ -115,6 +115,7 @@ impl SledAgent {
         log: Logger,
         nexus_client: Arc<NexusClient>,
         sled_address: SocketAddrV6,
+        rack_id: Uuid,
     ) -> Result<SledAgent, Error> {
         let id = &config.id;
 
@@ -248,6 +249,7 @@ impl SledAgent {
             etherstub_vnic.clone(),
             *sled_address.ip(),
             services::Config::default(),
+            rack_id,
         )
         .await?;
 

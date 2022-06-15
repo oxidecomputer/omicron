@@ -75,6 +75,9 @@ CREATE TABLE omicron.public.sled (
     time_deleted TIMESTAMPTZ,
     rcgen INT NOT NULL,
 
+    /* FK into the Rack table */
+    rack_id UUID NOT NULL,
+
     /* The IP address and bound port of the sled agent server. */
     ip INET NOT NULL,
     port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
@@ -82,6 +85,11 @@ CREATE TABLE omicron.public.sled (
     /* The last address allocated to an Oxide service on this sled. */
     last_used_address INET NOT NULL
 );
+
+/* Add an index which lets us look up sleds on a rack */
+CREATE INDEX ON omicron.public.sled (
+    rack_id
+) WHERE time_deleted IS NULL;
 
 /*
  * Services
