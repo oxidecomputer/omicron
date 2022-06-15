@@ -643,7 +643,7 @@ async fn sic_create_instance_record(
         time_updated: Utc::now(),
     };
 
-    let new_instance = db::model::Instance::new(
+    let new_instance = db::model::VmInstance::new(
         instance_id,
         params.project_id,
         &params.create_params,
@@ -673,7 +673,7 @@ async fn sic_delete_instance_record(
     // failed, so update the state accordingly to allow deletion.
     let (.., authz_instance, db_instance) = LookupPath::new(&opctx, &datastore)
         .project_id(params.project_id)
-        .instance_name(&instance_name)
+        .vm_instance_name(&instance_name)
         .fetch()
         .await
         .map_err(ActionError::action_failed)?;
@@ -728,7 +728,7 @@ async fn sic_instance_ensure(
 
     let (.., authz_instance, db_instance) = LookupPath::new(&opctx, &datastore)
         .project_id(params.project_id)
-        .instance_name(&instance_name)
+        .vm_instance_name(&instance_name)
         .fetch()
         .await
         .map_err(ActionError::action_failed)?;

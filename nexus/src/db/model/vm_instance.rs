@@ -5,7 +5,7 @@
 use super::{ByteCount, Disk, Generation, InstanceCpuCount, InstanceState};
 use crate::db::collection_attach::DatastoreAttachTarget;
 use crate::db::identity::Resource;
-use crate::db::schema::{disk, instance};
+use crate::db::schema::{disk, vm_instance};
 use crate::external_api::params;
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
@@ -17,10 +17,10 @@ use uuid::Uuid;
 
 /// An Instance (VM).
 #[derive(Queryable, Insertable, Debug, Selectable, Resource)]
-#[diesel(table_name = instance)]
-pub struct Instance {
+#[diesel(table_name = vm_instance)]
+pub struct VmInstance {
     #[diesel(embed)]
-    identity: InstanceIdentity,
+    identity: VmInstanceIdentity,
 
     /// id for the project containing this Instance
     pub project_id: Uuid,
@@ -33,7 +33,7 @@ pub struct Instance {
     pub runtime_state: InstanceRuntimeState,
 }
 
-impl Instance {
+impl VmInstance {
     pub fn new(
         instance_id: Uuid,
         project_id: Uuid,
@@ -41,7 +41,7 @@ impl Instance {
         runtime: InstanceRuntimeState,
     ) -> Self {
         let identity =
-            InstanceIdentity::new(instance_id, params.identity.clone());
+            VmInstanceIdentity::new(instance_id, params.identity.clone());
         Self {
             identity,
             project_id,
@@ -56,9 +56,9 @@ impl Instance {
 }
 
 /// Conversion to the external API type.
-impl Into<external::Instance> for Instance {
-    fn into(self) -> external::Instance {
-        external::Instance {
+impl Into<external::VmInstance> for VmInstance {
+    fn into(self) -> external::VmInstance {
+        external::VmInstance {
             identity: self.identity(),
             project_id: self.project_id,
             ncpus: self.runtime().ncpus.into(),
@@ -69,11 +69,11 @@ impl Into<external::Instance> for Instance {
     }
 }
 
-impl DatastoreAttachTarget<Disk> for Instance {
+impl DatastoreAttachTarget<Disk> for VmInstance {
     type Id = Uuid;
 
-    type CollectionIdColumn = instance::dsl::id;
-    type CollectionTimeDeletedColumn = instance::dsl::time_deleted;
+    type CollectionIdColumn = vm_instance::dsl::id;
+    type CollectionTimeDeletedColumn = vm_instance::dsl::time_deleted;
 
     type ResourceIdColumn = disk::dsl::id;
     type ResourceCollectionIdColumn = disk::dsl::attach_instance_id;
@@ -85,7 +85,7 @@ impl DatastoreAttachTarget<Disk> for Instance {
 ///
 /// This state is owned by the sled agent running that Instance.
 #[derive(Clone, Debug, AsChangeset, Selectable, Insertable, Queryable)]
-#[diesel(table_name = instance)]
+#[diesel(table_name = vm_instance)]
 pub struct InstanceRuntimeState {
     /// runtime state of the Instance
     #[diesel(column_name = state)]

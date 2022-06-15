@@ -220,9 +220,9 @@ impl<'a> LookupPath<'a> {
     }
 
     /// Select a resource of type Instance, identified by its id
-    pub fn instance_id(self, id: Uuid) -> Instance<'a> {
-        Instance {
-            key: InstanceKey::PrimaryKey(Root { lookup_root: self }, id),
+    pub fn instance_id(self, id: Uuid) -> VmInstance<'a> {
+        VmInstance {
+            key: VmInstanceKey::PrimaryKey(Root { lookup_root: self }, id),
         }
     }
 
@@ -461,7 +461,7 @@ lookup_resource! {
 lookup_resource! {
     name = "Project",
     ancestors = [ "Silo", "Organization" ],
-    children = [ "Disk", "Instance", "Vpc" ],
+    children = [ "Disk", "VmInstance", "Vpc" ],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -477,7 +477,7 @@ lookup_resource! {
 }
 
 lookup_resource! {
-    name = "Instance",
+    name = "VmInstance",
     ancestors = [ "Silo", "Organization", "Project" ],
     children = [ "NetworkInterface" ],
     lookup_by_name = true,
@@ -487,7 +487,7 @@ lookup_resource! {
 
 lookup_resource! {
     name = "NetworkInterface",
-    ancestors = [ "Silo", "Organization", "Project", "Instance" ],
+    ancestors = [ "Silo", "Organization", "Project", "VmInstance" ],
     children = [],
     lookup_by_name = true,
     soft_deletes = true,
@@ -606,7 +606,7 @@ lookup_resource! {
 
 #[cfg(test)]
 mod test {
-    use super::Instance;
+    use super::VmInstance;
     use super::LookupPath;
     use super::Organization;
     use super::Project;
@@ -632,10 +632,10 @@ mod test {
         let leaf = LookupPath::new(&opctx, &datastore)
             .organization_name(&org_name)
             .project_name(&project_name)
-            .instance_name(&instance_name);
+            .vm_instance_name(&instance_name);
         assert!(matches!(&leaf,
-            Instance {
-                key: super::InstanceKey::Name(Project {
+            VmInstance {
+                key: super::VmInstanceKey::Name(Project {
                     key: super::ProjectKey::Name(Organization {
                         key: super::OrganizationKey::Name(_, o)
                     }, p)

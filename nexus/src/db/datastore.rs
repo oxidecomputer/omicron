@@ -54,13 +54,13 @@ use crate::db::{
     model::{
         ConsoleSession, Dataset, DatasetKind, Disk, DiskRuntimeState,
         Generation, GlobalImage, IdentityProvider, IncompleteNetworkInterface,
-        Instance, InstanceRuntimeState, Name, NetworkInterface, Organization,
+        InstanceRuntimeState, Name, NetworkInterface, Organization,
         OrganizationUpdate, OximeterInfo, ProducerEndpoint, Project,
         ProjectUpdate, Rack, Region, RoleAssignment, RoleBuiltin, RouterRoute,
         RouterRouteUpdate, Service, Silo, SiloUser, Sled, SshKey,
-        UpdateAvailableArtifact, UserBuiltin, Volume, VpcFirewallRule,
-        VpcRouter, VpcRouterUpdate, VpcSubnet, VpcSubnetUpdate, VpcUpdate,
-        Zpool,
+        UpdateAvailableArtifact, UserBuiltin, VmInstance, Volume,
+        VpcFirewallRule, VpcRouter, VpcRouterUpdate, VpcSubnet,
+        VpcSubnetUpdate, VpcUpdate, Zpool,
     },
     pagination::paginated,
     pagination::paginated_multicolumn,
@@ -1053,24 +1053,24 @@ impl DataStore {
     // what this function does under the hood).
     pub async fn project_create_instance(
         &self,
-        instance: Instance,
-    ) -> CreateResult<Instance> {
-        use db::schema::instance::dsl;
+        instance: VmInstance,
+    ) -> CreateResult<VmInstance> {
+        use db::schema::vm_instance::dsl;
 
         let gen = instance.runtime().gen;
         let name = instance.name().clone();
-        let instance: Instance = diesel::insert_into(dsl::instance)
+        let instance: VmInstance = diesel::insert_into(dsl::vm_instance)
             .values(instance)
             .on_conflict(dsl::id)
             .do_nothing()
-            .returning(Instance::as_returning())
+            .returning(VmInstance::as_returning())
             .get_result_async(self.pool())
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
                     e,
                     ErrorHandler::Conflict(
-                        ResourceType::Instance,
+                        ResourceType::VmInstance,
                         name.as_str(),
                     ),
                 )
@@ -1095,15 +1095,15 @@ impl DataStore {
         opctx: &OpContext,
         authz_project: &authz::Project,
         pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResultVec<Instance> {
+    ) -> ListResultVec<VmInstance> {
         opctx.authorize(authz::Action::ListChildren, authz_project).await?;
 
-        use db::schema::instance::dsl;
-        paginated(dsl::instance, dsl::name, &pagparams)
+        use db::schema::vm_instance::dsl;
+        paginated(dsl::vm_instance, dsl::name, &pagparams)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::project_id.eq(authz_project.id()))
-            .select(Instance::as_select())
-            .load_async::<Instance>(self.pool_authorized(opctx).await?)
+            .select(VmInstance::as_select())
+            .load_async::<VmInstance>(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
@@ -1115,8 +1115,8 @@ impl DataStore {
     pub async fn instance_refetch(
         &self,
         opctx: &OpContext,
-        authz_instance: &authz::Instance,
-    ) -> LookupResult<Instance> {
+        authz_instance: &authz::VmInstance,
+    ) -> LookupResult<VmInstance> {
         let (.., db_instance) = LookupPath::new(opctx, self)
             .instance_id(authz_instance.id())
             .fetch()
@@ -1143,9 +1143,9 @@ impl DataStore {
         instance_id: &Uuid,
         new_runtime: &InstanceRuntimeState,
     ) -> Result<bool, Error> {
-        use db::schema::instance::dsl;
+        use db::schema::vm_instance::dsl;
 
-        let updated = diesel::update(dsl::instance)
+        let updated = diesel::update(dsl::vm_instance)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(*instance_id))
             .filter(dsl::state_generation.lt(new_runtime.gen))
@@ -1155,7 +1155,7 @@ impl DataStore {
                     .or(dsl::target_propolis_id.eq(new_runtime.propolis_id)),
             )
             .set(new_runtime.clone())
-            .check_if_exists::<Instance>(*instance_id)
+            .check_if_exists::<VmInstance>(*instance_id)
             .execute_and_check(self.pool())
             .await
             .map(|r| match r.status {
@@ -1166,7 +1166,7 @@ impl DataStore {
                 public_error_from_diesel_pool(
                     e,
                     ErrorHandler::NotFoundByLookup(
-                        ResourceType::Instance,
+                        ResourceType::VmInstance,
                         LookupType::ById(*instance_id),
                     ),
                 )
@@ -1178,7 +1178,7 @@ impl DataStore {
     pub async fn project_delete_instance(
         &self,
         opctx: &OpContext,
-        authz_instance: &authz::Instance,
+        authz_instance: &authz::VmInstance,
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Delete, authz_instance).await?;
 
@@ -1188,7 +1188,7 @@ impl DataStore {
         // and also sets the state to "destroyed".
         use api::external::InstanceState as ApiInstanceState;
         use db::model::InstanceState as DbInstanceState;
-        use db::schema::{disk, instance};
+        use db::schema::{disk, vm_instance};
 
         let stopped = DbInstanceState::new(ApiInstanceState::Stopped);
         let failed = DbInstanceState::new(ApiInstanceState::Failed);
@@ -1201,17 +1201,17 @@ impl DataStore {
         let ok_to_detach_disk_state_labels: Vec<_> =
             ok_to_detach_disk_states.iter().map(|s| s.label()).collect();
 
-        let _instance = Instance::detach_resources(
+        let _instance = VmInstance::detach_resources(
             authz_instance.id(),
-            instance::table.into_boxed().filter(
-                instance::dsl::state.eq_any(ok_to_delete_instance_states),
+            vm_instance::table.into_boxed().filter(
+                vm_instance::dsl::state.eq_any(ok_to_delete_instance_states),
             ),
             disk::table.into_boxed().filter(
                 disk::dsl::disk_state.eq_any(ok_to_detach_disk_state_labels),
             ),
-            diesel::update(instance::dsl::instance).set((
-                instance::dsl::state.eq(destroyed),
-                instance::dsl::time_deleted.eq(Utc::now()),
+            diesel::update(vm_instance::dsl::vm_instance).set((
+                vm_instance::dsl::state.eq(destroyed),
+                vm_instance::dsl::time_deleted.eq(Utc::now()),
             )),
             diesel::update(disk::dsl::disk).set((
                 disk::dsl::disk_state.eq(detached_label),
@@ -1222,7 +1222,7 @@ impl DataStore {
         .await
         .map_err(|e| match e {
             DetachManyError::CollectionNotFound => Error::not_found_by_id(
-                ResourceType::Instance,
+                ResourceType::VmInstance,
                 &authz_instance.id(),
             ),
             DetachManyError::NoUpdate { collection } => {
@@ -1252,7 +1252,7 @@ impl DataStore {
     pub async fn instance_list_disks(
         &self,
         opctx: &OpContext,
-        authz_instance: &authz::Instance,
+        authz_instance: &authz::VmInstance,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<Disk> {
         use db::schema::disk::dsl;
@@ -1326,11 +1326,11 @@ impl DataStore {
     pub async fn instance_attach_disk(
         &self,
         opctx: &OpContext,
-        authz_instance: &authz::Instance,
+        authz_instance: &authz::VmInstance,
         authz_disk: &authz::Disk,
         max_disks: u32,
-    ) -> Result<(Instance, Disk), Error> {
-        use db::schema::{disk, instance};
+    ) -> Result<(VmInstance, Disk), Error> {
+        use db::schema::{disk, vm_instance};
 
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
         opctx.authorize(authz::Action::Modify, authz_disk).await?;
@@ -1355,12 +1355,12 @@ impl DataStore {
         let attached_label =
             api::external::DiskState::Attached(authz_instance.id()).label();
 
-        let (instance, disk) = Instance::attach_resource(
+        let (instance, disk) = VmInstance::attach_resource(
             authz_instance.id(),
             authz_disk.id(),
-            instance::table
+            vm_instance::table
                 .into_boxed()
-                .filter(instance::dsl::state.eq_any(ok_to_attach_instance_states)),
+                .filter(vm_instance::dsl::state.eq_any(ok_to_attach_instance_states)),
             disk::table
                 .into_boxed()
                 .filter(disk::dsl::disk_state.eq_any(ok_to_attach_disk_state_labels)),
@@ -1377,7 +1377,7 @@ impl DataStore {
             match e {
                 AttachError::CollectionNotFound => {
                     Err(Error::not_found_by_id(
-                        ResourceType::Instance,
+                        ResourceType::VmInstance,
                         &authz_instance.id(),
                     ))
                 },
@@ -1461,10 +1461,10 @@ impl DataStore {
     pub async fn instance_detach_disk(
         &self,
         opctx: &OpContext,
-        authz_instance: &authz::Instance,
+        authz_instance: &authz::VmInstance,
         authz_disk: &authz::Disk,
     ) -> Result<Disk, Error> {
-        use db::schema::{disk, instance};
+        use db::schema::{disk, vm_instance};
 
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
         opctx.authorize(authz::Action::Modify, authz_disk).await?;
@@ -1486,12 +1486,12 @@ impl DataStore {
 
         let detached_label = api::external::DiskState::Detached.label();
 
-        let disk = Instance::detach_resource(
+        let disk = VmInstance::detach_resource(
             authz_instance.id(),
             authz_disk.id(),
-            instance::table
+            vm_instance::table
                 .into_boxed()
-                .filter(instance::dsl::state.eq_any(ok_to_detach_instance_states)),
+                .filter(vm_instance::dsl::state.eq_any(ok_to_detach_instance_states)),
             disk::table
                 .into_boxed()
                 .filter(disk::dsl::disk_state.eq_any(ok_to_detach_disk_state_labels)),
@@ -1507,7 +1507,7 @@ impl DataStore {
             match e {
                 DetachError::CollectionNotFound => {
                     Err(Error::not_found_by_id(
-                        ResourceType::Instance,
+                        ResourceType::VmInstance,
                         &authz_instance.id(),
                     ))
                 },
@@ -1754,7 +1754,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_subnet: &authz::VpcSubnet,
-        authz_instance: &authz::Instance,
+        authz_instance: &authz::VmInstance,
         interface: IncompleteNetworkInterface,
     ) -> Result<NetworkInterface, network_interface::InsertError> {
         opctx
@@ -1795,14 +1795,14 @@ impl DataStore {
     pub async fn instance_delete_all_network_interfaces(
         &self,
         opctx: &OpContext,
-        authz_instance: &authz::Instance,
+        authz_instance: &authz::VmInstance,
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
 
         use db::schema::network_interface::dsl;
         let now = Utc::now();
         diesel::update(dsl::network_interface)
-            .filter(dsl::instance_id.eq(authz_instance.id()))
+            .filter(dsl::vm_instance_id.eq(authz_instance.id()))
             .filter(dsl::time_deleted.is_null())
             .set(dsl::time_deleted.eq(now))
             .execute_async(self.pool_authorized(opctx).await?)
@@ -1823,7 +1823,7 @@ impl DataStore {
     pub async fn instance_delete_network_interface(
         &self,
         opctx: &OpContext,
-        authz_instance: &authz::Instance,
+        authz_instance: &authz::VmInstance,
         authz_interface: &authz::NetworkInterface,
     ) -> Result<(), network_interface::DeleteError> {
         opctx
@@ -1857,7 +1857,7 @@ impl DataStore {
     pub(crate) async fn derive_guest_network_interface_info(
         &self,
         opctx: &OpContext,
-        authz_instance: &authz::Instance,
+        authz_instance: &authz::VmInstance,
     ) -> ListResultVec<sled_client_types::NetworkInterface> {
         opctx.authorize(authz::Action::ListChildren, authz_instance).await?;
 
@@ -1896,7 +1896,7 @@ impl DataStore {
         }
 
         let rows = network_interface::table
-            .filter(network_interface::instance_id.eq(authz_instance.id()))
+            .filter(network_interface::vm_instance_id.eq(authz_instance.id()))
             .filter(network_interface::time_deleted.is_null())
             .inner_join(
                 vpc_subnet::table
@@ -1931,7 +1931,7 @@ impl DataStore {
     pub async fn instance_list_network_interfaces(
         &self,
         opctx: &OpContext,
-        authz_instance: &authz::Instance,
+        authz_instance: &authz::VmInstance,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<NetworkInterface> {
         opctx.authorize(authz::Action::ListChildren, authz_instance).await?;
@@ -1939,7 +1939,7 @@ impl DataStore {
         use db::schema::network_interface::dsl;
         paginated(dsl::network_interface, dsl::name, &pagparams)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::instance_id.eq(authz_instance.id()))
+            .filter(dsl::vm_instance_id.eq(authz_instance.id()))
             .select(NetworkInterface::as_select())
             .load_async::<NetworkInterface>(self.pool_authorized(opctx).await?)
             .await
@@ -1950,7 +1950,7 @@ impl DataStore {
     pub async fn instance_update_network_interface(
         &self,
         opctx: &OpContext,
-        authz_instance: &authz::Instance,
+        authz_instance: &authz::VmInstance,
         authz_interface: &authz::NetworkInterface,
         updates: NetworkInterfaceUpdate,
     ) -> UpdateResult<NetworkInterface> {
@@ -1977,16 +1977,16 @@ impl DataStore {
         let instance_id = authz_instance.id();
         let interface_id = authz_interface.id();
         let find_primary_query = dsl::network_interface
-            .filter(dsl::instance_id.eq(instance_id))
+            .filter(dsl::vm_instance_id.eq(instance_id))
             .filter(dsl::is_primary.eq(true))
             .filter(dsl::time_deleted.is_null())
             .select(NetworkInterface::as_select());
 
         // This returns the state of the associated instance.
-        let instance_query = db::schema::instance::dsl::instance
-            .filter(db::schema::instance::dsl::id.eq(instance_id))
-            .filter(db::schema::instance::dsl::time_deleted.is_null())
-            .select(Instance::as_select());
+        let instance_query = db::schema::vm_instance::dsl::vm_instance
+            .filter(db::schema::vm_instance::dsl::id.eq(instance_id))
+            .filter(db::schema::vm_instance::dsl::time_deleted.is_null())
+            .select(VmInstance::as_select());
         let stopped =
             db::model::InstanceState::new(external::InstanceState::Stopped);
 

@@ -20,7 +20,7 @@ pub struct NetworkInterface {
     #[diesel(embed)]
     pub identity: NetworkInterfaceIdentity,
 
-    pub instance_id: Uuid,
+    pub vm_instance_id: Uuid,
     pub vpc_id: Uuid,
     pub subnet_id: Uuid,
     pub mac: MacAddr,
@@ -39,7 +39,7 @@ impl From<NetworkInterface> for external::NetworkInterface {
     fn from(iface: NetworkInterface) -> Self {
         Self {
             identity: iface.identity(),
-            instance_id: iface.instance_id,
+            vm_instance_id: iface.vm_instance_id,
             vpc_id: iface.vpc_id,
             subnet_id: iface.subnet_id,
             ip: iface.ip.ip(),

@@ -24,7 +24,7 @@ use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::Instance;
+use omicron_common::api::external::VmInstance;
 use omicron_common::api::external::Name;
 use omicron_nexus::TestInterfaces as _;
 use omicron_nexus::{external_api::params, Nexus};
@@ -118,7 +118,7 @@ async fn set_instance_state(
     client: &ClientTestContext,
     instance_url: &str,
     state: &str,
-) -> Instance {
+) -> VmInstance {
     let url = format!("{}/{}", instance_url, state);
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url)

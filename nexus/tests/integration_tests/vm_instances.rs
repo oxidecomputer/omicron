@@ -17,7 +17,7 @@ use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
-use omicron_common::api::external::Instance;
+use omicron_common::api::external::VmInstance;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Ipv4Net;
@@ -196,7 +196,7 @@ async fn test_instances_create_reboot_halt(
             .await
             .items;
     assert_eq!(network_interfaces.len(), 1);
-    assert_eq!(network_interfaces[0].instance_id, instance.identity.id);
+    assert_eq!(network_interfaces[0].vm_instance_id, instance.identity.id);
     assert_eq!(
         network_interfaces[0].identity.name,
         omicron_nexus::defaults::DEFAULT_PRIMARY_NIC_NAME
@@ -592,7 +592,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
             .execute()
             .await
             .expect("Failed to create first instance");
-    let _ = response.parsed_body::<Instance>().unwrap();
+    let _ = response.parsed_body::<VmInstance>().unwrap();
 
     // Try to create a _new_ instance, with the same IP address. Note that the
     // other data does not conflict yet.
@@ -645,7 +645,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
             .execute()
             .await
             .expect("Creating a new instance should succeed");
-    let instance = response.parsed_body::<Instance>().unwrap();
+    let instance = response.parsed_body::<VmInstance>().unwrap();
     assert_eq!(instance.identity.name, instance_params.identity.name);
 }
 
@@ -700,7 +700,7 @@ async fn test_instance_with_single_explicit_ip_address(
             .execute()
             .await
             .expect("Failed to create instance with two network interfaces");
-    let instance = response.parsed_body::<Instance>().unwrap();
+    let instance = response.parsed_body::<VmInstance>().unwrap();
 
     // Get the interface, and verify it has the requested address
     let url_interface = format!(
@@ -714,7 +714,7 @@ async fn test_instance_with_single_explicit_ip_address(
         .expect("Failed to get network interface for new instance")
         .parsed_body::<NetworkInterface>()
         .expect("Failed to parse a network interface");
-    assert_eq!(interface.instance_id, instance.identity.id);
+    assert_eq!(interface.vm_instance_id, instance.identity.id);
     assert_eq!(interface.identity.name, if0_params.identity.name);
     assert_eq!(
         interface.ip, requested_address,
@@ -817,7 +817,7 @@ async fn test_instance_with_new_custom_network_interfaces(
             .execute()
             .await
             .expect("Failed to create instance with two network interfaces");
-    let instance = response.parsed_body::<Instance>().unwrap();
+    let instance = response.parsed_body::<VmInstance>().unwrap();
 
     // Check that both interfaces actually appear correct.
     let ip_url = |subnet_name: &Name| {
@@ -844,7 +844,7 @@ async fn test_instance_with_new_custom_network_interfaces(
     let if0 = &interfaces.all_items[0];
     assert_eq!(if0.identity.name, if0_params.identity.name);
     assert_eq!(if0.identity.description, if0_params.identity.description);
-    assert_eq!(if0.instance_id, instance.identity.id);
+    assert_eq!(if0.vm_instance_id, instance.identity.id);
     assert_eq!(if0.ip, std::net::IpAddr::V4("172.30.0.5".parse().unwrap()));
 
     let interfaces1 = NexusRequest::iter_collection_authn::<NetworkInterface>(
@@ -869,7 +869,7 @@ async fn test_instance_with_new_custom_network_interfaces(
     assert_eq!(if1.identity.name, if1_params.identity.name);
     assert_eq!(if1.identity.description, if1_params.identity.description);
     assert_eq!(if1.ip, std::net::IpAddr::V4("172.31.0.5".parse().unwrap()));
-    assert_eq!(if1.instance_id, instance.identity.id);
+    assert_eq!(if1.vm_instance_id, instance.identity.id);
     assert_eq!(if0.vpc_id, if1.vpc_id);
     assert_ne!(
         if0.subnet_id, if1.subnet_id,
@@ -931,7 +931,7 @@ async fn test_instance_create_delete_network_interface(
             .execute()
             .await
             .expect("Failed to create instance with two network interfaces");
-    let instance = response.parsed_body::<Instance>().unwrap();
+    let instance = response.parsed_body::<VmInstance>().unwrap();
     let url_instance =
         format!("{}/{}", url_instances, instance.identity.name.as_str());
 
@@ -1181,7 +1181,7 @@ async fn test_instance_update_network_interfaces(
             .execute()
             .await
             .expect("Failed to create instance with two network interfaces");
-    let instance = response.parsed_body::<Instance>().unwrap();
+    let instance = response.parsed_body::<VmInstance>().unwrap();
     let url_instance =
         format!("{}/{}", url_instances, instance.identity.name.as_str());
     let url_interfaces = format!(
@@ -1312,7 +1312,7 @@ async fn test_instance_update_network_interfaces(
             assert_eq!(original_iface.mac, new_iface.mac);
             assert_eq!(original_iface.subnet_id, new_iface.subnet_id);
             assert_eq!(original_iface.vpc_id, new_iface.vpc_id);
-            assert_eq!(original_iface.instance_id, new_iface.instance_id);
+            assert_eq!(original_iface.vm_instance_id, new_iface.vm_instance_id);
         };
     verify_unchanged_attributes(&primary_iface, &updated_primary_iface);
 
@@ -1634,7 +1634,7 @@ async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
         .await
         .expect("Expected instance creation to work!");
 
-    let instance = response.parsed_body::<Instance>().unwrap();
+    let instance = response.parsed_body::<VmInstance>().unwrap();
 
     // Verify disk is attached to the instance
     let url_instance_disks = format!(
@@ -1739,7 +1739,7 @@ async fn test_attach_eight_disks_to_instance(
         .await
         .expect("Expected instance creation!");
 
-    let instance = response.parsed_body::<Instance>().unwrap();
+    let instance = response.parsed_body::<VmInstance>().unwrap();
 
     // Assert disks are attached
     let url_project_disks = format!(
@@ -2333,7 +2333,7 @@ async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
 async fn instance_get(
     client: &ClientTestContext,
     instance_url: &str,
-) -> Instance {
+) -> VmInstance {
     NexusRequest::object_get(client, instance_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -2346,7 +2346,7 @@ async fn instance_get(
 async fn instances_list(
     client: &ClientTestContext,
     instances_url: &str,
-) -> Vec<Instance> {
+) -> Vec<VmInstance> {
     NexusRequest::iter_collection_authn(client, instances_url, "", None)
         .await
         .expect("failed to list Instances")
@@ -2363,7 +2363,7 @@ async fn instance_post(
     client: &ClientTestContext,
     instance_url: &str,
     which: InstanceOp,
-) -> Instance {
+) -> VmInstance {
     let url = format!(
         "{}/{}",
         instance_url,
@@ -2386,7 +2386,7 @@ async fn instance_post(
     .unwrap()
 }
 
-fn instances_eq(instance1: &Instance, instance2: &Instance) {
+fn instances_eq(instance1: &VmInstance, instance2: &VmInstance) {
     identity_eq(&instance1.identity, &instance2.identity);
     assert_eq!(instance1.project_id, instance2.project_id);
 

@@ -81,7 +81,7 @@ table! {
 }
 
 table! {
-    instance (id) {
+    vm_instance (id) {
         id -> Uuid,
         name -> Text,
         description -> Text,
@@ -125,7 +125,7 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
-        instance_id -> Uuid,
+        vm_instance_id -> Uuid,
         vpc_id -> Uuid,
         subnet_id -> Uuid,
         mac -> Int8,
@@ -510,7 +510,7 @@ table! {
 allow_tables_to_appear_in_same_query!(
     dataset,
     disk,
-    instance,
+    vm_instance,
     metric_producer,
     network_interface,
     organization,

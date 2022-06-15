@@ -49,7 +49,7 @@ use omicron_common::api::external::to_list;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::Instance;
+use omicron_common::api::external::VmInstance;
 use omicron_common::api::external::NetworkInterface;
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteCreateParams;
@@ -1158,7 +1158,7 @@ async fn project_instances_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByName>,
     path_params: Path<ProjectPathParam>,
-) -> Result<HttpResponseOk<ResultsPage<Instance>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<VmInstance>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
@@ -1201,7 +1201,7 @@ async fn project_instances_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
     new_instance: TypedBody<params::InstanceCreate>,
-) -> Result<HttpResponseCreated<Instance>, HttpError> {
+) -> Result<HttpResponseCreated<VmInstance>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -1240,7 +1240,7 @@ struct InstancePathParam {
 async fn project_instances_get_instance(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstancePathParam>,
-) -> Result<HttpResponseOk<Instance>, HttpError> {
+) -> Result<HttpResponseOk<VmInstance>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -1303,7 +1303,7 @@ async fn project_instances_migrate_instance(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstancePathParam>,
     migrate_params: TypedBody<params::InstanceMigrate>,
-) -> Result<HttpResponseOk<Instance>, HttpError> {
+) -> Result<HttpResponseOk<VmInstance>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -1336,7 +1336,7 @@ async fn project_instances_migrate_instance(
 async fn project_instances_instance_reboot(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstancePathParam>,
-) -> Result<HttpResponseAccepted<Instance>, HttpError> {
+) -> Result<HttpResponseAccepted<VmInstance>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -1367,7 +1367,7 @@ async fn project_instances_instance_reboot(
 async fn project_instances_instance_start(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstancePathParam>,
-) -> Result<HttpResponseAccepted<Instance>, HttpError> {
+) -> Result<HttpResponseAccepted<VmInstance>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -1399,7 +1399,7 @@ async fn project_instances_instance_start(
 async fn project_instances_instance_stop(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstancePathParam>,
-) -> Result<HttpResponseAccepted<Instance>, HttpError> {
+) -> Result<HttpResponseAccepted<VmInstance>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();

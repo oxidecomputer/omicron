@@ -483,7 +483,7 @@ authz_resource! {
 }
 
 authz_resource! {
-    name = "Instance",
+    name = "VmInstance",
     parent = "Project",
     primary_key = Uuid,
     roles_allowed = false,
@@ -492,7 +492,7 @@ authz_resource! {
 
 authz_resource! {
     name = "NetworkInterface",
-    parent = "Instance",
+    parent = "VmInstance",
     primary_key = Uuid,
     roles_allowed = false,
     polar_snippet = InProject,

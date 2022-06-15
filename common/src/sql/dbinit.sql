@@ -425,7 +425,7 @@ CREATE TYPE omicron.public.instance_state AS ENUM (
  * Instance -- e.g., reboot concurrent with destroy or concurrent reboots or the
  * like.  Or changing # of CPUs or memory size.
  */
-CREATE TABLE omicron.public.instance (
+CREATE TABLE omicron.public.vm_instance (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
@@ -476,7 +476,7 @@ CREATE TABLE omicron.public.instance (
     hostname STRING(63) NOT NULL
 );
 
-CREATE UNIQUE INDEX ON omicron.public.instance (
+CREATE UNIQUE INDEX ON omicron.public.vm_instance (
     project_id,
     name
 ) WHERE
@@ -756,7 +756,7 @@ CREATE TABLE omicron.public.network_interface (
      * Note that interfaces are always attached to a particular instance.
      * IP addresses may be reserved, but this is a different resource.
      */
-    instance_id UUID NOT NULL,
+    vm_instance_id UUID NOT NULL,
 
     /* FK into VPC table */
     vpc_id UUID NOT NULL,
@@ -820,7 +820,7 @@ CREATE UNIQUE INDEX ON omicron.public.network_interface (
  * mostly used when setting a new primary interface for an instance.
  */
 CREATE UNIQUE INDEX ON omicron.public.network_interface (
-    instance_id,
+    vm_instance_id,
     name
 )
 STORING (vpc_id, subnet_id, is_primary)

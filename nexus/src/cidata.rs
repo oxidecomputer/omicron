@@ -1,4 +1,4 @@
-use crate::db::{identity::Resource, model::Instance};
+use crate::db::{identity::Resource, model::VmInstance};
 use fatfs::{FatType, FileSystem, FormatVolumeOptions, FsOptions};
 use num_integer::Integer;
 use omicron_common::api::external::Error;
@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 pub const MAX_USER_DATA_BYTES: usize = 32 * 1024; // 32 KiB
 
-impl Instance {
+impl VmInstance {
     pub fn generate_cidata(
         &self,
         public_keys: &[String],

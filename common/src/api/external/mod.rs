@@ -524,7 +524,7 @@ pub enum ResourceType {
     Dataset,
     Disk,
     Image,
-    Instance,
+    VmInstance,
     NetworkInterface,
     Rack,
     Service,
@@ -731,9 +731,9 @@ impl From<crate::api::internal::nexus::InstanceRuntimeState>
     }
 }
 
-/// Client view of an [`Instance`]
+/// Client view of an [`VmInstance`]
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct Instance {
+pub struct VmInstance {
     // TODO is flattening here the intent in RFD 4?
     #[serde(flatten)]
     pub identity: IdentityMetadata,
@@ -1824,7 +1824,7 @@ pub struct NetworkInterface {
     pub identity: IdentityMetadata,
 
     /// The Instance to which the interface belongs.
-    pub instance_id: Uuid,
+    pub vm_instance_id: Uuid,
 
     /// The VPC to which the interface belongs.
     pub vpc_id: Uuid,

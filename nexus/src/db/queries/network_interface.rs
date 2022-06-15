@@ -423,7 +423,7 @@ pub struct NextNicSlot {
         i16,
         db::schema::network_interface::dsl::slot,
         Uuid,
-        db::schema::network_interface::dsl::instance_id,
+        db::schema::network_interface::dsl::vm_instance_id,
     >,
 }
 
@@ -538,7 +538,7 @@ fn push_ensure_unique_vpc_expression<'a>(
     out.push_sql(" WHERE ");
     out.push_identifier(dsl::time_deleted::NAME)?;
     out.push_sql(" IS NULL AND ");
-    out.push_identifier(dsl::instance_id::NAME)?;
+    out.push_identifier(dsl::vm_instance_id::NAME)?;
     out.push_sql(" = ");
     out.push_bind_param::<sql_types::Uuid, Uuid>(instance_id)?;
     out.push_sql(" LIMIT 1), ");
@@ -651,7 +651,7 @@ fn push_ensure_unique_vpc_subnet_expression<'a>(
     out.push_sql(" FROM ");
     NETWORK_INTERFACE_FROM_CLAUSE.walk_ast(out.reborrow())?;
     out.push_sql(" WHERE ");
-    out.push_identifier(dsl::instance_id::NAME)?;
+    out.push_identifier(dsl::vm_instance_id::NAME)?;
     out.push_sql(" = ");
     out.push_bind_param::<sql_types::Uuid, Uuid>(instance_id)?;
     out.push_sql(" AND ");
@@ -884,7 +884,7 @@ fn push_interface_allocation_subquery<'a>(
 
     out.push_bind_param::<sql_types::Uuid, Uuid>(&query.interface.instance_id)?;
     out.push_sql(" AS ");
-    out.push_identifier(dsl::instance_id::NAME)?;
+    out.push_identifier(dsl::vm_instance_id::NAME)?;
     out.push_sql(", ");
 
     // Helper function to push a subquery selecting something from the CTE.
@@ -1085,7 +1085,7 @@ impl QueryFragment<Pg> for InsertQuery {
                 out.push_sql(", ");
                 out.push_identifier(dsl::time_deleted::NAME)?;
                 out.push_sql(", ");
-                out.push_identifier(dsl::instance_id::NAME)?;
+                out.push_identifier(dsl::vm_instance_id::NAME)?;
                 out.push_sql(", ");
                 out.push_identifier(dsl::vpc_id::NAME)?;
                 out.push_sql(", ");
@@ -1161,7 +1161,7 @@ impl QueryFragment<Pg> for InsertQueryValues {
         out.push_sql(", ");
         out.push_identifier(dsl::time_deleted::NAME)?;
         out.push_sql(", ");
-        out.push_identifier(dsl::instance_id::NAME)?;
+        out.push_identifier(dsl::vm_instance_id::NAME)?;
         out.push_sql(", ");
         out.push_identifier(dsl::vpc_id::NAME)?;
         out.push_sql(", ");
@@ -1204,7 +1204,7 @@ impl QueryFragment<Pg> for IsPrimaryNic {
         out.push_sql("SELECT NOT EXISTS(SELECT 1 FROM");
         NETWORK_INTERFACE_FROM_CLAUSE.walk_ast(out.reborrow())?;
         out.push_sql(" WHERE ");
-        out.push_identifier(dsl::instance_id::NAME)?;
+        out.push_identifier(dsl::vm_instance_id::NAME)?;
         out.push_sql(" = ");
         out.push_bind_param::<sql_types::Uuid, Uuid>(&self.instance_id)?;
         out.push_sql(" AND ");
@@ -1214,7 +1214,7 @@ impl QueryFragment<Pg> for IsPrimaryNic {
     }
 }
 
-type InstanceFromClause = FromClause<db::schema::instance::table>;
+type InstanceFromClause = FromClause<db::schema::vm_instance::table>;
 const INSTANCE_FROM_CLAUSE: InstanceFromClause = InstanceFromClause::new();
 
 /// Delete a network interface from an instance.
@@ -1341,7 +1341,7 @@ impl QueryFragment<Pg> for DeleteQuery {
         out.push_sql(" IS NULL) OR (SELECT COUNT(*) FROM ");
         NETWORK_INTERFACE_FROM_CLAUSE.walk_ast(out.reborrow())?;
         out.push_sql(" WHERE ");
-        out.push_identifier(dsl::instance_id::NAME)?;
+        out.push_identifier(dsl::vm_instance_id::NAME)?;
         out.push_sql(" = ");
         out.push_bind_param::<sql_types::Uuid, Uuid>(&self.instance_id)?;
         out.push_sql(" AND ");
@@ -1353,17 +1353,17 @@ impl QueryFragment<Pg> for DeleteQuery {
             &DeleteError::HAS_SECONDARIES_SENTINEL,
         )?;
         out.push_sql(") AS UUID)), instance AS MATERIALIZED (SELECT CAST(IF(EXISTS(SELECT ");
-        out.push_identifier(db::schema::instance::dsl::id::NAME)?;
+        out.push_identifier(db::schema::vm_instance::dsl::id::NAME)?;
         out.push_sql(" FROM ");
         INSTANCE_FROM_CLAUSE.walk_ast(out.reborrow())?;
         out.push_sql(" WHERE ");
-        out.push_identifier(db::schema::instance::dsl::id::NAME)?;
+        out.push_identifier(db::schema::vm_instance::dsl::id::NAME)?;
         out.push_sql(" = ");
         out.push_bind_param::<sql_types::Uuid, Uuid>(&self.instance_id)?;
         out.push_sql(" AND ");
-        out.push_identifier(db::schema::instance::dsl::time_deleted::NAME)?;
+        out.push_identifier(db::schema::vm_instance::dsl::time_deleted::NAME)?;
         out.push_sql(" IS NULL AND ");
-        out.push_identifier(db::schema::instance::dsl::state::NAME)?;
+        out.push_identifier(db::schema::vm_instance::dsl::state::NAME)?;
         out.push_sql(" = ");
         out.push_bind_param::<db::model::InstanceStateEnum, db::model::InstanceState>(&self.instance_state)?;
         out.push_sql("), ");
@@ -1860,7 +1860,7 @@ mod tests {
         assert_eq!(inserted.id(), incomplete.identity.id);
         assert_eq!(inserted.name(), &incomplete.identity.name);
         assert_eq!(inserted.description(), incomplete.identity.description);
-        assert_eq!(inserted.instance_id, incomplete.instance_id);
+        assert_eq!(inserted.vm_instance_id, incomplete.instance_id);
         assert_eq!(inserted.vpc_id, incomplete.vpc_id);
         assert_eq!(inserted.subnet_id, incomplete.subnet.id());
         assert!(

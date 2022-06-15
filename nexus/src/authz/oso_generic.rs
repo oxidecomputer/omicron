@@ -56,7 +56,7 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<Oso, anyhow::Error> {
         Organization::init(),
         Project::init(),
         Disk::init(),
-        Instance::init(),
+        VmInstance::init(),
         NetworkInterface::init(),
         Vpc::init(),
         VpcRouter::init(),

@@ -42,7 +42,7 @@ impl super::Nexus {
         organization_name: &Name,
         project_name: &Name,
         params: &params::InstanceCreate,
-    ) -> CreateResult<db::model::Instance> {
+    ) -> CreateResult<db::model::VmInstance> {
         let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
             .organization_name(organization_name)
             .project_name(project_name)
@@ -151,7 +151,7 @@ impl super::Nexus {
         organization_name: &Name,
         project_name: &Name,
         pagparams: &DataPageParams<'_, Name>,
-    ) -> ListResultVec<db::model::Instance> {
+    ) -> ListResultVec<db::model::VmInstance> {
         let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
             .organization_name(organization_name)
             .project_name(project_name)
@@ -168,11 +168,11 @@ impl super::Nexus {
         organization_name: &Name,
         project_name: &Name,
         instance_name: &Name,
-    ) -> LookupResult<db::model::Instance> {
+    ) -> LookupResult<db::model::VmInstance> {
         let (.., db_instance) = LookupPath::new(opctx, &self.db_datastore)
             .organization_name(organization_name)
             .project_name(project_name)
-            .instance_name(instance_name)
+            .vm_instance_name(instance_name)
             .fetch()
             .await?;
         Ok(db_instance)
@@ -195,7 +195,7 @@ impl super::Nexus {
             LookupPath::new(opctx, &self.db_datastore)
                 .organization_name(organization_name)
                 .project_name(project_name)
-                .instance_name(instance_name)
+                .vm_instance_name(instance_name)
                 .fetch()
                 .await?;
 
@@ -209,11 +209,11 @@ impl super::Nexus {
         project_name: &Name,
         instance_name: &Name,
         params: params::InstanceMigrate,
-    ) -> UpdateResult<db::model::Instance> {
+    ) -> UpdateResult<db::model::VmInstance> {
         let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
             .organization_name(organization_name)
             .project_name(project_name)
-            .instance_name(instance_name)
+            .vm_instance_name(instance_name)
             .lookup_for(authz::Action::Modify)
             .await?;
 
@@ -243,7 +243,7 @@ impl super::Nexus {
         instance_id: Uuid,
         migration_id: Uuid,
         dst_propolis_id: Uuid,
-    ) -> UpdateResult<db::model::Instance> {
+    ) -> UpdateResult<db::model::VmInstance> {
         let (.., authz_instance, db_instance) =
             LookupPath::new(opctx, &self.db_datastore)
                 .instance_id(instance_id)
@@ -274,7 +274,7 @@ impl super::Nexus {
         organization_name: &Name,
         project_name: &Name,
         instance_name: &Name,
-    ) -> UpdateResult<db::model::Instance> {
+    ) -> UpdateResult<db::model::VmInstance> {
         // To implement reboot, we issue a call to the sled agent to set a
         // runtime state of "reboot". We cannot simply stop the Instance and
         // start it again here because if we crash in the meantime, we might
@@ -290,7 +290,7 @@ impl super::Nexus {
             LookupPath::new(opctx, &self.db_datastore)
                 .organization_name(organization_name)
                 .project_name(project_name)
-                .instance_name(instance_name)
+                .vm_instance_name(instance_name)
                 .fetch()
                 .await?;
         let requested = InstanceRuntimeStateRequested {
@@ -314,12 +314,12 @@ impl super::Nexus {
         organization_name: &Name,
         project_name: &Name,
         instance_name: &Name,
-    ) -> UpdateResult<db::model::Instance> {
+    ) -> UpdateResult<db::model::VmInstance> {
         let (.., authz_instance, db_instance) =
             LookupPath::new(opctx, &self.db_datastore)
                 .organization_name(organization_name)
                 .project_name(project_name)
-                .instance_name(instance_name)
+                .vm_instance_name(instance_name)
                 .fetch()
                 .await?;
         let requested = InstanceRuntimeStateRequested {
@@ -343,12 +343,12 @@ impl super::Nexus {
         organization_name: &Name,
         project_name: &Name,
         instance_name: &Name,
-    ) -> UpdateResult<db::model::Instance> {
+    ) -> UpdateResult<db::model::VmInstance> {
         let (.., authz_instance, db_instance) =
             LookupPath::new(opctx, &self.db_datastore)
                 .organization_name(organization_name)
                 .project_name(project_name)
-                .instance_name(instance_name)
+                .vm_instance_name(instance_name)
                 .fetch()
                 .await?;
         let requested = InstanceRuntimeStateRequested {
@@ -368,7 +368,7 @@ impl super::Nexus {
     /// Returns the SledAgentClient for the host where this Instance is running.
     pub(crate) async fn instance_sled(
         &self,
-        instance: &db::model::Instance,
+        instance: &db::model::VmInstance,
     ) -> Result<Arc<SledAgentClient>, Error> {
         let sa_id = &instance.runtime().sled_id;
         self.sled_client(&sa_id).await
@@ -419,8 +419,8 @@ impl super::Nexus {
     pub(crate) async fn instance_set_runtime(
         &self,
         opctx: &OpContext,
-        authz_instance: &authz::Instance,
-        db_instance: &db::model::Instance,
+        authz_instance: &authz::VmInstance,
+        db_instance: &db::model::VmInstance,
         requested: InstanceRuntimeStateRequested,
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
@@ -543,7 +543,7 @@ impl super::Nexus {
         let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
             .organization_name(organization_name)
             .project_name(project_name)
-            .instance_name(instance_name)
+            .vm_instance_name(instance_name)
             .lookup_for(authz::Action::ListChildren)
             .await?;
         self.db_datastore
@@ -570,7 +570,7 @@ impl super::Nexus {
         let (.., authz_instance, _) =
             LookupPath::new(opctx, &self.db_datastore)
                 .project_id(authz_project.id())
-                .instance_name(instance_name)
+                .vm_instance_name(instance_name)
                 .fetch()
                 .await?;
 
@@ -618,7 +618,7 @@ impl super::Nexus {
         let (.., authz_instance, _) =
             LookupPath::new(opctx, &self.db_datastore)
                 .project_id(authz_project.id())
-                .instance_name(instance_name)
+                .vm_instance_name(instance_name)
                 .fetch()
                 .await?;
 
@@ -658,7 +658,7 @@ impl super::Nexus {
             LookupPath::new(opctx, &self.db_datastore)
                 .organization_name(organization_name)
                 .project_name(project_name)
-                .instance_name(instance_name)
+                .vm_instance_name(instance_name)
                 .fetch()
                 .await?;
 
@@ -724,7 +724,7 @@ impl super::Nexus {
         let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
             .organization_name(organization_name)
             .project_name(project_name)
-            .instance_name(instance_name)
+            .vm_instance_name(instance_name)
             .lookup_for(authz::Action::ListChildren)
             .await?;
         self.db_datastore
@@ -744,7 +744,7 @@ impl super::Nexus {
         let (.., db_interface) = LookupPath::new(opctx, &self.db_datastore)
             .organization_name(organization_name)
             .project_name(project_name)
-            .instance_name(instance_name)
+            .vm_instance_name(instance_name)
             .network_interface_name(interface_name)
             .fetch()
             .await?;
@@ -764,7 +764,7 @@ impl super::Nexus {
         let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
             .organization_name(organization_name)
             .project_name(project_name)
-            .instance_name(instance_name)
+            .vm_instance_name(instance_name)
             .lookup_for(authz::Action::Modify)
             .await?;
         let (.., authz_interface) = LookupPath::new(opctx, &self.db_datastore)
@@ -798,7 +798,7 @@ impl super::Nexus {
             LookupPath::new(opctx, &self.db_datastore)
                 .organization_name(organization_name)
                 .project_name(project_name)
-                .instance_name(instance_name)
+                .vm_instance_name(instance_name)
                 .fetch_for(authz::Action::Modify)
                 .await?;
         let (.., authz_interface) = LookupPath::new(opctx, &self.db_datastore)
