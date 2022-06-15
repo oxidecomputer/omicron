@@ -131,25 +131,7 @@ impl Server {
         // Wait until RSS handoff completes.
         let opctx = apictx.nexus.opctx_for_background();
         apictx.nexus.await_rack_initialization(&opctx).await;
-        apictx.nexus
-            .start_background_tasks()
-            .map_err(|e| e.to_string())?;
-
-        // TODO: What triggers background tasks to execute?
-        //
-        //  - Perhaps the API is exposed to tests?
-        //  - Perhaps the invocation of that API is controlled by config
-        //  options?
-        //
-        // TODO: services we need to start:
-        //
-        // Datasets:
-        // - Crucible (as a dataset on each unique zpool)
-        // - Clickhouse (as a dataset on a zpool)
-        // - CRDB (prolly just check it exists, period)
-        //
-        // - Oximeter (as a service)
-        // - Nexus (again, maybe just check it exists at all)
+        apictx.nexus.start_background_tasks().map_err(|e| e.to_string())?;
 
         let http_server_starter_external = dropshot::HttpServerStarter::new(
             &config.runtime.dropshot_external,

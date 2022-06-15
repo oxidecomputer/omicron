@@ -13,13 +13,15 @@ use std::net::SocketAddrV6;
 use uuid::Uuid;
 
 /// Database representation of a Sled.
-#[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
+#[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset, PartialEq)]
 #[diesel(table_name = sled)]
 pub struct Sled {
     #[diesel(embed)]
     identity: SledIdentity,
     time_deleted: Option<DateTime<Utc>>,
     rcgen: Generation,
+
+    pub rack_id: Uuid,
 
     // ServiceAddress (Sled Agent).
     pub ip: ipv6::Ipv6Addr,
@@ -30,7 +32,7 @@ pub struct Sled {
 }
 
 impl Sled {
-    pub fn new(id: Uuid, addr: SocketAddrV6) -> Self {
+    pub fn new(id: Uuid, addr: SocketAddrV6, rack_id: Uuid) -> Self {
         let last_used_address = {
             let mut segments = addr.ip().segments();
             segments[7] += omicron_common::address::RSS_RESERVED_ADDRESSES;
@@ -40,6 +42,7 @@ impl Sled {
             identity: SledIdentity::new(id),
             time_deleted: None,
             rcgen: Generation::new(),
+            rack_id,
             ip: ipv6::Ipv6Addr::from(addr.ip()),
             port: addr.port().into(),
             last_used_address,

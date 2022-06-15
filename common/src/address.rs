@@ -178,7 +178,7 @@ mod test {
 
         // Observe the first DNS subnet within this reserved rack subnet.
         let dns_subnets = rack_subnet.get_dns_subnets();
-        assert_eq!(DNS_REDUNDANCY, dns_subnets.len());
+        assert_eq!(DNS_REDUNDANCY, dns_subnets.len() as u32);
 
         // The DNS address and GZ address should be only differing by one.
         assert_eq!(

@@ -102,10 +102,7 @@ impl super::Nexus {
     ///    initialized.
     ///
     /// See RFD 278 for additional context.
-    pub async fn await_rack_initialization(
-        &self,
-        opctx: &OpContext
-    ) {
+    pub async fn await_rack_initialization(&self, opctx: &OpContext) {
         loop {
             let result = self.rack_lookup(&opctx, &self.rack_id).await;
             match result {
@@ -124,6 +121,5 @@ impl super::Nexus {
             }
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         }
-
     }
 }

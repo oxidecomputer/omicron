@@ -10,7 +10,7 @@ use std::net::Ipv6Addr;
 use uuid::Uuid;
 
 /// Representation of services which may run on Sleds.
-#[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
+#[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset, PartialEq)]
 #[diesel(table_name = service)]
 pub struct Service {
     #[diesel(embed)]

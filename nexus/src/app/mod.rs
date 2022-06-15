@@ -232,11 +232,13 @@ impl Nexus {
         }
     }
 
-    pub fn start_background_tasks(self: &Arc<Nexus>) -> Result<(), anyhow::Error> {
+    pub fn start_background_tasks(
+        self: &Arc<Nexus>,
+    ) -> Result<(), anyhow::Error> {
         let nexus = self.clone();
-        self.background_task_runner.set(
-            background::TaskRunner::new(nexus)
-        ).map_err(|error| anyhow!(error.to_string()))
+        self.background_task_runner
+            .set(background::TaskRunner::new(nexus))
+            .map_err(|error| anyhow!(error.to_string()))
     }
 
     /// Returns an [`OpContext`] used for authenticating external requests

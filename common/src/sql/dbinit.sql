@@ -75,6 +75,9 @@ CREATE TABLE omicron.public.sled (
     time_deleted TIMESTAMPTZ,
     rcgen INT NOT NULL,
 
+    /* FK into the Rack table */
+    rack_id UUID NOT NULL,
+
     /* The IP address and bound port of the sled agent server. */
     ip INET NOT NULL,
     port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
@@ -82,6 +85,12 @@ CREATE TABLE omicron.public.sled (
     /* The last address allocated to an Oxide service on this sled. */
     last_used_address INET NOT NULL
 );
+
+/* Add an index which lets us look up the sleds on a rack */
+CREATE INDEX ON omicron.public.sled (
+    rack_id
+) WHERE
+    time_deleted IS NULL;
 
 /*
  * Services
@@ -109,7 +118,13 @@ CREATE TABLE omicron.public.service (
 
 /* Add an index which lets us look up the services on a sled */
 CREATE INDEX ON omicron.public.service (
-    sled_id
+    sled_id,
+    kind
+);
+
+/* Add an index which lets us look up services of a particular kind on a sled */
+CREATE INDEX ON omicron.public.service (
+    kind
 );
 
 /*
@@ -131,6 +146,11 @@ CREATE TABLE omicron.public.Zpool (
 
     total_size INT NOT NULL
 );
+
+/* Create an index which allows looking up all zpools on a sled */
+CREATE INDEX on omicron.public.Zpool (
+    sled_id
+) WHERE time_deleted IS NULL;
 
 CREATE TYPE omicron.public.dataset_kind AS ENUM (
   'crucible',
@@ -161,6 +181,11 @@ CREATE TABLE omicron.public.Dataset (
     /* An upper bound on the amount of space that might be in-use */
     size_used INT
 );
+
+/* Create an index which allows looking up all datasets in a pool */
+CREATE INDEX on omicron.public.Dataset (
+    pool_id
+) WHERE time_deleted IS NULL;
 
 /* Create an index on the size usage for Crucible's allocation */
 CREATE INDEX on omicron.public.Dataset (

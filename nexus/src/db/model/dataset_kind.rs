@@ -4,12 +4,12 @@
 
 use super::impl_enum_type;
 use crate::internal_api;
+use omicron_common::address::{CLICKHOUSE_PORT, COCKROACH_PORT, CRUCIBLE_PORT};
 use serde::{Deserialize, Serialize};
 use std::io::Write;
-use omicron_common::address::{COCKROACH_PORT, CRUCIBLE_PORT, CLICKHOUSE_PORT};
 
 impl_enum_type!(
-    #[derive(SqlType, Debug, QueryId)]
+    #[derive(Clone, SqlType, Debug, QueryId)]
     #[diesel(postgres_type(name = "dataset_kind"))]
     pub struct DatasetKindEnum;
 
