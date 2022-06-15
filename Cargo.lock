@@ -294,7 +294,7 @@ dependencies = [
  "bitflags",
  "cexpr",
  "clang-sys",
- "clap 3.1.18",
+ "clap 3.2.1",
  "env_logger",
  "lazy_static",
  "lazycell",
