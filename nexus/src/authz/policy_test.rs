@@ -447,6 +447,7 @@ fn action_abbreviation(action: authz::Action) -> &'static str {
         authz::Action::ModifyPolicy => "MP",
         authz::Action::CreateChild => "CC",
         authz::Action::Delete => "D",
+        authz::Action::ListIdentityProviders => "LP",
     }
 }
 

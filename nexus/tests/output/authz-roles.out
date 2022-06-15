@@ -1,418 +1,418 @@
 resource: Fleet id "001de000-1334-4000-8000-000000000000"
 
-  USER                             Q  R LC RP  M MP CC  D
-  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-collaborator               ✗  ✓  ✓  ✓  ✗  ✗  ✓  ✗
-  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-admin                      ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-collaborator               ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-viewer                     ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-admin                 ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-collaborator          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-viewer                ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  USER                             Q  R LC RP  M MP CC  D LP
+  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-collaborator               ✗  ✓  ✓  ✓  ✗  ✗  ✓  ✗  ✗
+  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-admin                      ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-collaborator               ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-viewer                     ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-admin                 ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-collaborator          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-viewer                ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
 
 resource: Silo "silo1"
 
-  USER                             Q  R LC RP  M MP CC  D
-  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-collaborator               ✗  ✓  ✓  ✓  ✗  ✗  ✓  ✗
-  silo1-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-org1-admin                 ✗  ✓  ✗  ✓  ✗  ✗  ✗  ✗
-  silo1-org1-collaborator          ✗  ✓  ✗  ✓  ✗  ✗  ✗  ✗
-  silo1-org1-viewer                ✗  ✓  ✗  ✓  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-admin           ✗  ✓  ✗  ✓  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-collaborator    ✗  ✓  ✗  ✓  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-viewer          ✗  ✓  ✗  ✓  ✗  ✗  ✗  ✗
+  USER                             Q  R LC RP  M MP CC  D LP
+  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✓
+  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✓
+  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✓
+  silo1-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✓
+  silo1-collaborator               ✗  ✓  ✓  ✓  ✗  ✗  ✓  ✗  ✓
+  silo1-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✓
+  silo1-org1-admin                 ✗  ✓  ✗  ✓  ✗  ✗  ✗  ✗  ✓
+  silo1-org1-collaborator          ✗  ✓  ✗  ✓  ✗  ✗  ✗  ✗  ✓
+  silo1-org1-viewer                ✗  ✓  ✗  ✓  ✗  ✗  ✗  ✗  ✓
+  silo1-org1-proj1-admin           ✗  ✓  ✗  ✓  ✗  ✗  ✗  ✗  ✓
+  silo1-org1-proj1-collaborator    ✗  ✓  ✗  ✓  ✗  ✗  ✗  ✗  ✓
+  silo1-org1-proj1-viewer          ✗  ✓  ✗  ✓  ✗  ✗  ✗  ✗  ✓
 
 resource: Organization "silo1-org1"
 
-  USER                             Q  R LC RP  M MP CC  D
-  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-org1-admin                 ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-org1-collaborator          ✗  ✓  ✓  ✓  ✗  ✗  ✓  ✗
-  silo1-org1-viewer                ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  USER                             Q  R LC RP  M MP CC  D LP
+  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-admin                 ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-org1-collaborator          ✗  ✓  ✓  ✓  ✗  ✗  ✓  ✗  ✗
+  silo1-org1-viewer                ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
 
 resource: Project "silo1-org1-proj1"
 
-  USER                             Q  R LC RP  M MP CC  D
-  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-org1-admin                 ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-org1-collaborator          ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-org1-viewer                ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-admin           ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-org1-proj1-collaborator    ✗  ✓  ✓  ✓  ✗  ✗  ✓  ✗
-  silo1-org1-proj1-viewer          ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
+  USER                             Q  R LC RP  M MP CC  D LP
+  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-admin                 ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-org1-collaborator          ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-org1-viewer                ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-admin           ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-org1-proj1-collaborator    ✗  ✓  ✓  ✓  ✗  ✗  ✓  ✗  ✗
+  silo1-org1-proj1-viewer          ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
 
 resource: Disk "silo1-org1-proj1-disk1"
 
-  USER                             Q  R LC RP  M MP CC  D
-  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-org1-admin                 ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-org1-collaborator          ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-org1-viewer                ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-admin           ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-org1-proj1-collaborator    ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-org1-proj1-viewer          ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
+  USER                             Q  R LC RP  M MP CC  D LP
+  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-admin                 ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-org1-collaborator          ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-org1-viewer                ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-admin           ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-org1-proj1-collaborator    ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-org1-proj1-viewer          ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
 
 resource: Instance "silo1-org1-proj1-instance1"
 
-  USER                             Q  R LC RP  M MP CC  D
-  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-org1-admin                 ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-org1-collaborator          ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-org1-viewer                ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-admin           ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-org1-proj1-collaborator    ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-org1-proj1-viewer          ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
+  USER                             Q  R LC RP  M MP CC  D LP
+  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-admin                 ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-org1-collaborator          ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-org1-viewer                ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-admin           ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-org1-proj1-collaborator    ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-org1-proj1-viewer          ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
 
 resource: Vpc "silo1-org1-proj1-vpc1"
 
-  USER                             Q  R LC RP  M MP CC  D
-  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-org1-admin                 ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-org1-collaborator          ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-org1-viewer                ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-admin           ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-org1-proj1-collaborator    ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-org1-proj1-viewer          ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
+  USER                             Q  R LC RP  M MP CC  D LP
+  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-admin                 ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-org1-collaborator          ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-org1-viewer                ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-admin           ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-org1-proj1-collaborator    ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-org1-proj1-viewer          ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
 
 resource: VpcSubnet "silo1-org1-proj1-vpc1-subnet1"
 
-  USER                             Q  R LC RP  M MP CC  D
-  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-org1-admin                 ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-org1-collaborator          ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-org1-viewer                ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-admin           ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-org1-proj1-collaborator    ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-org1-proj1-viewer          ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
+  USER                             Q  R LC RP  M MP CC  D LP
+  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-admin                 ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-org1-collaborator          ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-org1-viewer                ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-admin           ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-org1-proj1-collaborator    ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-org1-proj1-viewer          ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
 
 resource: Project "silo1-org1-proj2"
 
-  USER                             Q  R LC RP  M MP CC  D
-  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-org1-admin                 ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-org1-collaborator          ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-org1-viewer                ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  USER                             Q  R LC RP  M MP CC  D LP
+  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-admin                 ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-org1-collaborator          ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-org1-viewer                ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
 
 resource: Disk "silo1-org1-proj2-disk1"
 
-  USER                             Q  R LC RP  M MP CC  D
-  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-org1-admin                 ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-org1-collaborator          ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-org1-viewer                ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  USER                             Q  R LC RP  M MP CC  D LP
+  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-admin                 ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-org1-collaborator          ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-org1-viewer                ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
 
 resource: Instance "silo1-org1-proj2-instance1"
 
-  USER                             Q  R LC RP  M MP CC  D
-  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-org1-admin                 ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-org1-collaborator          ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-org1-viewer                ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  USER                             Q  R LC RP  M MP CC  D LP
+  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-admin                 ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-org1-collaborator          ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-org1-viewer                ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
 
 resource: Vpc "silo1-org1-proj2-vpc1"
 
-  USER                             Q  R LC RP  M MP CC  D
-  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-org1-admin                 ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-org1-collaborator          ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-org1-viewer                ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  USER                             Q  R LC RP  M MP CC  D LP
+  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-admin                 ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-org1-collaborator          ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-org1-viewer                ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
 
 resource: VpcSubnet "silo1-org1-proj2-vpc1-subnet1"
 
-  USER                             Q  R LC RP  M MP CC  D
-  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-org1-admin                 ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-org1-collaborator          ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-org1-viewer                ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  USER                             Q  R LC RP  M MP CC  D LP
+  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-admin                 ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-org1-collaborator          ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-org1-viewer                ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
 
 resource: Organization "silo1-org2"
 
-  USER                             Q  R LC RP  M MP CC  D
-  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-org1-admin                 ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-collaborator          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-viewer                ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  USER                             Q  R LC RP  M MP CC  D LP
+  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-admin                 ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-collaborator          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-viewer                ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
 
 resource: Project "silo1-org2-proj1"
 
-  USER                             Q  R LC RP  M MP CC  D
-  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-org1-admin                 ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-collaborator          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-viewer                ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  USER                             Q  R LC RP  M MP CC  D LP
+  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-admin                 ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-collaborator          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-viewer                ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
 
 resource: Disk "silo1-org2-proj1-disk1"
 
-  USER                             Q  R LC RP  M MP CC  D
-  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-org1-admin                 ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-collaborator          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-viewer                ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  USER                             Q  R LC RP  M MP CC  D LP
+  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-admin                 ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-collaborator          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-viewer                ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
 
 resource: Instance "silo1-org2-proj1-instance1"
 
-  USER                             Q  R LC RP  M MP CC  D
-  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-org1-admin                 ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-collaborator          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-viewer                ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  USER                             Q  R LC RP  M MP CC  D LP
+  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-admin                 ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-collaborator          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-viewer                ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
 
 resource: Vpc "silo1-org2-proj1-vpc1"
 
-  USER                             Q  R LC RP  M MP CC  D
-  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-org1-admin                 ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-collaborator          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-viewer                ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  USER                             Q  R LC RP  M MP CC  D LP
+  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-admin                 ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-collaborator          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-viewer                ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
 
 resource: VpcSubnet "silo1-org2-proj1-vpc1-subnet1"
 
-  USER                             Q  R LC RP  M MP CC  D
-  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  silo1-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-org1-admin                 ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-collaborator          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-viewer                ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  USER                             Q  R LC RP  M MP CC  D LP
+  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  silo1-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-admin                 ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-collaborator          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-viewer                ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
 
 resource: Silo "silo2"
 
-  USER                             Q  R LC RP  M MP CC  D
-  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-admin                      ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-collaborator               ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-viewer                     ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-admin                 ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-collaborator          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-viewer                ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  USER                             Q  R LC RP  M MP CC  D LP
+  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-admin                      ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-collaborator               ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-viewer                     ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-admin                 ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-collaborator          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-viewer                ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
 
 resource: Organization "silo2-org1"
 
-  USER                             Q  R LC RP  M MP CC  D
-  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-admin                      ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-collaborator               ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-viewer                     ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-admin                 ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-collaborator          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-viewer                ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  USER                             Q  R LC RP  M MP CC  D LP
+  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-admin                      ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-collaborator               ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-viewer                     ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-admin                 ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-collaborator          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-viewer                ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
 
 resource: Project "silo2-org1-proj1"
 
-  USER                             Q  R LC RP  M MP CC  D
-  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-admin                      ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-collaborator               ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-viewer                     ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-admin                 ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-collaborator          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-viewer                ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  USER                             Q  R LC RP  M MP CC  D LP
+  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-admin                      ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-collaborator               ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-viewer                     ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-admin                 ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-collaborator          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-viewer                ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
 
 resource: Disk "silo2-org1-proj1-disk1"
 
-  USER                             Q  R LC RP  M MP CC  D
-  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-admin                      ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-collaborator               ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-viewer                     ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-admin                 ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-collaborator          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-viewer                ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  USER                             Q  R LC RP  M MP CC  D LP
+  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-admin                      ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-collaborator               ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-viewer                     ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-admin                 ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-collaborator          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-viewer                ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
 
 resource: Instance "silo2-org1-proj1-instance1"
 
-  USER                             Q  R LC RP  M MP CC  D
-  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-admin                      ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-collaborator               ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-viewer                     ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-admin                 ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-collaborator          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-viewer                ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  USER                             Q  R LC RP  M MP CC  D LP
+  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-admin                      ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-collaborator               ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-viewer                     ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-admin                 ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-collaborator          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-viewer                ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
 
 resource: Vpc "silo2-org1-proj1-vpc1"
 
-  USER                             Q  R LC RP  M MP CC  D
-  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-admin                      ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-collaborator               ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-viewer                     ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-admin                 ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-collaborator          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-viewer                ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  USER                             Q  R LC RP  M MP CC  D LP
+  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-admin                      ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-collaborator               ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-viewer                     ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-admin                 ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-collaborator          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-viewer                ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
 
 resource: VpcSubnet "silo2-org1-proj1-vpc1-subnet1"
 
-  USER                             Q  R LC RP  M MP CC  D
-  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓
-  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗
-  silo1-admin                      ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-collaborator               ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-viewer                     ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-admin                 ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-collaborator          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-viewer                ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
-  silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  USER                             Q  R LC RP  M MP CC  D LP
+  fleet-admin                      ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-collaborator               ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
+  fleet-viewer                     ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  silo1-admin                      ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-collaborator               ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-viewer                     ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-admin                 ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-collaborator          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-viewer                ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
 
 ACTIONS:
 
@@ -424,4 +424,5 @@ ACTIONS:
   MP = ModifyPolicy
   CC = CreateChild
    D = Delete
+  LP = ListIdentityProviders
 
