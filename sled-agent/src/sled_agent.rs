@@ -170,9 +170,8 @@ impl SledAgent {
         // re-establish contact (i.e., if the Sled Agent crashed, but we wanted
         // to leave the running Zones intact).
         let zones = Zones::get()?;
-        let logs = vec![log.clone(); zones.len()];
         stream::iter(zones)
-            .zip(stream::iter(logs))
+            .zip(stream::iter(std::iter::repeat(log.clone())))
             .map(Ok::<_, crate::zone::AdmError>)
             .try_for_each_concurrent(
                 None,
@@ -198,9 +197,8 @@ impl SledAgent {
         // order. That should be OK, since we're definitely deleting the guest
         // VNICs before the xde devices, which is the main constraint.
         let vnics = Dladm::get_vnics()?;
-        let logs = vec![log.clone(); vnics.len()];
         stream::iter(vnics)
-            .zip(stream::iter(logs))
+            .zip(stream::iter(std::iter::repeat(log.clone())))
             .map(Ok::<_, crate::illumos::dladm::DeleteVnicError>)
             .try_for_each_concurrent(None, |(vnic, log)| async {
                 tokio::task::spawn_blocking(move || {
