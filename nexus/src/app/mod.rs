@@ -112,7 +112,7 @@ impl Nexus {
         authz: Arc<authz::Authz>,
     ) -> Arc<Nexus> {
         let pool = Arc::new(pool);
-        let my_sec_id = db::SecId::from(config.runtime.id);
+        let my_sec_id = db::SecId::from(config.deployment.id);
         let db_datastore = Arc::new(db::DataStore::new(Arc::clone(&pool)));
         let sec_store = Arc::new(db::CockroachDbSecStore::new(
             my_sec_id,
@@ -143,7 +143,7 @@ impl Nexus {
             populate_start(populate_ctx, Arc::clone(&db_datastore));
 
         let nexus = Nexus {
-            id: config.runtime.id,
+            id: config.deployment.id,
             rack_id,
             log: log.new(o!()),
             api_rack_identity: db::model::RackIdentity::new(rack_id),

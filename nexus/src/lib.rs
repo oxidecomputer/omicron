@@ -85,7 +85,7 @@ impl Server {
         rack_id: Uuid,
         log: &Logger,
     ) -> Result<Server, String> {
-        let log = log.new(o!("name" => config.runtime.id.to_string()));
+        let log = log.new(o!("name" => config.deployment.id.to_string()));
         info!(log, "setting up nexus server");
 
         let ctxlog = log.new(o!("component" => "ServerContext"));
@@ -93,7 +93,7 @@ impl Server {
         let apictx = ServerContext::new(rack_id, ctxlog, &config)?;
 
         let http_server_starter_external = dropshot::HttpServerStarter::new(
-            &config.runtime.dropshot_external,
+            &config.deployment.dropshot_external,
             external_api(),
             Arc::clone(&apictx),
             &log.new(o!("component" => "dropshot_external")),
@@ -101,7 +101,7 @@ impl Server {
         .map_err(|error| format!("initializing external server: {}", error))?;
 
         let http_server_starter_internal = dropshot::HttpServerStarter::new(
-            &config.runtime.dropshot_internal,
+            &config.deployment.dropshot_internal,
             internal_api(),
             Arc::clone(&apictx),
             &log.new(o!("component" => "dropshot_internal")),

@@ -7,7 +7,9 @@
 
 use anyhow::anyhow;
 use dropshot::ConfigLogging;
-use omicron_common::nexus_config::{InvalidTunable, LoadError, RuntimeConfig};
+use omicron_common::nexus_config::{
+    DeploymentConfig, InvalidTunable, LoadError,
+};
 use serde::Deserialize;
 use serde::Serialize;
 use serde_with::DeserializeFromStr;
@@ -147,8 +149,8 @@ pub struct Config {
     #[serde(flatten)]
     pub pkg: PackageConfig,
 
-    /// A variety of configuration parameters only known at runtime.
-    pub runtime: RuntimeConfig,
+    /// A variety of configuration parameters only known at deployment time.
+    pub deployment: DeploymentConfig,
 }
 
 impl Config {
@@ -214,7 +216,7 @@ mod test {
     use libc;
     use omicron_common::address::{Ipv6Subnet, RACK_PREFIX};
     use omicron_common::nexus_config::{
-        Database, LoadErrorKind, RuntimeConfig,
+        Database, DeploymentConfig, LoadErrorKind,
     };
     use std::fs;
     use std::net::{Ipv6Addr, SocketAddr};
@@ -288,7 +290,7 @@ mod test {
         let error = read_config("empty", "").expect_err("expected failure");
         if let LoadErrorKind::Parse(error) = &error.kind {
             assert_eq!(error.line_col(), None);
-            assert_eq!(error.to_string(), "missing field `runtime`");
+            assert_eq!(error.to_string(), "missing field `deployment`");
         } else {
             panic!(
                 "Got an unexpected error, expected Parse but got {:?}",
@@ -325,17 +327,17 @@ mod test {
             default_base_url = "http://example.invalid/"
             [tunables]
             max_vpc_ipv4_subnet_prefix = 27
-            [runtime]
+            [deployment]
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
-            [runtime.dropshot_external]
+            [deployment.dropshot_external]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
-            [runtime.dropshot_internal]
+            [deployment.dropshot_internal]
             bind_address = "10.1.2.3:4568"
             request_body_max_bytes = 1024
-            [runtime.subnet]
+            [deployment.subnet]
             net = "::/56"
-            [runtime.database]
+            [deployment.database]
             type = "from_dns"
             "##,
         )
@@ -344,7 +346,7 @@ mod test {
         assert_eq!(
             config,
             Config {
-                runtime: RuntimeConfig {
+                deployment: DeploymentConfig {
                     id: "28b90dc4-c22a-65ba-f49a-f051fe01208f".parse().unwrap(),
                     dropshot_external: ConfigDropshot {
                         bind_address: "10.1.2.3:4567"
@@ -403,17 +405,17 @@ mod test {
             if_exists = "fail"
             [timeseries_db]
             address = "[::1]:8123"
-            [runtime]
+            [deployment]
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
-            [runtime.dropshot_external]
+            [deployment.dropshot_external]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
-            [runtime.dropshot_internal]
+            [deployment.dropshot_internal]
             bind_address = "10.1.2.3:4568"
             request_body_max_bytes = 1024
-            [runtime.subnet]
+            [deployment.subnet]
             net = "::/56"
-            [runtime.database]
+            [deployment.database]
             type = "from_dns"
             "##,
         )
@@ -444,17 +446,17 @@ mod test {
             if_exists = "fail"
             [timeseries_db]
             address = "[::1]:8123"
-            [runtime]
+            [deployment]
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
-            [runtime.dropshot_external]
+            [deployment.dropshot_external]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
-            [runtime.dropshot_internal]
+            [deployment.dropshot_internal]
             bind_address = "10.1.2.3:4568"
             request_body_max_bytes = 1024
-            [runtime.subnet]
+            [deployment.subnet]
             net = "::/56"
-            [runtime.database]
+            [deployment.database]
             type = "from_dns"
             "##,
         )
@@ -499,17 +501,17 @@ mod test {
             default_base_url = "http://example.invalid/"
             [tunables]
             max_vpc_ipv4_subnet_prefix = 100
-            [runtime]
+            [deployment]
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
-            [runtime.dropshot_external]
+            [deployment.dropshot_external]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
-            [runtime.dropshot_internal]
+            [deployment.dropshot_internal]
             bind_address = "10.1.2.3:4568"
             request_body_max_bytes = 1024
-            [runtime.subnet]
+            [deployment.subnet]
             net = "::/56"
-            [runtime.database]
+            [deployment.database]
             type = "from_dns"
             "##,
         )
