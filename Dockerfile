@@ -16,7 +16,16 @@ WORKDIR /usr/src/omicron
 COPY . .
 
 WORKDIR /usr/src/omicron
-RUN tools/install_prerequisites.sh -y
+RUN apt-get update && apt-get install -y \
+	libpq-dev \
+	pkg-config \
+	xmlsec1 \
+	libxmlsec1-dev \
+	libxmlsec1-openssl \
+	libclang-dev \
+	libsqlite3-dev \
+	--no-install-recommends \
+	&& rm -rf /var/lib/apt/lists/*
 RUN cargo build --release
 
 # ------------------------------------------------------------------------------
