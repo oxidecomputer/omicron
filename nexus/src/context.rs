@@ -18,7 +18,7 @@ use authn::external::session_cookie::HttpAuthnSessionCookie;
 use authn::external::spoof::HttpAuthnSpoof;
 use authn::external::HttpAuthnScheme;
 use chrono::{DateTime, Duration, Utc};
-use internal_dns_client::names::SRV;
+use internal_dns_client::names::{ServiceName, SRV};
 use omicron_common::address::{Ipv6Subnet, AZ_PREFIX, COCKROACH_PORT};
 use omicron_common::api::external::Error;
 use omicron_common::nexus_config;
@@ -155,7 +155,7 @@ impl ServerContext {
                 info!(log, "Accessing DB url from DNS");
                 let response = resolver
                     .lookup_ip(
-                        &SRV::Service("cockroachdb".to_string()).to_string(),
+                        &SRV::Service(ServiceName::Cockroach).to_string(),
                     )
                     .await
                     .map_err(|e| format!("Failed to lookup IP: {}", e))?;

@@ -15,7 +15,7 @@ use crate::rack_setup::plan::service::{
 use crate::rack_setup::plan::sled::{
     Plan as SledPlan, PlanError as SledPlanError,
 };
-use internal_dns_client::names::{AAAA, SRV};
+use internal_dns_client::names::{ServiceName, AAAA, SRV};
 use nexus_client::{
     types as NexusTypes, Client as NexusClient, Error as NexusError,
 };
@@ -225,8 +225,7 @@ impl ServiceInner {
             .iter()
             .map(|dataset| (AAAA::Zone(dataset.id), dataset.address))
             .collect::<Vec<_>>();
-        let srv_key = SRV::Service("cockroachdb".into());
-
+        let srv_key = SRV::Service(ServiceName::Cockroach);
         self.dns_servers
             .get()
             .expect("DNS servers must be initialized first")
@@ -304,7 +303,7 @@ impl ServiceInner {
                 )
             })
             .collect::<Vec<_>>();
-        let srv_key = SRV::Service("nexus".into());
+        let srv_key = SRV::Service(ServiceName::Nexus);
         self.dns_servers
             .get()
             .expect("DNS servers must be initialized first")
@@ -370,7 +369,7 @@ impl ServiceInner {
         )
         .expect("Failed to create DNS resolver");
         let response = resolver
-            .lookup_ip(&SRV::Service("nexus".to_string()).to_string())
+            .lookup_ip(&SRV::Service(ServiceName::Nexus).to_string())
             .await
             .expect("Failed to lookup IP");
 

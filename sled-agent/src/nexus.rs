@@ -7,7 +7,7 @@ pub use crate::mocks::MockNexusClient as NexusClient;
 #[cfg(not(test))]
 pub use nexus_client::Client as NexusClient;
 
-use internal_dns_client::names::SRV;
+use internal_dns_client::names::{ServiceName, SRV};
 use omicron_common::address::{Ipv6Subnet, AZ_PREFIX, NEXUS_INTERNAL_PORT};
 use slog::Logger;
 use std::net::Ipv6Addr;
@@ -49,7 +49,7 @@ impl LazyNexusClient {
             internal_dns_client::multiclient::create_resolver(az_subnet)
                 .map_err(|e| format!("Failed to create DNS resolver: {}", e))?;
         let response = resolver
-            .lookup_ip(&SRV::Service("nexus".to_string()).to_string())
+            .lookup_ip(&SRV::Service(ServiceName::Nexus).to_string())
             .await
             .map_err(|e| format!("Failed to lookup Nexus IP: {}", e))?;
         let address = response.iter().next().ok_or_else(|| {

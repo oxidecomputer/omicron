@@ -7,17 +7,43 @@ use uuid::Uuid;
 
 const DNS_ZONE: &str = "control-plane.oxide.internal";
 
+pub enum ServiceName {
+    Nexus,
+    Cockroach,
+}
+
+impl fmt::Display for ServiceName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self {
+            ServiceName::Nexus => write!(f, "nexus"),
+            ServiceName::Cockroach => write!(f, "cockroachdb"),
+        }
+    }
+}
+
+pub enum BackendName {
+    SledAgent,
+}
+
+impl fmt::Display for BackendName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self {
+            BackendName::SledAgent => write!(f, "sledagent"),
+        }
+    }
+}
+
 pub enum SRV {
     /// A service identified and accessed by name, such as "nexus", "CRDB", etc.
     ///
     /// This is used in cases where services are interchangeable.
-    Service(String),
+    Service(ServiceName),
 
     /// A service identified by name and a unique identifier.
     ///
     /// This is used in cases where services are not interchangeable, such as
     /// for the Sled agent.
-    Backend(String, Uuid),
+    Backend(BackendName, Uuid),
 }
 
 impl fmt::Display for SRV {
