@@ -121,9 +121,7 @@ pub struct Server {
 }
 
 impl Server {
-    pub async fn start<'a>(
-        internal: InternalServer<'a>,
-    ) -> Result<Self, String> {
+    pub async fn start(internal: InternalServer<'_>) -> Result<Self, String> {
         let apictx = internal.apictx;
         let http_server_internal = internal.http_server_internal;
         let log = internal.log;

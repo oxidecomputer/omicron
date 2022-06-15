@@ -12,7 +12,7 @@ impl_enum_type!(
     #[diesel(postgres_type(name = "service_kind"))]
     pub struct ServiceKindEnum;
 
-    #[derive(Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
+    #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
     #[diesel(sql_type = ServiceKindEnum)]
     pub enum ServiceKind;
 

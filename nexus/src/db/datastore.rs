@@ -449,11 +449,9 @@ impl DataStore {
         db::schema::sled::table
             .filter(sled_dsl::time_deleted.is_null())
             .filter(sled_dsl::rack_id.eq(rack_id))
-            .left_outer_join(
-                db::schema::service::table.on(svc_dsl::sled_id
-                    .eq(sled_dsl::id)
-                    .and(svc_dsl::kind.eq(kind.clone()))),
-            )
+            .left_outer_join(db::schema::service::table.on(
+                svc_dsl::sled_id.eq(sled_dsl::id).and(svc_dsl::kind.eq(kind)),
+            ))
             .select(<(Sled, Option<Service>)>::as_select())
             .get_results(conn)
     }
@@ -476,11 +474,8 @@ impl DataStore {
 
         self.pool()
             .transaction(move |conn| {
-                let sleds_and_maybe_svcs = Self::sled_and_service_list_sync(
-                    conn,
-                    rack_id,
-                    kind.clone(),
-                )?;
+                let sleds_and_maybe_svcs =
+                    Self::sled_and_service_list_sync(conn, rack_id, kind)?;
 
                 // Split the set of returned sleds into "those with" and "those
                 // without" the requested service.
@@ -522,7 +517,7 @@ impl DataStore {
                         svc_id,
                         sled.id(),
                         address,
-                        kind.clone(),
+                        kind,
                     );
 
                     // TODO: Can we insert all the services at the same time?
@@ -675,7 +670,7 @@ impl DataStore {
             .left_outer_join(
                 db::schema::dataset::table.on(dataset_dsl::pool_id
                     .eq(zpool_dsl::id)
-                    .and(dataset_dsl::kind.eq(kind.clone()))
+                    .and(dataset_dsl::kind.eq(kind))
                     .and(dataset_dsl::time_deleted.is_null())),
             )
             .select(<(Sled, Zpool, Option<Dataset>)>::as_select())
@@ -702,9 +697,7 @@ impl DataStore {
             .transaction(move |conn| {
                 let sleds_zpools_and_maybe_datasets =
                     Self::sled_zpool_and_dataset_list_sync(
-                        conn,
-                        rack_id,
-                        kind.clone(),
+                        conn, rack_id, kind,
                     )?;
 
                 // Split the set of returned zpools into "those with" and "those
@@ -772,7 +765,7 @@ impl DataStore {
                         dataset_id,
                         zpool.id(),
                         address,
-                        kind.clone(),
+                        kind,
                     );
 
                     // TODO: Can we insert all the datasets at the same time?

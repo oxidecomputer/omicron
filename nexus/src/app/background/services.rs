@@ -122,8 +122,7 @@ impl ServiceBalancer {
                             let address = Ipv6Addr::from(s.ip);
                             let (name, service_type) =
                                 Self::get_service_name_and_type(
-                                    address,
-                                    s.kind.clone(),
+                                    address, s.kind,
                                 );
 
                             // TODO: This is hacky, specifically to inject
@@ -137,11 +136,9 @@ impl ServiceBalancer {
                                 _ => vec![],
                             };
 
-                            // TODO: this is wrong for DNS service; needs the gz
-                            // addreess
                             SledAgentTypes::ServiceRequest {
                                 id: s.id(),
-                                name: name.to_string(),
+                                name,
                                 addresses: vec![address],
                                 gz_addresses,
                                 service_type,
@@ -249,7 +246,7 @@ impl ServiceBalancer {
                 ServiceRedundancy::PerRack(desired_count) => {
                     self.ensure_rack_service(
                         opctx,
-                        expected_svc.kind.clone(),
+                        expected_svc.kind,
                         desired_count,
                     )
                     .await?;
@@ -335,7 +332,7 @@ impl ServiceBalancer {
             info!(self.log, "Ensuring dataset {:?} exists", expected_dataset);
             self.ensure_rack_dataset(
                 opctx,
-                expected_dataset.kind.clone(),
+                expected_dataset.kind,
                 expected_dataset.redundancy,
             )
             .await?

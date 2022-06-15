@@ -86,7 +86,7 @@ impl Server {
                 let nexus_client = lazy_nexus_client
                     .get()
                     .await
-                    .map_err(|err| BackoffError::transient(err.to_string()))?;
+                    .map_err(|err| BackoffError::transient(err))?;
                 nexus_client
                     .cpapi_sled_agents_post(
                         &sled_id,
