@@ -17,7 +17,7 @@ use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_nexus::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
 use omicron_nexus::db::identity::Asset;
-use omicron_nexus::external_api::console_api::LoginParams;
+use omicron_nexus::external_api::console_api::SpoofLoginBody;
 use omicron_nexus::external_api::params::OrganizationCreate;
 use omicron_nexus::external_api::views;
 
@@ -282,7 +282,7 @@ fn get_header_value(resp: TestResponse, header_name: HeaderName) -> String {
 
 async fn log_in_and_extract_token(testctx: &ClientTestContext) -> String {
     let login = RequestBuilder::new(&testctx, Method::POST, "/login")
-        .body(Some(&LoginParams { username: "privileged".to_string() }))
+        .body(Some(&SpoofLoginBody { username: "privileged".to_string() }))
         .expect_status(Some(StatusCode::OK))
         .execute()
         .await

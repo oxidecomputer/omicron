@@ -4,35 +4,17 @@
 
 //! Error type for trust quorum code
 
-use super::super::spdm::SpdmError;
-
-use std::net::SocketAddr;
+use crate::bootstrap;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum TrustQuorumError {
-    #[error("Error running SPDM protocol: {0}")]
-    Spdm(#[from] SpdmError),
+    #[error("Error contacting bootstrap agent: {0}")]
+    BootstrapClient(#[from] bootstrap::client::Error),
 
     #[error("Not enough peers to unlock storage")]
     NotEnoughPeers,
 
-    #[error("Bincode (de)serialization error: {0}")]
-    Bincode(#[from] Box<bincode::ErrorKind>),
-
-    #[error("JSON (de)serialization error: {0}")]
-    Json(#[from] serde_json::Error),
-
-    #[error("Invalid secret share received from {0}")]
-    InvalidShare(SocketAddr),
-
     #[error("Rack secret construction failed: {0:?}")]
     RackSecretConstructionFailed(vsss_rs::Error),
-
-    #[error("IO error {message}: {err}")]
-    Io {
-        message: String,
-        #[source]
-        err: std::io::Error,
-    },
 }

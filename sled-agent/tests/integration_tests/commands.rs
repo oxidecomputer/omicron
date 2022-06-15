@@ -29,7 +29,7 @@ fn path_to_sled_agent_sim() -> PathBuf {
 fn test_sled_agent_sim_no_args() {
     let exec = Exec::cmd(path_to_sled_agent_sim());
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
-    assert_exit_code(exit_status, EXIT_USAGE);
+    assert_exit_code(exit_status, EXIT_USAGE, &stderr_text);
     assert_contents(
         "tests/output/cmd-sled-agent-sim-noargs-stdout",
         &stdout_text,
@@ -50,7 +50,7 @@ fn path_to_sled_agent() -> PathBuf {
 fn test_sled_agent_no_args() {
     let exec = Exec::cmd(path_to_sled_agent());
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
-    assert_exit_code(exit_status, EXIT_USAGE);
+    assert_exit_code(exit_status, EXIT_USAGE, &stderr_text);
     assert_contents("tests/output/cmd-sled-agent-noargs-stdout", &stdout_text);
     assert_contents("tests/output/cmd-sled-agent-noargs-stderr", &stderr_text);
 }
@@ -59,7 +59,7 @@ fn test_sled_agent_no_args() {
 fn test_sled_agent_openapi_sled() {
     let exec = Exec::cmd(path_to_sled_agent()).arg("openapi");
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
-    assert_exit_code(exit_status, EXIT_SUCCESS);
+    assert_exit_code(exit_status, EXIT_SUCCESS, &stderr_text);
     assert_contents(
         "tests/output/cmd-sled-agent-openapi-sled-stderr",
         &stderr_text,

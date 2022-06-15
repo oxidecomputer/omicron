@@ -14,6 +14,7 @@ use crate::bootstrap::views::ResponseEnvelope;
 use crate::sp::SpHandle;
 use crate::sp::SprocketsRole;
 use slog::Logger;
+use sprockets_host::Ed25519Certificate;
 use std::borrow::Cow;
 use std::io;
 use std::net::SocketAddrV6;
@@ -21,9 +22,10 @@ use thiserror::Error;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
+use vsss_rs::Share;
 
 #[derive(Debug, Error)]
-pub(crate) enum Error {
+pub enum Error {
     #[error("Could not connect to {addr}: {err}")]
     Connect { addr: SocketAddrV6, err: io::Error },
 
@@ -67,6 +69,7 @@ pub(crate) enum Error {
 pub(crate) struct Client<'a> {
     addr: SocketAddrV6,
     sp: &'a Option<SpHandle>,
+    trust_quorum_members: &'a [Ed25519Certificate],
     log: Logger,
 }
 
@@ -74,9 +77,14 @@ impl<'a> Client<'a> {
     pub(crate) fn new(
         addr: SocketAddrV6,
         sp: &'a Option<SpHandle>,
+        trust_quorum_members: &'a [Ed25519Certificate],
         log: Logger,
     ) -> Self {
-        Self { addr, sp, log }
+        Self { addr, sp, trust_quorum_members, log }
+    }
+
+    pub(crate) fn addr(&self) -> SocketAddrV6 {
+        self.addr
     }
 
     pub(crate) async fn start_sled(
@@ -90,6 +98,18 @@ impl<'a> Client<'a> {
             Response::ShareResponse(_) => Err(Error::InvalidResponse {
                 expected: "SledAgentResponse",
                 received: "ShareResponse",
+            }),
+        }
+    }
+
+    pub(crate) async fn request_share(&self) -> Result<Share, Error> {
+        let request = Request::ShareRequest;
+
+        match self.request_response(request).await? {
+            Response::ShareResponse(response) => Ok(response),
+            Response::SledAgentResponse(_) => Err(Error::InvalidResponse {
+                expected: "ShareResponse",
+                received: "SledAgentResponse",
             }),
         }
     }
@@ -114,6 +134,7 @@ impl<'a> Client<'a> {
             stream,
             self.sp,
             SprocketsRole::Client,
+            Some(self.trust_quorum_members),
             &self.log,
         )
         .await

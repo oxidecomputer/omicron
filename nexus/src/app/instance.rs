@@ -16,6 +16,7 @@ use crate::db::model::Name;
 use crate::db::queries::network_interface;
 use crate::external_api::params;
 use omicron_common::api::external;
+use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -54,6 +55,32 @@ impl super::Nexus {
                 "cannot attach more than {} disks to instance!",
                 MAX_DISKS_PER_INSTANCE
             )));
+        }
+
+        // Reject instances where the memory is not at least
+        // MIN_MEMORY_SIZE_BYTES
+        if params.memory.to_bytes() < params::MIN_MEMORY_SIZE_BYTES as u64 {
+            return Err(Error::InvalidValue {
+                label: String::from("size"),
+                message: format!(
+                    "memory must be at least {}",
+                    ByteCount::from(params::MIN_MEMORY_SIZE_BYTES)
+                ),
+            });
+        }
+
+        // Reject instances where the memory is not divisible by
+        // MIN_MEMORY_SIZE_BYTES
+        if (params.memory.to_bytes() % params::MIN_MEMORY_SIZE_BYTES as u64)
+            != 0
+        {
+            return Err(Error::InvalidValue {
+                label: String::from("size"),
+                message: format!(
+                    "memory must be divisible by {}",
+                    ByteCount::from(params::MIN_MEMORY_SIZE_BYTES)
+                ),
+            });
         }
 
         let saga_params = Arc::new(sagas::instance_create::Params {
@@ -724,6 +751,37 @@ impl super::Nexus {
         Ok(db_interface)
     }
 
+    /// Update a network interface for the given instance.
+    pub async fn network_interface_update(
+        &self,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
+        instance_name: &Name,
+        interface_name: &Name,
+        updates: params::NetworkInterfaceUpdate,
+    ) -> UpdateResult<db::model::NetworkInterface> {
+        let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .instance_name(instance_name)
+            .lookup_for(authz::Action::Modify)
+            .await?;
+        let (.., authz_interface) = LookupPath::new(opctx, &self.db_datastore)
+            .instance_id(authz_instance.id())
+            .network_interface_name(interface_name)
+            .lookup_for(authz::Action::Modify)
+            .await?;
+        self.db_datastore
+            .instance_update_network_interface(
+                opctx,
+                &authz_instance,
+                &authz_interface,
+                db::model::NetworkInterfaceUpdate::from(updates),
+            )
+            .await
+    }
+
     /// Delete a network interface from the provided instance.
     ///
     /// Note that the primary interface for an instance cannot be deleted if
@@ -826,5 +884,42 @@ impl super::Nexus {
                 Err(error)
             }
         }
+    }
+
+    /// Returns the requested range of serial console output bytes,
+    /// provided they are still in the sled-agent's cache.
+    pub(crate) async fn instance_serial_console_data(
+        &self,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
+        instance_name: &Name,
+        params: &params::InstanceSerialConsoleRequest,
+    ) -> Result<params::InstanceSerialConsoleData, Error> {
+        let db_instance = self
+            .instance_fetch(
+                opctx,
+                organization_name,
+                project_name,
+                instance_name,
+            )
+            .await?;
+
+        let sa = self.instance_sled(&db_instance).await?;
+        let data = sa
+            .instance_serial_get(
+                &db_instance.identity().id,
+                // these parameters are all the same type; OpenAPI puts them in alphabetical order.
+                params.from_start,
+                params.max_bytes,
+                params.most_recent,
+            )
+            .await?;
+        let sa_data: sled_agent_client::types::InstanceSerialConsoleData =
+            data.into_inner();
+        Ok(params::InstanceSerialConsoleData {
+            data: sa_data.data,
+            last_byte_offset: sa_data.last_byte_offset,
+        })
     }
 }

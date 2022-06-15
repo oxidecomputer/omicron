@@ -6,6 +6,11 @@
 #              |...............| <- This /56 is the Rack Subnet
 rack_subnet = "fd00:1122:3344:0100::"
 
+# The number of sleds required to unlock the rack secret.
+#
+# For values less than 2, no rack secret will be generated.
+rack_secret_threshold = 1
+
 [[request]]
 
 # TODO(https://github.com/oxidecomputer/omicron/issues/732): Nexus
