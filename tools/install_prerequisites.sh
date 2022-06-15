@@ -80,11 +80,11 @@ if [[ "${HOST_OS}" == "Linux" ]]; then
     'libclang-dev'
     'libsqlite3-dev'
   )
-  apt-get update
+  sudo apt-get update
   if [[ "${ASSUME_YES}" == "true" ]]; then
-    apt-get install -y ${packages[@]}
+    sudo apt-get install -y ${packages[@]}
   else
-      confirm "Install (or update) [${packages[*]}]?" && apt-get install ${packages[@]}
+      confirm "Install (or update) [${packages[*]}]?" && sudo apt-get install ${packages[@]}
   fi
 elif [[ "${HOST_OS}" == "SunOS" ]]; then
   packages=(
