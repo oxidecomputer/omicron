@@ -13,6 +13,7 @@ use crate::db;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
 use crate::external_api::params;
+use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -51,6 +52,32 @@ impl super::Nexus {
                         label: String::from("size and block_size"),
                         message: String::from(
                             "total size must be a multiple of block size",
+                        ),
+                    });
+                }
+
+                // Reject disks where the size isn't at least
+                // MIN_DISK_SIZE_BYTES
+                if params.size.to_bytes() < params::MIN_DISK_SIZE_BYTES as u64 {
+                    return Err(Error::InvalidValue {
+                        label: String::from("size"),
+                        message: format!(
+                            "total size must be at least {}",
+                            ByteCount::from(params::MIN_DISK_SIZE_BYTES)
+                        ),
+                    });
+                }
+
+                // Reject disks where the MIN_DISK_SIZE_BYTES doesn't evenly divide
+                // the size
+                if (params.size.to_bytes() % params::MIN_DISK_SIZE_BYTES as u64)
+                    != 0
+                {
+                    return Err(Error::InvalidValue {
+                        label: String::from("size"),
+                        message: format!(
+                            "total size must be a multiple of {}",
+                            ByteCount::from(params::MIN_DISK_SIZE_BYTES)
                         ),
                     });
                 }
@@ -104,6 +131,32 @@ impl super::Nexus {
                             db_global_image.size.to_bytes(),
                         ),
                     ));
+                }
+
+                // Reject disks where the size isn't at least
+                // MIN_DISK_SIZE_BYTES
+                if params.size.to_bytes() < params::MIN_DISK_SIZE_BYTES as u64 {
+                    return Err(Error::InvalidValue {
+                        label: String::from("size"),
+                        message: format!(
+                            "total size must be at least {}",
+                            ByteCount::from(params::MIN_DISK_SIZE_BYTES)
+                        ),
+                    });
+                }
+
+                // Reject disks where the MIN_DISK_SIZE_BYTES doesn't evenly divide
+                // the size
+                if (params.size.to_bytes() % params::MIN_DISK_SIZE_BYTES as u64)
+                    != 0
+                {
+                    return Err(Error::InvalidValue {
+                        label: String::from("size"),
+                        message: format!(
+                            "total size must be a multiple of {}",
+                            ByteCount::from(params::MIN_DISK_SIZE_BYTES)
+                        ),
+                    });
                 }
             }
         }

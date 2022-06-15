@@ -1,7 +1,7 @@
-omicron-dev: parsing arguments: error: The following required arguments were not provided:
-    --database-url <database-url>
+error: The following required arguments were not provided:
+    --database-url <DATABASE_URL>
 
 USAGE:
-    omicron-dev db-populate [FLAGS] --database-url <database-url>
+    omicron-dev db-populate [OPTIONS] --database-url <DATABASE_URL>
 
 For more information try --help

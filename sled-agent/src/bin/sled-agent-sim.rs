@@ -6,6 +6,7 @@
 
 // TODO see the TODO for nexus.
 
+use clap::Parser;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
@@ -16,7 +17,6 @@ use omicron_sled_agent::sim::{
 };
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
-use structopt::StructOpt;
 use uuid::Uuid;
 
 fn parse_sim_mode(src: &str) -> Result<SimMode, String> {
@@ -27,27 +27,24 @@ fn parse_sim_mode(src: &str) -> Result<SimMode, String> {
     }
 }
 
-#[derive(Debug, StructOpt)]
-#[structopt(
-    name = "sled_agent",
-    about = "See README.adoc for more information"
-)]
+#[derive(Debug, Parser)]
+#[clap(name = "sled_agent", about = "See README.adoc for more information")]
 struct Args {
-    #[structopt(
+    #[clap(
         long = "sim-mode",
-        parse(try_from_str = parse_sim_mode),
+        value_parser = parse_sim_mode,
         default_value = "auto",
         help = "Automatically simulate transitions",
     )]
     sim_mode: SimMode,
 
-    #[structopt(name = "SA_UUID", parse(try_from_str))]
+    #[clap(name = "SA_UUID", action)]
     uuid: Uuid,
 
-    #[structopt(name = "SA_IP:PORT", parse(try_from_str))]
+    #[clap(name = "SA_IP:PORT", action)]
     sled_agent_addr: SocketAddrV6,
 
-    #[structopt(name = "NEXUS_IP:PORT", parse(try_from_str))]
+    #[clap(name = "NEXUS_IP:PORT", action)]
     nexus_addr: SocketAddr,
 }
 
@@ -59,9 +56,7 @@ async fn main() {
 }
 
 async fn do_run() -> Result<(), CmdError> {
-    let args = Args::from_args_safe().map_err(|err| {
-        CmdError::Usage(format!("parsing arguments: {}", err.message))
-    })?;
+    let args = Args::parse();
 
     let config = Config {
         id: args.uuid,

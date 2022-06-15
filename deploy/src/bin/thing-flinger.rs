@@ -10,10 +10,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
+use clap::{Parser, Subcommand};
 use crossbeam::thread::{self, ScopedJoinHandle};
 use serde_derive::Deserialize;
-use structopt::StructOpt;
 use thiserror::Error;
 
 // A server on which omicron source should be compiled into packages.
@@ -33,7 +33,6 @@ struct Server {
 #[derive(Deserialize, Debug)]
 struct Deployment {
     rss_server: String,
-    rack_secret_threshold: usize,
     staging_dir: PathBuf,
 }
 
@@ -58,11 +57,11 @@ impl Config {
     }
 }
 
-fn parse_into_set(src: &str) -> BTreeSet<String> {
-    src.split_whitespace().map(|s| s.to_owned()).collect()
+fn parse_into_set(src: &str) -> Result<BTreeSet<String>, &'static str> {
+    Ok(src.split_whitespace().map(|s| s.to_owned()).collect())
 }
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, Subcommand)]
 enum SubCommand {
     /// Run the given command on the given servers, or all servers if none are
     /// specified.
@@ -70,11 +69,11 @@ enum SubCommand {
     /// Be careful!
     Exec {
         /// The command to run
-        #[structopt(short, long)]
+        #[clap(short, long, action)]
         cmd: String,
 
         /// The servers to run the command on
-        #[structopt(short, long, parse(from_str = parse_into_set))]
+        #[clap(short, long, value_parser = parse_into_set)]
         servers: Option<BTreeSet<String>>,
     },
 
@@ -86,10 +85,11 @@ enum SubCommand {
     Sync,
 
     /// Runs a command on the "builder" server.
-    #[structopt(name = "build")]
+    #[clap(name = "build", subcommand)]
     Builder(BuildCommand),
 
     /// Runs a command on all the "deploy" servers.
+    #[clap(subcommand)]
     Deploy(DeployCommand),
 
     /// Create an overlay directory tree for each deployment server
@@ -102,17 +102,22 @@ enum SubCommand {
     Overlay,
 }
 
-#[derive(Debug, StructOpt)]
-#[structopt(
+#[derive(Debug, Parser)]
+#[clap(
     name = "thing-flinger",
     about = "A tool for synchronizing packages and configs between machines"
 )]
 struct Args {
     /// The path to the deployment manifest TOML file
-    #[structopt(short, long, help = "Path to deployment manifest toml file")]
+    #[clap(
+        short,
+        long,
+        help = "Path to deployment manifest toml file",
+        action
+    )]
     config: PathBuf,
 
-    #[structopt(subcommand)]
+    #[clap(subcommand)]
     subcommand: SubCommand,
 }
 
@@ -477,17 +482,16 @@ fn overlay_sled_agent(
     // names have spaces
     let dirs = sled_agent_dirs
         .iter()
-        .map(|dir| format!("{} ", dir.display()))
+        .map(|dir| format!(" --directories {}", dir.display()))
         .collect::<String>();
 
     let cmd = format!(
         "sh -c 'for dir in {}; do mkdir -p $dir; done' && \
             cd {} && \
-            cargo run {} --bin sled-agent-overlay-files -- --threshold {} --directories {}",
+            cargo run {} --bin sled-agent-overlay-files -- {}",
         dirs,
         config.builder.omicron_path.to_string_lossy(),
         config.release_arg(),
-        config.deployment.rack_secret_threshold,
         dirs
     );
     ssh_exec(builder, &cmd, false)
@@ -779,7 +783,7 @@ fn validate(config: &Config) -> Result<(), FlingError> {
 }
 
 fn main() -> Result<()> {
-    let args = Args::from_args_safe().map_err(|err| anyhow!(err))?;
+    let args = Args::try_parse()?;
     let config = parse::<_, Config>(args.config)?;
 
     validate(&config)?;

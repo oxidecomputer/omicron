@@ -3,17 +3,17 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use anyhow::Result;
+use clap::Parser;
 use omicron_common::cmd::{fatal, CmdError};
 use sp_sim::config::Config;
 use sp_sim::SimRack;
 use std::path::PathBuf;
 use std::time::Duration;
-use structopt::StructOpt;
 
-#[derive(Debug, StructOpt)]
-#[structopt(name = "sp-sim", about = "See README.adoc for more information")]
+#[derive(Debug, Parser)]
+#[clap(name = "sp-sim", about = "See README.adoc for more information")]
 struct Args {
-    #[structopt(name = "CONFIG_FILE_PATH", parse(from_os_str))]
+    #[clap(name = "CONFIG_FILE_PATH", action)]
     config_file_path: PathBuf,
 }
 
@@ -25,9 +25,7 @@ async fn main() {
 }
 
 async fn do_run() -> Result<(), CmdError> {
-    let args = Args::from_args_safe().map_err(|err| {
-        CmdError::Usage(format!("parsing arguments: {}", err.message))
-    })?;
+    let args = Args::parse();
     let config = Config::from_file(args.config_file_path)
         .map_err(|e| CmdError::Failure(e.to_string()))?;
 

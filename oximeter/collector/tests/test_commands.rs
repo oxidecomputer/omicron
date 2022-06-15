@@ -34,7 +34,7 @@ fn write_config(config: &str) -> PathBuf {
 fn test_oximeter_no_args() {
     let exec = Exec::cmd(path_to_oximeter());
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
-    assert_exit_code(exit_status, EXIT_USAGE);
+    assert_exit_code(exit_status, EXIT_USAGE, &stderr_text);
     assert_contents("tests/output/cmd-oximeter-noargs-stdout", &stdout_text);
     assert_contents("tests/output/cmd-oximeter-noargs-stderr", &stderr_text);
 }
@@ -53,7 +53,7 @@ fn test_oximeter_openapi() {
     let exec = Exec::cmd(path_to_oximeter()).arg(&config_path).arg("--openapi");
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
     fs::remove_file(&config_path).expect("failed to remove temporary file");
-    assert_exit_code(exit_status, EXIT_SUCCESS);
+    assert_exit_code(exit_status, EXIT_SUCCESS, &stderr_text);
     assert_contents("tests/output/cmd-oximeter-openapi-stderr", &stderr_text);
 
     let spec: OpenAPI = serde_json::from_str(&stdout_text)
