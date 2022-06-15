@@ -14,7 +14,6 @@ use serde::{
     Deserialize, Deserializer, Serialize,
 };
 use std::net::IpAddr;
-use std::str::FromStr;
 use uuid::Uuid;
 
 // Silos
@@ -296,6 +295,33 @@ pub struct NetworkInterfaceCreate {
     pub ip: Option<IpAddr>,
 }
 
+/// Parameters for updating a
+/// [`NetworkInterface`](omicron_common::api::external::NetworkInterface).
+///
+/// Note that modifying IP addresses for an interface is not yet supported, a
+/// new interface must be created instead.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct NetworkInterfaceUpdate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParams,
+
+    /// Make a secondary interface the instance's primary interface.
+    ///
+    /// If applied to a secondary interface, that interface will become the
+    /// primary on the next reboot of the instance. Note that this may have
+    /// implications for routing between instances, as the new primary interface
+    /// will be on a distinct subnet from the previous primary interface.
+    ///
+    /// Note that this can only be used to select a new primary interface for an
+    /// instance. Requests to change the primary interface into a secondary will
+    /// return an error.
+    // TODO-completeness TODO-docs: When we get there, this should note that a
+    // change in the primary interface will result in changes to the DNS records
+    // for the instance, though not the name.
+    #[serde(default)]
+    pub make_primary: bool,
+}
+
 // INSTANCES
 
 pub const MIN_MEMORY_SIZE_BYTES: u32 = 1 << 30; // 1 GiB
@@ -425,6 +451,34 @@ mod serde_user_data {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceMigrate {
     pub dst_sled_id: Uuid,
+}
+
+/// Forwarded to a sled agent to request the contents of an Instance's serial console.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct InstanceSerialConsoleRequest {
+    /// Character index in the serial buffer from which to read, counting the bytes output since
+    /// instance start. If this is not provided, `most_recent` must be provided, and if this *is*
+    /// provided, `most_recent` must *not* be provided.
+    pub from_start: Option<u64>,
+    /// Character index in the serial buffer from which to read, counting *backward* from the most
+    /// recently buffered data retrieved from the instance. (See note on `from_start` about mutual
+    /// exclusivity)
+    pub most_recent: Option<u64>,
+    /// Maximum number of bytes of buffered serial console contents to return. If the requested
+    /// range runs to the end of the available buffer, the data returned will be shorter than
+    /// `max_bytes`.
+    pub max_bytes: Option<u64>,
+}
+
+/// Contents of an Instance's serial console buffer.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InstanceSerialConsoleData {
+    /// The bytes starting from the requested offset up to either the end of the buffer or the
+    /// request's `max_bytes`. Provided as a u8 array rather than a string, as it may not be UTF-8.
+    pub data: Vec<u8>,
+    /// The absolute offset since boot (suitable for use as `byte_offset` in a subsequent request)
+    /// of the last byte returned in `data`.
+    pub last_byte_offset: u64,
 }
 
 // VPCS
@@ -633,93 +687,12 @@ pub enum ImageSource {
 }
 
 /// OS image distribution
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct Distribution(String);
-
-impl From<Distribution> for String {
-    fn from(distribution: Distribution) -> String {
-        distribution.0
-    }
-}
-
-impl TryFrom<String> for Distribution {
-    type Error = String;
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        if value.len() > 63 {
-            return Err(String::from(
-                "distribution may contain at most 63 characters",
-            ));
-        }
-
-        let mut iter = value.chars();
-
-        let first = iter.next().ok_or_else(|| {
-            String::from("distribution requires at least one character")
-        })?;
-        if !first.is_ascii_lowercase() {
-            return Err(String::from(
-                "distribution must begin with an ASCII lowercase character",
-            ));
-        }
-
-        let mut last = first;
-        for c in iter {
-            last = c;
-
-            if !c.is_ascii_lowercase() && !c.is_digit(10) && c != '-' {
-                return Err(format!(
-                    "distribution contains invalid character: \"{}\" (allowed \
-                     characters are lowercase ASCII, digits, and \"-\")",
-                    c
-                ));
-            }
-        }
-
-        if last == '-' {
-            return Err(String::from("distribution cannot end with \"-\""));
-        }
-
-        Ok(Distribution(value))
-    }
-}
-
-impl FromStr for Distribution {
-    type Err = String;
-    fn from_str(value: &str) -> Result<Self, String> {
-        Distribution::try_from(String::from(value))
-    }
-}
-
-impl JsonSchema for Distribution {
-    fn schema_name() -> String {
-        "Distribution".to_string()
-    }
-
-    fn json_schema(
-        _gen: &mut schemars::gen::SchemaGenerator,
-    ) -> schemars::schema::Schema {
-        schemars::schema::Schema::Object(schemars::schema::SchemaObject {
-            metadata: Some(Box::new(schemars::schema::Metadata {
-                title: Some("OS image distribution".to_string()),
-                description: Some(
-                    "Distribution must begin with a lower case ASCII letter, be \
-                     composed exclusively of lowercase ASCII, uppercase \
-                     ASCII, numbers, and '-', and may not end with a '-'."
-                        .to_string(),
-                ),
-                ..Default::default()
-            })),
-            instance_type: Some(schemars::schema::SingleOrVec::Single(
-                Box::new(schemars::schema::InstanceType::String),
-            )),
-            string: Some(Box::new(schemars::schema::StringValidation {
-                max_length: Some(63),
-                min_length: None,
-                pattern: Some("[a-z](|[a-zA-Z0-9-]*[a-zA-Z0-9])".to_string()),
-            })),
-            ..Default::default()
-        })
-    }
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct Distribution {
+    /// The name of the distribution (e.g. "alpine" or "ubuntu")
+    pub name: Name,
+    /// The version of the distribution (e.g. "3.10" or "18.04")
+    pub version: String,
 }
 
 /// Create-time parameters for an
@@ -732,9 +705,6 @@ pub struct GlobalImageCreate {
 
     /// OS image distribution
     pub distribution: Distribution,
-
-    /// image version
-    pub version: String,
 
     /// block size in bytes
     pub block_size: BlockSize,

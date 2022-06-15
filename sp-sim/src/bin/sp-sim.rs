@@ -13,7 +13,7 @@ use std::time::Duration;
 #[derive(Debug, Parser)]
 #[clap(name = "sp-sim", about = "See README.adoc for more information")]
 struct Args {
-    #[clap(name = "CONFIG_FILE_PATH", parse(from_os_str))]
+    #[clap(name = "CONFIG_FILE_PATH", action)]
     config_file_path: PathBuf,
 }
 

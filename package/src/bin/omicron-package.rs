@@ -42,7 +42,8 @@ struct Args {
         short,
         long,
         default_value = "package-manifest.toml",
-        help = "Path to package manifest toml file"
+        help = "Path to package manifest toml file",
+        action
     )]
     manifest: PathBuf,
 

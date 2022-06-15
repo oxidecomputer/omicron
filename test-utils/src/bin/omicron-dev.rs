@@ -64,7 +64,7 @@ enum OmicronDb {
 #[derive(Debug, Args)]
 struct DbRunArgs {
     /// Path to store database data (default: temp dir cleaned up on exit)
-    #[clap(long, parse(from_os_str))]
+    #[clap(long, action)]
     store_dir: Option<PathBuf>,
 
     /// Database (SQL) listen port.  Use `0` to request any available port.
@@ -72,13 +72,13 @@ struct DbRunArgs {
     // CockroachDB port to avoid conflicting.  We don't use 0 because this port
     // is specified in a few other places, like the default Nexus config file.
     // TODO We could load that file at compile time and use the value there.
-    #[clap(long, default_value = "32221")]
+    #[clap(long, default_value = "32221", action)]
     listen_port: u16,
 
     // This unusual clap configuration makes "populate" default to true,
     // allowing a --no-populate override on the CLI.
     /// Do not populate the database with any schema
-    #[clap(long = "--no-populate", parse(from_flag = std::ops::Not::not))]
+    #[clap(long = "--no-populate", action(clap::ArgAction::SetFalse))]
     populate: bool,
 }
 
@@ -171,11 +171,11 @@ async fn cmd_db_run(args: &DbRunArgs) -> Result<(), anyhow::Error> {
 #[derive(Debug, Args)]
 struct DbPopulateArgs {
     /// URL for connecting to the database (postgresql:///...)
-    #[clap(long)]
+    #[clap(long, action)]
     database_url: String,
 
     /// Wipe any existing schema (and data!) before populating
-    #[clap(long)]
+    #[clap(long, action)]
     wipe: bool,
 }
 
@@ -203,7 +203,7 @@ async fn cmd_db_populate(args: &DbPopulateArgs) -> Result<(), anyhow::Error> {
 #[derive(Debug, Args)]
 struct DbWipeArgs {
     /// URL for connecting to the database (postgresql:///...)
-    #[clap(long)]
+    #[clap(long, action)]
     database_url: String,
 }
 
@@ -226,7 +226,7 @@ async fn cmd_db_wipe(args: &DbWipeArgs) -> Result<(), anyhow::Error> {
 #[derive(Debug, Args)]
 struct ChRunArgs {
     /// The HTTP port on which the server will listen
-    #[clap(short, long, default_value = "8123")]
+    #[clap(short, long, default_value = "8123", action)]
     port: u16,
 }
 

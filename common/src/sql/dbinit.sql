@@ -821,14 +821,19 @@ CREATE UNIQUE INDEX ON omicron.public.network_interface (
  * Index used to verify that an Instance's networking is contained
  * within a single VPC, and that all interfaces are in unique VPC
  * Subnets.
+ *
+ * This is also used to quickly find the primary interface for an
+ * instance, since we store the `is_primary` column. Such queries are
+ * mostly used when setting a new primary interface for an instance.
  */
 CREATE UNIQUE INDEX ON omicron.public.network_interface (
     instance_id,
     name
 )
-STORING (vpc_id, subnet_id)
+STORING (vpc_id, subnet_id, is_primary)
 WHERE
     time_deleted IS NULL;
+
 
 CREATE TYPE omicron.public.vpc_router_kind AS ENUM (
     'system',
