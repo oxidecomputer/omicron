@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::instance_create::allocate_sled_ipv6;
+use super::vm_instance_create::allocate_sled_ipv6;
 use super::{impl_authenticated_saga_params, saga_generate_uuid};
 use crate::authn;
 use crate::context::OpContext;

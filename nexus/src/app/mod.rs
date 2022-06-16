@@ -23,7 +23,7 @@ use uuid::Uuid;
 mod disk;
 mod iam;
 mod image;
-mod instance;
+mod vm_instance;
 mod organization;
 mod oximeter;
 mod project;

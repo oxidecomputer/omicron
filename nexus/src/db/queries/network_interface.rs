@@ -171,7 +171,7 @@ fn decode_database_error(
     // name to an interface that is already used for another interface on the
     // same instance.
     const NAME_CONFLICT_CONSTRAINT: &str =
-        "network_interface_instance_id_name_key";
+        "network_interface_vm_instance_id_name_key";
 
     // The primary key constraint. This is intended only to be caught, and
     // usually ignored, in sagas. UUIDs are allocated in one node of the saga,

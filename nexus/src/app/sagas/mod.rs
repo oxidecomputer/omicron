@@ -22,7 +22,7 @@ use uuid::Uuid;
 
 pub mod disk_create;
 pub mod disk_delete;
-pub mod instance_create;
+pub mod vm_instance_create;
 pub mod instance_migrate;
 
 // We'll need a richer mechanism for registering sagas, but this works for now.
@@ -35,8 +35,8 @@ fn all_templates(
 ) -> BTreeMap<&'static str, Arc<dyn SagaTemplateGeneric<Arc<SagaContext>>>> {
     vec![
         (
-            instance_create::SAGA_NAME,
-            Arc::clone(&instance_create::SAGA_TEMPLATE)
+            vm_instance_create::SAGA_NAME,
+            Arc::clone(&vm_instance_create::SAGA_TEMPLATE)
                 as Arc<dyn SagaTemplateGeneric<Arc<SagaContext>>>,
         ),
         (

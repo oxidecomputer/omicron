@@ -83,7 +83,7 @@ impl super::Nexus {
             });
         }
 
-        let saga_params = Arc::new(sagas::instance_create::Params {
+        let saga_params = Arc::new(sagas::vm_instance_create::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             organization_name: organization_name.clone().into(),
             project_name: project_name.clone().into(),
@@ -93,8 +93,8 @@ impl super::Nexus {
 
         let saga_outputs = self
             .execute_saga(
-                Arc::clone(&sagas::instance_create::SAGA_TEMPLATE),
-                sagas::instance_create::SAGA_NAME,
+                Arc::clone(&sagas::vm_instance_create::SAGA_TEMPLATE),
+                sagas::vm_instance_create::SAGA_NAME,
                 saga_params,
             )
             .await?;

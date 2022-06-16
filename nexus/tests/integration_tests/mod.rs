@@ -10,7 +10,7 @@ mod console_api;
 mod datasets;
 mod disks;
 mod images;
-mod instances;
+mod vm_instances;
 mod organizations;
 mod oximeter;
 mod projects;
