@@ -32,16 +32,18 @@ use crate::db::model::DatabaseString;
 use crate::external_api::shared;
 use futures::future::BoxFuture;
 use futures::FutureExt;
+use futures::StreamExt;
 use nexus_test_utils::db::test_setup_database;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
 use omicron_test_utils::dev;
-use std::fmt::Write;
+use std::io::Cursor;
+use std::io::Write;
 use std::sync::Arc;
 use strum::IntoEnumIterator;
 use uuid::Uuid;
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_iam_roles() {
     let logctx = dev::test_setup_log("test_iam_roles");
     let mut db = test_setup_database(&logctx.log).await;
@@ -93,7 +95,7 @@ async fn test_iam_roles() {
 
     // Create an OpContext for each user for testing.
     let authz = Arc::new(authz::Authz::new(&logctx.log));
-    let user_contexts: Vec<(String, Uuid, OpContext)> = users
+    let user_contexts: Vec<Arc<(String, Uuid, OpContext)>> = users
         .iter()
         .map(|(username, user_id)| {
             let user_id = *user_id;
@@ -108,16 +110,15 @@ async fn test_iam_roles() {
                 Arc::clone(&datastore),
             );
 
-            (username.clone(), user_id, opctx)
+            Arc::new((username.clone(), user_id, opctx))
         })
         .collect();
 
-    let mut buffer = String::new();
+    let mut buffer = Vec::new();
     {
-        let mut tee = StdoutTee::new(&mut buffer);
-
+        let mut out = StdoutTee::new(&mut buffer);
         run_test_operations(
-            &mut tee,
+            &mut out,
             &logctx.log,
             &user_contexts,
             &test_resources,
@@ -126,7 +127,10 @@ async fn test_iam_roles() {
         .unwrap();
     }
 
-    expectorate::assert_contents("tests/output/authz-roles.out", &buffer);
+    expectorate::assert_contents(
+        "tests/output/authz-roles.out",
+        &std::str::from_utf8(buffer.as_ref()).expect("non-UTF8 output"),
+    );
 
     db.cleanup().await.unwrap();
     logctx.cleanup_successful();
@@ -135,11 +139,43 @@ async fn test_iam_roles() {
 async fn run_test_operations<W: Write>(
     mut out: W,
     log: &slog::Logger,
-    user_contexts: &[(String, Uuid, OpContext)],
+    user_contexts: &[Arc<(String, Uuid, OpContext)>],
     test_resources: &Resources,
-) -> std::fmt::Result {
+) -> std::io::Result<()> {
+    let mut futures = futures::stream::FuturesOrdered::new();
+
     for resource in test_resources.all_resources() {
-        write!(out, "resource: {}\n\n", resource_name(resource),)?;
+        let log = log.new(o!("resource" => format!("{:?}", resource)));
+        futures.push(test_one_resource(
+            log,
+            user_contexts.to_owned(),
+            Arc::clone(&resource),
+        ));
+    }
+
+    let outputs: Vec<String> = futures.collect().await;
+    for o in outputs {
+        write!(out, "{}", o)?;
+    }
+
+    write!(out, "ACTIONS:\n\n")?;
+    for action in authz::Action::iter() {
+        write!(out, "  {:>2} = {:?}\n", action_abbreviation(action), action)?;
+    }
+    write!(out, "\n")?;
+
+    Ok(())
+}
+
+async fn test_one_resource(
+    log: slog::Logger,
+    user_contexts: Vec<Arc<(String, Uuid, OpContext)>>,
+    resource: Arc<dyn Authorizable>,
+) -> String {
+    let task = tokio::spawn(async move {
+        let mut buffer = Vec::new();
+        let mut out = Cursor::new(&mut buffer);
+        write!(out, "resource: {}\n\n", resource_name(resource.as_ref()),)?;
 
         write!(out, "  {:31}", "USER")?;
         for action in authz::Action::iter() {
@@ -147,7 +183,8 @@ async fn run_test_operations<W: Write>(
         }
         write!(out, "\n")?;
 
-        for (username, _, opctx) in user_contexts.iter() {
+        for ctx_tuple in user_contexts.iter() {
+            let (ref username, _, ref opctx) = **ctx_tuple;
             write!(out, "  {:31}", &username)?;
             for action in authz::Action::iter() {
                 let result = resource.do_authorize(opctx, action).await;
@@ -171,15 +208,13 @@ async fn run_test_operations<W: Write>(
         }
 
         write!(out, "\n")?;
-    }
+        Ok(buffer)
+    });
 
-    write!(out, "ACTIONS:\n\n")?;
-    for action in authz::Action::iter() {
-        write!(out, "  {:>2} = {:?}\n", action_abbreviation(action), action)?;
-    }
-    write!(out, "\n")?;
-
-    Ok(())
+    let result: std::io::Result<Vec<u8>> =
+        task.await.expect("failed to wait for task");
+    let result_str = result.expect("failed to write to string buffer");
+    String::from_utf8(result_str).expect("unexpected non-UTF8 output")
 }
 
 /// Describes the hierarchy of resources used in our RBAC test
@@ -202,59 +237,45 @@ struct Resources {
     silo1: authz::Silo,
     silo1_org1: authz::Organization,
     silo1_org1_proj1: authz::Project,
-    silo1_org1_proj1_children: Vec<Box<dyn Authorizable>>,
+    silo1_org1_proj1_children: Vec<Arc<dyn Authorizable>>,
     silo1_org1_proj2: authz::Project,
-    silo1_org1_proj2_children: Vec<Box<dyn Authorizable>>,
+    silo1_org1_proj2_children: Vec<Arc<dyn Authorizable>>,
     silo1_org2: authz::Organization,
     silo1_org2_proj1: authz::Project,
-    silo1_org2_proj1_children: Vec<Box<dyn Authorizable>>,
+    silo1_org2_proj1_children: Vec<Arc<dyn Authorizable>>,
     silo2: authz::Silo,
     silo2_org1: authz::Organization,
     silo2_org1_proj1: authz::Project,
-    silo2_org1_proj1_children: Vec<Box<dyn Authorizable>>,
+    silo2_org1_proj1_children: Vec<Arc<dyn Authorizable>>,
 }
 
 impl Resources {
     fn all_resources(
         &self,
-    ) -> impl std::iter::Iterator<Item = &dyn Authorizable> {
+    ) -> impl std::iter::Iterator<Item = Arc<dyn Authorizable>> + '_ {
         vec![
-            &authz::FLEET as &dyn Authorizable,
-            &self.silo1 as &dyn Authorizable,
-            &self.silo1_org1 as &dyn Authorizable,
-            &self.silo1_org1_proj1 as &dyn Authorizable,
+            Arc::new(authz::FLEET.clone()) as Arc<dyn Authorizable>,
+            Arc::new(self.silo1.clone()) as Arc<dyn Authorizable>,
+            Arc::new(self.silo1_org1.clone()) as Arc<dyn Authorizable>,
+            Arc::new(self.silo1_org1_proj1.clone()) as Arc<dyn Authorizable>,
         ]
         .into_iter()
-        .chain(
-            self.silo1_org1_proj1_children
-                .iter()
-                .map(|d: &Box<dyn Authorizable>| d.as_ref()),
-        )
-        .chain(std::iter::once(&self.silo1_org1_proj2 as &dyn Authorizable))
-        .chain(
-            self.silo1_org1_proj2_children
-                .iter()
-                .map(|d: &Box<dyn Authorizable>| d.as_ref()),
-        )
+        .chain(self.silo1_org1_proj1_children.iter().cloned())
+        .chain(std::iter::once(
+            Arc::new(self.silo1_org1_proj2.clone()) as Arc<dyn Authorizable>
+        ))
+        .chain(self.silo1_org1_proj2_children.iter().cloned())
         .chain(vec![
-            &self.silo1_org2 as &dyn Authorizable,
-            &self.silo1_org2_proj1 as &dyn Authorizable,
+            Arc::new(self.silo1_org2.clone()) as Arc<dyn Authorizable>,
+            Arc::new(self.silo1_org2_proj1.clone()) as Arc<dyn Authorizable>,
         ])
-        .chain(
-            self.silo1_org2_proj1_children
-                .iter()
-                .map(|d: &Box<dyn Authorizable>| d.as_ref()),
-        )
+        .chain(self.silo1_org2_proj1_children.iter().cloned())
         .chain(vec![
-            &self.silo2 as &dyn Authorizable,
-            &self.silo2_org1 as &dyn Authorizable,
-            &self.silo2_org1_proj1 as &dyn Authorizable,
+            Arc::new(self.silo2.clone()) as Arc<dyn Authorizable>,
+            Arc::new(self.silo2_org1.clone()) as Arc<dyn Authorizable>,
+            Arc::new(self.silo2_org1_proj1.clone()) as Arc<dyn Authorizable>,
         ])
-        .chain(
-            self.silo2_org1_proj1_children
-                .iter()
-                .map(|d: &Box<dyn Authorizable>| d.as_ref()),
-        )
+        .chain(self.silo2_org1_proj1_children.iter().cloned())
     }
 }
 
@@ -352,7 +373,7 @@ fn make_resources() -> Resources {
 fn make_project(
     organization: &authz::Organization,
     project_name: &str,
-) -> (authz::Project, Vec<Box<dyn Authorizable>>) {
+) -> (authz::Project, Vec<Arc<dyn Authorizable>>) {
     let project = authz::Project::new(
         organization.clone(),
         make_uuid(),
@@ -365,21 +386,21 @@ fn make_project(
         make_uuid(),
         LookupType::ByName(vpc1_name.clone()),
     );
-    let children: Vec<Box<dyn Authorizable>> = vec![
+    let children: Vec<Arc<dyn Authorizable>> = vec![
         // XXX-dap TODO-coverage add more different kinds of children
-        Box::new(authz::Disk::new(
+        Arc::new(authz::Disk::new(
             project.clone(),
             make_uuid(),
             LookupType::ByName(format!("{}-disk1", project_name)),
         )),
-        Box::new(authz::Instance::new(
+        Arc::new(authz::Instance::new(
             project.clone(),
             make_uuid(),
             LookupType::ByName(format!("{}-instance1", project_name)),
         )),
-        Box::new(vpc1.clone()),
+        Arc::new(vpc1.clone()),
         // Test a resource nested two levels below Project
-        Box::new(authz::VpcSubnet::new(
+        Arc::new(authz::VpcSubnet::new(
             vpc1,
             make_uuid(),
             LookupType::ByName(format!("{}-subnet1", vpc1_name)),
@@ -481,9 +502,12 @@ impl<W: Write> StdoutTee<W> {
 }
 
 impl<W: Write> Write for StdoutTee<W> {
-    fn write_str(&mut self, s: &str) -> std::fmt::Result {
-        self.sink.write_str(s)?;
-        print!("{}", s);
-        Ok(())
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        print!("{}", std::str::from_utf8(buf).expect("non-UTF8 in stdout tee"));
+        self.sink.write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.sink.flush()
     }
 }
