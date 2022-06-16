@@ -6,7 +6,7 @@
 
 use super::client::Client as BootstrapAgentClient;
 use super::config::{Config, BOOTSTRAP_AGENT_PORT};
-use super::discovery;
+use super::discovery::{self, DdmError};
 use super::params::SledAgentRequest;
 use super::rss_handle::RssHandle;
 use super::server::TrustQuorumMembership;
@@ -38,6 +38,9 @@ pub enum BootstrapError {
         #[source]
         err: std::io::Error,
     },
+
+    #[error("Error contacting ddmd: {0}")]
+    DdmError(#[from] DdmError),
 
     #[error("Error starting sled agent: {0}")]
     SledError(String),
@@ -158,11 +161,8 @@ impl Agent {
         )
         .map_err(|err| BootstrapError::BootstrapAddress { err })?;
 
-        let peer_monitor = discovery::PeerMonitor::new(&ba_log, address)
-            .map_err(|err| BootstrapError::Io {
-                message: format!("Monitoring for peers from {address}"),
-                err,
-            })?;
+        let peer_monitor =
+            discovery::PeerMonitor::new(ba_log.clone(), address)?;
 
         let agent = Agent {
             log: ba_log,
@@ -287,7 +287,12 @@ impl Agent {
         let rack_secret = retry_notify(
             internal_service_policy(),
             || async {
-                let other_agents = self.peer_monitor.peer_addrs().await;
+                let other_agents = self.peer_monitor
+                    .peer_addrs()
+                    .await
+                    .map_err(BootstrapError::DdmError)
+                    .map_err(|err| BackoffError::transient(err))?
+                    .collect::<Vec<_>>();
                 info!(
                     &self.log,
                     "Bootstrap: Communicating with peers: {:?}", other_agents
@@ -300,7 +305,9 @@ impl Agent {
                         "Not enough peers to start establishing quorum"
                     );
                     return Err(BackoffError::transient(
-                        TrustQuorumError::NotEnoughPeers,
+                        BootstrapError::TrustQuorum(
+                            TrustQuorumError::NotEnoughPeers,
+                        ),
                     ));
                 }
                 info!(
@@ -336,7 +343,9 @@ impl Agent {
                     let share = agent.request_share().await
                         .map_err(|e| {
                             info!(&self.log, "Bootstrap: failed to retreive share from peer: {:?}", e);
-                            BackoffError::transient(e.into())
+                            BackoffError::transient(
+                                BootstrapError::TrustQuorum(e.into()),
+                            )
                         })?;
                     info!(
                         &self.log,
@@ -360,7 +369,9 @@ impl Agent {
                     // the error returned from `RackSecret::combine_shares`.
                     // See https://github.com/oxidecomputer/omicron/issues/516
                     BackoffError::transient(
-                        TrustQuorumError::RackSecretConstructionFailed(e),
+                        BootstrapError::TrustQuorum(
+                            TrustQuorumError::RackSecretConstructionFailed(e),
+                        ),
                     )
                 })?;
                 info!(self.log, "RackSecret computed from shares.");
@@ -386,7 +397,7 @@ impl Agent {
             let rss = RssHandle::start_rss(
                 &self.parent_log,
                 rss_config.clone(),
-                self.peer_monitor.observer().await,
+                self.peer_monitor.clone(),
                 self.sp.clone(),
                 // TODO-cleanup: Remove this arg once RSS can discover the trust
                 // quorum members over the management network.

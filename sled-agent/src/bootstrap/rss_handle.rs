@@ -5,7 +5,7 @@
 //! sled-agent's handle to the Rack Setup Service it spawns
 
 use super::client as bootstrap_agent_client;
-use super::discovery::PeerMonitorObserver;
+use super::discovery::PeerMonitor;
 use super::params::SledAgentRequest;
 use crate::rack_setup::config::SetupServiceConfig;
 use crate::rack_setup::service::Service;
@@ -43,7 +43,7 @@ impl RssHandle {
     pub(super) fn start_rss(
         log: &Logger,
         config: SetupServiceConfig,
-        peer_monitor: PeerMonitorObserver,
+        peer_monitor: PeerMonitor,
         sp: Option<SpHandle>,
         member_device_id_certs: Vec<Ed25519Certificate>,
     ) -> Self {

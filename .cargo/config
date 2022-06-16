@@ -1,3 +1,8 @@
+# Allow fetching private repositories over https via a .netrc with
+# a personal access token (https://gist.github.com/technoweenie/1072829)
+[net]
+git-fetch-with-cli = true
+
 #
 # Build private documentation for this package to serve as internal developer
 # documentation.  (The "library" in this package only exists to implement the
