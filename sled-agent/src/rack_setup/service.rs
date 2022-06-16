@@ -434,15 +434,25 @@ impl ServiceInner {
             // discusses this issue for disk creation.
             internal_service_policy(),
             || async {
-                let all_addrs = self
-                    .peer_monitor
-                    .peer_addrs()
-                    .await
-                    .map_err(|err| {
-                        BackoffError::transient(format!(
-                            "Failed to get peers from ddmd: {err}"
-                        ))
-                    })?
+                let peer_addrs_result = self.peer_monitor.peer_addrs().await;
+
+                if let Err(err) = peer_addrs_result.as_ref() {
+                    info!(
+                        self.log, "Failed to get peers from ddmd";
+                        "err" => %err,
+                    );
+                }
+
+                let all_addrs = peer_addrs_result
+                    .into_iter()
+                    // TODO-cleanup This is a `flat_map` over a `Result`, which
+                    // yields the `Ok()` value or no items; this treats an error
+                    // to get peers from ddmd as an empty list of peers,
+                    // allowing us to proceed, in case our plan only requires a
+                    // single node (ourself). We could remove this and treat an
+                    // error to get peers as a transient error from this closure
+                    // once we're always starting ddmd.
+                    .flat_map(|peer_addrs| peer_addrs)
                     .chain(iter::once(our_bootstrap_address))
                     .collect::<HashSet<_>>();
 
