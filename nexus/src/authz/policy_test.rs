@@ -218,9 +218,9 @@ async fn test_one_resource(
                     "result" => ?result,
                 );
                 let summary = match result {
-                    Ok(_) => '\u{2713}',
+                    Ok(_) => '\u{2714}',
                     Err(Error::Forbidden)
-                    | Err(Error::ObjectNotFound { .. }) => '\u{2717}',
+                    | Err(Error::ObjectNotFound { .. }) => '\u{2718}',
                     Err(Error::Unauthenticated { .. }) => '!',
                     Err(_) => '\u{26a0}',
                 };
