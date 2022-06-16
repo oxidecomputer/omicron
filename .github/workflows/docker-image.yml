@@ -27,7 +27,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Extract branch name
         shell: bash
-        run: BRANCH="${GITHUB_HEAD_REF//\//-}"; echo "::set-output name=branch::${BRANCH:-main}"
+        run: echo "##[set-output name=branch;]$(echo ${GITHUB_REF_NAME//\//-})"
         id: extract_branch
       - name: Build and push
         # This pushes a docker image to github's container registry.
