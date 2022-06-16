@@ -366,12 +366,9 @@ impl internal_dns_client::multiclient::Service for ServiceRequest {
         match self.service_type {
             ServiceType::InternalDns { server_address, .. } => server_address,
             ServiceType::Nexus { internal_address, .. } => internal_address,
-            ServiceType::Oximeter => SocketAddrV6::new(
-                Ipv6Addr::from(self.addresses[0]),
-                OXIMETER_PORT,
-                0,
-                0,
-            ),
+            ServiceType::Oximeter => {
+                SocketAddrV6::new(self.addresses[0], OXIMETER_PORT, 0, 0)
+            }
         }
     }
 }
