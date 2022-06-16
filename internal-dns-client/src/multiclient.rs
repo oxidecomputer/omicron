@@ -63,10 +63,11 @@ impl Updater {
 
         while let Some(record) = records.next() {
             let srv = record.srv();
+            info!(self.log, "Inserting DNS record: {:?}", srv);
 
             match &srv {
                 &crate::names::SRV::Service(_) => {
-                    let mut aaaa = vec![];
+                    let mut aaaa = vec![(record.aaaa(), record.address())];
                     while let Some(record) = records.peek() {
                         if record.srv() == srv {
                             let record = records.next().unwrap();
@@ -76,18 +77,13 @@ impl Updater {
                         }
                     }
 
-                    self.insert_dns_records_internal(
-                        aaaa,
-                        srv,
-                    ).await?;
-                },
+                    self.insert_dns_records_internal(aaaa, srv).await?;
+                }
                 &crate::names::SRV::Backend(_, _) => {
                     let aaaa = vec![(record.aaaa(), record.address())];
-                    self.insert_dns_records_internal(
-                        aaaa,
-                        record.srv(),
-                    ).await?;
-                },
+                    self.insert_dns_records_internal(aaaa, record.srv())
+                        .await?;
+                }
             };
         }
         Ok(())

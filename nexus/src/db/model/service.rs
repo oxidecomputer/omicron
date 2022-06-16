@@ -3,12 +3,14 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::ServiceKind;
-use crate::db::ipv6;
 use crate::db::identity::Asset;
+use crate::db::ipv6;
 use crate::db::schema::service;
 use db_macros::Asset;
-use internal_dns_client::names::{AAAA, SRV, ServiceName};
-use omicron_common::address::{DNS_SERVER_PORT, NEXUS_INTERNAL_PORT, OXIMETER_PORT};
+use internal_dns_client::names::{ServiceName, AAAA, SRV};
+use omicron_common::address::{
+    DNS_SERVER_PORT, NEXUS_INTERNAL_PORT, OXIMETER_PORT,
+};
 use std::net::{Ipv6Addr, SocketAddrV6};
 use uuid::Uuid;
 

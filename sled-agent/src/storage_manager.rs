@@ -655,7 +655,9 @@ impl StorageWorker {
         };
         nexus_notifications.push(
             backoff::retry_notify(
-                backoff::internal_service_policy(),
+                backoff::internal_service_policy_with_max(
+                    std::time::Duration::from_secs(1),
+                ),
                 notify_nexus,
                 log_post_failure,
             )

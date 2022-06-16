@@ -253,12 +253,10 @@ impl ServiceInner {
         retry_notify(internal_service_policy(), services_put, log_failure)
             .await?;
 
-        // Insert DNS records
-        self.dns_servers
-            .get()
-            .expect("DNS servers must be initialized first")
-            .insert_dns_records(services)
-            .await?;
+        // Insert DNS records, if the DNS servers have been initialized
+        if let Some(dns_servers) = self.dns_servers.get() {
+            dns_servers.insert_dns_records(services).await?;
+        }
 
         Ok(())
     }

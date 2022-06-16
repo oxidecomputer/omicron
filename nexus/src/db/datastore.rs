@@ -752,14 +752,7 @@ impl DataStore {
                         .map_err(|e| {
                             TxnError::CustomError(DatasetError::Other(e))
                         })
-                        .map(|ip| {
-                            SocketAddrV6::new(
-                                ip,
-                                kind.port(),
-                                0,
-                                0,
-                            )
-                        })?;
+                        .map(|ip| SocketAddrV6::new(ip, kind.port(), 0, 0))?;
 
                     let dataset = db::model::Dataset::new(
                         dataset_id,

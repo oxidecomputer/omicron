@@ -15,8 +15,7 @@ use crate::db::model::Sled;
 use crate::db::model::Zpool;
 use crate::Nexus;
 use internal_dns_client::multiclient::{
-    Service as DnsService,
-    Updater as DnsUpdater
+    Service as DnsService, Updater as DnsUpdater,
 };
 use omicron_common::address::{
     DNS_PORT, DNS_REDUNDANCY, DNS_SERVER_PORT, NEXUS_EXTERNAL_PORT,
@@ -96,11 +95,7 @@ impl ServiceBalancer {
             log.new(o!("component" => "DNS Updater")),
         );
 
-        Self {
-            log,
-            nexus,
-            dns_updater,
-        }
+        Self { log, nexus, dns_updater }
     }
 
     // Reaches out to all sled agents implied in "services", and
@@ -167,9 +162,10 @@ impl ServiceBalancer {
         // strictly necessary, but doing so makes the record insertion more
         // efficient.
         services.sort_by(|a, b| a.srv().partial_cmp(&b.srv()).unwrap());
-        self.dns_updater.insert_dns_records(
-            &services
-        ).await.map_err(|e| Error::internal_error(&e.to_string()))?;
+        self.dns_updater
+            .insert_dns_records(&services)
+            .await
+            .map_err(|e| Error::internal_error(&e.to_string()))?;
 
         Ok(())
     }
@@ -350,9 +346,12 @@ impl ServiceBalancer {
                 .await?;
         }
 
-        self.dns_updater.insert_dns_records(
-            &datasets.into_iter().map(|(_, _, dataset)| dataset).collect()
-        ).await.map_err(|e| Error::internal_error(&e.to_string()))?;
+        self.dns_updater
+            .insert_dns_records(
+                &datasets.into_iter().map(|(_, _, dataset)| dataset).collect(),
+            )
+            .await
+            .map_err(|e| Error::internal_error(&e.to_string()))?;
 
         Ok(())
     }

@@ -3,13 +3,13 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{DatasetKind, Generation, Region, SqlU16};
-use crate::db::identity::Asset;
 use crate::db::collection_insert::DatastoreCollection;
+use crate::db::identity::Asset;
 use crate::db::ipv6;
 use crate::db::schema::{dataset, region};
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
-use internal_dns_client::names::{AAAA, SRV, ServiceName, BackendName};
+use internal_dns_client::names::{BackendName, ServiceName, AAAA, SRV};
 use serde::{Deserialize, Serialize};
 use std::net::{Ipv6Addr, SocketAddrV6};
 use uuid::Uuid;
@@ -84,7 +84,9 @@ impl internal_dns_client::multiclient::Service for Dataset {
 
     fn srv(&self) -> SRV {
         match self.kind {
-            DatasetKind::Crucible => SRV::Backend(BackendName::Crucible, self.id()),
+            DatasetKind::Crucible => {
+                SRV::Backend(BackendName::Crucible, self.id())
+            }
             DatasetKind::Clickhouse => SRV::Service(ServiceName::Clickhouse),
             DatasetKind::Cockroach => SRV::Service(ServiceName::Cockroach),
         }
