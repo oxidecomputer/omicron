@@ -28,14 +28,13 @@ pub enum DdmError {
 /// as well as our discovery of those sleds.
 #[derive(Clone)]
 pub struct PeerMonitor {
-    our_address: Ipv6Addr,
     client: DdmAdminClient,
     log: Logger,
 }
 
 impl PeerMonitor {
     /// Creates a new [`PeerMonitor`].
-    pub fn new(log: Logger, address: Ipv6Addr) -> Result<Self, DdmError> {
+    pub fn new(log: Logger) -> Result<Self, DdmError> {
         let dur = std::time::Duration::from_secs(60);
         let ddmd_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, DDMD_PORT, 0, 0);
 
@@ -48,11 +47,7 @@ impl PeerMonitor {
             client,
             log.new(o!("DdmAdminClient" => SocketAddr::V6(ddmd_addr))),
         );
-        Ok(PeerMonitor { our_address: address, client, log })
-    }
-
-    pub fn our_address(&self) -> Ipv6Addr {
-        self.our_address
+        Ok(PeerMonitor { client, log })
     }
 
     /// Returns the addresses of connected sleds.

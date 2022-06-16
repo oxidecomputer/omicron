@@ -424,6 +424,7 @@ impl ServiceInner {
     async fn wait_for_peers(
         &self,
         expectation: PeerExpectation,
+        our_bootstrap_address: Ipv6Addr,
     ) -> Vec<Ipv6Addr> {
         retry_notify(
             // TODO-correctness `internal_service_policy()` has potentially-long
@@ -442,7 +443,7 @@ impl ServiceInner {
                             "Failed to get peers from ddmd: {err}"
                         ))
                     })?
-                    .chain(iter::once(self.peer_monitor.our_address()))
+                    .chain(iter::once(our_bootstrap_address))
                     .collect::<HashSet<_>>();
 
                 match expectation {
@@ -540,7 +541,9 @@ impl ServiceInner {
         } else {
             PeerExpectation::CreateNewPlan(config.requests.len())
         };
-        let addrs = self.wait_for_peers(expectation).await;
+        let addrs = self
+            .wait_for_peers(expectation, local_bootstrap_agent.our_address())
+            .await;
         info!(self.log, "Enough peers exist to enact RSS plan");
 
         // If we created a plan, reuse it. Otherwise, create a new plan.

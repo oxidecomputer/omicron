@@ -69,6 +69,7 @@ pub(crate) struct Agent {
     /// other launched components can set their own value.
     parent_log: Logger,
     peer_monitor: discovery::PeerMonitor,
+    address: Ipv6Addr,
 
     /// Our share of the rack secret, if we have one.
     share: Mutex<Option<ShareDistribution>>,
@@ -161,13 +162,13 @@ impl Agent {
         )
         .map_err(|err| BootstrapError::BootstrapAddress { err })?;
 
-        let peer_monitor =
-            discovery::PeerMonitor::new(ba_log.clone(), address)?;
+        let peer_monitor = discovery::PeerMonitor::new(ba_log.clone())?;
 
         let agent = Agent {
             log: ba_log,
             parent_log: log,
             peer_monitor,
+            address,
             share: Mutex::new(None),
             rss: Mutex::new(None),
             sled_agent: Mutex::new(None),
@@ -398,6 +399,7 @@ impl Agent {
                 &self.parent_log,
                 rss_config.clone(),
                 self.peer_monitor.clone(),
+                self.address,
                 self.sp.clone(),
                 // TODO-cleanup: Remove this arg once RSS can discover the trust
                 // quorum members over the management network.

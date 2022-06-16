@@ -17,6 +17,7 @@ use omicron_common::backoff::retry_notify;
 use omicron_common::backoff::BackoffError;
 use slog::Logger;
 use sprockets_host::Ed25519Certificate;
+use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
@@ -44,10 +45,11 @@ impl RssHandle {
         log: &Logger,
         config: SetupServiceConfig,
         peer_monitor: PeerMonitor,
+        our_bootstrap_address: Ipv6Addr,
         sp: Option<SpHandle>,
         member_device_id_certs: Vec<Ed25519Certificate>,
     ) -> Self {
-        let (tx, rx) = rss_channel();
+        let (tx, rx) = rss_channel(our_bootstrap_address);
 
         let rss = Service::new(
             log.new(o!("component" => "RSS")),
@@ -111,10 +113,12 @@ async fn initialize_sled_agent(
 // communication in the types below to avoid using tokio channels directly and
 // leave a breadcrumb for where the work will need to be done to switch the
 // communication mechanism.
-fn rss_channel() -> (BootstrapAgentHandle, BootstrapAgentHandleReceiver) {
+fn rss_channel(
+    our_bootstrap_address: Ipv6Addr,
+) -> (BootstrapAgentHandle, BootstrapAgentHandleReceiver) {
     let (tx, rx) = mpsc::channel(32);
     (
-        BootstrapAgentHandle { inner: tx },
+        BootstrapAgentHandle { inner: tx, our_bootstrap_address },
         BootstrapAgentHandleReceiver { inner: rx },
     )
 }
@@ -126,6 +130,7 @@ type InnerInitRequest = (
 
 pub(crate) struct BootstrapAgentHandle {
     inner: mpsc::Sender<InnerInitRequest>,
+    our_bootstrap_address: Ipv6Addr,
 }
 
 impl BootstrapAgentHandle {
@@ -151,6 +156,10 @@ impl BootstrapAgentHandle {
         // https://github.com/oxidecomputer/omicron/issues/820.
         self.inner.send((requests, tx)).await.unwrap();
         rx.await.unwrap()
+    }
+
+    pub(crate) fn our_address(&self) -> Ipv6Addr {
+        self.our_bootstrap_address
     }
 }
 
