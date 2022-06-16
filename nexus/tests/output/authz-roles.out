@@ -13,6 +13,7 @@ resource: DATABASE
   silo1-org1-proj1-admin           ✓  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
   silo1-org1-proj1-collaborator    ✓  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
   silo1-org1-proj1-viewer          ✓  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  unauthenticated                  !  !  !  !  !  !  !  !  !
 
 resource: Fleet id "001de000-1334-4000-8000-000000000000"
 
@@ -29,6 +30,7 @@ resource: Fleet id "001de000-1334-4000-8000-000000000000"
   silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
   silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
   silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  unauthenticated                  !  !  !  !  !  !  !  !  !
 
 resource: Silo "silo1"
 
@@ -45,6 +47,7 @@ resource: Silo "silo1"
   silo1-org1-proj1-admin           ✗  ✓  ✗  ✓  ✗  ✗  ✗  ✗  ✓
   silo1-org1-proj1-collaborator    ✗  ✓  ✗  ✓  ✗  ✗  ✗  ✗  ✓
   silo1-org1-proj1-viewer          ✗  ✓  ✗  ✓  ✗  ✗  ✗  ✗  ✓
+  unauthenticated                  !  !  !  !  !  !  !  !  !
 
 resource: Organization "silo1-org1"
 
@@ -61,6 +64,7 @@ resource: Organization "silo1-org1"
   silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
   silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
   silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  unauthenticated                  !  !  !  !  !  !  !  !  !
 
 resource: Project "silo1-org1-proj1"
 
@@ -77,6 +81,7 @@ resource: Project "silo1-org1-proj1"
   silo1-org1-proj1-admin           ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
   silo1-org1-proj1-collaborator    ✗  ✓  ✓  ✓  ✗  ✗  ✓  ✗  ✗
   silo1-org1-proj1-viewer          ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  unauthenticated                  !  !  !  !  !  !  !  !  !
 
 resource: Disk "silo1-org1-proj1-disk1"
 
@@ -93,6 +98,7 @@ resource: Disk "silo1-org1-proj1-disk1"
   silo1-org1-proj1-admin           ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
   silo1-org1-proj1-collaborator    ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
   silo1-org1-proj1-viewer          ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  unauthenticated                  !  !  !  !  !  !  !  !  !
 
 resource: Instance "silo1-org1-proj1-instance1"
 
@@ -109,6 +115,7 @@ resource: Instance "silo1-org1-proj1-instance1"
   silo1-org1-proj1-admin           ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
   silo1-org1-proj1-collaborator    ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
   silo1-org1-proj1-viewer          ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  unauthenticated                  !  !  !  !  !  !  !  !  !
 
 resource: Vpc "silo1-org1-proj1-vpc1"
 
@@ -125,6 +132,7 @@ resource: Vpc "silo1-org1-proj1-vpc1"
   silo1-org1-proj1-admin           ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
   silo1-org1-proj1-collaborator    ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
   silo1-org1-proj1-viewer          ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  unauthenticated                  !  !  !  !  !  !  !  !  !
 
 resource: VpcSubnet "silo1-org1-proj1-vpc1-subnet1"
 
@@ -141,6 +149,7 @@ resource: VpcSubnet "silo1-org1-proj1-vpc1-subnet1"
   silo1-org1-proj1-admin           ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
   silo1-org1-proj1-collaborator    ✗  ✓  ✓  ✓  ✓  ✓  ✓  ✓  ✗
   silo1-org1-proj1-viewer          ✗  ✓  ✓  ✓  ✗  ✗  ✗  ✗  ✗
+  unauthenticated                  !  !  !  !  !  !  !  !  !
 
 resource: Project "silo1-org1-proj2"
 
@@ -157,6 +166,7 @@ resource: Project "silo1-org1-proj2"
   silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
   silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
   silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  unauthenticated                  !  !  !  !  !  !  !  !  !
 
 resource: Disk "silo1-org1-proj2-disk1"
 
@@ -173,6 +183,7 @@ resource: Disk "silo1-org1-proj2-disk1"
   silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
   silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
   silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  unauthenticated                  !  !  !  !  !  !  !  !  !
 
 resource: Instance "silo1-org1-proj2-instance1"
 
@@ -189,6 +200,7 @@ resource: Instance "silo1-org1-proj2-instance1"
   silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
   silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
   silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  unauthenticated                  !  !  !  !  !  !  !  !  !
 
 resource: Vpc "silo1-org1-proj2-vpc1"
 
@@ -205,6 +217,7 @@ resource: Vpc "silo1-org1-proj2-vpc1"
   silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
   silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
   silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  unauthenticated                  !  !  !  !  !  !  !  !  !
 
 resource: VpcSubnet "silo1-org1-proj2-vpc1-subnet1"
 
@@ -221,6 +234,7 @@ resource: VpcSubnet "silo1-org1-proj2-vpc1-subnet1"
   silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
   silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
   silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  unauthenticated                  !  !  !  !  !  !  !  !  !
 
 resource: Organization "silo1-org2"
 
@@ -237,6 +251,7 @@ resource: Organization "silo1-org2"
   silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
   silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
   silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  unauthenticated                  !  !  !  !  !  !  !  !  !
 
 resource: Project "silo1-org2-proj1"
 
@@ -253,6 +268,7 @@ resource: Project "silo1-org2-proj1"
   silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
   silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
   silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  unauthenticated                  !  !  !  !  !  !  !  !  !
 
 resource: Disk "silo1-org2-proj1-disk1"
 
@@ -269,6 +285,7 @@ resource: Disk "silo1-org2-proj1-disk1"
   silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
   silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
   silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  unauthenticated                  !  !  !  !  !  !  !  !  !
 
 resource: Instance "silo1-org2-proj1-instance1"
 
@@ -285,6 +302,7 @@ resource: Instance "silo1-org2-proj1-instance1"
   silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
   silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
   silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  unauthenticated                  !  !  !  !  !  !  !  !  !
 
 resource: Vpc "silo1-org2-proj1-vpc1"
 
@@ -301,6 +319,7 @@ resource: Vpc "silo1-org2-proj1-vpc1"
   silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
   silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
   silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  unauthenticated                  !  !  !  !  !  !  !  !  !
 
 resource: VpcSubnet "silo1-org2-proj1-vpc1-subnet1"
 
@@ -317,6 +336,7 @@ resource: VpcSubnet "silo1-org2-proj1-vpc1-subnet1"
   silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
   silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
   silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  unauthenticated                  !  !  !  !  !  !  !  !  !
 
 resource: Silo "silo2"
 
@@ -333,6 +353,7 @@ resource: Silo "silo2"
   silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
   silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
   silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  unauthenticated                  !  !  !  !  !  !  !  !  !
 
 resource: Organization "silo2-org1"
 
@@ -349,6 +370,7 @@ resource: Organization "silo2-org1"
   silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
   silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
   silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  unauthenticated                  !  !  !  !  !  !  !  !  !
 
 resource: Project "silo2-org1-proj1"
 
@@ -365,6 +387,7 @@ resource: Project "silo2-org1-proj1"
   silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
   silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
   silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  unauthenticated                  !  !  !  !  !  !  !  !  !
 
 resource: Disk "silo2-org1-proj1-disk1"
 
@@ -381,6 +404,7 @@ resource: Disk "silo2-org1-proj1-disk1"
   silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
   silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
   silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  unauthenticated                  !  !  !  !  !  !  !  !  !
 
 resource: Instance "silo2-org1-proj1-instance1"
 
@@ -397,6 +421,7 @@ resource: Instance "silo2-org1-proj1-instance1"
   silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
   silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
   silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  unauthenticated                  !  !  !  !  !  !  !  !  !
 
 resource: Vpc "silo2-org1-proj1-vpc1"
 
@@ -413,6 +438,7 @@ resource: Vpc "silo2-org1-proj1-vpc1"
   silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
   silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
   silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  unauthenticated                  !  !  !  !  !  !  !  !  !
 
 resource: VpcSubnet "silo2-org1-proj1-vpc1-subnet1"
 
@@ -429,6 +455,7 @@ resource: VpcSubnet "silo2-org1-proj1-vpc1-subnet1"
   silo1-org1-proj1-admin           ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
   silo1-org1-proj1-collaborator    ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
   silo1-org1-proj1-viewer          ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗  ✗
+  unauthenticated                  !  !  !  !  !  !  !  !  !
 
 ACTIONS:
 

@@ -95,7 +95,7 @@ async fn test_iam_roles() {
 
     // Create an OpContext for each user for testing.
     let authz = Arc::new(authz::Authz::new(&logctx.log));
-    let user_contexts: Vec<Arc<(String, Uuid, OpContext)>> = users
+    let mut user_contexts: Vec<Arc<(String, OpContext)>> = users
         .iter()
         .map(|(username, user_id)| {
             let user_id = *user_id;
@@ -110,9 +110,29 @@ async fn test_iam_roles() {
                 Arc::clone(&datastore),
             );
 
-            Arc::new((username.clone(), user_id, opctx))
+            Arc::new((username.clone(), opctx))
         })
         .collect();
+
+    // Create and test an unauthenticated OpContext as well.
+    //
+    // We could test the "test-privileged" and "test-unprivileged" users, but it
+    // wouldn't be very interesting: they're in a different Silo than the
+    // resources that we're checking against so even "test-privileged" won't
+    // have privileges here.   Anyway, they're composed of ordinary role
+    // assignments so they're just a special case of what we're already testing.
+    let user_log = logctx.log.new(o!(
+        "username" => "unauthenticated",
+    ));
+    user_contexts.push(Arc::new((
+        String::from("unauthenticated"),
+        OpContext::for_background(
+            user_log,
+            Arc::clone(&authz),
+            authn::Context::internal_unauthenticated(),
+            Arc::clone(&datastore),
+        ),
+    )));
 
     let mut buffer = Vec::new();
     {
@@ -139,7 +159,7 @@ async fn test_iam_roles() {
 async fn run_test_operations<W: Write>(
     mut out: W,
     log: &slog::Logger,
-    user_contexts: &[Arc<(String, Uuid, OpContext)>],
+    user_contexts: &[Arc<(String, OpContext)>],
     test_resources: &Resources,
 ) -> std::io::Result<()> {
     let mut futures = futures::stream::FuturesOrdered::new();
@@ -170,7 +190,7 @@ async fn run_test_operations<W: Write>(
 
 async fn test_one_resource(
     log: slog::Logger,
-    user_contexts: Vec<Arc<(String, Uuid, OpContext)>>,
+    user_contexts: Vec<Arc<(String, OpContext)>>,
     resource: Arc<dyn Authorizable>,
 ) -> String {
     let task = tokio::spawn(async move {
@@ -185,7 +205,7 @@ async fn test_one_resource(
         write!(out, "\n")?;
 
         for ctx_tuple in user_contexts.iter() {
-            let (ref username, _, ref opctx) = **ctx_tuple;
+            let (ref username, ref opctx) = **ctx_tuple;
             write!(out, "  {:31}", &username)?;
             for action in authz::Action::iter() {
                 let result = resource.do_authorize(opctx, action).await;
@@ -201,6 +221,7 @@ async fn test_one_resource(
                     Ok(_) => '\u{2713}',
                     Err(Error::Forbidden)
                     | Err(Error::ObjectNotFound { .. }) => '\u{2717}',
+                    Err(Error::Unauthenticated { .. }) => '!',
                     Err(_) => '\u{26a0}',
                 };
                 write!(out, " {:>2}", summary)?;
