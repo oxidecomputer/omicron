@@ -14,8 +14,8 @@ use http::StatusCode;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::VmInstance;
 use omicron_common::api::external::InstanceCpuCount;
+use omicron_common::api::external::VmInstance;
 use omicron_nexus::crucible_agent_client::types::State as RegionState;
 use omicron_nexus::external_api::params;
 use omicron_nexus::external_api::shared;
@@ -176,7 +176,7 @@ pub async fn create_instance_with_nics(
         &params::InstanceCreate {
             identity: IdentityMetadataCreateParams {
                 name: instance_name.parse().unwrap(),
-                description: format!("instance {:?}", instance_name),
+                description: format!("vm-instance {:?}", instance_name),
             },
             ncpus: InstanceCpuCount(4),
             memory: ByteCount::from_gibibytes_u32(1),

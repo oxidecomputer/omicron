@@ -1609,7 +1609,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InstanceResultsPage"
+                  "$ref": "#/components/schemas/VmInstanceResultsPage"
                 }
               }
             }
@@ -1667,7 +1667,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Instance"
+                  "$ref": "#/components/schemas/VmInstance"
                 }
               }
             }
@@ -1723,7 +1723,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Instance"
+                  "$ref": "#/components/schemas/VmInstance"
                 }
               }
             }
@@ -2053,7 +2053,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Instance"
+                  "$ref": "#/components/schemas/VmInstance"
                 }
               }
             }
@@ -2455,7 +2455,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Instance"
+                  "$ref": "#/components/schemas/VmInstance"
                 }
               }
             }
@@ -2603,7 +2603,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Instance"
+                  "$ref": "#/components/schemas/VmInstance"
                 }
               }
             }
@@ -2659,7 +2659,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Instance"
+                  "$ref": "#/components/schemas/VmInstance"
                 }
               }
             }
@@ -6673,84 +6673,6 @@
           }
         ]
       },
-      "Instance": {
-        "description": "Client view of an [`Instance`]",
-        "type": "object",
-        "properties": {
-          "description": {
-            "description": "human-readable free-form text about a resource",
-            "type": "string"
-          },
-          "hostname": {
-            "description": "RFC1035-compliant hostname for the Instance.",
-            "type": "string"
-          },
-          "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
-            "type": "string",
-            "format": "uuid"
-          },
-          "memory": {
-            "description": "memory allocated for this Instance",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ByteCount"
-              }
-            ]
-          },
-          "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
-          },
-          "ncpus": {
-            "description": "number of CPUs allocated for this Instance",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/InstanceCpuCount"
-              }
-            ]
-          },
-          "project_id": {
-            "description": "id for the project containing this Instance",
-            "type": "string",
-            "format": "uuid"
-          },
-          "run_state": {
-            "$ref": "#/components/schemas/InstanceState"
-          },
-          "time_created": {
-            "description": "timestamp when this resource was created",
-            "type": "string",
-            "format": "date-time"
-          },
-          "time_modified": {
-            "description": "timestamp when this resource was last modified",
-            "type": "string",
-            "format": "date-time"
-          },
-          "time_run_state_updated": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "description",
-          "hostname",
-          "id",
-          "memory",
-          "name",
-          "ncpus",
-          "project_id",
-          "run_state",
-          "time_created",
-          "time_modified",
-          "time_run_state_updated"
-        ]
-      },
       "InstanceCpuCount": {
         "description": "The number of CPUs in an Instance",
         "type": "integer",
@@ -6949,27 +6871,6 @@
           }
         ]
       },
-      "InstanceResultsPage": {
-        "description": "A single page of results",
-        "type": "object",
-        "properties": {
-          "items": {
-            "description": "list of items on this page of results",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Instance"
-            }
-          },
-          "next_page": {
-            "nullable": true,
-            "description": "token used to fetch the next page of results (if any)",
-            "type": "string"
-          }
-        },
-        "required": [
-          "items"
-        ]
-      },
       "InstanceSerialConsoleData": {
         "description": "Contents of an Instance's serial console buffer.",
         "type": "object",
@@ -7085,11 +6986,6 @@
             "type": "string",
             "format": "uuid"
           },
-          "instance_id": {
-            "description": "The Instance to which the interface belongs.",
-            "type": "string",
-            "format": "uuid"
-          },
           "ip": {
             "description": "The IP address assigned to this interface.",
             "type": "string",
@@ -7130,6 +7026,11 @@
             "type": "string",
             "format": "date-time"
           },
+          "vm_instance_id": {
+            "description": "The Instance to which the interface belongs.",
+            "type": "string",
+            "format": "uuid"
+          },
           "vpc_id": {
             "description": "The VPC to which the interface belongs.",
             "type": "string",
@@ -7139,7 +7040,6 @@
         "required": [
           "description",
           "id",
-          "instance_id",
           "ip",
           "mac",
           "name",
@@ -7147,6 +7047,7 @@
           "subnet_id",
           "time_created",
           "time_modified",
+          "vm_instance_id",
           "vpc_id"
         ]
       },
@@ -8778,6 +8679,105 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/User"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "VmInstance": {
+        "description": "Client view of an [`VmInstance`]",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "hostname": {
+            "description": "RFC1035-compliant hostname for the Instance.",
+            "type": "string"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "memory": {
+            "description": "memory allocated for this Instance",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "ncpus": {
+            "description": "number of CPUs allocated for this Instance",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceCpuCount"
+              }
+            ]
+          },
+          "project_id": {
+            "description": "id for the project containing this Instance",
+            "type": "string",
+            "format": "uuid"
+          },
+          "run_state": {
+            "$ref": "#/components/schemas/InstanceState"
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_run_state_updated": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "description",
+          "hostname",
+          "id",
+          "memory",
+          "name",
+          "ncpus",
+          "project_id",
+          "run_state",
+          "time_created",
+          "time_modified",
+          "time_run_state_updated"
+        ]
+      },
+      "VmInstanceResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VmInstance"
             }
           },
           "next_page": {

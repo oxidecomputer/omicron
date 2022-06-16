@@ -81,12 +81,12 @@ use uuid::Uuid;
 ///
 /// // Fetch an Instance by a path of names (Organization name, Project name,
 /// // Instance name)
-/// let instance_name = db::model::Name("test-server".parse().unwrap());
+/// let vm_instance_name = db::model::Name("test-server".parse().unwrap());
 /// let (authz_silo, authz_org, authz_project, authz_instance, db_instance) =
 ///     LookupPath::new(opctx, datastore)
 ///         .organization_name(&organization_name)
 ///         .project_name(&project_name)
-///         .instance_name(&instance_name)
+///         .vm_instance_name(&vm_instance_name)
 ///         .fetch()
 ///         .await?;
 ///
@@ -606,10 +606,10 @@ lookup_resource! {
 
 #[cfg(test)]
 mod test {
-    use super::VmInstance;
     use super::LookupPath;
     use super::Organization;
     use super::Project;
+    use super::VmInstance;
     use crate::context::OpContext;
     use crate::db::model::Name;
     use nexus_test_utils::db::test_setup_database;

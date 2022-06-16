@@ -22,8 +22,8 @@ use uuid::Uuid;
 
 pub mod disk_create;
 pub mod disk_delete;
-pub mod vm_instance_create;
 pub mod instance_migrate;
+pub mod vm_instance_create;
 
 // We'll need a richer mechanism for registering sagas, but this works for now.
 lazy_static! {

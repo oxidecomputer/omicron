@@ -17,12 +17,12 @@ use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
-use omicron_common::api::external::VmInstance;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NetworkInterface;
+use omicron_common::api::external::VmInstance;
 use omicron_nexus::TestInterfaces as _;
 use omicron_nexus::{external_api::params, Nexus};
 use sled_agent_client::TestInterfaces as _;
@@ -91,7 +91,7 @@ async fn test_instances_access_before_create_returns_not_found(
     .unwrap();
     assert_eq!(
         error.message,
-        "not found: instance with name \"just-rainsticks\""
+        "not found: vm-instance with name \"just-rainsticks\""
     );
 
     // Ditto if we try to delete one.
@@ -109,7 +109,7 @@ async fn test_instances_access_before_create_returns_not_found(
     .unwrap();
     assert_eq!(
         error.message,
-        "not found: instance with name \"just-rainsticks\""
+        "not found: vm-instance with name \"just-rainsticks\""
     );
 }
 
@@ -139,7 +139,7 @@ async fn test_instances_create_reboot_halt(
     )
     .await;
     assert_eq!(instance.identity.name, "just-rainsticks");
-    assert_eq!(instance.identity.description, "instance \"just-rainsticks\"");
+    assert_eq!(instance.identity.description, "vm-instance \"just-rainsticks\"");
     let InstanceCpuCount(nfoundcpus) = instance.ncpus;
     // These particulars are hardcoded in create_instance().
     assert_eq!(nfoundcpus, 4);
@@ -174,7 +174,7 @@ async fn test_instances_create_reboot_halt(
     .unwrap()
     .parsed_body()
     .unwrap();
-    assert_eq!(error.message, "already exists: instance \"just-rainsticks\"");
+    assert_eq!(error.message, "already exists: vm-instance \"just-rainsticks\"");
 
     // List instances again and expect to find the one we just created.
     let instances = instances_list(&client, &url_instances).await;
@@ -2270,7 +2270,7 @@ async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
     .unwrap()
     .parsed_body()
     .unwrap();
-    assert_eq!(error.message, "not found: instance with name \"kris-picks\"");
+    assert_eq!(error.message, "not found: vm-instance with name \"kris-picks\"");
 
     // Create an instance.
     let instance_url = format!("{}/kris-picks", url_instances);
