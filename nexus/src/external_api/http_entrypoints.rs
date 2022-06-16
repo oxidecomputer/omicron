@@ -264,7 +264,7 @@ pub fn external_api() -> NexusApiDescription {
 }]
 async fn policy_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-) -> Result<HttpResponseOk<shared::Policy<authz::FleetRoles>>, HttpError> {
+) -> Result<HttpResponseOk<shared::Policy<authz::FleetRole>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
 
@@ -284,8 +284,8 @@ async fn policy_get(
 }]
 async fn policy_put(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    new_policy: TypedBody<shared::Policy<authz::FleetRoles>>,
-) -> Result<HttpResponseOk<shared::Policy<authz::FleetRoles>>, HttpError> {
+    new_policy: TypedBody<shared::Policy<authz::FleetRole>>,
+) -> Result<HttpResponseOk<shared::Policy<authz::FleetRole>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let new_policy = new_policy.into_inner();
@@ -421,7 +421,7 @@ async fn silos_delete_silo(
 async fn silos_get_silo_policy(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<SiloPathParam>,
-) -> Result<HttpResponseOk<shared::Policy<authz::SiloRoles>>, HttpError> {
+) -> Result<HttpResponseOk<shared::Policy<authz::SiloRole>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -444,8 +444,8 @@ async fn silos_get_silo_policy(
 async fn silos_put_silo_policy(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<SiloPathParam>,
-    new_policy: TypedBody<shared::Policy<authz::SiloRoles>>,
-) -> Result<HttpResponseOk<shared::Policy<authz::SiloRoles>>, HttpError> {
+    new_policy: TypedBody<shared::Policy<authz::SiloRole>>,
+) -> Result<HttpResponseOk<shared::Policy<authz::SiloRole>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -725,7 +725,7 @@ async fn organizations_put_organization(
 async fn organization_get_policy(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<OrganizationPathParam>,
-) -> Result<HttpResponseOk<shared::Policy<authz::OrganizationRoles>>, HttpError>
+) -> Result<HttpResponseOk<shared::Policy<authz::OrganizationRole>>, HttpError>
 {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -750,8 +750,8 @@ async fn organization_get_policy(
 async fn organization_put_policy(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<OrganizationPathParam>,
-    new_policy: TypedBody<shared::Policy<authz::OrganizationRoles>>,
-) -> Result<HttpResponseOk<shared::Policy<authz::OrganizationRoles>>, HttpError>
+    new_policy: TypedBody<shared::Policy<authz::OrganizationRole>>,
+) -> Result<HttpResponseOk<shared::Policy<authz::OrganizationRole>>, HttpError>
 {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -957,7 +957,7 @@ async fn organization_projects_put_project(
 async fn organization_projects_get_project_policy(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
-) -> Result<HttpResponseOk<shared::Policy<authz::ProjectRoles>>, HttpError> {
+) -> Result<HttpResponseOk<shared::Policy<authz::ProjectRole>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -983,8 +983,8 @@ async fn organization_projects_get_project_policy(
 async fn organization_projects_put_project_policy(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
-    new_policy: TypedBody<shared::Policy<authz::ProjectRoles>>,
-) -> Result<HttpResponseOk<shared::Policy<authz::ProjectRoles>>, HttpError> {
+    new_policy: TypedBody<shared::Policy<authz::ProjectRole>>,
+) -> Result<HttpResponseOk<shared::Policy<authz::ProjectRole>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
