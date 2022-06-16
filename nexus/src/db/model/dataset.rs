@@ -3,12 +3,15 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{DatasetKind, Generation, Region, SqlU16};
+use crate::db::identity::Asset;
 use crate::db::collection_insert::DatastoreCollection;
+use crate::db::ipv6;
 use crate::db::schema::{dataset, region};
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
+use internal_dns_client::names::{AAAA, SRV, ServiceName, BackendName};
 use serde::{Deserialize, Serialize};
-use std::net::SocketAddr;
+use std::net::{Ipv6Addr, SocketAddrV6};
 use uuid::Uuid;
 
 /// Database representation of a Dataset.
@@ -35,7 +38,7 @@ pub struct Dataset {
 
     pub pool_id: Uuid,
 
-    ip: ipnetwork::IpNetwork,
+    ip: ipv6::Ipv6Addr,
     port: SqlU16,
 
     pub kind: DatasetKind,
@@ -43,11 +46,10 @@ pub struct Dataset {
 }
 
 impl Dataset {
-    // TODO: Only operate on SocketAddrV6
     pub fn new(
         id: Uuid,
         pool_id: Uuid,
-        addr: SocketAddr,
+        addr: SocketAddrV6,
         kind: DatasetKind,
     ) -> Self {
         let size_used = match kind {
@@ -66,12 +68,30 @@ impl Dataset {
         }
     }
 
-    pub fn address(&self) -> SocketAddr {
+    pub fn address(&self) -> SocketAddrV6 {
         self.address_with_port(self.port.into())
     }
 
-    pub fn address_with_port(&self, port: u16) -> SocketAddr {
-        SocketAddr::new(self.ip.ip(), port)
+    pub fn address_with_port(&self, port: u16) -> SocketAddrV6 {
+        SocketAddrV6::new(Ipv6Addr::from(self.ip), port, 0, 0)
+    }
+}
+
+impl internal_dns_client::multiclient::Service for Dataset {
+    fn aaaa(&self) -> AAAA {
+        AAAA::Zone(self.id())
+    }
+
+    fn srv(&self) -> SRV {
+        match self.kind {
+            DatasetKind::Crucible => SRV::Backend(BackendName::Crucible, self.id()),
+            DatasetKind::Clickhouse => SRV::Service(ServiceName::Clickhouse),
+            DatasetKind::Cockroach => SRV::Service(ServiceName::Cockroach),
+        }
+    }
+
+    fn address(&self) -> SocketAddrV6 {
+        self.address()
     }
 }
 

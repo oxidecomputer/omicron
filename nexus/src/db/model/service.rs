@@ -4,9 +4,12 @@
 
 use super::ServiceKind;
 use crate::db::ipv6;
+use crate::db::identity::Asset;
 use crate::db::schema::service;
 use db_macros::Asset;
-use std::net::Ipv6Addr;
+use internal_dns_client::names::{AAAA, SRV, ServiceName};
+use omicron_common::address::{DNS_SERVER_PORT, NEXUS_INTERNAL_PORT, OXIMETER_PORT};
+use std::net::{Ipv6Addr, SocketAddrV6};
 use uuid::Uuid;
 
 /// Representation of services which may run on Sleds.
@@ -34,5 +37,28 @@ impl Service {
             ip: addr.into(),
             kind,
         }
+    }
+}
+
+impl internal_dns_client::multiclient::Service for Service {
+    fn aaaa(&self) -> AAAA {
+        AAAA::Zone(self.id())
+    }
+
+    fn srv(&self) -> SRV {
+        match self.kind {
+            ServiceKind::InternalDNS => SRV::Service(ServiceName::InternalDNS),
+            ServiceKind::Nexus => SRV::Service(ServiceName::Nexus),
+            ServiceKind::Oximeter => SRV::Service(ServiceName::Oximeter),
+        }
+    }
+
+    fn address(&self) -> SocketAddrV6 {
+        let port = match self.kind {
+            ServiceKind::InternalDNS => DNS_SERVER_PORT,
+            ServiceKind::Nexus => NEXUS_INTERNAL_PORT,
+            ServiceKind::Oximeter => OXIMETER_PORT,
+        };
+        SocketAddrV6::new(Ipv6Addr::from(self.ip), port, 0, 0)
     }
 }

@@ -7,32 +7,43 @@ use uuid::Uuid;
 
 const DNS_ZONE: &str = "control-plane.oxide.internal";
 
+#[derive(Debug, PartialEq, PartialOrd)]
 pub enum ServiceName {
-    Nexus,
+    Clickhouse,
     Cockroach,
+    InternalDNS,
+    Nexus,
+    Oximeter,
 }
 
 impl fmt::Display for ServiceName {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self {
+            ServiceName::Clickhouse => write!(f, "clickhouse"),
+            ServiceName::Cockroach => write!(f, "cockroach"),
+            ServiceName::InternalDNS => write!(f, "internalDNS"),
             ServiceName::Nexus => write!(f, "nexus"),
-            ServiceName::Cockroach => write!(f, "cockroachdb"),
+            ServiceName::Oximeter => write!(f, "oximeter"),
         }
     }
 }
 
+#[derive(Debug, PartialEq, PartialOrd)]
 pub enum BackendName {
+    Crucible,
     SledAgent,
 }
 
 impl fmt::Display for BackendName {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self {
+            BackendName::Crucible => write!(f, "crucible"),
             BackendName::SledAgent => write!(f, "sledagent"),
         }
     }
 }
 
+#[derive(Debug, PartialEq, PartialOrd)]
 pub enum SRV {
     /// A service identified and accessed by name, such as "nexus", "CRDB", etc.
     ///

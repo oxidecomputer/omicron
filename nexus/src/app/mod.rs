@@ -14,7 +14,7 @@ use crate::populate::PopulateArgs;
 use crate::populate::PopulateStatus;
 use crate::saga_interface::SagaContext;
 use anyhow::anyhow;
-use omicron_common::address::{Ipv6Subnet, RACK_PREFIX};
+use omicron_common::address::{Ipv6Subnet, AZ_PREFIX, RACK_PREFIX};
 use omicron_common::api::external::Error;
 use slog::Logger;
 use std::sync::Arc;
@@ -208,6 +208,10 @@ impl Nexus {
 
         *nexus.recovery_task.lock().unwrap() = Some(recovery_task);
         nexus
+    }
+
+    pub fn az_subnet(&self) -> Ipv6Subnet<AZ_PREFIX> {
+        Ipv6Subnet::<AZ_PREFIX>::new(self.rack_subnet.net().ip())
     }
 
     /// Return the tunable configuration parameters, e.g. for use in tests.

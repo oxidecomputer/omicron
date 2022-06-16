@@ -15,7 +15,7 @@ use crate::rack_setup::plan::service::{
 use crate::rack_setup::plan::sled::{
     Plan as SledPlan, PlanError as SledPlanError,
 };
-use internal_dns_client::names::{ServiceName, AAAA, SRV};
+use internal_dns_client::names::{ServiceName, SRV};
 use nexus_client::{
     types as NexusTypes, Client as NexusClient, Error as NexusError,
 };
@@ -168,22 +168,11 @@ impl ServiceInner {
         }
     }
 
-    async fn initialize_crdb(
+    async fn initialize_datasets(
         &self,
         sled_address: SocketAddrV6,
         datasets: &Vec<DatasetEnsureBody>,
     ) -> Result<(), SetupServiceError> {
-        if datasets.iter().any(|dataset| {
-            !matches!(
-                dataset.dataset_kind,
-                crate::params::DatasetKind::CockroachDb { .. }
-            )
-        }) {
-            return Err(SetupServiceError::BadConfig(
-                "RSS should only initialize CRDB services".into(),
-            ));
-        }
-
         let dur = std::time::Duration::from_secs(60);
         let client = reqwest::ClientBuilder::new()
             .connect_timeout(dur)
@@ -218,18 +207,10 @@ impl ServiceInner {
         }
 
         // Initialize DNS records for these datasets.
-        //
-        // CRDB is treated as a service, since they are interchangeable.
-
-        let aaaa = datasets
-            .iter()
-            .map(|dataset| (AAAA::Zone(dataset.id), dataset.address))
-            .collect::<Vec<_>>();
-        let srv_key = SRV::Service(ServiceName::Cockroach);
         self.dns_servers
             .get()
             .expect("DNS servers must be initialized first")
-            .insert_dns_records(&self.log, aaaa, srv_key)
+            .insert_dns_records(datasets)
             .await?;
 
         Ok(())
@@ -272,42 +253,11 @@ impl ServiceInner {
         retry_notify(internal_service_policy(), services_put, log_failure)
             .await?;
 
-        // Initialize DNS records for the Nexus service.
-        let services: Vec<_> = services
-            .iter()
-            .filter(|svc| {
-                matches!(
-                    svc.service_type,
-                    crate::params::ServiceType::Nexus { .. }
-                )
-            })
-            .collect();
-
-        // Early-exit for non-Nexus case
-        if services.is_empty() {
-            return Ok(());
-        }
-
-        // Otherwise, insert DNS records for Nexus
-        let aaaa = services
-            .iter()
-            .map(|service| {
-                (
-                    AAAA::Zone(service.id),
-                    SocketAddrV6::new(
-                        service.addresses[0],
-                        NEXUS_INTERNAL_PORT,
-                        0,
-                        0,
-                    ),
-                )
-            })
-            .collect::<Vec<_>>();
-        let srv_key = SRV::Service(ServiceName::Nexus);
+        // Insert DNS records
         self.dns_servers
             .get()
             .expect("DNS servers must be initialized first")
-            .insert_dns_records(&self.log, aaaa, srv_key)
+            .insert_dns_records(services)
             .await?;
 
         Ok(())
@@ -609,8 +559,11 @@ impl ServiceInner {
         // Issue the crdb initialization requests to all sleds.
         futures::future::join_all(service_plan.services.iter().map(
             |(sled_address, services_request)| async move {
-                self.initialize_crdb(*sled_address, &services_request.datasets)
-                    .await?;
+                self.initialize_datasets(
+                    *sled_address,
+                    &services_request.datasets,
+                )
+                .await?;
                 Ok(())
             },
         ))
@@ -622,9 +575,12 @@ impl ServiceInner {
 
         // Issue service initialization requests.
         //
-        // Note that this must happen *after* the dataset initialization,
+        // NOTE: This must happen *after* the dataset initialization,
         // to ensure that CockroachDB has been initialized before Nexus
         // starts.
+        //
+        // If Nexus was more resilient to concurrent initialization
+        // of CRDB, this requirement could be relaxed.
         futures::future::join_all(service_plan.services.iter().map(
             |(sled_address, services_request)| async move {
                 // With the current implementation of "initialize_services",

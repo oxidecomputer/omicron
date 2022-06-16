@@ -95,7 +95,7 @@ use omicron_common::api::external::{
 use omicron_common::bail_unless;
 use sled_agent_client::types as sled_client_types;
 use std::convert::{TryFrom, TryInto};
-use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
+use std::net::{Ipv6Addr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -753,12 +753,12 @@ impl DataStore {
                             TxnError::CustomError(DatasetError::Other(e))
                         })
                         .map(|ip| {
-                            SocketAddr::V6(SocketAddrV6::new(
+                            SocketAddrV6::new(
                                 ip,
                                 kind.port(),
                                 0,
                                 0,
-                            ))
+                            )
                         })?;
 
                     let dataset = db::model::Dataset::new(

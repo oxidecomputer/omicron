@@ -36,6 +36,7 @@ pub const PROPOLIS_PORT: u16 = 12400;
 pub const COCKROACH_PORT: u16 = 32221;
 pub const CRUCIBLE_PORT: u16 = 32345;
 pub const CLICKHOUSE_PORT: u16 = 8123;
+pub const OXIMETER_PORT: u16 = 12223;
 
 pub const NEXUS_EXTERNAL_PORT: u16 = 12220;
 pub const NEXUS_INTERNAL_PORT: u16 = 12221;

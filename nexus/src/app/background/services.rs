@@ -14,6 +14,10 @@ use crate::db::model::ServiceKind;
 use crate::db::model::Sled;
 use crate::db::model::Zpool;
 use crate::Nexus;
+use internal_dns_client::multiclient::{
+    Service as DnsService,
+    Updater as DnsUpdater
+};
 use omicron_common::address::{
     DNS_PORT, DNS_REDUNDANCY, DNS_SERVER_PORT, NEXUS_EXTERNAL_PORT,
     NEXUS_INTERNAL_PORT,
@@ -82,11 +86,21 @@ const EXPECTED_DATASETS: [ExpectedDataset; 3] = [
 pub struct ServiceBalancer {
     log: Logger,
     nexus: Arc<Nexus>,
+    dns_updater: DnsUpdater,
 }
 
 impl ServiceBalancer {
     pub fn new(log: Logger, nexus: Arc<Nexus>) -> Self {
-        Self { log, nexus }
+        let dns_updater = DnsUpdater::new(
+            nexus.az_subnet(),
+            log.new(o!("component" => "DNS Updater")),
+        );
+
+        Self {
+            log,
+            nexus,
+            dns_updater,
+        }
     }
 
     // Reaches out to all sled agents implied in "services", and
@@ -94,7 +108,7 @@ impl ServiceBalancer {
     async fn instantiate_services(
         &self,
         opctx: &OpContext,
-        services: Vec<Service>,
+        mut services: Vec<Service>,
     ) -> Result<(), Error> {
         let mut sled_ids = HashSet::new();
         for svc in &services {
@@ -148,6 +162,15 @@ impl ServiceBalancer {
                 })
                 .await?;
         }
+
+        // Putting records of the same SRV right next to each other isn't
+        // strictly necessary, but doing so makes the record insertion more
+        // efficient.
+        services.sort_by(|a, b| a.srv().partial_cmp(&b.srv()).unwrap());
+        self.dns_updater.insert_dns_records(
+            &services
+        ).await.map_err(|e| Error::internal_error(&e.to_string()))?;
+
         Ok(())
     }
 
@@ -273,7 +296,7 @@ impl ServiceBalancer {
             .await?;
 
         // Actually instantiate those datasets.
-        self.instantiate_datasets(new_datasets).await
+        self.instantiate_datasets(new_datasets, kind).await
     }
 
     // Reaches out to all sled agents implied in "services", and
@@ -281,7 +304,12 @@ impl ServiceBalancer {
     async fn instantiate_datasets(
         &self,
         datasets: Vec<(Sled, Zpool, Dataset)>,
+        kind: DatasetKind,
     ) -> Result<(), Error> {
+        if datasets.is_empty() {
+            return Ok(());
+        }
+
         let mut sled_clients = HashMap::new();
 
         // TODO: We could issue these requests concurrently
@@ -298,9 +326,10 @@ impl ServiceBalancer {
                 }
             };
 
-            let dataset_kind = match dataset.kind {
+            let dataset_kind = match kind {
                 // TODO: This set of "all addresses" isn't right.
                 // TODO: ... should we even be using "all addresses" to contact CRDB?
+                // Can it just rely on DNS, somehow?
                 DatasetKind::Cockroach => {
                     SledAgentTypes::DatasetKind::CockroachDb(vec![])
                 }
@@ -320,6 +349,10 @@ impl ServiceBalancer {
                 })
                 .await?;
         }
+
+        self.dns_updater.insert_dns_records(
+            &datasets.into_iter().map(|(_, _, dataset)| dataset).collect()
+        ).await.map_err(|e| Error::internal_error(&e.to_string()))?;
 
         Ok(())
     }

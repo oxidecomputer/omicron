@@ -74,7 +74,7 @@ impl FromStr for DatasetKind {
 pub struct DatasetPutRequest {
     /// Address on which a service is responding to requests for the
     /// dataset.
-    pub address: SocketAddr,
+    pub address: SocketAddrV6,
 
     /// Type of dataset being inserted.
     pub kind: DatasetKind,

@@ -21,7 +21,14 @@ type DnsError = crate::Error<crate::types::Error>;
 
 /// A connection used to update multiple DNS servers.
 pub struct Updater {
+    log: Logger,
     clients: Vec<crate::Client>,
+}
+
+pub trait Service {
+    fn aaaa(&self) -> crate::names::AAAA;
+    fn srv(&self) -> crate::names::SRV;
+    fn address(&self) -> SocketAddrV6;
 }
 
 impl Updater {
@@ -41,15 +48,56 @@ impl Updater {
             })
             .collect::<Vec<_>>();
 
-        Self { clients }
+        Self { log, clients }
+    }
+
+    /// Inserts all service records into the DNS server.
+    ///
+    /// This method is most efficient when records are sorted by
+    /// SRV key.
+    pub async fn insert_dns_records(
+        &self,
+        records: &Vec<impl Service>,
+    ) -> Result<(), DnsError> {
+        let mut records = records.iter().peekable();
+
+        while let Some(record) = records.next() {
+            let srv = record.srv();
+
+            match &srv {
+                &crate::names::SRV::Service(_) => {
+                    let mut aaaa = vec![];
+                    while let Some(record) = records.peek() {
+                        if record.srv() == srv {
+                            let record = records.next().unwrap();
+                            aaaa.push((record.aaaa(), record.address()));
+                        } else {
+                            break;
+                        }
+                    }
+
+                    self.insert_dns_records_internal(
+                        aaaa,
+                        srv,
+                    ).await?;
+                },
+                &crate::names::SRV::Backend(_, _) => {
+                    let aaaa = vec![(record.aaaa(), record.address())];
+                    self.insert_dns_records_internal(
+                        aaaa,
+                        record.srv(),
+                    ).await?;
+                },
+            };
+        }
+        Ok(())
     }
 
     /// Utility function to insert:
     /// - A set of uniquely-named AAAA records, each corresponding to an address
     /// - An SRV record, pointing to each of the AAAA records.
-    pub async fn insert_dns_records(
+    async fn insert_dns_records_internal(
         &self,
-        log: &Logger,
         aaaa: Vec<(crate::names::AAAA, SocketAddrV6)>,
         srv_key: crate::names::SRV,
     ) -> Result<(), DnsError> {
@@ -84,7 +132,7 @@ impl Updater {
             Ok::<(), BackoffError<DnsError>>(())
         };
         let log_failure = |error, _| {
-            warn!(log, "Failed to set DNS records"; "error" => ?error);
+            warn!(self.log, "Failed to set DNS records"; "error" => ?error);
         };
 
         retry_notify(internal_service_policy(), set_record, log_failure)
