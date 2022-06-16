@@ -144,6 +144,7 @@ async fn run_test_operations<W: Write>(
 ) -> std::io::Result<()> {
     let mut futures = futures::stream::FuturesOrdered::new();
 
+    // Run the per-resource tests in parallel.
     for resource in test_resources.all_resources() {
         let log = log.new(o!("resource" => format!("{:?}", resource)));
         futures.push(test_one_resource(
@@ -175,7 +176,7 @@ async fn test_one_resource(
     let task = tokio::spawn(async move {
         let mut buffer = Vec::new();
         let mut out = Cursor::new(&mut buffer);
-        write!(out, "resource: {}\n\n", resource_name(resource.as_ref()),)?;
+        write!(out, "resource: {}\n\n", resource.resource_name())?;
 
         write!(out, "  {:31}", "USER")?;
         for action in authz::Action::iter() {
@@ -254,6 +255,7 @@ impl Resources {
         &self,
     ) -> impl std::iter::Iterator<Item = Arc<dyn Authorizable>> + '_ {
         vec![
+            Arc::new(authz::DATABASE.clone()) as Arc<dyn Authorizable>,
             Arc::new(authz::FLEET.clone()) as Arc<dyn Authorizable>,
             Arc::new(self.silo1.clone()) as Arc<dyn Authorizable>,
             Arc::new(self.silo1_org1.clone()) as Arc<dyn Authorizable>,
@@ -279,7 +281,9 @@ impl Resources {
     }
 }
 
-trait Authorizable: AuthorizedResource + ApiResource {
+trait Authorizable: AuthorizedResource + std::fmt::Debug {
+    fn resource_name(&self) -> String;
+
     fn do_authorize<'a, 'b>(
         &'a self,
         opctx: &'b OpContext,
@@ -293,6 +297,35 @@ impl<T> Authorizable for T
 where
     T: ApiResource + AuthorizedResource + Clone,
 {
+    fn do_authorize<'a, 'b>(
+        &'a self,
+        opctx: &'b OpContext,
+        action: authz::Action,
+    ) -> BoxFuture<'a, Result<(), Error>>
+    where
+        'b: 'a,
+    {
+        opctx.authorize(action, self).boxed()
+    }
+
+    fn resource_name(&self) -> String {
+        let my_ident = match self.lookup_type() {
+            LookupType::ByName(name) => format!("{:?}", name),
+            LookupType::ById(id) => format!("id {:?}", id.to_string()),
+            LookupType::BySessionToken(_) | LookupType::ByCompositeId(_) => {
+                unimplemented!()
+            }
+        };
+
+        format!("{:?} {}", self.resource_type(), my_ident)
+    }
+}
+
+impl Authorizable for authz::oso_generic::Database {
+    fn resource_name(&self) -> String {
+        String::from("DATABASE")
+    }
+
     fn do_authorize<'a, 'b>(
         &'a self,
         opctx: &'b OpContext,
@@ -470,18 +503,6 @@ fn action_abbreviation(action: authz::Action) -> &'static str {
         authz::Action::Delete => "D",
         authz::Action::ListIdentityProviders => "LP",
     }
-}
-
-fn resource_name(authz_resource: &dyn Authorizable) -> String {
-    let my_ident = match authz_resource.lookup_type() {
-        LookupType::ByName(name) => format!("{:?}", name),
-        LookupType::ById(id) => format!("id {:?}", id.to_string()),
-        LookupType::BySessionToken(_) | LookupType::ByCompositeId(_) => {
-            unimplemented!()
-        }
-    };
-
-    format!("{:?} {}", authz_resource.resource_type(), my_ident)
 }
 
 /// `Write` impl that writes everything it's given to both a destination `Write`
