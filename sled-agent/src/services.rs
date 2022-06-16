@@ -12,7 +12,7 @@ use crate::illumos::zone::AddressRequest;
 use crate::params::{ServiceEnsureBody, ServiceRequest, ServiceType};
 use crate::zone::Zones;
 use dropshot::ConfigDropshot;
-use omicron_common::address::{Ipv6Subnet, RACK_PREFIX};
+use omicron_common::address::{Ipv6Subnet, OXIMETER_PORT, RACK_PREFIX};
 use omicron_common::nexus_config::{
     self, DeploymentConfig as NexusDeploymentConfig,
 };
@@ -427,8 +427,50 @@ impl ServiceManager {
                 ServiceType::Oximeter => {
                     info!(self.log, "Setting up oximeter service");
 
-                    // TODO: Implement with dynamic parameters, when address is
-                    // dynamically assigned.
+                    let address = service.addresses[0];
+                    running_zone
+                        .run_cmd(&[
+                            crate::illumos::zone::SVCCFG,
+                            "-s",
+                            &smf_name,
+                            "setprop",
+                            &format!("config/id={}", service.id),
+                        ])
+                        .map_err(|err| Error::ZoneCommand {
+                            intent: "set server ID".to_string(),
+                            err,
+                        })?;
+
+                    running_zone
+                        .run_cmd(&[
+                            crate::illumos::zone::SVCCFG,
+                            "-s",
+                            &smf_name,
+                            "setprop",
+                            &format!(
+                                "config/address=[{}]:{}",
+                                address, OXIMETER_PORT,
+                            ),
+                        ])
+                        .map_err(|err| Error::ZoneCommand {
+                            intent: "set server address".to_string(),
+                            err,
+                        })?;
+
+                    running_zone
+                        .run_cmd(&[
+                            crate::illumos::zone::SVCCFG,
+                            "-s",
+                            &default_smf_name,
+                            "refresh",
+                        ])
+                        .map_err(|err| Error::ZoneCommand {
+                            intent: format!(
+                                "Refresh SMF manifest {}",
+                                default_smf_name
+                            ),
+                            err,
+                        })?;
                 }
             }
 

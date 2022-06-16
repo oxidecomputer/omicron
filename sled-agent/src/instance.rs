@@ -831,7 +831,8 @@ mod test {
         );
         let port_allocator = OptePortAllocator::new();
         let lazy_nexus_client =
-            LazyNexusClient::new(log.clone(), std::net::Ipv6Addr::LOCALHOST);
+            LazyNexusClient::new(log.clone(), std::net::Ipv6Addr::LOCALHOST)
+                .unwrap();
 
         let inst = Instance::new(
             log.clone(),

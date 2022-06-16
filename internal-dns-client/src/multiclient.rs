@@ -11,7 +11,7 @@ use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
 };
 use slog::{info, warn, Logger};
-use std::net::{SocketAddr, SocketAddrV6};
+use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use trust_dns_resolver::config::{
     NameServerConfig, Protocol, ResolverConfig, ResolverOpts,
 };
@@ -196,4 +196,66 @@ pub fn create_resolver(
         });
     }
     TokioAsyncResolver::tokio(rc, ResolverOpts::default())
+}
+
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum ResolveError {
+    #[error(transparent)]
+    Resolve(#[from] trust_dns_resolver::error::ResolveError),
+
+    #[error("Record not found for SRV key: {0}")]
+    NotFound(crate::names::SRV),
+}
+
+/// A wrapper around a DNS resolver, providing a way to conveniently
+/// look up IP addresses of services based on their SRV keys.
+pub struct Resolver {
+    inner: TokioAsyncResolver,
+}
+
+impl Resolver {
+    /// Creates a DNS resolver, looking up DNS server addresses based on
+    /// the provided subnet.
+    pub fn new(subnet: Ipv6Subnet<AZ_PREFIX>) -> Result<Self, ResolveError> {
+        Ok(Self { inner: create_resolver(subnet)? })
+    }
+
+    /// Convenience wrapper for [`Resolver::new`] which determines the subnet
+    /// based on a provided IP address.
+    pub fn new_from_ip(address: Ipv6Addr) -> Result<Self, ResolveError> {
+        let subnet = Ipv6Subnet::<AZ_PREFIX>::new(address);
+
+        Resolver::new(subnet)
+    }
+
+    /// Looks up a single [`Ipv6Addr`] based on the SRV name.
+    /// Returns an error if the record does not exist.
+    // TODO: There are lots of ways this API can expand: Caching,
+    // actually respecting TTL, looking up ports, etc.
+    //
+    // For now, however, it serves as a very simple "get everyone using DNS"
+    // API that can be improved upon later.
+    pub async fn lookup_ipv6(
+        &self,
+        srv: crate::names::SRV,
+    ) -> Result<Ipv6Addr, ResolveError> {
+        let response = self.inner.ipv6_lookup(&srv.to_string()).await?;
+        let address = response
+            .iter()
+            .next()
+            .ok_or_else(|| ResolveError::NotFound(srv))?;
+        Ok(*address)
+    }
+
+    pub async fn lookup_ip(
+        &self,
+        srv: crate::names::SRV,
+    ) -> Result<IpAddr, ResolveError> {
+        let response = self.inner.lookup_ip(&srv.to_string()).await?;
+        let address = response
+            .iter()
+            .next()
+            .ok_or_else(|| ResolveError::NotFound(srv))?;
+        Ok(address)
+    }
 }

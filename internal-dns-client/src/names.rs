@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 const DNS_ZONE: &str = "control-plane.oxide.internal";
 
-#[derive(Debug, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, PartialEq, PartialOrd)]
 pub enum ServiceName {
     Clickhouse,
     Cockroach,
@@ -28,7 +28,7 @@ impl fmt::Display for ServiceName {
     }
 }
 
-#[derive(Debug, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, PartialEq, PartialOrd)]
 pub enum BackendName {
     Crucible,
     SledAgent,
@@ -43,7 +43,7 @@ impl fmt::Display for BackendName {
     }
 }
 
-#[derive(Debug, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, PartialEq, PartialOrd)]
 pub enum SRV {
     /// A service identified and accessed by name, such as "nexus", "CRDB", etc.
     ///

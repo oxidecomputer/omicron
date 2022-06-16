@@ -642,7 +642,9 @@ impl StorageWorker {
                 lazy_nexus_client
                     .get()
                     .await
-                    .map_err(|e| backoff::BackoffError::transient(e))?
+                    .map_err(|e| {
+                        backoff::BackoffError::transient(e.to_string())
+                    })?
                     .zpool_put(&sled_id, &pool_id, &zpool_request)
                     .await
                     .map_err(|e| {

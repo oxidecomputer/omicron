@@ -271,7 +271,8 @@ mod test {
     async fn ensure_instance() {
         let log = logger();
         let lazy_nexus_client =
-            LazyNexusClient::new(log.clone(), std::net::Ipv6Addr::LOCALHOST);
+            LazyNexusClient::new(log.clone(), std::net::Ipv6Addr::LOCALHOST)
+                .unwrap();
 
         // Creation of the instance manager incurs some "global" system
         // checks: cleanup of existing zones + vnics.
@@ -355,7 +356,8 @@ mod test {
     async fn ensure_instance_repeatedly() {
         let log = logger();
         let lazy_nexus_client =
-            LazyNexusClient::new(log.clone(), std::net::Ipv6Addr::LOCALHOST);
+            LazyNexusClient::new(log.clone(), std::net::Ipv6Addr::LOCALHOST)
+                .unwrap();
 
         // Instance Manager creation.
 

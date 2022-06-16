@@ -8,8 +8,10 @@
 use clap::Parser;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
-use oximeter_collector::{oximeter_api, Config, Oximeter};
+use oximeter_collector::{oximeter_api, Config, Oximeter, OximeterArguments};
+use std::net::SocketAddrV6;
 use std::path::PathBuf;
+use uuid::Uuid;
 
 pub fn run_openapi() -> Result<(), String> {
     oximeter_api()
@@ -36,6 +38,12 @@ struct Args {
     /// Path to TOML file with configuration for the server
     #[clap(name = "CONFIG_FILE", action)]
     config_file: PathBuf,
+
+    #[clap(short, long, action)]
+    id: Uuid,
+
+    #[clap(short, long, action)]
+    address: SocketAddrV6,
 }
 
 #[tokio::main]
@@ -51,7 +59,8 @@ async fn do_run() -> Result<(), CmdError> {
     if args.openapi {
         run_openapi().map_err(CmdError::Failure)
     } else {
-        Oximeter::new(&config)
+        let args = OximeterArguments { id: args.id, address: args.address };
+        Oximeter::new(&config, &args)
             .await
             .unwrap()
             .serve_forever()

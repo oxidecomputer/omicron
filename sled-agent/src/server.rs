@@ -44,7 +44,8 @@ impl Server {
 
         let client_log = log.new(o!("component" => "NexusClient"));
 
-        let lazy_nexus_client = LazyNexusClient::new(client_log, *addr.ip());
+        let lazy_nexus_client = LazyNexusClient::new(client_log, *addr.ip())
+            .map_err(|e| e.to_string())?;
 
         let sled_agent = SledAgent::new(
             &config,
@@ -86,7 +87,7 @@ impl Server {
                 let nexus_client = lazy_nexus_client
                     .get()
                     .await
-                    .map_err(|err| BackoffError::transient(err))?;
+                    .map_err(|err| BackoffError::transient(err.to_string()))?;
                 nexus_client
                     .cpapi_sled_agents_post(
                         &sled_id,

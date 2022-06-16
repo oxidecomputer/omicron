@@ -7,16 +7,18 @@ pub use crate::mocks::MockNexusClient as NexusClient;
 #[cfg(not(test))]
 pub use nexus_client::Client as NexusClient;
 
-use internal_dns_client::names::{ServiceName, SRV};
-use omicron_common::address::{Ipv6Subnet, AZ_PREFIX, NEXUS_INTERNAL_PORT};
+use internal_dns_client::{
+    multiclient::{ResolveError, Resolver},
+    names::{ServiceName, SRV},
+};
+use omicron_common::address::NEXUS_INTERNAL_PORT;
 use slog::Logger;
 use std::net::Ipv6Addr;
 use std::sync::Arc;
 
 struct Inner {
     log: Logger,
-    addr: Ipv6Addr,
-    // TODO: We could also totally cache the resolver / observed IP here?
+    resolver: Resolver,
 }
 
 /// Wrapper around a [`NexusClient`] object, which allows deferring
@@ -35,26 +37,21 @@ pub struct LazyNexusClient {
 }
 
 impl LazyNexusClient {
-    pub fn new(log: Logger, addr: Ipv6Addr) -> Self {
-        Self { inner: Arc::new(Inner { log, addr }) }
+    pub fn new(log: Logger, addr: Ipv6Addr) -> Result<Self, ResolveError> {
+        Ok(Self {
+            inner: Arc::new(Inner {
+                log,
+                resolver: Resolver::new_from_ip(addr)?,
+            }),
+        })
     }
 
-    pub async fn get(&self) -> Result<NexusClient, String> {
-        // TODO: Consider refactoring this:
-        // - Address as input
-        // - Lookup "nexus" DNS record
-        // - Result<Address> as output
-        let az_subnet = Ipv6Subnet::<AZ_PREFIX>::new(self.inner.addr);
-        let resolver =
-            internal_dns_client::multiclient::create_resolver(az_subnet)
-                .map_err(|e| format!("Failed to create DNS resolver: {}", e))?;
-        let response = resolver
-            .lookup_ip(&SRV::Service(ServiceName::Nexus).to_string())
-            .await
-            .map_err(|e| format!("Failed to lookup Nexus IP: {}", e))?;
-        let address = response.iter().next().ok_or_else(|| {
-            "no addresses returned from DNS resolver".to_string()
-        })?;
+    pub async fn get(&self) -> Result<NexusClient, ResolveError> {
+        let address = self
+            .inner
+            .resolver
+            .lookup_ipv6(SRV::Service(ServiceName::Nexus))
+            .await?;
 
         Ok(NexusClient::new(
             &format!("http://[{}]:{}", address, NEXUS_INTERNAL_PORT),
@@ -70,7 +67,7 @@ impl LazyNexusClient {
 #[cfg(test)]
 mockall::mock! {
     pub LazyNexusClient {
-        pub fn new(log: Logger, addr: Ipv6Addr) -> Self;
+        pub fn new(log: Logger, addr: Ipv6Addr) -> Result<Self, ResolveError>;
         pub async fn get(&self) -> Result<NexusClient, String>;
     }
     impl Clone for LazyNexusClient {
