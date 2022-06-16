@@ -4459,9 +4459,7 @@ mod test {
     };
     use omicron_test_utils::dev;
     use std::collections::{HashMap, HashSet};
-    use std::net::Ipv6Addr;
-    use std::net::SocketAddrV6;
-    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+    use std::net::{Ipv6Addr, SocketAddrV6};
     use std::sync::Arc;
     use uuid::Uuid;
 
@@ -4677,8 +4675,7 @@ mod test {
 
         // ... and datasets within that zpool.
         let dataset_count = REGION_REDUNDANCY_THRESHOLD * 2;
-        let bogus_addr =
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+        let bogus_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
         let dataset_ids: Vec<Uuid> =
             (0..dataset_count).map(|_| Uuid::new_v4()).collect();
         for id in &dataset_ids {
@@ -4759,8 +4756,7 @@ mod test {
 
         // ... and datasets within that zpool.
         let dataset_count = REGION_REDUNDANCY_THRESHOLD;
-        let bogus_addr =
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+        let bogus_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
         let dataset_ids: Vec<Uuid> =
             (0..dataset_count).map(|_| Uuid::new_v4()).collect();
         for id in &dataset_ids {
@@ -4826,8 +4822,7 @@ mod test {
 
         // ... and datasets within that zpool.
         let dataset_count = REGION_REDUNDANCY_THRESHOLD - 1;
-        let bogus_addr =
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+        let bogus_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
         let dataset_ids: Vec<Uuid> =
             (0..dataset_count).map(|_| Uuid::new_v4()).collect();
         for id in &dataset_ids {
@@ -4878,8 +4873,7 @@ mod test {
 
         // ... and datasets within that zpool.
         let dataset_count = REGION_REDUNDANCY_THRESHOLD;
-        let bogus_addr =
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+        let bogus_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
         let dataset_ids: Vec<Uuid> =
             (0..dataset_count).map(|_| Uuid::new_v4()).collect();
         for id in &dataset_ids {

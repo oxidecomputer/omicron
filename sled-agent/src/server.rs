@@ -100,12 +100,12 @@ impl Server {
             let log_notification_failure = |err, delay| {
                 warn!(
                     log,
-                    "failed to contact nexus: {}, will retry in {:?}", err, delay;
+                    "failed to notify nexus about sled agent: {}, will retry in {:?}", err, delay;
                 );
             };
             retry_notify(
                 internal_service_policy_with_max(
-                    std::time::Duration::from_secs(5),
+                    std::time::Duration::from_secs(1),
                 ),
                 notify_nexus,
                 log_notification_failure,

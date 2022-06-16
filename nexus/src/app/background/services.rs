@@ -14,6 +14,7 @@ use crate::db::model::ServiceKind;
 use crate::db::model::Sled;
 use crate::db::model::Zpool;
 use crate::Nexus;
+use futures::stream::{self, StreamExt, TryStreamExt};
 use internal_dns_client::multiclient::{
     Service as DnsService, Updater as DnsUpdater,
 };
@@ -112,51 +113,58 @@ impl ServiceBalancer {
 
         // For all sleds requiring an update, request all services be
         // instantiated.
-        for sled_id in &sled_ids {
-            // TODO: This interface kinda sucks; ideally we would
-            // only insert the *new* services.
-            //
-            // Inserting the old ones too is costing us an extra query.
-            let services =
-                self.nexus.datastore().service_list(opctx, *sled_id).await?;
-            let sled_client = self.nexus.sled_client(sled_id).await?;
+        stream::iter(&sled_ids)
+            .map(Ok::<_, Error>)
+            .try_for_each_concurrent(None, |sled_id| async {
+                // TODO: This interface kinda sucks; ideally we would
+                // only insert the *new* services.
+                //
+                // Inserting the old ones too is costing us an extra query.
+                let services = self
+                    .nexus
+                    .datastore()
+                    .service_list(opctx, *sled_id)
+                    .await?;
+                let sled_client = self.nexus.sled_client(sled_id).await?;
 
-            info!(self.log, "instantiate_services: {:?}", services);
+                info!(self.log, "instantiate_services: {:?}", services);
 
-            sled_client
-                .services_put(&SledAgentTypes::ServiceEnsureBody {
-                    services: services
-                        .iter()
-                        .map(|s| {
-                            let address = Ipv6Addr::from(s.ip);
-                            let (name, service_type) =
-                                Self::get_service_name_and_type(
-                                    address, s.kind,
-                                );
+                sled_client
+                    .services_put(&SledAgentTypes::ServiceEnsureBody {
+                        services: services
+                            .iter()
+                            .map(|s| {
+                                let address = Ipv6Addr::from(s.ip);
+                                let (name, service_type) =
+                                    Self::get_service_name_and_type(
+                                        address, s.kind,
+                                    );
 
-                            // TODO: This is hacky, specifically to inject
-                            // global zone addresses in the DNS service.
-                            let gz_addresses = match &s.kind {
-                                ServiceKind::InternalDNS => {
-                                    let mut octets = address.octets();
-                                    octets[15] = octets[15] + 1;
-                                    vec![Ipv6Addr::from(octets)]
+                                // TODO: This is hacky, specifically to inject
+                                // global zone addresses in the DNS service.
+                                let gz_addresses = match &s.kind {
+                                    ServiceKind::InternalDNS => {
+                                        let mut octets = address.octets();
+                                        octets[15] = octets[15] + 1;
+                                        vec![Ipv6Addr::from(octets)]
+                                    }
+                                    _ => vec![],
+                                };
+
+                                SledAgentTypes::ServiceRequest {
+                                    id: s.id(),
+                                    name,
+                                    addresses: vec![address],
+                                    gz_addresses,
+                                    service_type,
                                 }
-                                _ => vec![],
-                            };
-
-                            SledAgentTypes::ServiceRequest {
-                                id: s.id(),
-                                name,
-                                addresses: vec![address],
-                                gz_addresses,
-                                service_type,
-                            }
-                        })
-                        .collect(),
-                })
-                .await?;
-        }
+                            })
+                            .collect(),
+                    })
+                    .await?;
+                Ok(())
+            })
+            .await?;
 
         // Putting records of the same SRV right next to each other isn't
         // strictly necessary, but doing so makes the record insertion more
@@ -215,40 +223,33 @@ impl ServiceBalancer {
         }
     }
 
-    async fn ensure_rack_service(
+    // Provision the services within the database.
+    async fn provision_rack_service(
         &self,
         opctx: &OpContext,
         kind: ServiceKind,
         desired_count: u32,
-    ) -> Result<(), Error> {
-        // Provision the services within the database.
-        let services = self
-            .nexus
+    ) -> Result<Vec<Service>, Error> {
+        self.nexus
             .datastore()
             .ensure_rack_service(opctx, self.nexus.rack_id, kind, desired_count)
-            .await?;
-
-        // Actually instantiate those services.
-        self.instantiate_services(opctx, services).await
+            .await
     }
 
-    async fn ensure_dns_service(
+    // Provision the services within the database.
+    async fn provision_dns_service(
         &self,
         opctx: &OpContext,
         desired_count: u32,
-    ) -> Result<(), Error> {
-        // Provision the services within the database.
-        let services = self
-            .nexus
+    ) -> Result<Vec<Service>, Error> {
+        self.nexus
             .datastore()
             .ensure_dns_service(opctx, self.nexus.rack_subnet, desired_count)
-            .await?;
-
-        // Actually instantiate those services.
-        self.instantiate_services(opctx, services).await
+            .await
     }
 
-    // TODO: Consider using sagas to ensure the rollout of services happens.
+    // TODO: Consider using sagas to ensure the rollout of services.
+    //
     // Not using sagas *happens* to be fine because these operations are
     // re-tried periodically, but that's kind forcing a dependency on the
     // caller.
@@ -256,25 +257,34 @@ impl ServiceBalancer {
         &self,
         opctx: &OpContext,
     ) -> Result<(), Error> {
-        // NOTE: If any sleds host DNS + other redudant services, we send
-        // redundant requests. We could propagate the service list up to a
-        // higher level, and do instantiation after all services complete?
+        // Provision services within the database.
+        let mut svcs = vec![];
         for expected_svc in &EXPECTED_SERVICES {
             info!(self.log, "Ensuring service {:?} exists", expected_svc);
             match expected_svc.redundancy {
                 ServiceRedundancy::PerRack(desired_count) => {
-                    self.ensure_rack_service(
-                        opctx,
-                        expected_svc.kind,
-                        desired_count,
-                    )
-                    .await?;
+                    svcs.extend_from_slice(
+                        &self
+                            .provision_rack_service(
+                                opctx,
+                                expected_svc.kind,
+                                desired_count,
+                            )
+                            .await?,
+                    );
                 }
                 ServiceRedundancy::DnsPerAz(desired_count) => {
-                    self.ensure_dns_service(opctx, desired_count).await?;
+                    svcs.extend_from_slice(
+                        &self
+                            .provision_dns_service(opctx, desired_count)
+                            .await?,
+                    );
                 }
             }
         }
+
+        // Ensure services exist on the target sleds.
+        self.instantiate_services(opctx, svcs).await?;
         Ok(())
     }
 
@@ -306,46 +316,50 @@ impl ServiceBalancer {
             return Ok(());
         }
 
+        // Ensure that there is one connection per sled.
         let mut sled_clients = HashMap::new();
-
-        // TODO: We could issue these requests concurrently
-        for (sled, zpool, dataset) in &datasets {
-            let sled_client = {
-                match sled_clients.get(&sled.id()) {
-                    Some(client) => client,
-                    None => {
-                        let sled_client =
-                            self.nexus.sled_client(&sled.id()).await?;
-                        sled_clients.insert(sled.id(), sled_client);
-                        sled_clients.get(&sled.id()).unwrap()
-                    }
-                }
-            };
-
-            let dataset_kind = match kind {
-                // TODO: This set of "all addresses" isn't right.
-                // TODO: ... should we even be using "all addresses" to contact CRDB?
-                // Can it just rely on DNS, somehow?
-                DatasetKind::Cockroach => {
-                    SledAgentTypes::DatasetKind::CockroachDb(vec![])
-                }
-                DatasetKind::Crucible => SledAgentTypes::DatasetKind::Crucible,
-                DatasetKind::Clickhouse => {
-                    SledAgentTypes::DatasetKind::Clickhouse
-                }
-            };
-
-            // Instantiate each dataset.
-            sled_client
-                .filesystem_put(&SledAgentTypes::DatasetEnsureBody {
-                    id: dataset.id(),
-                    zpool_id: zpool.id(),
-                    dataset_kind,
-                    address: dataset.address().to_string(),
-                })
-                .await?;
+        for (sled, _, _) in &datasets {
+            if sled_clients.get(&sled.id()).is_none() {
+                let sled_client = self.nexus.sled_client(&sled.id()).await?;
+                sled_clients.insert(sled.id(), sled_client);
+            }
         }
 
+        // Issue all dataset instantiation requests concurrently.
+        stream::iter(&datasets)
+            .map(Ok::<_, Error>)
+            .try_for_each_concurrent(None, |(sled, zpool, dataset)| async {
+                let sled_client = sled_clients.get(&sled.id()).unwrap();
+
+                let dataset_kind = match kind {
+                    // TODO: This set of "all addresses" isn't right.
+                    // TODO: ... should we even be using "all addresses" to contact CRDB?
+                    // Can it just rely on DNS, somehow?
+                    DatasetKind::Cockroach => {
+                        SledAgentTypes::DatasetKind::CockroachDb(vec![])
+                    }
+                    DatasetKind::Crucible => {
+                        SledAgentTypes::DatasetKind::Crucible
+                    }
+                    DatasetKind::Clickhouse => {
+                        SledAgentTypes::DatasetKind::Clickhouse
+                    }
+                };
+
+                // Instantiate each dataset.
+                sled_client
+                    .filesystem_put(&SledAgentTypes::DatasetEnsureBody {
+                        id: dataset.id(),
+                        zpool_id: zpool.id(),
+                        dataset_kind,
+                        address: dataset.address().to_string(),
+                    })
+                    .await?;
+                Ok(())
+            })
+            .await?;
+
+        // Ensure all DNS records are updated for the created datasets.
         self.dns_updater
             .insert_dns_records(
                 &datasets.into_iter().map(|(_, _, dataset)| dataset).collect(),
@@ -360,16 +374,23 @@ impl ServiceBalancer {
         &self,
         opctx: &OpContext,
     ) -> Result<(), Error> {
-        for expected_dataset in &EXPECTED_DATASETS {
-            info!(self.log, "Ensuring dataset {:?} exists", expected_dataset);
-            self.ensure_rack_dataset(
-                opctx,
-                expected_dataset.kind,
-                expected_dataset.redundancy,
-            )
-            .await?
-        }
-        Ok(())
+        // Provision all dataset types concurrently.
+        stream::iter(&EXPECTED_DATASETS)
+            .map(Ok::<_, Error>)
+            .try_for_each_concurrent(None, |expected_dataset| async move {
+                info!(
+                    self.log,
+                    "Ensuring dataset {:?} exists", expected_dataset
+                );
+                self.ensure_rack_dataset(
+                    opctx,
+                    expected_dataset.kind,
+                    expected_dataset.redundancy,
+                )
+                .await?;
+                Ok(())
+            })
+            .await
     }
 
     // Provides a single point-in-time evaluation and adjustment of

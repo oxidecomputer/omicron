@@ -202,11 +202,11 @@ impl ServiceManager {
         existing_zones: &mut Vec<RunningZone>,
         services: &Vec<ServiceRequest>,
     ) -> Result<(), Error> {
-        info!(self.log, "Ensuring services are initialized: {:?}", services);
         // TODO(https://github.com/oxidecomputer/omicron/issues/726):
         // As long as we ensure the requests don't overlap, we could
         // parallelize this request.
         for service in services {
+            info!(self.log, "Ensuring service is initialized: {:?}", service);
             // Before we bother allocating anything for this request, check if
             // this service has already been created.
             let expected_zone_name =
@@ -332,8 +332,6 @@ impl ServiceManager {
                         subnet: Ipv6Subnet::<RACK_PREFIX>::new(
                             self.underlay_address,
                         ),
-                        // TODO: Switch to inferring this URL by DNS.
-                        // "postgresql://root@[fd00:1122:3344:0101::2]:32221/omicron?sslmode=disable"
                         database: nexus_config::Database::FromDns,
                     };
 

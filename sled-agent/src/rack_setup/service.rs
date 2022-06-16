@@ -21,7 +21,8 @@ use nexus_client::{
 };
 use omicron_common::address::{get_sled_address, NEXUS_INTERNAL_PORT};
 use omicron_common::backoff::{
-    internal_service_policy, retry_notify, BackoffError,
+    internal_service_policy, internal_service_policy_with_max, retry_notify,
+    BackoffError,
 };
 use sled_agent_client::{
     types as SledAgentTypes, Client as SledAgentClient, Error as SledAgentError,
@@ -398,8 +399,12 @@ impl ServiceInner {
             info!(self.log, "Failed to handoff to nexus: {err}");
         };
 
-        retry_notify(internal_service_policy(), notify_nexus, log_failure)
-            .await?;
+        retry_notify(
+            internal_service_policy_with_max(std::time::Duration::from_secs(1)),
+            notify_nexus,
+            log_failure,
+        )
+        .await?;
 
         info!(self.log, "Handoff to Nexus is complete");
         Ok(())

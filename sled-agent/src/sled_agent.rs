@@ -324,7 +324,7 @@ impl SledAgent {
             .lazy_nexus_client
             .get()
             .await
-            // TODO: Handle error
+            // TODO: Handle error... or push out lazy nexus client.
             .unwrap();
         crate::updates::download_artifact(artifact, &nexus_client).await?;
         Ok(())

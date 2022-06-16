@@ -241,6 +241,9 @@ impl DatasetInfo {
         address: SocketAddrV6,
         do_format: bool,
     ) -> Result<(), Error> {
+        // TODO: Related to
+        // https://github.com/oxidecomputer/omicron/pull/1124 , should we
+        // avoid importing these manifests?
         match self.kind {
             DatasetKind::CockroachDb { .. } => {
                 info!(log, "start_zone: Loading CRDB manifest");
@@ -317,7 +320,9 @@ impl DatasetInfo {
                     warn!(log, "cockroachdb not yet alive");
                 };
                 backoff::retry_notify(
-                    backoff::internal_service_policy(),
+                    backoff::internal_service_policy_with_max(
+                        std::time::Duration::from_secs(1),
+                    ),
                     check_health,
                     log_failure,
                 )
@@ -650,7 +655,7 @@ impl StorageWorker {
         let log_post_failure = move |_, delay| {
             warn!(
                 log,
-                "failed to notify nexus, will retry in {:?}", delay;
+                "failed to notify nexus about zpool, will retry in {:?}", delay;
             );
         };
         nexus_notifications.push(
@@ -664,59 +669,6 @@ impl StorageWorker {
             .boxed(),
         );
     }
-
-    // Adds a "notification to nexus" to `nexus_notifications`,
-    // informing it about the addition of `datasets` to `pool_id`.
-    /*
-    fn add_datasets_notify(
-        &self,
-        nexus_notifications: &mut FuturesOrdered<Pin<Box<NotifyFut>>>,
-        datasets: Vec<(Uuid, SocketAddrV6, DatasetKind)>,
-        pool_id: Uuid,
-    ) {
-        let lazy_nexus_client = self.lazy_nexus_client.clone();
-        let notify_nexus = move || {
-            let lazy_nexus_client = lazy_nexus_client.clone();
-            let datasets = datasets.clone();
-            async move {
-                for (id, address, kind) in datasets {
-                    let request = DatasetPutRequest {
-                        address: address.to_string(),
-                        kind: kind.into(),
-                    };
-                    lazy_nexus_client
-                        .get()
-                        .await
-                        .map_err(|e| {
-                            backoff::BackoffError::transient(e.to_string())
-                        })?
-                        .dataset_put(&pool_id, &id, &request)
-                        .await
-                        .map_err(|e| {
-                            backoff::BackoffError::transient(e.to_string())
-                        })?;
-                }
-
-                Ok(())
-            }
-        };
-        let log = self.log.clone();
-        let log_post_failure = move |_, delay| {
-            warn!(
-                log,
-                "failed to notify nexus about datasets, will retry in {:?}", delay;
-            );
-        };
-        nexus_notifications.push(
-            backoff::retry_notify(
-                backoff::internal_service_policy(),
-                notify_nexus,
-                log_post_failure,
-            )
-            .boxed(),
-        );
-    }
-    */
 
     // TODO: a lot of these functions act on the `FuturesOrdered` - should
     // that just be a part of the "worker" struct?
