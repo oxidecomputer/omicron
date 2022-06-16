@@ -17,6 +17,7 @@ use crate::illumos::dladm::{self, Dladm, PhysicalLink};
 use crate::illumos::zone::Zones;
 use crate::server::Server as SledServer;
 use crate::sp::SpHandle;
+use ddm_admin_client::types::Ipv6Prefix;
 use omicron_common::address::get_sled_address;
 use omicron_common::api::external::{Error as ExternalError, MacAddr};
 use omicron_common::backoff::{
@@ -28,6 +29,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::Mutex;
+
+/// Initial octet of IPv6 for bootstrap addresses.
+pub(crate) const BOOTSTRAP_PREFIX: u16 = 0xfdb0;
+
+/// IPv6 prefix mask for bootstrap addresses.
+pub(crate) const BOOTSTRAP_MASK: u8 = 64;
+
 
 /// Describes errors which may occur while operating the bootstrap service.
 #[derive(Error, Debug)]
@@ -89,7 +97,7 @@ fn mac_to_socket_addr(mac: MacAddr) -> SocketAddrV6 {
     assert_eq!(6, mac_bytes.len());
 
     let address = Ipv6Addr::new(
-        0xfdb0,
+        BOOTSTRAP_PREFIX,
         ((mac_bytes[0] as u16) << 8) | mac_bytes[1] as u16,
         ((mac_bytes[2] as u16) << 8) | mac_bytes[3] as u16,
         ((mac_bytes[4] as u16) << 8) | mac_bytes[5] as u16,
@@ -160,6 +168,13 @@ impl Agent {
             "bootstrap6",
         )
         .map_err(|err| BootstrapError::BootstrapAddress { err })?;
+
+        // Start trying to notify ddmd of our bootstrap address so it can
+        // advertise it to other sleds.
+        tokio::spawn(advertise_bootstrap_address_via_ddmd(
+            ba_log.clone(),
+            address,
+        ));
 
         let agent = Agent {
             log: ba_log,
@@ -431,6 +446,22 @@ impl Agent {
 
         Ok(())
     }
+}
+
+async fn advertise_bootstrap_address_via_ddmd(log: Logger, address: Ipv6Addr) {
+    let prefix = Ipv6Prefix { addr: address, mask: 64 };
+    retry_notify(internal_service_policy(), || async {
+        let client = DdmAdminClient::new(log.clone())?;
+        // TODO-cleanup implement Copy on Ipv6Prefix
+        client.advertise_prefix(prefix.clone()).await?;
+        Ok(())
+    }, |err, duration| {
+        info!(
+            log,
+            "Failed to notify ddmd of our address (will retry after {duration:?}";
+            "err" => %err,
+        );
+    }).await.unwrap();
 }
 
 #[cfg(test)]

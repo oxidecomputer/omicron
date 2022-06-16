@@ -4,12 +4,16 @@
 
 //! Client to ddmd (the maghemite service running on localhost).
 
+use ddm_admin_client::types::Ipv6Prefix;
 use ddm_admin_client::Client;
 use slog::Logger;
 use std::net::Ipv6Addr;
-use std::net::SocketAddrV6;
 use std::net::SocketAddr;
+use std::net::SocketAddrV6;
 use thiserror::Error;
+
+use crate::bootstrap::agent::BOOTSTRAP_MASK;
+use crate::bootstrap::agent::BOOTSTRAP_PREFIX;
 
 // TODO-cleanup Is it okay to hardcode this port number and assume ddmd is bound
 // to `::1`, or should we move that into our config?
@@ -50,6 +54,22 @@ impl DdmAdminClient {
         Ok(DdmAdminClient { client, log })
     }
 
+    /// Instruct ddmd to advertise the given prefix to peer sleds.
+    pub async fn advertise_prefix(
+        &self,
+        prefix: Ipv6Prefix,
+    ) -> Result<(), DdmError> {
+        // TODO-cleanup Why does the generated openapi client require a `&Vec`
+        // instead of a `&[]`?
+        info!(
+            self.log, "Sending prefix to ddmd for advertisement";
+            "prefix" => ?prefix,
+        );
+        let prefixes = vec![prefix];
+        self.client.advertise_prefixes(&prefixes).await?;
+        Ok(())
+    }
+
     /// Returns the addresses of connected sleds.
     ///
     /// Note: These sleds have not yet been verified.
@@ -66,8 +86,12 @@ impl DdmAdminClient {
             // "three peers with 1 prefix each".
             prefixes.into_iter().find_map(|prefix| {
                 let mut segments = prefix.addr.segments();
-                // TODO GROSS
-                if segments[0] == 0xfdb0 {
+                if prefix.mask == BOOTSTRAP_MASK
+                    && segments[0] == BOOTSTRAP_PREFIX
+                {
+                    // Bootstrap agent IPs always end in ::1; convert the
+                    // `BOOTSTRAP_PREFIX::*/BOOTSTRAP_PREFIX` address we
+                    // received into that specific address.
                     segments[7] = 1;
                     Some(Ipv6Addr::from(segments))
                 } else {
