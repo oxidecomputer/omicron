@@ -6,7 +6,7 @@
 
 use super::client::Client as BootstrapAgentClient;
 use super::config::{Config, BOOTSTRAP_AGENT_PORT};
-use super::discovery::{self, DdmError};
+use super::ddm_admin_client::{DdmAdminClient, DdmError};
 use super::params::SledAgentRequest;
 use super::rss_handle::RssHandle;
 use super::server::TrustQuorumMembership;
@@ -68,7 +68,6 @@ pub(crate) struct Agent {
     /// Store the parent log - without "component = BootstrapAgent" - so
     /// other launched components can set their own value.
     parent_log: Logger,
-    peer_monitor: discovery::PeerMonitor,
     address: Ipv6Addr,
 
     /// Our share of the rack secret, if we have one.
@@ -162,12 +161,9 @@ impl Agent {
         )
         .map_err(|err| BootstrapError::BootstrapAddress { err })?;
 
-        let peer_monitor = discovery::PeerMonitor::new(ba_log.clone())?;
-
         let agent = Agent {
             log: ba_log,
             parent_log: log,
-            peer_monitor,
             address,
             share: Mutex::new(None),
             rss: Mutex::new(None),
@@ -285,10 +281,11 @@ impl Agent {
         &self,
         share: ShareDistribution,
     ) -> Result<RackSecret, BootstrapError> {
+        let ddm_admin_client = DdmAdminClient::new(self.log.clone())?;
         let rack_secret = retry_notify(
             internal_service_policy(),
             || async {
-                let other_agents = self.peer_monitor
+                let other_agents = ddm_admin_client
                     .peer_addrs()
                     .await
                     .map_err(BootstrapError::DdmError)
@@ -398,7 +395,6 @@ impl Agent {
             let rss = RssHandle::start_rss(
                 &self.parent_log,
                 rss_config.clone(),
-                self.peer_monitor.clone(),
                 self.address,
                 self.sp.clone(),
                 // TODO-cleanup: Remove this arg once RSS can discover the trust

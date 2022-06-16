@@ -7,7 +7,7 @@
 pub mod agent;
 pub mod client;
 pub mod config;
-pub mod discovery;
+pub mod ddm_admin_client;
 mod maghemite;
 pub(crate) mod params;
 pub(crate) mod rss_handle;

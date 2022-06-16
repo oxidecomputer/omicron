@@ -2,9 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Sled announcement and discovery.
+//! Client to ddmd (the maghemite service running on localhost).
 
-use ddm_admin_client::Client as DdmAdminClient;
+use ddm_admin_client::Client;
 use slog::Logger;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
@@ -27,12 +27,12 @@ pub enum DdmError {
 /// Manages Sled Discovery - both our announcement to other Sleds,
 /// as well as our discovery of those sleds.
 #[derive(Clone)]
-pub struct PeerMonitor {
-    client: DdmAdminClient,
+pub struct DdmAdminClient {
+    client: Client,
     log: Logger,
 }
 
-impl PeerMonitor {
+impl DdmAdminClient {
     /// Creates a new [`PeerMonitor`].
     pub fn new(log: Logger) -> Result<Self, DdmError> {
         let dur = std::time::Duration::from_secs(60);
@@ -42,12 +42,12 @@ impl PeerMonitor {
             .connect_timeout(dur)
             .timeout(dur)
             .build()?;
-        let client = DdmAdminClient::new_with_client(
+        let client = Client::new_with_client(
             &format!("http://{ddmd_addr}"),
             client,
             log.new(o!("DdmAdminClient" => SocketAddr::V6(ddmd_addr))),
         );
-        Ok(PeerMonitor { client, log })
+        Ok(DdmAdminClient { client, log })
     }
 
     /// Returns the addresses of connected sleds.

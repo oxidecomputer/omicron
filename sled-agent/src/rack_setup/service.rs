@@ -6,7 +6,7 @@
 
 use super::config::{HardcodedSledRequest, SetupServiceConfig as Config};
 use crate::bootstrap::config::BOOTSTRAP_AGENT_PORT;
-use crate::bootstrap::discovery::PeerMonitor;
+use crate::bootstrap::ddm_admin_client::{DdmAdminClient, DdmError};
 use crate::bootstrap::params::SledAgentRequest;
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
 use crate::bootstrap::trust_quorum::{RackSecret, ShareDistribution};
@@ -43,6 +43,9 @@ pub enum SetupServiceError {
 
     #[error("Error making HTTP request to Sled Agent: {0}")]
     SledApi(#[from] sled_agent_client::Error<sled_agent_client::types::Error>),
+
+    #[error("Error contacting ddmd: {0}")]
+    DdmError(#[from] DdmError),
 
     #[error("Cannot deserialize TOML file at {path}: {err}")]
     Toml { path: PathBuf, err: toml::de::Error },
@@ -83,7 +86,6 @@ impl Service {
     pub(crate) fn new(
         log: Logger,
         config: Config,
-        peer_monitor: PeerMonitor,
         local_bootstrap_agent: BootstrapAgentHandle,
         // TODO-cleanup: We should be collecting the device ID certs of all
         // trust quorum members over the management network. Currently we don't
@@ -92,7 +94,7 @@ impl Service {
         member_device_id_certs: Vec<Ed25519Certificate>,
     ) -> Self {
         let handle = tokio::task::spawn(async move {
-            let svc = ServiceInner::new(log.clone(), peer_monitor);
+            let svc = ServiceInner::new(log.clone());
             if let Err(e) = svc
                 .inject_rack_setup_requests(
                     &config,
@@ -148,12 +150,11 @@ enum PeerExpectation {
 /// The implementation of the Rack Setup Service.
 struct ServiceInner {
     log: Logger,
-    peer_monitor: PeerMonitor,
 }
 
 impl ServiceInner {
-    fn new(log: Logger, peer_monitor: PeerMonitor) -> Self {
-        ServiceInner { log, peer_monitor }
+    fn new(log: Logger) -> Self {
+        ServiceInner { log }
     }
 
     async fn initialize_datasets(
@@ -425,8 +426,9 @@ impl ServiceInner {
         &self,
         expectation: PeerExpectation,
         our_bootstrap_address: Ipv6Addr,
-    ) -> Vec<Ipv6Addr> {
-        retry_notify(
+    ) -> Result<Vec<Ipv6Addr>, DdmError> {
+        let ddm_admin_client = DdmAdminClient::new(self.log.clone())?;
+        let addrs = retry_notify(
             // TODO-correctness `internal_service_policy()` has potentially-long
             // exponential backoff; do we want a different infinitely-retrying
             // policy that is more aggressive? This is similar to
@@ -434,7 +436,7 @@ impl ServiceInner {
             // discusses this issue for disk creation.
             internal_service_policy(),
             || async {
-                let peer_addrs_result = self.peer_monitor.peer_addrs().await;
+                let peer_addrs_result = ddm_admin_client.peer_addrs().await;
 
                 if let Err(err) = peer_addrs_result.as_ref() {
                     info!(
@@ -494,7 +496,9 @@ impl ServiceInner {
         // (the only kind we produce), allowing us to `.unwrap()` without
         // panicking
         .await
-        .unwrap()
+        .unwrap();
+
+        Ok(addrs)
     }
 
     // In lieu of having an operator send requests to all sleds via an
@@ -553,7 +557,7 @@ impl ServiceInner {
         };
         let addrs = self
             .wait_for_peers(expectation, local_bootstrap_agent.our_address())
-            .await;
+            .await?;
         info!(self.log, "Enough peers exist to enact RSS plan");
 
         // If we created a plan, reuse it. Otherwise, create a new plan.
