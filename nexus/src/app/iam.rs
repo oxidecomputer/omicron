@@ -23,7 +23,7 @@ impl super::Nexus {
     pub async fn fleet_fetch_policy(
         &self,
         opctx: &OpContext,
-    ) -> LookupResult<shared::Policy<authz::FleetRoles>> {
+    ) -> LookupResult<shared::Policy<authz::FleetRole>> {
         let role_assignments = self
             .db_datastore
             .role_assignment_fetch_visible(opctx, &authz::FLEET)
@@ -38,8 +38,8 @@ impl super::Nexus {
     pub async fn fleet_update_policy(
         &self,
         opctx: &OpContext,
-        policy: &shared::Policy<authz::FleetRoles>,
-    ) -> UpdateResult<shared::Policy<authz::FleetRoles>> {
+        policy: &shared::Policy<authz::FleetRole>,
+    ) -> UpdateResult<shared::Policy<authz::FleetRole>> {
         let role_assignments = self
             .db_datastore
             .role_assignment_replace_visible(
