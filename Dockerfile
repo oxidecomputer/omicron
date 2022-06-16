@@ -16,16 +16,9 @@ WORKDIR /usr/src/omicron
 COPY . .
 
 WORKDIR /usr/src/omicron
-RUN apt-get update && apt-get install -y \
-	libpq-dev \
-	pkg-config \
-	xmlsec1 \
-	libxmlsec1-dev \
-	libxmlsec1-openssl \
-	libclang-dev \
-	libsqlite3-dev \
-	--no-install-recommends \
-	&& rm -rf /var/lib/apt/lists/*
+ENV PATH=/usr/src/omicron/out/cockroachdb/bin:/usr/src/omicron/out/clickhouse:${PATH} 
+RUN apt-get update && apt-get install -y sudo --no-install-recommends && rm -rf /var/lib/apt/lists/*
+RUN tools/install_prerequisites.sh -y
 RUN cargo build --release
 
 # ------------------------------------------------------------------------------
