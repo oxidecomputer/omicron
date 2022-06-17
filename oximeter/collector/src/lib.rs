@@ -239,6 +239,12 @@ async fn results_sink(
 /// Configuration for interacting with the metric database.
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 pub struct DbConfig {
+    /// Optional address of the ClickHouse server.
+    ///
+    /// If "None", will be inferred from DNS.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub address: Option<SocketAddr>,
+
     /// Batch size of samples at which to insert
     pub batch_size: usize,
 
@@ -273,10 +279,16 @@ impl OximeterAgent {
 
         // Construct the ClickHouse client first, propagate an error if we can't reach the
         // database.
-        let db_address = SocketAddr::new(
-            resolver.lookup_ip(SRV::Service(ServiceName::Clickhouse)).await?,
-            CLICKHOUSE_PORT,
-        );
+        let db_address = if let Some(address) = db_config.address {
+            address
+        } else {
+            SocketAddr::new(
+                resolver
+                    .lookup_ip(SRV::Service(ServiceName::Clickhouse))
+                    .await?,
+                CLICKHOUSE_PORT,
+            )
+        };
         let client = Client::new(db_address, &log);
         client.init_db().await?;
 
@@ -344,6 +356,12 @@ impl OximeterAgent {
 /// Configuration used to initialize an oximeter server
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Config {
+    /// The address used to connect to Nexus.
+    ///
+    /// If "None", will be inferred from DNS.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nexus_address: Option<SocketAddr>,
+
     /// Configuration for working with ClickHouse
     pub db: DbConfig,
 
@@ -438,16 +456,24 @@ impl Oximeter {
         let client = reqwest::Client::new();
         let notify_nexus = || async {
             debug!(log, "contacting nexus");
-            let nexus_address = resolver
-                .lookup_ipv6(SRV::Service(ServiceName::Nexus))
-                .await
-                .map_err(|e| backoff::BackoffError::transient(e.to_string()))?;
+            let nexus_address = if let Some(address) = config.nexus_address {
+                address
+            } else {
+                SocketAddr::V6(SocketAddrV6::new(
+                    resolver
+                        .lookup_ipv6(SRV::Service(ServiceName::Nexus))
+                        .await
+                        .map_err(|e| {
+                            backoff::BackoffError::transient(e.to_string())
+                        })?,
+                    NEXUS_INTERNAL_PORT,
+                    0,
+                    0,
+                ))
+            };
 
             client
-                .post(format!(
-                    "http://[{}]:{}/metrics/collectors",
-                    nexus_address, NEXUS_INTERNAL_PORT,
-                ))
+                .post(format!("http://{}/metrics/collectors", nexus_address,))
                 .json(&nexus_client::types::OximeterInfo {
                     address: server.local_addr().to_string(),
                     collector_id: agent.id,
