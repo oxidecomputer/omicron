@@ -12,7 +12,7 @@ of Rust crates:
   samples
 - [`collector`](2): The `oximeter` binary program run by the control plane,
   which pulls metrics from other sources.
-- [`producer`](3): A library that allows programs to produce its metric data for
+- [`producer`](3): A library that allows a program to produce its metric data for
   the control plane. This allows consumers to register with the control plane,
   and provide an HTTP endpoint from which the `oximeter` binary will pull data.
 - [`db`](4): A library for interacting with the telemetry database,
