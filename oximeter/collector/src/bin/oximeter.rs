@@ -26,24 +26,22 @@ pub fn run_openapi() -> Result<(), String> {
 /// Run an oximeter metric collection server in the Oxide Control Plane.
 #[derive(Parser)]
 #[clap(name = "oximeter", about = "See README.adoc for more information")]
-struct Args {
-    #[clap(
-        short = 'O',
-        long = "openapi",
-        help = "Print the external OpenAPI Spec document and exit",
-        action
-    )]
-    openapi: bool,
+enum Args {
+    /// Print the external OpenAPI Spec document and exit
+    Openapi,
 
-    /// Path to TOML file with configuration for the server
-    #[clap(name = "CONFIG_FILE", action)]
-    config_file: PathBuf,
+    /// Start an Oximeter server
+    Run {
+        /// Path to TOML file with configuration for the server
+        #[clap(name = "CONFIG_FILE", action)]
+        config_file: PathBuf,
 
-    #[clap(short, long, action)]
-    id: Uuid,
+        #[clap(short, long, action)]
+        id: Uuid,
 
-    #[clap(short, long, action)]
-    address: SocketAddrV6,
+        #[clap(short, long, action)]
+        address: SocketAddrV6,
+    },
 }
 
 #[tokio::main]
@@ -55,16 +53,17 @@ async fn main() {
 
 async fn do_run() -> Result<(), CmdError> {
     let args = Args::parse();
-    let config = Config::from_file(args.config_file).unwrap();
-    if args.openapi {
-        run_openapi().map_err(CmdError::Failure)
-    } else {
-        let args = OximeterArguments { id: args.id, address: args.address };
-        Oximeter::new(&config, &args)
-            .await
-            .unwrap()
-            .serve_forever()
-            .await
-            .map_err(|e| CmdError::Failure(e.to_string()))
+    match args {
+        Args::Openapi => run_openapi().map_err(CmdError::Failure),
+        Args::Run { config_file, id, address } => {
+            let config = Config::from_file(config_file).unwrap();
+            let args = OximeterArguments { id, address };
+            Oximeter::new(&config, &args)
+                .await
+                .unwrap()
+                .serve_forever()
+                .await
+                .map_err(|e| CmdError::Failure(e.to_string()))
+        }
     }
 }
