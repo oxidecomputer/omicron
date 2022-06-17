@@ -163,7 +163,6 @@ There's a complete, self-contained example in
 - Add the `Producer` implementation to the server.
 - Register with nexus.
 
-## References
 [1]: ../target/doc/oximeter/index.html
 [2]: ../target/doc/oximeter_collector/index.html
 [3]: ../target/doc/oximeter_producer/index.html
