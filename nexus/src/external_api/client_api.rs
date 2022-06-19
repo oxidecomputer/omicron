@@ -60,6 +60,7 @@ pub struct AuthenticateParams {
 #[endpoint {
     method = POST,
     path = "/client/authenticate",
+    content_type = "application/x-www-form-urlencoded",
     tags = ["hidden"], // "token"
 }]
 pub async fn client_authenticate(
@@ -185,6 +186,7 @@ pub enum TokenResponse {
 #[endpoint {
     method = POST,
     path = "/client/token",
+    content_type = "application/x-www-form-urlencoded",
     tags = ["hidden"], // "token"
 }]
 pub async fn client_grant_token(
