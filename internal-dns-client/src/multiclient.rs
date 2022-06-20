@@ -19,75 +19,37 @@ use trust_dns_resolver::TokioAsyncResolver;
 
 type DnsError = crate::Error<crate::types::Error>;
 
-// A structure which instructs the client APIs how to access
-// DNS servers.
-//
-// These functions exist in a separate struct for comparison
-// with the test-utility, [`LocalAddressGetter`].
-struct FromReservedRackSubnet {}
+/// Describes how to find the DNS servers.
+///
+/// In production code, this is nearly always [`Ipv6Subnet<AZ_PREFIX>`],
+/// but it allows a point of dependency-injection for tests to supply their
+/// own address lookups.
+pub trait DnsAddressLookup {
+    fn dropshot_server_addrs(&self) -> Vec<SocketAddr>;
 
-const FROM_RESERVED_RACK_SUBNET: FromReservedRackSubnet =
-    FromReservedRackSubnet {};
+    fn dns_server_addrs(&self) -> Vec<SocketAddr>;
+}
 
-impl FromReservedRackSubnet {
-    fn subnet_to_ips(
-        subnet: Ipv6Subnet<AZ_PREFIX>,
-    ) -> impl Iterator<Item = IpAddr> {
-        ReservedRackSubnet::new(subnet)
-            .get_dns_subnets()
-            .into_iter()
-            .map(|dns_subnet| IpAddr::V6(dns_subnet.dns_address().ip()))
-    }
+fn subnet_to_ips(
+    subnet: Ipv6Subnet<AZ_PREFIX>,
+) -> impl Iterator<Item = IpAddr> {
+    ReservedRackSubnet::new(subnet)
+        .get_dns_subnets()
+        .into_iter()
+        .map(|dns_subnet| IpAddr::V6(dns_subnet.dns_address().ip()))
+}
 
-    fn subnet_to_dropshot_server_addrs(
-        &self,
-        subnet: Ipv6Subnet<AZ_PREFIX>,
-    ) -> impl Iterator<Item = SocketAddr> {
-        Self::subnet_to_ips(subnet)
+impl DnsAddressLookup for Ipv6Subnet<AZ_PREFIX> {
+    fn dropshot_server_addrs(&self) -> Vec<SocketAddr> {
+        subnet_to_ips(*self)
             .map(|address| SocketAddr::new(address, DNS_SERVER_PORT))
+            .collect()
     }
 
-    fn subnet_to_dns_server_addrs(
-        &self,
-        subnet: Ipv6Subnet<AZ_PREFIX>,
-    ) -> impl Iterator<Item = SocketAddr> {
-        Self::subnet_to_ips(subnet)
+    fn dns_server_addrs(&self) -> Vec<SocketAddr> {
+        subnet_to_ips(*self)
             .map(|address| SocketAddr::new(address, DNS_PORT))
-    }
-}
-
-// A test-only alternative to [`FromReservedRackSubnet`].
-//
-// Rather than inferring DNS server addresses from the rack subnet,
-// they may be explicitly supplied. This results in easier-to-test code.
-#[cfg(test)]
-#[derive(Default)]
-struct LocalAddressGetter {
-    addrs: Vec<(SocketAddr, SocketAddr)>,
-}
-
-#[cfg(test)]
-impl LocalAddressGetter {
-    fn add_dns_server(
-        &mut self,
-        dns_address: SocketAddr,
-        server_address: SocketAddr,
-    ) {
-        self.addrs.push((dns_address, server_address));
-    }
-
-    fn subnet_to_dropshot_server_addrs(
-        &self,
-    ) -> impl Iterator<Item = SocketAddr> + '_ {
-        self.addrs
-            .iter()
-            .map(|(_dns_address, dropshot_address)| *dropshot_address)
-    }
-
-    fn subnet_to_dns_server_addrs(
-        &self,
-    ) -> impl Iterator<Item = SocketAddr> + '_ {
-        self.addrs.iter().map(|(dns_address, _dropshot_address)| *dns_address)
+            .collect()
     }
 }
 
@@ -105,26 +67,14 @@ pub struct Updater {
 }
 
 impl Updater {
-    /// Creates a new "Updater", capable of communicating with all
-    /// DNS servers within the AZ.
-    pub fn new(subnet: Ipv6Subnet<AZ_PREFIX>, log: Logger) -> Self {
-        let addrs =
-            FROM_RESERVED_RACK_SUBNET.subnet_to_dropshot_server_addrs(subnet);
+    pub fn new(address_getter: &impl DnsAddressLookup, log: Logger) -> Self {
+        let addrs = address_getter.dropshot_server_addrs();
         Self::new_from_addrs(addrs, log)
     }
 
-    // Creates a new updater, using test-supplied DNS servers.
-    #[cfg(test)]
-    fn new_for_test(address_getter: &LocalAddressGetter, log: Logger) -> Self {
-        let dns_addrs = address_getter.subnet_to_dropshot_server_addrs();
-        Self::new_from_addrs(dns_addrs, log)
-    }
-
-    fn new_from_addrs(
-        addrs: impl Iterator<Item = SocketAddr>,
-        log: Logger,
-    ) -> Self {
+    fn new_from_addrs(addrs: Vec<SocketAddr>, log: Logger) -> Self {
         let clients = addrs
+            .into_iter()
             .map(|addr| {
                 info!(log, "Adding DNS server: {}", addr);
                 crate::Client::new(&format!("http://{}", addr), log.clone())
@@ -271,28 +221,18 @@ pub struct Resolver {
 }
 
 impl Resolver {
-    /// Creates a DNS resolver, looking up DNS server addresses based on
-    /// the provided subnet.
-    pub fn new(subnet: Ipv6Subnet<AZ_PREFIX>) -> Result<Self, ResolveError> {
-        let dns_addrs =
-            FROM_RESERVED_RACK_SUBNET.subnet_to_dns_server_addrs(subnet);
-        Self::new_from_addrs(dns_addrs)
-    }
-
-    // Creates a new resolver, using test-supplied DNS servers.
-    #[cfg(test)]
-    fn new_for_test(
-        address_getter: &LocalAddressGetter,
+    pub fn new(
+        address_getter: &impl DnsAddressLookup,
     ) -> Result<Self, ResolveError> {
-        let dns_addrs = address_getter.subnet_to_dns_server_addrs();
+        let dns_addrs = address_getter.dns_server_addrs();
         Self::new_from_addrs(dns_addrs)
     }
 
     fn new_from_addrs(
-        dns_addrs: impl Iterator<Item = SocketAddr>,
+        dns_addrs: Vec<SocketAddr>,
     ) -> Result<Self, ResolveError> {
         let mut rc = ResolverConfig::new();
-        for socket_addr in dns_addrs {
+        for socket_addr in dns_addrs.into_iter() {
             rc.add_name_server(NameServerConfig {
                 socket_addr,
                 protocol: Protocol::Udp,
@@ -312,7 +252,7 @@ impl Resolver {
     pub fn new_from_ip(address: Ipv6Addr) -> Result<Self, ResolveError> {
         let subnet = Ipv6Subnet::<AZ_PREFIX>::new(address);
 
-        Resolver::new(subnet)
+        Resolver::new(&subnet)
     }
 
     /// Looks up a single [`Ipv6Addr`] based on the SRV name.
@@ -416,6 +356,41 @@ mod test {
         }
     }
 
+    // A test-only way to infer DNS addresses.
+    //
+    // Rather than inferring DNS server addresses from the rack subnet,
+    // they may be explicitly supplied. This results in easier-to-test code.
+    #[derive(Default)]
+    struct LocalAddressGetter {
+        addrs: Vec<(SocketAddr, SocketAddr)>,
+    }
+
+    impl LocalAddressGetter {
+        fn add_dns_server(
+            &mut self,
+            dns_address: SocketAddr,
+            server_address: SocketAddr,
+        ) {
+            self.addrs.push((dns_address, server_address));
+        }
+    }
+
+    impl DnsAddressLookup for LocalAddressGetter {
+        fn dropshot_server_addrs(&self) -> Vec<SocketAddr> {
+            self.addrs
+                .iter()
+                .map(|(_dns_address, dropshot_address)| *dropshot_address)
+                .collect()
+        }
+
+        fn dns_server_addrs(&self) -> Vec<SocketAddr> {
+            self.addrs
+                .iter()
+                .map(|(dns_address, _dropshot_address)| *dns_address)
+                .collect()
+        }
+    }
+
     // The resolver cannot look up IPs before records have been inserted.
     #[tokio::test]
     async fn lookup_nonexistent_record_fails() {
@@ -428,7 +403,7 @@ mod test {
             dns_server.dropshot_server_address(),
         );
 
-        let resolver = Resolver::new_for_test(&address_getter)
+        let resolver = Resolver::new(&address_getter)
             .expect("Error creating localhost resolver");
 
         let err = resolver
@@ -489,10 +464,9 @@ mod test {
             dns_server.dropshot_server_address(),
         );
 
-        let resolver = Resolver::new_for_test(&address_getter)
+        let resolver = Resolver::new(&address_getter)
             .expect("Error creating localhost resolver");
-        let updater =
-            Updater::new_for_test(&address_getter, logctx.log.clone());
+        let updater = Updater::new(&address_getter, logctx.log.clone());
 
         let record = TestServiceRecord::new(
             AAAA::Zone(Uuid::new_v4()),
@@ -527,10 +501,9 @@ mod test {
             dns_server.dropshot_server_address(),
         );
 
-        let resolver = Resolver::new_for_test(&address_getter)
+        let resolver = Resolver::new(&address_getter)
             .expect("Error creating localhost resolver");
-        let updater =
-            Updater::new_for_test(&address_getter, logctx.log.clone());
+        let updater = Updater::new(&address_getter, logctx.log.clone());
 
         let cockroach_addrs = [
             SocketAddrV6::new(
@@ -652,10 +625,9 @@ mod test {
             dns_server.dropshot_server_address(),
         );
 
-        let resolver = Resolver::new_for_test(&address_getter)
+        let resolver = Resolver::new(&address_getter)
             .expect("Error creating localhost resolver");
-        let updater =
-            Updater::new_for_test(&address_getter, logctx.log.clone());
+        let updater = Updater::new(&address_getter, logctx.log.clone());
 
         // Insert a record, observe that it exists.
         let mut record = TestServiceRecord::new(

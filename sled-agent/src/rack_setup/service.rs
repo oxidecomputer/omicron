@@ -313,9 +313,10 @@ impl ServiceInner {
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Handing off control to Nexus");
 
-        let resolver =
-            internal_dns_client::multiclient::Resolver::new(config.az_subnet())
-                .expect("Failed to create DNS resolver");
+        let resolver = internal_dns_client::multiclient::Resolver::new(
+            &config.az_subnet(),
+        )
+        .expect("Failed to create DNS resolver");
         let ip = resolver
             .lookup_ip(SRV::Service(ServiceName::Nexus))
             .await
@@ -546,7 +547,7 @@ impl ServiceInner {
         .collect::<Result<_, SetupServiceError>>()?;
 
         let dns_servers = internal_dns_client::multiclient::Updater::new(
-            config.az_subnet(),
+            &config.az_subnet(),
             self.log.new(o!("client" => "DNS")),
         );
         self.dns_servers

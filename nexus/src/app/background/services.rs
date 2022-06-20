@@ -92,7 +92,7 @@ pub struct ServiceBalancer {
 impl ServiceBalancer {
     pub fn new(log: Logger, nexus: Arc<Nexus>) -> Self {
         let dns_updater = DnsUpdater::new(
-            nexus.az_subnet(),
+            &nexus.az_subnet(),
             log.new(o!("component" => "DNS Updater")),
         );
 
