@@ -3155,6 +3155,7 @@ dependencies = [
  "expectorate",
  "futures",
  "http",
+ "internal-dns-client",
  "ipnetwork",
  "libc",
  "macaddr",

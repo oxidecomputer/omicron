@@ -17,6 +17,7 @@ clap = { version = "3.2", features = ["derive"] }
 crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "8314eeddd228ec0d76cefa40c4a41d3e2611ac18" }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
 futures = "0.3.21"
+internal-dns-client = { path = "../internal-dns-client" }
 ipnetwork = "0.18"
 libc = "0.2.126"
 macaddr = { version = "1.0.1", features = [ "serde_std" ] }
