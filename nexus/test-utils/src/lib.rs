@@ -18,7 +18,7 @@ use oximeter_collector::Oximeter;
 use oximeter_producer::Server as ProducerServer;
 use slog::o;
 use slog::Logger;
-use std::net::{IpAddr, Ipv6Addr, SocketAddr};
+use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::path::Path;
 use std::time::Duration;
 use uuid::Uuid;
