@@ -2339,14 +2339,20 @@ dependencies = [
 name = "internal-dns-client"
 version = "0.1.0"
 dependencies = [
+ "dropshot",
  "futures",
+ "internal-dns",
  "omicron-common 0.1.0",
+ "omicron-test-utils",
  "progenitor",
  "reqwest",
  "serde",
  "serde_json",
+ "sled",
  "slog",
+ "tempfile",
  "thiserror",
+ "tokio",
  "trust-dns-proto",
  "trust-dns-resolver",
  "uuid",

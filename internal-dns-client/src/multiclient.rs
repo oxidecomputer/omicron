@@ -19,32 +19,115 @@ use trust_dns_resolver::TokioAsyncResolver;
 
 type DnsError = crate::Error<crate::types::Error>;
 
-/// A connection used to update multiple DNS servers.
-pub struct Updater {
-    log: Logger,
-    clients: Vec<crate::Client>,
+// A structure which instructs the client APIs how to access
+// DNS servers.
+//
+// These functions exist in a separate struct for comparison
+// with the test-utility, [`LocalAddressGetter`].
+struct FromReservedRackSubnet {}
+
+const FROM_RESERVED_RACK_SUBNET: FromReservedRackSubnet =
+    FromReservedRackSubnet {};
+
+impl FromReservedRackSubnet {
+    fn subnet_to_ips(
+        subnet: Ipv6Subnet<AZ_PREFIX>,
+    ) -> impl Iterator<Item = IpAddr> {
+        ReservedRackSubnet::new(subnet)
+            .get_dns_subnets()
+            .into_iter()
+            .map(|dns_subnet| IpAddr::V6(dns_subnet.dns_address().ip()))
+    }
+
+    fn subnet_to_dropshot_server_addrs(
+        &self,
+        subnet: Ipv6Subnet<AZ_PREFIX>,
+    ) -> impl Iterator<Item = SocketAddr> {
+        Self::subnet_to_ips(subnet)
+            .map(|address| SocketAddr::new(address, DNS_SERVER_PORT))
+    }
+
+    fn subnet_to_dns_server_addrs(
+        &self,
+        subnet: Ipv6Subnet<AZ_PREFIX>,
+    ) -> impl Iterator<Item = SocketAddr> {
+        Self::subnet_to_ips(subnet)
+            .map(|address| SocketAddr::new(address, DNS_PORT))
+    }
 }
 
+// A test-only alternative to [`FromReservedRackSubnet`].
+//
+// Rather than inferring DNS server addresses from the rack subnet,
+// they may be explicitly supplied. This results in easier-to-test code.
+#[cfg(test)]
+#[derive(Default)]
+struct LocalAddressGetter {
+    addrs: Vec<(SocketAddr, SocketAddr)>,
+}
+
+#[cfg(test)]
+impl LocalAddressGetter {
+    fn add_dns_server(
+        &mut self,
+        dns_address: SocketAddr,
+        server_address: SocketAddr,
+    ) {
+        self.addrs.push((dns_address, server_address));
+    }
+
+    fn subnet_to_dropshot_server_addrs(
+        &self,
+    ) -> impl Iterator<Item = SocketAddr> + '_ {
+        self.addrs
+            .iter()
+            .map(|(_dns_address, dropshot_address)| *dropshot_address)
+    }
+
+    fn subnet_to_dns_server_addrs(
+        &self,
+    ) -> impl Iterator<Item = SocketAddr> + '_ {
+        self.addrs.iter().map(|(dns_address, _dropshot_address)| *dns_address)
+    }
+}
+
+/// Describes a service which may be inserted into DNS records.
 pub trait Service {
     fn aaaa(&self) -> crate::names::AAAA;
     fn srv(&self) -> crate::names::SRV;
     fn address(&self) -> SocketAddrV6;
 }
 
+/// A connection used to update multiple DNS servers.
+pub struct Updater {
+    log: Logger,
+    clients: Vec<crate::Client>,
+}
+
 impl Updater {
     /// Creates a new "Updater", capable of communicating with all
     /// DNS servers within the AZ.
     pub fn new(subnet: Ipv6Subnet<AZ_PREFIX>, log: Logger) -> Self {
-        let clients = ReservedRackSubnet::new(subnet)
-            .get_dns_subnets()
-            .into_iter()
-            .map(|dns_subnet| {
-                let addr = dns_subnet.dns_address().ip();
+        let addrs =
+            FROM_RESERVED_RACK_SUBNET.subnet_to_dropshot_server_addrs(subnet);
+        Self::new_from_addrs(addrs, log)
+    }
+
+    // Creates a new updater, using test-supplied DNS servers.
+    #[cfg(test)]
+    fn new_for_test(address_getter: &LocalAddressGetter, log: Logger) -> Self {
+        let dns_addrs = address_getter.subnet_to_dropshot_server_addrs();
+        Self::new_from_addrs(dns_addrs, log)
+    }
+
+    fn new_from_addrs(
+        addrs: impl Iterator<Item = SocketAddr>,
+        log: Logger,
+    ) -> Self {
+        let clients = addrs
+            .map(|addr| {
                 info!(log, "Adding DNS server: {}", addr);
-                crate::Client::new(
-                    &format!("http://[{}]:{}", addr, DNS_SERVER_PORT),
-                    log.clone(),
-                )
+                crate::Client::new(&format!("http://{}", addr), log.clone())
             })
             .collect::<Vec<_>>();
 
@@ -53,8 +136,7 @@ impl Updater {
 
     /// Inserts all service records into the DNS server.
     ///
-    /// This method is most efficient when records are sorted by
-    /// SRV key.
+    /// This method is most efficient when records are sorted by SRV key.
     pub async fn insert_dns_records(
         &self,
         records: &Vec<impl Service>,
@@ -89,9 +171,9 @@ impl Updater {
         Ok(())
     }
 
-    /// Utility function to insert:
-    /// - A set of uniquely-named AAAA records, each corresponding to an address
-    /// - An SRV record, pointing to each of the AAAA records.
+    // Utility function to insert:
+    // - A set of uniquely-named AAAA records, each corresponding to an address
+    // - An SRV record, pointing to each of the AAAA records.
     async fn insert_dns_records_internal(
         &self,
         aaaa: Vec<(crate::names::AAAA, SocketAddrV6)>,
@@ -173,31 +255,6 @@ impl Updater {
     }
 }
 
-// Creates a resolver using all internal DNS name servers.
-fn create_resolver(
-    subnet: Ipv6Subnet<AZ_PREFIX>,
-) -> Result<TokioAsyncResolver, trust_dns_resolver::error::ResolveError> {
-    let mut rc = ResolverConfig::new();
-    let dns_ips = ReservedRackSubnet::new(subnet)
-        .get_dns_subnets()
-        .into_iter()
-        .map(|subnet| subnet.dns_address().ip())
-        .collect::<Vec<_>>();
-
-    for dns_ip in dns_ips {
-        rc.add_name_server(NameServerConfig {
-            socket_addr: SocketAddr::V6(SocketAddrV6::new(
-                dns_ip, DNS_PORT, 0, 0,
-            )),
-            protocol: Protocol::Udp,
-            tls_dns_name: None,
-            trust_nx_responses: false,
-            bind_addr: None,
-        });
-    }
-    TokioAsyncResolver::tokio(rc, ResolverOpts::default())
-}
-
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum ResolveError {
     #[error(transparent)]
@@ -217,7 +274,37 @@ impl Resolver {
     /// Creates a DNS resolver, looking up DNS server addresses based on
     /// the provided subnet.
     pub fn new(subnet: Ipv6Subnet<AZ_PREFIX>) -> Result<Self, ResolveError> {
-        Ok(Self { inner: Box::new(create_resolver(subnet)?) })
+        let dns_addrs =
+            FROM_RESERVED_RACK_SUBNET.subnet_to_dns_server_addrs(subnet);
+        Self::new_from_addrs(dns_addrs)
+    }
+
+    // Creates a new resolver, using test-supplied DNS servers.
+    #[cfg(test)]
+    fn new_for_test(
+        address_getter: &LocalAddressGetter,
+    ) -> Result<Self, ResolveError> {
+        let dns_addrs = address_getter.subnet_to_dns_server_addrs();
+        Self::new_from_addrs(dns_addrs)
+    }
+
+    fn new_from_addrs(
+        dns_addrs: impl Iterator<Item = SocketAddr>,
+    ) -> Result<Self, ResolveError> {
+        let mut rc = ResolverConfig::new();
+        for socket_addr in dns_addrs {
+            rc.add_name_server(NameServerConfig {
+                socket_addr,
+                protocol: Protocol::Udp,
+                tls_dns_name: None,
+                trust_nx_responses: false,
+                bind_addr: None,
+            });
+        }
+        let inner =
+            Box::new(TokioAsyncResolver::tokio(rc, ResolverOpts::default())?);
+
+        Ok(Self { inner })
     }
 
     /// Convenience wrapper for [`Resolver::new`] which determines the subnet
@@ -257,5 +344,352 @@ impl Resolver {
             .next()
             .ok_or_else(|| ResolveError::NotFound(srv))?;
         Ok(address)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::names::{BackendName, ServiceName, AAAA, SRV};
+    use omicron_test_utils::dev::test_setup_log;
+    use std::str::FromStr;
+    use std::sync::Arc;
+    use tempfile::TempDir;
+    use uuid::Uuid;
+
+    struct DnsServer {
+        _storage: TempDir,
+        dns_server: internal_dns::dns_server::Server,
+        dropshot_server:
+            dropshot::HttpServer<Arc<internal_dns::dropshot_server::Context>>,
+    }
+
+    impl DnsServer {
+        async fn create(log: &Logger) -> Self {
+            let storage =
+                TempDir::new().expect("Failed to create temporary directory");
+
+            let db = Arc::new(sled::open(&storage.path()).unwrap());
+
+            let dns_server = {
+                let db = db.clone();
+                let log = log.clone();
+                let dns_config = internal_dns::dns_server::Config {
+                    bind_address: "[::1]:0".to_string(),
+                    zone: crate::names::DNS_ZONE.into(),
+                };
+
+                internal_dns::dns_server::run(log, db, dns_config)
+                    .await
+                    .unwrap()
+            };
+
+            let config = internal_dns::Config {
+                log: dropshot::ConfigLogging::StderrTerminal {
+                    level: dropshot::ConfigLoggingLevel::Info,
+                },
+                dropshot: dropshot::ConfigDropshot {
+                    bind_address: "[::1]:0".parse().unwrap(),
+                    request_body_max_bytes: 1024,
+                    ..Default::default()
+                },
+                data: internal_dns::dns_data::Config {
+                    nmax_messages: 16,
+                    storage_path: storage.path().to_string_lossy().into(),
+                },
+            };
+
+            let dropshot_server =
+                internal_dns::start_server(config, log.clone(), db)
+                    .await
+                    .unwrap();
+
+            Self { _storage: storage, dns_server, dropshot_server }
+        }
+
+        fn dns_server_address(&self) -> SocketAddr {
+            self.dns_server.address
+        }
+
+        fn dropshot_server_address(&self) -> SocketAddr {
+            self.dropshot_server.local_addr()
+        }
+    }
+
+    // The resolver cannot look up IPs before records have been inserted.
+    #[tokio::test]
+    async fn lookup_nonexistent_record_fails() {
+        let logctx = test_setup_log("lookup_nonexistent_record_fails");
+        let dns_server = DnsServer::create(&logctx.log).await;
+
+        let mut address_getter = LocalAddressGetter::default();
+        address_getter.add_dns_server(
+            dns_server.dns_server_address(),
+            dns_server.dropshot_server_address(),
+        );
+
+        let resolver = Resolver::new_for_test(&address_getter)
+            .expect("Error creating localhost resolver");
+
+        let err = resolver
+            .lookup_ip(SRV::Service(ServiceName::Cockroach))
+            .await
+            .expect_err("Looking up non-existent service should fail");
+
+        let dns_error = match err {
+            ResolveError::Resolve(err) => err,
+            _ => panic!("Unexpected error: {err}"),
+        };
+        assert!(
+            matches!(
+                dns_error.kind(),
+                trust_dns_resolver::error::ResolveErrorKind::NoRecordsFound { .. },
+            ),
+            "Saw error: {dns_error}",
+        );
+        logctx.cleanup_successful();
+    }
+
+    #[derive(Clone)]
+    struct TestServiceRecord {
+        aaaa: AAAA,
+        srv: SRV,
+        addr: SocketAddrV6,
+    }
+
+    impl TestServiceRecord {
+        fn new(aaaa: AAAA, srv: SRV, addr: SocketAddrV6) -> Self {
+            Self { aaaa, srv, addr }
+        }
+    }
+
+    impl Service for TestServiceRecord {
+        fn aaaa(&self) -> AAAA {
+            self.aaaa.clone()
+        }
+
+        fn srv(&self) -> SRV {
+            self.srv.clone()
+        }
+
+        fn address(&self) -> SocketAddrV6 {
+            self.addr
+        }
+    }
+
+    // Insert and retreive a single DNS record.
+    #[tokio::test]
+    async fn insert_and_lookup_one_record() {
+        let logctx = test_setup_log("insert_and_lookup_one_record");
+        let dns_server = DnsServer::create(&logctx.log).await;
+
+        let mut address_getter = LocalAddressGetter::default();
+        address_getter.add_dns_server(
+            dns_server.dns_server_address(),
+            dns_server.dropshot_server_address(),
+        );
+
+        let resolver = Resolver::new_for_test(&address_getter)
+            .expect("Error creating localhost resolver");
+        let updater =
+            Updater::new_for_test(&address_getter, logctx.log.clone());
+
+        let record = TestServiceRecord::new(
+            AAAA::Zone(Uuid::new_v4()),
+            SRV::Service(ServiceName::Cockroach),
+            SocketAddrV6::new(
+                Ipv6Addr::from_str("ff::01").unwrap(),
+                12345,
+                0,
+                0,
+            ),
+        );
+        updater.insert_dns_records(&vec![record.clone()]).await.unwrap();
+
+        let ip = resolver
+            .lookup_ipv6(SRV::Service(ServiceName::Cockroach))
+            .await
+            .expect("Should have been able to look up IP address");
+        assert_eq!(&ip, record.addr.ip());
+
+        logctx.cleanup_successful();
+    }
+
+    // Insert multiple DNS records of different types.
+    #[tokio::test]
+    async fn insert_and_lookup_multiple_records() {
+        let logctx = test_setup_log("insert_and_lookup_multiple_records");
+        let dns_server = DnsServer::create(&logctx.log).await;
+
+        let mut address_getter = LocalAddressGetter::default();
+        address_getter.add_dns_server(
+            dns_server.dns_server_address(),
+            dns_server.dropshot_server_address(),
+        );
+
+        let resolver = Resolver::new_for_test(&address_getter)
+            .expect("Error creating localhost resolver");
+        let updater =
+            Updater::new_for_test(&address_getter, logctx.log.clone());
+
+        let cockroach_addrs = [
+            SocketAddrV6::new(
+                Ipv6Addr::from_str("ff::01").unwrap(),
+                1111,
+                0,
+                0,
+            ),
+            SocketAddrV6::new(
+                Ipv6Addr::from_str("ff::02").unwrap(),
+                2222,
+                0,
+                0,
+            ),
+            SocketAddrV6::new(
+                Ipv6Addr::from_str("ff::03").unwrap(),
+                3333,
+                0,
+                0,
+            ),
+        ];
+        let clickhouse_addr = SocketAddrV6::new(
+            Ipv6Addr::from_str("fe::01").unwrap(),
+            4444,
+            0,
+            0,
+        );
+        let crucible_addr = SocketAddrV6::new(
+            Ipv6Addr::from_str("fd::02").unwrap(),
+            5555,
+            0,
+            0,
+        );
+
+        let records = vec![
+            // Three Cockroach services
+            TestServiceRecord::new(
+                AAAA::Zone(Uuid::new_v4()),
+                SRV::Service(ServiceName::Cockroach),
+                cockroach_addrs[0],
+            ),
+            TestServiceRecord::new(
+                AAAA::Zone(Uuid::new_v4()),
+                SRV::Service(ServiceName::Cockroach),
+                cockroach_addrs[1],
+            ),
+            TestServiceRecord::new(
+                AAAA::Zone(Uuid::new_v4()),
+                SRV::Service(ServiceName::Cockroach),
+                cockroach_addrs[2],
+            ),
+            // One Clickhouse service
+            TestServiceRecord::new(
+                AAAA::Zone(Uuid::new_v4()),
+                SRV::Service(ServiceName::Clickhouse),
+                clickhouse_addr,
+            ),
+            // One Backend service
+            TestServiceRecord::new(
+                AAAA::Zone(Uuid::new_v4()),
+                SRV::Backend(BackendName::Crucible, Uuid::new_v4()),
+                crucible_addr,
+            ),
+        ];
+        updater.insert_dns_records(&records).await.unwrap();
+
+        // Look up Cockroach
+        let ip = resolver
+            .lookup_ipv6(SRV::Service(ServiceName::Cockroach))
+            .await
+            .expect("Should have been able to look up IP address");
+        assert!(cockroach_addrs.iter().any(|addr| addr.ip() == &ip));
+
+        // Look up Clickhouse
+        let ip = resolver
+            .lookup_ipv6(SRV::Service(ServiceName::Clickhouse))
+            .await
+            .expect("Should have been able to look up IP address");
+        assert_eq!(&ip, clickhouse_addr.ip());
+
+        // Look up Backend Service
+        let ip = resolver
+            .lookup_ipv6(records[4].srv.clone())
+            .await
+            .expect("Should have been able to look up IP address");
+        assert_eq!(&ip, crucible_addr.ip());
+
+        // If we remove the AAAA records for two of the CRDB services,
+        // only one will remain.
+        updater
+            .dns_records_delete(&vec![DnsRecordKey {
+                name: records[0].aaaa.to_string(),
+            }])
+            .await
+            .expect("Should have been able to delete record");
+        updater
+            .dns_records_delete(&vec![DnsRecordKey {
+                name: records[1].aaaa.to_string(),
+            }])
+            .await
+            .expect("Should have been able to delete record");
+        let ip = resolver
+            .lookup_ipv6(SRV::Service(ServiceName::Cockroach))
+            .await
+            .expect("Should have been able to look up IP address");
+        assert_eq!(&ip, cockroach_addrs[2].ip());
+
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn update_record() {
+        let logctx = test_setup_log("update_record");
+        let dns_server = DnsServer::create(&logctx.log).await;
+
+        let mut address_getter = LocalAddressGetter::default();
+        address_getter.add_dns_server(
+            dns_server.dns_server_address(),
+            dns_server.dropshot_server_address(),
+        );
+
+        let resolver = Resolver::new_for_test(&address_getter)
+            .expect("Error creating localhost resolver");
+        let updater =
+            Updater::new_for_test(&address_getter, logctx.log.clone());
+
+        // Insert a record, observe that it exists.
+        let mut record = TestServiceRecord::new(
+            AAAA::Zone(Uuid::new_v4()),
+            SRV::Service(ServiceName::Cockroach),
+            SocketAddrV6::new(
+                Ipv6Addr::from_str("ff::01").unwrap(),
+                12345,
+                0,
+                0,
+            ),
+        );
+        updater.insert_dns_records(&vec![record.clone()]).await.unwrap();
+        let ip = resolver
+            .lookup_ipv6(SRV::Service(ServiceName::Cockroach))
+            .await
+            .expect("Should have been able to look up IP address");
+        assert_eq!(&ip, record.addr.ip());
+
+        // If we insert the same record with a new address, it should be
+        // updated.
+        record.addr = SocketAddrV6::new(
+            Ipv6Addr::from_str("ee::02").unwrap(),
+            54321,
+            0,
+            0,
+        );
+        updater.insert_dns_records(&vec![record.clone()]).await.unwrap();
+        let ip = resolver
+            .lookup_ipv6(SRV::Service(ServiceName::Cockroach))
+            .await
+            .expect("Should have been able to look up IP address");
+        assert_eq!(&ip, record.addr.ip());
+
+        logctx.cleanup_successful();
     }
 }

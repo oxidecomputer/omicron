@@ -34,23 +34,43 @@ pub struct Config {
     pub zone: String,
 }
 
-pub async fn run(log: Logger, db: Arc<sled::Db>, config: Config) -> Result<()> {
-    let socket = Arc::new(UdpSocket::bind(config.bind_address).await?);
+pub struct Server {
+    pub address: SocketAddr,
+    pub handle: tokio::task::JoinHandle<Result<()>>,
+}
 
-    loop {
-        let mut buf = vec![0u8; 16384];
-        let (n, src) = socket.recv_from(&mut buf).await?;
-        buf.resize(n, 0);
-
-        let socket = socket.clone();
-        let log = log.clone();
-        let db = db.clone();
-        let zone = config.zone.clone();
-
-        tokio::spawn(async move {
-            handle_req(log, db, socket, src, buf, zone).await
-        });
+impl Server {
+    pub fn close(self) {
+        self.handle.abort()
     }
+}
+
+pub async fn run(
+    log: Logger,
+    db: Arc<sled::Db>,
+    config: Config,
+) -> Result<Server> {
+    let socket = Arc::new(UdpSocket::bind(config.bind_address).await?);
+    let address = socket.local_addr()?;
+
+    let handle = tokio::task::spawn(async move {
+        loop {
+            let mut buf = vec![0u8; 16384];
+            let (n, src) = socket.recv_from(&mut buf).await?;
+            buf.resize(n, 0);
+
+            let socket = socket.clone();
+            let log = log.clone();
+            let db = db.clone();
+            let zone = config.zone.clone();
+
+            tokio::spawn(async move {
+                handle_req(log, db, socket, src, buf, zone).await
+            });
+        }
+    });
+
+    Ok(Server { address, handle })
 }
 
 async fn respond_nxdomain(

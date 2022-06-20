@@ -520,7 +520,6 @@ impl DataStore {
                         kind,
                     );
 
-                    // TODO: Can we insert all the services at the same time?
                     let svc = Self::service_upsert_sync(conn, service)
                         .map_err(|e| {
                             TxnError::CustomError(ServiceError::Other(e))
@@ -610,7 +609,6 @@ impl DataStore {
                         ServiceKind::InternalDNS,
                     );
 
-                    // TODO: Can we insert all the services at the same time?
                     let svc = Self::service_upsert_sync(conn, service)
                         .map_err(|e| {
                             TxnError::CustomError(ServiceError::Other(e))
@@ -761,7 +759,6 @@ impl DataStore {
                         kind,
                     );
 
-                    // TODO: Can we insert all the datasets at the same time?
                     let dataset = Self::dataset_upsert_sync(conn, dataset)
                         .map_err(|e| {
                             TxnError::CustomError(DatasetError::Other(e))

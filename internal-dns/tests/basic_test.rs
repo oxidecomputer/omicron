@@ -280,13 +280,16 @@ pub async fn servfail() -> Result<(), anyhow::Error> {
 struct TestContext {
     client: Client,
     resolver: TokioAsyncResolver,
-    server: dropshot::HttpServer<Arc<internal_dns::dropshot_server::Context>>,
+    dns_server: internal_dns::dns_server::Server,
+    dropshot_server:
+        dropshot::HttpServer<Arc<internal_dns::dropshot_server::Context>>,
     tmp: tempdir::TempDir,
 }
 
 impl TestContext {
     async fn cleanup(self) {
-        self.server.close().await.expect("Failed to clean up server");
+        self.dns_server.close();
+        self.dropshot_server.close().await.expect("Failed to clean up server");
         self.tmp.close().expect("Failed to clean up tmp directory");
     }
 }
@@ -326,7 +329,7 @@ async fn init_client_server(
         TokioAsyncResolver::tokio(rc, ResolverOpts::default()).unwrap();
 
     // launch a dns server
-    {
+    let dns_server = {
         let db = db.clone();
         let log = log.clone();
         let dns_config = internal_dns::dns_server::Config {
@@ -334,18 +337,16 @@ async fn init_client_server(
             zone,
         };
 
-        tokio::spawn(async move {
-            internal_dns::dns_server::run(log, db, dns_config).await
-        });
-    }
+        internal_dns::dns_server::run(log, db, dns_config).await?
+    };
 
     // launch a dropshot server
-    let server = internal_dns::start_server(config, log, db).await?;
+    let dropshot_server = internal_dns::start_server(config, log, db).await?;
 
     // wait for server to start
     tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
 
-    Ok(TestContext { client, resolver, server, tmp })
+    Ok(TestContext { client, resolver, dns_server, dropshot_server, tmp })
 }
 
 fn test_config(
