@@ -173,6 +173,7 @@ impl Updater {
     }
 }
 
+// TODO: not pub?
 /// Creates a resolver using all internal DNS name servers.
 pub fn create_resolver(
     subnet: Ipv6Subnet<AZ_PREFIX>,

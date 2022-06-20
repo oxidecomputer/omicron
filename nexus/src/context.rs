@@ -145,7 +145,7 @@ impl ServerContext {
             Ipv6Subnet::<AZ_PREFIX>::new(config.deployment.subnet.net().ip());
         info!(log, "Setting up resolver on subnet: {:?}", az_subnet);
         let resolver =
-            internal_dns_client::multiclient::create_resolver(az_subnet)
+            internal_dns_client::multiclient::Resolver::new(az_subnet)
                 .map_err(|e| format!("Failed to create DNS resolver: {}", e))?;
 
         // Set up DB pool
@@ -153,15 +153,10 @@ impl ServerContext {
             nexus_config::Database::FromUrl { url } => url.clone(),
             nexus_config::Database::FromDns => {
                 info!(log, "Accessing DB url from DNS");
-                let response = resolver
-                    .lookup_ip(
-                        &SRV::Service(ServiceName::Cockroach).to_string(),
-                    )
+                let address = resolver
+                    .lookup_ipv6(SRV::Service(ServiceName::Cockroach))
                     .await
                     .map_err(|e| format!("Failed to lookup IP: {}", e))?;
-                let address = response.iter().next().ok_or_else(|| {
-                    "no addresses returned from DNS resolver".to_string()
-                })?;
                 info!(log, "DB address: {}", address);
                 PostgresConfigWithUrl::from_str(&format!(
                     "postgresql://root@[{}]:{}/omicron?sslmode=disable",
@@ -174,10 +169,12 @@ impl ServerContext {
         let nexus = Nexus::new_with_id(
             rack_id,
             log.new(o!("component" => "nexus")),
+            resolver,
             pool,
             config,
             Arc::clone(&authz),
-        );
+        )
+        .await;
 
         Ok(Arc::new(ServerContext {
             nexus,

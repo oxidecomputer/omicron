@@ -4,6 +4,7 @@
 
 //! Nexus, the service that operates much of the control plane in an Oxide fleet
 
+use crate::app::oximeter::LazyTimeseriesClient;
 use crate::authn;
 use crate::authz;
 use crate::config;
@@ -88,7 +89,7 @@ pub struct Nexus {
     background_task_runner: OnceCell<background::TaskRunner>,
 
     /// Client to the timeseries database.
-    timeseries_client: oximeter_db::Client,
+    timeseries_client: LazyTimeseriesClient,
 
     /// Contents of the trusted root role for the TUF repository.
     updates_config: Option<config::UpdatesConfig>,
@@ -113,9 +114,10 @@ pub struct Nexus {
 impl Nexus {
     /// Create a new Nexus instance for the given rack id `rack_id`
     // TODO-polish revisit rack metadata
-    pub fn new_with_id(
+    pub async fn new_with_id(
         rack_id: Uuid,
         log: Logger,
+        resolver: internal_dns_client::multiclient::Resolver,
         pool: db::Pool,
         config: &config::Config,
         authz: Arc<authz::Authz>,
@@ -135,8 +137,16 @@ impl Nexus {
             )),
             sec_store,
         ));
+
+        // Connect to Clickhouse - but do so lazily.
+        // Clickhouse may not be executing when Nexus starts.
         let timeseries_client =
-            oximeter_db::Client::new(config.pkg.timeseries_db.address, &log);
+            if let Some(address) = &config.pkg.timeseries_db.address {
+                // If an address was provided, use it instead of DNS.
+                LazyTimeseriesClient::new_from_address(log.clone(), *address)
+            } else {
+                LazyTimeseriesClient::new_from_dns(log.clone(), resolver)
+            };
 
         // TODO-cleanup We may want a first-class subsystem for managing startup
         // background tasks.  It could use a Future for each one, a status enum

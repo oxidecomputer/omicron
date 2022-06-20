@@ -101,7 +101,13 @@ pub async fn test_setup_with_config(
     // Store actual address/port information for the databases after they start.
     config.deployment.database =
         nexus_config::Database::FromUrl { url: database.pg_config().clone() };
-    config.pkg.timeseries_db.address.set_port(clickhouse.port());
+    config
+        .pkg
+        .timeseries_db
+        .address
+        .as_mut()
+        .expect("Tests expect to set a port of Clickhouse")
+        .set_port(clickhouse.port());
 
     // Start the Nexus internal API.
     let internal_server =
