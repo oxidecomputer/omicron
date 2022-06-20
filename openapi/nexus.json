@@ -5978,7 +5978,7 @@
             ]
           },
           {
-            "description": "Disk is ready but detached from any Instance",
+            "description": "Disk is ready but detached from any VmInstance",
             "type": "object",
             "properties": {
               "state": {
@@ -5993,7 +5993,7 @@
             ]
           },
           {
-            "description": "Disk is being attached to the given Instance",
+            "description": "Disk is being attached to the given VmInstance",
             "type": "object",
             "properties": {
               "instance": {
@@ -6013,7 +6013,7 @@
             ]
           },
           {
-            "description": "Disk is attached to the given Instance",
+            "description": "Disk is attached to the given VmInstance",
             "type": "object",
             "properties": {
               "instance": {
@@ -6033,7 +6033,7 @@
             ]
           },
           {
-            "description": "Disk is being detached from the given Instance",
+            "description": "Disk is being detached from the given VmInstance",
             "type": "object",
             "properties": {
               "instance": {
@@ -6674,7 +6674,7 @@
         ]
       },
       "InstanceCpuCount": {
-        "description": "The number of CPUs in an Instance",
+        "description": "The number of CPUs in a VmInstance",
         "type": "integer",
         "format": "uint16",
         "minimum": 0
@@ -6897,7 +6897,7 @@
         ]
       },
       "InstanceState": {
-        "description": "Running state of an Instance (primarily: booted or stopped)\n\nThis typically reflects whether it's starting, running, stopping, or stopped, but also includes states related to the Instance's lifecycle",
+        "description": "Running state of a VmInstance (primarily: booted or stopped)\n\nThis typically reflects whether it's starting, running, stopping, or stopped, but also includes states related to the VmInstance's lifecycle",
         "type": "string",
         "enum": [
           "creating",
@@ -7027,7 +7027,7 @@
             "format": "date-time"
           },
           "vm_instance_id": {
-            "description": "The Instance to which the interface belongs.",
+            "description": "The VmInstance to which the interface belongs.",
             "type": "string",
             "format": "uuid"
           },
@@ -8700,7 +8700,7 @@
             "type": "string"
           },
           "hostname": {
-            "description": "RFC1035-compliant hostname for the Instance.",
+            "description": "RFC1035-compliant hostname for the VmInstance.",
             "type": "string"
           },
           "id": {
@@ -8709,7 +8709,7 @@
             "format": "uuid"
           },
           "memory": {
-            "description": "memory allocated for this Instance",
+            "description": "memory allocated for this VmInstance",
             "allOf": [
               {
                 "$ref": "#/components/schemas/ByteCount"
@@ -8725,7 +8725,7 @@
             ]
           },
           "ncpus": {
-            "description": "number of CPUs allocated for this Instance",
+            "description": "number of CPUs allocated for this VmInstance",
             "allOf": [
               {
                 "$ref": "#/components/schemas/InstanceCpuCount"
@@ -8733,7 +8733,7 @@
             ]
           },
           "project_id": {
-            "description": "id for the project containing this Instance",
+            "description": "id for the project containing this VmInstance",
             "type": "string",
             "format": "uuid"
           },
@@ -9148,7 +9148,7 @@
         ]
       },
       "VpcFirewallRuleTarget": {
-        "description": "A `VpcFirewallRuleTarget` is used to specify the set of [`Instance`]s to which a firewall rule applies.",
+        "description": "A `VpcFirewallRuleTarget` is used to specify the set of [`VmInstance`]s to which a firewall rule applies.",
         "oneOf": [
           {
             "description": "The rule applies to all instances in the VPC",

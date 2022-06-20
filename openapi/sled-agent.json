@@ -508,7 +508,7 @@
             ]
           },
           {
-            "description": "Disk is ready but detached from any Instance",
+            "description": "Disk is ready but detached from any VmInstance",
             "type": "object",
             "properties": {
               "state": {
@@ -523,7 +523,7 @@
             ]
           },
           {
-            "description": "Disk is being attached to the given Instance",
+            "description": "Disk is being attached to the given VmInstance",
             "type": "object",
             "properties": {
               "instance": {
@@ -543,7 +543,7 @@
             ]
           },
           {
-            "description": "Disk is attached to the given Instance",
+            "description": "Disk is attached to the given VmInstance",
             "type": "object",
             "properties": {
               "instance": {
@@ -563,7 +563,7 @@
             ]
           },
           {
-            "description": "Disk is being detached from the given Instance",
+            "description": "Disk is being detached from the given VmInstance",
             "type": "object",
             "properties": {
               "instance": {
@@ -706,7 +706,7 @@
         "minimum": 0
       },
       "InstanceCpuCount": {
-        "description": "The number of CPUs in an Instance",
+        "description": "The number of CPUs in a VmInstance",
         "type": "integer",
         "format": "uint16",
         "minimum": 0
@@ -940,7 +940,7 @@
         ]
       },
       "InstanceState": {
-        "description": "Running state of an Instance (primarily: booted or stopped)\n\nThis typically reflects whether it's starting, running, stopping, or stopped, but also includes states related to the Instance's lifecycle",
+        "description": "Running state of a VmInstance (primarily: booted or stopped)\n\nThis typically reflects whether it's starting, running, stopping, or stopped, but also includes states related to the VmInstance's lifecycle",
         "type": "string",
         "enum": [
           "creating",

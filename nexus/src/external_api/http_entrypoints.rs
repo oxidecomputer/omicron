@@ -1223,7 +1223,7 @@ async fn project_instances_post(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Path parameters for Instance requests
+/// Path parameters for VmInstance requests
 #[derive(Deserialize, JsonSchema)]
 struct InstancePathParam {
     organization_name: Name,

@@ -1030,7 +1030,7 @@ impl DataStore {
 
     // Instances
 
-    /// Idempotently insert a database record for an Instance
+    /// Idempotently insert a database record for a VmInstance
     ///
     /// This is intended to be used by a saga action.  When we say this is
     /// idempotent, we mean that if this function succeeds and the caller
@@ -1079,12 +1079,12 @@ impl DataStore {
         bail_unless!(
             instance.runtime().state.state()
                 == &api::external::InstanceState::Creating,
-            "newly-created Instance has unexpected state: {:?}",
+            "newly-created VmInstance has unexpected state: {:?}",
             instance.runtime().state
         );
         bail_unless!(
             instance.runtime().gen == gen,
-            "newly-created Instance has unexpected generation: {:?}",
+            "newly-created VmInstance has unexpected generation: {:?}",
             instance.runtime().gen
         );
         Ok(instance)
@@ -1108,7 +1108,7 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    /// Fetches information about an Instance that the caller has previously
+    /// Fetches information about a VmInstance that the caller has previously
     /// fetched
     ///
     /// See disk_refetch().
@@ -1131,7 +1131,7 @@ impl DataStore {
         Ok(db_instance)
     }
 
-    // TODO-design It's tempting to return the updated state of the Instance
+    // TODO-design It's tempting to return the updated state of the VmInstance
     // here because it's convenient for consumers and by using a RETURNING
     // clause, we could ensure that the "update" and "fetch" are atomic.
     // But in the unusual case that we _don't_ update the row because our
@@ -2062,7 +2062,7 @@ impl DataStore {
             TxnError::CustomError(
                 NetworkInterfaceUpdateError::InstanceNotStopped,
             ) => Error::invalid_request(
-                "Instance must be stopped to update its network interfaces",
+                "VmInstance must be stopped to update its network interfaces",
             ),
             _ => Error::internal_error(&format!("Transaction error: {:?}", e)),
         })

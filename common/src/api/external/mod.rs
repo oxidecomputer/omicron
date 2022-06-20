@@ -589,12 +589,12 @@ pub struct IdentityMetadataUpdateParams {
 
 // Specific API resources
 
-// INSTANCES
+// VM INSTANCES
 
-/// Running state of an Instance (primarily: booted or stopped)
+/// Running state of a VmInstance (primarily: booted or stopped)
 ///
 /// This typically reflects whether it's starting, running, stopping, or stopped,
-/// but also includes states related to the Instance's lifecycle
+/// but also includes states related to the VmInstance's lifecycle
 #[derive(
     Copy,
     Clone,
@@ -675,7 +675,7 @@ impl InstanceState {
         }
     }
 
-    /// Returns true if the given state represents a fully stopped Instance.
+    /// Returns true if the given state represents a fully stopped VmInstance.
     /// This means that a transition from an !is_stopped() state must go
     /// through Stopping.
     pub fn is_stopped(&self) -> bool {
@@ -695,7 +695,7 @@ impl InstanceState {
     }
 }
 
-/// The number of CPUs in an Instance
+/// The number of CPUs in a VmInstance
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceCpuCount(pub u16);
 
@@ -738,14 +738,14 @@ pub struct VmInstance {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
-    /// id for the project containing this Instance
+    /// id for the project containing this VmInstance
     pub project_id: Uuid,
 
-    /// number of CPUs allocated for this Instance
+    /// number of CPUs allocated for this VmInstance
     pub ncpus: InstanceCpuCount,
-    /// memory allocated for this Instance
+    /// memory allocated for this VmInstance
     pub memory: ByteCount,
-    /// RFC1035-compliant hostname for the Instance.
+    /// RFC1035-compliant hostname for the VmInstance.
     pub hostname: String, // TODO-cleanup different type?
 
     #[serde(flatten)]
@@ -784,14 +784,14 @@ pub struct Disk {
 pub enum DiskState {
     /// Disk is being initialized
     Creating,
-    /// Disk is ready but detached from any Instance
+    /// Disk is ready but detached from any VmInstance
     Detached,
-    /// Disk is being attached to the given Instance
-    Attaching(Uuid), // attached Instance id
-    /// Disk is attached to the given Instance
-    Attached(Uuid), // attached Instance id
-    /// Disk is being detached from the given Instance
-    Detaching(Uuid), // attached Instance id
+    /// Disk is being attached to the given VmInstance
+    Attaching(Uuid), // attached VmInstance id
+    /// Disk is attached to the given VmInstance
+    Attached(Uuid), // attached VmInstance id
+    /// Disk is being detached from the given VmInstance
+    Detaching(Uuid), // attached VmInstance id
     /// Disk has been destroyed
     Destroyed,
     /// Disk is unavailable
@@ -841,13 +841,13 @@ impl DiskState {
     }
 
     /// Returns whether the Disk is currently attached to, being attached to, or
-    /// being detached from any Instance.
+    /// being detached from any VmInstance.
     pub fn is_attached(&self) -> bool {
         self.attached_instance_id().is_some()
     }
 
     /// If the Disk is attached to, being attached to, or being detached from an
-    /// Instance, returns the id for that Instance.  Otherwise returns `None`.
+    /// VmInstance, returns the id for that VmInstance.  Otherwise returns `None`.
     pub fn attached_instance_id(&self) -> Option<&Uuid> {
         match self {
             DiskState::Attaching(id) => Some(id),
@@ -1503,7 +1503,7 @@ pub enum VpcFirewallRuleAction {
     Deny,
 }
 
-/// A `VpcFirewallRuleTarget` is used to specify the set of [`Instance`]s to
+/// A `VpcFirewallRuleTarget` is used to specify the set of [`VmInstance`]s to
 /// which a firewall rule applies.
 #[derive(
     Clone,
@@ -1823,7 +1823,7 @@ pub struct NetworkInterface {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
-    /// The Instance to which the interface belongs.
+    /// The VmInstance to which the interface belongs.
     pub vm_instance_id: Uuid,
 
     /// The VPC to which the interface belongs.

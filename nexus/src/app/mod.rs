@@ -87,7 +87,7 @@ pub struct Nexus {
     /// The tunable parameters from a configuration file
     tunables: config::Tunables,
 
-    /// Operational context used for Instance allocation
+    /// Operational context used for VmInstance allocation
     opctx_alloc: OpContext,
 
     /// Operational context used for external request authentication

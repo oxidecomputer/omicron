@@ -404,7 +404,7 @@ CREATE UNIQUE INDEX ON omicron.public.project (
     time_deleted IS NULL;
 
 /*
- * Instances
+ * Vm Instances
  */
 
 CREATE TYPE omicron.public.instance_state AS ENUM (
@@ -422,8 +422,8 @@ CREATE TYPE omicron.public.instance_state AS ENUM (
 
 /*
  * TODO consider how we want to manage multiple sagas operating on the same
- * Instance -- e.g., reboot concurrent with destroy or concurrent reboots or the
- * like.  Or changing # of CPUs or memory size.
+ * VmInstance -- e.g., reboot concurrent with destroy or concurrent reboots or
+ * the like.  Or changing # of CPUs or memory size.
  */
 CREATE TABLE omicron.public.vm_instance (
     /* Identity metadata (resource) */
@@ -433,10 +433,10 @@ CREATE TABLE omicron.public.vm_instance (
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     /* Indicates that the object has been deleted */
-    /* This is redundant for Instances, but we keep it here for consistency. */
+    /* This is redundant for VmInstances, but we keep it here for consistency. */
     time_deleted TIMESTAMPTZ,
 
-    /* Every Instance is in exactly one Project at a time. */
+    /* Every VmInstance is in exactly one Project at a time. */
     project_id UUID NOT NULL,
 
     /* user data for instance initialization systems (e.g. cloud-init) */
@@ -453,7 +453,7 @@ CREATE TABLE omicron.public.vm_instance (
     /*
      * Server where the VM is currently running, if any.  Note that when we
      * support live migration, there may be multiple servers associated with
-     * this Instance, but only one will be truly active.  Still, consumers of
+     * this VmInstance, but only one will be truly active.  Still, consumers of
      * this information should consider whether they also want to know the other
      * servers involved in the migration.
      */
@@ -470,7 +470,7 @@ CREATE TABLE omicron.public.vm_instance (
      */
     migration_id UUID,
 
-    /* Instance configuration */
+    /* VmInstance configuration */
     ncpus INT NOT NULL,
     memory INT NOT NULL,
     hostname STRING(63) NOT NULL
@@ -541,7 +541,7 @@ CREATE TABLE omicron.public.disk (
     disk_state STRING(15) NOT NULL,
     /*
      * Every Disk may be attaching to, attached to, or detaching from at most
-     * one Instance at a time.
+     * one VmInstance at a time.
      */
     attach_instance_id UUID,
     state_generation INT NOT NULL,
@@ -752,7 +752,7 @@ CREATE TABLE omicron.public.network_interface (
     /* Indicates that the object has been deleted */
     time_deleted TIMESTAMPTZ,
 
-    /* FK into Instance table.
+    /* FK into VmInstance table.
      * Note that interfaces are always attached to a particular instance.
      * IP addresses may be reserved, but this is a different resource.
      */
@@ -811,7 +811,7 @@ CREATE UNIQUE INDEX ON omicron.public.network_interface (
     time_deleted IS NULL;
 
 /*
- * Index used to verify that an Instance's networking is contained
+ * Index used to verify that a VmInstance's networking is contained
  * within a single VPC, and that all interfaces are in unique VPC
  * Subnets.
  *

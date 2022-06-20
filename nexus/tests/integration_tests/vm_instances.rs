@@ -139,7 +139,10 @@ async fn test_instances_create_reboot_halt(
     )
     .await;
     assert_eq!(instance.identity.name, "just-rainsticks");
-    assert_eq!(instance.identity.description, "vm-instance \"just-rainsticks\"");
+    assert_eq!(
+        instance.identity.description,
+        "vm-instance \"just-rainsticks\""
+    );
     let InstanceCpuCount(nfoundcpus) = instance.ncpus;
     // These particulars are hardcoded in create_instance().
     assert_eq!(nfoundcpus, 4);
@@ -174,7 +177,10 @@ async fn test_instances_create_reboot_halt(
     .unwrap()
     .parsed_body()
     .unwrap();
-    assert_eq!(error.message, "already exists: vm-instance \"just-rainsticks\"");
+    assert_eq!(
+        error.message,
+        "already exists: vm-instance \"just-rainsticks\""
+    );
 
     // List instances again and expect to find the one we just created.
     let instances = instances_list(&client, &url_instances).await;
@@ -1268,7 +1274,7 @@ async fn test_instance_update_network_interfaces(
         .expect("Failed to parse error response body");
     assert_eq!(
         err.message,
-        "Instance must be stopped to update its network interfaces",
+        "VmInstance must be stopped to update its network interfaces",
         "Expected an InvalidRequest response when modifying an interface on a running instance"
     );
 
@@ -1403,7 +1409,7 @@ async fn test_instance_update_network_interfaces(
             .expect("Failed to parse error response body");
         assert_eq!(
             err.message,
-            "Instance must be stopped to update its network interfaces",
+            "VmInstance must be stopped to update its network interfaces",
             "Expected an InvalidRequest response when modifying an interface on a running instance"
         );
     }
@@ -2270,7 +2276,10 @@ async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
     .unwrap()
     .parsed_body()
     .unwrap();
-    assert_eq!(error.message, "not found: vm-instance with name \"kris-picks\"");
+    assert_eq!(
+        error.message,
+        "not found: vm-instance with name \"kris-picks\""
+    );
 
     // Create an instance.
     let instance_url = format!("{}/kris-picks", url_instances);

@@ -68,7 +68,7 @@ use uuid::Uuid;
 ///         .fetch()
 ///         .await?;
 ///
-/// // Lookup a Project with the intent of creating an Instance inside it.  For
+/// // Lookup a Project with the intent of creating a VmInstance inside it.  For
 /// // this purpose, we don't need the database row for the Project, so we use
 /// // `lookup_for()`.
 /// let project_name = db::model::Name("omicron".parse().unwrap());
@@ -79,8 +79,8 @@ use uuid::Uuid;
 ///         .lookup_for(authz::Action::CreateChild)
 ///         .await?;
 ///
-/// // Fetch an Instance by a path of names (Organization name, Project name,
-/// // Instance name)
+/// // Fetch a VmInstance by a path of names (Organization name, Project name,
+/// // VmInstance name)
 /// let vm_instance_name = db::model::Name("test-server".parse().unwrap());
 /// let (authz_silo, authz_org, authz_project, authz_instance, db_instance) =
 ///     LookupPath::new(opctx, datastore)
@@ -90,7 +90,7 @@ use uuid::Uuid;
 ///         .fetch()
 ///         .await?;
 ///
-/// // Having looked up the Instance, you have the `authz::Project`.  Use this
+/// // Having looked up the VmInstance, you have the `authz::Project`.  Use this
 /// // to look up a Disk that you expect is in the same Project.
 /// let disk_name = db::model::Name("my-disk".parse().unwrap());
 /// let (.., authz_disk, db_disk) =
@@ -108,9 +108,9 @@ use uuid::Uuid;
 // Example selection paths:
 //
 // - From the root, select Organization with name "org1", then Project with name
-//   "proj1", then Instance with name "instance1".
+//   "proj1", then VmInstance with name "instance1".
 //
-// - From the root, select Project with id 123, then Instance "instance1".
+// - From the root, select Project with id 123, then VmInstance "instance1".
 //
 // A selection path always starts at the root, then _may_ contain a lookup-by-id
 // node, and then _may_ contain any number of lookup-by-name nodes.  It must
@@ -118,7 +118,7 @@ use uuid::Uuid;
 //
 // Once constructed, it looks like this:
 //
-//    Instance
+//    VmInstance
 //        key: Key::Name(p, "instance1")
 //                       |
 //            +----------+
@@ -157,7 +157,7 @@ use uuid::Uuid;
 //             .project_name("proj1")          // consumes Organization,
 //                                                  returns Project
 //             .instance_name("instance1")     // consumes Project,
-//                                                  returns Instance
+//                                                  returns VmInstance
 //             .fetch().await?;
 //
 // As you can see, at each step, a selection function (like "organization_name")
@@ -219,7 +219,7 @@ impl<'a> LookupPath<'a> {
         Project { key: ProjectKey::PrimaryKey(Root { lookup_root: self }, id) }
     }
 
-    /// Select a resource of type Instance, identified by its id
+    /// Select a resource of type VmInstance, identified by its id
     pub fn instance_id(self, id: Uuid) -> VmInstance<'a> {
         VmInstance {
             key: VmInstanceKey::PrimaryKey(Root { lookup_root: self }, id),

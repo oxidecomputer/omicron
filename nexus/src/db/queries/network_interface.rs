@@ -473,11 +473,11 @@ impl NextGuestMacAddress {
 
 delegate_query_fragment_impl!(NextGuestMacAddress);
 
-/// Add a subquery intended to verify that an Instance's networking does not
+/// Add a subquery intended to verify that a VmInstance's networking does not
 /// span multiple VPCs.
 ///
-/// As described in RFD 21, an Instance's networking is confined to a single
-/// VPC. That is, any NetworkInterfaces attached to an Instance must all have
+/// As described in RFD 21, a VmInstance's networking is confined to a single
+/// VPC. That is, any NetworkInterfaces attached to a VmInstance must all have
 /// the same VPC ID. This function adds a subquery, shown below, that fails in a
 /// specific way (parsing error) if that invariant is violated. The basic
 /// structure of the query is:
@@ -759,7 +759,7 @@ fn push_instance_validation_cte<'a>(
 ///        <slot> AS slot, <is_primary> AS is_primary
 /// ```
 ///
-/// Instance validation
+/// VmInstance validation
 /// -------------------
 ///
 /// This common-table expression checks that the provided instance meets a few
@@ -1396,7 +1396,7 @@ pub enum DeleteError {
     /// Attempting to delete the primary interface, while there still exist
     /// secondary interfaces.
     InstanceHasSecondaryInterfaces(Uuid),
-    /// Instance must be stopped prior to deleting interfaces from it
+    /// VmInstance must be stopped prior to deleting interfaces from it
     InstanceMustBeStopped(Uuid),
     /// Any other error
     External(external::Error),
@@ -1449,7 +1449,7 @@ impl DeleteError {
             }
             DeleteError::InstanceMustBeStopped(_) => {
                 external::Error::invalid_request(
-                    "Instance must be stopped to detach a network interface",
+                    "VmInstance must be stopped to detach a network interface",
                 )
             }
             DeleteError::External(e) => e,
