@@ -156,7 +156,7 @@ impl super::Nexus {
         opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
-    ) -> LookupResult<shared::Policy<authz::ProjectRoles>> {
+    ) -> LookupResult<shared::Policy<authz::ProjectRole>> {
         let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
             .organization_name(organization_name)
             .project_name(project_name)
@@ -178,8 +178,8 @@ impl super::Nexus {
         opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
-        policy: &shared::Policy<authz::ProjectRoles>,
-    ) -> UpdateResult<shared::Policy<authz::ProjectRoles>> {
+        policy: &shared::Policy<authz::ProjectRole>,
+    ) -> UpdateResult<shared::Policy<authz::ProjectRole>> {
         let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
             .organization_name(organization_name)
             .project_name(project_name)
