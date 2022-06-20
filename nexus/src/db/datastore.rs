@@ -480,11 +480,6 @@ impl DataStore {
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::kind.eq(DatasetKind::Crucible))
             .order(dsl::size_used.asc())
-            // TODO: We admittedly don't actually *fail* any request for
-            // running out of space - we try to send the request down to
-            // crucible agents, and expect them to fail on our behalf in
-            // out-of-storage conditions. This should undoubtedly be
-            // handled more explicitly.
             .select(Dataset::as_select())
             .limit(REGION_REDUNDANCY_THRESHOLD.try_into().unwrap())
     }
@@ -540,6 +535,7 @@ impl DataStore {
     ) -> Result<Vec<(Dataset, Region)>, Error> {
         use db::schema::dataset::dsl as dataset_dsl;
         use db::schema::region::dsl as region_dsl;
+        use db::schema::zpool::dsl as zpool_dsl;
 
         // ALLOCATION POLICY
         //
@@ -564,6 +560,8 @@ impl DataStore {
         enum RegionAllocateError {
             #[error("Not enough datasets for replicated allocation: {0}")]
             NotEnoughDatasets(usize),
+            #[error("Not enough avaiable space for regions")]
+            NotEnoughAvailableSpace,
         }
         type TxnError = TransactionError<RegionAllocateError>;
 
@@ -587,6 +585,12 @@ impl DataStore {
                     return Ok(datasets_and_regions);
                 }
 
+                // Return the REGION_REDUNDANCY_THRESHOLD datasets with the most
+                // amount of available space.
+                //
+                // Note: it only returns REGION_REDUNDANCY_THRESHOLD datasets,
+                // and as a result does not support allocating chunks of a disk
+                // separately - this is all or nothing.
                 let mut datasets: Vec<Dataset> =
                     Self::get_allocatable_datasets_query()
                         .get_results::<Dataset>(conn)?;
@@ -622,9 +626,26 @@ impl DataStore {
                 let region_size = i64::from(block_size.to_bytes())
                     * blocks_per_extent
                     * params.extent_count();
+
                 for dataset in source_datasets.iter_mut() {
                     dataset.size_used =
                         dataset.size_used.map(|v| v + region_size);
+
+                    // Does this go over the zpool's total size?
+                    if let Some(size_used) = dataset.size_used {
+                        let zpool = zpool_dsl::zpool
+                            .filter(zpool_dsl::id.eq(dataset.pool_id))
+                            .select(Zpool::as_returning())
+                            .first(conn)?;
+
+                        let size_used: u64 = size_used.try_into().unwrap();
+                        let zpool_total_size: u64 = zpool.total_size.to_bytes();
+                        if size_used > zpool_total_size {
+                            return Err(TxnError::CustomError(
+                                RegionAllocateError::NotEnoughAvailableSpace,
+                            ));
+                        }
+                    }
                 }
 
                 let dataset_ids: Vec<Uuid> =
@@ -649,6 +670,11 @@ impl DataStore {
                 TxnError::CustomError(
                     RegionAllocateError::NotEnoughDatasets(_),
                 ) => Error::unavail("Not enough datasets to allocate disks"),
+                TxnError::CustomError(
+                    RegionAllocateError::NotEnoughAvailableSpace,
+                ) => Error::unavail(
+                    "Not enough available space to allocate disks",
+                ),
                 _ => {
                     Error::internal_error(&format!("Transaction error: {}", e))
                 }

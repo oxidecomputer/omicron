@@ -820,6 +820,77 @@ async fn test_disk_reject_total_size_not_divisible_by_min_disk_size(
     );
 }
 
+// Test disks backed by multiple regions
+#[nexus_test]
+async fn test_disk_backed_by_multiple_regions(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // Create two zpools, both 10 gibibytes
+    let test = DiskTest::new(&cptestctx).await;
+    test.extra_zpool(10).await;
+
+    create_org_and_project(client).await;
+
+    // Ask for a 20 gibibyte disk.
+    let disk_size = ByteCount::try_from(20u64 * 1024 * 1024 * 1024).unwrap();
+    let disks_url = get_disks_url();
+    let new_disk = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: DISK_NAME.parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
+        size: disk_size,
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&new_disk))
+            // TODO: this fails! the current allocation algorithm does not split
+            // across datasets
+            .expect_status(Some(StatusCode::SERVICE_UNAVAILABLE)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+}
+
+#[nexus_test]
+async fn test_disk_too_big(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    DiskTest::new(&cptestctx).await;
+    create_org_and_project(client).await;
+
+    // Ask for a 300 gibibyte disk (but only 10 is available)
+    let disk_size = ByteCount::try_from(300u64 * 1024 * 1024 * 1024).unwrap();
+    let disks_url = get_disks_url();
+    let new_disk = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: DISK_NAME.parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
+        size: disk_size,
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&new_disk))
+            .expect_status(Some(StatusCode::SERVICE_UNAVAILABLE)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+}
+
 async fn disk_get(client: &ClientTestContext, disk_url: &str) -> Disk {
     NexusRequest::object_get(client, disk_url)
         .authn_as(AuthnMode::PrivilegedUser)

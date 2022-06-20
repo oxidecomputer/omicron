@@ -172,7 +172,7 @@ lazy_static! {
                 description: "".parse().unwrap(),
             },
             disk_source: params::DiskSource::Blank { block_size: params::BlockSize::try_from(4096).unwrap() },
-            size: ByteCount::from_gibibytes_u32(16),
+            size: ByteCount::from_gibibytes_u32(10),
         };
 
     // Instance used for testing

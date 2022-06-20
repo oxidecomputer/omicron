@@ -373,4 +373,25 @@ impl DiskTest {
 
         Self { sled_agent, zpool_id, zpool_size, dataset_ids }
     }
+
+    pub async fn extra_zpool(&self, gibibytes: u32) {
+        let zpool_id = Uuid::new_v4();
+        let zpool_size = ByteCount::from_gibibytes_u32(gibibytes);
+        self.sled_agent.create_zpool(zpool_id, zpool_size.to_bytes()).await;
+
+        // Create multiple Datasets within that Zpool.
+        let dataset_count = 3;
+        let dataset_ids: Vec<_> =
+            (0..dataset_count).map(|_| Uuid::new_v4()).collect();
+        for id in &dataset_ids {
+            self.sled_agent.create_crucible_dataset(zpool_id, *id).await;
+
+            // By default, regions are created immediately.
+            let crucible =
+                self.sled_agent.get_crucible_dataset(zpool_id, *id).await;
+            crucible
+                .set_create_callback(Box::new(|_| RegionState::Created))
+                .await;
+        }
+    }
 }
