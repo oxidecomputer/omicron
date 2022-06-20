@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
+use std::net::Ipv6Addr;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -280,13 +280,16 @@ pub async fn servfail() -> Result<(), anyhow::Error> {
 struct TestContext {
     client: Client,
     resolver: TokioAsyncResolver,
-    server: dropshot::HttpServer<Arc<internal_dns::dropshot_server::Context>>,
+    dns_server: internal_dns::dns_server::Server,
+    dropshot_server:
+        dropshot::HttpServer<Arc<internal_dns::dropshot_server::Context>>,
     tmp: tempdir::TempDir,
 }
 
 impl TestContext {
     async fn cleanup(self) {
-        self.server.close().await.expect("Failed to clean up server");
+        self.dns_server.close();
+        self.dropshot_server.close().await.expect("Failed to clean up server");
         self.tmp.close().expect("Failed to clean up tmp directory");
     }
 }
@@ -295,7 +298,7 @@ async fn init_client_server(
     zone: String,
 ) -> Result<TestContext, anyhow::Error> {
     // initialize dns server config
-    let (tmp, config, dropshot_port, dns_port) = test_config()?;
+    let (tmp, config) = test_config()?;
     let log = config
         .log
         .to_logger("internal-dns")
@@ -305,17 +308,21 @@ async fn init_client_server(
     let db = Arc::new(sled::open(&config.data.storage_path)?);
     db.clear()?;
 
-    let client =
-        Client::new(&format!("http://[::1]:{}", dropshot_port), log.clone());
+    // launch a dns server
+    let dns_server = {
+        let db = db.clone();
+        let log = log.clone();
+        let dns_config = internal_dns::dns_server::Config {
+            bind_address: "[::1]:0".into(),
+            zone,
+        };
+
+        internal_dns::dns_server::run(log, db, dns_config).await?
+    };
 
     let mut rc = ResolverConfig::new();
     rc.add_name_server(NameServerConfig {
-        socket_addr: SocketAddr::V6(SocketAddrV6::new(
-            Ipv6Addr::LOCALHOST,
-            dns_port,
-            0,
-            0,
-        )),
+        socket_addr: dns_server.address,
         protocol: Protocol::Udp,
         tls_dns_name: None,
         trust_nx_responses: false,
@@ -325,33 +332,21 @@ async fn init_client_server(
     let resolver =
         TokioAsyncResolver::tokio(rc, ResolverOpts::default()).unwrap();
 
-    // launch a dns server
-    {
-        let db = db.clone();
-        let log = log.clone();
-        let dns_config = internal_dns::dns_server::Config {
-            bind_address: format!("[::1]:{}", dns_port),
-            zone,
-        };
-
-        tokio::spawn(async move {
-            internal_dns::dns_server::run(log, db, dns_config).await
-        });
-    }
-
     // launch a dropshot server
-    let server = internal_dns::start_server(config, log, db).await?;
+    let dropshot_server =
+        internal_dns::start_server(config, log.clone(), db).await?;
 
     // wait for server to start
     tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
 
-    Ok(TestContext { client, resolver, server, tmp })
+    let client =
+        Client::new(&format!("http://{}", dropshot_server.local_addr()), log);
+
+    Ok(TestContext { client, resolver, dns_server, dropshot_server, tmp })
 }
 
 fn test_config(
-) -> Result<(tempdir::TempDir, internal_dns::Config, u16, u16), anyhow::Error> {
-    let dropshot_port = portpicker::pick_unused_port().expect("pick port");
-    let dns_port = portpicker::pick_unused_port().expect("pick port");
+) -> Result<(tempdir::TempDir, internal_dns::Config), anyhow::Error> {
     let tmp_dir = tempdir::TempDir::new("internal-dns-test")?;
     let mut storage_path = tmp_dir.path().to_path_buf();
     storage_path.push("test");
@@ -362,7 +357,7 @@ fn test_config(
             level: dropshot::ConfigLoggingLevel::Info,
         },
         dropshot: dropshot::ConfigDropshot {
-            bind_address: format!("[::1]:{}", dropshot_port).parse().unwrap(),
+            bind_address: format!("[::1]:0").parse().unwrap(),
             request_body_max_bytes: 1024,
             ..Default::default()
         },
@@ -372,5 +367,5 @@ fn test_config(
         },
     };
 
-    Ok((tmp_dir, config, dropshot_port, dns_port))
+    Ok((tmp_dir, config))
 }
