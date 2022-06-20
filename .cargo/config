@@ -7,3 +7,11 @@
 [build]
 rustdocflags = "--document-private-items"
 
+# On illumos, use `-znocompstrtab` to reduce link time.
+#
+# Note that these flags are overridden by a user's environment variable, so
+# things critical to correctness probably don't belong here.
+[target.x86_64-unknown-illumos]
+rustflags = [
+    "-C", "link-arg=-Wl,-znocompstrtab"
+]

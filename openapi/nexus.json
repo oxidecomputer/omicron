@@ -736,7 +736,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OrganizationRolesPolicy"
+                  "$ref": "#/components/schemas/OrganizationRolePolicy"
                 }
               }
             }
@@ -771,7 +771,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/OrganizationRolesPolicy"
+                "$ref": "#/components/schemas/OrganizationRolePolicy"
               }
             }
           },
@@ -783,7 +783,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OrganizationRolesPolicy"
+                  "$ref": "#/components/schemas/OrganizationRolePolicy"
                 }
               }
             }
@@ -2708,7 +2708,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProjectRolesPolicy"
+                  "$ref": "#/components/schemas/ProjectRolePolicy"
                 }
               }
             }
@@ -2753,7 +2753,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ProjectRolesPolicy"
+                "$ref": "#/components/schemas/ProjectRolePolicy"
               }
             }
           },
@@ -2765,7 +2765,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProjectRolesPolicy"
+                  "$ref": "#/components/schemas/ProjectRolePolicy"
                 }
               }
             }
@@ -4632,7 +4632,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FleetRolesPolicy"
+                  "$ref": "#/components/schemas/FleetRolePolicy"
                 }
               }
             }
@@ -4655,7 +4655,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FleetRolesPolicy"
+                "$ref": "#/components/schemas/FleetRolePolicy"
               }
             }
           },
@@ -4667,7 +4667,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FleetRolesPolicy"
+                  "$ref": "#/components/schemas/FleetRolePolicy"
                 }
               }
             }
@@ -5318,7 +5318,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SiloRolesPolicy"
+                  "$ref": "#/components/schemas/SiloRolePolicy"
                 }
               }
             }
@@ -5353,7 +5353,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SiloRolesPolicy"
+                "$ref": "#/components/schemas/SiloRolePolicy"
               }
             }
           },
@@ -5365,7 +5365,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SiloRolesPolicy"
+                  "$ref": "#/components/schemas/SiloRolePolicy"
                 }
               }
             }
@@ -6164,7 +6164,7 @@
           "bool"
         ]
       },
-      "FleetRoles": {
+      "FleetRole": {
         "type": "string",
         "enum": [
           "admin",
@@ -6172,7 +6172,7 @@
           "viewer"
         ]
       },
-      "FleetRolesPolicy": {
+      "FleetRolePolicy": {
         "description": "Client view of a [`Policy`], which describes how this resource may be accessed\n\nNote that the Policy only describes access granted explicitly for this resource.  The policies of parent resources can also cause a user to have access to this resource.",
         "type": "object",
         "properties": {
@@ -6180,7 +6180,7 @@
             "description": "Roles directly assigned on this resource",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/FleetRolesRoleAssignment"
+              "$ref": "#/components/schemas/FleetRoleRoleAssignment"
             }
           }
         },
@@ -6188,7 +6188,7 @@
           "role_assignments"
         ]
       },
-      "FleetRolesRoleAssignment": {
+      "FleetRoleRoleAssignment": {
         "description": "Describes the assignment of a particular role on a particular resource to a particular identity (user, group, etc.)\n\nThe resource is not part of this structure.  Rather, [`RoleAssignment`]s are put into a [`Policy`] and that Policy is applied to a particular resource.",
         "type": "object",
         "properties": {
@@ -6200,7 +6200,7 @@
             "$ref": "#/components/schemas/IdentityType"
           },
           "role_name": {
-            "$ref": "#/components/schemas/FleetRoles"
+            "$ref": "#/components/schemas/FleetRole"
           }
         },
         "required": [
@@ -7311,7 +7311,7 @@
           "items"
         ]
       },
-      "OrganizationRoles": {
+      "OrganizationRole": {
         "type": "string",
         "enum": [
           "admin",
@@ -7319,7 +7319,7 @@
           "viewer"
         ]
       },
-      "OrganizationRolesPolicy": {
+      "OrganizationRolePolicy": {
         "description": "Client view of a [`Policy`], which describes how this resource may be accessed\n\nNote that the Policy only describes access granted explicitly for this resource.  The policies of parent resources can also cause a user to have access to this resource.",
         "type": "object",
         "properties": {
@@ -7327,7 +7327,7 @@
             "description": "Roles directly assigned on this resource",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/OrganizationRolesRoleAssignment"
+              "$ref": "#/components/schemas/OrganizationRoleRoleAssignment"
             }
           }
         },
@@ -7335,7 +7335,7 @@
           "role_assignments"
         ]
       },
-      "OrganizationRolesRoleAssignment": {
+      "OrganizationRoleRoleAssignment": {
         "description": "Describes the assignment of a particular role on a particular resource to a particular identity (user, group, etc.)\n\nThe resource is not part of this structure.  Rather, [`RoleAssignment`]s are put into a [`Policy`] and that Policy is applied to a particular resource.",
         "type": "object",
         "properties": {
@@ -7347,7 +7347,7 @@
             "$ref": "#/components/schemas/IdentityType"
           },
           "role_name": {
-            "$ref": "#/components/schemas/OrganizationRoles"
+            "$ref": "#/components/schemas/OrganizationRole"
           }
         },
         "required": [
@@ -7456,7 +7456,7 @@
           "items"
         ]
       },
-      "ProjectRoles": {
+      "ProjectRole": {
         "type": "string",
         "enum": [
           "admin",
@@ -7464,7 +7464,7 @@
           "viewer"
         ]
       },
-      "ProjectRolesPolicy": {
+      "ProjectRolePolicy": {
         "description": "Client view of a [`Policy`], which describes how this resource may be accessed\n\nNote that the Policy only describes access granted explicitly for this resource.  The policies of parent resources can also cause a user to have access to this resource.",
         "type": "object",
         "properties": {
@@ -7472,7 +7472,7 @@
             "description": "Roles directly assigned on this resource",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/ProjectRolesRoleAssignment"
+              "$ref": "#/components/schemas/ProjectRoleRoleAssignment"
             }
           }
         },
@@ -7480,7 +7480,7 @@
           "role_assignments"
         ]
       },
-      "ProjectRolesRoleAssignment": {
+      "ProjectRoleRoleAssignment": {
         "description": "Describes the assignment of a particular role on a particular resource to a particular identity (user, group, etc.)\n\nThe resource is not part of this structure.  Rather, [`RoleAssignment`]s are put into a [`Policy`] and that Policy is applied to a particular resource.",
         "type": "object",
         "properties": {
@@ -7492,7 +7492,7 @@
             "$ref": "#/components/schemas/IdentityType"
           },
           "role_name": {
-            "$ref": "#/components/schemas/ProjectRoles"
+            "$ref": "#/components/schemas/ProjectRole"
           }
         },
         "required": [
@@ -8360,7 +8360,7 @@
           "items"
         ]
       },
-      "SiloRoles": {
+      "SiloRole": {
         "type": "string",
         "enum": [
           "admin",
@@ -8368,7 +8368,7 @@
           "viewer"
         ]
       },
-      "SiloRolesPolicy": {
+      "SiloRolePolicy": {
         "description": "Client view of a [`Policy`], which describes how this resource may be accessed\n\nNote that the Policy only describes access granted explicitly for this resource.  The policies of parent resources can also cause a user to have access to this resource.",
         "type": "object",
         "properties": {
@@ -8376,7 +8376,7 @@
             "description": "Roles directly assigned on this resource",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/SiloRolesRoleAssignment"
+              "$ref": "#/components/schemas/SiloRoleRoleAssignment"
             }
           }
         },
@@ -8384,7 +8384,7 @@
           "role_assignments"
         ]
       },
-      "SiloRolesRoleAssignment": {
+      "SiloRoleRoleAssignment": {
         "description": "Describes the assignment of a particular role on a particular resource to a particular identity (user, group, etc.)\n\nThe resource is not part of this structure.  Rather, [`RoleAssignment`]s are put into a [`Policy`] and that Policy is applied to a particular resource.",
         "type": "object",
         "properties": {
@@ -8396,7 +8396,7 @@
             "$ref": "#/components/schemas/IdentityType"
           },
           "role_name": {
-            "$ref": "#/components/schemas/SiloRoles"
+            "$ref": "#/components/schemas/SiloRole"
           }
         },
         "required": [
