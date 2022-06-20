@@ -49,6 +49,10 @@ This mode of operation will be used in production.
 
 See: xref:docs/how-to-run.adoc[].
 
+== Docker image
+
+This repo includes a Dockerfile that builds an image containing the Nexus and sled agent.  There's a GitHub Actions workflow that builds and publishes the Docker image.  This is used by [cli](https://github.com/oxidecomputer/cli) for testing. This is **not** the way Omicron will be deployed on production systems, but it's a useful vehicle for working with it.
+
 == Configuration reference
 
 `nexus` requires a TOML configuration file.  There's an example in
