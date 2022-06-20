@@ -222,6 +222,16 @@ impl Nexus {
         &self.opctx_external_authn
     }
 
+    /// Returns an [`OpContext`] used for background tasks.
+    pub fn opctx_for_background(&self) -> OpContext {
+        OpContext::for_background(
+            self.log.new(o!("component" => "BackgroundWork")),
+            Arc::clone(&self.authz),
+            authn::Context::internal_db_background(),
+            Arc::clone(&self.db_datastore),
+        )
+    }
+
     /// Used as the body of a "stub" endpoint -- one that's currently
     /// unimplemented but that we eventually intend to implement
     ///

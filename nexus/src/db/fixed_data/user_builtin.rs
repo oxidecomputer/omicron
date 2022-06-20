@@ -39,6 +39,15 @@ lazy_static! {
             "used for seeding initial database data",
         );
 
+    /// Internal user for performing operations driven by Nexus, rather
+    /// than any API request.
+    pub static ref USER_BACKGROUND_WORK: UserBuiltinConfig =
+        UserBuiltinConfig::new_static(
+            "001de000-05e4-4000-8000-00000000bac3",
+            "background-work",
+            "used for Nexus-driven database operations",
+        );
+
     /// Internal user used by Nexus when handling internal API requests
     pub static ref USER_INTERNAL_API: UserBuiltinConfig =
         UserBuiltinConfig::new_static(
@@ -77,6 +86,7 @@ lazy_static! {
 #[cfg(test)]
 mod test {
     use super::super::assert_valid_uuid;
+    use super::USER_BACKGROUND_WORK;
     use super::USER_DB_INIT;
     use super::USER_EXTERNAL_AUTHN;
     use super::USER_INTERNAL_API;
@@ -85,6 +95,7 @@ mod test {
 
     #[test]
     fn test_builtin_user_ids_are_valid() {
+        assert_valid_uuid(&USER_BACKGROUND_WORK.id);
         assert_valid_uuid(&USER_DB_INIT.id);
         assert_valid_uuid(&USER_INTERNAL_API.id);
         assert_valid_uuid(&USER_EXTERNAL_AUTHN.id);
