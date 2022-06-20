@@ -173,9 +173,8 @@ impl Updater {
     }
 }
 
-// TODO: not pub?
-/// Creates a resolver using all internal DNS name servers.
-pub fn create_resolver(
+// Creates a resolver using all internal DNS name servers.
+fn create_resolver(
     subnet: Ipv6Subnet<AZ_PREFIX>,
 ) -> Result<TokioAsyncResolver, trust_dns_resolver::error::ResolveError> {
     let mut rc = ResolverConfig::new();

@@ -78,6 +78,9 @@ pub enum Error {
 
     #[error("Error managing guest networking: {0}")]
     Opte(#[from] crate::opte::Error),
+
+    #[error("Error resolving DNS name: {0}")]
+    ResolveError(#[from] internal_dns_client::multiclient::ResolveError),
 }
 
 impl From<Error> for omicron_common::api::external::Error {
@@ -320,12 +323,7 @@ impl SledAgent {
         &self,
         artifact: UpdateArtifact,
     ) -> Result<(), Error> {
-        let nexus_client = self
-            .lazy_nexus_client
-            .get()
-            .await
-            // TODO: Handle error... or push out lazy nexus client.
-            .unwrap();
+        let nexus_client = self.lazy_nexus_client.get().await?;
         crate::updates::download_artifact(artifact, &nexus_client).await?;
         Ok(())
     }

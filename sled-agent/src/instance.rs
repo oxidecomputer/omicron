@@ -84,6 +84,9 @@ pub enum Error {
 
     #[error("Serial console buffer: {0}")]
     Serial(#[from] crate::serial::Error),
+
+    #[error("Error resolving DNS name: {0}")]
+    ResolveError(#[from] internal_dns_client::multiclient::ResolveError),
 }
 
 // Issues read-only, idempotent HTTP requests at propolis until it responds with
@@ -253,9 +256,7 @@ impl InstanceInner {
         // Notify Nexus of the state change.
         self.lazy_nexus_client
             .get()
-            .await
-            // TODO: Handle me
-            .unwrap()
+            .await?
             .cpapi_instances_put(
                 self.id(),
                 &nexus_client::types::InstanceRuntimeState::from(

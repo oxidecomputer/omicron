@@ -313,20 +313,15 @@ impl ServiceInner {
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Handing off control to Nexus");
 
-        let resolver = internal_dns_client::multiclient::create_resolver(
-            config.az_subnet(),
-        )
-        .expect("Failed to create DNS resolver");
-        let response = resolver
-            .lookup_ip(&SRV::Service(ServiceName::Nexus).to_string())
+        let resolver =
+            internal_dns_client::multiclient::Resolver::new(config.az_subnet())
+                .expect("Failed to create DNS resolver");
+        let ip = resolver
+            .lookup_ip(SRV::Service(ServiceName::Nexus))
             .await
             .expect("Failed to lookup IP");
+        let nexus_address = SocketAddr::new(ip, NEXUS_INTERNAL_PORT);
 
-        let nexus_address = response
-            .iter()
-            .next()
-            .map(|addr| SocketAddr::new(addr, NEXUS_INTERNAL_PORT))
-            .expect("no addresses returned from DNS resolver");
         info!(self.log, "Nexus address: {}", nexus_address.to_string());
 
         let nexus_client = NexusClient::new(

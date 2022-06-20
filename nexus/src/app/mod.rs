@@ -261,9 +261,6 @@ impl Nexus {
     }
 
     /// Returns an [`OpContext`] used for background tasks.
-    // TODO: Probably should be making a *new* opctx here?
-    //
-    // I think there should be one-per-"op", to get better metrics on bg ops.
     pub fn opctx_for_background(&self) -> OpContext {
         OpContext::for_background(
             self.log.new(o!("component" => "BackgroundWork")),
