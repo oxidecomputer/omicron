@@ -16,11 +16,13 @@ use omicron_common::address::{Ipv6Subnet, OXIMETER_PORT, RACK_PREFIX};
 use omicron_common::nexus_config::{
     self, DeploymentConfig as NexusDeploymentConfig,
 };
+use omicron_common::postgres_config::PostgresConfigWithUrl;
 use slog::Logger;
 use std::collections::HashSet;
 use std::iter::FromIterator;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -332,7 +334,12 @@ impl ServiceManager {
                         subnet: Ipv6Subnet::<RACK_PREFIX>::new(
                             self.underlay_address,
                         ),
-                        database: nexus_config::Database::FromDns,
+                        // TODO: Switch to inferring this URL by DNS.
+                        database: nexus_config::Database::FromUrl {
+                            url: PostgresConfigWithUrl::from_str(
+                                "postgresql://root@[fd00:1122:3344:0101::2]:32221/omicron?sslmode=disable"
+                            ).unwrap(),
+                        }
                     };
 
                     // Copy the partial config file to the expected location.
