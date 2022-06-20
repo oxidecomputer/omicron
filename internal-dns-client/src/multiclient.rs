@@ -7,17 +7,14 @@ use futures::stream::{self, StreamExt, TryStreamExt};
 use omicron_common::address::{
     Ipv6Subnet, ReservedRackSubnet, AZ_PREFIX, DNS_PORT, DNS_SERVER_PORT,
 };
-use omicron_common::backoff::{
-    internal_service_policy, retry_notify, BackoffError,
-};
-use slog::{info, warn, Logger};
+use slog::{info, Logger};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use trust_dns_resolver::config::{
     NameServerConfig, Protocol, ResolverConfig, ResolverOpts,
 };
 use trust_dns_resolver::TokioAsyncResolver;
 
-type DnsError = crate::Error<crate::types::Error>;
+pub type DnsError = crate::Error<crate::types::Error>;
 
 /// Describes how to find the DNS servers.
 ///
@@ -152,20 +149,7 @@ impl Updater {
                 })
                 .collect::<Vec<_>>(),
         });
-
-        let set_record = || async {
-            self.dns_records_set(&records)
-                .await
-                .map_err(BackoffError::transient)?;
-            Ok::<(), BackoffError<DnsError>>(())
-        };
-        let log_failure = |error, _| {
-            warn!(self.log, "Failed to set DNS records"; "error" => ?error);
-        };
-
-        retry_notify(internal_service_policy(), set_record, log_failure)
-            .await?;
-        Ok(())
+        self.dns_records_set(&records).await
     }
 
     /// Sets a records on all DNS servers.

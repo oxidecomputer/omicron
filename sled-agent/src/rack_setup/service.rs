@@ -207,11 +207,21 @@ impl ServiceInner {
             .await?;
         }
 
-        // Initialize DNS records for these datasets.
-        self.dns_servers
-            .get()
-            .expect("DNS servers must be initialized first")
-            .insert_dns_records(datasets)
+        let records_put = || async {
+            self.dns_servers
+                .get()
+                .expect("DNS servers must be initialized first")
+                .insert_dns_records(datasets)
+                .await
+                .map_err(BackoffError::transient)?;
+            Ok::<(), BackoffError<internal_dns_client::multiclient::DnsError>>(
+                (),
+            )
+        };
+        let log_failure = |error, _| {
+            warn!(self.log, "failed to set DNS records"; "error" => ?error);
+        };
+        retry_notify(internal_service_policy(), records_put, log_failure)
             .await?;
 
         Ok(())
@@ -256,7 +266,20 @@ impl ServiceInner {
 
         // Insert DNS records, if the DNS servers have been initialized
         if let Some(dns_servers) = self.dns_servers.get() {
-            dns_servers.insert_dns_records(services).await?;
+            let records_put = || async {
+                dns_servers
+                    .insert_dns_records(services)
+                    .await
+                    .map_err(BackoffError::transient)?;
+                Ok::<(), BackoffError<internal_dns_client::multiclient::DnsError>>(
+                    (),
+                )
+            };
+            let log_failure = |error, _| {
+                warn!(self.log, "failed to set DNS records"; "error" => ?error);
+            };
+            retry_notify(internal_service_policy(), records_put, log_failure)
+                .await?;
         }
 
         Ok(())
