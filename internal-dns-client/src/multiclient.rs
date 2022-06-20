@@ -210,14 +210,14 @@ pub enum ResolveError {
 /// A wrapper around a DNS resolver, providing a way to conveniently
 /// look up IP addresses of services based on their SRV keys.
 pub struct Resolver {
-    inner: TokioAsyncResolver,
+    inner: Box<TokioAsyncResolver>,
 }
 
 impl Resolver {
     /// Creates a DNS resolver, looking up DNS server addresses based on
     /// the provided subnet.
     pub fn new(subnet: Ipv6Subnet<AZ_PREFIX>) -> Result<Self, ResolveError> {
-        Ok(Self { inner: create_resolver(subnet)? })
+        Ok(Self { inner: Box::new(create_resolver(subnet)?) })
     }
 
     /// Convenience wrapper for [`Resolver::new`] which determines the subnet
