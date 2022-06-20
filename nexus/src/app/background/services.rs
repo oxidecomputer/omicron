@@ -33,7 +33,7 @@ use std::sync::Arc;
 #[derive(Debug)]
 enum ServiceRedundancy {
     // This service must exist on at least this many sleds
-    // within the racki.
+    // within the rack.
     PerRack(u32),
 
     // This service must exist on at least this many sleds

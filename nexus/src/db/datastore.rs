@@ -4615,7 +4615,6 @@ mod test {
         );
         let rack_id = Uuid::new_v4();
         let sled_id = Uuid::new_v4();
-        let rack_id = Uuid::new_v4();
         let sled = Sled::new(sled_id, bogus_addr.clone(), rack_id);
         datastore.sled_upsert(sled).await.unwrap();
         sled_id
@@ -4969,7 +4968,6 @@ mod test {
             OpContext::for_tests(logctx.log.new(o!()), datastore.clone());
         let rack_id = Uuid::new_v4();
 
-        let rack_id = Uuid::new_v4();
         let addr1 = "[fd00:1de::1]:12345".parse().unwrap();
         let sled1_id = "0de4b299-e0b4-46f0-d528-85de81a7095f".parse().unwrap();
         let sled1 = db::model::Sled::new(sled1_id, addr1, rack_id);
