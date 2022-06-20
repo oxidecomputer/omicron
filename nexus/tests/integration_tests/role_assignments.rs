@@ -104,8 +104,8 @@ async fn test_role_assignments_fleet(cptestctx: &ControlPlaneTestContext) {
 
     struct FleetRoleAssignmentTest;
     impl RoleAssignmentTest for FleetRoleAssignmentTest {
-        type RoleType = authz::FleetRoles;
-        const ROLE: Self::RoleType = authz::FleetRoles::Admin;
+        type RoleType = authz::FleetRole;
+        const ROLE: Self::RoleType = authz::FleetRole::Admin;
         const VISIBLE_TO_UNPRIVILEGED: bool = true;
         fn policy_url(&self) -> String {
             String::from("/policy")
@@ -169,8 +169,8 @@ async fn test_role_assignments_fleet(cptestctx: &ControlPlaneTestContext) {
 async fn test_role_assignments_silo(cptestctx: &ControlPlaneTestContext) {
     struct SiloRoleAssignmentTest;
     impl RoleAssignmentTest for SiloRoleAssignmentTest {
-        type RoleType = authz::SiloRoles;
-        const ROLE: Self::RoleType = authz::SiloRoles::Admin;
+        type RoleType = authz::SiloRole;
+        const ROLE: Self::RoleType = authz::SiloRole::Admin;
         const VISIBLE_TO_UNPRIVILEGED: bool = true;
         fn policy_url(&self) -> String {
             format!(
@@ -238,8 +238,8 @@ async fn test_role_assignments_organization(
     };
 
     impl RoleAssignmentTest for OrganizationRoleAssignmentTest {
-        type RoleType = authz::OrganizationRoles;
-        const ROLE: Self::RoleType = authz::OrganizationRoles::Admin;
+        type RoleType = authz::OrganizationRole;
+        const ROLE: Self::RoleType = authz::OrganizationRole::Admin;
         const VISIBLE_TO_UNPRIVILEGED: bool = false;
         fn policy_url(&self) -> String {
             format!("{}/policy", self.org_url)
@@ -300,8 +300,8 @@ async fn test_role_assignments_project(cptestctx: &ControlPlaneTestContext) {
         policy_url: format!("{}/policy", project_url),
     };
     impl RoleAssignmentTest for ProjectRoleAssignmentTest {
-        type RoleType = authz::ProjectRoles;
-        const ROLE: Self::RoleType = authz::ProjectRoles::Admin;
+        type RoleType = authz::ProjectRole;
+        const ROLE: Self::RoleType = authz::ProjectRole::Admin;
         const VISIBLE_TO_UNPRIVILEGED: bool = false;
         fn policy_url(&self) -> String {
             self.policy_url.clone()

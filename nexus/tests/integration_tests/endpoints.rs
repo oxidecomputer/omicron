@@ -439,7 +439,7 @@ lazy_static! {
                 AllowedMethod::Get,
                 AllowedMethod::Put(
                     serde_json::to_value(
-                        &shared::Policy::<authz::FleetRoles> {
+                        &shared::Policy::<authz::FleetRole> {
                             role_assignments: vec![]
                         }
                     ).unwrap()
@@ -473,7 +473,7 @@ lazy_static! {
                 AllowedMethod::Get,
                 AllowedMethod::Put(
                     serde_json::to_value(
-                        &shared::Policy::<authz::SiloRoles> {
+                        &shared::Policy::<authz::SiloRole> {
                             role_assignments: vec![]
                         }
                     ).unwrap()
@@ -517,7 +517,7 @@ lazy_static! {
                 AllowedMethod::Get,
                 AllowedMethod::Put(
                     serde_json::to_value(
-                        &shared::Policy::<authz::OrganizationRoles> {
+                        &shared::Policy::<authz::OrganizationRole> {
                             role_assignments: vec![]
                         }
                     ).unwrap()
@@ -568,7 +568,7 @@ lazy_static! {
                 AllowedMethod::Get,
                 AllowedMethod::Put(
                     serde_json::to_value(
-                        &shared::Policy::<authz::ProjectRoles> {
+                        &shared::Policy::<authz::ProjectRole> {
                             role_assignments: vec![]
                         }
                     ).unwrap()
