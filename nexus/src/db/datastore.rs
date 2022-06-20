@@ -3777,7 +3777,6 @@ impl DataStore {
                 // TODO-correctness: better error (not found)
                 public_error_from_diesel_pool(e, ErrorHandler::Server)
             })?;
-        let client_id = token.client_id;
         let silo_user_id = token.silo_user_id;
         let silo_id = silo_user_dsl::silo_user
             .filter(silo_user_dsl::id.eq(silo_user_id))
@@ -3789,7 +3788,7 @@ impl DataStore {
                 public_error_from_diesel_pool(e, ErrorHandler::Server)
             })?
             .silo_id;
-        Ok(Actor::ApiClient { silo_user_id, silo_id, client_id })
+        Ok(Actor::SiloUser { silo_user_id, silo_id })
     }
 
     // Test interfaces

@@ -120,8 +120,7 @@ impl Context {
         &self,
     ) -> Result<Option<authz::Silo>, omicron_common::api::external::Error> {
         self.actor_required().map(|actor| match actor {
-            Actor::SiloUser { silo_id, .. }
-            | Actor::ApiClient { silo_id, .. } => Some(authz::Silo::new(
+            Actor::SiloUser { silo_id, .. } => Some(authz::Silo::new(
                 authz::FLEET,
                 *silo_id,
                 LookupType::ById(*silo_id),
@@ -266,8 +265,6 @@ mod test {
 enum Kind {
     /// Client did not attempt to authenticate
     Unauthenticated,
-    /// Client has requested an authentication token
-    Authenticating(Details),
     /// Client successfully authenticated
     Authenticated(Details),
 }
@@ -287,7 +284,6 @@ pub struct Details {
 pub enum Actor {
     UserBuiltin { user_builtin_id: Uuid },
     SiloUser { silo_user_id: Uuid, silo_id: Uuid },
-    ApiClient { silo_user_id: Uuid, silo_id: Uuid, client_id: Uuid },
 }
 
 impl Actor {
@@ -295,7 +291,6 @@ impl Actor {
         match self {
             Actor::UserBuiltin { .. } => db::model::IdentityType::UserBuiltin,
             Actor::SiloUser { .. } => db::model::IdentityType::SiloUser,
-            Actor::ApiClient { .. } => db::model::IdentityType::SiloUser, // TODO: IdentityType::ApiClient
         }
     }
 
@@ -303,7 +298,6 @@ impl Actor {
         match self {
             Actor::UserBuiltin { user_builtin_id, .. } => *user_builtin_id,
             Actor::SiloUser { silo_user_id, .. } => *silo_user_id,
-            Actor::ApiClient { silo_user_id, .. } => *silo_user_id,
         }
     }
 
@@ -311,7 +305,6 @@ impl Actor {
         match self {
             Actor::UserBuiltin { .. } => None,
             Actor::SiloUser { silo_id, .. } => Some(*silo_id),
-            Actor::ApiClient { silo_id, .. } => Some(*silo_id),
         }
     }
 }
@@ -334,12 +327,6 @@ impl std::fmt::Debug for Actor {
                 .debug_struct("Actor::SiloUser")
                 .field("silo_user_id", &silo_user_id)
                 .field("silo_id", &silo_id)
-                .finish_non_exhaustive(),
-            Actor::ApiClient { silo_user_id, silo_id, client_id } => f
-                .debug_struct("Actor::ApiClient")
-                .field("silo_user_id", &silo_user_id)
-                .field("silo_id", &silo_id)
-                .field("client_id", &client_id)
                 .finish_non_exhaustive(),
         }
     }

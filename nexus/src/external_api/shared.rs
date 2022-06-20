@@ -128,9 +128,6 @@ impl TryFrom<db::model::IdentityType> for IdentityType {
                 Err(anyhow!("unsupported db identity type: {:?}", other))
             }
             db::model::IdentityType::SiloUser => Ok(IdentityType::SiloUser),
-            db::model::IdentityType::ApiClient => {
-                todo!("what shared identity type is an API client?")
-            }
         }
     }
 }
