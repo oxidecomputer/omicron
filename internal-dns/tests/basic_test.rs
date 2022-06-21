@@ -334,7 +334,7 @@ async fn init_client_server(
 
     // launch a dropshot server
     let dropshot_server =
-        internal_dns::start_server(config, log.clone(), db).await?;
+        internal_dns::start_dropshot_server(config, log.clone(), db).await?;
 
     // wait for server to start
     tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
