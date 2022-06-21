@@ -182,9 +182,7 @@ impl SerialConsoleBuffer {
             match connect_future.await {
                 Ok((mut websocket, _)) => loop {
                     match websocket.next().await {
-                        None => {
-                            warn!(log, "Nothing read from {}", &ws_uri);
-                        }
+                        None => {}
                         Some(Err(e)) => {
                             error!(
                                 log,
