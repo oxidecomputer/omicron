@@ -15,6 +15,9 @@ use crate::rack_setup::plan::service::{
 use crate::rack_setup::plan::sled::{
     Plan as SledPlan, PlanError as SledPlanError,
 };
+use internal_dns_client::multiclient::{
+    DnsError, Resolver as DnsResolver, Updater as DnsUpdater,
+};
 use internal_dns_client::names::{ServiceName, SRV};
 use nexus_client::{
     types as NexusTypes, Client as NexusClient, Error as NexusError,
@@ -72,9 +75,8 @@ pub enum SetupServiceError {
     #[error("Failed to construct an HTTP client: {0}")]
     HttpClient(reqwest::Error),
 
-    // XXX CLEAN UP
-    #[error(transparent)]
-    Dns(#[from] internal_dns_client::Error<internal_dns_client::types::Error>),
+    #[error("Failed to access DNS server: {0}")]
+    Dns(#[from] DnsError),
 }
 
 /// The interface to the Rack Setup Service.
@@ -157,7 +159,7 @@ enum PeerExpectation {
 struct ServiceInner {
     log: Logger,
     peer_monitor: Mutex<PeerMonitorObserver>,
-    dns_servers: OnceCell<internal_dns_client::multiclient::Updater>,
+    dns_servers: OnceCell<DnsUpdater>,
 }
 
 impl ServiceInner {
@@ -214,9 +216,7 @@ impl ServiceInner {
                 .insert_dns_records(datasets)
                 .await
                 .map_err(BackoffError::transient)?;
-            Ok::<(), BackoffError<internal_dns_client::multiclient::DnsError>>(
-                (),
-            )
+            Ok::<(), BackoffError<DnsError>>(())
         };
         let log_failure = |error, _| {
             warn!(self.log, "failed to set DNS records"; "error" => ?error);
@@ -271,9 +271,7 @@ impl ServiceInner {
                     .insert_dns_records(services)
                     .await
                     .map_err(BackoffError::transient)?;
-                Ok::<(), BackoffError<internal_dns_client::multiclient::DnsError>>(
-                    (),
-                )
+                Ok::<(), BackoffError<DnsError>>(())
             };
             let log_failure = |error, _| {
                 warn!(self.log, "failed to set DNS records"; "error" => ?error);
@@ -336,10 +334,8 @@ impl ServiceInner {
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Handing off control to Nexus");
 
-        let resolver = internal_dns_client::multiclient::Resolver::new(
-            &config.az_subnet(),
-        )
-        .expect("Failed to create DNS resolver");
+        let resolver = DnsResolver::new(&config.az_subnet())
+            .expect("Failed to create DNS resolver");
         let ip = resolver
             .lookup_ip(SRV::Service(ServiceName::Nexus))
             .await
@@ -569,7 +565,7 @@ impl ServiceInner {
         .into_iter()
         .collect::<Result<_, SetupServiceError>>()?;
 
-        let dns_servers = internal_dns_client::multiclient::Updater::new(
+        let dns_servers = DnsUpdater::new(
             &config.az_subnet(),
             self.log.new(o!("client" => "DNS")),
         );
