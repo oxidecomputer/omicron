@@ -1101,6 +1101,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "ddm-admin-client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "progenitor",
+ "progenitor-client",
+ "quote",
+ "reqwest",
+ "serde",
+ "slog",
+]
+
+[[package]]
 name = "der"
 version = "0.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
