@@ -20,7 +20,7 @@ pub struct Config {
     pub data: dns_data::Config,
 }
 
-pub async fn start_server(
+pub async fn start_dropshot_server(
     config: Config,
     log: slog::Logger,
     db: Arc<sled::Db>,

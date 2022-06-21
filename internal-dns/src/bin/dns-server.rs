@@ -64,7 +64,8 @@ async fn main() -> Result<(), anyhow::Error> {
         internal_dns::dns_server::run(log, db, dns_config).await?
     };
 
-    let dropshot_server = internal_dns::start_server(config, log, db).await?;
+    let dropshot_server =
+        internal_dns::start_dropshot_server(config, log, db).await?;
     dropshot_server
         .await
         .map_err(|error_message| anyhow!("server exiting: {}", error_message))
