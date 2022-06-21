@@ -288,7 +288,7 @@ struct TestContext {
 
 impl TestContext {
     async fn cleanup(self) {
-        self.dns_server.close();
+        drop(self.dns_server);
         self.dropshot_server.close().await.expect("Failed to clean up server");
         self.tmp.close().expect("Failed to clean up tmp directory");
     }
