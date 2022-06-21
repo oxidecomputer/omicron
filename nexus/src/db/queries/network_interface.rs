@@ -35,23 +35,23 @@ use uuid::Uuid;
 lazy_static::lazy_static! {
     // State an instance must be in to operate on its network interfaces, in
     // most situations.
-    pub static ref INSTANCE_STOPPED: db::model::InstanceState =
+    static ref INSTANCE_STOPPED: db::model::InstanceState =
         db::model::InstanceState(external::InstanceState::Stopped);
 
     // An instance can be in the creating state while we manipulate its
     // interfaces. The intention is for this only to be the case during sagas.
-    pub static ref INSTANCE_CREATING: db::model::InstanceState =
+    static ref INSTANCE_CREATING: db::model::InstanceState =
         db::model::InstanceState(external::InstanceState::Creating);
 
     // A sentinel value for the instance state when the instance actually does
     // not exist.
-    pub static ref INSTANCE_DESTROYED: db::model::InstanceState =
+    static ref INSTANCE_DESTROYED: db::model::InstanceState =
         db::model::InstanceState(external::InstanceState::Destroyed);
 
-    pub static ref NO_INSTANCE_SENTINEL_STRING: String =
+    static ref NO_INSTANCE_SENTINEL_STRING: String =
         String::from(NO_INSTANCE_SENTINEL);
 
-    pub static ref INSTANCE_NOT_STOPPED_SENTINEL_STRING: String =
+    static ref INSTANCE_NOT_STOPPED_SENTINEL_STRING: String =
         String::from(INSTANCE_NOT_STOPPED_SENTINEL);
 }
 
@@ -1314,21 +1314,24 @@ const INSTANCE_FROM_CLAUSE: InstanceFromClause = InstanceFromClause::new();
 //
 // ```sql
 // SELECT CAST(
-//  CASE COALESCE((
-//      SELECT
-//          state
-//      FROM
-//          instance
-//      WHERE
-//          id = <instance_id> AND time_deleted IS NULL
-//      ),
-//      'destroyed'
-//  )
-//  WHEN 'stopped' THEN '<instance_id_str>' -- Instance UUID as a string
-//  WHEN 'creating' THEN '<instance_id_str>' -- Instance UUID as a string
-//  WHEN 'destroyed' THEN 'no-instance' -- Sentinel for an instance not existing
-//  ELSE 'not-stopped' -- Any other state is invalid for operating on instances
-//  END
+//  CASE
+//      COALESCE(
+//          -- Identify the state of the instance
+//          (
+//              SELECT
+//                 state
+//              FROM
+//                  instance
+//              WHERE
+//                  id = <instance_id> AND time_deleted IS NULL
+//          ),
+//          'destroyed' -- Default state, if not found
+//      )
+//      WHEN 'stopped' THEN '<instance_id_str>' -- Instance UUID as a string
+//      WHEN 'creating' THEN '<instance_id_str>' -- Instance UUID as a string
+//      WHEN 'destroyed' THEN 'no-instance' -- Sentinel for an instance not existing
+//      ELSE 'not-stopped' -- Any other state is invalid for operating on instances
+//      END
 // AS UUID)
 // ```
 //
@@ -1674,6 +1677,7 @@ mod tests {
     use crate::external_api::params::InstanceCreate;
     use crate::external_api::params::InstanceNetworkInterfaceAttachment;
     use chrono::Utc;
+    use dropshot::test_util::LogContext;
     use nexus_test_utils::db::test_setup_database;
     use omicron_common::api::external;
     use omicron_common::api::external::ByteCount;
@@ -1687,6 +1691,7 @@ mod tests {
     use omicron_common::api::external::Name;
     use omicron_common::api::internal::nexus::InstanceRuntimeState;
     use omicron_test_utils::dev;
+    use omicron_test_utils::dev::db::CockroachInstance;
     use std::convert::TryInto;
     use std::net::IpAddr;
     use std::sync::Arc;
@@ -1765,85 +1770,113 @@ mod tests {
         instance
     }
 
+    // VPC with two VPC Subnets, for testing behavior of NIC queries.
+    struct Network {
+        vpc_id: Uuid,
+        subnets: [VpcSubnet; 2],
+    }
+
+    impl Network {
+        // Create a VPC with two distinct VPC Subnets.
+        fn new() -> Self {
+            let vpc_id = Uuid::new_v4();
+            let subnet1 = VpcSubnet::new(
+                Uuid::new_v4(),
+                vpc_id,
+                IdentityMetadataCreateParams {
+                    name: String::from("first-subnet").try_into().unwrap(),
+                    description: String::from("first test subnet"),
+                },
+                Ipv4Net("172.30.0.0/28".parse().unwrap()),
+                Ipv6Net("fd12:3456:7890::/64".parse().unwrap()),
+            );
+            let subnet2 = VpcSubnet::new(
+                Uuid::new_v4(),
+                vpc_id,
+                IdentityMetadataCreateParams {
+                    name: String::from("second-subnet").try_into().unwrap(),
+                    description: String::from("second test subnet"),
+                },
+                Ipv4Net("172.31.0.0/28".parse().unwrap()),
+                Ipv6Net("fd12:3456:7891::/64".parse().unwrap()),
+            );
+            Self { vpc_id, subnets: [subnet1, subnet2] }
+        }
+
+        fn available_ipv4_addresses(&self) -> [usize; 2] {
+            [
+                self.subnets[0].ipv4_block.size() as usize
+                    - crate::defaults::NUM_INITIAL_RESERVED_IP_ADDRESSES
+                    - 1,
+                self.subnets[1].ipv4_block.size() as usize
+                    - crate::defaults::NUM_INITIAL_RESERVED_IP_ADDRESSES
+                    - 1,
+            ]
+        }
+    }
+
+    // Context for testing network interface queries.
+    struct TestContext {
+        logctx: LogContext,
+        opctx: OpContext,
+        db: CockroachInstance,
+        db_datastore: Arc<DataStore>,
+        net1: Network,
+        net2: Network,
+    }
+
+    impl TestContext {
+        async fn new(test_name: &str) -> Self {
+            let logctx = dev::test_setup_log(test_name);
+            let log = logctx.log.new(o!());
+            let db = test_setup_database(&log).await;
+            let cfg = crate::db::Config { url: db.pg_config().clone() };
+            let pool = Arc::new(crate::db::Pool::new(&cfg));
+            let db_datastore =
+                Arc::new(crate::db::DataStore::new(Arc::clone(&pool)));
+            let opctx =
+                OpContext::for_tests(log.new(o!()), db_datastore.clone());
+            Self {
+                logctx,
+                opctx,
+                db,
+                db_datastore,
+                net1: Network::new(),
+                net2: Network::new(),
+            }
+        }
+
+        async fn success(mut self) {
+            self.db.cleanup().await.unwrap();
+            self.logctx.cleanup_successful();
+        }
+
+        async fn create_instance(
+            &self,
+            state: external::InstanceState,
+        ) -> Instance {
+            instance_set_state(
+                &self.db_datastore,
+                create_instance(&self.db_datastore).await,
+                state,
+            )
+            .await
+        }
+    }
+
     #[tokio::test]
-    async fn test_insert_network_interface_query() {
-        // Setup the test database
-        let logctx = dev::test_setup_log("test_insert_network_interface_query");
-        let log = logctx.log.new(o!());
-        let mut db = test_setup_database(&log).await;
-        let cfg = crate::db::Config { url: db.pg_config().clone() };
-        let pool = Arc::new(crate::db::Pool::new(&cfg));
-        let db_datastore =
-            Arc::new(crate::db::DataStore::new(Arc::clone(&pool)));
-        let opctx = OpContext::for_tests(log.new(o!()), db_datastore.clone());
-
-        // Create an instance and set it "running"
-        let instance = instance_set_state(
-            &db_datastore,
-            create_instance(&db_datastore).await,
-            external::InstanceState::Running,
-        )
-        .await;
+    async fn test_insert_running_instance_fails() {
+        let context =
+            TestContext::new("test_insert_running_instance_fails").await;
+        let instance =
+            context.create_instance(external::InstanceState::Running).await;
         let instance_id = instance.id();
-
-        // Two test VpcSubnets, in different VPCs. The IPv4 range has space for
-        // 16 addresses, less the 6 that are reserved.
-        let ipv4_block = Ipv4Net("172.30.0.0/28".parse().unwrap());
-        let ipv6_block = Ipv6Net("fd12:3456:7890::/64".parse().unwrap());
-        let other_ipv4_block = Ipv4Net("172.31.0.0/28".parse().unwrap());
-        let other_ipv6_block = Ipv6Net("fd12:3456:7891::/64".parse().unwrap());
-        let subnet_name = "subnet-a".to_string().try_into().unwrap();
-        let other_subnet_name = "subnet-b".to_string().try_into().unwrap();
-        let other_valid_subnet_name =
-            "subnet-c".to_string().try_into().unwrap();
-        let description = "some description".to_string();
-        let vpc_id = "d402369d-c9ec-c5ad-9138-9fbee732d53e".parse().unwrap();
-        let other_vpc_id =
-            "093ad2db-769b-e3c2-bc1c-b46e84ce5532".parse().unwrap();
-        let subnet_id = "093ad2db-769b-e3c2-bc1c-b46e84ce5532".parse().unwrap();
-        let other_subnet_id =
-            "695debcc-e197-447d-ffb2-976150a7b7cf".parse().unwrap();
-        let other_valid_subnet_id =
-            "e9274bde-1ef6-40b8-8e9d-ca67942a1d3a".parse().unwrap();
-        let subnet = VpcSubnet::new(
-            subnet_id,
-            vpc_id,
-            IdentityMetadataCreateParams {
-                name: subnet_name,
-                description: description.to_string(),
-            },
-            ipv4_block,
-            ipv6_block,
-        );
-        let other_subnet = VpcSubnet::new(
-            other_subnet_id,
-            other_vpc_id,
-            IdentityMetadataCreateParams {
-                name: other_subnet_name,
-                description: description.to_string(),
-            },
-            ipv4_block,
-            ipv6_block,
-        );
-        let other_valid_subnet = VpcSubnet::new(
-            other_valid_subnet_id,
-            vpc_id,
-            IdentityMetadataCreateParams {
-                name: other_valid_subnet_name,
-                description: description.to_string(),
-            },
-            other_ipv4_block,
-            other_ipv6_block,
-        );
-
-        // Insert a network interface with a known valid IP address, attached to
-        // a specific instance.
         let requested_ip = "172.30.0.5".parse().unwrap();
         let interface = IncompleteNetworkInterface::new(
             Uuid::new_v4(),
             instance_id,
-            vpc_id,
-            subnet.clone(),
+            context.net1.vpc_id,
+            context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-a".parse().unwrap(),
                 description: String::from("description"),
@@ -1851,11 +1884,8 @@ mod tests {
             Some(requested_ip),
         )
         .unwrap();
-
-        // First, try to insert it against an instance not in the stopped state,
-        // and verify that this fails.
-        let err = db_datastore
-            .instance_create_network_interface_raw(&opctx, interface.clone())
+        let err = context.db_datastore
+            .instance_create_network_interface_raw(&context.opctx, interface.clone())
             .await
             .expect_err("Should not be able to create an interface for a running instance");
         assert!(
@@ -1863,16 +1893,34 @@ mod tests {
             "Expected an InstanceMustBeStopped error, found {:?}",
             err
         );
+        context.success().await;
+    }
 
-        // Stop the instance for the rest of the tests
-        let _instance = instance_set_state(
-            &db_datastore,
-            instance,
-            external::InstanceState::Stopped,
+    #[tokio::test]
+    async fn test_insert_request_exact_ip() {
+        let context = TestContext::new("test_insert_request_exact_ip").await;
+        let instance =
+            context.create_instance(external::InstanceState::Stopped).await;
+        let instance_id = instance.id();
+        let requested_ip = "172.30.0.5".parse().unwrap();
+        let interface = IncompleteNetworkInterface::new(
+            Uuid::new_v4(),
+            instance_id,
+            context.net1.vpc_id,
+            context.net1.subnets[0].clone(),
+            IdentityMetadataCreateParams {
+                name: "interface-a".parse().unwrap(),
+                description: String::from("description"),
+            },
+            Some(requested_ip),
         )
-        .await;
-        let inserted_interface = db_datastore
-            .instance_create_network_interface_raw(&opctx, interface.clone())
+        .unwrap();
+        let inserted_interface = context
+            .db_datastore
+            .instance_create_network_interface_raw(
+                &context.opctx,
+                interface.clone(),
+            )
             .await
             .expect("Failed to insert interface with known-good IP address");
         assert_interfaces_eq(&interface, &inserted_interface);
@@ -1881,13 +1929,17 @@ mod tests {
             requested_ip,
             "The requested IP address should be available when no interfaces exist in the table"
         );
+        context.success().await;
+    }
 
-        // Insert an interface on a non-existent instance.
+    #[tokio::test]
+    async fn test_insert_no_instance_fails() {
+        let context = TestContext::new("test_insert_no_instance_fails").await;
         let interface = IncompleteNetworkInterface::new(
             Uuid::new_v4(),
             Uuid::new_v4(),
-            vpc_id,
-            subnet.clone(),
+            context.net1.vpc_id,
+            context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-b".parse().unwrap(),
                 description: String::from("description"),
@@ -1895,8 +1947,8 @@ mod tests {
             None,
         )
         .unwrap();
-        let err = db_datastore
-            .instance_create_network_interface_raw(&opctx, interface.clone())
+        let err = context.db_datastore
+            .instance_create_network_interface_raw(&context.opctx, interface.clone())
             .await
             .expect_err("Should not be able to insert an interface for an instance that doesn't exist");
         assert!(
@@ -1904,77 +1956,149 @@ mod tests {
             "Expected an InstanceNotFound error, found {:?}",
             err,
         );
+        context.success().await;
+    }
 
-        // Create a stopped instance on which to insert a new interface
-        let new_instance = create_stopped_instance(&db_datastore).await;
+    // Create one interface on the instance, and then verify that the next from
+    // the same VPC Subnet (which must be on a different instance) has the next
+    // IP address.
+    #[tokio::test]
+    async fn test_insert_sequential_ip_allocation() {
+        let context =
+            TestContext::new("test_insert_sequential_ip_allocation").await;
+        let addresses = context.net1.subnets[0]
+            .ipv4_block
+            .iter()
+            .skip(crate::defaults::NUM_INITIAL_RESERVED_IP_ADDRESSES);
 
-        // Insert an interface on the instance, but with an
-        // automatically-assigned IP address. This specifically tests that we
-        // sequentially allocate IP addresses within a single VPC Subnet.
-        let expected_address =
-            "172.30.0.6".parse::<std::net::IpAddr>().unwrap();
+        for (i, expected_address) in addresses.take(2).enumerate() {
+            let instance =
+                context.create_instance(external::InstanceState::Stopped).await;
+            let interface = IncompleteNetworkInterface::new(
+                Uuid::new_v4(),
+                instance.id(),
+                context.net1.vpc_id,
+                context.net1.subnets[0].clone(),
+                IdentityMetadataCreateParams {
+                    name: format!("interface-{}", i).parse().unwrap(),
+                    description: String::from("description"),
+                },
+                None,
+            )
+            .unwrap();
+            let inserted_interface = context
+                .db_datastore
+                .instance_create_network_interface_raw(
+                    &context.opctx,
+                    interface.clone(),
+                )
+                .await
+                .expect("Failed to insert interface");
+            assert_interfaces_eq(&interface, &inserted_interface);
+            let actual_address = inserted_interface.ip.ip();
+            assert_eq!(
+                actual_address, expected_address,
+                "Failed to auto-assign correct sequential address to interface"
+            );
+        }
+        context.success().await;
+    }
+
+    #[tokio::test]
+    async fn test_insert_request_same_ip_fails() {
+        let context =
+            TestContext::new("test_insert_request_same_ip_fails").await;
+
+        let instance =
+            context.create_instance(external::InstanceState::Stopped).await;
+        let new_instance =
+            context.create_instance(external::InstanceState::Stopped).await;
+
+        // Insert an interface on the first instance.
         let interface = IncompleteNetworkInterface::new(
             Uuid::new_v4(),
-            new_instance.id(),
-            vpc_id,
-            subnet.clone(),
+            instance.id(),
+            context.net1.vpc_id,
+            context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
-                name: "interface-b".parse().unwrap(),
+                name: "interface-c".parse().unwrap(),
                 description: String::from("description"),
             },
             None,
         )
         .unwrap();
-        let inserted_interface = db_datastore
-            .instance_create_network_interface_raw(&opctx, interface.clone())
+        let inserted_interface = context
+            .db_datastore
+            .instance_create_network_interface_raw(&context.opctx, interface)
             .await
-            .expect("Failed to insert interface with known-good IP address");
-        assert_interfaces_eq(&interface, &inserted_interface);
-        assert_eq!(
-            inserted_interface.ip.ip(),
-            expected_address,
-            "Failed to automatically assign the next available IP address"
-        );
+            .expect("Failed to insert interface");
 
         // Inserting an interface with the same IP should fail, even if all
         // other parameters are valid.
-        let new_instance = create_stopped_instance(&db_datastore).await;
         let interface = IncompleteNetworkInterface::new(
             Uuid::new_v4(),
             new_instance.id(),
-            vpc_id,
-            subnet.clone(),
+            context.net1.vpc_id,
+            context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-c".parse().unwrap(),
                 description: String::from("description"),
             },
-            Some(requested_ip),
+            Some(inserted_interface.ip.ip()),
         )
         .unwrap();
-        let result = db_datastore
-            .instance_create_network_interface_raw(&opctx, interface)
+        let result = context
+            .db_datastore
+            .instance_create_network_interface_raw(&context.opctx, interface)
             .await;
         assert!(
             matches!(result, Err(InsertError::IpAddressNotAvailable(_))),
             "Requesting an interface with an existing IP should fail"
         );
+        context.success().await;
+    }
 
-        // Inserting an interface with a new IP but the same name should
-        // generate an invalid request error.
+    #[tokio::test]
+    async fn test_insert_with_duplicate_name_fails() {
+        let context =
+            TestContext::new("test_insert_with_duplicate_name_fails").await;
+        let instance =
+            context.create_instance(external::InstanceState::Stopped).await;
         let interface = IncompleteNetworkInterface::new(
             Uuid::new_v4(),
-            instance_id,
-            vpc_id,
-            other_valid_subnet.clone(),
+            instance.id(),
+            context.net1.vpc_id,
+            context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
-                name: "interface-a".parse().unwrap(),
+                name: "interface-c".parse().unwrap(),
                 description: String::from("description"),
             },
             None,
         )
         .unwrap();
-        let result = db_datastore
-            .instance_create_network_interface_raw(&opctx, interface)
+        let _ = context
+            .db_datastore
+            .instance_create_network_interface_raw(
+                &context.opctx,
+                interface.clone(),
+            )
+            .await
+            .expect("Failed to insert interface");
+        let interface = IncompleteNetworkInterface::new(
+            Uuid::new_v4(),
+            instance.id(),
+            context.net1.vpc_id,
+            context.net1.subnets[1].clone(),
+            IdentityMetadataCreateParams {
+                name: "interface-c".parse().unwrap(),
+                description: String::from("description"),
+            },
+            None,
+        )
+        .unwrap();
+        let result = context
+            .db_datastore
+            .instance_create_network_interface_raw(&context.opctx, interface)
             .await;
         assert!(
             matches!(
@@ -1983,90 +2107,37 @@ mod tests {
             ),
             "Requesting an interface with the same name on the same instance should fail"
         );
+        context.success().await;
+    }
 
-        // Inserting an interface in the same VPC Subnet should fail.
+    #[tokio::test]
+    async fn test_insert_same_vpc_subnet_fails() {
+        let context =
+            TestContext::new("test_insert_same_vpc_subnet_fails").await;
+        let instance =
+            context.create_instance(external::InstanceState::Stopped).await;
         let interface = IncompleteNetworkInterface::new(
             Uuid::new_v4(),
-            instance_id,
-            vpc_id,
-            subnet.clone(),
+            instance.id(),
+            context.net1.vpc_id,
+            context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
-                name: "interface-b".parse().unwrap(),
+                name: "interface-c".parse().unwrap(),
                 description: String::from("description"),
             },
             None,
         )
         .unwrap();
-        let result = db_datastore
-            .instance_create_network_interface_raw(&opctx, interface)
-            .await;
-        assert!(
-            matches!(result, Err(InsertError::NonUniqueVpcSubnets)),
-            "Each interface for an instance must be in distinct VPC Subnets"
-        );
-
-        // Inserting an interface that is attached to the same instance, but in a different VPC,
-        // should fail regardless of whether the IP is explicitly requested or allocated.
-        for addr in [Some(expected_address), None] {
-            let interface = IncompleteNetworkInterface::new(
-                Uuid::new_v4(),
-                instance_id,
-                other_vpc_id,
-                other_subnet.clone(),
-                IdentityMetadataCreateParams {
-                    name: "interface-a".parse().unwrap(),
-                    description: String::from("description"),
-                },
-                addr,
-            )
-            .unwrap();
-            let result = db_datastore
-                .instance_create_network_interface_raw(&opctx, interface)
-                .await;
-            assert!(
-                matches!(result, Err(InsertError::InstanceSpansMultipleVpcs(_))),
-                "Attaching an interface to an instance which already has one in a different VPC should fail"
-            );
-        }
-
-        // At this point, we should have allocated 2 addresses in this VPC
-        // Subnet. That has a subnet of 172.30.0.0/28, so 16 total addresses are
-        // available, but there are 6 reserved. Assert that we fail after
-        // allocating 16 - 6 - 2 = 8 more interfaces, with an address exhaustion error.
-        //
-        // Note that we do this on _different_ instances, to avoid hitting the
-        // per-instance limit of 8 NICs.
-        for i in 0..8 {
-            let new_instance = create_stopped_instance(&db_datastore).await;
-            let interface = IncompleteNetworkInterface::new(
-                Uuid::new_v4(),
-                new_instance.id(),
-                vpc_id,
-                subnet.clone(),
-                IdentityMetadataCreateParams {
-                    name: format!("interface-{}", i).try_into().unwrap(),
-                    description: String::from("description"),
-                },
-                None,
-            )
-            .unwrap();
-            let result = db_datastore
-                .instance_create_network_interface_raw(&opctx, interface)
-                .await;
-            assert!(
-                result.is_ok(),
-                "We should be able to allocate 8 more interfaces successfully",
-            );
-        }
-
-        // Now create one more interface in that subnet, again on a new
-        // instance.
-        let new_instance = create_stopped_instance(&db_datastore).await;
+        let _ = context
+            .db_datastore
+            .instance_create_network_interface_raw(&context.opctx, interface)
+            .await
+            .expect("Failed to insert interface");
         let interface = IncompleteNetworkInterface::new(
             Uuid::new_v4(),
-            new_instance.id(),
-            vpc_id,
-            subnet.clone(),
+            instance.id(),
+            context.net1.vpc_id,
+            context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-d".parse().unwrap(),
                 description: String::from("description"),
@@ -2074,68 +2145,159 @@ mod tests {
             None,
         )
         .unwrap();
-        let result = db_datastore
-            .instance_create_network_interface_raw(&opctx, interface)
+        let result = context
+            .db_datastore
+            .instance_create_network_interface_raw(&context.opctx, interface)
             .await;
         assert!(
-            matches!(result, Err(InsertError::NoAvailableIpAddresses)),
-            "Address exhaustion should be detected and handled"
+            matches!(result, Err(InsertError::NonUniqueVpcSubnets)),
+            "Each interface for an instance must be in distinct VPC Subnets"
         );
+        context.success().await;
+    }
 
-        // We should _not_ fail to allocate two interfaces with the same name if
-        // they're in the same VPC and VPC Subnet, but on different instances.
-        for _ in 0..2 {
-            let new_instance = create_stopped_instance(&db_datastore).await;
-            let interface = IncompleteNetworkInterface::new(
-                Uuid::new_v4(),
-                new_instance.id(),
-                other_vpc_id,
-                other_subnet.clone(),
-                IdentityMetadataCreateParams {
-                    name: "interface-e".parse().unwrap(), // Same name
-                    description: String::from("description"),
-                },
-                None,
-            )
-            .unwrap();
-            let result = db_datastore
-                .instance_create_network_interface_raw(&opctx, interface)
-                .await;
-            assert!(
-                result.is_ok(),
-                concat!(
-                    "Should be able to allocate multiple interfaces with the same name ",
-                    "as long as they're attached to different instances",
-                ),
-            );
-        }
-
-        // We also should be able to insert multiple interfaces on the same
-        // instance, as long as the VPC is the same and the VPC Subnets are
-        // _different_.
+    #[tokio::test]
+    async fn test_insert_multiple_vpcs_fails() {
+        let context = TestContext::new("test_insert_multiple_vpcs_fails").await;
+        let instance =
+            context.create_instance(external::InstanceState::Stopped).await;
         let interface = IncompleteNetworkInterface::new(
             Uuid::new_v4(),
-            instance_id,
-            vpc_id,
-            other_subnet.clone(),
+            instance.id(),
+            context.net1.vpc_id,
+            context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
-                name: "interface-f".parse().unwrap(), // Same name
+                name: "interface-c".parse().unwrap(),
                 description: String::from("description"),
             },
             None,
         )
         .unwrap();
-        let result = db_datastore
-            .instance_create_network_interface_raw(&opctx, interface)
+        let _ = context
+            .db_datastore
+            .instance_create_network_interface_raw(&context.opctx, interface)
+            .await
+            .expect("Failed to insert interface");
+        let expected_address = "172.30.0.5".parse().unwrap();
+        for addr in [Some(expected_address), None] {
+            let interface = IncompleteNetworkInterface::new(
+                Uuid::new_v4(),
+                instance.id(),
+                context.net2.vpc_id,
+                context.net2.subnets[0].clone(),
+                IdentityMetadataCreateParams {
+                    name: "interface-a".parse().unwrap(),
+                    description: String::from("description"),
+                },
+                addr,
+            )
+            .unwrap();
+            let result = context
+                .db_datastore
+                .instance_create_network_interface_raw(
+                    &context.opctx,
+                    interface,
+                )
+                .await;
+            assert!(
+                matches!(result, Err(InsertError::InstanceSpansMultipleVpcs(_))),
+                "Attaching an interface to an instance which already has one in a different VPC should fail"
+            );
+        }
+        context.success().await;
+    }
+
+    // Ensure that we can allocate exactly many interfaces as there are IPs in
+    // the VPC Subnet, and no more. We do this on different instances to avoid
+    // hitting the per-instance limit of NICs.
+    #[tokio::test]
+    async fn test_detect_ip_exhaustion() {
+        let context = TestContext::new("test_detect_ip_exhaustion").await;
+        let n_interfaces = context.net1.available_ipv4_addresses()[0];
+        for _ in 0..n_interfaces {
+            let instance =
+                context.create_instance(external::InstanceState::Stopped).await;
+            let interface = IncompleteNetworkInterface::new(
+                Uuid::new_v4(),
+                instance.id(),
+                context.net1.vpc_id,
+                context.net1.subnets[0].clone(),
+                IdentityMetadataCreateParams {
+                    name: "interface-c".parse().unwrap(),
+                    description: String::from("description"),
+                },
+                None,
+            )
+            .unwrap();
+            let _ = context
+                .db_datastore
+                .instance_create_network_interface_raw(
+                    &context.opctx,
+                    interface,
+                )
+                .await
+                .expect("Failed to insert interface");
+        }
+
+        // Next one should fail
+        let instance = create_stopped_instance(&context.db_datastore).await;
+        let interface = IncompleteNetworkInterface::new(
+            Uuid::new_v4(),
+            instance.id(),
+            context.net1.vpc_id,
+            context.net1.subnets[0].clone(),
+            IdentityMetadataCreateParams {
+                name: "interface-d".parse().unwrap(),
+                description: String::from("description"),
+            },
+            None,
+        )
+        .unwrap();
+        let result = context
+            .db_datastore
+            .instance_create_network_interface_raw(&context.opctx, interface)
             .await;
         assert!(
-            result.is_ok(),
-            "Should be able to allocate multiple interfaces on the same \
-            instance, as long as they're in different VPC Subnets",
+            matches!(result, Err(InsertError::NoAvailableIpAddresses)),
+            "Address exhaustion should be detected and handled"
         );
+    }
 
-        db.cleanup().await.unwrap();
-        logctx.cleanup_successful();
+    // Ensure that we can insert more than one interface for an instance,
+    // provided they're in different VPC Subnets
+    #[tokio::test]
+    async fn test_insert_multiple_vpc_subnets_succeeds() {
+        let context =
+            TestContext::new("test_insert_multiple_vpc_subnets_succeeds").await;
+        let instance =
+            context.create_instance(external::InstanceState::Stopped).await;
+        for (i, subnet) in context.net1.subnets.iter().enumerate() {
+            let interface = IncompleteNetworkInterface::new(
+                Uuid::new_v4(),
+                instance.id(),
+                context.net1.vpc_id,
+                subnet.clone(),
+                IdentityMetadataCreateParams {
+                    name: format!("if{}", i).parse().unwrap(),
+                    description: String::from("description"),
+                },
+                None,
+            )
+            .unwrap();
+            let result = context
+                .db_datastore
+                .instance_create_network_interface_raw(
+                    &context.opctx,
+                    interface,
+                )
+                .await;
+            assert!(
+                result.is_ok(),
+                "Should be able to allocate multiple interfaces on the same \
+                instance, as long as they're in different VPC Subnets",
+            );
+        }
+        context.success().await;
     }
 
     // Test equality of a complete/inserted interface, for parts that are always known.
@@ -2165,41 +2327,17 @@ mod tests {
     // sagas. In that case, we construct the UUIDs of each interface in one
     // action, and then in the next, create and insert each interface.
     #[tokio::test]
-    async fn test_insert_network_interface_with_identical_primary_key() {
-        // Setup the test database
-        let logctx = dev::test_setup_log(
-            "test_insert_network_interface_with_identical_primary_key",
-        );
-        let log = logctx.log.new(o!());
-        let mut db = test_setup_database(&log).await;
-        let cfg = crate::db::Config { url: db.pg_config().clone() };
-        let pool = Arc::new(crate::db::Pool::new(&cfg));
-        let db_datastore =
-            Arc::new(crate::db::DataStore::new(Arc::clone(&pool)));
-        let opctx = OpContext::for_tests(log.new(o!()), db_datastore.clone());
-        let ipv4_block = Ipv4Net("172.30.0.0/28".parse().unwrap());
-        let ipv6_block = Ipv6Net("fd12:3456:7890::/64".parse().unwrap());
-        let subnet_name = "subnet-a".to_string().try_into().unwrap();
-        let description = "some description".to_string();
-        let vpc_id = "d402369d-c9ec-c5ad-9138-9fbee732d53e".parse().unwrap();
-        let subnet_id = "093ad2db-769b-e3c2-bc1c-b46e84ce5532".parse().unwrap();
-        let subnet = VpcSubnet::new(
-            subnet_id,
-            vpc_id,
-            IdentityMetadataCreateParams {
-                name: subnet_name,
-                description: description.to_string(),
-            },
-            ipv4_block,
-            ipv6_block,
-        );
-        let instance = create_stopped_instance(&db_datastore).await;
+    async fn test_insert_with_identical_primary_key() {
+        let context =
+            TestContext::new("test_insert_with_identical_primary_key").await;
+        let instance =
+            context.create_instance(external::InstanceState::Stopped).await;
         let requested_ip = "172.30.0.5".parse().unwrap();
         let interface = IncompleteNetworkInterface::new(
             Uuid::new_v4(),
             instance.id(),
-            vpc_id,
-            subnet,
+            context.net1.vpc_id,
+            context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-a".parse().unwrap(),
                 description: String::from("description"),
@@ -2207,14 +2345,22 @@ mod tests {
             Some(requested_ip),
         )
         .unwrap();
-        let inserted_interface = db_datastore
-            .instance_create_network_interface_raw(&opctx, interface.clone())
+        let inserted_interface = context
+            .db_datastore
+            .instance_create_network_interface_raw(
+                &context.opctx,
+                interface.clone(),
+            )
             .await
             .expect("Failed to insert interface with known-good IP address");
 
         // Attempt to insert the exact same record again.
-        let result = db_datastore
-            .instance_create_network_interface_raw(&opctx, interface.clone())
+        let result = context
+            .db_datastore
+            .instance_create_network_interface_raw(
+                &context.opctx,
+                interface.clone(),
+            )
             .await;
         if let Err(InsertError::DuplicatePrimaryKey(key)) = result {
             assert_eq!(key, inserted_interface.identity.id);
@@ -2225,32 +2371,19 @@ mod tests {
                 result,
             );
         }
-
-        db.cleanup().await.unwrap();
-        logctx.cleanup_successful();
+        context.success().await;
     }
 
     // Test that we fail to insert an interface if there are no available slots
     // on the instance.
     #[tokio::test]
     async fn test_limit_number_of_interfaces_per_instance_query() {
-        // Setup the test database
-        let logctx = dev::test_setup_log(
+        let context = TestContext::new(
             "test_limit_number_of_interfaces_per_instance_query",
-        );
-        let log = logctx.log.new(o!());
-        let mut db = test_setup_database(&log).await;
-        let cfg = crate::db::Config { url: db.pg_config().clone() };
-        let pool = Arc::new(crate::db::Pool::new(&cfg));
-        let db_datastore =
-            Arc::new(crate::db::DataStore::new(Arc::clone(&pool)));
-        let opctx = OpContext::for_tests(log.new(o!()), db_datastore.clone());
-        let ipv4_block = Ipv4Net("172.30.0.0/26".parse().unwrap());
-        let ipv6_block = Ipv6Net("fd12:3456:7890::/64".parse().unwrap());
-        let subnet_name = Name::try_from("subnet-a".to_string()).unwrap();
-        let description = "some description".to_string();
-        let vpc_id = "d402369d-c9ec-c5ad-9138-9fbee732d53e".parse().unwrap();
-        let instance = create_stopped_instance(&db_datastore).await;
+        )
+        .await;
+        let instance =
+            context.create_instance(external::InstanceState::Stopped).await;
         for slot in 0..MAX_NICS_PER_INSTANCE {
             // Each NIC must be in a different VPC Subnet.
             //
@@ -2259,18 +2392,20 @@ mod tests {
             // violate the name-uniqueness and IP subnet-overlap checks.
             let subnet = VpcSubnet::new(
                 Uuid::new_v4(),
-                vpc_id,
+                context.net1.vpc_id,
                 IdentityMetadataCreateParams {
-                    name: subnet_name.clone(),
-                    description: description.to_string(),
+                    name: context.net1.subnets[0].name().clone().0,
+                    description: context.net1.subnets[0]
+                        .description()
+                        .to_string(),
                 },
-                ipv4_block,
-                ipv6_block,
+                *context.net1.subnets[0].ipv4_block,
+                *context.net1.subnets[0].ipv6_block,
             );
             let interface = IncompleteNetworkInterface::new(
                 Uuid::new_v4(),
                 instance.id(),
-                vpc_id,
+                context.net1.vpc_id,
                 subnet.clone(),
                 IdentityMetadataCreateParams {
                     name: format!("interface-{}", slot).parse().unwrap(),
@@ -2279,9 +2414,10 @@ mod tests {
                 None,
             )
             .unwrap();
-            let inserted_interface = db_datastore
+            let inserted_interface = context
+                .db_datastore
                 .instance_create_network_interface_raw(
-                    &opctx,
+                    &context.opctx,
                     interface.clone(),
                 )
                 .await
@@ -2305,18 +2441,18 @@ mod tests {
         // The next one should fail
         let subnet = VpcSubnet::new(
             Uuid::new_v4(),
-            vpc_id,
+            context.net1.vpc_id,
             IdentityMetadataCreateParams {
-                name: subnet_name,
-                description: description.to_string(),
+                name: context.net1.subnets[0].name().clone().0,
+                description: context.net1.subnets[0].description().to_string(),
             },
-            ipv4_block,
-            ipv6_block,
+            *context.net1.subnets[0].ipv4_block,
+            *context.net1.subnets[0].ipv6_block,
         );
         let interface = IncompleteNetworkInterface::new(
             Uuid::new_v4(),
             instance.id(),
-            vpc_id,
+            context.net1.vpc_id,
             subnet,
             IdentityMetadataCreateParams {
                 name: "interface-8".parse().unwrap(),
@@ -2325,14 +2461,17 @@ mod tests {
             None,
         )
         .unwrap();
-        let result = db_datastore
-            .instance_create_network_interface_raw(&opctx, interface.clone())
+        let result = context
+            .db_datastore
+            .instance_create_network_interface_raw(
+                &context.opctx,
+                interface.clone(),
+            )
             .await
             .expect_err("Should not be able to insert more than 8 interfaces");
         assert!(matches!(result, InsertError::NoSlotsAvailable,));
 
-        db.cleanup().await.unwrap();
-        logctx.cleanup_successful();
+        context.success().await;
     }
 
     #[test]
