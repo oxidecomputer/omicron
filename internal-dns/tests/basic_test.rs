@@ -288,7 +288,7 @@ struct TestContext {
 
 impl TestContext {
     async fn cleanup(self) {
-        self.dns_server.close();
+        drop(self.dns_server);
         self.dropshot_server.close().await.expect("Failed to clean up server");
         self.tmp.close().expect("Failed to clean up tmp directory");
     }
@@ -334,7 +334,7 @@ async fn init_client_server(
 
     // launch a dropshot server
     let dropshot_server =
-        internal_dns::start_server(config, log.clone(), db).await?;
+        internal_dns::start_dropshot_server(config, log.clone(), db).await?;
 
     // wait for server to start
     tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
