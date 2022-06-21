@@ -18,8 +18,11 @@ use authn::external::session_cookie::HttpAuthnSessionCookie;
 use authn::external::spoof::HttpAuthnSpoof;
 use authn::external::HttpAuthnScheme;
 use chrono::{DateTime, Duration, Utc};
+use internal_dns_client::names::{ServiceName, SRV};
+use omicron_common::address::{Ipv6Subnet, AZ_PREFIX, COCKROACH_PORT};
 use omicron_common::api::external::Error;
 use omicron_common::nexus_config;
+use omicron_common::postgres_config::PostgresConfigWithUrl;
 use oximeter::types::ProducerRegistry;
 use oximeter_instruments::http::{HttpService, LatencyTracker};
 use slog::Logger;
@@ -27,6 +30,7 @@ use std::collections::BTreeMap;
 use std::env;
 use std::fmt::Debug;
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
 use std::time::SystemTime;
@@ -68,7 +72,7 @@ pub struct ConsoleConfig {
 impl ServerContext {
     /// Create a new context with the given rack id and log.  This creates the
     /// underlying nexus as well.
-    pub fn new(
+    pub async fn new(
         rack_id: Uuid,
         log: Logger,
         config: &config::Config,
@@ -136,23 +140,44 @@ impl ServerContext {
         // like console index.html. leaving that out for now so we don't break
         // nexus in dev for everyone
 
+        // Set up DNS Client
+        let az_subnet =
+            Ipv6Subnet::<AZ_PREFIX>::new(config.deployment.subnet.net().ip());
+        info!(log, "Setting up resolver on subnet: {:?}", az_subnet);
+        let resolver =
+            internal_dns_client::multiclient::Resolver::new(&az_subnet)
+                .map_err(|e| format!("Failed to create DNS resolver: {}", e))?;
+
         // Set up DB pool
         let url = match &config.deployment.database {
             nexus_config::Database::FromUrl { url } => url.clone(),
             nexus_config::Database::FromDns => {
-                todo!("Not yet implemented");
+                info!(log, "Accessing DB url from DNS");
+                let address = resolver
+                    .lookup_ipv6(SRV::Service(ServiceName::Cockroach))
+                    .await
+                    .map_err(|e| format!("Failed to lookup IP: {}", e))?;
+                info!(log, "DB address: {}", address);
+                PostgresConfigWithUrl::from_str(&format!(
+                    "postgresql://root@[{}]:{}/omicron?sslmode=disable",
+                    address, COCKROACH_PORT
+                ))
+                .map_err(|e| format!("Cannot parse Postgres URL: {}", e))?
             }
         };
         let pool = db::Pool::new(&db::Config { url });
+        let nexus = Nexus::new_with_id(
+            rack_id,
+            log.new(o!("component" => "nexus")),
+            resolver,
+            pool,
+            config,
+            Arc::clone(&authz),
+        )
+        .await;
 
         Ok(Arc::new(ServerContext {
-            nexus: Nexus::new_with_id(
-                rack_id,
-                log.new(o!("component" => "nexus")),
-                pool,
-                config,
-                Arc::clone(&authz),
-            ),
+            nexus,
             log,
             external_authn,
             internal_authn,

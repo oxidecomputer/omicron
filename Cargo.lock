@@ -3056,6 +3056,7 @@ dependencies = [
  "http",
  "httptest",
  "hyper",
+ "internal-dns-client",
  "ipnetwork",
  "lazy_static",
  "libc",
