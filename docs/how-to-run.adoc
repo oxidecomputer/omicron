@@ -109,27 +109,8 @@ When we deploy, we're effectively creating a number of different zones
 for all the components that make up Omicron (Nexus, Clickhouse, Crucible, etc).
 Since all these services run in different zones they cannot communicate with
 each other (and Sled Agent in the global zone) via `localhost`. In practice,
-we'll assign addresses as per RFD 63 as well as incorporating DNS based
+we assign addresses as per RFD 63 as well as incorporating DNS based
 service discovery.
-
-For the purposes of local development today, we specify some hardcoded IPv6
-unique local addresses in the subnet of the first Sled Agent: `fd00:1122:3344:1::/64`:
-
-[options="header"]
-|===================================================================================================
-| Service                    | Endpoint
-| Sled Agent: Bootstrap      | Derived from MAC address of physical data link.
-| Sled Agent: Dropshot API   | `[fd00:1122:3344:0101::1]:12345`
-| Cockroach DB               | `[fd00:1122:3344:0101::2]:32221`
-| Nexus: External API        | `[fd00:1122:3344:0101::3]:12220`
-| Nexus: Internal API        | `[fd00:1122:3344:0101::3]:12221`
-| Oximeter                   | `[fd00:1122:3344:0101::4]:12223`
-| Clickhouse                 | `[fd00:1122:3344:0101::5]:8123`
-| Crucible Downstairs 1      | `[fd00:1122:3344:0101::6]:32345`
-| Crucible Downstairs 2      | `[fd00:1122:3344:0101::7]:32345`
-| Crucible Downstairs 3      | `[fd00:1122:3344:0101::8]:32345`
-| Internal DNS Service       | `[fd00:1122:3344:0001::1]:5353`
-|===================================================================================================
 
 Note that Sled Agent runs in the global zone and is the one responsible for bringing up all the other
 other services and allocating them with vNICs and IPv6 addresses.
