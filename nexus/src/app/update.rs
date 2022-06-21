@@ -24,11 +24,15 @@ use tokio::io::AsyncWriteExt;
 static BASE_ARTIFACT_DIR: &str = "/var/tmp/oxide_artifacts";
 
 impl super::Nexus {
-    fn tuf_base_url(&self) -> Option<String> {
-        self.updates_config.as_ref().map(|c| {
-            let rack = self.as_rack();
+    async fn tuf_base_url(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<Option<String>, Error> {
+        let rack = self.rack_lookup(opctx, &self.rack_id).await?;
+
+        Ok(self.updates_config.as_ref().map(|c| {
             rack.tuf_base_url.unwrap_or_else(|| c.default_base_url.clone())
-        })
+        }))
     }
 
     pub async fn updates_refresh_metadata(
@@ -42,10 +46,11 @@ impl super::Nexus {
                 message: "updates system not configured".into(),
             }
         })?;
-        let base_url =
-            self.tuf_base_url().ok_or_else(|| Error::InvalidRequest {
+        let base_url = self.tuf_base_url(opctx).await?.ok_or_else(|| {
+            Error::InvalidRequest {
                 message: "updates system not configured".into(),
-            })?;
+            }
+        })?;
         let trusted_root = tokio::fs::read(&updates_config.trusted_root)
             .await
             .map_err(|e| Error::InternalError {
@@ -129,8 +134,10 @@ impl super::Nexus {
         artifact: UpdateArtifact,
     ) -> Result<Vec<u8>, Error> {
         let mut base_url =
-            self.tuf_base_url().ok_or_else(|| Error::InvalidRequest {
-                message: "updates system not configured".into(),
+            self.tuf_base_url(opctx).await?.ok_or_else(|| {
+                Error::InvalidRequest {
+                    message: "updates system not configured".into(),
+                }
             })?;
         if !base_url.ends_with('/') {
             base_url.push('/');

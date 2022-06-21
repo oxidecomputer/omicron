@@ -10,6 +10,7 @@ use crate::config;
 use crate::context::OpContext;
 use crate::db;
 use crate::populate::populate_start;
+use crate::populate::PopulateArgs;
 use crate::populate::PopulateStatus;
 use crate::saga_interface::SagaContext;
 use anyhow::anyhow;
@@ -54,14 +55,11 @@ pub struct Nexus {
     /// uuid for this nexus instance.
     id: Uuid,
 
-    /// uuid for this rack (TODO should also be in persistent storage)
+    /// uuid for this rack
     rack_id: Uuid,
 
     /// general server log
     log: Logger,
-
-    /// cached rack identity metadata
-    api_rack_identity: db::model::RackIdentity,
 
     /// persistent storage for resources in the control plane
     db_datastore: Arc<db::DataStore>,
@@ -139,14 +137,18 @@ impl Nexus {
             authn::Context::internal_db_init(),
             Arc::clone(&db_datastore),
         );
-        let populate_status =
-            populate_start(populate_ctx, Arc::clone(&db_datastore));
+
+        let populate_args = PopulateArgs::new(rack_id);
+        let populate_status = populate_start(
+            populate_ctx,
+            Arc::clone(&db_datastore),
+            populate_args,
+        );
 
         let nexus = Nexus {
             id: config.deployment.id,
             rack_id,
             log: log.new(o!()),
-            api_rack_identity: db::model::RackIdentity::new(rack_id),
             db_datastore: Arc::clone(&db_datastore),
             authz: Arc::clone(&authz),
             sec_client: Arc::clone(&sec_client),

@@ -147,6 +147,20 @@ impl DataStore {
         Ok(self.pool.pool())
     }
 
+    pub async fn rack_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<Rack> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        use db::schema::rack::dsl;
+        paginated(dsl::rack, dsl::id, pagparams)
+            .select(Rack::as_select())
+            .load_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
     /// Stores a new rack in the database.
     ///
     /// This function is a no-op if the rack already exists.
