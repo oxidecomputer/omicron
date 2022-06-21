@@ -1688,7 +1688,6 @@ mod tests {
     use omicron_common::api::external::InstanceState;
     use omicron_common::api::external::Ipv4Net;
     use omicron_common::api::external::Ipv6Net;
-    use omicron_common::api::external::Name;
     use omicron_common::api::internal::nexus::InstanceRuntimeState;
     use omicron_test_utils::dev;
     use omicron_test_utils::dev::db::CockroachInstance;
