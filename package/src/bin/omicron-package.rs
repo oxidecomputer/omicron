@@ -330,12 +330,16 @@ fn do_install(
     uninstall_all_packages(config);
     uninstall_all_omicron_zones()?;
 
-    // Extract and install the bootstrap service, which itself extracts and
-    // installs other services.
-    if let Some(package) = config.packages.get("omicron-sled-agent") {
-        let tar_path =
-            install_dir.join(format!("{}.tar", package.service_name));
-        let service_path = install_dir.join(&package.service_name);
+    // Extract all global zone services.
+    let global_zone_service_names = config
+        .packages
+        .values()
+        .chain(config.external_packages.values().map(|p| &p.package))
+        .filter_map(|p| if p.zone { None } else { Some(&p.service_name) });
+
+    for service_name in global_zone_service_names {
+        let tar_path = install_dir.join(format!("{}.tar", service_name));
+        let service_path = install_dir.join(service_name);
         println!(
             "Unpacking {} to {}",
             tar_path.to_string_lossy(),
@@ -347,7 +351,11 @@ fn do_install(
         std::fs::create_dir_all(&service_path)?;
         let mut archive = tar::Archive::new(tar_file);
         archive.unpack(&service_path)?;
+    }
 
+    // Install the bootstrap service, which itself extracts and
+    // installs other services.
+    if let Some(package) = config.packages.get("omicron-sled-agent") {
         let manifest_path = install_dir
             .join(&package.service_name)
             .join("pkg")
