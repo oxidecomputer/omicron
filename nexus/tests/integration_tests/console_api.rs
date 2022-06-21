@@ -196,7 +196,7 @@ async fn test_assets(cptestctx: &ControlPlaneTestContext) {
 #[tokio::test]
 async fn test_absolute_static_dir() {
     let mut config = load_test_config();
-    config.console.static_dir = current_dir().unwrap().join("tests/static");
+    config.pkg.console.static_dir = current_dir().unwrap().join("tests/static");
     let cptestctx =
         test_setup_with_config("test_absolute_static_dir", &mut config).await;
     let testctx = &cptestctx.external_client;

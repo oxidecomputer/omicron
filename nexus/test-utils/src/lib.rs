@@ -11,6 +11,7 @@ use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
 use omicron_common::api::external::IdentityMetadata;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
+use omicron_common::nexus_config;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
 use oximeter_collector::Oximeter;
@@ -75,7 +76,7 @@ pub fn load_test_config() -> omicron_nexus::Config {
     let config_file_path = Path::new("tests/config.test.toml");
     let mut config = omicron_nexus::Config::from_file(config_file_path)
         .expect("failed to load config.test.toml");
-    config.id = Uuid::new_v4();
+    config.deployment.id = Uuid::new_v4();
     config
 }
 
@@ -88,7 +89,7 @@ pub async fn test_setup_with_config(
     test_name: &str,
     config: &mut omicron_nexus::Config,
 ) -> ControlPlaneTestContext {
-    let logctx = LogContext::new(test_name, &config.log);
+    let logctx = LogContext::new(test_name, &config.pkg.log);
     let rack_id = Uuid::parse_str(RACK_UUID).unwrap();
     let log = &logctx.log;
 
@@ -99,8 +100,9 @@ pub async fn test_setup_with_config(
     let clickhouse = dev::clickhouse::ClickHouseInstance::new(0).await.unwrap();
 
     // Store actual address/port information for the databases after they start.
-    config.database.url = database.pg_config().clone();
-    config.timeseries_db.address.set_port(clickhouse.port());
+    config.deployment.database =
+        nexus_config::Database::FromUrl { url: database.pg_config().clone() };
+    config.pkg.timeseries_db.address.set_port(clickhouse.port());
 
     let server = omicron_nexus::Server::start(&config, rack_id, &logctx.log)
         .await

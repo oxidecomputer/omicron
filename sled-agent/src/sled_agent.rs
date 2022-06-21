@@ -17,7 +17,7 @@ use crate::params::{
     InstanceRuntimeStateRequested, InstanceSerialConsoleData,
     ServiceEnsureBody,
 };
-use crate::services::ServiceManager;
+use crate::services::{self, ServiceManager};
 use crate::storage_manager::StorageManager;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use omicron_common::api::{
@@ -265,7 +265,7 @@ impl SledAgent {
             etherstub.clone(),
             etherstub_vnic.clone(),
             *sled_address.ip(),
-            None,
+            services::Config::default(),
         )
         .await?;
 

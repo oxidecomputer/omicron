@@ -19,6 +19,7 @@ use authn::external::spoof::HttpAuthnSpoof;
 use authn::external::HttpAuthnScheme;
 use chrono::{DateTime, Duration, Utc};
 use omicron_common::api::external::Error;
+use omicron_common::nexus_config;
 use oximeter::types::ProducerRegistry;
 use oximeter_instruments::http::{HttpService, LatencyTracker};
 use slog::Logger;
@@ -70,10 +71,10 @@ impl ServerContext {
     pub fn new(
         rack_id: Uuid,
         log: Logger,
-        pool: db::Pool,
         config: &config::Config,
     ) -> Result<Arc<ServerContext>, String> {
         let nexus_schemes = config
+            .pkg
             .authn
             .schemes_external
             .iter()
@@ -90,7 +91,10 @@ impl ServerContext {
         let internal_authn = Arc::new(authn::Context::internal_api());
         let authz = Arc::new(authz::Authz::new(&log));
         let create_tracker = |name: &str| {
-            let target = HttpService { name: name.to_string(), id: config.id };
+            let target = HttpService {
+                name: name.to_string(),
+                id: config.deployment.id,
+            };
             const START_LATENCY_DECADE: i8 = -6;
             const END_LATENCY_DECADE: i8 = 3;
             LatencyTracker::with_latency_decades(
@@ -102,7 +106,7 @@ impl ServerContext {
         };
         let internal_latencies = create_tracker("nexus-internal");
         let external_latencies = create_tracker("nexus-external");
-        let producer_registry = ProducerRegistry::with_id(config.id);
+        let producer_registry = ProducerRegistry::with_id(config.deployment.id);
         producer_registry
             .register_producer(internal_latencies.clone())
             .unwrap();
@@ -113,11 +117,11 @@ impl ServerContext {
         // Support both absolute and relative paths. If configured dir is
         // absolute, use it directly. If not, assume it's relative to the
         // current working directory.
-        let static_dir = if config.console.static_dir.is_absolute() {
-            Some(config.console.static_dir.to_owned())
+        let static_dir = if config.pkg.console.static_dir.is_absolute() {
+            Some(config.pkg.console.static_dir.to_owned())
         } else {
             env::current_dir()
-                .map(|root| root.join(&config.console.static_dir))
+                .map(|root| root.join(&config.pkg.console.static_dir))
                 .ok()
         };
 
@@ -131,6 +135,15 @@ impl ServerContext {
         // TODO: check that asset directory exists, check for particular assets
         // like console index.html. leaving that out for now so we don't break
         // nexus in dev for everyone
+
+        // Set up DB pool
+        let url = match &config.deployment.database {
+            nexus_config::Database::FromUrl { url } => url.clone(),
+            nexus_config::Database::FromDns => {
+                todo!("Not yet implemented");
+            }
+        };
+        let pool = db::Pool::new(&db::Config { url });
 
         Ok(Arc::new(ServerContext {
             nexus: Nexus::new_with_id(
@@ -149,14 +162,14 @@ impl ServerContext {
             producer_registry,
             console_config: ConsoleConfig {
                 session_idle_timeout: Duration::minutes(
-                    config.console.session_idle_timeout_minutes.into(),
+                    config.pkg.console.session_idle_timeout_minutes.into(),
                 ),
                 session_absolute_timeout: Duration::minutes(
-                    config.console.session_absolute_timeout_minutes.into(),
+                    config.pkg.console.session_absolute_timeout_minutes.into(),
                 ),
                 static_dir,
                 cache_control_max_age: Duration::minutes(
-                    config.console.cache_control_max_age_minutes.into(),
+                    config.pkg.console.cache_control_max_age_minutes.into(),
                 ),
             },
         }))

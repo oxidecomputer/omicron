@@ -9,9 +9,7 @@ use omicron_common::api::internal::nexus::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Display, Formatter, Result as FormatResult};
-use std::net::IpAddr;
-use std::net::Ipv6Addr;
-use std::net::{SocketAddr, SocketAddrV6};
+use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use uuid::Uuid;
 
 /// Information required to construct a virtual network interface for a guest
@@ -193,7 +191,7 @@ pub struct InstanceSerialConsoleData {
 pub enum DatasetKind {
     CockroachDb {
         /// The addresses of all nodes within the cluster.
-        all_addresses: Vec<SocketAddr>,
+        all_addresses: Vec<SocketAddrV6>,
     },
     Crucible,
     Clickhouse,
@@ -241,6 +239,8 @@ impl std::fmt::Display for DatasetKind {
 /// instantiated when the dataset is detected.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct DatasetEnsureBody {
+    // The UUID of the dataset, as well as the service using it directly.
+    pub id: Uuid,
     // The name (and UUID) of the Zpool which we are inserting into.
     pub zpool_id: Uuid,
     // The type of the filesystem.
@@ -263,14 +263,52 @@ impl From<DatasetEnsureBody> for sled_agent_client::types::DatasetEnsureBody {
             zpool_id: p.zpool_id,
             dataset_kind: p.dataset_kind.into(),
             address: p.address.to_string(),
+            id: p.id,
         }
     }
 }
 
+/// Describes service-specific parameters.
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ServiceType {
+    Nexus { internal_address: SocketAddrV6, external_address: SocketAddrV6 },
+    InternalDns { server_address: SocketAddrV6, dns_address: SocketAddrV6 },
+    Oximeter,
+}
+
+impl From<ServiceType> for sled_agent_client::types::ServiceType {
+    fn from(s: ServiceType) -> Self {
+        use sled_agent_client::types::ServiceType as AutoSt;
+        use ServiceType as St;
+
+        match s {
+            St::Nexus { internal_address, external_address } => AutoSt::Nexus {
+                internal_address: internal_address.to_string(),
+                external_address: external_address.to_string(),
+            },
+            St::InternalDns { server_address, dns_address } => {
+                AutoSt::InternalDns {
+                    server_address: server_address.to_string(),
+                    dns_address: dns_address.to_string(),
+                }
+            }
+            St::Oximeter => AutoSt::Oximeter,
+        }
+    }
+}
+
+/// Describes a request to create a service. This information
+/// should be sufficient for a Sled Agent to start a zone
+/// containing the requested service.
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]
 pub struct ServiceRequest {
+    // The UUID of the service to be initialized.
+    pub id: Uuid,
     // The name of the service to be created.
     pub name: String,
     // The addresses on which the service should listen for requests.
@@ -284,14 +322,18 @@ pub struct ServiceRequest {
     // is necessary to allow inter-zone traffic routing.
     #[serde(default)]
     pub gz_addresses: Vec<Ipv6Addr>,
+    // Any other service-specific parameters.
+    pub service_type: ServiceType,
 }
 
 impl From<ServiceRequest> for sled_agent_client::types::ServiceRequest {
     fn from(s: ServiceRequest) -> Self {
         Self {
+            id: s.id,
             name: s.name,
             addresses: s.addresses,
             gz_addresses: s.gz_addresses,
+            service_type: s.service_type.into(),
         }
     }
 }

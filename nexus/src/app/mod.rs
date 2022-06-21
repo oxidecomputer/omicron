@@ -112,7 +112,7 @@ impl Nexus {
         authz: Arc<authz::Authz>,
     ) -> Arc<Nexus> {
         let pool = Arc::new(pool);
-        let my_sec_id = db::SecId::from(config.id);
+        let my_sec_id = db::SecId::from(config.deployment.id);
         let db_datastore = Arc::new(db::DataStore::new(Arc::clone(&pool)));
         let sec_store = Arc::new(db::CockroachDbSecStore::new(
             my_sec_id,
@@ -127,7 +127,7 @@ impl Nexus {
             sec_store,
         ));
         let timeseries_client =
-            oximeter_db::Client::new(config.timeseries_db.address, &log);
+            oximeter_db::Client::new(config.pkg.timeseries_db.address, &log);
 
         // TODO-cleanup We may want a first-class subsystem for managing startup
         // background tasks.  It could use a Future for each one, a status enum
@@ -143,7 +143,7 @@ impl Nexus {
             populate_start(populate_ctx, Arc::clone(&db_datastore));
 
         let nexus = Nexus {
-            id: config.id,
+            id: config.deployment.id,
             rack_id,
             log: log.new(o!()),
             api_rack_identity: db::model::RackIdentity::new(rack_id),
@@ -153,8 +153,8 @@ impl Nexus {
             recovery_task: std::sync::Mutex::new(None),
             populate_status,
             timeseries_client,
-            updates_config: config.updates.clone(),
-            tunables: config.tunables.clone(),
+            updates_config: config.pkg.updates.clone(),
+            tunables: config.pkg.tunables.clone(),
             opctx_alloc: OpContext::for_background(
                 log.new(o!("component" => "InstanceAllocator")),
                 Arc::clone(&authz),
