@@ -12,7 +12,10 @@ use super::params::RequestEnvelope;
 use super::trust_quorum::ShareDistribution;
 use super::views::Response;
 use super::views::ResponseEnvelope;
+use crate::bootstrap::maghemite;
 use crate::config::Config as SledConfig;
+use crate::illumos::addrobj::AddrObject;
+use crate::illumos::dladm::VnicSource;
 use crate::sp::AsyncReadWrite;
 use crate::sp::SpHandle;
 use crate::sp::SprocketsRole;
@@ -62,6 +65,23 @@ impl Server {
         } else {
             debug!(log, "registered DTrace probes");
         }
+
+        // Turn on the maghemite routing service.
+        info!(log, "Starting mg-ddm service");
+        let link = sled_config
+            .get_link()
+            .map_err(|err| format!("Failed to find physical link: {err}"))?;
+
+        // TODO-correctness (a) Is "linklocal" always right? (b) Do we need
+        // mg-ddm to listen on multiple addresses?
+        let mg_interface = AddrObject::new(link.name(), "linklocal")
+            .expect("unexpected failure creating AddrObject");
+
+        // TODO-cleanup Should we `tokio::spawn()` this so we can proceed
+        // concurrently with mg-ddm starting up?
+        maghemite::enable_mg_ddm_service(log.clone(), mg_interface)
+            .await
+            .map_err(|err| format!("Failed to start mg-ddm: {err}"))?;
 
         info!(log, "detecting (real or simulated) SP");
         let sp = SpHandle::detect(
