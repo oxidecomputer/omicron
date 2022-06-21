@@ -39,8 +39,8 @@ pub struct Server {
     pub handle: tokio::task::JoinHandle<Result<()>>,
 }
 
-impl Server {
-    pub fn close(self) {
+impl Drop for Server {
+    fn drop(&mut self) {
         self.handle.abort()
     }
 }
