@@ -130,7 +130,12 @@ impl Server {
         // Wait until RSS handoff completes.
         let opctx = apictx.nexus.opctx_for_background();
         apictx.nexus.await_rack_initialization(&opctx).await;
-        apictx.nexus.start_background_tasks().map_err(|e| e.to_string())?;
+
+        // With the exception of integration tests environments,
+        // we expect background tasks to be enabled.
+        if config.pkg.tunables.enable_background_tasks {
+            apictx.nexus.start_background_tasks().map_err(|e| e.to_string())?;
+        }
 
         let http_server_starter_external = dropshot::HttpServerStarter::new(
             &config.deployment.dropshot_external,
