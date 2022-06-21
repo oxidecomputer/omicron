@@ -57,7 +57,7 @@ use crate::db::{
         Instance, InstanceRuntimeState, Name, NetworkInterface, Organization,
         OrganizationUpdate, OximeterInfo, ProducerEndpoint, Project,
         ProjectUpdate, Rack, Region, RoleAssignment, RoleBuiltin, RouterRoute,
-        RouterRouteUpdate, Service, Silo, SiloUser, Sled, SshKey,
+        RouterRouteUpdate, Service, ServiceKind, Silo, SiloUser, Sled, SshKey,
         UpdateAvailableArtifact, UserBuiltin, Volume, VpcFirewallRule,
         VpcRouter, VpcRouterUpdate, VpcSubnet, VpcSubnetUpdate, VpcUpdate,
         Zpool,
@@ -76,6 +76,9 @@ use diesel::query_builder::{QueryFragment, QueryId};
 use diesel::query_dsl::methods::LoadQuery;
 use diesel::upsert::excluded;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
+use omicron_common::address::{
+    Ipv6Subnet, ReservedRackSubnet, DNS_REDUNDANCY, RACK_PREFIX,
+};
 use omicron_common::api;
 use omicron_common::api::external;
 use omicron_common::api::external::DataPageParams;
@@ -92,7 +95,7 @@ use omicron_common::api::external::{
 use omicron_common::bail_unless;
 use sled_agent_client::types as sled_client_types;
 use std::convert::{TryFrom, TryInto};
-use std::net::Ipv6Addr;
+use std::net::{Ipv6Addr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -121,6 +124,15 @@ impl<U, T> RunnableQuery<U> for T where
 {
 }
 
+// Redundancy for the number of datasets to be provisioned.
+#[derive(Clone, Copy, Debug)]
+pub enum DatasetRedundancy {
+    // The dataset should exist on all zpools.
+    OnAll,
+    // The dataset should exist on at least this many zpools.
+    PerRack(u32),
+}
+
 pub struct DataStore {
     pool: Arc<Pool>,
 }
@@ -145,20 +157,6 @@ impl DataStore {
     ) -> Result<&bb8::Pool<ConnectionManager<DbConnection>>, Error> {
         opctx.authorize(authz::Action::Query, &authz::DATABASE).await?;
         Ok(self.pool.pool())
-    }
-
-    pub async fn rack_list(
-        &self,
-        opctx: &OpContext,
-        pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<Rack> {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        use db::schema::rack::dsl;
-        paginated(dsl::rack, dsl::id, pagparams)
-            .select(Rack::as_select())
-            .load_async(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     /// Stores a new rack in the database.
@@ -197,19 +195,29 @@ impl DataStore {
         opctx: &OpContext,
         rack_id: Uuid,
         services: Vec<Service>,
+        datasets: Vec<Dataset>,
     ) -> UpdateResult<Rack> {
         use db::schema::rack::dsl as rack_dsl;
-        use db::schema::service::dsl as service_dsl;
 
         #[derive(Debug)]
         enum RackInitError {
-            ServiceInsert { err: SyncInsertError, sled_id: Uuid, svc_id: Uuid },
+            ServiceInsert {
+                err: SyncInsertError,
+                sled_id: Uuid,
+                svc_id: Uuid,
+            },
+            DatasetInsert {
+                err: SyncInsertError,
+                zpool_id: Uuid,
+                dataset_id: Uuid,
+            },
             RackUpdate(diesel::result::Error),
         }
         type TxnError = TransactionError<RackInitError>;
 
         // NOTE: This operation could likely be optimized with a CTE, but given
         // the low-frequency of calls, this optimization has been deferred.
+        let log = opctx.log.clone();
         self.pool_authorized(opctx)
             .await?
             .transaction(move |conn| {
@@ -222,25 +230,25 @@ impl DataStore {
                         TxnError::CustomError(RackInitError::RackUpdate(e))
                     })?;
                 if rack.initialized {
+                    info!(log, "Early exit: Rack already initialized");
                     return Ok(rack);
                 }
 
-                // Otherwise, insert services and set rack.initialized = true.
+                // Otherwise, insert services and datasets
                 for svc in services {
+                    use db::schema::service::dsl;
                     let sled_id = svc.sled_id;
                     <Sled as DatastoreCollection<Service>>::insert_resource(
                         sled_id,
-                        diesel::insert_into(service_dsl::service)
+                        diesel::insert_into(dsl::service)
                             .values(svc.clone())
-                            .on_conflict(service_dsl::id)
+                            .on_conflict(dsl::id)
                             .do_update()
                             .set((
-                                service_dsl::time_modified.eq(Utc::now()),
-                                service_dsl::sled_id
-                                    .eq(excluded(service_dsl::sled_id)),
-                                service_dsl::ip.eq(excluded(service_dsl::ip)),
-                                service_dsl::kind
-                                    .eq(excluded(service_dsl::kind)),
+                                dsl::time_modified.eq(Utc::now()),
+                                dsl::sled_id.eq(excluded(dsl::sled_id)),
+                                dsl::ip.eq(excluded(dsl::ip)),
+                                dsl::kind.eq(excluded(dsl::kind)),
                             )),
                     )
                     .insert_and_get_result(conn)
@@ -252,7 +260,37 @@ impl DataStore {
                         })
                     })?;
                 }
-                diesel::update(rack_dsl::rack)
+                info!(log, "Inserted services");
+                for dataset in datasets {
+                    use db::schema::dataset::dsl;
+                    let zpool_id = dataset.pool_id;
+                    <Zpool as DatastoreCollection<Dataset>>::insert_resource(
+                        zpool_id,
+                        diesel::insert_into(dsl::dataset)
+                            .values(dataset.clone())
+                            .on_conflict(dsl::id)
+                            .do_update()
+                            .set((
+                                dsl::time_modified.eq(Utc::now()),
+                                dsl::pool_id.eq(excluded(dsl::pool_id)),
+                                dsl::ip.eq(excluded(dsl::ip)),
+                                dsl::port.eq(excluded(dsl::port)),
+                                dsl::kind.eq(excluded(dsl::kind)),
+                            )),
+                    )
+                    .insert_and_get_result(conn)
+                    .map_err(|err| {
+                        TxnError::CustomError(RackInitError::DatasetInsert {
+                            err,
+                            zpool_id,
+                            dataset_id: dataset.id(),
+                        })
+                    })?;
+                }
+                info!(log, "Inserted datasets");
+
+                // Set the rack to "initialized" once the handoff is complete
+                let rack = diesel::update(rack_dsl::rack)
                     .filter(rack_dsl::id.eq(rack_id))
                     .set((
                         rack_dsl::initialized.eq(true),
@@ -262,10 +300,31 @@ impl DataStore {
                     .get_result::<Rack>(conn)
                     .map_err(|e| {
                         TxnError::CustomError(RackInitError::RackUpdate(e))
-                    })
+                    })?;
+                info!(log, "Updated rack (set initialized to true)");
+                Ok(rack)
             })
             .await
             .map_err(|e| match e {
+                TxnError::CustomError(RackInitError::DatasetInsert {
+                    err,
+                    zpool_id,
+                    dataset_id,
+                }) => match err {
+                    SyncInsertError::CollectionNotFound => {
+                        Error::ObjectNotFound {
+                            type_name: ResourceType::Zpool,
+                            lookup_type: LookupType::ById(zpool_id),
+                        }
+                    }
+                    SyncInsertError::DatabaseError(e) => {
+                        public_error_from_diesel_create(
+                            e,
+                            ResourceType::Dataset,
+                            &dataset_id.to_string(),
+                        )
+                    }
+                },
                 TxnError::CustomError(RackInitError::ServiceInsert {
                     err,
                     sled_id,
@@ -296,6 +355,20 @@ impl DataStore {
                     Error::internal_error(&format!("Transaction error: {}", e))
                 }
             })
+    }
+
+    pub async fn rack_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<Rack> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        use db::schema::rack::dsl;
+        paginated(dsl::rack, dsl::id, pagparams)
+            .select(Rack::as_select())
+            .load_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     /// Stores a new sled in the database.
@@ -338,6 +411,375 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
+    fn sled_list_with_limit_sync(
+        conn: &mut DbConnection,
+        limit: u32,
+    ) -> Result<Vec<Sled>, diesel::result::Error> {
+        use db::schema::sled::dsl;
+        dsl::sled
+            .filter(dsl::time_deleted.is_null())
+            .limit(limit as i64)
+            .select(Sled::as_select())
+            .load(conn)
+    }
+
+    pub async fn service_list(
+        &self,
+        opctx: &OpContext,
+        sled_id: Uuid,
+    ) -> Result<Vec<Service>, Error> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        use db::schema::service::dsl;
+        dsl::service
+            .filter(dsl::sled_id.eq(sled_id))
+            .select(Service::as_select())
+            .load_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    fn sled_and_service_list_sync(
+        conn: &mut DbConnection,
+        rack_id: Uuid,
+        kind: ServiceKind,
+    ) -> Result<Vec<(Sled, Option<Service>)>, diesel::result::Error> {
+        use db::schema::service::dsl as svc_dsl;
+        use db::schema::sled::dsl as sled_dsl;
+
+        db::schema::sled::table
+            .filter(sled_dsl::time_deleted.is_null())
+            .filter(sled_dsl::rack_id.eq(rack_id))
+            .left_outer_join(db::schema::service::table.on(
+                svc_dsl::sled_id.eq(sled_dsl::id).and(svc_dsl::kind.eq(kind)),
+            ))
+            .select(<(Sled, Option<Service>)>::as_select())
+            .get_results(conn)
+    }
+
+    pub async fn ensure_rack_service(
+        &self,
+        opctx: &OpContext,
+        rack_id: Uuid,
+        kind: ServiceKind,
+        redundancy: u32,
+    ) -> Result<Vec<Service>, Error> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+        #[derive(Debug)]
+        enum ServiceError {
+            NotEnoughSleds,
+            Other(Error),
+        }
+        type TxnError = TransactionError<ServiceError>;
+
+        self.pool()
+            .transaction(move |conn| {
+                let sleds_and_maybe_svcs =
+                    Self::sled_and_service_list_sync(conn, rack_id, kind)?;
+
+                // Split the set of returned sleds into "those with" and "those
+                // without" the requested service.
+                let (sleds_with_svc, sleds_without_svc): (Vec<_>, Vec<_>) =
+                    sleds_and_maybe_svcs
+                        .into_iter()
+                        .partition(|(_, maybe_svc)| maybe_svc.is_some());
+                // Identify sleds without services (targets for future
+                // allocation).
+                let mut sleds_without_svc =
+                    sleds_without_svc.into_iter().map(|(sled, _)| sled);
+
+                // Identify sleds with services (part of output).
+                let mut svcs: Vec<_> = sleds_with_svc
+                    .into_iter()
+                    .map(|(_, maybe_svc)| {
+                        maybe_svc.expect(
+                            "Should have filtered by sleds with the service",
+                        )
+                    })
+                    .collect();
+
+                // Add services to sleds, in-order, until we've met a
+                // number sufficient for our redundancy.
+                //
+                // The selection of "which sleds run this service" is completely
+                // arbitrary.
+                while svcs.len() < (redundancy as usize) {
+                    let sled = sleds_without_svc.next().ok_or_else(|| {
+                        TxnError::CustomError(ServiceError::NotEnoughSleds)
+                    })?;
+                    let svc_id = Uuid::new_v4();
+                    let address = Self::next_ipv6_address_sync(conn, sled.id())
+                        .map_err(|e| {
+                            TxnError::CustomError(ServiceError::Other(e))
+                        })?;
+
+                    let service = db::model::Service::new(
+                        svc_id,
+                        sled.id(),
+                        address,
+                        kind,
+                    );
+
+                    let svc = Self::service_upsert_sync(conn, service)
+                        .map_err(|e| {
+                            TxnError::CustomError(ServiceError::Other(e))
+                        })?;
+                    svcs.push(svc);
+                }
+
+                return Ok(svcs);
+            })
+            .await
+            .map_err(|e| match e {
+                TxnError::CustomError(ServiceError::NotEnoughSleds) => {
+                    Error::unavail("Not enough sleds for service allocation")
+                }
+                TxnError::CustomError(ServiceError::Other(e)) => e,
+                TxnError::Pool(e) => {
+                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                }
+            })
+    }
+
+    pub async fn ensure_dns_service(
+        &self,
+        opctx: &OpContext,
+        rack_subnet: Ipv6Subnet<RACK_PREFIX>,
+        redundancy: u32,
+    ) -> Result<Vec<Service>, Error> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+        #[derive(Debug)]
+        enum ServiceError {
+            NotEnoughSleds,
+            NotEnoughIps,
+            Other(Error),
+        }
+        type TxnError = TransactionError<ServiceError>;
+
+        self.pool()
+            .transaction(move |conn| {
+                let mut svcs = Self::dns_service_list_sync(conn)?;
+
+                // Get all subnets not allocated to existing services.
+                let mut usable_dns_subnets = ReservedRackSubnet(rack_subnet)
+                    .get_dns_subnets()
+                    .into_iter()
+                    .filter(|subnet| {
+                        // If any existing services are using this address,
+                        // skip it.
+                        !svcs.iter().any(|svc| {
+                            Ipv6Addr::from(svc.ip) == subnet.dns_address().ip()
+                        })
+                    })
+                    .collect::<Vec<_>>()
+                    .into_iter();
+
+                // Get all sleds which aren't already running DNS services.
+                let mut target_sleds =
+                    Self::sled_list_with_limit_sync(conn, redundancy)?
+                        .into_iter()
+                        .filter(|sled| {
+                            // The target sleds are only considered if they aren't already
+                            // running a DNS service.
+                            svcs.iter().all(|svc| svc.sled_id != sled.id())
+                        })
+                        .collect::<Vec<_>>()
+                        .into_iter();
+
+                while svcs.len() < (redundancy as usize) {
+                    let sled = target_sleds.next().ok_or_else(|| {
+                        TxnError::CustomError(ServiceError::NotEnoughSleds)
+                    })?;
+                    let svc_id = Uuid::new_v4();
+                    let dns_subnet =
+                        usable_dns_subnets.next().ok_or_else(|| {
+                            TxnError::CustomError(ServiceError::NotEnoughIps)
+                        })?;
+                    let address = dns_subnet.dns_address().ip();
+
+                    // TODO: How are we tracking the GZ address that must be
+                    // allocated? They're tracked by the "DnsSubnet" object
+                    // in address.rs, but I don't think they're getting
+                    // propagated out of here.
+                    let service = db::model::Service::new(
+                        svc_id,
+                        sled.id(),
+                        address,
+                        ServiceKind::InternalDNS,
+                    );
+
+                    let svc = Self::service_upsert_sync(conn, service)
+                        .map_err(|e| {
+                            TxnError::CustomError(ServiceError::Other(e))
+                        })?;
+
+                    svcs.push(svc);
+                }
+                return Ok(svcs);
+            })
+            .await
+            .map_err(|e| match e {
+                TxnError::CustomError(ServiceError::NotEnoughSleds) => {
+                    Error::unavail("Not enough sleds for service allocation")
+                }
+                TxnError::CustomError(ServiceError::NotEnoughIps) => {
+                    Error::unavail(
+                        "Not enough IP addresses for service allocation",
+                    )
+                }
+                TxnError::CustomError(ServiceError::Other(e)) => e,
+                TxnError::Pool(e) => {
+                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                }
+            })
+    }
+
+    fn dns_service_list_sync(
+        conn: &mut DbConnection,
+    ) -> Result<Vec<Service>, diesel::result::Error> {
+        use db::schema::service::dsl as svc;
+
+        svc::service
+            .filter(svc::kind.eq(ServiceKind::InternalDNS))
+            .limit(DNS_REDUNDANCY.into())
+            .select(Service::as_select())
+            .get_results(conn)
+    }
+
+    fn sled_zpool_and_dataset_list_sync(
+        conn: &mut DbConnection,
+        rack_id: Uuid,
+        kind: DatasetKind,
+    ) -> Result<Vec<(Sled, Zpool, Option<Dataset>)>, diesel::result::Error>
+    {
+        use db::schema::dataset::dsl as dataset_dsl;
+        use db::schema::sled::dsl as sled_dsl;
+        use db::schema::zpool::dsl as zpool_dsl;
+
+        db::schema::sled::table
+            .filter(sled_dsl::time_deleted.is_null())
+            .filter(sled_dsl::rack_id.eq(rack_id))
+            .inner_join(
+                db::schema::zpool::table.on(zpool_dsl::sled_id
+                    .eq(sled_dsl::id)
+                    .and(zpool_dsl::time_deleted.is_null())),
+            )
+            .left_outer_join(
+                db::schema::dataset::table.on(dataset_dsl::pool_id
+                    .eq(zpool_dsl::id)
+                    .and(dataset_dsl::kind.eq(kind))
+                    .and(dataset_dsl::time_deleted.is_null())),
+            )
+            .select(<(Sled, Zpool, Option<Dataset>)>::as_select())
+            .get_results(conn)
+    }
+
+    pub async fn ensure_rack_dataset(
+        &self,
+        opctx: &OpContext,
+        rack_id: Uuid,
+        kind: DatasetKind,
+        redundancy: DatasetRedundancy,
+    ) -> Result<Vec<(Sled, Zpool, Dataset)>, Error> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+        #[derive(Debug)]
+        enum DatasetError {
+            NotEnoughZpools,
+            Other(Error),
+        }
+        type TxnError = TransactionError<DatasetError>;
+
+        self.pool()
+            .transaction(move |conn| {
+                let sleds_zpools_and_maybe_datasets =
+                    Self::sled_zpool_and_dataset_list_sync(
+                        conn, rack_id, kind,
+                    )?;
+
+                // Split the set of returned zpools into "those with" and "those
+                // without" the requested dataset.
+                let (zpools_with_dataset, zpools_without_dataset): (
+                    Vec<_>,
+                    Vec<_>,
+                ) = sleds_zpools_and_maybe_datasets
+                    .into_iter()
+                    .partition(|(_, _, maybe_dataset)| maybe_dataset.is_some());
+                let mut zpools_without_dataset = zpools_without_dataset
+                    .into_iter()
+                    .map(|(sled, zpool, _)| (sled, zpool))
+                    .peekable();
+
+                let mut datasets: Vec<_> = zpools_with_dataset
+                    .into_iter()
+                    .map(|(sled, zpool, maybe_dataset)| {
+                        (
+                            sled,
+                            zpool,
+                            maybe_dataset.expect("Dataset should exist"),
+                        )
+                    })
+                    .collect();
+
+                // Add datasets to zpools, in-order, until we've met a
+                // number sufficient for our redundancy.
+                //
+                // The selection of "which zpools contain this dataset" is completely
+                // arbitrary.
+                loop {
+                    match redundancy {
+                        DatasetRedundancy::OnAll => {
+                            if zpools_without_dataset.peek().is_none() {
+                                break;
+                            }
+                        }
+                        DatasetRedundancy::PerRack(desired) => {
+                            if datasets.len() >= (desired as usize) {
+                                break;
+                            }
+                        }
+                    };
+
+                    let (sled, zpool) =
+                        zpools_without_dataset.next().ok_or_else(|| {
+                            TxnError::CustomError(DatasetError::NotEnoughZpools)
+                        })?;
+                    let dataset_id = Uuid::new_v4();
+                    let address = Self::next_ipv6_address_sync(conn, sled.id())
+                        .map_err(|e| {
+                            TxnError::CustomError(DatasetError::Other(e))
+                        })
+                        .map(|ip| SocketAddrV6::new(ip, kind.port(), 0, 0))?;
+
+                    let dataset = db::model::Dataset::new(
+                        dataset_id,
+                        zpool.id(),
+                        address,
+                        kind,
+                    );
+
+                    let dataset = Self::dataset_upsert_sync(conn, dataset)
+                        .map_err(|e| {
+                            TxnError::CustomError(DatasetError::Other(e))
+                        })?;
+                    datasets.push((sled, zpool, dataset));
+                }
+
+                return Ok(datasets);
+            })
+            .await
+            .map_err(|e| match e {
+                TxnError::CustomError(DatasetError::NotEnoughZpools) => {
+                    Error::unavail("Not enough zpools for dataset allocation")
+                }
+                TxnError::CustomError(DatasetError::Other(e)) => e,
+                TxnError::Pool(e) => {
+                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                }
+            })
+    }
+
     /// Stores a new zpool in the database.
     pub async fn zpool_upsert(&self, zpool: Zpool) -> CreateResult<Zpool> {
         use db::schema::zpool::dsl;
@@ -372,6 +814,25 @@ impl DataStore {
                 )
             }
         })
+    }
+
+    // NOTE: This doesn't need to be test-only, it just happens to be test-only
+    // to avoid unused warnings.
+    #[cfg(test)]
+    async fn dataset_list(
+        &self,
+        opctx: &OpContext,
+        zpool_id: Uuid,
+    ) -> Result<Vec<Dataset>, Error> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        use db::schema::dataset::dsl;
+        dsl::dataset
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::pool_id.eq(zpool_id))
+            .select(Dataset::as_select())
+            .load_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     /// Stores a new dataset in the database.
@@ -415,6 +876,44 @@ impl DataStore {
         })
     }
 
+    /// Stores a new dataset in the database.
+    fn dataset_upsert_sync(
+        conn: &mut DbConnection,
+        dataset: Dataset,
+    ) -> CreateResult<Dataset> {
+        use db::schema::dataset::dsl;
+
+        let zpool_id = dataset.pool_id;
+        Zpool::insert_resource(
+            zpool_id,
+            diesel::insert_into(dsl::dataset)
+                .values(dataset.clone())
+                .on_conflict(dsl::id)
+                .do_update()
+                .set((
+                    dsl::time_modified.eq(Utc::now()),
+                    dsl::pool_id.eq(excluded(dsl::pool_id)),
+                    dsl::ip.eq(excluded(dsl::ip)),
+                    dsl::port.eq(excluded(dsl::port)),
+                    dsl::kind.eq(excluded(dsl::kind)),
+                )),
+        )
+        .insert_and_get_result(conn)
+        .map_err(|e| match e {
+            SyncInsertError::CollectionNotFound => Error::ObjectNotFound {
+                type_name: ResourceType::Zpool,
+                lookup_type: LookupType::ById(zpool_id),
+            },
+            SyncInsertError::DatabaseError(e) => {
+                public_error_from_diesel_create(
+                    e,
+                    ResourceType::Dataset,
+                    &dataset.id().to_string(),
+                )
+            }
+        })
+    }
+
     /// Stores a new service in the database.
     pub async fn service_upsert(
         &self,
@@ -451,6 +950,42 @@ impl DataStore {
                         ResourceType::Service,
                         &service.id().to_string(),
                     ),
+                )
+            }
+        })
+    }
+
+    fn service_upsert_sync(
+        conn: &mut DbConnection,
+        service: Service,
+    ) -> CreateResult<Service> {
+        use db::schema::service::dsl;
+
+        let sled_id = service.sled_id;
+        Sled::insert_resource(
+            sled_id,
+            diesel::insert_into(dsl::service)
+                .values(service.clone())
+                .on_conflict(dsl::id)
+                .do_update()
+                .set((
+                    dsl::time_modified.eq(Utc::now()),
+                    dsl::sled_id.eq(excluded(dsl::sled_id)),
+                    dsl::ip.eq(excluded(dsl::ip)),
+                    dsl::kind.eq(excluded(dsl::kind)),
+                )),
+        )
+        .insert_and_get_result(conn)
+        .map_err(|e| match e {
+            SyncInsertError::CollectionNotFound => Error::ObjectNotFound {
+                type_name: ResourceType::Sled,
+                lookup_type: LookupType::ById(sled_id),
+            },
+            SyncInsertError::DatabaseError(e) => {
+                public_error_from_diesel_create(
+                    e,
+                    ResourceType::Service,
+                    &service.id().to_string(),
                 )
             }
         })
@@ -3584,6 +4119,36 @@ impl DataStore {
         }
     }
 
+    /// Return the next available IPv6 address for an Oxide service running on
+    /// the provided sled.
+    fn next_ipv6_address_sync(
+        conn: &mut DbConnection,
+        sled_id: Uuid,
+    ) -> Result<Ipv6Addr, Error> {
+        use db::schema::sled::dsl;
+        let net = diesel::update(
+            dsl::sled.find(sled_id).filter(dsl::time_deleted.is_null()),
+        )
+        .set(dsl::last_used_address.eq(dsl::last_used_address + 1))
+        .returning(dsl::last_used_address)
+        .get_result(conn)
+        .map_err(|e| {
+            public_error_from_diesel_lookup(
+                e,
+                ResourceType::Sled,
+                &LookupType::ById(sled_id),
+            )
+        })?;
+
+        // TODO-correctness: We could ensure that this address is actually
+        // within the sled's underlay prefix, once that's included in the
+        // database record.
+        match net {
+            ipnetwork::IpNetwork::V6(net) => Ok(net.ip()),
+            _ => panic!("Sled IP must be IPv6"),
+        }
+    }
+
     pub async fn global_image_list_images(
         &self,
         opctx: &OpContext,
@@ -3879,6 +4444,7 @@ mod test {
     use crate::authz;
     use crate::db::explain::ExplainableAsync;
     use crate::db::fixed_data::silo::SILO_ID;
+    use crate::db::identity::Asset;
     use crate::db::identity::Resource;
     use crate::db::lookup::LookupPath;
     use crate::db::model::{ConsoleSession, DatasetKind, Project, ServiceKind};
@@ -3889,10 +4455,8 @@ mod test {
         ByteCount, Error, IdentityMetadataCreateParams, LookupType, Name,
     };
     use omicron_test_utils::dev;
-    use std::collections::HashSet;
-    use std::net::Ipv6Addr;
-    use std::net::SocketAddrV6;
-    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+    use std::collections::{HashMap, HashSet};
+    use std::net::{Ipv6Addr, SocketAddrV6};
     use std::sync::Arc;
     use uuid::Uuid;
 
@@ -4108,8 +4672,7 @@ mod test {
 
         // ... and datasets within that zpool.
         let dataset_count = REGION_REDUNDANCY_THRESHOLD * 2;
-        let bogus_addr =
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+        let bogus_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
         let dataset_ids: Vec<Uuid> =
             (0..dataset_count).map(|_| Uuid::new_v4()).collect();
         for id in &dataset_ids {
@@ -4190,8 +4753,7 @@ mod test {
 
         // ... and datasets within that zpool.
         let dataset_count = REGION_REDUNDANCY_THRESHOLD;
-        let bogus_addr =
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+        let bogus_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
         let dataset_ids: Vec<Uuid> =
             (0..dataset_count).map(|_| Uuid::new_v4()).collect();
         for id in &dataset_ids {
@@ -4257,8 +4819,7 @@ mod test {
 
         // ... and datasets within that zpool.
         let dataset_count = REGION_REDUNDANCY_THRESHOLD - 1;
-        let bogus_addr =
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+        let bogus_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
         let dataset_ids: Vec<Uuid> =
             (0..dataset_count).map(|_| Uuid::new_v4()).collect();
         for id in &dataset_ids {
@@ -4309,8 +4870,7 @@ mod test {
 
         // ... and datasets within that zpool.
         let dataset_count = REGION_REDUNDANCY_THRESHOLD;
-        let bogus_addr =
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+        let bogus_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
         let dataset_ids: Vec<Uuid> =
             (0..dataset_count).map(|_| Uuid::new_v4()).collect();
         for id in &dataset_ids {
@@ -4406,8 +4966,8 @@ mod test {
         let datastore = Arc::new(DataStore::new(Arc::clone(&pool)));
         let opctx =
             OpContext::for_tests(logctx.log.new(o!()), datastore.clone());
-
         let rack_id = Uuid::new_v4();
+
         let addr1 = "[fd00:1de::1]:12345".parse().unwrap();
         let sled1_id = "0de4b299-e0b4-46f0-d528-85de81a7095f".parse().unwrap();
         let sled1 = db::model::Sled::new(sled1_id, addr1, rack_id);
@@ -4556,6 +5116,497 @@ mod test {
     }
 
     #[tokio::test]
+    async fn test_ensure_rack_service() {
+        let logctx = dev::test_setup_log("test_ensure_rack_service");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        // Create a sled on which the service should exist.
+        let sled_addr = SocketAddrV6::new(
+            Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1),
+            8080,
+            0,
+            0,
+        );
+        let sled_id = Uuid::new_v4();
+        let rack_id = Uuid::new_v4();
+        let sled = Sled::new(sled_id, sled_addr.clone(), rack_id);
+        datastore
+            .sled_upsert(sled)
+            .await
+            .expect("Should be able to upsert sled");
+
+        // Ensure a service exists on the rack.
+        let services = datastore
+            .ensure_rack_service(&opctx, rack_id, ServiceKind::Nexus, 1)
+            .await
+            .expect("Should have allocated service");
+
+        // Only a single service was allocated, with the type / address we
+        // expect.
+        assert_eq!(1, services.len());
+        assert_eq!(ServiceKind::Nexus, services[0].kind);
+        assert_eq!(sled_id, services[0].sled_id);
+
+        // Listing services only shows this one.
+        let observed_services = datastore
+            .service_list(&opctx, sled_id)
+            .await
+            .expect("Should be able to list services");
+        assert_eq!(1, observed_services.len());
+        assert_eq!(services[0].id(), observed_services[0].id());
+
+        // Test that ensuring services is idempotent.
+        let services_again = datastore
+            .ensure_rack_service(&opctx, rack_id, ServiceKind::Nexus, 1)
+            .await
+            .expect("Should have allocated service");
+        assert_eq!(services_again, services);
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_ensure_rack_service_multi_sled() {
+        let logctx = dev::test_setup_log("test_ensure_rack_service_multi_sled");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        let rack_id = Uuid::new_v4();
+
+        // Create sleds with distinct underlay subnets.
+        const SLED_COUNT: usize = 3;
+        let mut sleds = HashMap::new();
+        for i in 0..SLED_COUNT {
+            let sled_addr = SocketAddrV6::new(
+                Ipv6Addr::new(0xfd00, 0, 0, i.try_into().unwrap(), 0, 0, 0, 1),
+                8080,
+                0,
+                0,
+            );
+            let sled_id = Uuid::new_v4();
+            let sled = Sled::new(sled_id, sled_addr.clone(), rack_id);
+            datastore
+                .sled_upsert(sled.clone())
+                .await
+                .expect("Should be able to upsert sled");
+            sleds.insert(sled.id(), sled);
+        }
+
+        // Ensure a service exists on the rack, with some redundancy.
+        const NEXUS_COUNT: u32 = 3;
+        let mut services = datastore
+            .ensure_rack_service(
+                &opctx,
+                rack_id,
+                ServiceKind::Nexus,
+                NEXUS_COUNT,
+            )
+            .await
+            .expect("Should have allocated service");
+        services.sort_by(|a, b| a.id().cmp(&b.id()));
+
+        assert_eq!(NEXUS_COUNT, services.len() as u32);
+        for svc in &services {
+            assert_eq!(ServiceKind::Nexus, svc.kind);
+
+            // Each service should have been provisioned to a distinct sled.
+            let observed_services = datastore
+                .service_list(&opctx, svc.sled_id)
+                .await
+                .expect("Should be able to list services");
+            assert_eq!(1, observed_services.len());
+            assert_eq!(svc.id(), observed_services[0].id());
+        }
+
+        // Test that ensuring services is idempotent.
+        let mut services_again = datastore
+            .ensure_rack_service(
+                &opctx,
+                rack_id,
+                ServiceKind::Nexus,
+                NEXUS_COUNT,
+            )
+            .await
+            .expect("Should have allocated service");
+        services_again.sort_by(|a, b| a.id().cmp(&b.id()));
+        assert_eq!(services_again, services);
+
+        // Ask for a different service type on the rack.
+        let oximeter_services = datastore
+            .ensure_rack_service(&opctx, rack_id, ServiceKind::Oximeter, 1)
+            .await
+            .expect("Should have allocated service");
+
+        // This should only return a single service
+        assert_eq!(1, oximeter_services.len());
+
+        // The target sled should contain both the nexus and oximeter services
+        let observed_services = datastore
+            .service_list(&opctx, oximeter_services[0].sled_id)
+            .await
+            .expect("Should be able to list services");
+        assert_eq!(2, observed_services.len());
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_ensure_rack_service_not_enough_sleds() {
+        let logctx =
+            dev::test_setup_log("test_ensure_rack_service_not_enough_sleds");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        // Create a sled on which the service should exist.
+        let sled_addr = SocketAddrV6::new(
+            Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1),
+            8080,
+            0,
+            0,
+        );
+        let sled_id = Uuid::new_v4();
+        let rack_id = Uuid::new_v4();
+        let sled = Sled::new(sled_id, sled_addr.clone(), rack_id);
+        datastore
+            .sled_upsert(sled)
+            .await
+            .expect("Should be able to upsert sled");
+
+        // Try to request a redundancy which is larger than the number of sleds.
+        let err = datastore
+            .ensure_rack_service(&opctx, rack_id, ServiceKind::Nexus, 2)
+            .await
+            .expect_err("Should have failed to allocate service");
+
+        assert!(
+            matches!(err, Error::ServiceUnavailable { .. }),
+            "Error should have been ServiceUnavailable: {:?}",
+            err
+        );
+        assert!(
+            err.to_string().contains("Not enough sleds"),
+            "Error should have identified 'Not enough sleds' as the cause: {:?}", err
+        );
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_ensure_dns_service() {
+        let logctx = dev::test_setup_log("test_ensure_dns_service");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        // Create a sled on which the service should exist.
+        let sled_addr = SocketAddrV6::new(
+            Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1),
+            8080,
+            0,
+            0,
+        );
+        let sled_id = Uuid::new_v4();
+        let rack_id = Uuid::new_v4();
+        let sled = Sled::new(sled_id, sled_addr.clone(), rack_id);
+        datastore
+            .sled_upsert(sled)
+            .await
+            .expect("Should be able to upsert sled");
+
+        let rack_subnet = Ipv6Subnet::<RACK_PREFIX>::new(*sled_addr.ip());
+
+        // Ensure a service exists on the rack.
+        let services = datastore
+            .ensure_dns_service(&opctx, rack_subnet, 1)
+            .await
+            .expect("Should have allocated service");
+
+        // Only a single service was allocated, with the type / address we
+        // expect.
+        assert_eq!(1, services.len());
+        assert_eq!(ServiceKind::InternalDNS, services[0].kind);
+        assert_eq!(sled_id, services[0].sled_id);
+
+        // Listing services only shows this one.
+        let observed_services = datastore
+            .service_list(&opctx, sled_id)
+            .await
+            .expect("Should be able to list services");
+        assert_eq!(1, observed_services.len());
+        assert_eq!(services[0].id(), observed_services[0].id());
+
+        // Test that ensuring services is idempotent.
+        let services_again = datastore
+            .ensure_dns_service(&opctx, rack_subnet, 1)
+            .await
+            .expect("Should have allocated service");
+        assert_eq!(services_again, services);
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_ensure_dns_service_multi_sled() {
+        let logctx = dev::test_setup_log("test_ensure_dns_service_multi_sled");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        let rack_id = Uuid::new_v4();
+
+        // Create sleds with distinct underlay subnets.
+        const SLED_COUNT: u32 = DNS_REDUNDANCY;
+        let mut sleds = HashMap::new();
+        for i in 0..SLED_COUNT {
+            let sled_addr = SocketAddrV6::new(
+                Ipv6Addr::new(0xfd00, 0, 0, i.try_into().unwrap(), 0, 0, 0, 1),
+                8080,
+                0,
+                0,
+            );
+            let sled_id = Uuid::new_v4();
+            let sled = Sled::new(sled_id, sled_addr.clone(), rack_id);
+            datastore
+                .sled_upsert(sled.clone())
+                .await
+                .expect("Should be able to upsert sled");
+            sleds.insert(sled.id(), sled);
+        }
+        let rack_subnet = Ipv6Subnet::<RACK_PREFIX>::new(Ipv6Addr::from(
+            sleds.values().next().unwrap().ip,
+        ));
+
+        for sled in sleds.values() {
+            assert_eq!(
+                rack_subnet,
+                Ipv6Subnet::<RACK_PREFIX>::new(Ipv6Addr::from(sled.ip)),
+                "Test pre-condition violated: All sleds must belong to the same rack"
+            );
+        }
+
+        // Ensure a service exists on the rack.
+        const DNS_COUNT: u32 = DNS_REDUNDANCY;
+        let mut services = datastore
+            .ensure_dns_service(&opctx, rack_subnet, DNS_COUNT)
+            .await
+            .expect("Should have allocated service");
+        services.sort_by(|a, b| a.id().cmp(&b.id()));
+
+        assert_eq!(DNS_COUNT, services.len() as u32);
+        for svc in &services {
+            assert_eq!(ServiceKind::InternalDNS, svc.kind);
+
+            // Each service should have been provisioned to a distinct sled.
+            let observed_services = datastore
+                .service_list(&opctx, svc.sled_id)
+                .await
+                .expect("Should be able to list services");
+            assert_eq!(1, observed_services.len());
+            assert_eq!(svc.id(), observed_services[0].id());
+        }
+
+        // Test for idempotency
+        let mut services_again = datastore
+            .ensure_dns_service(&opctx, rack_subnet, DNS_COUNT)
+            .await
+            .expect("Should have allocated service");
+        services_again.sort_by(|a, b| a.id().cmp(&b.id()));
+        assert_eq!(services_again, services);
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_ensure_rack_dataset() {
+        let logctx = dev::test_setup_log("test_ensure_rack_dataset");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        // Create a sled on which the dataset should exist.
+        let sled_addr = SocketAddrV6::new(
+            Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1),
+            8080,
+            0,
+            0,
+        );
+        let sled_id = Uuid::new_v4();
+        let rack_id = Uuid::new_v4();
+        let sled = Sled::new(sled_id, sled_addr.clone(), rack_id);
+        datastore
+            .sled_upsert(sled)
+            .await
+            .expect("Should be able to upsert sled");
+        let zpool_id = create_test_zpool(&datastore, sled_id).await;
+
+        // Ensure a dataset exists on the rack.
+        let output = datastore
+            .ensure_rack_dataset(
+                &opctx,
+                rack_id,
+                DatasetKind::Crucible,
+                DatasetRedundancy::PerRack(1),
+            )
+            .await
+            .expect("Should have allocated dataset");
+
+        // Observe that only a single dataset was allocated
+        assert_eq!(1, output.len());
+        let (_, _, output_dataset) = &output[0];
+        assert_eq!(DatasetKind::Crucible, output_dataset.kind);
+        assert_eq!(zpool_id, output_dataset.pool_id);
+
+        // Listing datasets only shows this one.
+        let observed_datasets = datastore
+            .dataset_list(&opctx, zpool_id)
+            .await
+            .expect("Should be able to list datasets");
+        assert_eq!(1, observed_datasets.len());
+        assert_eq!(output_dataset.id(), observed_datasets[0].id());
+
+        // Test that ensuring datasets is idempotent.
+        let output_again = datastore
+            .ensure_rack_dataset(
+                &opctx,
+                rack_id,
+                DatasetKind::Crucible,
+                DatasetRedundancy::PerRack(1),
+            )
+            .await
+            .expect("Should have allocated dataset");
+        let (_, _, output_dataset_again) = &output_again[0];
+        assert_eq!(output_dataset_again, output_dataset);
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_ensure_rack_dataset_not_enough_zpools() {
+        let logctx =
+            dev::test_setup_log("test_ensure_rack_dataset_not_enough_zpools");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        // Create a sled on which the dataset should exist.
+        let sled_addr = SocketAddrV6::new(
+            Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1),
+            8080,
+            0,
+            0,
+        );
+        let sled_id = Uuid::new_v4();
+        let rack_id = Uuid::new_v4();
+        let sled = Sled::new(sled_id, sled_addr.clone(), rack_id);
+        datastore
+            .sled_upsert(sled)
+            .await
+            .expect("Should be able to upsert sled");
+
+        // Attempt to allocate a dataset on a rack without zpools.
+        let err = datastore
+            .ensure_rack_dataset(
+                &opctx,
+                rack_id,
+                DatasetKind::Crucible,
+                DatasetRedundancy::PerRack(1),
+            )
+            .await
+            .expect_err("Should not have allocated dataset");
+
+        assert!(
+            matches!(err, Error::ServiceUnavailable { .. }),
+            "Error should have been ServiceUnavailable: {:?}",
+            err
+        );
+        assert!(
+            err.to_string().contains("Not enough zpools"),
+            "Error should have identified 'Not enough zpools' as the cause: {:?}", err
+        );
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_ensure_rack_dataset_multi_sled() {
+        let logctx = dev::test_setup_log("test_ensure_rack_dataset_multi_sled");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        let rack_id = Uuid::new_v4();
+
+        // Create sleds with distinct underlay subnets.
+        const SLED_COUNT: usize = 3;
+        let mut sleds = HashMap::new();
+        for i in 0..SLED_COUNT {
+            let sled_addr = SocketAddrV6::new(
+                Ipv6Addr::new(0xfd00, 0, 0, i.try_into().unwrap(), 0, 0, 0, 1),
+                8080,
+                0,
+                0,
+            );
+            let sled_id = Uuid::new_v4();
+            let sled = Sled::new(sled_id, sled_addr.clone(), rack_id);
+            datastore
+                .sled_upsert(sled.clone())
+                .await
+                .expect("Should be able to upsert sled");
+            sleds.insert(sled.id(), sled);
+            create_test_zpool(&datastore, sled_id).await;
+        }
+
+        // Ensure datasets exist on the rack.
+        let output = datastore
+            .ensure_rack_dataset(
+                &opctx,
+                rack_id,
+                DatasetKind::Crucible,
+                DatasetRedundancy::OnAll,
+            )
+            .await
+            .expect("Should have allocated dataset");
+        assert_eq!(SLED_COUNT, output.len());
+        for (sled, zpool, dataset) in &output {
+            assert_eq!(DatasetKind::Crucible, dataset.kind);
+            assert_eq!(zpool.id(), dataset.pool_id);
+            assert_eq!(sled.id(), zpool.sled_id);
+
+            let observed_datasets = datastore
+                .dataset_list(&opctx, zpool.id())
+                .await
+                .expect("Should be able to list datasets");
+            assert_eq!(1, observed_datasets.len());
+            assert_eq!(dataset.id(), observed_datasets[0].id())
+        }
+
+        // Test that ensuring datasets is idempotent.
+        let output_again = datastore
+            .ensure_rack_dataset(
+                &opctx,
+                rack_id,
+                DatasetKind::Crucible,
+                DatasetRedundancy::OnAll,
+            )
+            .await
+            .expect("Should have allocated dataset");
+
+        let mut output: Vec<_> =
+            output.into_iter().map(|(_, _, dataset)| dataset).collect();
+        output.sort_by(|a, b| a.id().cmp(&b.id()));
+        let mut output_again: Vec<_> =
+            output_again.into_iter().map(|(_, _, dataset)| dataset).collect();
+        output_again.sort_by(|a, b| a.id().cmp(&b.id()));
+        assert_eq!(output, output_again);
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
     async fn test_rack_initialize_is_idempotent() {
         let logctx = dev::test_setup_log("test_rack_initialize_is_idempotent");
         let mut db = test_setup_database(&logctx.log).await;
@@ -4574,14 +5625,14 @@ mod test {
 
         // Initialize the Rack.
         let result = datastore
-            .rack_set_initialized(&opctx, rack.id(), vec![])
+            .rack_set_initialized(&opctx, rack.id(), vec![], vec![])
             .await
             .unwrap();
         assert!(result.initialized);
 
         // Re-initialize the rack (check for idempotency)
         let result = datastore
-            .rack_set_initialized(&opctx, rack.id(), vec![])
+            .rack_set_initialized(&opctx, rack.id(), vec![], vec![])
             .await
             .unwrap();
         assert!(result.initialized);

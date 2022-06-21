@@ -8,11 +8,11 @@ use serde::{Deserialize, Serialize};
 use std::io::Write;
 
 impl_enum_type!(
-    #[derive(SqlType, Debug, QueryId)]
+    #[derive(Clone, SqlType, Debug, QueryId)]
     #[diesel(postgres_type(name = "service_kind"))]
     pub struct ServiceKindEnum;
 
-    #[derive(Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
+    #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
     #[diesel(sql_type = ServiceKindEnum)]
     pub enum ServiceKind;
 

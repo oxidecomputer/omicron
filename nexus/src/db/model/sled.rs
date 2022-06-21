@@ -13,7 +13,7 @@ use std::net::SocketAddrV6;
 use uuid::Uuid;
 
 /// Database representation of a Sled.
-#[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
+#[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset, PartialEq)]
 #[diesel(table_name = sled)]
 pub struct Sled {
     #[diesel(embed)]

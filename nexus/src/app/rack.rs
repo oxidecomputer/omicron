@@ -74,8 +74,9 @@ impl super::Nexus {
             })
             .collect();
 
+        // TODO: Actually supply datasets provided from the sled agent.
         self.db_datastore
-            .rack_set_initialized(opctx, rack_id, services)
+            .rack_set_initialized(opctx, rack_id, services, vec![])
             .await?;
 
         Ok(())

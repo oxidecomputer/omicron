@@ -52,34 +52,30 @@ pub struct TimeseriesDbConfig {
     pub address: Option<SocketAddr>,
 }
 
-// A deserializable type that does no validation on the tunable parameters.
-#[derive(Clone, Debug, Deserialize, PartialEq)]
-struct UnvalidatedTunables {
-    max_vpc_ipv4_subnet_prefix: u8,
+fn deserialize_ipv4_subnet<'de, D>(deserializer: D) -> Result<u8, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let prefix = u8::deserialize(deserializer)?;
+    Tunables::validate_ipv4_prefix(prefix)
+        .map_err(|e| serde::de::Error::custom(e))?;
+    Ok(prefix)
 }
 
 /// Tunable configuration parameters, intended for use in test environments or
 /// other situations in which experimentation / tuning is valuable.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-#[serde(try_from = "UnvalidatedTunables")]
 pub struct Tunables {
     /// The maximum prefix size supported for VPC Subnet IPv4 subnetworks.
     ///
     /// Note that this is the maximum _prefix_ size, which sets the minimum size
     /// of the subnet.
+    #[serde(default, deserialize_with = "deserialize_ipv4_subnet")]
     pub max_vpc_ipv4_subnet_prefix: u8,
-}
 
-// Convert from the unvalidated tunables, verifying each parameter as needed.
-impl TryFrom<UnvalidatedTunables> for Tunables {
-    type Error = InvalidTunable;
-
-    fn try_from(unvalidated: UnvalidatedTunables) -> Result<Self, Self::Error> {
-        Tunables::validate_ipv4_prefix(unvalidated.max_vpc_ipv4_subnet_prefix)?;
-        Ok(Tunables {
-            max_vpc_ipv4_subnet_prefix: unvalidated.max_vpc_ipv4_subnet_prefix,
-        })
-    }
+    /// Identifies whether or not background tasks will be enabled.
+    #[serde(default)]
+    pub enable_background_tasks: bool,
 }
 
 impl Tunables {
@@ -119,7 +115,10 @@ pub const MAX_VPC_IPV4_SUBNET_PREFIX: u8 = 26;
 
 impl Default for Tunables {
     fn default() -> Self {
-        Tunables { max_vpc_ipv4_subnet_prefix: MAX_VPC_IPV4_SUBNET_PREFIX }
+        Tunables {
+            max_vpc_ipv4_subnet_prefix: MAX_VPC_IPV4_SUBNET_PREFIX,
+            enable_background_tasks: true,
+        }
     }
 }
 
@@ -388,7 +387,10 @@ mod test {
                         trusted_root: PathBuf::from("/path/to/root.json"),
                         default_base_url: "http://example.invalid/".into(),
                     }),
-                    tunables: Tunables { max_vpc_ipv4_subnet_prefix: 27 },
+                    tunables: Tunables {
+                        max_vpc_ipv4_subnet_prefix: 27,
+                        enable_background_tasks: false,
+                    },
                 },
             }
         );

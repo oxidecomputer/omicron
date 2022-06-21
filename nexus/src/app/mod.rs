@@ -15,9 +15,11 @@ use crate::populate::PopulateArgs;
 use crate::populate::PopulateStatus;
 use crate::saga_interface::SagaContext;
 use anyhow::anyhow;
+use omicron_common::address::{Ipv6Subnet, AZ_PREFIX, RACK_PREFIX};
 use omicron_common::api::external::Error;
 use slog::Logger;
 use std::sync::Arc;
+use tokio::sync::OnceCell;
 use uuid::Uuid;
 
 // The implementation of Nexus is large, and split into a number of submodules
@@ -40,6 +42,9 @@ mod vpc;
 mod vpc_router;
 mod vpc_subnet;
 
+// Background tasks exist in the "background" module.
+mod background;
+
 // Sagas are not part of the "Nexus" implementation, but they are
 // application logic.
 mod sagas;
@@ -59,6 +64,9 @@ pub struct Nexus {
     /// uuid for this rack
     rack_id: Uuid,
 
+    /// subnet of this rack
+    rack_subnet: Ipv6Subnet<RACK_PREFIX>,
+
     /// general server log
     log: Logger,
 
@@ -76,6 +84,9 @@ pub struct Nexus {
 
     /// Status of background task to populate database
     populate_status: tokio::sync::watch::Receiver<PopulateStatus>,
+
+    /// Background task for Nexus.
+    background_task_runner: OnceCell<background::TaskRunner>,
 
     /// Client to the timeseries database.
     timeseries_client: LazyTimeseriesClient,
@@ -127,7 +138,7 @@ impl Nexus {
             sec_store,
         ));
 
-        // Connect to clickhouse - but do so lazily.
+        // Connect to Clickhouse - but do so lazily.
         // Clickhouse may not be executing when Nexus starts.
         let timeseries_client =
             if let Some(address) = &config.pkg.timeseries_db.address {
@@ -158,12 +169,14 @@ impl Nexus {
         let nexus = Nexus {
             id: config.deployment.id,
             rack_id,
+            rack_subnet: config.deployment.subnet,
             log: log.new(o!()),
             db_datastore: Arc::clone(&db_datastore),
             authz: Arc::clone(&authz),
             sec_client: Arc::clone(&sec_client),
             recovery_task: std::sync::Mutex::new(None),
             populate_status,
+            background_task_runner: OnceCell::new(),
             timeseries_client,
             updates_config: config.pkg.updates.clone(),
             tunables: config.pkg.tunables.clone(),
@@ -207,6 +220,10 @@ impl Nexus {
         nexus
     }
 
+    pub fn az_subnet(&self) -> Ipv6Subnet<AZ_PREFIX> {
+        Ipv6Subnet::<AZ_PREFIX>::new(self.rack_subnet.net().ip())
+    }
+
     /// Return the tunable configuration parameters, e.g. for use in tests.
     pub fn tunables(&self) -> &config::Tunables {
         &self.tunables
@@ -231,6 +248,15 @@ impl Nexus {
                 }
             };
         }
+    }
+
+    pub fn start_background_tasks(
+        self: &Arc<Nexus>,
+    ) -> Result<(), anyhow::Error> {
+        let nexus = self.clone();
+        self.background_task_runner
+            .set(background::TaskRunner::new(nexus))
+            .map_err(|error| anyhow!(error.to_string()))
     }
 
     /// Returns an [`OpContext`] used for authenticating external requests
