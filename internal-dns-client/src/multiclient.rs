@@ -324,7 +324,7 @@ mod test {
             };
 
             let dropshot_server =
-                internal_dns::start_server(config, log.clone(), db)
+                internal_dns::start_dropshot_server(config, log.clone(), db)
                     .await
                     .unwrap();
 
