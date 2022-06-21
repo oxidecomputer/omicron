@@ -52,13 +52,6 @@ pub struct TimeseriesDbConfig {
     pub address: Option<SocketAddr>,
 }
 
-// A deserializable type that does no validation on the tunable parameters.
-#[derive(Clone, Debug, Deserialize, PartialEq)]
-struct UnvalidatedTunables {
-    max_vpc_ipv4_subnet_prefix: u8,
-    enable_background_tasks: bool,
-}
-
 fn deserialize_ipv4_subnet<'de, D>(deserializer: D) -> Result<u8, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -83,19 +76,6 @@ pub struct Tunables {
     /// Identifies whether or not background tasks will be enabled.
     #[serde(default)]
     pub enable_background_tasks: bool,
-}
-
-// Convert from the unvalidated tunables, verifying each parameter as needed.
-impl TryFrom<UnvalidatedTunables> for Tunables {
-    type Error = InvalidTunable;
-
-    fn try_from(unvalidated: UnvalidatedTunables) -> Result<Self, Self::Error> {
-        Tunables::validate_ipv4_prefix(unvalidated.max_vpc_ipv4_subnet_prefix)?;
-        Ok(Tunables {
-            max_vpc_ipv4_subnet_prefix: unvalidated.max_vpc_ipv4_subnet_prefix,
-            enable_background_tasks: unvalidated.enable_background_tasks,
-        })
-    }
 }
 
 impl Tunables {
