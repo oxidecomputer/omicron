@@ -170,6 +170,7 @@ pub async fn test_setup_with_config(
     // Set up an Oximeter collector server
     let collector_id = Uuid::parse_str(OXIMETER_UUID).unwrap();
     let oximeter = start_oximeter(
+        log.new(o!("component" => "oximeter")),
         server.http_server_internal.local_addr(),
         clickhouse.port(),
         collector_id,
@@ -225,6 +226,7 @@ pub async fn start_sled_agent(
 }
 
 pub async fn start_oximeter(
+    log: Logger,
     nexus_address: SocketAddr,
     db_port: u16,
     id: Uuid,
@@ -243,7 +245,7 @@ pub async fn start_oximeter(
         id,
         address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
     };
-    Oximeter::new(&config, &args).await.map_err(|e| e.to_string())
+    Oximeter::with_logger(&config, &args, log).await.map_err(|e| e.to_string())
 }
 
 #[derive(Debug, Clone, oximeter::Target)]

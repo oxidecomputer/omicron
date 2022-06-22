@@ -541,6 +541,9 @@ impl Instance {
         let network = running_zone.ensure_address(addr_request).await?;
         info!(inner.log, "Created address {} for zone: {}", network, zname);
 
+        let gateway = inner.underlay_addr;
+        running_zone.add_default_route(gateway).await?;
+
         // Run Propolis in the Zone.
         let smf_service_name = "svc:/system/illumos/propolis-server";
         let instance_name = format!("vm-{}", inner.propolis_id());

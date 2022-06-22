@@ -399,12 +399,23 @@ impl Oximeter {
         config: &Config,
         args: &OximeterArguments,
     ) -> Result<Self, Error> {
-        let (drain, registration) = slog_dtrace::with_drain(
-            config
-                .log
-                .to_logger("oximeter")
-                .map_err(|msg| Error::Server(msg.to_string()))?,
-        );
+        let log = config
+            .log
+            .to_logger("oximeter")
+            .map_err(|msg| Error::Server(msg.to_string()))?;
+        Self::with_logger(config, args, log).await
+    }
+
+    /// Create a new `Oximeter`, specifying an alternative logger to use.
+    ///
+    /// This can be used to override / ignore the logging configuration in
+    /// `config`, using `log` instead.
+    pub async fn with_logger(
+        config: &Config,
+        args: &OximeterArguments,
+        log: Logger,
+    ) -> Result<Self, Error> {
+        let (drain, registration) = slog_dtrace::with_drain(log);
         let log = slog::Logger::root(drain.fuse(), o!());
         if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
             let msg = format!("failed to register DTrace probes: {}", e);

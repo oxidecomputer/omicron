@@ -264,12 +264,12 @@ impl Nexus {
         &self.opctx_external_authn
     }
 
-    /// Returns an [`OpContext`] used for background tasks.
-    pub fn opctx_for_background(&self) -> OpContext {
+    /// Returns an [`OpContext`] used for balancing services.
+    pub fn opctx_for_service_balancer(&self) -> OpContext {
         OpContext::for_background(
-            self.log.new(o!("component" => "BackgroundWork")),
+            self.log.new(o!("component" => "ServiceBalancer")),
             Arc::clone(&self.authz),
-            authn::Context::internal_db_background(),
+            authn::Context::internal_service_balancer(),
             Arc::clone(&self.db_datastore),
         )
     }
