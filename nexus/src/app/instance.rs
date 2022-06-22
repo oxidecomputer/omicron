@@ -8,6 +8,7 @@ use super::MAX_DISKS_PER_INSTANCE;
 use crate::app::sagas;
 use crate::authn;
 use crate::authz;
+use crate::authz::ApiResource;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::Resource;
@@ -15,7 +16,6 @@ use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
 use crate::db::queries::network_interface;
 use crate::external_api::params;
-use omicron_common::api::external;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -654,33 +654,24 @@ impl super::Nexus {
         instance_name: &Name,
         params: &params::NetworkInterfaceCreate,
     ) -> CreateResult<db::model::NetworkInterface> {
-        let (.., authz_project, authz_instance, db_instance) =
+        let (.., authz_project, authz_instance) =
             LookupPath::new(opctx, &self.db_datastore)
                 .organization_name(organization_name)
                 .project_name(project_name)
                 .instance_name(instance_name)
-                .fetch()
+                .lookup_for(authz::Action::Modify)
                 .await?;
-
-        // TODO-completeness: We'd like to relax this once hot-plug is
-        // supported.
-        //
-        // TODO-correctness: There's a TOCTOU race here. Someone might start the
-        // instance between this check and when we actually create the NIC
-        // record. One solution is to place the state verification in the query
-        // to create the NIC. Unfortunately, that query is already very
-        // complicated. See
-        // https://github.com/oxidecomputer/omicron/issues/1134.
-        let stopped =
-            db::model::InstanceState::new(external::InstanceState::Stopped);
-        if db_instance.runtime_state.state != stopped {
-            return Err(external::Error::invalid_request(
-                "Instance must be stopped to attach a new network interface",
-            ));
-        }
 
         // NOTE: We need to lookup the VPC and VPC Subnet, since we need both
         // IDs for creating the network interface.
+        //
+        // TODO-correctness: There are additional races here. The VPC and VPC
+        // Subnet could both be deleted between the time we fetch them and
+        // actually insert the record for the interface. The solution is likely
+        // to make both objects implement `DatastoreCollection` for their
+        // children, and then use `VpcSubnet::insert_resource` inside the
+        // `instance_create_network_interface` method. See
+        // https://github.com/oxidecomputer/omicron/issues/738.
         let vpc_name = db::model::Name(params.vpc_name.clone());
         let subnet_name = db::model::Name(params.subnet_name.clone());
         let (.., authz_vpc, authz_subnet, db_subnet) =
@@ -699,8 +690,7 @@ impl super::Nexus {
             params.identity.clone(),
             params.ip,
         )?;
-        let interface = self
-            .db_datastore
+        self.db_datastore
             .instance_create_network_interface(
                 opctx,
                 &authz_subnet,
@@ -708,8 +698,27 @@ impl super::Nexus {
                 interface,
             )
             .await
-            .map_err(network_interface::InsertError::into_external)?;
-        Ok(interface)
+            .map_err(|e| {
+                debug!(
+                    self.log,
+                    "failed to create network interface";
+                    "instance_id" => ?authz_instance.id(),
+                    "interface_id" => ?interface_id,
+                    "error" => ?e,
+                );
+                if matches!(
+                    e,
+                    network_interface::InsertError::InstanceNotFound(_)
+                ) {
+                    // Return the not-found message of the authz interface
+                    // object, so that the message reflects how the caller
+                    // originally looked it up
+                    authz_instance.not_found()
+                } else {
+                    // Convert other errors into an appropriate client error
+                    network_interface::InsertError::into_external(e)
+                }
+            })
     }
 
     /// Lists network interfaces attached to the instance.
@@ -794,29 +803,17 @@ impl super::Nexus {
         instance_name: &Name,
         interface_name: &Name,
     ) -> DeleteResult {
-        let (.., authz_instance, db_instance) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .organization_name(organization_name)
-                .project_name(project_name)
-                .instance_name(instance_name)
-                .fetch_for(authz::Action::Modify)
-                .await?;
+        let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .instance_name(instance_name)
+            .lookup_for(authz::Action::Modify)
+            .await?;
         let (.., authz_interface) = LookupPath::new(opctx, &self.db_datastore)
             .instance_id(authz_instance.id())
             .network_interface_name(interface_name)
             .lookup_for(authz::Action::Delete)
             .await?;
-
-        // TODO-completeness: We'd like to relax this once hot-plug is supported
-        // TODO-correctness: There's a race condition here. Someone may start
-        // the instance after this check but before we actually delete the NIC.
-        let stopped =
-            db::model::InstanceState::new(external::InstanceState::Stopped);
-        if db_instance.runtime_state.state != stopped {
-            return Err(external::Error::invalid_request(
-                "Instance must be stopped to detach a network interface",
-            ));
-        }
         self.db_datastore
             .instance_delete_network_interface(
                 opctx,
@@ -824,7 +821,27 @@ impl super::Nexus {
                 &authz_interface,
             )
             .await
-            .map_err(network_interface::DeleteError::into_external)
+            .map_err(|e| {
+                debug!(
+                    self.log,
+                    "failed to delete network interface";
+                    "instance_id" => ?authz_instance.id(),
+                    "interface_id" => ?authz_interface.id(),
+                    "error" => ?e,
+                );
+                if matches!(
+                    e,
+                    network_interface::DeleteError::InstanceNotFound(_)
+                ) {
+                    // Return the not-found message of the authz interface
+                    // object, so that the message reflects how the caller
+                    // originally looked it up
+                    authz_instance.not_found()
+                } else {
+                    // Convert other errors into an appropriate client error
+                    network_interface::DeleteError::into_external(e)
+                }
+            })
     }
 
     /// Invoked by a sled agent to publish an updated runtime state for an
