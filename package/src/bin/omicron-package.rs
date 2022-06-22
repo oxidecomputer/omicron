@@ -42,7 +42,8 @@ struct Args {
         short,
         long,
         default_value = "package-manifest.toml",
-        help = "Path to package manifest toml file"
+        help = "Path to package manifest toml file",
+        action
     )]
     manifest: PathBuf,
 
@@ -362,9 +363,10 @@ fn do_install(
 }
 
 fn uninstall_all_omicron_zones() -> Result<()> {
-    for zone in zone::Zones::get()? {
+    zone::Zones::get()?.into_par_iter().try_for_each(|zone| -> Result<()> {
         zone::Zones::halt_and_remove(zone.name())?;
-    }
+        Ok(())
+    })?;
     Ok(())
 }
 

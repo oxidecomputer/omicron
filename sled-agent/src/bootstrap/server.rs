@@ -9,9 +9,11 @@ use super::config::Config;
 use super::params::version;
 use super::params::Request;
 use super::params::RequestEnvelope;
+use super::trust_quorum::ShareDistribution;
 use super::views::Response;
 use super::views::ResponseEnvelope;
 use crate::config::Config as SledConfig;
+use crate::sp::AsyncReadWrite;
 use crate::sp::SpHandle;
 use crate::sp::SprocketsRole;
 use slog::Drain;
@@ -23,7 +25,16 @@ use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 use tokio::net::TcpStream;
+use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
+
+pub enum TrustQuorumMembership {
+    Uninitialized,
+    // TODO-cleanup `ShareDistribution` is optional here because we still
+    // support dev/test environments that do not use a trust quorum. Eventually
+    // it should be non-optional.
+    Known(Arc<Option<ShareDistribution>>),
+}
 
 /// Wraps a [Agent] object, and provides helper methods for exposing it
 /// via an HTTP interface.
@@ -53,21 +64,30 @@ impl Server {
         }
 
         info!(log, "detecting (real or simulated) SP");
-        let sp = SpHandle::detect(&config.sp_config, &sled_config, &log)
-            .await
-            .map_err(|err| format!("Failed to detect local SP: {err}"))?;
+        let sp = SpHandle::detect(
+            config.sp_config.as_ref().map(|c| &c.local_sp),
+            &sled_config,
+            &log,
+        )
+        .await
+        .map_err(|err| format!("Failed to detect local SP: {err}"))?;
 
         info!(log, "setting up bootstrap agent server");
-        let bootstrap_agent = Arc::new(
+        let (bootstrap_agent, trust_quorum) =
             Agent::new(log.clone(), sled_config, address, sp.clone())
                 .await
-                .map_err(|e| e.to_string())?,
-        );
+                .map_err(|e| e.to_string())?;
+        let bootstrap_agent = Arc::new(bootstrap_agent);
 
-        let ba = Arc::clone(&bootstrap_agent);
         let ba_log = log.new(o!("component" => "BootstrapAgentServer"));
-        let inner =
-            Inner::start(config.bind_address, sp.clone(), ba, ba_log).await?;
+        let inner = Inner::start(
+            config.bind_address,
+            sp.clone(),
+            trust_quorum,
+            Arc::clone(&bootstrap_agent),
+            ba_log,
+        )
+        .await?;
 
         let server = Server { bootstrap_agent, inner };
 
@@ -108,6 +128,7 @@ impl Server {
 struct Inner {
     listener: TcpListener,
     sp: Option<SpHandle>,
+    trust_quorum: TrustQuorumMembership,
     bootstrap_agent: Arc<Agent>,
     log: Logger,
 }
@@ -115,7 +136,10 @@ struct Inner {
 impl Inner {
     async fn start(
         bind_address: SocketAddrV6,
+        // TODO-cleanup `sp` is optional because we support running without an
+        // SP / any trust quorum mechanisms. Eventually it should be required.
         sp: Option<SpHandle>,
+        trust_quorum: TrustQuorumMembership,
         bootstrap_agent: Arc<Agent>,
         log: Logger,
     ) -> Result<JoinHandle<Result<(), String>>, String> {
@@ -124,15 +148,20 @@ impl Inner {
                 format!("could not bind to {bind_address}: {err}")
             })?;
         info!(log, "Started listening"; "local_addr" => %bind_address);
-        let inner = Inner { listener, sp, bootstrap_agent, log };
+        let inner = Inner { listener, sp, trust_quorum, bootstrap_agent, log };
         Ok(tokio::spawn(inner.run()))
     }
 
-    // Run our sprockets server. The only `.await` point is when `accept()`ing
-    // on our bound socket, so we can be cleanly shut down by our caller
-    // `.abort()`ing our task, which will not affect any already-accepted
-    // sockets (which are spawned onto detached tokio tasks).
     async fn run(self) -> Result<(), String> {
+        // Do we already have our trust quorum share? If not, we need to wait
+        // for RSS to send us a sled agent init request.
+        let trust_quorum = match self.trust_quorum {
+            TrustQuorumMembership::Uninitialized => {
+                self.wait_for_sled_initialization().await?
+            }
+            TrustQuorumMembership::Known(quorum) => quorum,
+        };
+
         loop {
             let (stream, remote_addr) =
                 self.listener.accept().await.map_err(|err| {
@@ -143,9 +172,57 @@ impl Inner {
             info!(log, "Accepted connection");
 
             let sp = self.sp.clone();
-            let ba = Arc::clone(&self.bootstrap_agent);
+            let trust_quorum = Arc::clone(&trust_quorum);
             tokio::spawn(async move {
-                match serve_single_request(stream, sp, ba, &log).await {
+                match serve_request_after_quorum_initialization(
+                    stream,
+                    sp,
+                    trust_quorum.as_ref(),
+                    &log,
+                )
+                .await
+                {
+                    Ok(()) => info!(log, "Connection closed"),
+                    Err(err) => warn!(log, "Connection failed"; "err" => err),
+                }
+            });
+        }
+    }
+
+    async fn wait_for_sled_initialization(
+        &self,
+    ) -> Result<Arc<Option<ShareDistribution>>, String> {
+        let (tx_share, mut rx_share) = mpsc::channel(1);
+
+        loop {
+            // Wait for either a new client or a response on our channel sent by
+            // a task spawned for a previously-accepted client that provides us
+            // our quorum share.
+            let (stream, remote_addr) = tokio::select! {
+                share = rx_share.recv() => {
+                    // `share` can never be `None`, as we're holding
+                    // `tx_share`; we can `.unwrap()` it.
+                    return Ok(Arc::new(share.unwrap()));
+                }
+                result = self.listener.accept() => {
+                    result.map_err(|err| {
+                        format!("accept() on already-bound socket failed: {err}")
+                    })?
+                }
+            };
+
+            let log = self.log.new(o!("remote_addr" => remote_addr));
+            info!(log, "Accepted connection");
+
+            let sp = self.sp.clone();
+            let ba = Arc::clone(&self.bootstrap_agent);
+            let tx_share = tx_share.clone();
+            tokio::spawn(async move {
+                match serve_request_before_quorum_initialization(
+                    stream, sp, &ba, tx_share, &log,
+                )
+                .await
+                {
                     Ok(()) => info!(log, "Connection closed"),
                     Err(err) => warn!(log, "Connection failed"; "err" => err),
                 }
@@ -154,26 +231,107 @@ impl Inner {
     }
 }
 
-async fn serve_single_request(
+async fn serve_request_before_quorum_initialization(
     stream: TcpStream,
     sp: Option<SpHandle>,
-    bootstrap_agent: Arc<Agent>,
+    bootstrap_agent: &Agent,
+    tx_share: mpsc::Sender<Option<ShareDistribution>>,
     log: &Logger,
 ) -> Result<(), String> {
+    // Establish sprockets session (if we have an SP).
+    let mut stream = crate::sp::maybe_wrap_stream(
+        stream,
+        &sp,
+        SprocketsRole::Server,
+        None, // We don't have our trust quorum members yet
+        log,
+    )
+    .await
+    .map_err(|err| format!("Failed to establish sprockets session: {err}"))?;
+
+    let response = match read_request(&mut stream).await? {
+        Request::SledAgentRequest(request) => {
+            match bootstrap_agent.request_agent(&*request).await {
+                Ok(response) => {
+                    // If this send fails, it means our caller already received
+                    // our share from a different
+                    // `serve_request_before_quorum_initialization()` task
+                    // (i.e., from another incoming request from RSS). We'll
+                    // ignore such failures.
+                    let _ =
+                        tx_share.send(request.trust_quorum_share.clone()).await;
+
+                    Ok(Response::SledAgentResponse(response))
+                }
+                Err(err) => {
+                    warn!(log, "Sled agent request failed"; "err" => %err);
+                    Err(format!("Sled agent request failed: {err}"))
+                }
+            }
+        }
+        Request::ShareRequest => {
+            warn!(log, "Share requested before we have one");
+            Err("Share request failed: share unavailable".to_string())
+        }
+    };
+
+    write_response(&mut stream, response).await
+}
+
+async fn serve_request_after_quorum_initialization(
+    stream: TcpStream,
+    // TODO-cleanup `sp` and `tx_share` are optional while we still allow
+    // trust-quorum-free dev/test setups. Eventually they should be required.
+    sp: Option<SpHandle>,
+    trust_quorum_share: &Option<ShareDistribution>,
+    log: &Logger,
+) -> Result<(), String> {
+    // Establish sprockets session (if we have an SP).
+    let mut stream = crate::sp::maybe_wrap_stream(
+        stream,
+        &sp,
+        SprocketsRole::Server,
+        trust_quorum_share
+            .as_ref()
+            .map(|dist| dist.member_device_id_certs.as_slice()),
+        log,
+    )
+    .await
+    .map_err(|err| format!("Failed to establish sprockets session: {err}"))?;
+
+    let response = match read_request(&mut stream).await? {
+        Request::SledAgentRequest(request) => {
+            warn!(
+                log, "Received sled agent request after we're initialized";
+                "request" => ?request,
+            );
+            Err("Sled agent already initialized".to_string())
+        }
+        Request::ShareRequest => {
+            match trust_quorum_share {
+                Some(dist) => Ok(Response::ShareResponse(dist.share.clone())),
+                None => {
+                    // TODO-cleanup Remove this case once we always use trust
+                    // quorum.
+                    warn!(log, "Received share request, but we have no quorum");
+                    Err("No trust quorum in use".to_string())
+                }
+            }
+        }
+    };
+
+    write_response(&mut stream, response).await
+}
+
+async fn read_request(
+    stream: &mut Box<dyn AsyncReadWrite>,
+) -> Result<Request<'static>, String> {
     // Bound to avoid allocating an unreasonable amount of memory from a bogus
     // length prefix from a client. We authenticate clients via sprockets before
     // allocating based on the length prefix they send, so it should be fine to
     // be a little sloppy here and just pick something far larger than we ever
     // expect to see.
     const MAX_REQUEST_LEN: u32 = 128 << 20;
-
-    // Establish sprockets session (if we have an SP).
-    let mut stream =
-        crate::sp::maybe_wrap_stream(stream, &sp, SprocketsRole::Server, log)
-            .await
-            .map_err(|err| {
-                format!("Failed to establish sprockets session: {err}")
-            })?;
 
     // Read request, length prefix first.
     let request_length = stream
@@ -194,8 +352,8 @@ async fn serve_single_request(
     })?;
 
     // Deserialize request.
-    let envelope: RequestEnvelope =
-        serde_json::from_slice(&buf).map_err(|err| {
+    let envelope: RequestEnvelope<'static> = serde_json::from_slice(&buf)
+        .map_err(|err| {
             format!("Failed to deserialize request envelope: {err}")
         })?;
 
@@ -206,30 +364,16 @@ async fn serve_single_request(
         other => return Err(format!("Unsupported version: {other}")),
     }
 
-    // Handle request.
-    let response = match envelope.request {
-        Request::SledAgentRequest(request) => {
-            match bootstrap_agent.request_agent(&*request).await {
-                Ok(response) => Ok(Response::SledAgentResponse(response)),
-                Err(err) => {
-                    warn!(log, "Sled agent request failed"; "err" => %err);
-                    Err(format!("Sled agent request failed: {err}"))
-                }
-            }
-        }
-        Request::ShareRequest => match bootstrap_agent.secret_share().await {
-            Some(share) => Ok(Response::ShareResponse(share)),
-            None => {
-                warn!(log, "Share requested before we have one");
-                Err("Share request failed: share unavailable".to_string())
-            }
-        },
-    };
+    Ok(envelope.request)
+}
 
+async fn write_response(
+    stream: &mut Box<dyn AsyncReadWrite>,
+    response: Result<Response, String>,
+) -> Result<(), String> {
     // Build and serialize response.
     let envelope = ResponseEnvelope { version: version::V1, response };
-    buf.clear();
-    serde_json::to_writer(&mut buf, &envelope)
+    let buf = serde_json::to_vec(&envelope)
         .map_err(|err| format!("Failed to serialize response: {err}"))?;
 
     // Write response, length prefix first.

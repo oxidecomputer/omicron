@@ -151,8 +151,10 @@ command line interface.
       "name": "alpine",
       "description": "boot from propolis zone blob!",
       "block_size": 512,
-      "distribution": "alpine",
-      "version": "propolis-blob",
+      "distribution": {
+        "name": "alpine",
+        "version": "propolis-blob"
+      },
       "source": {
         "type": "you_can_boot_anything_as_long_as_its_alpine"
       }
@@ -164,8 +166,10 @@ command line interface.
       "name": "crucible-tester-sparse",
       "description": "boot from a url!",
       "block_size": 512,
-      "distribution": "debian",
-      "version": "9",
+      "distribution": {
+        "name": "debian",
+        "version": "9"
+      },
       "source": {
         "type": "url",
         "url": "http://[fd00:1122:3344:101::15]/crucible-tester-sparse.img"

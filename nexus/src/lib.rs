@@ -29,7 +29,7 @@ pub mod updates; // public for testing
 
 pub use app::test_interfaces::TestInterfaces;
 pub use app::Nexus;
-pub use config::Config;
+pub use config::{Config, PackageConfig};
 pub use context::ServerContext;
 pub use crucible_agent_client;
 use external_api::http_entrypoints::external_api;
@@ -85,15 +85,15 @@ impl Server {
         rack_id: Uuid,
         log: &Logger,
     ) -> Result<Server, String> {
-        let log = log.new(o!("name" => config.id.to_string()));
+        let log = log.new(o!("name" => config.deployment.id.to_string()));
         info!(log, "setting up nexus server");
 
         let ctxlog = log.new(o!("component" => "ServerContext"));
-        let pool = db::Pool::new(&config.database);
-        let apictx = ServerContext::new(rack_id, ctxlog, pool, &config)?;
+
+        let apictx = ServerContext::new(rack_id, ctxlog, &config)?;
 
         let http_server_starter_external = dropshot::HttpServerStarter::new(
-            &config.dropshot_external,
+            &config.deployment.dropshot_external,
             external_api(),
             Arc::clone(&apictx),
             &log.new(o!("component" => "dropshot_external")),
@@ -101,7 +101,7 @@ impl Server {
         .map_err(|error| format!("initializing external server: {}", error))?;
 
         let http_server_starter_internal = dropshot::HttpServerStarter::new(
-            &config.dropshot_internal,
+            &config.deployment.dropshot_internal,
             internal_api(),
             Arc::clone(&apictx),
             &log.new(o!("component" => "dropshot_internal")),
@@ -153,12 +153,12 @@ impl Server {
 /// Run an instance of the [Server].
 pub async fn run_server(config: &Config) -> Result<(), String> {
     use slog::Drain;
-    let (drain, registration) = slog_dtrace::with_drain(
-        config
-            .log
-            .to_logger("nexus")
-            .map_err(|message| format!("initializing logger: {}", message))?,
-    );
+    let (drain, registration) =
+        slog_dtrace::with_drain(
+            config.pkg.log.to_logger("nexus").map_err(|message| {
+                format!("initializing logger: {}", message)
+            })?,
+        );
     let log = slog::Logger::root(drain.fuse(), slog::o!());
     if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
         let msg = format!("failed to register DTrace probes: {}", e);

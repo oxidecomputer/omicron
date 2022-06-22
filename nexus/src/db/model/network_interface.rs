@@ -4,8 +4,13 @@
 
 use super::{MacAddr, VpcSubnet};
 use crate::db::identity::Resource;
+use crate::db::model::Name;
 use crate::db::schema::network_interface;
+use crate::external_api::params;
+use chrono::DateTime;
+use chrono::Utc;
 use db_macros::Resource;
+use diesel::AsChangeset;
 use omicron_common::api::external;
 use uuid::Uuid;
 
@@ -69,5 +74,28 @@ impl IncompleteNetworkInterface {
         };
         let identity = NetworkInterfaceIdentity::new(interface_id, identity);
         Ok(Self { identity, instance_id, subnet, vpc_id, ip })
+    }
+}
+
+/// Describes a set of updates for the [`NetworkInterface`] model.
+#[derive(AsChangeset, Debug, Clone)]
+#[diesel(table_name = network_interface)]
+pub struct NetworkInterfaceUpdate {
+    pub name: Option<Name>,
+    pub description: Option<String>,
+    pub time_modified: DateTime<Utc>,
+    #[diesel(column_name = is_primary)]
+    pub make_primary: Option<bool>,
+}
+
+impl From<params::NetworkInterfaceUpdate> for NetworkInterfaceUpdate {
+    fn from(params: params::NetworkInterfaceUpdate) -> Self {
+        let make_primary = if params.make_primary { Some(true) } else { None };
+        Self {
+            name: params.identity.name.map(|n| n.into()),
+            description: params.identity.description,
+            time_modified: Utc::now(),
+            make_primary,
+        }
     }
 }

@@ -4,24 +4,30 @@
 
 //! Rack Setup Service implementation
 
-use super::config::{SetupServiceConfig as Config, SledRequest};
-use crate::bootstrap::config::BOOTSTRAP_AGENT_PORT;
-use crate::bootstrap::discovery::PeerMonitorObserver;
-use crate::bootstrap::params::SledAgentRequest;
-use crate::bootstrap::rss_handle::BootstrapAgentHandle;
-use crate::bootstrap::trust_quorum::{RackSecret, ShareDistribution};
-use crate::params::ServiceRequest;
-use omicron_common::address::{get_sled_address, ReservedRackSubnet};
+use super::config::{HardcodedSledRequest, SetupServiceConfig as Config};
+use crate::bootstrap::{
+    config::BOOTSTRAP_AGENT_PORT,
+    discovery::PeerMonitorObserver,
+    params::SledAgentRequest,
+    rss_handle::BootstrapAgentHandle,
+    trust_quorum::{RackSecret, ShareDistribution},
+};
+use crate::params::{ServiceRequest, ServiceType};
+use omicron_common::address::{
+    get_sled_address, ReservedRackSubnet, DNS_PORT, DNS_SERVER_PORT,
+};
 use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
 };
 use serde::{Deserialize, Serialize};
 use slog::Logger;
+use sprockets_host::Ed25519Certificate;
 use std::collections::{HashMap, HashSet};
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::path::PathBuf;
 use thiserror::Error;
 use tokio::sync::Mutex;
+use uuid::Uuid;
 
 /// Describes errors which may occur while operating the setup service.
 #[derive(Error, Debug)]
@@ -56,7 +62,7 @@ pub enum SetupServiceError {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 struct SledAllocation {
     initialization_request: SledAgentRequest,
-    services_request: SledRequest,
+    services_request: HardcodedSledRequest,
 }
 
 /// The interface to the Rack Setup Service.
@@ -80,11 +86,20 @@ impl Service {
         config: Config,
         peer_monitor: PeerMonitorObserver,
         local_bootstrap_agent: BootstrapAgentHandle,
+        // TODO-cleanup: We should be collecting the device ID certs of all
+        // trust quorum members over the management network. Currently we don't
+        // have a management network, so we hard-code the list of members and
+        // accept it as a parameter instead.
+        member_device_id_certs: Vec<Ed25519Certificate>,
     ) -> Self {
         let handle = tokio::task::spawn(async move {
             let svc = ServiceInner::new(log.clone(), peer_monitor);
             if let Err(e) = svc
-                .inject_rack_setup_requests(&config, local_bootstrap_agent)
+                .inject_rack_setup_requests(
+                    &config,
+                    local_bootstrap_agent,
+                    &member_device_id_certs,
+                )
                 .await
             {
                 warn!(log, "RSS injection failed: {}", e);
@@ -193,7 +208,7 @@ impl ServiceInner {
     async fn initialize_services(
         &self,
         sled_address: SocketAddr,
-        services: &Vec<crate::params::ServiceRequest>,
+        services: &Vec<ServiceRequest>,
     ) -> Result<(), SetupServiceError> {
         let dur = std::time::Duration::from_secs(60);
         let client = reqwest::ClientBuilder::new()
@@ -269,18 +284,31 @@ impl ServiceInner {
         &self,
         config: &Config,
         bootstrap_addrs: Vec<Ipv6Addr>,
+        member_device_id_certs: &[Ed25519Certificate],
     ) -> Result<HashMap<SocketAddrV6, SledAllocation>, SetupServiceError> {
         // Create a rack secret, unless we're in the single-sled case.
         let mut maybe_rack_secret_shares = generate_rack_secret(
             config.rack_secret_threshold,
-            bootstrap_addrs.len(),
+            member_device_id_certs,
             &self.log,
         )?;
 
-        // Sanity check that the returned iterator (if we got one) is the length
-        // we expect.
+        // Confirm that the returned iterator (if we got one) is the length we
+        // expect.
         if let Some(rack_secret_shares) = maybe_rack_secret_shares.as_ref() {
-            assert_eq!(rack_secret_shares.len(), bootstrap_addrs.len());
+            // TODO-cleanup Asserting here seems fine as long as
+            // `member_device_id_certs` is hard-coded from a config file, but
+            // once we start collecting them over the management network we
+            // should probably attach them at the type level to the bootstrap
+            // addrs, which would remove the need for this assertion.
+            assert_eq!(
+                rack_secret_shares.len(),
+                bootstrap_addrs.len(),
+                concat!(
+                    "Number of trust quorum members does not match ",
+                    "number of bootstrap addresses"
+                )
+            );
         }
 
         let bootstrap_addrs = bootstrap_addrs.into_iter().enumerate();
@@ -298,18 +326,31 @@ impl ServiceInner {
                     if idx < config.requests.len() {
                         config.requests[idx].clone()
                     } else {
-                        SledRequest::default()
+                        HardcodedSledRequest::default()
                     }
                 };
 
-                // The first enumerated addresses get assigned the additional
+                // The first enumerated sleds get assigned the additional
                 // responsibility of being internal DNS servers.
                 if idx < dns_subnets.len() {
                     let dns_subnet = &dns_subnets[idx];
+                    let dns_addr = dns_subnet.dns_address().ip();
                     request.dns_services.push(ServiceRequest {
+                        id: Uuid::new_v4(),
                         name: "internal-dns".to_string(),
-                        addresses: vec![dns_subnet.dns_address().ip()],
+                        addresses: vec![dns_addr],
                         gz_addresses: vec![dns_subnet.gz_address().ip()],
+                        service_type: ServiceType::InternalDns {
+                            server_address: SocketAddrV6::new(
+                                dns_addr,
+                                DNS_SERVER_PORT,
+                                0,
+                                0,
+                            ),
+                            dns_address: SocketAddrV6::new(
+                                dns_addr, DNS_PORT, 0, 0,
+                            ),
+                        },
                     });
                 }
 
@@ -356,8 +397,10 @@ impl ServiceInner {
         }
 
         // Once we've constructed a plan, write it down to durable storage.
-        let serialized_plan = toml::Value::try_from(&plan)
-            .expect("Cannot serialize configuration");
+        let serialized_plan =
+            toml::Value::try_from(&plan).unwrap_or_else(|e| {
+                panic!("Cannot serialize configuration: {:#?}: {}", plan, e)
+            });
         let plan_str = toml::to_string(&serialized_plan)
             .expect("Cannot turn config to string");
 
@@ -441,6 +484,7 @@ impl ServiceInner {
         &self,
         config: &Config,
         local_bootstrap_agent: BootstrapAgentHandle,
+        member_device_id_certs: &[Ed25519Certificate],
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Injecting RSS configuration: {:#?}", config);
 
@@ -484,7 +528,7 @@ impl ServiceInner {
             plan
         } else {
             info!(self.log, "Creating new allocation plan");
-            self.create_plan(config, addrs).await?
+            self.create_plan(config, addrs, member_device_id_certs).await?
         };
 
         // Forward the sled initialization requests to our sled-agent.
@@ -596,16 +640,17 @@ impl ServiceInner {
     }
 }
 
-fn generate_rack_secret(
+fn generate_rack_secret<'a>(
     rack_secret_threshold: usize,
-    total_shares: usize,
+    member_device_id_certs: &'a [Ed25519Certificate],
     log: &Logger,
 ) -> Result<
-    Option<impl ExactSizeIterator<Item = ShareDistribution>>,
+    Option<impl ExactSizeIterator<Item = ShareDistribution> + 'a>,
     SetupServiceError,
 > {
     // We do not generate a rack secret if we only have a single sled or if our
     // config specifies that the threshold for unlock is only a single sled.
+    let total_shares = member_device_id_certs.len();
     if total_shares <= 1 {
         info!(log, "Skipping rack secret creation (only one sled present)");
         return Ok(None);
@@ -630,9 +675,9 @@ fn generate_rack_secret(
 
     Ok(Some(shares.into_iter().map(move |share| ShareDistribution {
         threshold: rack_secret_threshold,
-        total_shares,
         verifier: verifier.clone(),
         share,
+        member_device_id_certs: member_device_id_certs.to_vec(),
     })))
 }
 
@@ -640,23 +685,38 @@ fn generate_rack_secret(
 mod tests {
     use super::*;
     use omicron_test_utils::dev::test_setup_log;
+    use sprockets_common::certificates::Ed25519Signature;
+    use sprockets_common::certificates::KeyType;
+
+    fn dummy_certs(n: usize) -> Vec<Ed25519Certificate> {
+        vec![
+            Ed25519Certificate {
+                subject_key_type: KeyType::DeviceId,
+                subject_public_key: sprockets_host::Ed25519PublicKey([0; 32]),
+                signer_key_type: KeyType::Manufacturing,
+                signature: Ed25519Signature([0; 64]),
+            };
+            n
+        ]
+    }
 
     #[test]
     fn test_generate_rack_secret() {
         let logctx = test_setup_log("test_generate_rack_secret");
 
-        // No secret generated if total_shares <= 1
-        let maybe_shares = generate_rack_secret(10, 1, &logctx.log).unwrap();
-        assert!(maybe_shares.is_none());
+        // No secret generated if we have <= 1 sled
+        assert!(generate_rack_secret(10, &dummy_certs(1), &logctx.log)
+            .unwrap()
+            .is_none());
 
         // No secret generated if threshold <= 1
-        let maybe_shares = generate_rack_secret(1, 10, &logctx.log).unwrap();
-        assert!(maybe_shares.is_none());
+        assert!(generate_rack_secret(1, &dummy_certs(10), &logctx.log)
+            .unwrap()
+            .is_none());
 
-        // Secret generation fails if threshold > total shares
-        let maybe_shares = generate_rack_secret(10, 5, &logctx.log);
+        // Secret generation fails if threshold > total sleds
         assert!(matches!(
-            maybe_shares,
+            generate_rack_secret(10, &dummy_certs(5), &logctx.log),
             Err(SetupServiceError::SplitRackSecret(_))
         ));
 
@@ -667,8 +727,9 @@ mod tests {
         // * each share is distinct
         for total_shares in 2..=32 {
             for threshold in 2..=total_shares {
+                let certs = dummy_certs(total_shares);
                 let shares =
-                    generate_rack_secret(threshold, total_shares, &logctx.log)
+                    generate_rack_secret(threshold, &certs, &logctx.log)
                         .unwrap()
                         .unwrap();
 

@@ -117,6 +117,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(project_instances_instance_reboot)?;
         api.register(project_instances_instance_start)?;
         api.register(project_instances_instance_stop)?;
+        api.register(project_instances_instance_serial_get)?;
 
         // Globally-scoped Images API
         api.register(images_get)?;
@@ -156,6 +157,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(instance_network_interfaces_post)?;
         api.register(instance_network_interfaces_get)?;
         api.register(instance_network_interfaces_get_interface)?;
+        api.register(instance_network_interfaces_put_interface)?;
         api.register(instance_network_interfaces_delete_interface)?;
 
         api.register(vpc_routers_get)?;
@@ -263,7 +265,7 @@ pub fn external_api() -> NexusApiDescription {
 }]
 async fn policy_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-) -> Result<HttpResponseOk<shared::Policy<authz::FleetRoles>>, HttpError> {
+) -> Result<HttpResponseOk<shared::Policy<authz::FleetRole>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
 
@@ -283,8 +285,8 @@ async fn policy_get(
 }]
 async fn policy_put(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    new_policy: TypedBody<shared::Policy<authz::FleetRoles>>,
-) -> Result<HttpResponseOk<shared::Policy<authz::FleetRoles>>, HttpError> {
+    new_policy: TypedBody<shared::Policy<authz::FleetRole>>,
+) -> Result<HttpResponseOk<shared::Policy<authz::FleetRole>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let new_policy = new_policy.into_inner();
@@ -420,7 +422,7 @@ async fn silos_delete_silo(
 async fn silos_get_silo_policy(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<SiloPathParam>,
-) -> Result<HttpResponseOk<shared::Policy<authz::SiloRoles>>, HttpError> {
+) -> Result<HttpResponseOk<shared::Policy<authz::SiloRole>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -443,8 +445,8 @@ async fn silos_get_silo_policy(
 async fn silos_put_silo_policy(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<SiloPathParam>,
-    new_policy: TypedBody<shared::Policy<authz::SiloRoles>>,
-) -> Result<HttpResponseOk<shared::Policy<authz::SiloRoles>>, HttpError> {
+    new_policy: TypedBody<shared::Policy<authz::SiloRole>>,
+) -> Result<HttpResponseOk<shared::Policy<authz::SiloRole>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -724,7 +726,7 @@ async fn organizations_put_organization(
 async fn organization_get_policy(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<OrganizationPathParam>,
-) -> Result<HttpResponseOk<shared::Policy<authz::OrganizationRoles>>, HttpError>
+) -> Result<HttpResponseOk<shared::Policy<authz::OrganizationRole>>, HttpError>
 {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -749,8 +751,8 @@ async fn organization_get_policy(
 async fn organization_put_policy(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<OrganizationPathParam>,
-    new_policy: TypedBody<shared::Policy<authz::OrganizationRoles>>,
-) -> Result<HttpResponseOk<shared::Policy<authz::OrganizationRoles>>, HttpError>
+    new_policy: TypedBody<shared::Policy<authz::OrganizationRole>>,
+) -> Result<HttpResponseOk<shared::Policy<authz::OrganizationRole>>, HttpError>
 {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -956,7 +958,7 @@ async fn organization_projects_put_project(
 async fn organization_projects_get_project_policy(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
-) -> Result<HttpResponseOk<shared::Policy<authz::ProjectRoles>>, HttpError> {
+) -> Result<HttpResponseOk<shared::Policy<authz::ProjectRole>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -982,8 +984,8 @@ async fn organization_projects_get_project_policy(
 async fn organization_projects_put_project_policy(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
-    new_policy: TypedBody<shared::Policy<authz::ProjectRoles>>,
-) -> Result<HttpResponseOk<shared::Policy<authz::ProjectRoles>>, HttpError> {
+    new_policy: TypedBody<shared::Policy<authz::ProjectRole>>,
+) -> Result<HttpResponseOk<shared::Policy<authz::ProjectRole>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -1416,6 +1418,39 @@ async fn project_instances_instance_stop(
             )
             .await?;
         Ok(HttpResponseAccepted(instance.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Get contents of an instance's serial console.
+#[endpoint {
+    method = GET,
+    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/serial",
+    tags = ["instances"],
+}]
+async fn project_instances_instance_serial_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<InstancePathParam>,
+    query_params: Query<params::InstanceSerialConsoleRequest>,
+) -> Result<HttpResponseOk<params::InstanceSerialConsoleData>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
+    let project_name = &path.project_name;
+    let instance_name = &path.instance_name;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let data = nexus
+            .instance_serial_console_data(
+                &opctx,
+                &organization_name,
+                &project_name,
+                &instance_name,
+                &query_params.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseOk(data))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1874,8 +1909,6 @@ pub struct NetworkInterfacePathParam {
 /// are any secondary interfaces. A new primary interface must be designated
 /// first. The primary interface can be deleted if there are no secondary
 /// interfaces.
-// TODO-completeness: Add API for modifying an interface, including setting as
-// new primary. See https://github.com/oxidecomputer/omicron/issues/1153.
 #[endpoint {
     method = DELETE,
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}",
@@ -1934,6 +1967,42 @@ async fn instance_network_interfaces_get_interface(
                 project_name,
                 instance_name,
                 interface_name,
+            )
+            .await?;
+        Ok(HttpResponseOk(NetworkInterface::from(interface)))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Update information about an instance's network interface
+#[endpoint {
+    method = PUT,
+    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}",
+    tags = ["instances"],
+}]
+async fn instance_network_interfaces_put_interface(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<NetworkInterfacePathParam>,
+    updated_iface: TypedBody<params::NetworkInterfaceUpdate>,
+) -> Result<HttpResponseOk<NetworkInterface>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
+    let project_name = &path.project_name;
+    let instance_name = &path.instance_name;
+    let interface_name = &path.interface_name;
+    let updated_iface = updated_iface.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let interface = nexus
+            .network_interface_update(
+                &opctx,
+                organization_name,
+                project_name,
+                instance_name,
+                interface_name,
+                updated_iface,
             )
             .await?;
         Ok(HttpResponseOk(NetworkInterface::from(interface)))

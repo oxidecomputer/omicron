@@ -39,7 +39,7 @@ pub enum BuildCommand {
         /// The output directory, where artifacts should be placed.
         ///
         /// Defaults to "out".
-        #[clap(long = "out", default_value = "out")]
+        #[clap(long = "out", default_value = "out", action)]
         artifact_dir: PathBuf,
     },
     /// Checks the packages specified in a manifest, without building.
@@ -54,13 +54,13 @@ pub enum DeployCommand {
         /// The directory from which artifacts will be pulled.
         ///
         /// Should match the format from the Package subcommand.
-        #[clap(long = "in", default_value = "out")]
+        #[clap(long = "in", default_value = "out", action)]
         artifact_dir: PathBuf,
 
         /// The directory to which artifacts will be installed.
         ///
         /// Defaults to "/opt/oxide".
-        #[clap(long = "out", default_value = "/opt/oxide")]
+        #[clap(long = "out", default_value = "/opt/oxide", action)]
         install_dir: PathBuf,
     },
     /// Removes the packages from the target machine.
@@ -68,13 +68,13 @@ pub enum DeployCommand {
         /// The directory from which artifacts were be pulled.
         ///
         /// Should match the format from the Package subcommand.
-        #[clap(long = "in", default_value = "out")]
+        #[clap(long = "in", default_value = "out", action)]
         artifact_dir: PathBuf,
 
         /// The directory to which artifacts were installed.
         ///
         /// Defaults to "/opt/oxide".
-        #[clap(long = "out", default_value = "/opt/oxide")]
+        #[clap(long = "out", default_value = "/opt/oxide", action)]
         install_dir: PathBuf,
     },
 }

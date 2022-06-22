@@ -8,7 +8,7 @@ use crate::dev::poll;
 use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Context;
-use omicron_common::config::PostgresConfigWithUrl;
+use omicron_common::postgres_config::PostgresConfigWithUrl;
 use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::ops::Deref;

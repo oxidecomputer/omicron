@@ -12,8 +12,8 @@ use omicron_sled_agent::bootstrap::{
     server as bootstrap_server,
 };
 use omicron_sled_agent::rack_setup::config::SetupServiceConfig as RssConfig;
+use omicron_sled_agent::sp::SimSpConfig;
 use omicron_sled_agent::{config::Config as SledConfig, server as sled_server};
-use sp_sim::config::GimletConfig;
 use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
@@ -27,7 +27,7 @@ enum Args {
     Openapi,
     /// Runs the Sled Agent server.
     Run {
-        #[clap(name = "CONFIG_FILE_PATH", parse(from_os_str))]
+        #[clap(name = "CONFIG_FILE_PATH", action)]
         config_path: PathBuf,
     },
 }
@@ -82,7 +82,7 @@ async fn do_run() -> Result<(), CmdError> {
             };
             let sp_config = if sp_config_path.exists() {
                 Some(
-                    GimletConfig::from_file(sp_config_path)
+                    SimSpConfig::from_file(sp_config_path)
                         .map_err(|e| CmdError::Failure(e.to_string()))?,
                 )
             } else {

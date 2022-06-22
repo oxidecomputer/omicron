@@ -434,6 +434,7 @@ async fn sdc_regions_ensure(
                             .collect(),
 
                         lossy: false,
+                        flush_timeout: None,
 
                         // all downstairs will expect encrypted blocks
                         key: Some(base64::encode({
@@ -454,6 +455,8 @@ async fn sdc_regions_ensure(
                         // TODO open a control socket for the whole volume, not
                         // in the sub volumes
                         control: None,
+                        metric_register: None,
+                        metric_collect: None,
                     },
                 },
             ],

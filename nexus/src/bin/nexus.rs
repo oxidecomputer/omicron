@@ -28,18 +28,20 @@ struct Args {
     #[clap(
         short = 'O',
         long = "openapi",
-        help = "Print the external OpenAPI Spec document and exit"
+        help = "Print the external OpenAPI Spec document and exit",
+        action
     )]
     openapi: bool,
 
     #[clap(
         short = 'I',
         long = "openapi-internal",
-        help = "Print the internal OpenAPI Spec document and exit"
+        help = "Print the internal OpenAPI Spec document and exit",
+        action
     )]
     openapi_internal: bool,
 
-    #[clap(name = "CONFIG_FILE_PATH", parse(from_os_str))]
+    #[clap(name = "CONFIG_FILE_PATH", action)]
     config_file_path: PathBuf,
 }
 

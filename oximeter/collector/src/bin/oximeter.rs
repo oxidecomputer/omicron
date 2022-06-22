@@ -28,12 +28,13 @@ struct Args {
     #[clap(
         short = 'O',
         long = "openapi",
-        help = "Print the external OpenAPI Spec document and exit"
+        help = "Print the external OpenAPI Spec document and exit",
+        action
     )]
     openapi: bool,
 
     /// Path to TOML file with configuration for the server
-    #[clap(name = "CONFIG_FILE", parse(from_os_str))]
+    #[clap(name = "CONFIG_FILE", action)]
     config_file: PathBuf,
 }
 

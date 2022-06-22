@@ -274,6 +274,7 @@ async fn test_oximeter_reregistration() {
 
     // Restart oximeter again, and verify that we have even more new data.
     context.oximeter = nexus_test_utils::start_oximeter(
+        context.logctx.log.new(o!("component" => "oximeter")),
         context.server.http_server_internal.local_addr(),
         context.clickhouse.port(),
         oximeter_id,

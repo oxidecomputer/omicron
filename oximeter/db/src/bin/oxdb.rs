@@ -54,11 +54,11 @@ fn level_from_str(s: &str) -> Result<Level, anyhow::Error> {
 #[derive(Debug, Parser)]
 struct OxDb {
     /// Port on which to connect to the database
-    #[clap(short, long, default_value = "8123")]
+    #[clap(short, long, default_value = "8123", action)]
     port: u16,
 
     /// Logging level
-    #[clap(short, long, default_value = "info", parse(try_from_str = level_from_str))]
+    #[clap(short, long, default_value = "info", value_parser = level_from_str)]
     log_level: Level,
 
     #[clap(subcommand)]
@@ -68,24 +68,24 @@ struct OxDb {
 #[derive(Debug, Args)]
 struct PopulateArgs {
     /// The number of samples to generate, per timeseries
-    #[clap(short = 'n', long, default_value = "100")]
+    #[clap(short = 'n', long, default_value = "100", action)]
     n_samples: usize,
 
     /// Number of projects to simulate
-    #[clap(short = 'p', long, default_value = "2")]
+    #[clap(short = 'p', long, default_value = "2", action)]
     n_projects: usize,
 
     /// Number of VM instances to simulate, _per project_
-    #[clap(short = 'i', long, default_value = "2")]
+    #[clap(short = 'i', long, default_value = "2", action)]
     n_instances: usize,
 
     /// Number of vCPUs to simulate, per instance.
-    #[clap(short = 'c', long, default_value = "4")]
+    #[clap(short = 'c', long, default_value = "4", action)]
     n_cpus: usize,
 
     /// If true, generate data and report logs, but do not actually insert anything into the
     /// database.
-    #[clap(short, long)]
+    #[clap(short, long, action)]
     dry_run: bool,
 }
 
@@ -110,26 +110,27 @@ enum Subcommand {
     Query {
         /// The name of the timeseries to search for. (Currently only `virtual_machine:cpu_busy`
         /// makes any sense.)
+        #[clap(action)]
         timeseries_name: String,
 
         /// Filters applied to the timeseries's fields.
-        #[clap(required = true, min_values(1))]
+        #[clap(required = true, min_values(1), action)]
         filters: Vec<String>,
 
         /// The start time to which the search is constrained, inclusive.
-        #[clap(long)]
+        #[clap(long, action)]
         start: Option<DateTime<Utc>>,
 
         /// The start time to which the search is constrained, exclusive.
-        #[clap(long, conflicts_with("start"))]
+        #[clap(long, conflicts_with("start"), action)]
         start_exclusive: Option<DateTime<Utc>>,
 
         /// The stop time to which the search is constrained, inclusive.
-        #[clap(long)]
+        #[clap(long, action)]
         end: Option<DateTime<Utc>>,
 
         /// The start time to which the search is constrained, exclusive.
-        #[clap(long, conflicts_with("end"))]
+        #[clap(long, conflicts_with("end"), action)]
         end_exclusive: Option<DateTime<Utc>>,
     },
 }
