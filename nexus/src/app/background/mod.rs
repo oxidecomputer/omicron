@@ -26,7 +26,7 @@ impl TaskRunner {
             loop {
                 // TODO: We may want triggers to exist here, to invoke this task
                 // more frequently (e.g., on Sled failure).
-                let opctx = nexus.opctx_for_background();
+                let opctx = nexus.opctx_for_service_balancer();
                 if let Err(e) = service_balancer.balance_services(&opctx).await
                 {
                     warn!(log, "Failed to balance services: {:?}", e);
