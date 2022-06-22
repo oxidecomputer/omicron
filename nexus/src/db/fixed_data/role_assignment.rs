@@ -26,7 +26,7 @@ lazy_static! {
             ),
             RoleAssignment::new(
                 IdentityType::UserBuiltin,
-                user_builtin::USER_BACKGROUND_WORK.id,
+                user_builtin::USER_SERVICE_BALANCER.id,
                 role_builtin::FLEET_ADMIN.resource_type,
                 *FLEET_ID,
                 role_builtin::FLEET_ADMIN.role_name,
