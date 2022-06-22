@@ -2260,6 +2260,7 @@ mod tests {
             matches!(result, Err(InsertError::NoAvailableIpAddresses)),
             "Address exhaustion should be detected and handled"
         );
+        context.success().await;
     }
 
     // Ensure that we can insert more than one interface for an instance,
