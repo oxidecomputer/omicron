@@ -66,35 +66,46 @@ pub struct AuthenticateParams {
 pub async fn client_authenticate(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     params: TypedBody<AuthenticateParams>,
-) -> Result<HttpResponseOk<ClientAuthentication>, HttpError> {
+) -> Result<Response<Body>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let params = params.into_inner();
     let handler = async {
-        // TODO: use build_oauth_response
         let opctx = nexus.opctx_external_authn();
-        let model = nexus.client_authenticate(&opctx, params.client_id).await?;
         let request = rqctx.request.lock().await;
-        let host = request
-            .headers()
-            .get(header::HOST)
-            .ok_or_else(|| {
-                HttpError::for_bad_request(
-                    None,
-                    String::from("missing Host header in request"),
+        let host = match request.headers().get(header::HOST) {
+            None => {
+                return build_oauth_response(
+                    StatusCode::BAD_REQUEST,
+                    &serde_json::json!({
+                        "error": "invalid_request",
+                        "error_description": "missing Host header",
+                    }),
                 )
-            })?
-            .to_str()
-            .map_err(|e| {
-                HttpError::for_bad_request(
-                    None,
-                    format!("could not decode Host header: {}", e),
-                )
-            })?;
-        let view = ClientAuthentication::from_model(model, host);
-        Ok(HttpResponseOk(dbg!(view)))
+            }
+            Some(host) => match host.to_str() {
+                Ok(host) => host,
+                Err(e) => {
+                    return build_oauth_response(
+                        StatusCode::BAD_REQUEST,
+                        &serde_json::json!({
+                            "error": "invalid_request",
+                            "error_description": format!("could not decode Host header: {}", e)
+                        }),
+                    )
+                }
+            },
+        };
+
+        let model = nexus.client_authenticate(&opctx, params.client_id).await?;
+        build_oauth_response(
+            StatusCode::OK,
+            &ClientAuthentication::from_model(model, host),
+        )
     };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+    // TODO: instrumentation doesn't work because we use `Response<Body>`
+    //apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+    handler.await
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]

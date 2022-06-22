@@ -29,21 +29,13 @@
           "required": true
         },
         "responses": {
-          "200": {
-            "description": "successful operation",
+          "default": {
+            "description": "",
             "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ClientAuthentication"
-                }
+              "*/*": {
+                "schema": {}
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -5665,41 +5657,6 @@
         "type": "integer",
         "format": "uint64",
         "minimum": 0
-      },
-      "ClientAuthentication": {
-        "description": "Response to an authentication request. See RFC 8628 §3.2 (Device Authorization Response).",
-        "type": "object",
-        "properties": {
-          "device_code": {
-            "description": "The device (client) verification code.",
-            "type": "string"
-          },
-          "expires_in": {
-            "description": "The lifetime in seconds of the `device_code` and `user_code`.",
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
-          },
-          "user_code": {
-            "description": "The end-user verification code.",
-            "type": "string"
-          },
-          "verification_uri": {
-            "description": "The end-user verification URI on the authorization server. The URI should be short and easy to remember as end users may be asked to manually type it into their user agent.",
-            "type": "string"
-          },
-          "verification_uri_complete": {
-            "description": "A verification URI that includes the `user_code` (or other information with the same function as the `user_code`), which is designed for non-textual transmission.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "device_code",
-          "expires_in",
-          "user_code",
-          "verification_uri",
-          "verification_uri_complete"
-        ]
       },
       "ClientVerificationParams": {
         "type": "object",
