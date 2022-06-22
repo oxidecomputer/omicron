@@ -128,7 +128,7 @@ impl Server {
         let config = internal.config;
 
         // Wait until RSS handoff completes.
-        let opctx = apictx.nexus.opctx_for_background();
+        let opctx = apictx.nexus.opctx_for_service_balancer();
         apictx.nexus.await_rack_initialization(&opctx).await;
 
         // With the exception of integration tests environments,
