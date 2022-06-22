@@ -2990,7 +2990,7 @@ impl DataStore {
         let builtin_users = [
             // Note: "db_init" is also a builtin user, but that one by necessity
             // is created with the database.
-            &*authn::USER_BACKGROUND_WORK,
+            &*authn::USER_SERVICE_BALANCER,
             &*authn::USER_INTERNAL_API,
             &*authn::USER_INTERNAL_READ,
             &*authn::USER_EXTERNAL_AUTHN,
