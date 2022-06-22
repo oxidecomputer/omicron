@@ -36,7 +36,6 @@ pub(crate) const BOOTSTRAP_PREFIX: u16 = 0xfdb0;
 /// IPv6 prefix mask for bootstrap addresses.
 pub(crate) const BOOTSTRAP_MASK: u8 = 64;
 
-
 /// Describes errors which may occur while operating the bootstrap service.
 #[derive(Error, Debug)]
 pub enum BootstrapError {
