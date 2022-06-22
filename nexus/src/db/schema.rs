@@ -471,7 +471,7 @@ table! {
 }
 
 table! {
-    client_authentication (device_code, client_id) {
+    client_authentication (client_id, device_code) {
         client_id -> Uuid,
         device_code -> Text,
         user_code -> Text,

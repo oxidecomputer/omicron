@@ -17,8 +17,6 @@ impl super::Nexus {
         opctx: &OpContext,
         client_id: Uuid,
     ) -> CreateResult<ClientAuthentication> {
-        // TODO-security: validate `client_id`
-
         let client_authn = ClientAuthentication::new(client_id);
         self.db_datastore.client_authenticate(opctx, client_authn).await
     }

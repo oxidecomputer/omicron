@@ -12,6 +12,7 @@ use dropshot::ResultsPage;
 use headers::authorization::Credentials;
 use omicron_nexus::authn::external::spoof;
 use omicron_nexus::db::identity::Asset;
+use serde_urlencoded;
 use std::convert::TryInto;
 use std::fmt::Debug;
 
@@ -130,6 +131,29 @@ impl<'a> RequestBuilder<'a> {
             None => self.body = hyper::Body::empty(),
         };
         self
+    }
+
+    /// Set the outgoing request body using URL encoding
+    /// and set the content type appropriately
+    ///
+    /// If `body` is `None`, the request body will be empty.
+    pub fn body_urlencoded<RequestBodyType: serde::Serialize>(
+        mut self,
+        body: Option<&RequestBodyType>,
+    ) -> Self {
+        let new_body = body.map(|b| {
+            serde_urlencoded::to_string(b)
+                .context("failed to URL-encode request body")
+        });
+        match new_body {
+            Some(Err(error)) => self.error = Some(error),
+            Some(Ok(new_body)) => self.body = hyper::Body::from(new_body),
+            None => self.body = hyper::Body::empty(),
+        };
+        self.header(
+            http::header::CONTENT_TYPE,
+            "application/x-www-form-urlencoded",
+        )
     }
 
     /// Record that we expect to get status code `expected_status` in the
@@ -337,16 +361,17 @@ impl<'a> RequestBuilder<'a> {
             body: response_body,
         };
         if status.is_client_error() || status.is_server_error() {
-            let error_body = test_response
-                .parsed_body::<dropshot::HttpErrorResponseBody>()
-                .context("parsing error body")?;
-            ensure!(
-                error_body.request_id == request_id_header,
-                "expected error response body to have request id {:?} \
-                (to match request-id header), bout found {:?}",
-                request_id_header,
-                error_body.request_id
-            );
+            if let Ok(error_body) =
+                test_response.parsed_body::<dropshot::HttpErrorResponseBody>()
+            {
+                ensure!(
+                    error_body.request_id == request_id_header,
+                    "expected error response body to have request id {:?} \
+                     (to match request-id header), but found {:?}",
+                    request_id_header,
+                    error_body.request_id
+                );
+            }
         }
 
         Ok(test_response)

@@ -427,23 +427,23 @@ impl From<model::SshKey> for SshKey {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ClientAuthentication {
     /// The device (client) verification code.
-    device_code: String,
+    pub device_code: String,
 
     /// The end-user verification code.
-    user_code: String,
+    pub user_code: String,
 
     /// The end-user verification URI on the authorization server.
     /// The URI should be short and easy to remember as end users
     /// may be asked to manually type it into their user agent.
-    verification_uri: String,
+    pub verification_uri: String,
 
     /// A verification URI that includes the `user_code` (or other
     /// information with the same function as the `user_code`),
     /// which is designed for non-textual transmission.
-    verification_uri_complete: String,
+    pub verification_uri_complete: String,
 
     /// The lifetime in seconds of the `device_code` and `user_code`.
-    expires_in: u16,
+    pub expires_in: u16,
 }
 
 impl ClientAuthentication {
@@ -471,10 +471,10 @@ impl ClientAuthentication {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ClientTokenGrant {
     /// The access token issued to the client.
-    access_token: String,
+    pub access_token: String,
 
     /// The type of the token issued, as described in RFC 6749 §7.1.
-    token_type: TokenType,
+    pub token_type: TokenType,
 }
 
 impl From<model::ClientToken> for ClientTokenGrant {
@@ -487,7 +487,7 @@ impl From<model::ClientToken> for ClientTokenGrant {
 }
 
 /// The kind of token granted.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum TokenType {
     Bearer,

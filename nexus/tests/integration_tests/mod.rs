@@ -5,6 +5,7 @@
 
 mod authn_http;
 mod basic;
+mod client_api;
 mod commands;
 mod console_api;
 mod datasets;
