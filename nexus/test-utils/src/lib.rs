@@ -124,7 +124,7 @@ pub async fn test_setup_with_config(
     // Perform the "handoff from RSS".
     //
     // However, RSS isn't running, so we'll do the handoff ourselves.
-    let opctx = internal_server.apictx.nexus.opctx_for_background();
+    let opctx = internal_server.apictx.nexus.opctx_for_service_balancer();
     internal_server
         .apictx
         .nexus
