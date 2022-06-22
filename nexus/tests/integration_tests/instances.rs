@@ -1032,19 +1032,17 @@ async fn test_instance_create_delete_network_interface(
         instance_post(client, url_instance.as_str(), InstanceOp::Start).await;
     instance_simulate(nexus, &instance.identity.id).await;
 
-    for iface in interfaces.iter() {
-        let url_interface =
-            format!("{}/{}", url_interfaces, iface.identity.name.as_str());
-        let iface0 = NexusRequest::object_get(client, url_interface.as_str())
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
+    // Get all interfaces in one request.
+    let other_interfaces =
+        objects_list_page_authz::<NetworkInterface>(client, &url_interfaces)
             .await
-            .expect("Failed to get interface")
-            .parsed_body::<NetworkInterface>()
-            .expect("Failed to parse network interface from body");
-        assert_eq!(iface.identity.id, iface0.identity.id);
-        assert_eq!(iface.ip, iface0.ip);
-        assert_eq!(iface.primary, iface0.primary);
+            .items;
+    for (iface0, iface1) in interfaces.iter().zip(other_interfaces) {
+        assert_eq!(iface0.identity.id, iface1.identity.id);
+        assert_eq!(iface0.vpc_id, iface1.vpc_id);
+        assert_eq!(iface0.subnet_id, iface1.subnet_id);
+        assert_eq!(iface0.ip, iface1.ip);
+        assert_eq!(iface0.primary, iface1.primary);
     }
 
     // Verify we cannot delete either interface while the instance is running
@@ -1483,6 +1481,42 @@ async fn test_instance_update_network_interfaces(
         updated_primary_iface.identity.description
     );
     verify_unchanged_attributes(&updated_primary_iface, &new_secondary_iface);
+
+    // Let's delete the original primary, and verify that we've still got the
+    // secondary.
+    let url_interface =
+        format!("{}/{}", url_interfaces, new_secondary_iface.identity.name);
+    NexusRequest::object_delete(&client, &url_interface)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Failed to delete original secondary interface");
+    let all_interfaces =
+        objects_list_page_authz::<NetworkInterface>(client, &url_interfaces)
+            .await
+            .items;
+    assert_eq!(
+        all_interfaces.len(),
+        1,
+        "Expected just one interface after deleting the original primary"
+    );
+    assert_eq!(all_interfaces[0].identity.id, new_primary_iface.identity.id);
+    assert!(all_interfaces[0].primary);
+
+    // Add a _new_ interface, and verify that it still isn't the primary
+    let iface = NexusRequest::objects_post(
+        client,
+        url_interfaces.as_str(),
+        &if_params[0],
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Failed to create network interface on stopped instance")
+    .parsed_body::<NetworkInterface>()
+    .unwrap();
+    assert!(!iface.primary);
+    assert_eq!(iface.identity.name, if_params[0].identity.name);
 }
 
 /// This test specifically creates two NICs, the second of which will fail the
