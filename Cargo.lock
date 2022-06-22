@@ -1111,6 +1111,7 @@ dependencies = [
  "reqwest",
  "serde",
  "slog",
+ "toml",
 ]
 
 [[package]]

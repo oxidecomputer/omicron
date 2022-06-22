@@ -4,17 +4,60 @@
 
 // Copyright 2022 Oxide Computer Company
 
+use anyhow::bail;
 use anyhow::Context;
 use anyhow::Result;
 use quote::quote;
+use serde::Deserialize;
+use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::path::Path;
 
+// TODO-cleanup This is a copy/paste of (a subset of) omicron_package::Config.
+// We ought to depend on it directly, but that creates a circular dependency
+// between crates:
+//
+// us -> omicron_package -> omicron_sled_agent -> us
+//
+// omicron_package only depends on sled-agent for zone management; maybe that
+// could be broken out into a separate crate?
+#[derive(Deserialize, Debug)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum ExternalPackageSource {
+    Prebuilt { repo: String, commit: String, sha256: String },
+    Manual,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct ExternalPackage {
+    pub source: ExternalPackageSource,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct Config {
+    #[serde(default, rename = "external_package")]
+    pub external_packages: BTreeMap<String, ExternalPackage>,
+}
+
 fn main() -> Result<()> {
-    // TODO-cleanup: Pull hash from package-manifest.toml and add a
-    // rerun-if-changed rule
-    let commit = "05bd6e627c78b95166e3d258aab8edb4494e8ee0";
+    // Find the current maghemite repo commit from our package manifest.
+    let manifest = fs::read("../package-manifest.toml")
+        .context("failed to read ../package-manifest.toml")?;
+    println!("cargo:rerun-if-changed=../package-manifest.toml");
+
+    let config: Config = toml::de::from_slice(&manifest)
+        .context("failed to parse ../package-manifest.toml")?;
+    let maghemite = config
+        .external_packages
+        .get("maghemite")
+        .context("missing maghemite package in ../package-manifest.toml")?;
+    let commit = match &maghemite.source {
+        ExternalPackageSource::Manual => {
+            bail!("maghemite external package must have type `prebuilt`")
+        }
+        ExternalPackageSource::Prebuilt { commit, .. } => commit,
+    };
 
     let url = format!("https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/openapi/{commit}/ddm-admin.json");
 
