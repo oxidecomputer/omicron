@@ -18,7 +18,7 @@ use crate::illumos::zone::Zones;
 use crate::server::Server as SledServer;
 use crate::sp::SpHandle;
 use ddm_admin_client::types::Ipv6Prefix;
-use omicron_common::address::get_sled_address;
+use omicron_common::address::{get_sled_address, Ipv6Subnet, SLED_PREFIX};
 use omicron_common::api::external::{Error as ExternalError, MacAddr};
 use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
@@ -174,10 +174,7 @@ impl Agent {
 
         // Start trying to notify ddmd of our bootstrap address so it can
         // advertise it to other sleds.
-        tokio::spawn(advertise_bootstrap_address_via_ddmd(
-            ba_log.clone(),
-            address,
-        ));
+        advertise_address_via_ddmd(ba_log.clone(), Ipv6Subnet::new(address));
 
         let agent = Agent {
             log: ba_log,
@@ -289,6 +286,19 @@ impl Agent {
             message: format!("Recording Sled Agent request to {path:?}"),
             err,
         })?;
+
+        // Start trying to notify ddmd of our sled prefix so it can
+        // advertise it to other sleds.
+        //
+        // TODO-security This function is used to advertise both this address
+        // and our bootstrap address. Bootstrap addresses are unauthenticated
+        // (connections made on them are auth'd via sprockets), but underlay
+        // addresses should be exchanged via authenticated channels between ddmd
+        // instances. It's TBD how that will work, but presumably we'll need to
+        // do something different for underlay vs bootstrap addrs (either talk
+        // to a differently-configured ddmd, or include info indicating which
+        // kind of address we're advertising).
+        advertise_address_via_ddmd(self.log.clone(), request.subnet);
 
         Ok(SledAgentResponse { id: self.sled_config.id })
     }
@@ -469,19 +479,25 @@ impl Agent {
     }
 }
 
-async fn advertise_bootstrap_address_via_ddmd(log: Logger, address: Ipv6Addr) {
-    let prefix = Ipv6Prefix { addr: address, mask: 64 };
-    retry_notify(internal_service_policy(), || async {
-        let client = DdmAdminClient::new(log.clone())?;
-        client.advertise_prefix(prefix).await?;
-        Ok(())
-    }, |err, duration| {
-        info!(
-            log,
-            "Failed to notify ddmd of our address (will retry after {duration:?}";
-            "err" => %err,
-        );
-    }).await.unwrap();
+fn advertise_address_via_ddmd(log: Logger, address: Ipv6Subnet<SLED_PREFIX>) {
+    // We will retry notifying ddmd of this address indefinitely until we
+    // succeed, but this is only for the benefit of other sleds and doesn't need
+    // to block us. Spawn it on a background task and let it run until success.
+    tokio::spawn(async move {
+        let prefix =
+            Ipv6Prefix { addr: address.net().network(), mask: SLED_PREFIX };
+        retry_notify(internal_service_policy(), || async {
+            let client = DdmAdminClient::new(log.clone())?;
+            client.advertise_prefix(prefix).await?;
+            Ok(())
+        }, |err, duration| {
+            info!(
+                log,
+                "Failed to notify ddmd of our address (will retry after {duration:?}";
+                "err" => %err,
+            );
+        }).await.unwrap();
+    });
 }
 
 #[cfg(test)]
