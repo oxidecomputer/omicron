@@ -59,12 +59,21 @@ fn main() -> Result<()> {
         ExternalPackageSource::Prebuilt { commit, .. } => commit,
     };
 
-    let url = format!("https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/openapi/{commit}/ddm-admin.json");
+    // Report a relatively verbose error if we haven't downloaded the requisite
+    // openapi spec.
+    let local_path = format!("../out/downloads/ddm-admin-{commit}.json");
+    if !Path::new(&local_path).exists() {
+        bail!("{local_path} doesn't exist; rerun `tools/ci_download_maghemite_openapi` (after updating `tools/maghemite_openapi_version` if the maghemite commit in package-manifest.toml has changed)");
+    }
+    println!("cargo:rerun-if-changed={local_path}");
 
-    let spec = reqwest::blocking::get(&url)
-        .with_context(|| format!("failed to download openapi spec from {url}"))?
-        .json()
-        .with_context(|| format!("failed to parse {url} as openapi spec"))?;
+    let spec = {
+        let bytes = fs::read(&local_path)
+            .with_context(|| format!("failed to read {local_path}"))?;
+        serde_json::from_slice(&bytes).with_context(|| {
+            format!("failed to parse {local_path} as openapi spec")
+        })?
+    };
 
     let content = progenitor::Generator::new()
         .with_inner_type(quote!(slog::Logger))
@@ -84,7 +93,7 @@ fn main() -> Result<()> {
         })
         .generate_text(&spec)
         .with_context(|| {
-            format!("failed to generate progenitor client from {url}")
+            format!("failed to generate progenitor client from {local_path}")
         })?;
 
     let out_file =
