@@ -332,6 +332,10 @@
           "dataset_kind": {
             "$ref": "#/components/schemas/DatasetKind"
           },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "zpool_id": {
             "type": "string",
             "format": "uuid"
@@ -340,6 +344,7 @@
         "required": [
           "address",
           "dataset_kind",
+          "id",
           "zpool_id"
         ]
       },
@@ -1069,6 +1074,7 @@
         ]
       },
       "ServiceRequest": {
+        "description": "Describes a request to create a service. This information should be sufficient for a Sled Agent to start a zone containing the requested service.",
         "type": "object",
         "properties": {
           "addresses": {
@@ -1086,13 +1092,85 @@
               "format": "ipv6"
             }
           },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "name": {
             "type": "string"
+          },
+          "service_type": {
+            "$ref": "#/components/schemas/ServiceType"
           }
         },
         "required": [
           "addresses",
-          "name"
+          "id",
+          "name",
+          "service_type"
+        ]
+      },
+      "ServiceType": {
+        "description": "Describes service-specific parameters.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "external_address": {
+                "type": "string"
+              },
+              "internal_address": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "nexus"
+                ]
+              }
+            },
+            "required": [
+              "external_address",
+              "internal_address",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "dns_address": {
+                "type": "string"
+              },
+              "server_address": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "internal_dns"
+                ]
+              }
+            },
+            "required": [
+              "dns_address",
+              "server_address",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "oximeter"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
         ]
       },
       "Slot": {

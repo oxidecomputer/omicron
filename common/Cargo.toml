@@ -29,6 +29,7 @@ steno = { git = "https://github.com/oxidecomputer/steno", branch = "main" }
 thiserror = "1.0"
 tokio = { version = "1.18", features = [ "full" ] }
 tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1" ] }
+toml = "0.5.9"
 uuid = { version = "1.1.0", features = [ "serde", "v4" ] }
 parse-display = "0.5.4"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor" }
