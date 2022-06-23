@@ -9,9 +9,11 @@ use http::StatusCode;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
-use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::DiskTest;
+use nexus_test_utils::resource_helpers::{
+    create_disk, instance_network_interfaces_get,
+};
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskState;
@@ -39,7 +41,6 @@ use nexus_test_utils::resource_helpers::{
 };
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
-use omicron_nexus::external_api::views::NetworkInterfaces;
 
 static ORGANIZATION_NAME: &str = "test-org";
 static PROJECT_NAME: &str = "springfield-squidport";
@@ -941,16 +942,12 @@ async fn test_instance_create_delete_network_interface(
         "/organizations/{}/projects/{}/instances/{}/network-interfaces",
         ORGANIZATION_NAME, PROJECT_NAME, instance.identity.name,
     );
-    let interfaces = NexusRequest::iter_collection_authn::<NetworkInterface>(
-        client,
-        url_interfaces.as_str(),
-        "",
-        Some(100),
-    )
-    .await
-    .expect("Failed to get interfaces for instance");
+
+    // Get network interface(s) attached to the instance
+    let interfaces =
+        instance_network_interfaces_get(client, &url_interfaces).await;
     assert!(
-        interfaces.all_items.is_empty(),
+        interfaces.is_empty(),
         "Expected no network interfaces for instance"
     );
 
@@ -1035,9 +1032,7 @@ async fn test_instance_create_delete_network_interface(
 
     // Get all interfaces in one request.
     let other_interfaces =
-        objects_list_page_authz::<NetworkInterface>(client, &url_interfaces)
-            .await
-            .items;
+        instance_network_interfaces_get(client, &url_interfaces).await;
     for (iface0, iface1) in interfaces.iter().zip(other_interfaces) {
         assert_eq!(iface0.identity.id, iface1.identity.id);
         assert_eq!(iface0.vpc_id, iface1.vpc_id);
@@ -1165,7 +1160,7 @@ async fn test_instance_update_network_interfaces(
     let instance_params = params::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from("nic-update-test-inst")).unwrap(),
-            description: String::from("instance to test updatin nics"),
+            description: String::from("instance to test updating nics"),
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_gibibytes_u32(4),
@@ -1469,7 +1464,7 @@ async fn test_instance_update_network_interfaces(
     // The now-secondary interface should be, well, secondary
     assert!(
         !new_secondary_iface.primary,
-        "The old primary interface should now be a seconary"
+        "The old primary interface should now be a secondary"
     );
 
     // Nothing else about the old primary should have changed
@@ -1493,9 +1488,7 @@ async fn test_instance_update_network_interfaces(
         .await
         .expect("Failed to delete original secondary interface");
     let all_interfaces =
-        objects_list_page_authz::<NetworkInterface>(client, &url_interfaces)
-            .await
-            .items;
+        instance_network_interfaces_get(client, &url_interfaces).await;
     assert_eq!(
         all_interfaces.len(),
         1,
@@ -2365,15 +2358,13 @@ async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
         .unwrap();
 }
 
-<<<<<<< HEAD
-// Test that listing the network interfaces attached to an instance do not
-// accept pagparams
+// Test getting network interfaces attached to an instance
 #[nexus_test]
-async fn test_instance_list_network_interfaces_declines_pagparams(
-    cptestctx: &ControlPlaneTestContext
+async fn test_instance_get_network_interfaces(
+    cptestctx: &ControlPlaneTestContext,
 ) {
-    let client = &cptestctx.external_client;
     static INSTANCE_NAME: &str = "just-rainsticks";
+    let client = &cptestctx.external_client;
     let path = &format!(
         "/organizations/{}/projects/{}/instances/{}/network-interfaces",
         ORGANIZATION_NAME, PROJECT_NAME, INSTANCE_NAME
@@ -2385,23 +2376,21 @@ async fn test_instance_list_network_interfaces_declines_pagparams(
         &client,
         ORGANIZATION_NAME,
         PROJECT_NAME,
-        INSTANCE_NAME
-    ).await;
+        INSTANCE_NAME,
+    )
+    .await;
 
     // Get network interface(s) attached to the instance
-    let request: NetworkInterfaces = NexusRequest::object_get(client, path)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .unwrap()
-        .parsed_body()
-        .unwrap();
+    let interface = instance_network_interfaces_get(client, path).await;
 
-    assert_eq!(true, true);
+    assert_eq!(interface[0].identity.name, "net0");
+    assert_eq!(
+        interface[0].identity.description,
+        format!("default primary interface for {}", INSTANCE_NAME)
+    );
+    assert_eq!(interface[0].instance_id, instance.identity.id);
 }
 
-=======
->>>>>>> main
 async fn instance_get(
     client: &ClientTestContext,
     instance_url: &str,

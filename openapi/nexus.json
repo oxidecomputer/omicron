@@ -2076,36 +2076,6 @@
         "operationId": "instance_network_interfaces_get",
         "parameters": [
           {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            },
-            "style": "form"
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            },
-            "style": "form"
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/NameSortMode"
-            },
-            "style": "form"
-          },
-          {
             "in": "path",
             "name": "instance_name",
             "required": true,
@@ -2139,7 +2109,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NetworkInterfaceResultsPage"
+                  "$ref": "#/components/schemas/NetworkInterfaces"
                 }
               }
             }
@@ -2150,8 +2120,7 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        },
-        "x-dropshot-pagination": true
+        }
       },
       "post": {
         "tags": [
@@ -7233,6 +7202,21 @@
             ]
           }
         }
+      },
+      "NetworkInterfaces": {
+        "description": "Collection of an [`Instance`]'s network interfaces",
+        "type": "object",
+        "properties": {
+          "interfaces": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NetworkInterface"
+            }
+          }
+        },
+        "required": [
+          "interfaces"
+        ]
       },
       "Organization": {
         "description": "Client view of an [`Organization`]",

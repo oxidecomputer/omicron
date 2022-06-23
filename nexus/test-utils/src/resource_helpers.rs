@@ -11,17 +11,17 @@ use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use dropshot::Method;
 use http::StatusCode;
-use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
+use omicron_common::api::external::{ByteCount, NetworkInterface};
 use omicron_nexus::crucible_agent_client::types::State as RegionState;
 use omicron_nexus::external_api::params;
 use omicron_nexus::external_api::shared;
 use omicron_nexus::external_api::shared::IdentityType;
 use omicron_nexus::external_api::views::{
-    Organization, Project, Silo, Vpc, VpcRouter,
+    NetworkInterfaces, Organization, Project, Silo, Vpc, VpcRouter,
 };
 use omicron_sled_agent::sim::SledAgent;
 use std::sync::Arc;
@@ -338,6 +338,21 @@ pub async fn project_get(
         .expect("failed to get project")
         .parsed_body()
         .expect("failed to parse Project")
+}
+
+pub async fn instance_network_interfaces_get(
+    client: &ClientTestContext,
+    interfaces_url: &str,
+) -> Vec<NetworkInterface> {
+    let request: NetworkInterfaces =
+        NexusRequest::object_get(client, interfaces_url)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
+    request.interfaces
 }
 
 pub struct DiskTest {
