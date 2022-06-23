@@ -451,8 +451,7 @@ async fn advertise_bootstrap_address_via_ddmd(log: Logger, address: Ipv6Addr) {
     let prefix = Ipv6Prefix { addr: address, mask: 64 };
     retry_notify(internal_service_policy(), || async {
         let client = DdmAdminClient::new(log.clone())?;
-        // TODO-cleanup implement Copy on Ipv6Prefix
-        client.advertise_prefix(prefix.clone()).await?;
+        client.advertise_prefix(prefix).await?;
         Ok(())
     }, |err, duration| {
         info!(
