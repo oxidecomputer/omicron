@@ -7,10 +7,10 @@
 use crate::authn;
 use crate::db::identity::{Asset, Resource};
 use crate::db::model;
+use crate::external_api::shared::IpRange;
 use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
-use omicron_common::api::external;
 use omicron_common::api::external::{
     ByteCount, Digest, IdentityMetadata, Ipv4Net, Ipv6Net, Name,
     ObjectIdentity, RoleName,
@@ -334,7 +334,7 @@ impl From<model::IpPool> for IpPool {
 pub struct IpPoolRange {
     pub id: Uuid,
     pub time_created: DateTime<Utc>,
-    pub range: external::IpRange,
+    pub range: IpRange,
 }
 
 impl From<model::IpPoolRange> for IpPoolRange {
@@ -342,7 +342,7 @@ impl From<model::IpPoolRange> for IpPoolRange {
         Self {
             id: range.id,
             time_created: range.time_created,
-            range: external::IpRange::from(&range),
+            range: IpRange::from(&range),
         }
     }
 }

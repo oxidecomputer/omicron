@@ -16,11 +16,11 @@ use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
-use omicron_common::api::external::IpRange;
-use omicron_common::api::external::Ipv4Range;
-use omicron_common::api::external::Ipv6Range;
 use omicron_nexus::external_api::params::IpPoolCreate;
 use omicron_nexus::external_api::params::IpPoolUpdate;
+use omicron_nexus::external_api::shared::IpRange;
+use omicron_nexus::external_api::shared::Ipv4Range;
+use omicron_nexus::external_api::shared::Ipv6Range;
 use omicron_nexus::external_api::views::IpPool;
 use omicron_nexus::external_api::views::IpPoolRange;
 

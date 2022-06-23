@@ -946,14 +946,6 @@ CREATE TABLE omicron.public.ip_pool (
 
     /* The collection's child-resource generation number */
     rcgen INT8 NOT NULL
-
-    /* 
-     * TODO-completeness: These will need some enum describing what the pool can
-     * be used for. That can currently be:
-     * - Routing
-     * - Oxide public use, e.g., Nexus's public API or the console
-     * - Virtual machine instance NAT
-     */
 );
 
 /*
@@ -975,13 +967,15 @@ CREATE TABLE omicron.public.ip_pool_range (
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
     first_address INET NOT NULL,
+    /* The range is inclusive of the last address. */
     last_address INET NOT NULL,
     ip_pool_id UUID NOT NULL
 );
 
 /* 
- * These indexes are currently used to enforce that the ranges within an IP Pool
- * do not overlap with any other ranges.
+ * These help Nexus enforce that the ranges within an IP Pool do not overlap
+ * with any other ranges. See `nexus/src/db/queries/ip_pool.rs` for the actual
+ * query which does that.
  */
 CREATE UNIQUE INDEX ON omicron.public.ip_pool_range (
     first_address

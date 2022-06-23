@@ -9,6 +9,7 @@ use crate::db::model::Name;
 use crate::db::schema::ip_pool;
 use crate::db::schema::ip_pool_range;
 use crate::external_api::params;
+use crate::external_api::shared::IpRange;
 use chrono::DateTime;
 use chrono::Utc;
 use db_macros::Resource;
@@ -75,10 +76,12 @@ pub struct IpPoolRange {
 }
 
 impl IpPoolRange {
-    pub fn new(range: &external::IpRange, ip_pool_id: Uuid) -> Self {
+    pub fn new(range: &IpRange, ip_pool_id: Uuid) -> Self {
         let now = Utc::now();
         let first_address = range.first_address();
         let last_address = range.last_address();
+        // `range` has already been validated to have first address no greater
+        // than last address.
         assert!(
             last_address >= first_address,
             "Address ranges must be non-decreasing"
@@ -95,15 +98,15 @@ impl IpPoolRange {
     }
 }
 
-impl From<&IpPoolRange> for external::IpRange {
+impl From<&IpPoolRange> for IpRange {
     fn from(range: &IpPoolRange) -> Self {
         let maybe_range =
             match (range.first_address.ip(), range.last_address.ip()) {
                 (IpAddr::V4(first), IpAddr::V4(last)) => {
-                    external::IpRange::try_from((first, last))
+                    IpRange::try_from((first, last))
                 }
                 (IpAddr::V6(first), IpAddr::V6(last)) => {
-                    external::IpRange::try_from((first, last))
+                    IpRange::try_from((first, last))
                 }
                 (first, last) => {
                     unreachable!(

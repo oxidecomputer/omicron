@@ -10285,7 +10285,7 @@
     },
     {
       "name": "ip-pools",
-      "description": "IP Pools contain subnets used for assigning external IP addresses to virtual machine instances.",
+      "description": "IP Pools contain external IP addresses that can be assigned to virtual machine Instances.",
       "externalDocs": {
         "url": "http://oxide.computer/docs/#xxx"
       }

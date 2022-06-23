@@ -744,16 +744,6 @@ authz_resource! {
     polar_snippet = FleetChild,
 }
 
-/*
-authz_resource! {
-    name = "IpPoolCidrBlock",
-    parent = "IpPool",
-    primary_key = Uuid,
-    roles_allowed = false,
-    polar_snippet = Custom,
-}
-*/
-
 #[cfg(test)]
 mod test {
     use super::FleetRole;

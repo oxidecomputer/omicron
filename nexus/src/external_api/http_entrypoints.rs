@@ -37,7 +37,6 @@ use dropshot::ResultsPage;
 use dropshot::TypedBody;
 use dropshot::WhichPage;
 use ipnetwork::IpNetwork;
-use omicron_common::api::external;
 use omicron_common::api::external::http_pagination::data_page_params_nameid_id;
 use omicron_common::api::external::http_pagination::data_page_params_nameid_name;
 use omicron_common::api::external::http_pagination::pagination_field_for_scan_params;
@@ -1235,7 +1234,7 @@ async fn ip_pool_ranges_get(
 async fn ip_pool_ranges_add(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<IpPoolPathParam>,
-    range_params: TypedBody<external::IpRange>,
+    range_params: TypedBody<shared::IpRange>,
 ) -> Result<HttpResponseCreated<IpPoolRange>, HttpError> {
     let apictx = &rqctx.context();
     let nexus = &apictx.nexus;
@@ -1259,7 +1258,7 @@ async fn ip_pool_ranges_add(
 async fn ip_pool_ranges_delete(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<IpPoolPathParam>,
-    range_params: TypedBody<external::IpRange>,
+    range_params: TypedBody<shared::IpRange>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = &rqctx.context();
     let nexus = &apictx.nexus;

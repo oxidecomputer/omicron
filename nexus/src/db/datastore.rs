@@ -70,6 +70,7 @@ use crate::db::{
     pagination::paginated_multicolumn,
     update_and_check::{UpdateAndCheck, UpdateStatus},
 };
+use crate::external_api::shared::IpRange;
 use crate::external_api::{params, shared};
 use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl, ConnectionManager};
 use chrono::Utc;
@@ -86,7 +87,6 @@ use omicron_common::api::external;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::IpRange;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
@@ -1085,8 +1085,6 @@ impl DataStore {
         let pool_name = pool.name().as_str().to_string();
         diesel::insert_into(dsl::ip_pool)
             .values(pool)
-            .on_conflict(dsl::id)
-            .do_nothing()
             .returning(IpPool::as_returning())
             .get_result_async(self.pool_authorized(opctx).await?)
             .await

@@ -16,9 +16,7 @@ use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::InstanceCpuCount;
-use omicron_common::api::external::IpRange;
 use omicron_common::api::external::Ipv4Net;
-use omicron_common::api::external::Ipv4Range;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::RouteDestination;
 use omicron_common::api::external::RouteTarget;
@@ -29,6 +27,8 @@ use omicron_nexus::authn;
 use omicron_nexus::authz;
 use omicron_nexus::external_api::params;
 use omicron_nexus::external_api::shared;
+use omicron_nexus::external_api::shared::IpRange;
+use omicron_nexus::external_api::shared::Ipv4Range;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 
