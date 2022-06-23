@@ -10,7 +10,11 @@ use futures::stream::{self, StreamExt, TryStreamExt};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use omicron_package::{parse, BuildCommand, DeployCommand};
 use omicron_sled_agent::zone;
+use omicron_zone_package::config::Config;
+use omicron_zone_package::config::ExternalPackage;
+use omicron_zone_package::config::ExternalPackageSource;
 use omicron_zone_package::package::Package;
+use omicron_zone_package::package::Progress;
 use rayon::prelude::*;
 use ring::digest::{Context as DigestContext, Digest, SHA256};
 use std::env;
@@ -19,9 +23,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
-
-use omicron_package::{Config, ExternalPackage, ExternalPackageSource};
-use omicron_zone_package::package::Progress;
 
 /// All packaging subcommands.
 #[derive(Debug, Subcommand)]
