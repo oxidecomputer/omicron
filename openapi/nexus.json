@@ -5549,13 +5549,13 @@
         }
       }
     },
-    "/users": {
+    "/users_builtin": {
       "get": {
         "tags": [
-          "users"
+          "system"
         ],
         "summary": "List the built-in system users",
-        "operationId": "users_get",
+        "operationId": "builtin_users_get",
         "parameters": [
           {
             "in": "query",
@@ -5609,13 +5609,13 @@
         "x-dropshot-pagination": true
       }
     },
-    "/users/{user_name}": {
+    "/users_builtin/{user_name}": {
       "get": {
         "tags": [
-          "users"
+          "system"
         ],
         "summary": "Fetch a specific built-in system user",
-        "operationId": "users_get_user",
+        "operationId": "builtin_users_get_user",
         "parameters": [
           {
             "in": "path",
@@ -9793,15 +9793,15 @@
       }
     },
     {
-      "name": "updates",
-      "description": "This tag should be moved into a operations tag",
+      "name": "system",
+      "description": "Internal system information",
       "externalDocs": {
         "url": "http://oxide.computer/docs/#xxx"
       }
     },
     {
-      "name": "users",
-      "description": "This tag should be moved into an IAM tag",
+      "name": "updates",
+      "description": "This tag should be moved into a operations tag",
       "externalDocs": {
         "url": "http://oxide.computer/docs/#xxx"
       }

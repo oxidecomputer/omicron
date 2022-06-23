@@ -427,7 +427,7 @@ impl AllowedMethod {
 
 lazy_static! {
     pub static ref URL_USERS_DB_INIT: String =
-        format!("/users/{}", authn::USER_DB_INIT.name);
+        format!("/users_builtin/{}", authn::USER_DB_INIT.name);
 
     /// List of endpoints to be verified
     pub static ref VERIFY_ENDPOINTS: Vec<VerifyEndpoint> = vec![
@@ -915,7 +915,7 @@ lazy_static! {
         },
 
         VerifyEndpoint {
-            url: "/users",
+            url: "/users_builtin",
             visibility: Visibility::Public,
             allowed_methods: vec![AllowedMethod::Get],
         },
