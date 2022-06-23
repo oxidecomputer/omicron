@@ -19,6 +19,7 @@ use crate::illumos::dladm::VnicSource;
 use crate::sp::AsyncReadWrite;
 use crate::sp::SpHandle;
 use crate::sp::SprocketsRole;
+use crate::zone::Zones;
 use slog::Drain;
 use slog::Logger;
 use std::net::Ipv6Addr;
@@ -66,19 +67,26 @@ impl Server {
             debug!(log, "registered DTrace probes");
         }
 
-        // Turn on the maghemite routing service.
-        info!(log, "Starting mg-ddm service");
+        // Ensure we have a link-local inet6 address.
         let link = sled_config
             .get_link()
             .map_err(|err| format!("Failed to find physical link: {err}"))?;
 
-        // TODO-correctness (a) Is "linklocal" always right? (b) Do we need
-        // mg-ddm to listen on multiple addresses?
         let mg_interface = AddrObject::new(link.name(), "linklocal")
             .expect("unexpected failure creating AddrObject");
+        Zones::ensure_has_link_local_v6_address(None, &mg_interface).map_err(
+            |err| {
+                format!(
+                    "Failed to ensure link-local address for {}: {}",
+                    mg_interface, err
+                )
+            },
+        )?;
 
-        // TODO-cleanup Should we `tokio::spawn()` this so we can proceed
-        // concurrently with mg-ddm starting up?
+        // Turn on the maghemite routing service.
+        // TODO-correctness Eventually we need mg-ddm to listen on multiple
+        // interfaces (link-local addresses of both NICs).
+        info!(log, "Starting mg-ddm service");
         maghemite::enable_mg_ddm_service(log.clone(), mg_interface)
             .await
             .map_err(|err| format!("Failed to start mg-ddm: {err}"))?;
