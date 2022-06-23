@@ -199,8 +199,8 @@ pub fn external_api() -> NexusApiDescription {
         api.register(sagas_get)?;
         api.register(sagas_get_saga)?;
 
-        api.register(users_get)?;
-        api.register(users_get_user)?;
+        api.register(builtin_users_get)?;
+        api.register(builtin_users_get_user)?;
 
         api.register(timeseries_schema_get)?;
 
@@ -3428,10 +3428,10 @@ async fn sagas_get_saga(
 /// List the built-in system users
 #[endpoint {
     method = GET,
-    path = "/users",
-    tags = ["users"],
+    path = "/users_builtin",
+    tags = ["system"],
 }]
-async fn users_get(
+async fn builtin_users_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByName>,
 ) -> Result<HttpResponseOk<ResultsPage<User>>, HttpError> {
@@ -3467,10 +3467,10 @@ struct UserPathParam {
 /// Fetch a specific built-in system user
 #[endpoint {
     method = GET,
-    path = "/users/{user_name}",
-    tags = ["users"],
+    path = "/users_builtin/{user_name}",
+    tags = ["system"],
 }]
-async fn users_get_user(
+async fn builtin_users_get_user(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<UserPathParam>,
 ) -> Result<HttpResponseOk<User>, HttpError> {

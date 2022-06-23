@@ -134,14 +134,14 @@
         "url": "http://oxide.computer/docs/#xxx"
       }
     },
-    "updates": {
-      "description": "This tag should be moved into a operations tag",
+    "system": {
+      "description": "Internal system information",
       "external_docs": {
         "url": "http://oxide.computer/docs/#xxx"
       }
     },
-    "users": {
-      "description": "This tag should be moved into an IAM tag",
+    "updates": {
+      "description": "This tag should be moved into a operations tag",
       "external_docs": {
         "url": "http://oxide.computer/docs/#xxx"
       }
