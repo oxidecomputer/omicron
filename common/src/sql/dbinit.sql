@@ -1122,7 +1122,10 @@ INSERT INTO omicron.public.user_builtin (
  * (OAuth 2.0 Device Authorization Grant)
  */
 
--- Client authentication request record.
+-- Client authentication requests. In theory these records could
+-- (and probably should) be short-lived, and removed as soon as
+-- a token is granted.
+-- TODO-security: We should not grant a token more than once per record.
 CREATE TABLE omicron.public.client_authentication (
     client_id UUID NOT NULL,
     device_code STRING(40) NOT NULL,
@@ -1146,7 +1149,8 @@ CREATE TABLE omicron.public.client_token (
     time_created TIMESTAMPTZ NOT NULL
 );
 
-CREATE INDEX ON omicron.public.client_token (client_id, device_code);
+-- Matches the primary key on client authentication records.
+CREATE UNIQUE INDEX ON omicron.public.client_token (client_id, device_code);
 
 /*
  * Roles built into the system

@@ -3804,13 +3804,12 @@ impl DataStore {
 
     // Client authentication and token granting
 
+    // TODO-security: authz
     pub async fn client_authenticate(
         &self,
         opctx: &OpContext,
         client_authn: ClientAuthentication,
     ) -> CreateResult<ClientAuthentication> {
-        //opctx.authorize(authz::Action::CreateChild, &client_authn.client_id).await?;
-
         use db::schema::client_authentication::dsl;
         diesel::insert_into(dsl::client_authentication)
             .values(client_authn)
@@ -3825,6 +3824,7 @@ impl DataStore {
             })
     }
 
+    // TODO-security: authz
     pub async fn client_verify(
         &self,
         opctx: &OpContext,
@@ -3843,13 +3843,12 @@ impl DataStore {
             })
     }
 
+    // TODO-security: authz
     pub async fn client_grant_token(
         &self,
         opctx: &OpContext,
         client_token: ClientToken,
     ) -> CreateResult<ClientToken> {
-        //opctx.authorize(authz::Action::CreateChild, &client_token.client_id).await?;
-
         use db::schema::client_token::dsl;
         diesel::insert_into(dsl::client_token)
             .values(client_token)
@@ -3864,6 +3863,7 @@ impl DataStore {
             })
     }
 
+    // TODO-security: authz
     pub async fn client_get_token(
         &self,
         opctx: &OpContext,
@@ -3883,6 +3883,7 @@ impl DataStore {
             })
     }
 
+    // TODO-security: authz
     pub async fn client_get_actor(
         &self,
         opctx: &OpContext,
