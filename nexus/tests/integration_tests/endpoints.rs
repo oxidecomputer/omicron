@@ -292,10 +292,10 @@ lazy_static! {
                 description: Some(String::from("a new IP pool")),
             },
         };
-    pub static ref DEMO_IP_POOL_RANGE: IpRange = IpRange::V4(Ipv4Range {
-        first: std::net::Ipv4Addr::new(10, 0, 0, 1),
-        last: std::net::Ipv4Addr::new(10, 0, 0, 2),
-    });
+    pub static ref DEMO_IP_POOL_RANGE: IpRange = IpRange::V4(Ipv4Range::new(
+        std::net::Ipv4Addr::new(10, 0, 0, 1),
+        std::net::Ipv4Addr::new(10, 0, 0, 2),
+    ).unwrap());
     pub static ref DEMO_IP_POOL_RANGES_URL: String = format!("{}/ranges", *DEMO_IP_POOL_URL);
     pub static ref DEMO_IP_POOL_RANGES_ADD_URL: String = format!("{}/add", *DEMO_IP_POOL_RANGES_URL);
     pub static ref DEMO_IP_POOL_RANGES_DEL_URL: String = format!("{}/delete", *DEMO_IP_POOL_RANGES_URL);

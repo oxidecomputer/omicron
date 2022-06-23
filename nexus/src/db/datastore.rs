@@ -1274,8 +1274,8 @@ impl DataStore {
 
         // We can just delete the range, provided that it the exact first/last
         // address pair exists. We are guaranteed that concurrent modifications
-        // don't affect this, since this query will be serialized with any to
-        // insert a new range, which must be non-overlapping.
+        // don't affect this, since this query will be serialized with any
+        // requests to insert a new range, which must be non-overlapping.
         let first_address = range.first_address();
         let last_address = range.last_address();
         let first_net = ipnetwork::IpNetwork::from(first_address);

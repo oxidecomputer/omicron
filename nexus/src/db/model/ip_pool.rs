@@ -95,24 +95,27 @@ impl IpPoolRange {
     }
 }
 
-impl Into<external::IpRange> for IpPoolRange {
-    fn into(self) -> external::IpRange {
-        match (self.first_address.ip(), self.last_address.ip()) {
-            (IpAddr::V4(first), IpAddr::V4(last)) => {
-                external::IpRange::V4(external::Ipv4Range { first, last })
-            }
-            (IpAddr::V6(first), IpAddr::V6(last)) => {
-                external::IpRange::V6(external::Ipv6Range { first, last })
-            }
-            (first, last) => {
-                unreachable!(
-                    "Expected first/last address of an IP range to \
+impl From<&IpPoolRange> for external::IpRange {
+    fn from(range: &IpPoolRange) -> Self {
+        let maybe_range =
+            match (range.first_address.ip(), range.last_address.ip()) {
+                (IpAddr::V4(first), IpAddr::V4(last)) => {
+                    external::IpRange::try_from((first, last))
+                }
+                (IpAddr::V6(first), IpAddr::V6(last)) => {
+                    external::IpRange::try_from((first, last))
+                }
+                (first, last) => {
+                    unreachable!(
+                        "Expected first/last address of an IP range to \
                     both be of the same protocol version, but first = {:?} \
                     and last = {:?}",
-                    first, last
-                );
-            }
-        }
+                        first, last,
+                    );
+                }
+            };
+        maybe_range
+            .expect("Retrieved an out-of-order IP range pair from the database")
     }
 }
 

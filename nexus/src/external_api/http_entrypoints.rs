@@ -5,7 +5,7 @@
 //! Handler functions (entrypoints) for external HTTP APIs
 
 use super::views::IpPool;
-use super::views::IpRange;
+use super::views::IpPoolRange;
 use super::{
     console_api, params, views,
     views::{
@@ -115,13 +115,6 @@ pub fn external_api() -> NexusApiDescription {
         api.register(ip_pool_ranges_get)?;
         api.register(ip_pool_ranges_add)?;
         api.register(ip_pool_ranges_delete)?;
-
-        /*
-        api.register(ip_pool_cidr_blocks_get)?;
-        api.register(ip_pool_cidr_blocks_post)?;
-        api.register(ip_pool_cidr_blocks_get_cidr_block)?;
-        api.register(ip_pool_cidr_blocks_delete_cidr_block)?;
-        */
 
         api.register(project_disks_get)?;
         api.register(project_disks_post)?;
@@ -1037,12 +1030,6 @@ pub struct IpPoolPathParam {
     pub pool_name: Name,
 }
 
-#[derive(Deserialize, JsonSchema)]
-pub struct IpPoolCidrBlockPathParam {
-    pub pool_name: Name,
-    pub block_name: Name,
-}
-
 /// List IP Pools.
 #[endpoint {
     method = GET,
@@ -1183,10 +1170,8 @@ pub type IpPoolRangePaginationParams =
 async fn ip_pool_ranges_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<IpPoolPathParam>,
-    // TODO(ben): Figure out how to paginate this
     query_params: Query<IpPoolRangePaginationParams>,
-    //) -> Result<HttpResponseOk<ResultsPage<IpRange>>, HttpError> {
-) -> Result<HttpResponseOk<ResultsPage<IpRange>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<IpPoolRange>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
@@ -1212,7 +1197,7 @@ async fn ip_pool_ranges_get(
         Ok(HttpResponseOk(ResultsPage::new(
             ranges,
             &EmptyScanParams {},
-            |range: &IpRange, _| range.range.first_address(),
+            |range: &IpPoolRange, _| range.range.first_address(),
         )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -1228,7 +1213,7 @@ async fn ip_pool_ranges_add(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<IpPoolPathParam>,
     range_params: TypedBody<external::IpRange>,
-) -> Result<HttpResponseCreated<IpRange>, HttpError> {
+) -> Result<HttpResponseCreated<IpPoolRange>, HttpError> {
     let apictx = &rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();

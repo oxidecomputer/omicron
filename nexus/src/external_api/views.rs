@@ -17,7 +17,6 @@ use omicron_common::api::external::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::net::IpAddr;
 use std::net::SocketAddrV6;
 use uuid::Uuid;
 
@@ -332,28 +331,19 @@ impl From<model::IpPool> for IpPool {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct IpRange {
+pub struct IpPoolRange {
     pub id: Uuid,
     pub time_created: DateTime<Utc>,
     pub range: external::IpRange,
 }
 
-impl From<model::IpPoolRange> for IpRange {
+impl From<model::IpPoolRange> for IpPoolRange {
     fn from(range: model::IpPoolRange) -> Self {
-        let r = match (range.first_address.ip(), range.last_address.ip()) {
-            (IpAddr::V4(first), IpAddr::V4(last)) => {
-                external::IpRange::V4(external::Ipv4Range { first, last })
-            }
-            (IpAddr::V6(first), IpAddr::V6(last)) => {
-                external::IpRange::V6(external::Ipv6Range { first, last })
-            }
-            (first, last) => unreachable!(
-                "Expected first and last address from the same IP \
-                protocol versions, found {:?} and {:?}",
-                first, last
-            ),
-        };
-        Self { id: range.id, time_created: range.time_created, range: r }
+        Self {
+            id: range.id,
+            time_created: range.time_created,
+            range: external::IpRange::from(&range),
+        }
     }
 }
 
