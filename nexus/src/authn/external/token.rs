@@ -10,7 +10,6 @@ use super::Reason;
 use super::SchemeResult;
 use super::SiloContext;
 use crate::authn;
-use anyhow::Context;
 use async_trait::async_trait;
 use headers::authorization::{Authorization, Bearer};
 use headers::HeaderMapExt;
@@ -89,181 +88,85 @@ fn parse_token(
     Ok(Some(token[TOKEN_PREFIX.len()..].to_string()))
 }
 
-/// Returns a value of the `Authorization` header for this actor that will be
-/// accepted using this scheme
-pub fn make_header_value(token: &str) -> Authorization<Bearer> {
-    make_header_value_str(&token.to_string()).unwrap()
-}
-
-/// Returns a value of the `Authorization` header with `str` in the place where
-/// the token goes
-///
-/// Unlike `make_header_value`, this is not guaranteed to work, as the
-/// string may contain non-base64 characters.  Unlike `make_header_value_raw`,
-/// this returns a typed value and so cannot be used to make various kinds of
-/// invalid headers.
-fn make_header_value_str(
-    s: &str,
-) -> Result<Authorization<Bearer>, anyhow::Error> {
-    Authorization::bearer(&format!("{}{}", TOKEN_PREFIX, s))
-        .context("not a valid HTTP header value")
-}
-
 /// A context that can look up a Silo user and client ID from a token.
 #[async_trait]
 pub trait TokenContext {
     async fn token_actor(&self, token: String) -> Result<authn::Actor, Reason>;
 }
 
-/*
-/// Returns a value of the `Authorization` header with `data` in the place where
-/// the token goes
-///
-/// This is only intended for the test suite for cases where the input might not
-/// be a valid Uuid and might not even be valid UTF-8.  Use `make_header_value`
-/// if `data` is a valid UUID, as that function is safer and won't fail.
-pub fn make_header_value_raw(
-    data: &[u8],
-) -> Result<http::HeaderValue, anyhow::Error> {
-    let mut v: Vec<u8> = "Bearer oxide-token-".as_bytes().to_vec();
-    v.extend(data);
-    http::HeaderValue::from_bytes(&v).context("not a valid HTTP header value")
-}
-
 #[cfg(test)]
 mod test {
-    use super::super::super::Reason;
-    use super::authn_spoof_parse_id;
-    use super::make_header_value;
-    use super::make_header_value_raw;
-    use super::make_header_value_str;
+    use super::{parse_token, TOKEN_PREFIX};
+    use anyhow::Context;
     use headers::authorization::Bearer;
     use headers::authorization::Credentials;
     use headers::Authorization;
     use headers::HeaderMapExt;
-    use uuid::Uuid;
+
+    /// Returns a value of the `Authorization` header for this actor that will be
+    /// accepted using this scheme.
+    fn make_header_value(token: &str) -> Authorization<Bearer> {
+        make_header_value_str(&token.to_string()).unwrap()
+    }
+
+    /// Returns a value of the `Authorization` header with `str` in the place where
+    /// the token goes.
+    fn make_header_value_str(
+        s: &str,
+    ) -> Result<Authorization<Bearer>, anyhow::Error> {
+        Authorization::bearer(&format!("{}{}", TOKEN_PREFIX, s))
+            .context("not a valid HTTP header value")
+    }
+
+    /// Returns a value of the `Authorization` header with `data` in the place where
+    /// the token goes. This is only intended for the test suite for cases where the
+    /// input might not be valid UTF-8.
+    pub fn make_header_value_raw(
+        data: &[u8],
+    ) -> Result<http::HeaderValue, anyhow::Error> {
+        let mut v: Vec<u8> =
+            format!("Bearer {}", TOKEN_PREFIX).as_bytes().to_vec();
+        v.extend(data);
+        http::HeaderValue::from_bytes(&v)
+            .context("not a valid HTTP header value")
+    }
 
     #[test]
     fn test_make_header_value() {
-        let test_uuid_str = "37b56e4f-8c60-453b-a37e-99be6efe8a89";
-        let test_uuid = test_uuid_str.parse::<Uuid>().unwrap();
-        let header_value = make_header_value(test_uuid);
-        // Other formats are valid here (e.g., changes in case or spacing).
-        // However, a black-box test that accounted for those would be at least
-        // as complicated as `make_header_value()` itself and wouldn't be so
-        // convincing in demonstrating that that function does what we think it
-        // does.
+        let test_token = "AAAAAAATOKEN";
+        let header_value = make_header_value(test_token);
         assert_eq!(
             header_value.0.encode().to_str().unwrap(),
-            "Bearer oxide-spoof-37b56e4f-8c60-453b-a37e-99be6efe8a89"
+            "Bearer oxide-token-AAAAAAATOKEN"
         );
     }
 
     #[test]
-    fn test_make_header_value_raw() {
-        let test_uuid_str = "37b56e4f-8c60-453b-a37e-99be6efe8a89";
-        let test_uuid = test_uuid_str.parse::<Uuid>().unwrap();
-        assert_eq!(
-            make_header_value_raw(test_uuid_str.as_bytes()).unwrap(),
-            make_header_value(test_uuid).0.encode(),
-        );
+    fn test_token_header_valid() {
+        let test_token = "AAAAAAANOTHERTOKEN";
+        let test_header = make_header_value(test_token);
 
-        assert_eq!(
-            make_header_value_raw(b"who-put-the-bomp").unwrap(),
-            "Bearer oxide-spoof-who-put-the-bomp"
-        );
-
-        // This one is not a valid bearer token because it's not base64
-        assert_eq!(
-            make_header_value_raw(b"not base64").unwrap(),
-            "Bearer oxide-spoof-not base64"
-        );
-
-        // Perhaps surprisingly, header values do not need to be valid UTF-8
-        let non_utf8 = make_header_value_raw(b"not-\x80-UTF8").unwrap();
-        assert_eq!(non_utf8, b"Bearer oxide-spoof-not-\x80-UTF8".as_ref(),);
-        non_utf8.to_str().unwrap_err();
-
-        // Valid UTF-8, but not a valid HTTP header
-        make_header_value_raw(b"not valid \x08 HTTP header").unwrap_err();
-    }
-
-    #[test]
-    fn test_spoof_header_valid() {
-        let test_uuid_str = "37b56e4f-8c60-453b-a37e-99be6efe8a89";
-        let test_uuid = test_uuid_str.parse::<Uuid>().unwrap();
-        let test_header = make_header_value(test_uuid);
-
-        // Success case: the client provided a valid uuid in the header.
-        let success_case = authn_spoof_parse_id(Some(&test_header));
-        match success_case {
-            Ok(Some(actor_id)) => {
-                assert_eq!(actor_id, test_uuid);
-            }
-            _ => {
-                assert!(false);
-            }
+        let parsed_token = parse_token(Some(&test_header));
+        match parsed_token {
+            Ok(Some(token)) => assert_eq!(token, test_token),
+            _ => assert!(false),
         };
     }
 
     #[test]
-    fn test_spoof_header_missing() {
+    fn test_token_header_missing() {
         // The client provided no credentials.
-        assert!(matches!(authn_spoof_parse_id(None), Ok(None)));
+        assert!(matches!(parse_token(None), Ok(None)));
     }
 
     #[test]
-    fn test_spoof_reserved_values() {
-        let bad_actor = super::SPOOF_RESERVED_BAD_ACTOR;
-        let header = super::SPOOF_HEADER_BAD_ACTOR.clone();
-        assert!(matches!(
-            authn_spoof_parse_id(Some(&header)),
-            Err(Reason::UnknownActor{ actor })
-                if actor == bad_actor
-        ));
-
-        let header = super::SPOOF_HEADER_BAD_CREDS.clone();
-        assert!(matches!(
-            authn_spoof_parse_id(Some(&header)),
-            Err(Reason::BadCredentials{
-                actor,
-                source
-            }) if actor == *super::SPOOF_RESERVED_BAD_CREDS_ACTOR &&
-                    source.to_string() ==
-                    "do not sell to the people on this list"
-        ));
-    }
-
-    #[test]
-    fn test_spoof_header_bad_uuids() {
-        // These inputs are all legal HTTP headers but not valid values for our
-        // "oxide-authn-spoof" header.
-        let bad_inputs: Vec<&str> = vec![
-            "garbage-in-garbage-can--makes-sense", // not a uuid
-            "",                                    // empty value
-        ];
-
-        for input in &bad_inputs {
-            let test_header = make_header_value_str(input).unwrap();
-            let result = authn_spoof_parse_id(Some(&test_header));
-            if let Err(error) = result {
-                assert!(error.to_string().starts_with(
-                    "bad authentication credentials: parsing header value"
-                ));
-            } else {
-                panic!(
-                    "unexpected result from bad input {:?}: {:?}",
-                    input, result
-                );
-            }
-        }
-
+    fn test_token_header_bad_utf8() {
         // This case is not UTF-8.  It's a valid HTTP header.  The
         // implementation cannot easily distinguish:
         //
-        //    Authorization: Bearer oxide-spoof-foo\x80ar
+        //    Authorization: Bearer oxide-token-foo\x80ar
         //
-        // which is clearly intended for "spoof" (but invalid input) from
+        // which is clearly intended for "token" (but invalid input) from
         //
         //    Authorization: Bearer some-other-junk
         //
@@ -275,10 +178,6 @@ mod test {
         map.insert(&http::header::AUTHORIZATION, test_header);
         let typed_header = map.typed_get::<Authorization<Bearer>>();
         assert!(typed_header.is_none());
-        assert!(matches!(
-            authn_spoof_parse_id(typed_header.as_ref()),
-            Ok(None)
-        ));
+        assert!(matches!(parse_token(typed_header.as_ref()), Ok(None)));
     }
 }
-*/
