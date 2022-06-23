@@ -146,7 +146,7 @@ command line interface.  Note that the `jq` command is required. In addition, th
 
 2. Define a global image that will be used as initial disk contents.
 
-This can be the alpine.iso image that ships with propolis:
+ a. This can be the alpine.iso image that ships with propolis:
 
     oxide api /images --method POST --input - <<EOF
     {
@@ -163,7 +163,7 @@ This can be the alpine.iso image that ships with propolis:
     }
     EOF
 
-Or an ISO / raw disk image / etc hosted at a URL:
+ b. Or an ISO / raw disk image / etc hosted at a URL:
 
     oxide api /images --method POST --input - <<EOF
     {
