@@ -10,6 +10,7 @@ use crate::db;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
 use crate::external_api::params;
+use ipnetwork::IpNetwork;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -17,7 +18,6 @@ use omicron_common::api::external::IpRange;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::UpdateResult;
-use std::net::IpAddr;
 use uuid::Uuid;
 
 impl super::Nexus {
@@ -89,7 +89,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pool_name: &Name,
-        pagparams: &DataPageParams<'_, IpAddr>,
+        pagparams: &DataPageParams<'_, IpNetwork>,
     ) -> ListResultVec<db::model::IpPoolRange> {
         let (.., authz_pool) = LookupPath::new(opctx, &self.db_datastore)
             .ip_pool_name(pool_name)

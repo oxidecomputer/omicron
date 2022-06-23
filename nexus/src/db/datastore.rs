@@ -80,6 +80,7 @@ use diesel::query_builder::{QueryFragment, QueryId};
 use diesel::query_dsl::methods::LoadQuery;
 use diesel::upsert::excluded;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
+use ipnetwork::IpNetwork;
 use omicron_common::api;
 use omicron_common::api::external;
 use omicron_common::api::external::DataPageParams;
@@ -1180,36 +1181,22 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_pool: &authz::IpPool,
-        pag_params: &DataPageParams<'_, std::net::IpAddr>,
+        pag_params: &DataPageParams<'_, IpNetwork>,
     ) -> ListResultVec<IpPoolRange> {
         use db::schema::ip_pool_range::dsl;
         opctx.authorize(authz::Action::ListChildren, authz_pool).await?;
-        let limit = pag_params.limit.get().into();
-        let res = if let Some(last_seen_addr) = pag_params.marker {
-            let addr = ipnetwork::IpNetwork::from(*last_seen_addr);
-            dsl::ip_pool_range
-                .filter(dsl::ip_pool_id.eq(authz_pool.id()))
-                .filter(dsl::time_deleted.is_null())
-                .filter(dsl::first_address.gt(addr))
-                .order(dsl::first_address)
-                .limit(limit)
-                .select(IpPoolRange::as_select())
-                .get_results_async(self.pool_authorized(opctx).await?)
-        } else {
-            dsl::ip_pool_range
-                .filter(dsl::ip_pool_id.eq(authz_pool.id()))
-                .filter(dsl::time_deleted.is_null())
-                .order(dsl::first_address)
-                .limit(limit)
-                .select(IpPoolRange::as_select())
-                .get_results_async(self.pool_authorized(opctx).await?)
-        };
-        res.await.map_err(|e| {
-            public_error_from_diesel_pool(
-                e,
-                ErrorHandler::NotFoundByResource(authz_pool),
-            )
-        })
+        paginated(dsl::ip_pool_range, dsl::first_address, pag_params)
+            .filter(dsl::ip_pool_id.eq(authz_pool.id()))
+            .filter(dsl::time_deleted.is_null())
+            .select(IpPoolRange::as_select())
+            .get_results_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_pool),
+                )
+            })
     }
 
     pub async fn ip_pool_add_range(

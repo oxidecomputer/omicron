@@ -36,6 +36,7 @@ use dropshot::RequestContext;
 use dropshot::ResultsPage;
 use dropshot::TypedBody;
 use dropshot::WhichPage;
+use ipnetwork::IpNetwork;
 use omicron_common::api::external;
 use omicron_common::api::external::http_pagination::data_page_params_nameid_id;
 use omicron_common::api::external::http_pagination::data_page_params_nameid_name;
@@ -1156,8 +1157,25 @@ async fn ip_pools_put_ip_pool(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-pub type IpPoolRangePaginationParams =
-    PaginationParams<EmptyScanParams, std::net::IpAddr>;
+/// Parameters for controlling pagination of IP Pool ranges
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+pub struct IpPoolRangeScanParams {
+    #[serde(default = "default_ip_pool_range_order")]
+    direction: PaginationOrder,
+}
+
+fn default_ip_pool_range_order() -> PaginationOrder {
+    PaginationOrder::Ascending
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+struct IpPoolRangePageSelector {
+    scan_params: IpPoolRangeScanParams,
+    last_seen_address: IpNetwork,
+}
+
+type IpPoolRangePaginationParams =
+    PaginationParams<IpPoolRangeScanParams, IpPoolRangePageSelector>;
 
 /// List the ranges of IP addresses within an existing IP Pool.
 ///
@@ -1179,13 +1197,15 @@ async fn ip_pool_ranges_get(
     let pool_name = &path.pool_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let marker = match query.page {
-            WhichPage::First(_) => None,
-            WhichPage::Next(ref last_address) => Some(last_address),
+        let (scan_params, marker) = match query.page {
+            WhichPage::First(ref scan_params) => (scan_params, None),
+            WhichPage::Next(ref selector) => {
+                (&selector.scan_params, Some(&selector.last_seen_address))
+            }
         };
         let pag_params = DataPageParams {
             limit: rqctx.page_limit(&query)?,
-            direction: PaginationOrder::Ascending,
+            direction: scan_params.direction,
             marker,
         };
         let ranges = nexus
@@ -1196,8 +1216,11 @@ async fn ip_pool_ranges_get(
             .collect();
         Ok(HttpResponseOk(ResultsPage::new(
             ranges,
-            &EmptyScanParams {},
-            |range: &IpPoolRange, _| range.range.first_address(),
+            scan_params,
+            |range: &IpPoolRange, scan_params| IpPoolRangePageSelector {
+                scan_params: scan_params.clone(),
+                last_seen_address: IpNetwork::from(range.range.first_address()),
+            },
         )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
