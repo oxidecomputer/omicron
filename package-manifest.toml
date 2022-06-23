@@ -109,6 +109,10 @@ zone = false
 [external_package.maghemite.source]
 type = "prebuilt"
 repo = "maghemite"
+# Updating the commit hash here currently requires also updating
+# `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
+# building `ddm-admin-client` (which will instruct you to update
+# `tools/maghemite_openapi_version`).
 commit = "2be097ddd1d3fd8e7f56bc0a4bfd696253b11454"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
