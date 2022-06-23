@@ -1218,7 +1218,7 @@ async fn ip_pool_ranges_get(
             ranges,
             scan_params,
             |range: &IpPoolRange, scan_params| IpPoolRangePageSelector {
-                scan_params: scan_params.clone(),
+                scan_params: *scan_params,
                 last_seen_address: IpNetwork::from(range.range.first_address()),
             },
         )?))
