@@ -24,7 +24,7 @@ fn test_gateway_openapi_sled() {
         .arg("--openapi")
         .arg("examples/config.toml");
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
-    assert_exit_code(exit_status, EXIT_SUCCESS);
+    assert_exit_code(exit_status, EXIT_SUCCESS, &stderr_text);
     assert_contents("tests/output/cmd-gateway-openapi-stderr", &stderr_text);
 
     let spec: OpenAPI = serde_json::from_str(&stdout_text)

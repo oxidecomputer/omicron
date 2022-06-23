@@ -9,9 +9,7 @@ use omicron_common::api::internal::nexus::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Display, Formatter, Result as FormatResult};
-use std::net::IpAddr;
-use std::net::Ipv6Addr;
-use std::net::{SocketAddr, SocketAddrV6};
+use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use uuid::Uuid;
 
 /// Information required to construct a virtual network interface for a guest
@@ -158,6 +156,34 @@ pub struct InstanceRuntimeStateRequested {
     pub migration_params: Option<InstanceRuntimeStateMigrateParams>,
 }
 
+/// Request the contents of an Instance's serial console.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct InstanceSerialConsoleRequest {
+    /// Character index in the serial buffer from which to read, counting the bytes output since
+    /// instance start. If this is not provided, `most_recent` must be provided, and if this *is*
+    /// provided, `most_recent` must *not* be provided.
+    pub from_start: Option<u64>,
+    /// Character index in the serial buffer from which to read, counting *backward* from the most
+    /// recently buffered data retrieved from the instance. (See note on `from_start` about mutual
+    /// exclusivity)
+    pub most_recent: Option<u64>,
+    /// Maximum number of bytes of buffered serial console contents to return. If the requested
+    /// range runs to the end of the available buffer, the data returned will be shorter than
+    /// `max_bytes`.
+    pub max_bytes: Option<u64>,
+}
+
+/// Contents of an Instance's serial console buffer.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InstanceSerialConsoleData {
+    /// The bytes starting from the requested offset up to either the end of the buffer or the
+    /// request's `max_bytes`. Provided as a u8 array rather than a string, as it may not be UTF-8.
+    pub data: Vec<u8>,
+    /// The absolute offset since boot (suitable for use as `byte_offset` in a subsequent request)
+    /// of the last byte returned in `data`.
+    pub last_byte_offset: u64,
+}
+
 /// The type of a dataset, and an auxiliary information necessary
 /// to successfully launch a zone managing the associated data.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
@@ -165,7 +191,7 @@ pub struct InstanceRuntimeStateRequested {
 pub enum DatasetKind {
     CockroachDb {
         /// The addresses of all nodes within the cluster.
-        all_addresses: Vec<SocketAddr>,
+        all_addresses: Vec<SocketAddrV6>,
     },
     Crucible,
     Clickhouse,
@@ -213,6 +239,8 @@ impl std::fmt::Display for DatasetKind {
 /// instantiated when the dataset is detected.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct DatasetEnsureBody {
+    // The UUID of the dataset, as well as the service using it directly.
+    pub id: Uuid,
     // The name (and UUID) of the Zpool which we are inserting into.
     pub zpool_id: Uuid,
     // The type of the filesystem.
@@ -235,14 +263,52 @@ impl From<DatasetEnsureBody> for sled_agent_client::types::DatasetEnsureBody {
             zpool_id: p.zpool_id,
             dataset_kind: p.dataset_kind.into(),
             address: p.address.to_string(),
+            id: p.id,
         }
     }
 }
 
+/// Describes service-specific parameters.
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ServiceType {
+    Nexus { internal_address: SocketAddrV6, external_address: SocketAddrV6 },
+    InternalDns { server_address: SocketAddrV6, dns_address: SocketAddrV6 },
+    Oximeter,
+}
+
+impl From<ServiceType> for sled_agent_client::types::ServiceType {
+    fn from(s: ServiceType) -> Self {
+        use sled_agent_client::types::ServiceType as AutoSt;
+        use ServiceType as St;
+
+        match s {
+            St::Nexus { internal_address, external_address } => AutoSt::Nexus {
+                internal_address: internal_address.to_string(),
+                external_address: external_address.to_string(),
+            },
+            St::InternalDns { server_address, dns_address } => {
+                AutoSt::InternalDns {
+                    server_address: server_address.to_string(),
+                    dns_address: dns_address.to_string(),
+                }
+            }
+            St::Oximeter => AutoSt::Oximeter,
+        }
+    }
+}
+
+/// Describes a request to create a service. This information
+/// should be sufficient for a Sled Agent to start a zone
+/// containing the requested service.
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]
 pub struct ServiceRequest {
+    // The UUID of the service to be initialized.
+    pub id: Uuid,
     // The name of the service to be created.
     pub name: String,
     // The addresses on which the service should listen for requests.
@@ -256,14 +322,18 @@ pub struct ServiceRequest {
     // is necessary to allow inter-zone traffic routing.
     #[serde(default)]
     pub gz_addresses: Vec<Ipv6Addr>,
+    // Any other service-specific parameters.
+    pub service_type: ServiceType,
 }
 
 impl From<ServiceRequest> for sled_agent_client::types::ServiceRequest {
     fn from(s: ServiceRequest) -> Self {
         Self {
+            id: s.id,
             name: s.name,
             addresses: s.addresses,
             gz_addresses: s.gz_addresses,
+            service_type: s.service_type.into(),
         }
     }
 }

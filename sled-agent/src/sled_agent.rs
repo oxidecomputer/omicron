@@ -14,10 +14,12 @@ use crate::instance_manager::InstanceManager;
 use crate::nexus::NexusClient;
 use crate::params::{
     DatasetKind, DiskStateRequested, InstanceHardware, InstanceMigrateParams,
-    InstanceRuntimeStateRequested, ServiceEnsureBody,
+    InstanceRuntimeStateRequested, InstanceSerialConsoleData,
+    ServiceEnsureBody,
 };
-use crate::services::ServiceManager;
+use crate::services::{self, ServiceManager};
 use crate::storage_manager::StorageManager;
+use futures::stream::{self, StreamExt, TryStreamExt};
 use omicron_common::api::{
     internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
     internal::nexus::UpdateArtifact,
@@ -33,6 +35,7 @@ use crate::illumos::{dladm::Dladm, zfs::Zfs, zone::Zones};
 use crate::illumos::{
     dladm::MockDladm as Dladm, zfs::MockZfs as Zfs, zone::MockZones as Zones,
 };
+use crate::serial::ByteOffset;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -167,10 +170,18 @@ impl SledAgent {
         // re-establish contact (i.e., if the Sled Agent crashed, but we wanted
         // to leave the running Zones intact).
         let zones = Zones::get()?;
-        for z in zones {
-            warn!(log, "Deleting existing zone"; "zone_name" => z.name());
-            Zones::halt_and_remove_logged(&log, z.name())?;
-        }
+        stream::iter(zones)
+            .zip(stream::iter(std::iter::repeat(log.clone())))
+            .map(Ok::<_, crate::zone::AdmError>)
+            .try_for_each_concurrent(
+                None,
+                |(zone, log)| async {
+                    tokio::task::spawn_blocking(move || {
+                        warn!(log, "Deleting existing zone"; "zone_name" => zone.name());
+                        Zones::halt_and_remove_logged(&log, zone.name())
+                    }).await.unwrap()
+                }
+            ).await?;
 
         // Identify all VNICs which should be managed by the Sled Agent.
         //
@@ -185,15 +196,24 @@ impl SledAgent {
         // Note that we don't currently delete the VNICs in any particular
         // order. That should be OK, since we're definitely deleting the guest
         // VNICs before the xde devices, which is the main constraint.
-        for vnic in Dladm::get_vnics()? {
-            warn!(
-              log,
-              "Deleting existing VNIC";
-                "vnic_name" => &vnic,
-                "vnic_kind" => ?VnicKind::from_name(&vnic).unwrap(),
-            );
-            Dladm::delete_vnic(&vnic)?;
-        }
+        let vnics = Dladm::get_vnics()?;
+        stream::iter(vnics)
+            .zip(stream::iter(std::iter::repeat(log.clone())))
+            .map(Ok::<_, crate::illumos::dladm::DeleteVnicError>)
+            .try_for_each_concurrent(None, |(vnic, log)| async {
+                tokio::task::spawn_blocking(move || {
+                    warn!(
+                      log,
+                      "Deleting existing VNIC";
+                        "vnic_name" => &vnic,
+                        "vnic_kind" => ?VnicKind::from_name(&vnic).unwrap(),
+                    );
+                    Dladm::delete_vnic(&vnic)
+                })
+                .await
+                .unwrap()
+            })
+            .await?;
 
         // Also delete any extant xde devices. These should also eventually be
         // recovered / tracked, to avoid interruption of any guests that are
@@ -245,7 +265,7 @@ impl SledAgent {
             etherstub.clone(),
             etherstub_vnic.clone(),
             *sled_address.ip(),
-            None,
+            services::Config::default(),
         )
         .await?;
 
@@ -322,5 +342,21 @@ impl SledAgent {
         crate::updates::download_artifact(artifact, self.nexus_client.as_ref())
             .await?;
         Ok(())
+    }
+
+    pub async fn instance_serial_console_data(
+        &self,
+        instance_id: Uuid,
+        byte_offset: ByteOffset,
+        max_bytes: Option<usize>,
+    ) -> Result<InstanceSerialConsoleData, Error> {
+        self.instances
+            .instance_serial_console_buffer_data(
+                instance_id,
+                byte_offset,
+                max_bytes,
+            )
+            .await
+            .map_err(Error::from)
     }
 }

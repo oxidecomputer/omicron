@@ -372,12 +372,22 @@ impl Oximeter {
     /// This starts an HTTP server used to communicate with other agents in Omicron, especially
     /// Nexus. It also registers itself as a new `oximeter` instance with Nexus.
     pub async fn new(config: &Config) -> Result<Self, Error> {
-        let (drain, registration) = slog_dtrace::with_drain(
-            config
-                .log
-                .to_logger("oximeter")
-                .map_err(|msg| Error::Server(msg.to_string()))?,
-        );
+        let log = config
+            .log
+            .to_logger("oximeter")
+            .map_err(|msg| Error::Server(msg.to_string()))?;
+        Self::with_logger(config, log).await
+    }
+
+    /// Create a new `Oximeter`, specifying an alternative logger to use.
+    ///
+    /// This can be used to override / ignore the logging configuration in
+    /// `config`, using `log` instead.
+    pub async fn with_logger(
+        config: &Config,
+        log: Logger,
+    ) -> Result<Self, Error> {
+        let (drain, registration) = slog_dtrace::with_drain(log);
         let log = slog::Logger::root(drain.fuse(), o!());
         if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
             let msg = format!("failed to register DTrace probes: {}", e);

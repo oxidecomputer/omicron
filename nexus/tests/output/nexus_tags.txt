@@ -43,10 +43,12 @@ instance_network_interfaces_delete_interface /organizations/{organization_name}/
 instance_network_interfaces_get          /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces
 instance_network_interfaces_get_interface /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}
 instance_network_interfaces_post         /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces
+instance_network_interfaces_put_interface /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}
 project_instances_delete_instance        /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}
 project_instances_get                    /organizations/{organization_name}/projects/{project_name}/instances
 project_instances_get_instance           /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}
 project_instances_instance_reboot        /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/reboot
+project_instances_instance_serial_get    /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/serial
 project_instances_instance_start         /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/start
 project_instances_instance_stop          /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/stop
 project_instances_migrate_instance       /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/migrate

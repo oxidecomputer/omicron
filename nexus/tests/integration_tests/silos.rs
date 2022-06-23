@@ -21,7 +21,7 @@ use nexus_test_utils::resource_helpers::{
 
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
-use omicron_nexus::authz::SiloRoles;
+use omicron_nexus::authz::SiloRole;
 
 use httptest::{matchers::*, responders::*, Expectation, Server};
 
@@ -88,7 +88,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     grant_iam(
         client,
         "/silos/discoverable",
-        SiloRoles::Admin,
+        SiloRole::Admin,
         new_silo_user_id,
         AuthnMode::PrivilegedUser,
     )

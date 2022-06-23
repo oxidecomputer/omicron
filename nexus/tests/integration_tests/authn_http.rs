@@ -277,7 +277,7 @@ async fn start_whoami_server(
     sessions: HashMap<String, FakeSession>,
 ) -> TestContext<WhoamiServerState> {
     let config = nexus_test_utils::load_test_config();
-    let logctx = LogContext::new(test_name, &config.log);
+    let logctx = LogContext::new(test_name, &config.pkg.log);
 
     let whoami_api = {
         let mut whoami_api = ApiDescription::new();
@@ -299,7 +299,7 @@ async fn start_whoami_server(
     TestContext::new(
         whoami_api,
         server_state,
-        &config.dropshot_external,
+        &config.deployment.dropshot_external,
         Some(logctx),
         log,
     )

@@ -869,7 +869,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OrganizationRolesPolicy"
+                  "$ref": "#/components/schemas/OrganizationRolePolicy"
                 }
               }
             }
@@ -904,7 +904,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/OrganizationRolesPolicy"
+                "$ref": "#/components/schemas/OrganizationRolePolicy"
               }
             }
           },
@@ -916,7 +916,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OrganizationRolesPolicy"
+                  "$ref": "#/components/schemas/OrganizationRolePolicy"
                 }
               }
             }
@@ -2415,6 +2415,79 @@
           }
         }
       },
+      "put": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "Update information about an instance's network interface",
+        "operationId": "instance_network_interfaces_put_interface",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "interface_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "organization_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "project_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NetworkInterfaceUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NetworkInterface"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
       "delete": {
         "tags": [
           "instances"
@@ -2516,6 +2589,98 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Instance"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/serial": {
+      "get": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "Get contents of an instance's serial console.",
+        "operationId": "project_instances_instance_serial_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "organization_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "project_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "query",
+            "name": "from_start",
+            "description": "Character index in the serial buffer from which to read, counting the bytes output since instance start. If this is not provided, `most_recent` must be provided, and if this *is* provided, `most_recent` must *not* be provided.",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "max_bytes",
+            "description": "Maximum number of bytes of buffered serial console contents to return. If the requested range runs to the end of the available buffer, the data returned will be shorter than `max_bytes`.",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "most_recent",
+            "description": "Character index in the serial buffer from which to read, counting *backward* from the most recently buffered data retrieved from the instance. (See note on `from_start` about mutual exclusivity)",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstanceSerialConsoleData"
                 }
               }
             }
@@ -2676,7 +2841,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProjectRolesPolicy"
+                  "$ref": "#/components/schemas/ProjectRolePolicy"
                 }
               }
             }
@@ -2721,7 +2886,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ProjectRolesPolicy"
+                "$ref": "#/components/schemas/ProjectRolePolicy"
               }
             }
           },
@@ -2733,7 +2898,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProjectRolesPolicy"
+                  "$ref": "#/components/schemas/ProjectRolePolicy"
                 }
               }
             }
@@ -4600,7 +4765,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FleetRolesPolicy"
+                  "$ref": "#/components/schemas/FleetRolePolicy"
                 }
               }
             }
@@ -4623,7 +4788,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FleetRolesPolicy"
+                "$ref": "#/components/schemas/FleetRolePolicy"
               }
             }
           },
@@ -4635,7 +4800,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FleetRolesPolicy"
+                  "$ref": "#/components/schemas/FleetRolePolicy"
                 }
               }
             }
@@ -5286,7 +5451,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SiloRolesPolicy"
+                  "$ref": "#/components/schemas/SiloRolePolicy"
                 }
               }
             }
@@ -5321,7 +5486,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SiloRolesPolicy"
+                "$ref": "#/components/schemas/SiloRolePolicy"
               }
             }
           },
@@ -5333,7 +5498,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SiloRolesPolicy"
+                  "$ref": "#/components/schemas/SiloRolePolicy"
                 }
               }
             }
@@ -6076,11 +6241,26 @@
         ]
       },
       "Distribution": {
-        "title": "OS image distribution",
-        "description": "Distribution must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'.",
-        "type": "string",
-        "pattern": "[a-z](|[a-zA-Z0-9-]*[a-zA-Z0-9])",
-        "maxLength": 63
+        "description": "OS image distribution",
+        "type": "object",
+        "properties": {
+          "name": {
+            "description": "The name of the distribution (e.g. \"alpine\" or \"ubuntu\")",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "version": {
+            "description": "The version of the distribution (e.g. \"3.10\" or \"18.04\")",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "version"
+        ]
       },
       "Error": {
         "description": "Error information from a response.",
@@ -6140,7 +6320,7 @@
           "bool"
         ]
       },
-      "FleetRoles": {
+      "FleetRole": {
         "type": "string",
         "enum": [
           "admin",
@@ -6148,7 +6328,7 @@
           "viewer"
         ]
       },
-      "FleetRolesPolicy": {
+      "FleetRolePolicy": {
         "description": "Client view of a [`Policy`], which describes how this resource may be accessed\n\nNote that the Policy only describes access granted explicitly for this resource.  The policies of parent resources can also cause a user to have access to this resource.",
         "type": "object",
         "properties": {
@@ -6156,7 +6336,7 @@
             "description": "Roles directly assigned on this resource",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/FleetRolesRoleAssignment"
+              "$ref": "#/components/schemas/FleetRoleRoleAssignment"
             }
           }
         },
@@ -6164,7 +6344,7 @@
           "role_assignments"
         ]
       },
-      "FleetRolesRoleAssignment": {
+      "FleetRoleRoleAssignment": {
         "description": "Describes the assignment of a particular role on a particular resource to a particular identity (user, group, etc.)\n\nThe resource is not part of this structure.  Rather, [`RoleAssignment`]s are put into a [`Policy`] and that Policy is applied to a particular resource.",
         "type": "object",
         "properties": {
@@ -6176,7 +6356,7 @@
             "$ref": "#/components/schemas/IdentityType"
           },
           "role_name": {
-            "$ref": "#/components/schemas/FleetRoles"
+            "$ref": "#/components/schemas/FleetRole"
           }
         },
         "required": [
@@ -6300,10 +6480,6 @@
                 "$ref": "#/components/schemas/ImageSource"
               }
             ]
-          },
-          "version": {
-            "description": "image version",
-            "type": "string"
           }
         },
         "required": [
@@ -6311,8 +6487,7 @@
           "description",
           "distribution",
           "name",
-          "source",
-          "version"
+          "source"
         ]
       },
       "GlobalImageResultsPage": {
@@ -6951,6 +7126,31 @@
           "items"
         ]
       },
+      "InstanceSerialConsoleData": {
+        "description": "Contents of an Instance's serial console buffer.",
+        "type": "object",
+        "properties": {
+          "data": {
+            "description": "The bytes starting from the requested offset up to either the end of the buffer or the request's `max_bytes`. Provided as a u8 array rather than a string, as it may not be UTF-8.",
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0
+            }
+          },
+          "last_byte_offset": {
+            "description": "The absolute offset since boot (suitable for use as `byte_offset` in a subsequent request) of the last byte returned in `data`.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "data",
+          "last_byte_offset"
+        ]
+      },
       "InstanceState": {
         "description": "Running state of an Instance (primarily: booted or stopped)\n\nThis typically reflects whether it's starting, running, stopping, or stopped, but also includes states related to the Instance's lifecycle",
         "type": "string",
@@ -7167,6 +7367,29 @@
           "items"
         ]
       },
+      "NetworkInterfaceUpdate": {
+        "description": "Parameters for updating a [`NetworkInterface`](omicron_common::api::external::NetworkInterface).\n\nNote that modifying IP addresses for an interface is not yet supported, a new interface must be created instead.",
+        "type": "object",
+        "properties": {
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "make_primary": {
+            "description": "Make a secondary interface the instance's primary interface.\n\nIf applied to a secondary interface, that interface will become the primary on the next reboot of the instance. Note that this may have implications for routing between instances, as the new primary interface will be on a distinct subnet from the previous primary interface.\n\nNote that this can only be used to select a new primary interface for an instance. Requests to change the primary interface into a secondary will return an error.",
+            "default": false,
+            "type": "boolean"
+          },
+          "name": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          }
+        }
+      },
       "Organization": {
         "description": "Client view of an [`Organization`]",
         "type": "object",
@@ -7244,7 +7467,7 @@
           "items"
         ]
       },
-      "OrganizationRoles": {
+      "OrganizationRole": {
         "type": "string",
         "enum": [
           "admin",
@@ -7252,7 +7475,7 @@
           "viewer"
         ]
       },
-      "OrganizationRolesPolicy": {
+      "OrganizationRolePolicy": {
         "description": "Client view of a [`Policy`], which describes how this resource may be accessed\n\nNote that the Policy only describes access granted explicitly for this resource.  The policies of parent resources can also cause a user to have access to this resource.",
         "type": "object",
         "properties": {
@@ -7260,7 +7483,7 @@
             "description": "Roles directly assigned on this resource",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/OrganizationRolesRoleAssignment"
+              "$ref": "#/components/schemas/OrganizationRoleRoleAssignment"
             }
           }
         },
@@ -7268,7 +7491,7 @@
           "role_assignments"
         ]
       },
-      "OrganizationRolesRoleAssignment": {
+      "OrganizationRoleRoleAssignment": {
         "description": "Describes the assignment of a particular role on a particular resource to a particular identity (user, group, etc.)\n\nThe resource is not part of this structure.  Rather, [`RoleAssignment`]s are put into a [`Policy`] and that Policy is applied to a particular resource.",
         "type": "object",
         "properties": {
@@ -7280,7 +7503,7 @@
             "$ref": "#/components/schemas/IdentityType"
           },
           "role_name": {
-            "$ref": "#/components/schemas/OrganizationRoles"
+            "$ref": "#/components/schemas/OrganizationRole"
           }
         },
         "required": [
@@ -7389,7 +7612,7 @@
           "items"
         ]
       },
-      "ProjectRoles": {
+      "ProjectRole": {
         "type": "string",
         "enum": [
           "admin",
@@ -7397,7 +7620,7 @@
           "viewer"
         ]
       },
-      "ProjectRolesPolicy": {
+      "ProjectRolePolicy": {
         "description": "Client view of a [`Policy`], which describes how this resource may be accessed\n\nNote that the Policy only describes access granted explicitly for this resource.  The policies of parent resources can also cause a user to have access to this resource.",
         "type": "object",
         "properties": {
@@ -7405,7 +7628,7 @@
             "description": "Roles directly assigned on this resource",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/ProjectRolesRoleAssignment"
+              "$ref": "#/components/schemas/ProjectRoleRoleAssignment"
             }
           }
         },
@@ -7413,7 +7636,7 @@
           "role_assignments"
         ]
       },
-      "ProjectRolesRoleAssignment": {
+      "ProjectRoleRoleAssignment": {
         "description": "Describes the assignment of a particular role on a particular resource to a particular identity (user, group, etc.)\n\nThe resource is not part of this structure.  Rather, [`RoleAssignment`]s are put into a [`Policy`] and that Policy is applied to a particular resource.",
         "type": "object",
         "properties": {
@@ -7425,7 +7648,7 @@
             "$ref": "#/components/schemas/IdentityType"
           },
           "role_name": {
-            "$ref": "#/components/schemas/ProjectRoles"
+            "$ref": "#/components/schemas/ProjectRole"
           }
         },
         "required": [
@@ -8293,7 +8516,7 @@
           "items"
         ]
       },
-      "SiloRoles": {
+      "SiloRole": {
         "type": "string",
         "enum": [
           "admin",
@@ -8301,7 +8524,7 @@
           "viewer"
         ]
       },
-      "SiloRolesPolicy": {
+      "SiloRolePolicy": {
         "description": "Client view of a [`Policy`], which describes how this resource may be accessed\n\nNote that the Policy only describes access granted explicitly for this resource.  The policies of parent resources can also cause a user to have access to this resource.",
         "type": "object",
         "properties": {
@@ -8309,7 +8532,7 @@
             "description": "Roles directly assigned on this resource",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/SiloRolesRoleAssignment"
+              "$ref": "#/components/schemas/SiloRoleRoleAssignment"
             }
           }
         },
@@ -8317,7 +8540,7 @@
           "role_assignments"
         ]
       },
-      "SiloRolesRoleAssignment": {
+      "SiloRoleRoleAssignment": {
         "description": "Describes the assignment of a particular role on a particular resource to a particular identity (user, group, etc.)\n\nThe resource is not part of this structure.  Rather, [`RoleAssignment`]s are put into a [`Policy`] and that Policy is applied to a particular resource.",
         "type": "object",
         "properties": {
@@ -8329,7 +8552,7 @@
             "$ref": "#/components/schemas/IdentityType"
           },
           "role_name": {
-            "$ref": "#/components/schemas/SiloRoles"
+            "$ref": "#/components/schemas/SiloRole"
           }
         },
         "required": [

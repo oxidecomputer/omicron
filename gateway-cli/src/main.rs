@@ -35,7 +35,7 @@ struct Args {
         short,
         long,
         default_value = "info",
-        parse(try_from_str = level_from_str),
+        value_parser = level_from_str,
         help = "Log level for MGS client",
     )]
     log_level: Level,
@@ -43,15 +43,15 @@ struct Args {
     #[clap(
         short,
         long,
-        parse(try_from_str = resolve_host),
+        value_parser = resolve_host,
         help = "IP address of MGS server",
     )]
     server: IpAddr,
 
-    #[clap(short, long, help = "Port of MGS server")]
+    #[clap(short, long, help = "Port of MGS server", action)]
     port: u16,
 
-    #[clap(long, help = "Target sled number")]
+    #[clap(long, help = "Target sled number", action)]
     sled: u32,
 
     #[clap(subcommand)]
@@ -62,7 +62,7 @@ struct Args {
 enum Command {
     #[clap(about = "Attach to serial console")]
     Attach {
-        #[clap(long, help = "Put terminal in raw mode")]
+        #[clap(long, help = "Put terminal in raw mode", action)]
         raw: bool,
     },
     #[clap(about = "Detach any existing serial console connection")]

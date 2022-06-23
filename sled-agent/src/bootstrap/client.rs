@@ -14,6 +14,7 @@ use crate::bootstrap::views::ResponseEnvelope;
 use crate::sp::SpHandle;
 use crate::sp::SprocketsRole;
 use slog::Logger;
+use sprockets_host::Ed25519Certificate;
 use std::borrow::Cow;
 use std::io;
 use std::net::SocketAddrV6;
@@ -68,6 +69,7 @@ pub enum Error {
 pub(crate) struct Client<'a> {
     addr: SocketAddrV6,
     sp: &'a Option<SpHandle>,
+    trust_quorum_members: &'a [Ed25519Certificate],
     log: Logger,
 }
 
@@ -75,9 +77,10 @@ impl<'a> Client<'a> {
     pub(crate) fn new(
         addr: SocketAddrV6,
         sp: &'a Option<SpHandle>,
+        trust_quorum_members: &'a [Ed25519Certificate],
         log: Logger,
     ) -> Self {
-        Self { addr, sp, log }
+        Self { addr, sp, trust_quorum_members, log }
     }
 
     pub(crate) fn addr(&self) -> SocketAddrV6 {
@@ -131,6 +134,7 @@ impl<'a> Client<'a> {
             stream,
             self.sp,
             SprocketsRole::Client,
+            Some(self.trust_quorum_members),
             &self.log,
         )
         .await

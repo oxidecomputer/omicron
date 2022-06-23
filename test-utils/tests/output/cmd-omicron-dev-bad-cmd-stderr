@@ -1,4 +1,4 @@
-omicron-dev: parsing arguments: error: Found argument 'bogus-command' which wasn't expected, or isn't valid in this context
+error: Found argument 'bogus-command' which wasn't expected, or isn't valid in this context
 
 USAGE:
     omicron-dev <SUBCOMMAND>

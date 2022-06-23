@@ -1,12 +1,12 @@
 //! Common code shared between `omicron-package` and `thing-flinger` binaries.
 
+use clap::Subcommand;
 use omicron_zone_package::package::Package;
 use serde::de::DeserializeOwned;
 use serde_derive::Deserialize;
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::path::PathBuf;
-use structopt::StructOpt;
 use thiserror::Error;
 
 /// Errors which may be returned when parsing the server configuration.
@@ -31,7 +31,7 @@ pub fn parse<P: AsRef<Path>, C: DeserializeOwned>(
 }
 
 /// Commands which should execute on a host building packages.
-#[derive(Debug, StructOpt)]
+#[derive(Debug, Subcommand)]
 pub enum BuildCommand {
     /// Builds the packages specified in a manifest, and places them into a target
     /// directory.
@@ -39,7 +39,7 @@ pub enum BuildCommand {
         /// The output directory, where artifacts should be placed.
         ///
         /// Defaults to "out".
-        #[structopt(long = "out", default_value = "out")]
+        #[clap(long = "out", default_value = "out", action)]
         artifact_dir: PathBuf,
     },
     /// Checks the packages specified in a manifest, without building.
@@ -47,20 +47,20 @@ pub enum BuildCommand {
 }
 
 /// Commands which should execute on a host installing packages.
-#[derive(Debug, StructOpt)]
+#[derive(Debug, Subcommand)]
 pub enum DeployCommand {
     /// Installs the packages to a target machine.
     Install {
         /// The directory from which artifacts will be pulled.
         ///
         /// Should match the format from the Package subcommand.
-        #[structopt(long = "in", default_value = "out")]
+        #[clap(long = "in", default_value = "out", action)]
         artifact_dir: PathBuf,
 
         /// The directory to which artifacts will be installed.
         ///
         /// Defaults to "/opt/oxide".
-        #[structopt(long = "out", default_value = "/opt/oxide")]
+        #[clap(long = "out", default_value = "/opt/oxide", action)]
         install_dir: PathBuf,
     },
     /// Removes the packages from the target machine.
@@ -68,13 +68,13 @@ pub enum DeployCommand {
         /// The directory from which artifacts were be pulled.
         ///
         /// Should match the format from the Package subcommand.
-        #[structopt(long = "in", default_value = "out")]
+        #[clap(long = "in", default_value = "out", action)]
         artifact_dir: PathBuf,
 
         /// The directory to which artifacts were installed.
         ///
         /// Defaults to "/opt/oxide".
-        #[structopt(long = "out", default_value = "/opt/oxide")]
+        #[clap(long = "out", default_value = "/opt/oxide", action)]
         install_dir: PathBuf,
     },
 }

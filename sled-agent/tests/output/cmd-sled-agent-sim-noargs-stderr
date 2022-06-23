@@ -1,9 +1,9 @@
-sled-agent-sim: parsing arguments: error: The following required arguments were not provided:
+error: The following required arguments were not provided:
     <SA_UUID>
     <SA_IP:PORT>
     <NEXUS_IP:PORT>
 
 USAGE:
-    sled-agent-sim <SA_UUID> <SA_IP:PORT> <NEXUS_IP:PORT> --sim-mode <sim-mode>
+    sled-agent-sim [OPTIONS] <SA_UUID> <SA_IP:PORT> <NEXUS_IP:PORT>
 
 For more information try --help
