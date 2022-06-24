@@ -6,6 +6,10 @@
 
 use ddm_admin_client::types::Ipv6Prefix;
 use ddm_admin_client::Client;
+use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::SLED_PREFIX;
+use omicron_common::backoff::internal_service_policy;
+use omicron_common::backoff::retry_notify;
 use slog::Logger;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
@@ -54,20 +58,32 @@ impl DdmAdminClient {
         Ok(DdmAdminClient { client, log })
     }
 
-    /// Instruct ddmd to advertise the given prefix to peer sleds.
-    pub async fn advertise_prefix(
-        &self,
-        prefix: Ipv6Prefix,
-    ) -> Result<(), DdmError> {
-        // TODO-cleanup Why does the generated openapi client require a `&Vec`
-        // instead of a `&[]`?
-        info!(
-            self.log, "Sending prefix to ddmd for advertisement";
-            "prefix" => ?prefix,
-        );
-        let prefixes = vec![prefix];
-        self.client.advertise_prefixes(&prefixes).await?;
-        Ok(())
+    /// Spawns a background task to instruct ddmd to advertise the given prefix
+    /// to peer sleds.
+    pub fn advertise_prefix(&self, address: Ipv6Subnet<SLED_PREFIX>) {
+        let me = self.clone();
+        tokio::spawn(async move {
+            let prefix =
+                Ipv6Prefix { addr: address.net().network(), mask: SLED_PREFIX };
+            retry_notify(internal_service_policy(), || async {
+                info!(
+                    me.log, "Sending prefix to ddmd for advertisement";
+                    "prefix" => ?prefix,
+                );
+
+                // TODO-cleanup Why does the generated openapi client require a
+                // `&Vec` instead of a `&[]`?
+                let prefixes = vec![prefix];
+                me.client.advertise_prefixes(&prefixes).await?;
+                Ok(())
+            }, |err, duration| {
+                info!(
+                    me.log,
+                    "Failed to notify ddmd of our address (will retry after {duration:?}";
+                    "err" => %err,
+                );
+            }).await.unwrap();
+        });
     }
 
     /// Returns the addresses of connected sleds.

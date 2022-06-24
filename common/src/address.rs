@@ -50,7 +50,9 @@ const GZ_ADDRESS_INDEX: usize = 2;
 pub const RSS_RESERVED_ADDRESSES: u16 = 10;
 
 /// Wraps an [`Ipv6Network`] with a compile-time prefix length.
-#[derive(Debug, Clone, Copy, JsonSchema, Serialize, Deserialize, PartialEq)]
+#[derive(
+    Debug, Clone, Copy, JsonSchema, Serialize, Deserialize, Hash, PartialEq, Eq,
+)]
 pub struct Ipv6Subnet<const N: u8> {
     net: Ipv6Net,
 }

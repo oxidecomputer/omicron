@@ -4,6 +4,7 @@
 
 //! Support for miscellaneous services managed by the sled.
 
+use crate::bootstrap::ddm_admin_client::{DdmAdminClient, DdmError};
 use crate::illumos::dladm::{Etherstub, EtherstubVnic};
 use crate::illumos::running_zone::{InstalledZone, RunningZone};
 use crate::illumos::vnic::VnicAllocator;
@@ -12,7 +13,7 @@ use crate::illumos::zone::AddressRequest;
 use crate::params::{ServiceEnsureBody, ServiceRequest, ServiceType};
 use crate::zone::Zones;
 use dropshot::ConfigDropshot;
-use omicron_common::address::{Ipv6Subnet, RACK_PREFIX};
+use omicron_common::address::{Ipv6Subnet, RACK_PREFIX, SLED_PREFIX};
 use omicron_common::nexus_config::{
     self, DeploymentConfig as NexusDeploymentConfig,
 };
@@ -62,6 +63,9 @@ pub enum Error {
 
     #[error(transparent)]
     ZoneInstall(#[from] crate::illumos::running_zone::InstallZoneError),
+
+    #[error("Error contacting ddmd: {0}")]
+    DdmError(#[from] DdmError),
 
     #[error("Failed to add GZ addresses: {message}: {err}")]
     GzAddress {
@@ -126,6 +130,8 @@ pub struct ServiceManager {
     underlay_vnic: EtherstubVnic,
     underlay_address: Ipv6Addr,
     rack_id: Uuid,
+    ddmd_client: DdmAdminClient,
+    advertised_prefixes: Mutex<HashSet<Ipv6Subnet<SLED_PREFIX>>>,
 }
 
 impl ServiceManager {
@@ -148,14 +154,17 @@ impl ServiceManager {
         rack_id: Uuid,
     ) -> Result<Self, Error> {
         debug!(log, "Creating new ServiceManager");
+        let log = log.new(o!("component" => "ServiceManager"));
         let mgr = Self {
-            log: log.new(o!("component" => "ServiceManager")),
+            log: log.clone(),
             config,
             zones: Mutex::new(vec![]),
             vnic_allocator: VnicAllocator::new("Service", etherstub),
             underlay_vnic,
             underlay_address,
             rack_id,
+            ddmd_client: DdmAdminClient::new(log)?,
+            advertised_prefixes: Mutex::new(HashSet::new()),
         };
 
         let config_path = mgr.services_config_path();
@@ -192,6 +201,18 @@ impl ServiceManager {
     // chooses the default one.
     fn services_config_path(&self) -> PathBuf {
         self.config.all_svcs_config_path.clone()
+    }
+
+    // Advertise the /64 prefix of `address`, unless we already have.
+    //
+    // This method only blocks long enough to check our HashSet of
+    // already-advertised prefixes; the actual request to ddmd to advertise the
+    // prefix is spawned onto a background task.
+    async fn advertise_prefix_of_address(&self, address: Ipv6Addr) {
+        let subnet = Ipv6Subnet::new(address);
+        if self.advertised_prefixes.lock().await.insert(subnet) {
+            self.ddmd_client.advertise_prefix(subnet);
+        }
     }
 
     // Populates `existing_zones` according to the requests in `services`.
@@ -250,7 +271,7 @@ impl ServiceManager {
             }
 
             info!(self.log, "GZ addresses: {:#?}", service.gz_addresses);
-            for addr in &service.gz_addresses {
+            for &addr in &service.gz_addresses {
                 info!(
                     self.log,
                     "Ensuring GZ address {} exists",
@@ -260,7 +281,7 @@ impl ServiceManager {
                 let addr_name = service.name.replace(&['-', '_'][..], "");
                 Zones::ensure_has_global_zone_v6_address(
                     self.underlay_vnic.clone(),
-                    *addr,
+                    addr,
                     &addr_name,
                 )
                 .map_err(|err| Error::GzAddress {
@@ -270,6 +291,10 @@ impl ServiceManager {
                     ),
                     err,
                 })?;
+
+                // If this address is in a new ipv6 prefix, notify maghemite so
+                // it can advertise it to other sleds.
+                self.advertise_prefix_of_address(addr).await;
             }
 
             let gateway = if !service.gz_addresses.is_empty() {
