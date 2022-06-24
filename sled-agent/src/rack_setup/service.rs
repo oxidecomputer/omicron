@@ -604,10 +604,17 @@ impl ServiceInner {
                 )
                 .await?;
 
+                let mut records = HashMap::new();
+                for dataset in &allocation.services_request.datasets {
+                    records
+                        .entry(dataset.srv())
+                        .or_insert_with(Vec::new)
+                        .push((dataset.aaaa(), dataset.address()));
+                }
                 self.dns_servers
                     .get()
                     .expect("DNS servers must be initialized first")
-                    .insert_dns_records(&allocation.services_request.datasets)
+                    .insert_dns_records(&records)
                     .await?;
                 Ok(())
             },
@@ -638,10 +645,18 @@ impl ServiceInner {
                     .collect::<Vec<_>>();
 
                 self.initialize_services(sled_address, &all_services).await?;
+
+                let mut records = HashMap::new();
+                for service in &all_services {
+                    records
+                        .entry(service.srv())
+                        .or_insert_with(Vec::new)
+                        .push((service.aaaa(), service.address()));
+                }
                 self.dns_servers
                     .get()
                     .expect("DNS servers must be initialized first")
-                    .insert_dns_records(&all_services)
+                    .insert_dns_records(&records)
                     .await?;
                 Ok(())
             },
