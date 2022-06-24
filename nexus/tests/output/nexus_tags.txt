@@ -39,14 +39,27 @@ instance_network_interfaces_delete_interface /organizations/{organization_name}/
 instance_network_interfaces_get          /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces
 instance_network_interfaces_get_interface /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}
 instance_network_interfaces_post         /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces
+instance_network_interfaces_put_interface /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}
 project_instances_delete_instance        /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}
 project_instances_get                    /organizations/{organization_name}/projects/{project_name}/instances
 project_instances_get_instance           /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}
 project_instances_instance_reboot        /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/reboot
+project_instances_instance_serial_get    /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/serial
 project_instances_instance_start         /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/start
 project_instances_instance_stop          /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/stop
 project_instances_migrate_instance       /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/migrate
 project_instances_post                   /organizations/{organization_name}/projects/{project_name}/instances
+
+API operations found with tag "ip-pools"
+OPERATION ID                             URL PATH
+ip_pool_ranges_add                       /ip-pools/{pool_name}/ranges/add
+ip_pool_ranges_delete                    /ip-pools/{pool_name}/ranges/delete
+ip_pool_ranges_get                       /ip-pools/{pool_name}/ranges
+ip_pools_delete_ip_pool                  /ip-pools/{pool_name}
+ip_pools_get                             /ip-pools
+ip_pools_get_ip_pool                     /ip-pools/{pool_name}
+ip_pools_post                            /ip-pools
+ip_pools_put_ip_pool                     /ip-pools/{pool_name}
 
 API operations found with tag "login"
 OPERATION ID                             URL PATH

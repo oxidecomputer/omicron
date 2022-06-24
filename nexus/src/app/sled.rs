@@ -31,7 +31,7 @@ impl super::Nexus {
         address: SocketAddrV6,
     ) -> Result<(), Error> {
         info!(self.log, "registered sled agent"; "sled_uuid" => id.to_string());
-        let sled = db::model::Sled::new(id, address);
+        let sled = db::model::Sled::new(id, address, self.rack_id);
         self.db_datastore.sled_upsert(sled).await?;
         Ok(())
     }

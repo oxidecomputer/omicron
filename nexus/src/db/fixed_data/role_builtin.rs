@@ -104,12 +104,12 @@ mod test {
         // resource must have a corresponding entry in BUILTIN_ROLES above.
         // The reverse is not necessarily true because we have some internal
         // roles that are not exposed to end users.
-        check_public_roles::<authz::FleetRoles>(ResourceType::Fleet);
-        check_public_roles::<authz::SiloRoles>(ResourceType::Silo);
-        check_public_roles::<authz::OrganizationRoles>(
+        check_public_roles::<authz::FleetRole>(ResourceType::Fleet);
+        check_public_roles::<authz::SiloRole>(ResourceType::Silo);
+        check_public_roles::<authz::OrganizationRole>(
             ResourceType::Organization,
         );
-        check_public_roles::<authz::ProjectRoles>(ResourceType::Project);
+        check_public_roles::<authz::ProjectRole>(ResourceType::Project);
     }
 
     fn check_public_roles<T>(resource_type: ResourceType)

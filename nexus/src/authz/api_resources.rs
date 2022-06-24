@@ -202,7 +202,7 @@ impl ApiResourceWithRoles for Fleet {
 }
 
 impl ApiResourceWithRolesType for Fleet {
-    type AllowedRoles = FleetRoles;
+    type AllowedRoles = FleetRole;
 }
 
 #[derive(
@@ -210,7 +210,7 @@ impl ApiResourceWithRolesType for Fleet {
 )]
 #[cfg_attr(test, derive(EnumIter))]
 #[serde(rename_all = "snake_case")]
-pub enum FleetRoles {
+pub enum FleetRole {
     Admin,
     Collaborator,
     Viewer,
@@ -218,22 +218,22 @@ pub enum FleetRoles {
     // they do not show up in this enum.
 }
 
-impl db::model::DatabaseString for FleetRoles {
+impl db::model::DatabaseString for FleetRole {
     type Error = anyhow::Error;
 
     fn to_database_string(&self) -> &str {
         match self {
-            FleetRoles::Admin => "admin",
-            FleetRoles::Collaborator => "collaborator",
-            FleetRoles::Viewer => "viewer",
+            FleetRole::Admin => "admin",
+            FleetRole::Collaborator => "collaborator",
+            FleetRole::Viewer => "viewer",
         }
     }
 
     fn from_database_string(s: &str) -> Result<Self, Self::Error> {
         match s {
-            "admin" => Ok(FleetRoles::Admin),
-            "collaborator" => Ok(FleetRoles::Collaborator),
-            "viewer" => Ok(FleetRoles::Viewer),
+            "admin" => Ok(FleetRole::Admin),
+            "collaborator" => Ok(FleetRole::Collaborator),
+            "viewer" => Ok(FleetRole::Viewer),
             _ => Err(anyhow!("unsupported Fleet role from database: {:?}", s)),
         }
     }
@@ -359,6 +359,68 @@ impl AuthorizedResource for GlobalImageList {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct IpPoolList;
+
+/// Singleton representing the [`IpPoolList`] itself for authz purposes
+pub const IP_POOL_LIST: IpPoolList = IpPoolList;
+
+impl Eq for IpPoolList {}
+
+impl PartialEq for IpPoolList {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl oso::PolarClass for IpPoolList {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder()
+            .with_equality_check()
+            .add_attribute_getter("fleet", |_: &IpPoolList| FLEET)
+    }
+}
+
+impl AuthorizedResource for IpPoolList {
+    fn load_roles<'a, 'b, 'c, 'd, 'e, 'f>(
+        &'a self,
+        opctx: &'b OpContext,
+        datastore: &'c DataStore,
+        authn: &'d authn::Context,
+        roleset: &'e mut RoleSet,
+    ) -> futures::future::BoxFuture<'f, Result<(), Error>>
+    where
+        'a: 'f,
+        'b: 'f,
+        'c: 'f,
+        'd: 'f,
+        'e: 'f,
+    {
+        // There are no roles on the IpPoolList, only permissions. But we still
+        // need to load the Fleet-related roles to verify that the actor has the
+        // "admin" role on the Fleet.
+        load_roles_for_resource(
+            opctx,
+            datastore,
+            authn,
+            ResourceType::Fleet,
+            *FLEET_ID,
+            roleset,
+        )
+        .boxed()
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+}
+
 // Main resource hierarchy: Organizations, Projects, and their resources
 
 authz_resource! {
@@ -370,7 +432,7 @@ authz_resource! {
 }
 
 impl ApiResourceWithRolesType for Organization {
-    type AllowedRoles = OrganizationRoles;
+    type AllowedRoles = OrganizationRole;
 }
 
 #[derive(
@@ -388,28 +450,28 @@ impl ApiResourceWithRolesType for Organization {
 #[cfg_attr(test, derive(EnumIter))]
 #[display(style = "kebab-case")]
 #[serde(rename_all = "snake_case")]
-pub enum OrganizationRoles {
+pub enum OrganizationRole {
     Admin,
     Collaborator,
     Viewer,
 }
 
-impl db::model::DatabaseString for OrganizationRoles {
+impl db::model::DatabaseString for OrganizationRole {
     type Error = anyhow::Error;
 
     fn to_database_string(&self) -> &str {
         match self {
-            OrganizationRoles::Admin => "admin",
-            OrganizationRoles::Collaborator => "collaborator",
-            OrganizationRoles::Viewer => "viewer",
+            OrganizationRole::Admin => "admin",
+            OrganizationRole::Collaborator => "collaborator",
+            OrganizationRole::Viewer => "viewer",
         }
     }
 
     fn from_database_string(s: &str) -> Result<Self, Self::Error> {
         match s {
-            "admin" => Ok(OrganizationRoles::Admin),
-            "collaborator" => Ok(OrganizationRoles::Collaborator),
-            "viewer" => Ok(OrganizationRoles::Viewer),
+            "admin" => Ok(OrganizationRole::Admin),
+            "collaborator" => Ok(OrganizationRole::Collaborator),
+            "viewer" => Ok(OrganizationRole::Viewer),
             _ => Err(anyhow!(
                 "unsupported Organization role from database: {:?}",
                 s
@@ -427,7 +489,7 @@ authz_resource! {
 }
 
 impl ApiResourceWithRolesType for Project {
-    type AllowedRoles = ProjectRoles;
+    type AllowedRoles = ProjectRole;
 }
 
 #[derive(
@@ -445,28 +507,28 @@ impl ApiResourceWithRolesType for Project {
 #[cfg_attr(test, derive(EnumIter))]
 #[display(style = "kebab-case")]
 #[serde(rename_all = "snake_case")]
-pub enum ProjectRoles {
+pub enum ProjectRole {
     Admin,
     Collaborator,
     Viewer,
 }
 
-impl db::model::DatabaseString for ProjectRoles {
+impl db::model::DatabaseString for ProjectRole {
     type Error = anyhow::Error;
 
     fn to_database_string(&self) -> &str {
         match self {
-            ProjectRoles::Admin => "admin",
-            ProjectRoles::Collaborator => "collaborator",
-            ProjectRoles::Viewer => "viewer",
+            ProjectRole::Admin => "admin",
+            ProjectRole::Collaborator => "collaborator",
+            ProjectRole::Viewer => "viewer",
         }
     }
 
     fn from_database_string(s: &str) -> Result<Self, Self::Error> {
         match s {
-            "admin" => Ok(ProjectRoles::Admin),
-            "collaborator" => Ok(ProjectRoles::Collaborator),
-            "viewer" => Ok(ProjectRoles::Viewer),
+            "admin" => Ok(ProjectRole::Admin),
+            "collaborator" => Ok(ProjectRole::Collaborator),
+            "viewer" => Ok(ProjectRole::Viewer),
             _ => {
                 Err(anyhow!("unsupported Project role from database: {:?}", s))
             }
@@ -573,7 +635,7 @@ authz_resource! {
 }
 
 impl ApiResourceWithRolesType for Silo {
-    type AllowedRoles = SiloRoles;
+    type AllowedRoles = SiloRole;
 }
 
 #[derive(
@@ -591,28 +653,28 @@ impl ApiResourceWithRolesType for Silo {
 #[cfg_attr(test, derive(EnumIter))]
 #[display(style = "kebab-case")]
 #[serde(rename_all = "snake_case")]
-pub enum SiloRoles {
+pub enum SiloRole {
     Admin,
     Collaborator,
     Viewer,
 }
 
-impl db::model::DatabaseString for SiloRoles {
+impl db::model::DatabaseString for SiloRole {
     type Error = anyhow::Error;
 
     fn to_database_string(&self) -> &str {
         match self {
-            SiloRoles::Admin => "admin",
-            SiloRoles::Collaborator => "collaborator",
-            SiloRoles::Viewer => "viewer",
+            SiloRole::Admin => "admin",
+            SiloRole::Collaborator => "collaborator",
+            SiloRole::Viewer => "viewer",
         }
     }
 
     fn from_database_string(s: &str) -> Result<Self, Self::Error> {
         match s {
-            "admin" => Ok(SiloRoles::Admin),
-            "collaborator" => Ok(SiloRoles::Collaborator),
-            "viewer" => Ok(SiloRoles::Viewer),
+            "admin" => Ok(SiloRole::Admin),
+            "collaborator" => Ok(SiloRole::Collaborator),
+            "viewer" => Ok(SiloRole::Viewer),
             _ => Err(anyhow!("unsupported Silo role from database: {:?}", s)),
         }
     }
@@ -674,26 +736,34 @@ authz_resource! {
     polar_snippet = FleetChild,
 }
 
+authz_resource! {
+    name = "IpPool",
+    parent = "Fleet",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}
+
 #[cfg(test)]
 mod test {
-    use super::FleetRoles;
-    use super::OrganizationRoles;
-    use super::ProjectRoles;
-    use super::SiloRoles;
+    use super::FleetRole;
+    use super::OrganizationRole;
+    use super::ProjectRole;
+    use super::SiloRole;
     use crate::db::model::test_database_string_impl;
 
     #[test]
     fn test_roles_database_strings() {
-        test_database_string_impl::<FleetRoles, _>(
+        test_database_string_impl::<FleetRole, _>(
             "tests/output/authz-roles-fleet.txt",
         );
-        test_database_string_impl::<SiloRoles, _>(
+        test_database_string_impl::<SiloRole, _>(
             "tests/output/authz-roles-silo.txt",
         );
-        test_database_string_impl::<OrganizationRoles, _>(
+        test_database_string_impl::<OrganizationRole, _>(
             "tests/output/authz-roles-organization.txt",
         );
-        test_database_string_impl::<ProjectRoles, _>(
+        test_database_string_impl::<ProjectRole, _>(
             "tests/output/authz-roles-project.txt",
         );
     }

@@ -11,6 +11,14 @@
     type='service'>
   <service_fmri value='svc:/milestone/multi-user:default' />
   </dependency>
+  <dependency name='network' grouping='require_all' restart_on='none'
+    type='service'>
+  <service_fmri value='svc:/milestone/network:default' />
+  </dependency>
+  <dependency name='routing' grouping='require_all' restart_on='none'
+    type='service'>
+  <service_fmri value='svc:/network/routing/ndp:default' />
+  </dependency>
 
   <method_context>
     <method_environment>

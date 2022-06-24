@@ -5,7 +5,6 @@
 //! sled-agent's handle to the Rack Setup Service it spawns
 
 use super::client as bootstrap_agent_client;
-use super::discovery::PeerMonitorObserver;
 use super::params::SledAgentRequest;
 use crate::rack_setup::config::SetupServiceConfig;
 use crate::rack_setup::service::Service;
@@ -16,6 +15,8 @@ use omicron_common::backoff::internal_service_policy;
 use omicron_common::backoff::retry_notify;
 use omicron_common::backoff::BackoffError;
 use slog::Logger;
+use sprockets_host::Ed25519Certificate;
+use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
@@ -42,16 +43,17 @@ impl RssHandle {
     pub(super) fn start_rss(
         log: &Logger,
         config: SetupServiceConfig,
-        peer_monitor: PeerMonitorObserver,
+        our_bootstrap_address: Ipv6Addr,
         sp: Option<SpHandle>,
+        member_device_id_certs: Vec<Ed25519Certificate>,
     ) -> Self {
-        let (tx, rx) = rss_channel();
+        let (tx, rx) = rss_channel(our_bootstrap_address);
 
         let rss = Service::new(
             log.new(o!("component" => "RSS")),
             config,
-            peer_monitor,
             tx,
+            member_device_id_certs,
         );
         let log = log.new(o!("component" => "BootstrapAgentRssHandler"));
         let task = tokio::spawn(async move {
@@ -70,6 +72,19 @@ async fn initialize_sled_agent(
     let client = bootstrap_agent_client::Client::new(
         bootstrap_addr,
         sp,
+        // TODO-cleanup: Creating a bootstrap client requires the list of trust
+        // quorum members (as clients should always know the set of possible
+        // servers they can connect to), but `request.trust_quorum_share` is
+        // optional for now because we don't yet require trust quorum in all
+        // sled-agent deployments. We use `.map_or(&[], ...)` here to pass an
+        // empty set of trust quorum members if we're in such a
+        // trust-quorum-free deployment. This would cause any sprockets
+        // connections to fail with unknown peers, but in a trust-quorum-free
+        // deployment we don't actually wrap connections in sprockets.
+        request
+            .trust_quorum_share
+            .as_ref()
+            .map_or(&[], |share| share.member_device_id_certs.as_slice()),
         log.new(o!("BootstrapAgentClient" => bootstrap_addr.to_string())),
     );
 
@@ -95,10 +110,12 @@ async fn initialize_sled_agent(
 // communication in the types below to avoid using tokio channels directly and
 // leave a breadcrumb for where the work will need to be done to switch the
 // communication mechanism.
-fn rss_channel() -> (BootstrapAgentHandle, BootstrapAgentHandleReceiver) {
+fn rss_channel(
+    our_bootstrap_address: Ipv6Addr,
+) -> (BootstrapAgentHandle, BootstrapAgentHandleReceiver) {
     let (tx, rx) = mpsc::channel(32);
     (
-        BootstrapAgentHandle { inner: tx },
+        BootstrapAgentHandle { inner: tx, our_bootstrap_address },
         BootstrapAgentHandleReceiver { inner: rx },
     )
 }
@@ -110,6 +127,7 @@ type InnerInitRequest = (
 
 pub(crate) struct BootstrapAgentHandle {
     inner: mpsc::Sender<InnerInitRequest>,
+    our_bootstrap_address: Ipv6Addr,
 }
 
 impl BootstrapAgentHandle {
@@ -135,6 +153,10 @@ impl BootstrapAgentHandle {
         // https://github.com/oxidecomputer/omicron/issues/820.
         self.inner.send((requests, tx)).await.unwrap();
         rx.await.unwrap()
+    }
+
+    pub(crate) fn our_address(&self) -> Ipv6Addr {
+        self.our_bootstrap_address
     }
 }
 

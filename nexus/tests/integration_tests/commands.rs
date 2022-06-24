@@ -45,7 +45,7 @@ fn write_config(config: &str) -> PathBuf {
 fn test_nexus_no_args() {
     let exec = Exec::cmd(path_to_nexus());
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
-    assert_exit_code(exit_status, EXIT_USAGE);
+    assert_exit_code(exit_status, EXIT_USAGE, &stderr_text);
     assert_contents("tests/output/cmd-nexus-noargs-stdout", &stdout_text);
     assert_contents("tests/output/cmd-nexus-noargs-stderr", &stderr_text);
 }
@@ -54,7 +54,7 @@ fn test_nexus_no_args() {
 fn test_nexus_bad_config() {
     let exec = Exec::cmd(path_to_nexus()).arg("nonexistent");
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
-    assert_exit_code(exit_status, EXIT_FAILURE);
+    assert_exit_code(exit_status, EXIT_FAILURE, &stderr_text);
     assert_contents("tests/output/cmd-nexus-badconfig-stdout", &stdout_text);
     assert_eq!(
         stderr_text,
@@ -68,7 +68,7 @@ fn test_nexus_invalid_config() {
     let exec = Exec::cmd(path_to_nexus()).arg(&config_path);
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
     fs::remove_file(&config_path).expect("failed to remove temporary file");
-    assert_exit_code(exit_status, EXIT_FAILURE);
+    assert_exit_code(exit_status, EXIT_FAILURE, &stderr_text);
     assert_contents(
         "tests/output/cmd-nexus-invalidconfig-stdout",
         &stdout_text,
@@ -76,8 +76,7 @@ fn test_nexus_invalid_config() {
     assert_eq!(
         stderr_text,
         format!(
-            "nexus: parse \"{}\": missing field \
-             `dropshot_external`\n",
+            "nexus: parse \"{}\": missing field `deployment`\n",
             config_path.display()
         ),
     );
@@ -97,7 +96,7 @@ fn run_command_with_arg(arg: &str) -> (String, String) {
     let exec = Exec::cmd(path_to_nexus()).arg(&config_path).arg(arg);
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
     fs::remove_file(&config_path).expect("failed to remove temporary file");
-    assert_exit_code(exit_status, EXIT_SUCCESS);
+    assert_exit_code(exit_status, EXIT_SUCCESS, &stderr_text);
 
     (stdout_text, stderr_text)
 }

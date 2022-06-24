@@ -6,9 +6,10 @@
 
 use super::client::Client as BootstrapAgentClient;
 use super::config::{Config, BOOTSTRAP_AGENT_PORT};
-use super::discovery;
+use super::ddm_admin_client::{DdmAdminClient, DdmError};
 use super::params::SledAgentRequest;
 use super::rss_handle::RssHandle;
+use super::server::TrustQuorumMembership;
 use super::trust_quorum::{RackSecret, ShareDistribution, TrustQuorumError};
 use super::views::SledAgentResponse;
 use crate::config::Config as SledConfig;
@@ -16,17 +17,25 @@ use crate::illumos::dladm::{self, Dladm, PhysicalLink};
 use crate::illumos::zone::Zones;
 use crate::server::Server as SledServer;
 use crate::sp::SpHandle;
+use ddm_admin_client::types::Ipv6Prefix;
 use omicron_common::address::get_sled_address;
 use omicron_common::api::external::{Error as ExternalError, MacAddr};
 use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
 };
 use slog::Logger;
+use std::collections::HashSet;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::Mutex;
-use vsss_rs::Share;
+
+/// Initial octet of IPv6 for bootstrap addresses.
+pub(crate) const BOOTSTRAP_PREFIX: u16 = 0xfdb0;
+
+/// IPv6 prefix mask for bootstrap addresses.
+pub(crate) const BOOTSTRAP_MASK: u8 = 64;
 
 /// Describes errors which may occur while operating the bootstrap service.
 #[derive(Error, Debug)]
@@ -38,6 +47,9 @@ pub enum BootstrapError {
         err: std::io::Error,
     },
 
+    #[error("Error contacting ddmd: {0}")]
+    DdmError(#[from] DdmError),
+
     #[error("Error starting sled agent: {0}")]
     SledError(String),
 
@@ -46,6 +58,9 @@ pub enum BootstrapError {
 
     #[error(transparent)]
     TrustQuorum(#[from] TrustQuorumError),
+
+    #[error("Error collecting peer addresses: {0}")]
+    PeerAddresses(String),
 
     #[error("Failed to initialize bootstrap address: {err}")]
     BootstrapAddress { err: crate::illumos::zone::EnsureGzAddressError },
@@ -64,7 +79,7 @@ pub(crate) struct Agent {
     /// Store the parent log - without "component = BootstrapAgent" - so
     /// other launched components can set their own value.
     parent_log: Logger,
-    peer_monitor: discovery::PeerMonitor,
+    address: Ipv6Addr,
 
     /// Our share of the rack secret, if we have one.
     share: Mutex<Option<ShareDistribution>>,
@@ -85,7 +100,7 @@ fn mac_to_socket_addr(mac: MacAddr) -> SocketAddrV6 {
     assert_eq!(6, mac_bytes.len());
 
     let address = Ipv6Addr::new(
-        0xfdb0,
+        BOOTSTRAP_PREFIX,
         ((mac_bytes[0] as u16) << 8) | mac_bytes[1] as u16,
         ((mac_bytes[2] as u16) << 8) | mac_bytes[3] as u16,
         ((mac_bytes[4] as u16) << 8) | mac_bytes[5] as u16,
@@ -113,7 +128,7 @@ impl Agent {
         sled_config: SledConfig,
         address: Ipv6Addr,
         sp: Option<SpHandle>,
-    ) -> Result<Self, BootstrapError> {
+    ) -> Result<(Self, TrustQuorumMembership), BootstrapError> {
         let ba_log = log.new(o!(
             "component" => "BootstrapAgent",
             "server" => sled_config.id.to_string(),
@@ -157,16 +172,17 @@ impl Agent {
         )
         .map_err(|err| BootstrapError::BootstrapAddress { err })?;
 
-        let peer_monitor = discovery::PeerMonitor::new(&ba_log, address)
-            .map_err(|err| BootstrapError::Io {
-                message: format!("Monitoring for peers from {address}"),
-                err,
-            })?;
+        // Start trying to notify ddmd of our bootstrap address so it can
+        // advertise it to other sleds.
+        tokio::spawn(advertise_bootstrap_address_via_ddmd(
+            ba_log.clone(),
+            address,
+        ));
 
         let agent = Agent {
             log: ba_log,
             parent_log: log,
-            peer_monitor,
+            address,
             share: Mutex::new(None),
             rss: Mutex::new(None),
             sled_agent: Mutex::new(None),
@@ -175,7 +191,7 @@ impl Agent {
         };
 
         let request_path = get_sled_agent_request_path();
-        if request_path.exists() {
+        let trust_quorum = if request_path.exists() {
             info!(agent.log, "Sled already configured, loading sled agent");
             let sled_request: SledAgentRequest = toml::from_str(
                 &tokio::fs::read_to_string(&request_path).await.map_err(
@@ -189,18 +205,14 @@ impl Agent {
             )
             .map_err(|err| BootstrapError::Toml { path: request_path, err })?;
             agent.request_agent(&sled_request).await?;
-        }
+            TrustQuorumMembership::Known(Arc::new(
+                sled_request.trust_quorum_share,
+            ))
+        } else {
+            TrustQuorumMembership::Uninitialized
+        };
 
-        Ok(agent)
-    }
-
-    /// Returns our share of the rack secret, if we have one.
-    pub async fn secret_share(&self) -> Option<Share> {
-        self.share
-            .lock()
-            .await
-            .as_ref()
-            .map(|share_dist| share_dist.share.clone())
+        Ok((agent, trust_quorum))
     }
 
     /// Initializes the Sled Agent on behalf of the RSS, if one has not already
@@ -248,6 +260,7 @@ impl Agent {
             &self.sled_config,
             self.parent_log.clone(),
             sled_address,
+            request.rack_id,
         )
         .await
         .map_err(|e| {
@@ -258,7 +271,6 @@ impl Agent {
         maybe_agent.replace(server);
         info!(&self.log, "Sled Agent loaded; recording configuration");
 
-        // Remember our share, allowing us to respond to `request_share()`.
         *self.share.lock().await = request.trust_quorum_share.clone();
 
         // Record this request so the sled agent can be automatically
@@ -287,10 +299,33 @@ impl Agent {
         &self,
         share: ShareDistribution,
     ) -> Result<RackSecret, BootstrapError> {
+        let ddm_admin_client = DdmAdminClient::new(self.log.clone())?;
         let rack_secret = retry_notify(
             internal_service_policy(),
             || async {
-                let other_agents = self.peer_monitor.peer_addrs().await;
+                let other_agents = {
+                    // Manually build up a `HashSet` instead of `.collect()`ing
+                    // so we can log if we see any duplicates.
+                    let mut addrs = HashSet::new();
+                    for addr in ddm_admin_client
+                        .peer_addrs()
+                        .await
+                        .map_err(BootstrapError::DdmError)
+                        .map_err(|err| BackoffError::transient(err))?
+                    {
+                        // We should never see duplicates; that would mean
+                        // maghemite thinks two different sleds have the same
+                        // bootstrap address!
+                        if !addrs.insert(addr) {
+                            let msg = format!("Duplicate peer addresses received from ddmd: {addr}");
+                            error!(&self.log, "{}", msg);
+                            return Err(BackoffError::permanent(
+                                BootstrapError::PeerAddresses(msg),
+                            ));
+                        }
+                    }
+                    addrs
+                };
                 info!(
                     &self.log,
                     "Bootstrap: Communicating with peers: {:?}", other_agents
@@ -303,7 +338,9 @@ impl Agent {
                         "Not enough peers to start establishing quorum"
                     );
                     return Err(BackoffError::transient(
-                        TrustQuorumError::NotEnoughPeers,
+                        BootstrapError::TrustQuorum(
+                            TrustQuorumError::NotEnoughPeers,
+                        ),
                     ));
                 }
                 info!(
@@ -324,6 +361,7 @@ impl Agent {
                         BootstrapAgentClient::new(
                             addr,
                             &self.sp,
+                            &share.member_device_id_certs,
                             self.log.new(o!(
                                 "BootstrapAgentClient" => addr.to_string()),
                             ),
@@ -331,14 +369,17 @@ impl Agent {
                     })
                     .collect();
 
-                // TODO: Parallelize this and keep track of whose shares we've already retrieved and
-                // don't resend. See https://github.com/oxidecomputer/omicron/issues/514
+                // TODO: Parallelize this and keep track of whose shares we've
+                // already retrieved and don't resend. See
+                // https://github.com/oxidecomputer/omicron/issues/514
                 let mut shares = vec![share.share.clone()];
                 for agent in &other_agents {
                     let share = agent.request_share().await
                         .map_err(|e| {
                             info!(&self.log, "Bootstrap: failed to retreive share from peer: {:?}", e);
-                            BackoffError::transient(e.into())
+                            BackoffError::transient(
+                                BootstrapError::TrustQuorum(e.into()),
+                            )
                         })?;
                     info!(
                         &self.log,
@@ -349,7 +390,7 @@ impl Agent {
                 }
                 let rack_secret = RackSecret::combine_shares(
                     share.threshold,
-                    share.total_shares,
+                    share.total_shares(),
                     &shares,
                 )
                 .map_err(|e| {
@@ -362,7 +403,9 @@ impl Agent {
                     // the error returned from `RackSecret::combine_shares`.
                     // See https://github.com/oxidecomputer/omicron/issues/516
                     BackoffError::transient(
-                        TrustQuorumError::RackSecretConstructionFailed(e),
+                        BootstrapError::TrustQuorum(
+                            TrustQuorumError::RackSecretConstructionFailed(e),
+                        ),
                     )
                 })?;
                 info!(self.log, "RackSecret computed from shares.");
@@ -388,8 +431,15 @@ impl Agent {
             let rss = RssHandle::start_rss(
                 &self.parent_log,
                 rss_config.clone(),
-                self.peer_monitor.observer().await,
+                self.address,
                 self.sp.clone(),
+                // TODO-cleanup: Remove this arg once RSS can discover the trust
+                // quorum members over the management network.
+                config
+                    .sp_config
+                    .as_ref()
+                    .map(|sp_config| sp_config.trust_quorum_members.clone())
+                    .unwrap_or_default(),
             );
             self.rss.lock().await.replace(rss);
         }
@@ -417,6 +467,21 @@ impl Agent {
 
         Ok(())
     }
+}
+
+async fn advertise_bootstrap_address_via_ddmd(log: Logger, address: Ipv6Addr) {
+    let prefix = Ipv6Prefix { addr: address, mask: 64 };
+    retry_notify(internal_service_policy(), || async {
+        let client = DdmAdminClient::new(log.clone())?;
+        client.advertise_prefix(prefix).await?;
+        Ok(())
+    }, |err, duration| {
+        info!(
+            log,
+            "Failed to notify ddmd of our address (will retry after {duration:?}";
+            "err" => %err,
+        );
+    }).await.unwrap();
 }
 
 #[cfg(test)]

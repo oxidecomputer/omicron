@@ -57,8 +57,8 @@ impl Config {
     }
 }
 
-fn parse_into_set(src: &str) -> BTreeSet<String> {
-    src.split_whitespace().map(|s| s.to_owned()).collect()
+fn parse_into_set(src: &str) -> Result<BTreeSet<String>, &'static str> {
+    Ok(src.split_whitespace().map(|s| s.to_owned()).collect())
 }
 
 #[derive(Debug, Subcommand)]
@@ -69,11 +69,11 @@ enum SubCommand {
     /// Be careful!
     Exec {
         /// The command to run
-        #[clap(short, long)]
+        #[clap(short, long, action)]
         cmd: String,
 
         /// The servers to run the command on
-        #[clap(short, long, parse(from_str = parse_into_set))]
+        #[clap(short, long, value_parser = parse_into_set)]
         servers: Option<BTreeSet<String>>,
     },
 
@@ -109,7 +109,12 @@ enum SubCommand {
 )]
 struct Args {
     /// The path to the deployment manifest TOML file
-    #[clap(short, long, help = "Path to deployment manifest toml file")]
+    #[clap(
+        short,
+        long,
+        help = "Path to deployment manifest toml file",
+        action
+    )]
     config: PathBuf,
 
     #[clap(subcommand)]
@@ -475,19 +480,16 @@ fn overlay_sled_agent(
 
     // TODO do we need any escaping here? this will definitely break if any dir
     // names have spaces
-    let dirs = sled_agent_dirs
-        .iter()
-        .map(|dir| format!("{} ", dir.display()))
-        .collect::<String>();
+    let dirs = sled_agent_dirs.iter().map(|dir| format!(" {}", dir.display()));
 
     let cmd = format!(
         "sh -c 'for dir in {}; do mkdir -p $dir; done' && \
             cd {} && \
-            cargo run {} --bin sled-agent-overlay-files -- --directories {}",
-        dirs,
+            cargo run {} --bin sled-agent-overlay-files -- {}",
+        dirs.clone().collect::<String>(),
         config.builder.omicron_path.to_string_lossy(),
         config.release_arg(),
-        dirs
+        dirs.map(|dir| format!(" --directories {}", dir)).collect::<String>(),
     );
     ssh_exec(builder, &cmd, false)
 }

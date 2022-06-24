@@ -39,6 +39,12 @@ use crate::db::fixed_data::silo::DEFAULT_SILO;
 use crate::db::lookup::LookupPath;
 use crate::db::model::DatabaseString;
 use crate::db::model::IncompleteVpc;
+use crate::db::model::IpPool;
+use crate::db::model::IpPoolRange;
+use crate::db::model::IpPoolUpdate;
+use crate::db::model::NetworkInterfaceUpdate;
+use crate::db::model::Vpc;
+use crate::db::queries::ip_pool::FilterOverlappingIpRanges;
 use crate::db::queries::network_interface;
 use crate::db::queries::vpc::InsertVpcQuery;
 use crate::db::queries::vpc_subnet::FilterConflictingVpcSubnetRangesQuery;
@@ -64,6 +70,7 @@ use crate::db::{
     pagination::paginated_multicolumn,
     update_and_check::{UpdateAndCheck, UpdateStatus},
 };
+use crate::external_api::shared::IpRange;
 use crate::external_api::{params, shared};
 use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl, ConnectionManager};
 use chrono::Utc;
@@ -74,6 +81,7 @@ use diesel::query_builder::{QueryFragment, QueryId};
 use diesel::query_dsl::methods::LoadQuery;
 use diesel::upsert::excluded;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
+use ipnetwork::IpNetwork;
 use omicron_common::api;
 use omicron_common::api::external;
 use omicron_common::api::external::DataPageParams;
@@ -1026,6 +1034,260 @@ impl DataStore {
             })
     }
 
+    // IP Pools
+
+    /// List IP Pools by their name
+    pub async fn ip_pools_list_by_name(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Name>,
+    ) -> ListResultVec<IpPool> {
+        use db::schema::ip_pool::dsl;
+        opctx
+            .authorize(authz::Action::ListChildren, &authz::IP_POOL_LIST)
+            .await?;
+        paginated(dsl::ip_pool, dsl::name, pagparams)
+            .filter(dsl::time_deleted.is_null())
+            .select(db::model::IpPool::as_select())
+            .get_results_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    /// List IP Pools by their IDs
+    pub async fn ip_pools_list_by_id(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<IpPool> {
+        use db::schema::ip_pool::dsl;
+        opctx
+            .authorize(authz::Action::ListChildren, &authz::IP_POOL_LIST)
+            .await?;
+        paginated(dsl::ip_pool, dsl::id, pagparams)
+            .filter(dsl::time_deleted.is_null())
+            .select(db::model::IpPool::as_select())
+            .get_results_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    pub async fn ip_pool_create(
+        &self,
+        opctx: &OpContext,
+        new_pool: &params::IpPoolCreate,
+    ) -> CreateResult<IpPool> {
+        use db::schema::ip_pool::dsl;
+        opctx
+            .authorize(authz::Action::CreateChild, &authz::IP_POOL_LIST)
+            .await?;
+        let pool = IpPool::new(&new_pool.identity);
+        let pool_name = pool.name().as_str().to_string();
+        diesel::insert_into(dsl::ip_pool)
+            .values(pool)
+            .returning(IpPool::as_returning())
+            .get_result_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::Conflict(ResourceType::IpPool, &pool_name),
+                )
+            })
+    }
+
+    pub async fn ip_pool_delete(
+        &self,
+        opctx: &OpContext,
+        authz_pool: &authz::IpPool,
+        db_pool: &IpPool,
+    ) -> DeleteResult {
+        use db::schema::ip_pool::dsl;
+        use db::schema::ip_pool_range;
+        opctx.authorize(authz::Action::Delete, authz_pool).await?;
+
+        // Verify there are no IP ranges still in this pool
+        let range = diesel_pool_result_optional(
+            ip_pool_range::dsl::ip_pool_range
+                .filter(ip_pool_range::dsl::ip_pool_id.eq(authz_pool.id()))
+                .filter(ip_pool_range::dsl::time_deleted.is_null())
+                .select(ip_pool_range::dsl::id)
+                .limit(1)
+                .first_async::<Uuid>(self.pool_authorized(opctx).await?)
+                .await,
+        )
+        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
+        if range.is_some() {
+            return Err(Error::InvalidRequest {
+                message:
+                    "IP Pool cannot be deleted while it contains IP ranges"
+                        .to_string(),
+            });
+        }
+
+        // Delete the pool, conditional on the rcgen not having changed. This
+        // protects the delete from occuring if clients created a new IP range
+        // in between the above check for children and this query.
+        let now = Utc::now();
+        let updated_rows = diesel::update(dsl::ip_pool)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(authz_pool.id()))
+            .filter(dsl::rcgen.eq(db_pool.rcgen))
+            .set(dsl::time_deleted.eq(now))
+            .execute_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_pool),
+                )
+            })?;
+
+        if updated_rows == 0 {
+            return Err(Error::InvalidRequest {
+                message: "deletion failed due to concurrent modification"
+                    .to_string(),
+            });
+        }
+        Ok(())
+    }
+
+    pub async fn ip_pool_update(
+        &self,
+        opctx: &OpContext,
+        authz_pool: &authz::IpPool,
+        updates: IpPoolUpdate,
+    ) -> UpdateResult<IpPool> {
+        use db::schema::ip_pool::dsl;
+        opctx.authorize(authz::Action::Modify, authz_pool).await?;
+        diesel::update(dsl::ip_pool)
+            .filter(dsl::id.eq(authz_pool.id()))
+            .filter(dsl::time_deleted.is_null())
+            .set(updates)
+            .returning(IpPool::as_returning())
+            .get_result_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_pool),
+                )
+            })
+    }
+
+    pub async fn ip_pool_list_ranges(
+        &self,
+        opctx: &OpContext,
+        authz_pool: &authz::IpPool,
+        pag_params: &DataPageParams<'_, IpNetwork>,
+    ) -> ListResultVec<IpPoolRange> {
+        use db::schema::ip_pool_range::dsl;
+        opctx.authorize(authz::Action::ListChildren, authz_pool).await?;
+        paginated(dsl::ip_pool_range, dsl::first_address, pag_params)
+            .filter(dsl::ip_pool_id.eq(authz_pool.id()))
+            .filter(dsl::time_deleted.is_null())
+            .select(IpPoolRange::as_select())
+            .get_results_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_pool),
+                )
+            })
+    }
+
+    pub async fn ip_pool_add_range(
+        &self,
+        opctx: &OpContext,
+        authz_pool: &authz::IpPool,
+        range: &IpRange,
+    ) -> CreateResult<IpPoolRange> {
+        use db::schema::ip_pool_range::dsl;
+        opctx.authorize(authz::Action::CreateChild, authz_pool).await?;
+        let pool_id = authz_pool.id();
+        let new_range = IpPoolRange::new(range, pool_id);
+        let filter_subquery = FilterOverlappingIpRanges { range: new_range };
+        let insert_query =
+            diesel::insert_into(dsl::ip_pool_range).values(filter_subquery);
+        IpPool::insert_resource(pool_id, insert_query)
+            .insert_and_get_result_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                use async_bb8_diesel::ConnectionError::Query;
+                use async_bb8_diesel::PoolError::Connection;
+                use diesel::result::Error::NotFound;
+
+                match e {
+                    AsyncInsertError::DatabaseError(Connection(Query(
+                        NotFound,
+                    ))) => {
+                        // We've filtered out the IP addresses the client provided,
+                        // i.e., there's some overlap with existing addresses.
+                        Error::invalid_request(
+                            format!(
+                                "The provided IP range {}-{} overlaps with \
+                            an existing range",
+                                range.first_address(),
+                                range.last_address(),
+                            )
+                            .as_str(),
+                        )
+                    }
+                    AsyncInsertError::CollectionNotFound => {
+                        Error::ObjectNotFound {
+                            type_name: ResourceType::IpPool,
+                            lookup_type: LookupType::ById(pool_id),
+                        }
+                    }
+                    AsyncInsertError::DatabaseError(err) => {
+                        public_error_from_diesel_pool(err, ErrorHandler::Server)
+                    }
+                }
+            })
+    }
+
+    pub async fn ip_pool_delete_range(
+        &self,
+        opctx: &OpContext,
+        authz_pool: &authz::IpPool,
+        range: &IpRange,
+    ) -> DeleteResult {
+        use db::schema::ip_pool_range::dsl;
+        opctx.authorize(authz::Action::Modify, authz_pool).await?;
+        let now = Utc::now();
+
+        // We can just delete the range, provided that it the exact first/last
+        // address pair exists. We are guaranteed that concurrent modifications
+        // don't affect this, since this query will be serialized with any
+        // requests to insert a new range, which must be non-overlapping.
+        let first_address = range.first_address();
+        let last_address = range.last_address();
+        let first_net = ipnetwork::IpNetwork::from(first_address);
+        let last_net = ipnetwork::IpNetwork::from(last_address);
+        let updated_rows = diesel::update(dsl::ip_pool_range)
+            .filter(dsl::first_address.eq(first_net))
+            .filter(dsl::last_address.eq(last_net))
+            .filter(dsl::time_deleted.is_null())
+            .set(dsl::time_deleted.eq(now))
+            .execute_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            })?;
+        if updated_rows == 1 {
+            Ok(())
+        } else {
+            Err(Error::invalid_request(
+                format!(
+                    "The provided range {}-{} does not exist",
+                    first_address, last_address,
+                )
+                .as_str(),
+            ))
+        }
+    }
+
     // Instances
 
     /// Idempotently insert a database record for an Instance
@@ -1942,6 +2204,128 @@ impl DataStore {
             .load_async::<NetworkInterface>(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    /// Update a network interface associated with a given instance.
+    pub async fn instance_update_network_interface(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+        authz_interface: &authz::NetworkInterface,
+        updates: NetworkInterfaceUpdate,
+    ) -> UpdateResult<NetworkInterface> {
+        use crate::db::schema::network_interface::dsl;
+
+        // This database operation is surprisingly subtle. It's possible to
+        // express this in a single query, with multiple common-table
+        // expressions for the updated rows. For example, if we're setting a new
+        // primary interface, we need to set the `is_primary` column to false
+        // for the current primary, and then set it to true, along with any
+        // other updates, for the new primary.
+        //
+        // That's feasible, but there's a CRDB bug that affects some queries
+        // with multiple update statements. It's possible that this query isn't
+        // in that bucket, but we'll still avoid it for now. Instead, we'll bite
+        // the bullet and use a transaction.
+        //
+        // See https://github.com/oxidecomputer/omicron/issues/1204 for the
+        // issue tracking the work to move this into a CTE.
+
+        // Build up some of the queries first, outside the transaction.
+        //
+        // This selects the existing primary interface.
+        let instance_id = authz_instance.id();
+        let interface_id = authz_interface.id();
+        let find_primary_query = dsl::network_interface
+            .filter(dsl::instance_id.eq(instance_id))
+            .filter(dsl::is_primary.eq(true))
+            .filter(dsl::time_deleted.is_null())
+            .select(NetworkInterface::as_select());
+
+        // This returns the state of the associated instance.
+        let instance_query = db::schema::instance::dsl::instance
+            .filter(db::schema::instance::dsl::id.eq(instance_id))
+            .filter(db::schema::instance::dsl::time_deleted.is_null())
+            .select(Instance::as_select());
+        let stopped =
+            db::model::InstanceState::new(external::InstanceState::Stopped);
+
+        // This is the actual query to update the target interface.
+        let make_primary = matches!(updates.make_primary, Some(true));
+        let update_target_query = diesel::update(dsl::network_interface)
+            .filter(dsl::id.eq(interface_id))
+            .filter(dsl::time_deleted.is_null())
+            .set(updates)
+            .returning(NetworkInterface::as_returning());
+
+        // Errors returned from the below transactions.
+        #[derive(Debug)]
+        enum NetworkInterfaceUpdateError {
+            InstanceNotStopped,
+            FailedToUnsetPrimary(diesel::result::Error),
+        }
+        type TxnError = TransactionError<NetworkInterfaceUpdateError>;
+
+        let pool = self.pool_authorized(opctx).await?;
+        if make_primary {
+            pool.transaction(move |conn| {
+                let instance_state =
+                    instance_query.get_result(conn)?.runtime_state.state;
+                if instance_state != stopped {
+                    return Err(TxnError::CustomError(
+                        NetworkInterfaceUpdateError::InstanceNotStopped,
+                    ));
+                }
+
+                // First, get the primary interface
+                let primary_interface = find_primary_query.get_result(conn)?;
+
+                // If the target and primary are different, we need to toggle
+                // the primary into a secondary.
+                if primary_interface.identity.id != interface_id {
+                    if let Err(e) = diesel::update(dsl::network_interface)
+                        .filter(dsl::id.eq(primary_interface.identity.id))
+                        .filter(dsl::time_deleted.is_null())
+                        .set(dsl::is_primary.eq(false))
+                        .execute(conn)
+                    {
+                        return Err(TxnError::CustomError(
+                            NetworkInterfaceUpdateError::FailedToUnsetPrimary(
+                                e,
+                            ),
+                        ));
+                    }
+                }
+
+                // In any case, update the actual target
+                Ok(update_target_query.get_result(conn)?)
+            })
+        } else {
+            // In this case, we can just directly apply the updates. By
+            // construction, `updates.make_primary` is `None`, so nothing will
+            // be done there. The other columns always need to be updated, and
+            // we're only hitting a single row. Note that we still need to
+            // verify the instance is stopped.
+            pool.transaction(move |conn| {
+                let instance_state =
+                    instance_query.get_result(conn)?.runtime_state.state;
+                if instance_state != stopped {
+                    return Err(TxnError::CustomError(
+                        NetworkInterfaceUpdateError::InstanceNotStopped,
+                    ));
+                }
+                Ok(update_target_query.get_result(conn)?)
+            })
+        }
+        .await
+        .map_err(|e| match e {
+            TxnError::CustomError(
+                NetworkInterfaceUpdateError::InstanceNotStopped,
+            ) => Error::invalid_request(
+                "Instance must be stopped to update its network interfaces",
+            ),
+            _ => Error::internal_error(&format!("Transaction error: {:?}", e)),
+        })
     }
 
     // Create a record for a new Oximeter instance
@@ -3910,8 +4294,9 @@ mod test {
             0,
             0,
         );
+        let rack_id = Uuid::new_v4();
         let sled_id = Uuid::new_v4();
-        let sled = Sled::new(sled_id, bogus_addr.clone());
+        let sled = Sled::new(sled_id, bogus_addr.clone(), rack_id);
         datastore.sled_upsert(sled).await.unwrap();
         sled_id
     }
@@ -4267,14 +4652,15 @@ mod test {
         let opctx =
             OpContext::for_tests(logctx.log.new(o!()), datastore.clone());
 
+        let rack_id = Uuid::new_v4();
         let addr1 = "[fd00:1de::1]:12345".parse().unwrap();
         let sled1_id = "0de4b299-e0b4-46f0-d528-85de81a7095f".parse().unwrap();
-        let sled1 = db::model::Sled::new(sled1_id, addr1);
+        let sled1 = db::model::Sled::new(sled1_id, addr1, rack_id);
         datastore.sled_upsert(sled1).await.unwrap();
 
         let addr2 = "[fd00:1df::1]:12345".parse().unwrap();
         let sled2_id = "66285c18-0c79-43e0-e54f-95271f271314".parse().unwrap();
-        let sled2 = db::model::Sled::new(sled2_id, addr2);
+        let sled2 = db::model::Sled::new(sled2_id, addr2, rack_id);
         datastore.sled_upsert(sled2).await.unwrap();
 
         let ip = datastore.next_ipv6_address(&opctx, sled1_id).await.unwrap();

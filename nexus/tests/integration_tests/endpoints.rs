@@ -27,6 +27,8 @@ use omicron_nexus::authn;
 use omicron_nexus::authz;
 use omicron_nexus::external_api::params;
 use omicron_nexus::external_api::shared;
+use omicron_nexus::external_api::shared::IpRange;
+use omicron_nexus::external_api::shared::Ipv4Range;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 
@@ -195,6 +197,8 @@ lazy_static! {
         format!("{}/detach", *DEMO_INSTANCE_DISKS_URL);
     pub static ref DEMO_INSTANCE_NICS_URL: String =
         format!("{}/network-interfaces", *DEMO_INSTANCE_URL);
+    pub static ref DEMO_INSTANCE_SERIAL_URL: String =
+        format!("{}/serial", *DEMO_INSTANCE_URL);
     pub static ref DEMO_INSTANCE_CREATE: params::InstanceCreate =
         params::InstanceCreate {
             identity: IdentityMetadataCreateParams {
@@ -225,6 +229,15 @@ lazy_static! {
             subnet_name: DEMO_VPC_SUBNET_NAME.clone(),
             ip: None,
         };
+    pub static ref DEMO_INSTANCE_NIC_PUT: params::NetworkInterfaceUpdate = {
+        params::NetworkInterfaceUpdate {
+            identity: IdentityMetadataUpdateParams {
+                name: None,
+                description: Some(String::from("an updated description")),
+            },
+            make_primary: false,
+        }
+    };
 }
 
 // Separate lazy_static! blocks to avoid hitting some recursion limit when compiling
@@ -254,10 +267,38 @@ lazy_static! {
                 description: String::from(""),
             },
             source: params::ImageSource::Url { url: HTTP_SERVER.url("/image.raw").to_string() },
-            distribution: params::Distribution::try_from(String::from("alpine")).unwrap(),
-            version: String::from("edge"),
+            distribution: params::Distribution {
+                name: "alpine".parse().unwrap(),
+                version: String::from("edge"),
+            },
             block_size: params::BlockSize::try_from(4096).unwrap(),
         };
+
+    // IP Pools
+    pub static ref DEMO_IP_POOLS_URL: &'static str = "/ip-pools";
+    pub static ref DEMO_IP_POOL_NAME: Name = "pool0".parse().unwrap();
+    pub static ref DEMO_IP_POOL_CREATE: params::IpPoolCreate =
+        params::IpPoolCreate {
+            identity: IdentityMetadataCreateParams {
+                name: DEMO_IP_POOL_NAME.clone(),
+                description: String::from("an IP pool"),
+            },
+        };
+    pub static ref DEMO_IP_POOL_URL: String = format!("/ip-pools/{}", *DEMO_IP_POOL_NAME);
+    pub static ref DEMO_IP_POOL_UPDATE: params::IpPoolUpdate =
+        params::IpPoolUpdate {
+            identity: IdentityMetadataUpdateParams {
+                name: None,
+                description: Some(String::from("a new IP pool")),
+            },
+        };
+    pub static ref DEMO_IP_POOL_RANGE: IpRange = IpRange::V4(Ipv4Range::new(
+        std::net::Ipv4Addr::new(10, 0, 0, 1),
+        std::net::Ipv4Addr::new(10, 0, 0, 2),
+    ).unwrap());
+    pub static ref DEMO_IP_POOL_RANGES_URL: String = format!("{}/ranges", *DEMO_IP_POOL_URL);
+    pub static ref DEMO_IP_POOL_RANGES_ADD_URL: String = format!("{}/add", *DEMO_IP_POOL_RANGES_URL);
+    pub static ref DEMO_IP_POOL_RANGES_DEL_URL: String = format!("{}/delete", *DEMO_IP_POOL_RANGES_URL);
 
     // Snapshots
     pub static ref DEMO_SNAPSHOT_NAME: Name = "demo-snapshot".parse().unwrap();
@@ -426,10 +467,66 @@ lazy_static! {
                 AllowedMethod::Get,
                 AllowedMethod::Put(
                     serde_json::to_value(
-                        &shared::Policy::<authz::FleetRoles> {
+                        &shared::Policy::<authz::FleetRole> {
                             role_assignments: vec![]
                         }
                     ).unwrap()
+                ),
+            ],
+        },
+
+        // IP Pools top-level endpoint
+        VerifyEndpoint {
+            url: *DEMO_IP_POOLS_URL,
+            visibility: Visibility::Public,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_IP_POOL_CREATE).unwrap()
+                ),
+            ],
+        },
+
+        // Single IP Pool endpoint
+        VerifyEndpoint {
+            url: &*DEMO_IP_POOL_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Put(
+                    serde_json::to_value(&*DEMO_IP_POOL_UPDATE).unwrap()
+                ),
+                AllowedMethod::Delete,
+            ],
+        },
+
+        // IP Pool ranges endpoint
+        VerifyEndpoint {
+            url: &*DEMO_IP_POOL_RANGES_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Get
+            ],
+        },
+
+        // IP Pool ranges/add endpoint
+        VerifyEndpoint {
+            url: &*DEMO_IP_POOL_RANGES_ADD_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_IP_POOL_RANGE).unwrap()
+                ),
+            ],
+        },
+
+        // IP Pool ranges/delete endpoint
+        VerifyEndpoint {
+            url: &*DEMO_IP_POOL_RANGES_DEL_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_IP_POOL_RANGE).unwrap()
                 ),
             ],
         },
@@ -460,7 +557,7 @@ lazy_static! {
                 AllowedMethod::Get,
                 AllowedMethod::Put(
                     serde_json::to_value(
-                        &shared::Policy::<authz::SiloRoles> {
+                        &shared::Policy::<authz::SiloRole> {
                             role_assignments: vec![]
                         }
                     ).unwrap()
@@ -504,7 +601,7 @@ lazy_static! {
                 AllowedMethod::Get,
                 AllowedMethod::Put(
                     serde_json::to_value(
-                        &shared::Policy::<authz::OrganizationRoles> {
+                        &shared::Policy::<authz::OrganizationRole> {
                             role_assignments: vec![]
                         }
                     ).unwrap()
@@ -555,7 +652,7 @@ lazy_static! {
                 AllowedMethod::Get,
                 AllowedMethod::Put(
                     serde_json::to_value(
-                        &shared::Policy::<authz::ProjectRoles> {
+                        &shared::Policy::<authz::ProjectRole> {
                             role_assignments: vec![]
                         }
                     ).unwrap()
@@ -857,6 +954,13 @@ lazy_static! {
                 ).unwrap()),
             ],
         },
+        VerifyEndpoint {
+            url: &*DEMO_INSTANCE_SERIAL_URL,
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::GetNonexistent // has required query parameters
+            ],
+        },
 
         /* Instance NICs */
         VerifyEndpoint {
@@ -875,6 +979,9 @@ lazy_static! {
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Delete,
+                AllowedMethod::Put(
+                    serde_json::to_value(&*DEMO_INSTANCE_NIC_PUT).unwrap()
+                ),
             ],
         },
 

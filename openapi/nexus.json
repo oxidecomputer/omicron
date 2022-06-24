@@ -376,6 +376,365 @@
         }
       }
     },
+    "/ip-pools": {
+      "get": {
+        "tags": [
+          "ip-pools"
+        ],
+        "summary": "List IP Pools.",
+        "operationId": "ip_pools_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPoolResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      },
+      "post": {
+        "tags": [
+          "ip-pools"
+        ],
+        "summary": "Create a new IP Pool.",
+        "operationId": "ip_pools_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IpPoolCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPool"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/ip-pools/{pool_name}": {
+      "get": {
+        "tags": [
+          "ip-pools"
+        ],
+        "summary": "Fetch a single IP Pool.",
+        "operationId": "ip_pools_get_ip_pool",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPool"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "ip-pools"
+        ],
+        "summary": "Update an IP Pool.",
+        "operationId": "ip_pools_put_ip_pool",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IpPoolUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPool"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "ip-pools"
+        ],
+        "summary": "Delete an IP Pool.",
+        "operationId": "ip_pools_delete_ip_pool",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/ip-pools/{pool_name}/ranges": {
+      "get": {
+        "tags": [
+          "ip-pools"
+        ],
+        "summary": "List the ranges of IP addresses within an existing IP Pool.",
+        "description": "Note that ranges are listed sorted by their first address.",
+        "operationId": "ip_pool_ranges_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPoolRangeResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      }
+    },
+    "/ip-pools/{pool_name}/ranges/add": {
+      "post": {
+        "tags": [
+          "ip-pools"
+        ],
+        "summary": "Add a new range to an existing IP Pool.",
+        "operationId": "ip_pool_ranges_add",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IpRange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPoolRange"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/ip-pools/{pool_name}/ranges/delete": {
+      "post": {
+        "tags": [
+          "ip-pools"
+        ],
+        "summary": "Remove a range from an existing IP Pool.",
+        "operationId": "ip_pool_ranges_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IpRange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/login": {
       "post": {
         "tags": [
@@ -736,7 +1095,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OrganizationRolesPolicy"
+                  "$ref": "#/components/schemas/OrganizationRolePolicy"
                 }
               }
             }
@@ -771,7 +1130,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/OrganizationRolesPolicy"
+                "$ref": "#/components/schemas/OrganizationRolePolicy"
               }
             }
           },
@@ -783,7 +1142,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OrganizationRolesPolicy"
+                  "$ref": "#/components/schemas/OrganizationRolePolicy"
                 }
               }
             }
@@ -2282,6 +2641,79 @@
           }
         }
       },
+      "put": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "Update information about an instance's network interface",
+        "operationId": "instance_network_interfaces_put_interface",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "interface_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "organization_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "project_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NetworkInterfaceUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NetworkInterface"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
       "delete": {
         "tags": [
           "instances"
@@ -2383,6 +2815,98 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Instance"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/serial": {
+      "get": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "Get contents of an instance's serial console.",
+        "operationId": "project_instances_instance_serial_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "organization_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "project_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "query",
+            "name": "from_start",
+            "description": "Character index in the serial buffer from which to read, counting the bytes output since instance start. If this is not provided, `most_recent` must be provided, and if this *is* provided, `most_recent` must *not* be provided.",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "max_bytes",
+            "description": "Maximum number of bytes of buffered serial console contents to return. If the requested range runs to the end of the available buffer, the data returned will be shorter than `max_bytes`.",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "most_recent",
+            "description": "Character index in the serial buffer from which to read, counting *backward* from the most recently buffered data retrieved from the instance. (See note on `from_start` about mutual exclusivity)",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstanceSerialConsoleData"
                 }
               }
             }
@@ -2543,7 +3067,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProjectRolesPolicy"
+                  "$ref": "#/components/schemas/ProjectRolePolicy"
                 }
               }
             }
@@ -2588,7 +3112,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ProjectRolesPolicy"
+                "$ref": "#/components/schemas/ProjectRolePolicy"
               }
             }
           },
@@ -2600,7 +3124,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProjectRolesPolicy"
+                  "$ref": "#/components/schemas/ProjectRolePolicy"
                 }
               }
             }
@@ -4467,7 +4991,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FleetRolesPolicy"
+                  "$ref": "#/components/schemas/FleetRolePolicy"
                 }
               }
             }
@@ -4490,7 +5014,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FleetRolesPolicy"
+                "$ref": "#/components/schemas/FleetRolePolicy"
               }
             }
           },
@@ -4502,7 +5026,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FleetRolesPolicy"
+                  "$ref": "#/components/schemas/FleetRolePolicy"
                 }
               }
             }
@@ -5153,7 +5677,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SiloRolesPolicy"
+                  "$ref": "#/components/schemas/SiloRolePolicy"
                 }
               }
             }
@@ -5188,7 +5712,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SiloRolesPolicy"
+                "$ref": "#/components/schemas/SiloRolePolicy"
               }
             }
           },
@@ -5200,7 +5724,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SiloRolesPolicy"
+                  "$ref": "#/components/schemas/SiloRolePolicy"
                 }
               }
             }
@@ -5920,11 +6444,26 @@
         ]
       },
       "Distribution": {
-        "title": "OS image distribution",
-        "description": "Distribution must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'.",
-        "type": "string",
-        "pattern": "[a-z](|[a-zA-Z0-9-]*[a-zA-Z0-9])",
-        "maxLength": 63
+        "description": "OS image distribution",
+        "type": "object",
+        "properties": {
+          "name": {
+            "description": "The name of the distribution (e.g. \"alpine\" or \"ubuntu\")",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "version": {
+            "description": "The version of the distribution (e.g. \"3.10\" or \"18.04\")",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "version"
+        ]
       },
       "Error": {
         "description": "Error information from a response.",
@@ -5984,7 +6523,7 @@
           "bool"
         ]
       },
-      "FleetRoles": {
+      "FleetRole": {
         "type": "string",
         "enum": [
           "admin",
@@ -5992,7 +6531,7 @@
           "viewer"
         ]
       },
-      "FleetRolesPolicy": {
+      "FleetRolePolicy": {
         "description": "Client view of a [`Policy`], which describes how this resource may be accessed\n\nNote that the Policy only describes access granted explicitly for this resource.  The policies of parent resources can also cause a user to have access to this resource.",
         "type": "object",
         "properties": {
@@ -6000,7 +6539,7 @@
             "description": "Roles directly assigned on this resource",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/FleetRolesRoleAssignment"
+              "$ref": "#/components/schemas/FleetRoleRoleAssignment"
             }
           }
         },
@@ -6008,7 +6547,7 @@
           "role_assignments"
         ]
       },
-      "FleetRolesRoleAssignment": {
+      "FleetRoleRoleAssignment": {
         "description": "Describes the assignment of a particular role on a particular resource to a particular identity (user, group, etc.)\n\nThe resource is not part of this structure.  Rather, [`RoleAssignment`]s are put into a [`Policy`] and that Policy is applied to a particular resource.",
         "type": "object",
         "properties": {
@@ -6020,7 +6559,7 @@
             "$ref": "#/components/schemas/IdentityType"
           },
           "role_name": {
-            "$ref": "#/components/schemas/FleetRoles"
+            "$ref": "#/components/schemas/FleetRole"
           }
         },
         "required": [
@@ -6144,10 +6683,6 @@
                 "$ref": "#/components/schemas/ImageSource"
               }
             ]
-          },
-          "version": {
-            "description": "image version",
-            "type": "string"
           }
         },
         "required": [
@@ -6155,8 +6690,7 @@
           "description",
           "distribution",
           "name",
-          "source",
-          "version"
+          "source"
         ]
       },
       "GlobalImageResultsPage": {
@@ -6795,6 +7329,31 @@
           "items"
         ]
       },
+      "InstanceSerialConsoleData": {
+        "description": "Contents of an Instance's serial console buffer.",
+        "type": "object",
+        "properties": {
+          "data": {
+            "description": "The bytes starting from the requested offset up to either the end of the buffer or the request's `max_bytes`. Provided as a u8 array rather than a string, as it may not be UTF-8.",
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0
+            }
+          },
+          "last_byte_offset": {
+            "description": "The absolute offset since boot (suitable for use as `byte_offset` in a subsequent request) of the last byte returned in `data`.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "data",
+          "last_byte_offset"
+        ]
+      },
       "InstanceState": {
         "description": "Running state of an Instance (primarily: booted or stopped)\n\nThis typically reflects whether it's starting, running, stopping, or stopped, but also includes states related to the Instance's lifecycle",
         "type": "string",
@@ -6831,6 +7390,163 @@
           }
         ]
       },
+      "IpPool": {
+        "description": "Identity-related metadata that's included in nearly all public API objects",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "description",
+          "id",
+          "name",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "IpPoolCreate": {
+        "description": "Create-time parameters for an IP Pool.\n\nSee [`IpPool`](omicron_nexus::external_api::views::IpPool)",
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          }
+        },
+        "required": [
+          "description",
+          "name"
+        ]
+      },
+      "IpPoolRange": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "range": {
+            "$ref": "#/components/schemas/IpRange"
+          },
+          "time_created": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "range",
+          "time_created"
+        ]
+      },
+      "IpPoolRangeResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpPoolRange"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "IpPoolResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpPool"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "IpPoolUpdate": {
+        "description": "Parameters for updating an IP Pool",
+        "type": "object",
+        "properties": {
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          }
+        }
+      },
+      "IpRange": {
+        "oneOf": [
+          {
+            "title": "v4",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv4Range"
+              }
+            ]
+          },
+          {
+            "title": "v6",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv6Range"
+              }
+            ]
+          }
+        ]
+      },
       "Ipv4Net": {
         "example": "192.168.1.0/24",
         "title": "An IPv4 subnet",
@@ -6839,6 +7555,24 @@
         "pattern": "(^(10\\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9]\\.){2}(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])/(1[0-9]|2[0-8]|[8-9]))$)|(^(172\\.16\\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])/(1[2-9]|2[0-8]))$)|(^(192\\.168\\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])/(1[6-9]|2[0-8]))$)",
         "maxLength": 18
       },
+      "Ipv4Range": {
+        "description": "A non-decreasing IPv4 address range, inclusive of both ends.\n\nThe first address must be less than or equal to the last address.",
+        "type": "object",
+        "properties": {
+          "first": {
+            "type": "string",
+            "format": "ipv4"
+          },
+          "last": {
+            "type": "string",
+            "format": "ipv4"
+          }
+        },
+        "required": [
+          "first",
+          "last"
+        ]
+      },
       "Ipv6Net": {
         "example": "fd12:3456::/64",
         "title": "An IPv6 subnet",
@@ -6846,6 +7580,24 @@
         "type": "string",
         "pattern": "^(fd|FD)[0-9a-fA-F]{2}:((([0-9a-fA-F]{1,4}\\:){6}[0-9a-fA-F]{1,4})|(([0-9a-fA-F]{1,4}:){1,6}:))/(6[4-9]|[7-9][0-9]|1[0-1][0-9]|12[0-6])$",
         "maxLength": 43
+      },
+      "Ipv6Range": {
+        "description": "A non-decreasing IPv6 address range, inclusive of both ends.\n\nThe first address must be less than or equal to the last address.",
+        "type": "object",
+        "properties": {
+          "first": {
+            "type": "string",
+            "format": "ipv6"
+          },
+          "last": {
+            "type": "string",
+            "format": "ipv6"
+          }
+        },
+        "required": [
+          "first",
+          "last"
+        ]
       },
       "L4PortRange": {
         "example": "22",
@@ -7011,6 +7763,29 @@
           "items"
         ]
       },
+      "NetworkInterfaceUpdate": {
+        "description": "Parameters for updating a [`NetworkInterface`](omicron_common::api::external::NetworkInterface).\n\nNote that modifying IP addresses for an interface is not yet supported, a new interface must be created instead.",
+        "type": "object",
+        "properties": {
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "make_primary": {
+            "description": "Make a secondary interface the instance's primary interface.\n\nIf applied to a secondary interface, that interface will become the primary on the next reboot of the instance. Note that this may have implications for routing between instances, as the new primary interface will be on a distinct subnet from the previous primary interface.\n\nNote that this can only be used to select a new primary interface for an instance. Requests to change the primary interface into a secondary will return an error.",
+            "default": false,
+            "type": "boolean"
+          },
+          "name": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          }
+        }
+      },
       "Organization": {
         "description": "Client view of an [`Organization`]",
         "type": "object",
@@ -7088,7 +7863,7 @@
           "items"
         ]
       },
-      "OrganizationRoles": {
+      "OrganizationRole": {
         "type": "string",
         "enum": [
           "admin",
@@ -7096,7 +7871,7 @@
           "viewer"
         ]
       },
-      "OrganizationRolesPolicy": {
+      "OrganizationRolePolicy": {
         "description": "Client view of a [`Policy`], which describes how this resource may be accessed\n\nNote that the Policy only describes access granted explicitly for this resource.  The policies of parent resources can also cause a user to have access to this resource.",
         "type": "object",
         "properties": {
@@ -7104,7 +7879,7 @@
             "description": "Roles directly assigned on this resource",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/OrganizationRolesRoleAssignment"
+              "$ref": "#/components/schemas/OrganizationRoleRoleAssignment"
             }
           }
         },
@@ -7112,7 +7887,7 @@
           "role_assignments"
         ]
       },
-      "OrganizationRolesRoleAssignment": {
+      "OrganizationRoleRoleAssignment": {
         "description": "Describes the assignment of a particular role on a particular resource to a particular identity (user, group, etc.)\n\nThe resource is not part of this structure.  Rather, [`RoleAssignment`]s are put into a [`Policy`] and that Policy is applied to a particular resource.",
         "type": "object",
         "properties": {
@@ -7124,7 +7899,7 @@
             "$ref": "#/components/schemas/IdentityType"
           },
           "role_name": {
-            "$ref": "#/components/schemas/OrganizationRoles"
+            "$ref": "#/components/schemas/OrganizationRole"
           }
         },
         "required": [
@@ -7233,7 +8008,7 @@
           "items"
         ]
       },
-      "ProjectRoles": {
+      "ProjectRole": {
         "type": "string",
         "enum": [
           "admin",
@@ -7241,7 +8016,7 @@
           "viewer"
         ]
       },
-      "ProjectRolesPolicy": {
+      "ProjectRolePolicy": {
         "description": "Client view of a [`Policy`], which describes how this resource may be accessed\n\nNote that the Policy only describes access granted explicitly for this resource.  The policies of parent resources can also cause a user to have access to this resource.",
         "type": "object",
         "properties": {
@@ -7249,7 +8024,7 @@
             "description": "Roles directly assigned on this resource",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/ProjectRolesRoleAssignment"
+              "$ref": "#/components/schemas/ProjectRoleRoleAssignment"
             }
           }
         },
@@ -7257,7 +8032,7 @@
           "role_assignments"
         ]
       },
-      "ProjectRolesRoleAssignment": {
+      "ProjectRoleRoleAssignment": {
         "description": "Describes the assignment of a particular role on a particular resource to a particular identity (user, group, etc.)\n\nThe resource is not part of this structure.  Rather, [`RoleAssignment`]s are put into a [`Policy`] and that Policy is applied to a particular resource.",
         "type": "object",
         "properties": {
@@ -7269,7 +8044,7 @@
             "$ref": "#/components/schemas/IdentityType"
           },
           "role_name": {
-            "$ref": "#/components/schemas/ProjectRoles"
+            "$ref": "#/components/schemas/ProjectRole"
           }
         },
         "required": [
@@ -7300,22 +8075,10 @@
         "description": "Client view of an [`Rack`]",
         "type": "object",
         "properties": {
-          "description": {
-            "description": "human-readable free-form text about a resource",
-            "type": "string"
-          },
           "id": {
             "description": "unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
-          },
-          "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
           },
           "time_created": {
             "description": "timestamp when this resource was created",
@@ -7329,9 +8092,7 @@
           }
         },
         "required": [
-          "description",
           "id",
-          "name",
           "time_created",
           "time_modified"
         ]
@@ -8137,7 +8898,7 @@
           "items"
         ]
       },
-      "SiloRoles": {
+      "SiloRole": {
         "type": "string",
         "enum": [
           "admin",
@@ -8145,7 +8906,7 @@
           "viewer"
         ]
       },
-      "SiloRolesPolicy": {
+      "SiloRolePolicy": {
         "description": "Client view of a [`Policy`], which describes how this resource may be accessed\n\nNote that the Policy only describes access granted explicitly for this resource.  The policies of parent resources can also cause a user to have access to this resource.",
         "type": "object",
         "properties": {
@@ -8153,7 +8914,7 @@
             "description": "Roles directly assigned on this resource",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/SiloRolesRoleAssignment"
+              "$ref": "#/components/schemas/SiloRoleRoleAssignment"
             }
           }
         },
@@ -8161,7 +8922,7 @@
           "role_assignments"
         ]
       },
-      "SiloRolesRoleAssignment": {
+      "SiloRoleRoleAssignment": {
         "description": "Describes the assignment of a particular role on a particular resource to a particular identity (user, group, etc.)\n\nThe resource is not part of this structure.  Rather, [`RoleAssignment`]s are put into a [`Policy`] and that Policy is applied to a particular resource.",
         "type": "object",
         "properties": {
@@ -8173,7 +8934,7 @@
             "$ref": "#/components/schemas/IdentityType"
           },
           "role_name": {
-            "$ref": "#/components/schemas/SiloRoles"
+            "$ref": "#/components/schemas/SiloRole"
           }
         },
         "required": [
@@ -8186,22 +8947,10 @@
         "description": "Client view of an [`Sled`]",
         "type": "object",
         "properties": {
-          "description": {
-            "description": "human-readable free-form text about a resource",
-            "type": "string"
-          },
           "id": {
             "description": "unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
-          },
-          "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
           },
           "service_address": {
             "type": "string"
@@ -8218,9 +8967,7 @@
           }
         },
         "required": [
-          "description",
           "id",
-          "name",
           "service_address",
           "time_created",
           "time_modified"
@@ -9488,6 +10235,13 @@
     {
       "name": "instances",
       "description": "Virtual machine instances are the basic unit of computation. These operations are used for provisioning, controlling, and destroying instances.",
+      "externalDocs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    {
+      "name": "ip-pools",
+      "description": "IP Pools contain external IP addresses that can be assigned to virtual machine Instances.",
       "externalDocs": {
         "url": "http://oxide.computer/docs/#xxx"
       }

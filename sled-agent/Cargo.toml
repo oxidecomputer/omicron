@@ -12,9 +12,10 @@ bincode = "1.3.3"
 bytes = "1.1"
 cfg-if = "1.0"
 chrono = { version = "0.4", features = [ "serde" ] }
-clap = { version = "3.1", features = ["derive"] }
+clap = { version = "3.2", features = ["derive"] }
 # Only used by the simulated sled agent.
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "cd74a23ea42ce5e673923a00faf31b0a920191cc" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "8314eeddd228ec0d76cefa40c4a41d3e2611ac18" }
+ddm-admin-client = { path = "../ddm-admin-client" }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
 futures = "0.3.21"
 ipnetwork = "0.18"
@@ -25,7 +26,7 @@ omicron-common = { path = "../common" }
 p256 = "0.9.0"
 percent-encoding = "2.1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "1538f78c1656bd3ac8ef816f6177ae9b1bef348a" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "d2b8184d11d5d5f56424fe0bee13ca03d576604e" }
 rand = { version = "0.8.5", features = ["getrandom"] }
 reqwest = { version = "0.11.8", default-features = false, features = ["rustls-tls", "stream"] }
 schemars = { version = "0.8.10", features = [ "chrono", "uuid1" ] }
@@ -37,12 +38,14 @@ slog-dtrace = "0.2"
 smf = "0.2"
 spdm = { git = "https://github.com/oxidecomputer/spdm", rev = "9742f6e" }
 sp-sim = { path = "../sp-sim" }
+sprockets-common = { git = "http://github.com/oxidecomputer/sprockets", rev = "0361fd13ff19cda6696242fe40f1325fca30d3d1" }
 sprockets-host = { git = "http://github.com/oxidecomputer/sprockets", rev = "0361fd13ff19cda6696242fe40f1325fca30d3d1" }
 socket2 = { version = "0.4", features = [ "all" ] }
 tar = "0.4"
 tempfile = "3.3"
 thiserror = "1.0"
 tokio = { version = "1.18", features = [ "full" ] }
+tokio-tungstenite = "0.17.1"
 tokio-util = { version = "0.7", features = ["codec"] }
 toml = "0.5.9"
 uuid = { version = "1.1.0", features = [ "serde", "v4" ] }
@@ -60,7 +63,7 @@ mockall = "0.11"
 omicron-test-utils = { path = "../test-utils" }
 openapi-lint = { git = "https://github.com/oxidecomputer/openapi-lint", branch = "main" }
 openapiv3 = "1.0"
-serial_test = "0.6"
+serial_test = "0.7"
 subprocess = "0.2.9"
 slog-async = "2.6"
 slog-term = "2.9"
