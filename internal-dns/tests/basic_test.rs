@@ -21,7 +21,8 @@ use trust_dns_resolver::TokioAsyncResolver;
 
 #[tokio::test]
 pub async fn aaaa_crud() -> Result<(), anyhow::Error> {
-    let test_ctx = init_client_server("aaaa_crud", "oxide.internal".into()).await?;
+    let test_ctx =
+        init_client_server("aaaa_crud", "oxide.internal".into()).await?;
     let client = &test_ctx.client;
     let resolver = &test_ctx.resolver;
 
@@ -66,7 +67,8 @@ pub async fn aaaa_crud() -> Result<(), anyhow::Error> {
 
 #[tokio::test]
 pub async fn srv_crud() -> Result<(), anyhow::Error> {
-    let test_ctx = init_client_server("srv_crud", "oxide.internal".into()).await?;
+    let test_ctx =
+        init_client_server("srv_crud", "oxide.internal".into()).await?;
     let client = &test_ctx.client;
     let resolver = &test_ctx.resolver;
 
@@ -118,7 +120,9 @@ pub async fn srv_crud() -> Result<(), anyhow::Error> {
 
 #[tokio::test]
 pub async fn multi_record_crud() -> Result<(), anyhow::Error> {
-    let test_ctx = init_client_server("multi_record_crud", "oxide.internal".into()).await?;
+    let test_ctx =
+        init_client_server("multi_record_crud", "oxide.internal".into())
+            .await?;
     let client = &test_ctx.client;
     let resolver = &test_ctx.resolver;
 
@@ -204,7 +208,8 @@ async fn lookup_ip_expect_nxdomain(resolver: &TokioAsyncResolver, name: &str) {
 
 #[tokio::test]
 pub async fn empty_record() -> Result<(), anyhow::Error> {
-    let test_ctx = init_client_server("empty_record", "oxide.internal".into()).await?;
+    let test_ctx =
+        init_client_server("empty_record", "oxide.internal".into()).await?;
     let client = &test_ctx.client;
     let resolver = &test_ctx.resolver;
 
@@ -233,7 +238,8 @@ pub async fn empty_record() -> Result<(), anyhow::Error> {
 
 #[tokio::test]
 pub async fn nxdomain() -> Result<(), anyhow::Error> {
-    let test_ctx = init_client_server("nxdomain", "oxide.internal".into()).await?;
+    let test_ctx =
+        init_client_server("nxdomain", "oxide.internal".into()).await?;
     let resolver = &test_ctx.resolver;
 
     // asking for a nonexistent record within the domain of the internal DNS
@@ -245,7 +251,8 @@ pub async fn nxdomain() -> Result<(), anyhow::Error> {
 
 #[tokio::test]
 pub async fn servfail() -> Result<(), anyhow::Error> {
-    let test_ctx = init_client_server("servfail", "oxide.internal".into()).await?;
+    let test_ctx =
+        init_client_server("servfail", "oxide.internal".into()).await?;
     let resolver = &test_ctx.resolver;
 
     // asking for a record outside the domain of the internal DNS
@@ -347,7 +354,8 @@ async fn init_client_server(
 
 fn test_config(
     test_name: &str,
-) -> Result<(tempdir::TempDir, internal_dns::Config, LogContext), anyhow::Error> {
+) -> Result<(tempdir::TempDir, internal_dns::Config, LogContext), anyhow::Error>
+{
     let logctx = test_setup_log(test_name);
     let tmp_dir = tempdir::TempDir::new("internal-dns-test")?;
     let mut storage_path = tmp_dir.path().to_path_buf();
