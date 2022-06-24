@@ -209,11 +209,18 @@ impl ServiceInner {
             .await?;
         }
 
+        let mut records = HashMap::new();
+        for dataset in datasets {
+            records
+                .entry(dataset.srv())
+                .or_insert_with(Vec::new)
+                .push((dataset.aaaa(), dataset.address()));
+        }
         let records_put = || async {
             self.dns_servers
                 .get()
                 .expect("DNS servers must be initialized first")
-                .insert_dns_records(datasets)
+                .insert_dns_records(&records)
                 .await
                 .map_err(BackoffError::transient)?;
             Ok::<(), BackoffError<DnsError>>(())
@@ -266,9 +273,16 @@ impl ServiceInner {
 
         // Insert DNS records, if the DNS servers have been initialized
         if let Some(dns_servers) = self.dns_servers.get() {
+            let mut records = HashMap::new();
+            for service in services {
+                records
+                    .entry(service.srv())
+                    .or_insert_with(Vec::new)
+                    .push((service.aaaa(), service.address()));
+            }
             let records_put = || async {
                 dns_servers
-                    .insert_dns_records(services)
+                    .insert_dns_records(&records)
                     .await
                     .map_err(BackoffError::transient)?;
                 Ok::<(), BackoffError<DnsError>>(())

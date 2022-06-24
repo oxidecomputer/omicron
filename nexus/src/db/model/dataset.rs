@@ -75,14 +75,12 @@ impl Dataset {
     pub fn address_with_port(&self, port: u16) -> SocketAddrV6 {
         SocketAddrV6::new(Ipv6Addr::from(self.ip), port, 0, 0)
     }
-}
 
-impl internal_dns_client::multiclient::Service for Dataset {
-    fn aaaa(&self) -> AAAA {
+    pub fn aaaa(&self) -> AAAA {
         AAAA::Zone(self.id())
     }
 
-    fn srv(&self) -> SRV {
+    pub fn srv(&self) -> SRV {
         match self.kind {
             DatasetKind::Crucible => {
                 SRV::Backend(BackendName::Crucible, self.id())
@@ -90,10 +88,6 @@ impl internal_dns_client::multiclient::Service for Dataset {
             DatasetKind::Clickhouse => SRV::Service(ServiceName::Clickhouse),
             DatasetKind::Cockroach => SRV::Service(ServiceName::Cockroach),
         }
-    }
-
-    fn address(&self) -> SocketAddrV6 {
-        self.address()
     }
 }
 

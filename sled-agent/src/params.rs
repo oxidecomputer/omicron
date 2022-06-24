@@ -256,12 +256,12 @@ pub struct DatasetEnsureBody {
     pub address: SocketAddrV6,
 }
 
-impl internal_dns_client::multiclient::Service for DatasetEnsureBody {
-    fn aaaa(&self) -> AAAA {
+impl DatasetEnsureBody {
+    pub fn aaaa(&self) -> AAAA {
         AAAA::Zone(self.id)
     }
 
-    fn srv(&self) -> SRV {
+    pub fn srv(&self) -> SRV {
         match self.dataset_kind {
             DatasetKind::Crucible => {
                 SRV::Backend(BackendName::Crucible, self.id)
@@ -273,7 +273,7 @@ impl internal_dns_client::multiclient::Service for DatasetEnsureBody {
         }
     }
 
-    fn address(&self) -> SocketAddrV6 {
+    pub fn address(&self) -> SocketAddrV6 {
         self.address
     }
 }
@@ -347,12 +347,12 @@ pub struct ServiceRequest {
     pub service_type: ServiceType,
 }
 
-impl internal_dns_client::multiclient::Service for ServiceRequest {
-    fn aaaa(&self) -> AAAA {
+impl ServiceRequest {
+    pub fn aaaa(&self) -> AAAA {
         AAAA::Zone(self.id)
     }
 
-    fn srv(&self) -> SRV {
+    pub fn srv(&self) -> SRV {
         match self.service_type {
             ServiceType::InternalDns { .. } => {
                 SRV::Service(ServiceName::InternalDNS)
@@ -362,7 +362,7 @@ impl internal_dns_client::multiclient::Service for ServiceRequest {
         }
     }
 
-    fn address(&self) -> SocketAddrV6 {
+    pub fn address(&self) -> SocketAddrV6 {
         match self.service_type {
             ServiceType::InternalDns { server_address, .. } => server_address,
             ServiceType::Nexus { internal_address, .. } => internal_address,

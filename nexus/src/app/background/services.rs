@@ -15,9 +15,7 @@ use crate::db::model::Sled;
 use crate::db::model::Zpool;
 use crate::Nexus;
 use futures::stream::{self, StreamExt, TryStreamExt};
-use internal_dns_client::multiclient::{
-    Service as DnsService, Updater as DnsUpdater,
-};
+use internal_dns_client::multiclient::Updater as DnsUpdater;
 use omicron_common::address::{
     DNS_PORT, DNS_REDUNDANCY, DNS_SERVER_PORT, NEXUS_EXTERNAL_PORT,
     NEXUS_INTERNAL_PORT,
@@ -104,7 +102,7 @@ impl ServiceBalancer {
     async fn instantiate_services(
         &self,
         opctx: &OpContext,
-        mut services: Vec<Service>,
+        services: Vec<Service>,
     ) -> Result<(), Error> {
         let mut sled_ids = HashSet::new();
         for svc in &services {
@@ -166,12 +164,15 @@ impl ServiceBalancer {
             })
             .await?;
 
-        // Putting records of the same SRV right next to each other isn't
-        // strictly necessary, but doing so makes the record insertion more
-        // efficient.
-        services.sort_by(|a, b| a.srv().partial_cmp(&b.srv()).unwrap());
+        let mut records = HashMap::new();
+        for service in &services {
+            records
+                .entry(service.srv())
+                .or_insert_with(Vec::new)
+                .push((service.aaaa(), service.address()));
+        }
         self.dns_updater
-            .insert_dns_records(&services)
+            .insert_dns_records(&records)
             .await
             .map_err(|e| Error::internal_error(&e.to_string()))?;
 
@@ -360,10 +361,15 @@ impl ServiceBalancer {
             .await?;
 
         // Ensure all DNS records are updated for the created datasets.
+        let mut records = HashMap::new();
+        for (_, _, dataset) in &datasets {
+            records
+                .entry(dataset.srv())
+                .or_insert_with(Vec::new)
+                .push((dataset.aaaa(), dataset.address()));
+        }
         self.dns_updater
-            .insert_dns_records(
-                &datasets.into_iter().map(|(_, _, dataset)| dataset).collect(),
-            )
+            .insert_dns_records(&records)
             .await
             .map_err(|e| Error::internal_error(&e.to_string()))?;
 

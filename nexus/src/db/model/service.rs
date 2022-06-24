@@ -40,14 +40,12 @@ impl Service {
             kind,
         }
     }
-}
 
-impl internal_dns_client::multiclient::Service for Service {
-    fn aaaa(&self) -> AAAA {
+    pub fn aaaa(&self) -> AAAA {
         AAAA::Zone(self.id())
     }
 
-    fn srv(&self) -> SRV {
+    pub fn srv(&self) -> SRV {
         match self.kind {
             ServiceKind::InternalDNS => SRV::Service(ServiceName::InternalDNS),
             ServiceKind::Nexus => SRV::Service(ServiceName::Nexus),
@@ -55,7 +53,7 @@ impl internal_dns_client::multiclient::Service for Service {
         }
     }
 
-    fn address(&self) -> SocketAddrV6 {
+    pub fn address(&self) -> SocketAddrV6 {
         let port = match self.kind {
             ServiceKind::InternalDNS => DNS_SERVER_PORT,
             ServiceKind::Nexus => NEXUS_INTERNAL_PORT,
