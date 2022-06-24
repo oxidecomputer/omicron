@@ -36,7 +36,6 @@ use external_api::http_entrypoints::external_api;
 use internal_api::http_entrypoints::internal_api;
 use slog::Logger;
 use std::sync::Arc;
-use uuid::Uuid;
 
 #[macro_use]
 extern crate slog;
@@ -82,7 +81,6 @@ impl Server {
     /// Start a nexus server.
     pub async fn start(
         config: &Config,
-        rack_id: Uuid,
         log: &Logger,
     ) -> Result<Server, String> {
         let log = log.new(o!("name" => config.deployment.id.to_string()));
@@ -90,7 +88,8 @@ impl Server {
 
         let ctxlog = log.new(o!("component" => "ServerContext"));
 
-        let apictx = ServerContext::new(rack_id, ctxlog, &config)?;
+        let apictx =
+            ServerContext::new(config.deployment.rack_id, ctxlog, &config)?;
 
         let http_server_starter_external = dropshot::HttpServerStarter::new(
             &config.deployment.dropshot_external,
@@ -167,8 +166,7 @@ pub async fn run_server(config: &Config) -> Result<(), String> {
     } else {
         debug!(log, "registered DTrace probes");
     }
-    let rack_id = Uuid::new_v4();
-    let server = Server::start(config, rack_id, &log).await?;
+    let server = Server::start(config, &log).await?;
     server.register_as_producer().await;
     server.wait_for_finish().await
 }

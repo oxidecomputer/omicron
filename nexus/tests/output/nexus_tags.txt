@@ -50,6 +50,17 @@ project_instances_instance_stop          /organizations/{organization_name}/proj
 project_instances_migrate_instance       /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/migrate
 project_instances_post                   /organizations/{organization_name}/projects/{project_name}/instances
 
+API operations found with tag "ip-pools"
+OPERATION ID                             URL PATH
+ip_pool_ranges_add                       /ip-pools/{pool_name}/ranges/add
+ip_pool_ranges_delete                    /ip-pools/{pool_name}/ranges/delete
+ip_pool_ranges_get                       /ip-pools/{pool_name}/ranges
+ip_pools_delete_ip_pool                  /ip-pools/{pool_name}
+ip_pools_get                             /ip-pools
+ip_pools_get_ip_pool                     /ip-pools/{pool_name}
+ip_pools_post                            /ip-pools
+ip_pools_put_ip_pool                     /ip-pools/{pool_name}
+
 API operations found with tag "login"
 OPERATION ID                             URL PATH
 consume_credentials                      /login/{silo_name}/{provider_name}

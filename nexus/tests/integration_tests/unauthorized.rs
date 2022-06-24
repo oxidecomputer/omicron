@@ -206,6 +206,11 @@ lazy_static! {
             url: &*SAML_IDENTITY_PROVIDERS_URL,
             body: serde_json::to_value(&*SAML_IDENTITY_PROVIDER).unwrap(),
         },
+        // Create an IP pool
+        SetupReq {
+            url: &*DEMO_IP_POOLS_URL,
+            body: serde_json::to_value(&*DEMO_IP_POOL_CREATE).unwrap(),
+        }
     ];
 }
 

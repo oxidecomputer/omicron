@@ -7,7 +7,10 @@
 use crate::authn;
 use crate::db::identity::{Asset, Resource};
 use crate::db::model;
+use crate::external_api::shared::IpRange;
 use api_identity::ObjectIdentity;
+use chrono::DateTime;
+use chrono::Utc;
 use omicron_common::api::external::{
     ByteCount, Digest, IdentityMetadata, Ipv4Net, Ipv6Net, Name,
     ObjectIdentity, RoleName,
@@ -338,6 +341,35 @@ impl From<model::VpcRouter> for VpcRouter {
             identity: router.identity(),
             vpc_id: router.vpc_id,
             kind: router.kind.into(),
+        }
+    }
+}
+
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct IpPool {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+}
+
+impl From<model::IpPool> for IpPool {
+    fn from(pool: model::IpPool) -> Self {
+        Self { identity: pool.identity() }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct IpPoolRange {
+    pub id: Uuid,
+    pub time_created: DateTime<Utc>,
+    pub range: IpRange,
+}
+
+impl From<model::IpPoolRange> for IpPoolRange {
+    fn from(range: model::IpPoolRange) -> Self {
+        Self {
+            id: range.id,
+            time_created: range.time_created,
+            range: IpRange::from(&range),
         }
     }
 }
