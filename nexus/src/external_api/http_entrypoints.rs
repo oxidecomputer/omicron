@@ -1156,25 +1156,7 @@ async fn ip_pools_put_ip_pool(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Parameters for controlling pagination of IP Pool ranges
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
-pub struct IpPoolRangeScanParams {
-    #[serde(default = "default_ip_pool_range_order")]
-    direction: PaginationOrder,
-}
-
-fn default_ip_pool_range_order() -> PaginationOrder {
-    PaginationOrder::Ascending
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-struct IpPoolRangePageSelector {
-    scan_params: IpPoolRangeScanParams,
-    last_seen_address: IpNetwork,
-}
-
-type IpPoolRangePaginationParams =
-    PaginationParams<IpPoolRangeScanParams, IpPoolRangePageSelector>;
+type IpPoolRangePaginationParams = PaginationParams<EmptyScanParams, IpNetwork>;
 
 /// List the ranges of IP addresses within an existing IP Pool.
 ///
@@ -1196,15 +1178,13 @@ async fn ip_pool_ranges_get(
     let pool_name = &path.pool_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let (scan_params, marker) = match query.page {
-            WhichPage::First(ref scan_params) => (scan_params, None),
-            WhichPage::Next(ref selector) => {
-                (&selector.scan_params, Some(&selector.last_seen_address))
-            }
+        let marker = match query.page {
+            WhichPage::First(_) => None,
+            WhichPage::Next(ref addr) => Some(addr),
         };
         let pag_params = DataPageParams {
             limit: rqctx.page_limit(&query)?,
-            direction: scan_params.direction,
+            direction: PaginationOrder::Ascending,
             marker,
         };
         let ranges = nexus
@@ -1215,10 +1195,9 @@ async fn ip_pool_ranges_get(
             .collect();
         Ok(HttpResponseOk(ResultsPage::new(
             ranges,
-            scan_params,
-            |range: &IpPoolRange, scan_params| IpPoolRangePageSelector {
-                scan_params: *scan_params,
-                last_seen_address: IpNetwork::from(range.range.first_address()),
+            &EmptyScanParams {},
+            |range: &IpPoolRange, _| {
+                IpNetwork::from(range.range.first_address())
             },
         )?))
     };

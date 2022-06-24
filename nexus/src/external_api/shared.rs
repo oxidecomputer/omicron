@@ -141,11 +141,16 @@ impl TryFrom<db::model::IdentityType> for IdentityType {
 /// The first address in the range is guaranteed to be no greater than the last
 /// address.
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(untagged)]
 pub enum IpRange {
     V4(Ipv4Range),
     V6(Ipv6Range),
 }
 
+// NOTE: We don't derive JsonSchema. That's intended so that we can use an
+// untagged enum for `IpRange`, and use this method to annotate schemars output
+// for client-generators (e.g., progenitor) to use in generating a better
+// client.
 impl JsonSchema for IpRange {
     fn schema_name() -> String {
         "IpRange".to_string()
@@ -452,7 +457,7 @@ mod test {
 
     #[test]
     fn test_ip_range_enum_deserialization() {
-        let data = r#"{"V4": {"first": "10.0.0.1", "last": "10.0.0.3"}}"#;
+        let data = r#"{"first": "10.0.0.1", "last": "10.0.0.3"}"#;
         let expected = IpRange::V4(
             Ipv4Range::new(
                 Ipv4Addr::new(10, 0, 0, 1),
@@ -462,7 +467,7 @@ mod test {
         );
         assert_eq!(expected, serde_json::from_str(data).unwrap());
 
-        let data = r#"{"V6": {"first": "fd00::", "last": "fd00::3"}}"#;
+        let data = r#"{"first": "fd00::", "last": "fd00::3"}"#;
         let expected = IpRange::V6(
             Ipv6Range::new(
                 Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0),
@@ -472,7 +477,7 @@ mod test {
         );
         assert_eq!(expected, serde_json::from_str(data).unwrap());
 
-        let data = r#"{"V6": {"first": "fd00::3", "last": "fd00::"}}"#;
+        let data = r#"{"first": "fd00::3", "last": "fd00::"}"#;
         assert!(
             serde_json::from_str::<IpRange>(data).is_err(),
             "Expected an error deserializing an IP range with first address \

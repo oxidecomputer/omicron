@@ -604,14 +604,6 @@
           },
           {
             "in": "query",
-            "name": "direction",
-            "schema": {
-              "$ref": "#/components/schemas/PaginationOrder"
-            },
-            "style": "form"
-          },
-          {
-            "in": "query",
             "name": "limit",
             "description": "Maximum number of items returned by a single call",
             "schema": {
@@ -10228,14 +10220,6 @@
           "name_ascending",
           "name_descending",
           "id_ascending"
-        ]
-      },
-      "PaginationOrder": {
-        "description": "The order in which the client wants to page through the requested collection",
-        "type": "string",
-        "enum": [
-          "ascending",
-          "descending"
         ]
       }
     }
