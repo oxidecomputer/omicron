@@ -24,6 +24,8 @@ use nexus_test_utils_macros::nexus_test;
 use omicron_nexus::authz::SiloRole;
 
 use httptest::{matchers::*, responders::*, Expectation, Server};
+use omicron_nexus::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
+use omicron_nexus::db::fixed_data::silo::SILO_ID;
 
 #[nexus_test]
 async fn test_silos(cptestctx: &ControlPlaneTestContext) {
@@ -1138,28 +1140,42 @@ async fn test_saml_idp_rsa_keypair_ok(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let silo_users = NexusRequest::iter_collection_authn::<views::User>(
-        client, "/users", "", None,
-    )
-    .await
-    .expect("failed to list silo users")
-    .all_items
-    .iter()
-    .map(|u| u.id.to_string())
-    .collect::<Vec<String>>();
+    let initial_silo_users: Vec<views::User> =
+        NexusRequest::iter_collection_authn(client, "/users", "", None)
+            .await
+            .expect("failed to list silo users (1)")
+            .all_items;
 
     // In the built-in Silo, we expect the test-privileged and test-unprivileged
     // users.
-    // XXX-dap should compare entire objects to make sure we're not missing
-    // other fields.
     assert_eq!(
-        silo_users,
+        initial_silo_users,
         vec![
-            "001de000-05e4-4000-8000-000000004007",
-            "001de000-05e4-4000-8000-000000060001"
+            views::User { id: USER_TEST_PRIVILEGED.id },
+            views::User { id: USER_TEST_UNPRIVILEGED.id },
         ]
     );
 
-    // XXX-dap TODO-coverage create a user, look for it, then remove it, then
-    // list them again and make sure it's gone.
+    // Now create another user and make sure we can see them.  While we're at
+    // it, use a small limit to check that pagination is really working.
+    let new_silo_user_id =
+        "bd75d207-37f3-4769-b808-677ae04eaf23".parse().unwrap();
+    nexus.silo_user_create(SILO_ID, new_silo_user_id).await.unwrap();
+
+    let silo_users: Vec<views::User> =
+        NexusRequest::iter_collection_authn(client, "/users", "", Some(1))
+            .await
+            .expect("failed to list silo users (2)")
+            .all_items;
+    assert_eq!(
+        initial_silo_users,
+        vec![
+            views::User { id: USER_TEST_PRIVILEGED.id },
+            views::User { id: USER_TEST_UNPRIVILEGED.id },
+            views::User { id: new_silo_user_id },
+        ]
+    );
+
+    // TODO-coverage When we have a way to remove or invalidate Silo Users, we
+    // should test that doing so causes them to stop appearing in the list.
 }

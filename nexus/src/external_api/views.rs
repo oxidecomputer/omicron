@@ -379,54 +379,16 @@ impl From<model::Sled> for Sled {
 // SILO USERS
 
 /// Client view of a [`User`]
-#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(from = "UserIncoming")]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct User {
     pub id: Uuid,
-    // See omicron_common::api::external::Saga.
-    #[serde(skip)]
-    pub identity: IdentityMetadata,
 }
 
 impl From<model::SiloUser> for User {
     fn from(user: model::SiloUser) -> Self {
-        let identity = user.identity();
-        let id = identity.id;
-        Self { id, identity }
+        Self { id: user.id() }
     }
 }
-
-// XXX-dap once I fix what's below, derive this
-impl Eq for User {}
-impl PartialEq for User {
-    fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
-    }
-}
-
-// XXX-dap this whole thing is stupid -- see the TODO-cleanup in Saga and
-// implement that workaround
-impl From<UserIncoming> for User {
-    fn from(user: UserIncoming) -> Self {
-        let now = chrono::Utc::now();
-        Self {
-            id: user.id,
-            identity: IdentityMetadata {
-                id: user.id,
-                name: "no-name".parse().unwrap(),
-                description: String::from("no description"),
-                time_created: now,
-                time_modified: now,
-            }
-        }
-    }
-}
-
-#[derive(Deserialize)]
-struct UserIncoming {
-    pub id: Uuid,
-}
-
 
 // BUILT-IN USERS
 
