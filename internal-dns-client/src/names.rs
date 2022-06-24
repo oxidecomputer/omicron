@@ -10,7 +10,7 @@ use uuid::Uuid;
 pub(crate) const DNS_ZONE: &str = "control-plane.oxide.internal";
 
 /// Names for services where backends are interchangeable.
-#[derive(Clone, Debug, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Hash, Eq, PartialEq, PartialOrd)]
 pub enum ServiceName {
     Clickhouse,
     Cockroach,
@@ -32,7 +32,7 @@ impl fmt::Display for ServiceName {
 }
 
 /// Names for services where backends are not interchangeable.
-#[derive(Clone, Debug, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Hash, Eq, PartialEq, PartialOrd)]
 pub enum BackendName {
     Crucible,
     SledAgent,
@@ -47,7 +47,7 @@ impl fmt::Display for BackendName {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Hash, Eq, PartialEq, PartialOrd)]
 pub enum SRV {
     /// A service identified and accessed by name, such as "nexus", "CRDB", etc.
     ///
