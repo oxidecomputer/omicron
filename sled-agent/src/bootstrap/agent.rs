@@ -24,6 +24,7 @@ use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
 };
 use slog::Logger;
+use std::collections::HashSet;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -57,6 +58,9 @@ pub enum BootstrapError {
 
     #[error(transparent)]
     TrustQuorum(#[from] TrustQuorumError),
+
+    #[error("Error collecting peer addresses: {0}")]
+    PeerAddresses(String),
 
     #[error("Failed to initialize bootstrap address: {err}")]
     BootstrapAddress { err: crate::illumos::zone::EnsureGzAddressError },
@@ -299,12 +303,29 @@ impl Agent {
         let rack_secret = retry_notify(
             internal_service_policy(),
             || async {
-                let other_agents = ddm_admin_client
-                    .peer_addrs()
-                    .await
-                    .map_err(BootstrapError::DdmError)
-                    .map_err(|err| BackoffError::transient(err))?
-                    .collect::<Vec<_>>();
+                let other_agents = {
+                    // Manually build up a `HashSet` instead of `.collect()`ing
+                    // so we can log if we see any duplicates.
+                    let mut addrs = HashSet::new();
+                    for addr in ddm_admin_client
+                        .peer_addrs()
+                        .await
+                        .map_err(BootstrapError::DdmError)
+                        .map_err(|err| BackoffError::transient(err))?
+                    {
+                        // We should never see duplicates; that would mean
+                        // maghemite thinks two different sleds have the same
+                        // bootstrap address!
+                        if !addrs.insert(addr) {
+                            let msg = format!("Duplicate peer addresses received from ddmd: {addr}");
+                            error!(&self.log, "{}", msg);
+                            return Err(BackoffError::permanent(
+                                BootstrapError::PeerAddresses(msg),
+                            ));
+                        }
+                    }
+                    addrs
+                };
                 info!(
                     &self.log,
                     "Bootstrap: Communicating with peers: {:?}", other_agents
@@ -348,8 +369,9 @@ impl Agent {
                     })
                     .collect();
 
-                // TODO: Parallelize this and keep track of whose shares we've already retrieved and
-                // don't resend. See https://github.com/oxidecomputer/omicron/issues/514
+                // TODO: Parallelize this and keep track of whose shares we've
+                // already retrieved and don't resend. See
+                // https://github.com/oxidecomputer/omicron/issues/514
                 let mut shares = vec![share.share.clone()];
                 for agent in &other_agents {
                     let share = agent.request_share().await

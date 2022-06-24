@@ -430,10 +430,8 @@ impl ServiceInner {
         let ddm_admin_client = DdmAdminClient::new(self.log.clone())?;
         let addrs = retry_notify(
             // TODO-correctness `internal_service_policy()` has potentially-long
-            // exponential backoff; do we want a different infinitely-retrying
-            // policy that is more aggressive? This is similar to
-            // https://github.com/oxidecomputer/omicron/issues/996, which
-            // discusses this issue for disk creation.
+            // exponential backoff, which is probably not what we want. See
+            // https://github.com/oxidecomputer/omicron/issues/1270
             internal_service_policy(),
             || async {
                 let peer_addrs =

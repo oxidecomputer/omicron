@@ -79,11 +79,9 @@ impl DdmAdminClient {
         let prefixes = self.client.get_prefixes().await?.into_inner();
         info!(self.log, "Received prefixes from ddmd"; "prefixes" => ?prefixes);
         Ok(prefixes.into_iter().filter_map(|(_, prefixes)| {
-            // TODO-correctness What if a single peer is advertising multiple
-            // bootstrap network prefixes? This will only grab the first. We
-            // could use `flat_map` instead of `filter_map`, but then our caller
-            // wouldn't be able to tell "one peer with 3 prefixes" apart from
-            // "three peers with 1 prefix each".
+            // If we receive multiple bootstrap prefixes from one peer, trim it
+            // down to just one. Connections on the bootstrap network are always
+            // authenticated via sprockets, which only needs one address.
             prefixes.into_iter().find_map(|prefix| {
                 let mut segments = prefix.addr.segments();
                 if prefix.mask == BOOTSTRAP_MASK
