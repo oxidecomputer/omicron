@@ -102,6 +102,8 @@ pub enum Database {
 pub struct DeploymentConfig {
     /// Uuid of the Nexus instance
     pub id: Uuid,
+    /// Uuid of the Rack where Nexus is executing.
+    pub rack_id: Uuid,
     /// Dropshot configuration for external API server
     pub dropshot_external: ConfigDropshot,
     /// Dropshot configuration for internal API server

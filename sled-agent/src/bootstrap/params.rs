@@ -8,12 +8,19 @@ use super::trust_quorum::ShareDistribution;
 use omicron_common::address::{Ipv6Subnet, SLED_PREFIX};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
+use uuid::Uuid;
 
 /// Configuration information for launching a Sled Agent.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct SledAgentRequest {
+    /// Uuid of the Sled Agent to be created.
+    pub id: Uuid,
+
     /// Portion of the IP space to be managed by the Sled Agent.
     pub subnet: Ipv6Subnet<SLED_PREFIX>,
+
+    /// Uuid of the rack to which this sled agent belongs.
+    pub rack_id: Uuid,
 
     /// Share of the rack secret for this Sled Agent.
     // TODO-cleanup This is currently optional because we don't do trust quorum
