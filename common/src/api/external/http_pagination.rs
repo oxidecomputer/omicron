@@ -126,22 +126,34 @@ pub trait ScanParams:
     }
 }
 
-// XXX-dap figure out where else to put this
-pub fn marker_for_object_identity_name<S, T: ObjectIdentity>(
+/// Marker function that extracts the "name" from an object
+///
+/// This is intended for use with [`ScanByName::results_page`] with objects that
+/// impl [`ObjectIdentity`].
+pub fn marker_for_name<S, T: ObjectIdentity>(
     _: &S,
     t: &T,
 ) -> Name {
     t.identity().name.clone()
 }
 
-pub fn marker_for_object_identity_id<S, T: ObjectIdentity>(
+/// Marker function that extracts the "id" from an object
+///
+/// This is intended for use with [`ScanById::results_page`] with objects that
+/// impl [`ObjectIdentity`].
+pub fn marker_for_id<S, T: ObjectIdentity>(
     _: &S,
     t: &T,
 ) -> Uuid {
     t.identity().id
 }
 
-pub fn marker_for_object_identity_name_or_id<T: ObjectIdentity>(
+/// Marker function that extracts the "name" or "id" from an object, depending
+/// on the scan in use
+///
+/// This is intended for use with [`ScanByNameOrId::results_page`] with objects
+/// that impl [`ObjectIdentity`].
+pub fn marker_for_name_or_id<T: ObjectIdentity>(
     scan: &ScanByNameOrId,
     item: &T,
 ) -> NameOrIdMarker {
@@ -363,15 +375,6 @@ impl ScanParams for ScanByNameOrId {
         }
     }
 
-    // XXX-dap
-    // fn marker_for_item<T: ObjectIdentity>(&self, item: &T) -> NameOrIdMarker {
-    //     let identity = item.identity();
-    //     match pagination_field_for_scan_params(self) {
-    //         PagField::Name => NameOrIdMarker::Name(identity.name.clone()),
-    //         PagField::Id => NameOrIdMarker::Id(identity.id),
-    //     }
-    // }
-
     fn from_query(
         p: &PaginationParams<Self, PageSelector<Self, Self::MarkerValue>>,
     ) -> Result<&Self, HttpError> {
@@ -473,9 +476,9 @@ mod test {
     use super::data_page_params_nameid_id_limit;
     use super::data_page_params_nameid_name_limit;
     use super::data_page_params_with_limit;
-    use super::marker_for_object_identity_id;
-    use super::marker_for_object_identity_name;
-    use super::marker_for_object_identity_name_or_id;
+    use super::marker_for_id;
+    use super::marker_for_name;
+    use super::marker_for_name_or_id;
     use super::page_selector_for;
     use super::pagination_field_for_scan_params;
     use super::IdSortMode;
@@ -726,7 +729,7 @@ mod test {
             &"thing0".parse().unwrap(),
             &"thing19".parse().unwrap(),
             &scan,
-            &marker_for_object_identity_name,
+            &marker_for_name,
         );
         assert_eq!(scan.direction(), PaginationOrder::Ascending);
 
@@ -766,7 +769,7 @@ mod test {
             &list[0].identity.id,
             &list[list.len() - 1].identity.id,
             &scan,
-            &marker_for_object_identity_id,
+            &marker_for_id,
         );
         assert_eq!(scan.direction(), PaginationOrder::Ascending);
 
@@ -832,7 +835,7 @@ mod test {
             &thing0_marker,
             &thinglast_marker,
             &ScanByNameOrId { sort_by: NameOrIdSortMode::NameAscending },
-            &marker_for_object_identity_name_or_id,
+            &marker_for_name_or_id,
         );
 
         // Verify data pages based on the query params.
@@ -871,7 +874,7 @@ mod test {
             &thing0_marker,
             &thinglast_marker,
             &ScanByNameOrId { sort_by: NameOrIdSortMode::NameAscending },
-            &marker_for_object_identity_name_or_id,
+            &marker_for_name_or_id,
         );
 
         // Verify data pages based on the query params.

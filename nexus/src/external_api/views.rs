@@ -17,6 +17,33 @@ use serde::{Deserialize, Serialize};
 use std::net::SocketAddrV6;
 use uuid::Uuid;
 
+// IDENTITY METADATA
+
+/// Identity-related metadata that's included in "asset" public API objects
+/// (which generally have no name or description)
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
+pub struct AssetIdentityMetadata {
+    /// unique, immutable, system-controlled identifier for each resource
+    pub id: Uuid,
+    /// timestamp when this resource was created
+    pub time_created: chrono::DateTime<chrono::Utc>,
+    /// timestamp when this resource was last modified
+    pub time_modified: chrono::DateTime<chrono::Utc>,
+}
+
+impl<T> From<&T> for AssetIdentityMetadata
+where
+    T: Asset,
+{
+    fn from(t: &T) -> Self {
+        AssetIdentityMetadata {
+            id: t.id(),
+            time_created: t.time_created(),
+            time_modified: t.time_modified(),
+        }
+    }
+}
+
 // SILOS
 
 /// Client view of a ['Silo']
@@ -318,31 +345,34 @@ impl From<model::VpcRouter> for VpcRouter {
 // RACKS
 
 /// Client view of an [`Rack`]
-#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Rack {
     #[serde(flatten)]
-    pub identity: IdentityMetadata,
+    pub identity: AssetIdentityMetadata,
 }
 
 impl From<model::Rack> for Rack {
     fn from(rack: model::Rack) -> Self {
-        Self { identity: rack.identity() }
+        Self { identity: AssetIdentityMetadata::from(&rack) }
     }
 }
 
 // SLEDS
 
 /// Client view of an [`Sled`]
-#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Sled {
     #[serde(flatten)]
-    pub identity: IdentityMetadata,
+    pub identity: AssetIdentityMetadata,
     pub service_address: SocketAddrV6,
 }
 
 impl From<model::Sled> for Sled {
     fn from(sled: model::Sled) -> Self {
-        Self { identity: sled.identity(), service_address: sled.address() }
+        Self {
+            identity: AssetIdentityMetadata::from(&sled),
+            service_address: sled.address(),
+        }
     }
 }
 

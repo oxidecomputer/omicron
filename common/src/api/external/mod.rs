@@ -867,44 +867,15 @@ impl DiskState {
 // These are currently only intended for observability by developers.  We will
 // eventually want to flesh this out into something more observable for end
 // users.
-#[derive(ObjectIdentity, Clone, Debug, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, JsonSchema)]
 pub struct Saga {
     pub id: Uuid,
     pub state: SagaState,
-    // TODO-cleanup This object contains a fake `IdentityMetadata`.  Why?  We
-    // want to paginate these objects.  http_pagination.rs provides a bunch of
-    // useful facilities -- notably `PaginatedById`.  `PaginatedById`
-    // requires being able to take an arbitrary object in the result set and get
-    // its id.  To do that, it uses the `ObjectIdentity` trait, which expects
-    // to be able to return an `IdentityMetadata` reference from an object.
-    // Finally, the pagination facilities just pull the `id` out of that.
-    //
-    // In this case (as well as others, like sleds and racks), we have ids, and
-    // we want to be able to paginate by id, but we don't have full identity
-    // metadata.  (Or we do, but it's similarly faked up.)  What we should
-    // probably do is create a new trait, say `ObjectId`, that returns _just_
-    // an id.  We can provide a blanket impl for anything that impls
-    // IdentityMetadata.  We can define one-off impls for structs like this
-    // one.  Then the id-only pagination interfaces can require just
-    // `ObjectId`.
-    #[serde(skip)]
-    pub identity: IdentityMetadata,
 }
 
 impl From<steno::SagaView> for Saga {
     fn from(s: steno::SagaView) -> Self {
-        Saga {
-            id: Uuid::from(s.id),
-            state: SagaState::from(s.state),
-            identity: IdentityMetadata {
-                // TODO-cleanup See the note in Saga above.
-                id: Uuid::from(s.id),
-                name: format!("saga-{}", s.id).parse().unwrap(),
-                description: format!("saga {}", s.id),
-                time_created: Utc::now(),
-                time_modified: Utc::now(),
-            },
-        }
+        Saga { id: Uuid::from(s.id), state: SagaState::from(s.state) }
     }
 }
 
