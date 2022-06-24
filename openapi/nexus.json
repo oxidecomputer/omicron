@@ -8075,22 +8075,10 @@
         "description": "Client view of an [`Rack`]",
         "type": "object",
         "properties": {
-          "description": {
-            "description": "human-readable free-form text about a resource",
-            "type": "string"
-          },
           "id": {
             "description": "unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
-          },
-          "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
           },
           "time_created": {
             "description": "timestamp when this resource was created",
@@ -8104,9 +8092,7 @@
           }
         },
         "required": [
-          "description",
           "id",
-          "name",
           "time_created",
           "time_modified"
         ]
@@ -8961,22 +8947,10 @@
         "description": "Client view of an [`Sled`]",
         "type": "object",
         "properties": {
-          "description": {
-            "description": "human-readable free-form text about a resource",
-            "type": "string"
-          },
           "id": {
             "description": "unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
-          },
-          "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
           },
           "service_address": {
             "type": "string"
@@ -8993,9 +8967,7 @@
           }
         },
         "required": [
-          "description",
           "id",
-          "name",
           "service_address",
           "time_created",
           "time_modified"

@@ -49,14 +49,4 @@ pub trait Asset {
     fn id(&self) -> Uuid;
     fn time_created(&self) -> DateTime<Utc>;
     fn time_modified(&self) -> DateTime<Utc>;
-
-    fn identity(&self) -> external::IdentityMetadata {
-        external::IdentityMetadata {
-            id: self.id(),
-            name: "no-name".parse().unwrap(),
-            description: "no description".to_string(),
-            time_created: self.time_created(),
-            time_modified: self.time_modified(),
-        }
-    }
 }
