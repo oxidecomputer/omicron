@@ -1140,6 +1140,8 @@ async fn test_saml_idp_rsa_keypair_ok(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.apictx.nexus;
+
     let initial_silo_users: Vec<views::User> =
         NexusRequest::iter_collection_authn(client, "/users", "", None)
             .await
@@ -1151,8 +1153,8 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(
         initial_silo_users,
         vec![
-            views::User { id: USER_TEST_PRIVILEGED.id },
-            views::User { id: USER_TEST_UNPRIVILEGED.id },
+            views::User { id: USER_TEST_PRIVILEGED.id() },
+            views::User { id: USER_TEST_UNPRIVILEGED.id() },
         ]
     );
 
@@ -1168,11 +1170,11 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
             .expect("failed to list silo users (2)")
             .all_items;
     assert_eq!(
-        initial_silo_users,
+        silo_users,
         vec![
-            views::User { id: USER_TEST_PRIVILEGED.id },
-            views::User { id: USER_TEST_UNPRIVILEGED.id },
-            views::User { id: new_silo_user_id },
+            views::User { id: USER_TEST_PRIVILEGED.id() },
+            views::User { id: USER_TEST_UNPRIVILEGED.id() },
+            views::User { id: new_silo_user_id() },
         ]
     );
 
