@@ -1134,3 +1134,32 @@ async fn test_saml_idp_rsa_keypair_ok(cptestctx: &ControlPlaneTestContext) {
     .await
     .expect("unexpected failure");
 }
+
+#[nexus_test]
+async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let silo_users = NexusRequest::iter_collection_authn::<views::User>(
+        client, "/users", "", None,
+    )
+    .await
+    .expect("failed to list silo users")
+    .all_items
+    .iter()
+    .map(|u| u.id.to_string())
+    .collect::<Vec<String>>();
+
+    // In the built-in Silo, we expect the test-privileged and test-unprivileged
+    // users.
+    // XXX-dap should compare entire objects to make sure we're not missing
+    // other fields.
+    assert_eq!(
+        silo_users,
+        vec![
+            "001de000-05e4-4000-8000-000000004007",
+            "001de000-05e4-4000-8000-000000060001"
+        ]
+    );
+
+    // XXX-dap TODO-coverage create a user, look for it, then remove it, then
+    // list them again and make sure it's gone.
+}
