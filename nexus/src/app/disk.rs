@@ -217,10 +217,10 @@ impl super::Nexus {
     pub async fn disk_fetch_by_id(
         &self,
         opctx: &OpContext,
-        disk_id: Uuid,
+        disk_id: &Uuid,
     ) -> LookupResult<db::model::Disk> {
         let (.., db_disk) = LookupPath::new(opctx, &self.db_datastore)
-            .disk_id(disk_id)
+            .disk_id(*disk_id)
             .fetch()
             .await?;
         Ok(db_disk)
@@ -401,12 +401,13 @@ impl super::Nexus {
     pub async fn snapshot_fetch_by_id(
         &self,
         opctx: &OpContext,
-        id: Uuid,
+        snapshot_id: &Uuid,
     ) -> LookupResult<db::model::Snapshot> {
-        let (.., db_snapshot) = LookupPath::new(opctx, &self.db_datastore)
-            .snapshot_id(id)
-            .fetch()
-            .await?;
+        let lookup_type = LookupType::ById(*snapshot_id);
+        let not_found_error =
+            lookup_type.into_not_found(ResourceType::Snapshot);
+        let unimp = Unimpl::ProtectedLookup(not_found_error);
+        Err(self.unimplemented_todo(opctx, unimp).await)
     }
 
     pub async fn project_delete_snapshot(

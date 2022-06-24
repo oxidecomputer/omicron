@@ -212,10 +212,12 @@ impl super::Nexus {
     pub async fn vpc_fetch_by_id(
         &self,
         opctx: &OpContext,
-        vpc_id: Uuid,
+        vpc_id: &Uuid,
     ) -> LookupResult<db::model::Vpc> {
-        let (.., db_vpc) =
-            LookupPath::new(opctx, &self.db_datastore).vpc_id(vpc_id).await?;
+        let (.., db_vpc) = LookupPath::new(opctx, &self.db_datastore)
+            .vpc_id(*vpc_id)
+            .fetch()
+            .await?;
         Ok(db_vpc)
     }
 

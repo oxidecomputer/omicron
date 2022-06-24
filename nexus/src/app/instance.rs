@@ -181,10 +181,10 @@ impl super::Nexus {
     pub async fn instance_fetch_by_id(
         &self,
         opctx: &OpContext,
-        instance_id: Uuid,
+        instance_id: &Uuid,
     ) -> LookupResult<db::model::Instance> {
         let (.., db_instance) = LookupPath::new(opctx, &self.db_datastore)
-            .instance_id(instance_id)
+            .instance_id(*instance_id)
             .fetch()
             .await?;
         Ok(db_instance)
@@ -775,10 +775,11 @@ impl super::Nexus {
     pub async fn network_interface_fetch_by_id(
         &self,
         opctx: &OpContext,
-        interface_id: Uuid,
+        interface_id: &Uuid,
     ) -> LookupResult<db::model::NetworkInterface> {
         let (.., db_interface) = LookupPath::new(opctx, &self.db_datastore)
-            .network_interface_id(interface_id)
+            .network_interface_id(*interface_id)
+            .fetch()
             .await?;
         Ok(db_interface)
     }

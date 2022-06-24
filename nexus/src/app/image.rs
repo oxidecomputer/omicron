@@ -74,10 +74,10 @@ impl super::Nexus {
     pub async fn project_image_fetch_by_id(
         &self,
         opctx: &OpContext,
-        image_id: Uuid,
+        image_id: &Uuid,
     ) -> LookupResult<db::model::Image> {
         let (.., db_image) = LookupPath::new(opctx, &self.db_datastore)
-            .image_id(image_id)
+            .image_id(*image_id)
             .fetch()
             .await?;
         Ok(db_image)
@@ -311,10 +311,10 @@ impl super::Nexus {
     pub async fn global_image_fetch_by_id(
         &self,
         opctx: &OpContext,
-        global_image_id: Uuid,
+        global_image_id: &Uuid,
     ) -> LookupResult<db::model::GlobalImage> {
         let (.., db_global_image) = LookupPath::new(opctx, &self.db_datastore)
-            .global_image_id(global_image_id)
+            .global_image_id(*global_image_id)
             .fetch()
             .await?;
         Ok(db_global_image)

@@ -221,10 +221,10 @@ impl super::Nexus {
     pub async fn vpc_subnet_fetch_by_id(
         &self,
         opctx: &OpContext,
-        vpc_subnet_id: Uuid,
+        vpc_subnet_id: &Uuid,
     ) -> LookupResult<db::model::VpcSubnet> {
         let (.., db_vpc) = LookupPath::new(opctx, &self.db_datastore)
-            .vpc_subnet_id(vpc_subnet_id)
+            .vpc_subnet_id(*vpc_subnet_id)
             .fetch()
             .await?;
         Ok(db_vpc)

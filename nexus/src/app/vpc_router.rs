@@ -99,10 +99,10 @@ impl super::Nexus {
     pub async fn vpc_router_fetch_by_id(
         &self,
         opctx: &OpContext,
-        vpc_router_id: Uuid,
+        vpc_router_id: &Uuid,
     ) -> LookupResult<db::model::VpcRouter> {
         let (.., db_router) = LookupPath::new(opctx, &self.db_datastore)
-            .vpc_router_id(vpc_router_id)
+            .vpc_router_id(*vpc_router_id)
             .fetch()
             .await?;
         Ok(db_router)
@@ -238,10 +238,10 @@ impl super::Nexus {
     pub async fn route_fetch_by_id(
         &self,
         opctx: &OpContext,
-        route_id: Uuid,
+        route_id: &Uuid,
     ) -> LookupResult<db::model::RouterRoute> {
         let (.., db_route) = LookupPath::new(opctx, &self.db_datastore)
-            .router_route_id(route_id)
+            .router_route_id(*route_id)
             .fetch()
             .await?;
         Ok(db_route)

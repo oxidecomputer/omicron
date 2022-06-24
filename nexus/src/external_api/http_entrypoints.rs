@@ -3503,7 +3503,7 @@ async fn by_id_image_get(
     let id = &path.id;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let image = nexus.image_fetch_by_id(&opctx, id).await?;
+        let image = nexus.project_image_fetch_by_id(&opctx, id).await?;
         Ok(HttpResponseOk(image.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -3607,14 +3607,14 @@ async fn by_id_vpc_get(
 async fn by_id_subnet_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ByIdPathParams>,
-) -> Result<HttpResponseOk<Subnet>, HttpError> {
+) -> Result<HttpResponseOk<VpcSubnet>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let id = &path.id;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let subnet = nexus.subnet_fetch_by_id(&opctx, id).await?;
+        let subnet = nexus.vpc_subnet_fetch_by_id(&opctx, id).await?;
         Ok(HttpResponseOk(subnet.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -3651,7 +3651,7 @@ async fn by_id_router_get(
 async fn by_id_route_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ByIdPathParams>,
-) -> Result<HttpResponseOk<Route>, HttpError> {
+) -> Result<HttpResponseOk<RouterRoute>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
