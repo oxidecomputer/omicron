@@ -181,7 +181,7 @@ impl InsertError {
                 )
             }
             InsertError::InstanceNotFound(id) => {
-                external::Error::not_found_by_id(external::ResourceType::Instance, &id)
+                external::Error::not_found_by_id(external::ResourceType::VmInstance, &id)
             }
             InsertError::External(e) => e,
         }
@@ -778,7 +778,7 @@ fn push_instance_validation_cte<'a>(
     out.push_sql(", ");
     out.push_identifier(dsl::subnet_id::NAME)?;
     out.push_sql(", ");
-    out.push_identifier(dsl::instance_id::NAME)?;
+    out.push_identifier(dsl::vm_instance_id::NAME)?;
     out.push_sql(", ");
     out.push_identifier(dsl::slot::NAME)?;
     out.push_sql(", ");
@@ -1351,15 +1351,15 @@ fn push_instance_stopped_verification_subquery<'a>(
     mut out: AstPass<'_, 'a, Pg>,
 ) -> QueryResult<()> {
     out.push_sql("CAST(CASE COALESCE((SELECT ");
-    out.push_identifier(db::schema::instance::dsl::state::NAME)?;
+    out.push_identifier(db::schema::vm_instance::dsl::state::NAME)?;
     out.push_sql(" FROM ");
     INSTANCE_FROM_CLAUSE.walk_ast(out.reborrow())?;
     out.push_sql(" WHERE ");
-    out.push_identifier(db::schema::instance::dsl::id::NAME)?;
+    out.push_identifier(db::schema::vm_instance::dsl::id::NAME)?;
     out.push_sql(" = ");
     out.push_bind_param::<sql_types::Uuid, Uuid>(instance_id)?;
     out.push_sql(" AND ");
-    out.push_identifier(db::schema::instance::dsl::time_deleted::NAME)?;
+    out.push_identifier(db::schema::vm_instance::dsl::time_deleted::NAME)?;
     out.push_sql(" IS NULL), ");
     out.push_bind_param::<db::model::InstanceStateEnum, db::model::InstanceState>(&INSTANCE_DESTROYED)?;
     out.push_sql(") WHEN ");
@@ -1591,7 +1591,7 @@ impl DeleteError {
             }
             DeleteError::InstanceNotFound(id) => {
                 external::Error::not_found_by_id(
-                    external::ResourceType::Instance,
+                    external::ResourceType::VmInstance,
                     &id,
                 )
             }
@@ -1670,9 +1670,9 @@ mod tests {
     use crate::db::identity::Resource;
     use crate::db::model;
     use crate::db::model::IncompleteNetworkInterface;
-    use crate::db::model::Instance;
     use crate::db::model::MacAddr;
     use crate::db::model::NetworkInterface;
+    use crate::db::model::VmInstance;
     use crate::db::model::VpcSubnet;
     use crate::external_api::params::InstanceCreate;
     use crate::external_api::params::InstanceNetworkInterfaceAttachment;
@@ -1698,7 +1698,7 @@ mod tests {
 
     // Add an instance. We'll use this to verify that the instance must be
     // stopped to add or delete interfaces.
-    async fn create_instance(db_datastore: &DataStore) -> Instance {
+    async fn create_instance(db_datastore: &DataStore) -> VmInstance {
         let instance_id = Uuid::new_v4();
         let project_id =
             "f89892a0-58e0-60c8-a164-a82d0bd29ff4".parse().unwrap();
@@ -1734,14 +1734,14 @@ mod tests {
             time_updated: Utc::now(),
         };
         let instance =
-            Instance::new(instance_id, project_id, &params, runtime.into());
+            VmInstance::new(instance_id, project_id, &params, runtime.into());
         db_datastore
             .project_create_instance(instance)
             .await
             .expect("Failed to create new instance record")
     }
 
-    async fn create_stopped_instance(db_datastore: &DataStore) -> Instance {
+    async fn create_stopped_instance(db_datastore: &DataStore) -> VmInstance {
         let instance = create_instance(db_datastore).await;
         instance_set_state(
             db_datastore,
@@ -1753,9 +1753,9 @@ mod tests {
 
     async fn instance_set_state(
         db_datastore: &DataStore,
-        mut instance: Instance,
+        mut instance: VmInstance,
         state: external::InstanceState,
-    ) -> Instance {
+    ) -> VmInstance {
         let new_runtime = model::InstanceRuntimeState {
             state: model::InstanceState::new(state),
             gen: instance.runtime_state.gen.next().into(),
@@ -1853,7 +1853,7 @@ mod tests {
         async fn create_instance(
             &self,
             state: external::InstanceState,
-        ) -> Instance {
+        ) -> VmInstance {
             instance_set_state(
                 &self.db_datastore,
                 create_instance(&self.db_datastore).await,

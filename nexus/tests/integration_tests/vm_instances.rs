@@ -1071,7 +1071,7 @@ async fn test_instance_create_delete_network_interface(
         .expect("Failed to parse error response body");
         assert_eq!(
             err.message,
-            "Instance must be stopped to detach a network interface",
+            "VmInstance must be stopped to detach a network interface",
             "Expected an InvalidRequest response when detaching an interface from a running instance"
         );
     }
