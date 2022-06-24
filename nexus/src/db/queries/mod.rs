@@ -5,6 +5,7 @@
 //! Specialized queries for inserting database records, usually to maintain
 //! complex invariants that are most accurately expressed in a single query.
 
+pub mod ip_pool;
 #[macro_use]
 mod next_item;
 pub mod network_interface;
