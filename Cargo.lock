@@ -3167,6 +3167,7 @@ dependencies = [
  "chrono",
  "clap 3.2.6",
  "crucible-agent-client",
+ "ddm-admin-client",
  "dropshot",
  "expectorate",
  "futures",
