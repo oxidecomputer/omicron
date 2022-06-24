@@ -217,8 +217,9 @@ pub fn external_api() -> NexusApiDescription {
         api.register(by_id_snapshot_get)?;
         api.register(by_id_vpc_get)?;
         api.register(by_id_subnet_get)?;
-        api.register(by_id_network_interface_get)?;
         api.register(by_id_router_get)?;
+        api.register(by_id_route_get)?;
+        api.register(by_id_network_interface_get)?;
 
         Ok(())
     }
@@ -3557,4 +3558,107 @@ async fn by_id_snapshot_get(
 /// Fetch a network interface by id
 #[endpoint {
     method = GET,
-    path = "/by_id/network-
+    path = "/by_id/network-interfaces/{id}",
+    tags = ["instances"],
+}]
+async fn by_id_network_interface_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ByIdPathParams>,
+) -> Result<HttpResponseOk<NetworkInterface>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let id = &path.id;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let network_interface = nexus
+            .network_interface_fetch_by_id(&opctx, id)
+            .await?;
+        Ok(HttpResponseOk(network_interface.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+#[endpoint {
+    method = GET,
+    path = "/by_id/vpcs/{id}",
+    tags = ["vpcs"],
+}]
+async fn by_id_vpc_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ByIdPathParams>,
+) -> Result<HttpResponseOk<Vpc>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let id = &path.id;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let vpc = nexus.vpc_fetch_by_id(&opctx, id).await?;
+        Ok(HttpResponseOk(vpc.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+#[endpoint {
+    method = GET,
+    path = "/by_id/subnets/{id}",
+    tags = ["subnets"],
+}]
+async fn by_id_subnet_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ByIdPathParams>,
+) -> Result<HttpResponseOk<Subnet>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let id = &path.id;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let subnet = nexus.subnet_fetch_by_id(&opctx, id).await?;
+        Ok(HttpResponseOk(subnet.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+#[endpoint {
+    method = GET,
+    path = "/by_id/router/{id}",
+    tags = ["routers"],
+}]
+async fn by_id_router_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ByIdPathParams>,
+) -> Result<HttpResponseOk<VpcRouter>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let id = &path.id;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let router = nexus.vpc_router_fetch_by_id(&opctx, id).await?;
+        Ok(HttpResponseOk(router.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+#[endpoint {
+    method = GET,
+    path = "/by_id/route/{id}",
+    tags = ["routes"]
+}]
+async fn by_id_route_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ByIdPathParams>,
+) -> Result<HttpResponseOk<Route>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let id = &path.id;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let route = nexus.route_fetch_by_id(&opctx, id).await?;
+        Ok(HttpResponseOk(route.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
