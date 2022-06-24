@@ -118,14 +118,16 @@ other services and allocating them with vNICs and IPv6 addresses.
 === How to provision an instance using the CLI
 
 Here are the current steps to provision an instance using the https://github.com/oxidecomputer/cli[oxide]
-command line interface.
+command line interface.  Note that the `jq` command is required. In addition, the examples build on each other, so a previous name (or org, or project) are used in later steps.
 
 1. Create an organization and project that the resources will live under:
 
     oxide org create myorg
     oxide project create -o myorg myproj
 
-2. Define a global image that will be used as initial disk contents. This can be the alpine.iso image that ships with propolis, or an ISO / raw disk image / etc hosted at a URL:
+2. Define a global image that will be used as initial disk contents.
+
+ a. This can be the alpine.iso image that ships with propolis:
 
     oxide api /images --method POST --input - <<EOF
     {
@@ -141,6 +143,8 @@ command line interface.
       }
     }
     EOF
+
+ b. Or an ISO / raw disk image / etc hosted at a URL:
 
     oxide api /images --method POST --input - <<EOF
     {
@@ -158,14 +162,14 @@ command line interface.
     }
     EOF
 
-3. Create a disk from that global image (note that disk size must be greater than or equal to image size!). The example below creates a disk using the image made from the alpine ISO that ships with propolis, and sets the size to be the exact same as the image size:
+3. Create a disk from that global image (note that disk size must be greater than or equal to image size and a 1GiB multiple!). The example below creates a disk using the image made from the alpine ISO that ships with propolis, and sets the size to the next 1GiB multiple of the original alpine source:
 
     oxide api /organizations/myorg/projects/myproj/disks/ --method POST --input - <<EOF
     {
       "name": "alpine",
       "description": "alpine.iso blob",
       "block_size": 512,
-      "size": $(oxide api /images/alpine | jq -r .size),
+      "size": 1073741824,
       "disk_source": {
           "type": "global_image",
           "image_id": "$(oxide api /images/alpine | jq -r .id)"
@@ -173,7 +177,7 @@ command line interface.
     }
     EOF
 
-4. Create an instance, attaching the disk created above:
+4. Create an instance, attaching the alpine disk created above:
 
     oxide api /organizations/myorg/projects/myproj/instances --method POST --input - <<EOF
     {
@@ -191,7 +195,7 @@ command line interface.
     }
     EOF
 
-5. Optionally, attach to the propolis server serial console:
+5. Optionally, attach to the propolis server serial console, though the serial console is under active development and these commands are subject to change:
 
   a. find the zone launched for the instance: `zoneadm list -c | grep oxz_propolis-server`
   b. get the instance uuid from the zone name. if the zone's name is `oxz_propolis-server_3b03ad43-4e9b-4f3a-866c-238d9ec4ac45`, then the uuid is `3b03ad43-4e9b-4f3a-866c-238d9ec4ac45`
