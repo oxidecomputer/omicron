@@ -26,6 +26,7 @@ use omicron_nexus::authz::SiloRole;
 use httptest::{matchers::*, responders::*, Expectation, Server};
 use omicron_nexus::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
 use omicron_nexus::db::fixed_data::silo::SILO_ID;
+use omicron_nexus::db::identity::Asset;
 
 #[nexus_test]
 async fn test_silos(cptestctx: &ControlPlaneTestContext) {
@@ -1162,7 +1163,7 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
     // it, use a small limit to check that pagination is really working.
     let new_silo_user_id =
         "bd75d207-37f3-4769-b808-677ae04eaf23".parse().unwrap();
-    nexus.silo_user_create(SILO_ID, new_silo_user_id).await.unwrap();
+    nexus.silo_user_create(*SILO_ID, new_silo_user_id).await.unwrap();
 
     let silo_users: Vec<views::User> =
         NexusRequest::iter_collection_authn(client, "/users", "", Some(1))
@@ -1174,7 +1175,7 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
         vec![
             views::User { id: USER_TEST_PRIVILEGED.id() },
             views::User { id: USER_TEST_UNPRIVILEGED.id() },
-            views::User { id: new_silo_user_id() },
+            views::User { id: new_silo_user_id },
         ]
     );
 
