@@ -10,7 +10,11 @@ use futures::stream::{self, StreamExt, TryStreamExt};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use omicron_package::{parse, BuildCommand, DeployCommand};
 use omicron_sled_agent::zone;
+use omicron_zone_package::config::Config;
+use omicron_zone_package::config::ExternalPackage;
+use omicron_zone_package::config::ExternalPackageSource;
 use omicron_zone_package::package::Package;
+use omicron_zone_package::package::Progress;
 use rayon::prelude::*;
 use ring::digest::{Context as DigestContext, Digest, SHA256};
 use std::env;
@@ -19,9 +23,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
-
-use omicron_package::{Config, ExternalPackage, ExternalPackageSource};
-use omicron_zone_package::package::Progress;
 
 /// All packaging subcommands.
 #[derive(Debug, Subcommand)]
@@ -330,12 +331,16 @@ fn do_install(
     uninstall_all_packages(config);
     uninstall_all_omicron_zones()?;
 
-    // Extract and install the bootstrap service, which itself extracts and
-    // installs other services.
-    if let Some(package) = config.packages.get("omicron-sled-agent") {
-        let tar_path =
-            install_dir.join(format!("{}.tar", package.service_name));
-        let service_path = install_dir.join(&package.service_name);
+    // Extract all global zone services.
+    let global_zone_service_names = config
+        .packages
+        .values()
+        .chain(config.external_packages.values().map(|p| &p.package))
+        .filter_map(|p| if p.zone { None } else { Some(&p.service_name) });
+
+    for service_name in global_zone_service_names {
+        let tar_path = install_dir.join(format!("{}.tar", service_name));
+        let service_path = install_dir.join(service_name);
         println!(
             "Unpacking {} to {}",
             tar_path.to_string_lossy(),
@@ -347,7 +352,11 @@ fn do_install(
         std::fs::create_dir_all(&service_path)?;
         let mut archive = tar::Archive::new(tar_file);
         archive.unpack(&service_path)?;
+    }
 
+    // Install the bootstrap service, which itself extracts and
+    // installs other services.
+    if let Some(package) = config.packages.get("omicron-sled-agent") {
         let manifest_path = install_dir
             .join(&package.service_name)
             .join("pkg")
