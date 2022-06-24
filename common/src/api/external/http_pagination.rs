@@ -130,10 +130,7 @@ pub trait ScanParams:
 ///
 /// This is intended for use with [`ScanByName::results_page`] with objects that
 /// impl [`ObjectIdentity`].
-pub fn marker_for_name<S, T: ObjectIdentity>(
-    _: &S,
-    t: &T,
-) -> Name {
+pub fn marker_for_name<S, T: ObjectIdentity>(_: &S, t: &T) -> Name {
     t.identity().name.clone()
 }
 
@@ -141,10 +138,7 @@ pub fn marker_for_name<S, T: ObjectIdentity>(
 ///
 /// This is intended for use with [`ScanById::results_page`] with objects that
 /// impl [`ObjectIdentity`].
-pub fn marker_for_id<S, T: ObjectIdentity>(
-    _: &S,
-    t: &T,
-) -> Uuid {
+pub fn marker_for_id<S, T: ObjectIdentity>(_: &S, t: &T) -> Uuid {
     t.identity().id
 }
 
