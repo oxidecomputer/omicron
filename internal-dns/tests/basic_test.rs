@@ -246,6 +246,7 @@ pub async fn nxdomain() -> Result<(), anyhow::Error> {
     // server should result in an NXDOMAIN
     lookup_ip_expect_nxdomain(&resolver, "unicorn.oxide.internal").await;
 
+    test_ctx.cleanup().await;
     Ok(())
 }
 
@@ -283,6 +284,7 @@ pub async fn servfail() -> Result<(), anyhow::Error> {
         },
     };
 
+    test_ctx.cleanup().await;
     Ok(())
 }
 
