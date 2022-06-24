@@ -16,3 +16,6 @@ progenitor::generate_api!(
         slog::debug!(log, "client response"; "result" => ?result);
     }),
 );
+
+pub mod multiclient;
+pub mod names;

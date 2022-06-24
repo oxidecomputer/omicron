@@ -245,6 +245,7 @@ impl Agent {
             &self.sled_config,
             self.parent_log.clone(),
             sled_address,
+            request.rack_id,
         )
         .await
         .map_err(|e| {

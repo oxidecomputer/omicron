@@ -25,6 +25,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
+use uuid::Uuid;
 
 // The filename of ServiceManager's internal storage.
 const SERVICE_CONFIG_FILENAME: &str = "service.toml";
@@ -124,6 +125,7 @@ pub struct ServiceManager {
     vnic_allocator: VnicAllocator,
     underlay_vnic: EtherstubVnic,
     underlay_address: Ipv6Addr,
+    rack_id: Uuid,
 }
 
 impl ServiceManager {
@@ -143,6 +145,7 @@ impl ServiceManager {
         underlay_vnic: EtherstubVnic,
         underlay_address: Ipv6Addr,
         config: Config,
+        rack_id: Uuid,
     ) -> Result<Self, Error> {
         debug!(log, "Creating new ServiceManager");
         let mgr = Self {
@@ -152,6 +155,7 @@ impl ServiceManager {
             vnic_allocator: VnicAllocator::new("Service", etherstub),
             underlay_vnic,
             underlay_address,
+            rack_id,
         };
 
         let config_path = mgr.services_config_path();
@@ -316,6 +320,7 @@ impl ServiceManager {
                     // cannot be known at packaging time.
                     let deployment_config = NexusDeploymentConfig {
                         id: service.id,
+                        rack_id: self.rack_id,
                         dropshot_external: ConfigDropshot {
                             bind_address: SocketAddr::V6(external_address),
                             request_body_max_bytes: 1048576,
@@ -702,6 +707,7 @@ mod test {
             EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
             Ipv6Addr::LOCALHOST,
             test_config.make_config(),
+            Uuid::new_v4(),
         )
         .await
         .unwrap();
@@ -728,6 +734,7 @@ mod test {
             EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
             Ipv6Addr::LOCALHOST,
             test_config.make_config(),
+            Uuid::new_v4(),
         )
         .await
         .unwrap();
@@ -756,6 +763,7 @@ mod test {
             EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
             Ipv6Addr::LOCALHOST,
             test_config.make_config(),
+            Uuid::new_v4(),
         )
         .await
         .unwrap();
@@ -773,6 +781,7 @@ mod test {
             EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
             Ipv6Addr::LOCALHOST,
             test_config.make_config(),
+            Uuid::new_v4(),
         )
         .await
         .unwrap();
@@ -797,6 +806,7 @@ mod test {
             EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
             Ipv6Addr::LOCALHOST,
             test_config.make_config(),
+            Uuid::new_v4(),
         )
         .await
         .unwrap();
@@ -816,6 +826,7 @@ mod test {
             EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
             Ipv6Addr::LOCALHOST,
             config,
+            Uuid::new_v4(),
         )
         .await
         .unwrap();

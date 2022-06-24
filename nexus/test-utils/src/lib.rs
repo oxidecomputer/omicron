@@ -90,7 +90,6 @@ pub async fn test_setup_with_config(
     config: &mut omicron_nexus::Config,
 ) -> ControlPlaneTestContext {
     let logctx = LogContext::new(test_name, &config.pkg.log);
-    let rack_id = Uuid::parse_str(RACK_UUID).unwrap();
     let log = &logctx.log;
 
     // Start up CockroachDB.
@@ -104,9 +103,8 @@ pub async fn test_setup_with_config(
         nexus_config::Database::FromUrl { url: database.pg_config().clone() };
     config.pkg.timeseries_db.address.set_port(clickhouse.port());
 
-    let server = omicron_nexus::Server::start(&config, rack_id, &logctx.log)
-        .await
-        .unwrap();
+    let server =
+        omicron_nexus::Server::start(&config, &logctx.log).await.unwrap();
     server
         .apictx
         .nexus
