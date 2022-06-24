@@ -1101,6 +1101,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "ddm-admin-client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "omicron-zone-package",
+ "progenitor",
+ "progenitor-client",
+ "quote",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "slog",
+ "toml",
+]
+
+[[package]]
 name = "der"
 version = "0.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3227,11 +3243,13 @@ dependencies = [
 
 [[package]]
 name = "omicron-zone-package"
-version = "0.2.1"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f71c6f5ec2330cbc04a9f1fc67f8d3dd5af24ac1394a02c98296611505333df"
+checksum = "5e4371f82156ede0edb2682b42f9f3f3f78fe27429838006eb66f659aa6d0743"
 dependencies = [
  "anyhow",
+ "chrono",
+ "filetime",
  "flate2",
  "reqwest",
  "serde",
