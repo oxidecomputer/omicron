@@ -297,6 +297,7 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         rcgen -> Int8,
 
+        rack_id -> Uuid,
         ip -> Inet,
         port -> Int4,
         last_used_address -> Inet,

@@ -38,6 +38,7 @@ impl Server {
         config: &Config,
         log: Logger,
         addr: SocketAddrV6,
+        rack_id: Uuid,
     ) -> Result<Server, String> {
         info!(log, "setting up sled agent server");
 
@@ -47,10 +48,15 @@ impl Server {
             client_log,
         ));
 
-        let sled_agent =
-            SledAgent::new(&config, log.clone(), nexus_client.clone(), addr)
-                .await
-                .map_err(|e| e.to_string())?;
+        let sled_agent = SledAgent::new(
+            &config,
+            log.clone(),
+            nexus_client.clone(),
+            addr,
+            rack_id,
+        )
+        .await
+        .map_err(|e| e.to_string())?;
 
         let mut dropshot_config = dropshot::ConfigDropshot::default();
         dropshot_config.request_body_max_bytes = 1024 * 1024;
