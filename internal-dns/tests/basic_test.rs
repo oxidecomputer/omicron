@@ -293,6 +293,7 @@ struct TestContext {
     dropshot_server:
         dropshot::HttpServer<Arc<internal_dns::dropshot_server::Context>>,
     tmp: tempdir::TempDir,
+    logctx: LogContext,
 }
 
 impl TestContext {
@@ -300,6 +301,7 @@ impl TestContext {
         drop(self.dns_server);
         self.dropshot_server.close().await.expect("Failed to clean up server");
         self.tmp.close().expect("Failed to clean up tmp directory");
+        self.logctx.cleanup_successful();
     }
 }
 
@@ -309,7 +311,7 @@ async fn init_client_server(
 ) -> Result<TestContext, anyhow::Error> {
     // initialize dns server config
     let (tmp, config, logctx) = test_config(test_name)?;
-    let log = logctx.log;
+    let log = logctx.log.clone();
 
     // initialize dns server db
     let db = Arc::new(sled::open(&config.data.storage_path)?);
@@ -349,7 +351,14 @@ async fn init_client_server(
     let client =
         Client::new(&format!("http://{}", dropshot_server.local_addr()), log);
 
-    Ok(TestContext { client, resolver, dns_server, dropshot_server, tmp })
+    Ok(TestContext {
+        client,
+        resolver,
+        dns_server,
+        dropshot_server,
+        tmp,
+        logctx,
+    })
 }
 
 fn test_config(
