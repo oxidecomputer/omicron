@@ -408,18 +408,70 @@ impl From<model::Sled> for Sled {
     }
 }
 
-// BUILT-IN USERS
+// SILO USERS
 
 /// Client view of a [`User`]
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(from = "UserIncoming")]
 pub struct User {
+    pub id: Uuid,
+    // See omicron_common::api::external::Saga.
+    #[serde(skip)]
+    pub identity: IdentityMetadata,
+}
+
+impl From<model::SiloUser> for User {
+    fn from(user: model::SiloUser) -> Self {
+        let identity = user.identity();
+        let id = identity.id;
+        Self { id, identity }
+    }
+}
+
+// XXX-dap once I fix what's below, derive this
+impl Eq for User {}
+impl PartialEq for User {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+// XXX-dap this whole thing is stupid -- see the TODO-cleanup in Saga and
+// implement that workaround
+impl From<UserIncoming> for User {
+    fn from(user: UserIncoming) -> Self {
+        let now = chrono::Utc::now();
+        Self {
+            id: user.id,
+            identity: IdentityMetadata {
+                id: user.id,
+                name: "no-name".parse().unwrap(),
+                description: String::from("no description"),
+                time_created: now,
+                time_modified: now,
+            }
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct UserIncoming {
+    pub id: Uuid,
+}
+
+
+// BUILT-IN USERS
+
+/// Client view of a [`UserBuiltin`]
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct UserBuiltin {
     // TODO-correctness is flattening here (and in all the other types) the
     // intent in RFD 4?
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 }
 
-impl From<model::UserBuiltin> for User {
+impl From<model::UserBuiltin> for UserBuiltin {
     fn from(user: model::UserBuiltin) -> Self {
         Self { identity: user.identity() }
     }
