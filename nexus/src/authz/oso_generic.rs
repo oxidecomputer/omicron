@@ -43,6 +43,7 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<Oso, anyhow::Error> {
         AuthenticatedActor::get_polar_class(),
         Database::get_polar_class(),
         Fleet::get_polar_class(),
+        IpPoolList::get_polar_class(),
         GlobalImageList::get_polar_class(),
         ConsoleSessionList::get_polar_class(),
     ];
@@ -57,6 +58,7 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<Oso, anyhow::Error> {
         Project::init(),
         Disk::init(),
         VmInstance::init(),
+        IpPool::init(),
         NetworkInterface::init(),
         Vpc::init(),
         VpcRouter::init(),

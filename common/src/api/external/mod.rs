@@ -525,6 +525,7 @@ pub enum ResourceType {
     Disk,
     Image,
     VmInstance,
+    IpPool,
     NetworkInterface,
     Rack,
     Service,
@@ -867,44 +868,15 @@ impl DiskState {
 // These are currently only intended for observability by developers.  We will
 // eventually want to flesh this out into something more observable for end
 // users.
-#[derive(ObjectIdentity, Clone, Debug, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, JsonSchema)]
 pub struct Saga {
     pub id: Uuid,
     pub state: SagaState,
-    // TODO-cleanup This object contains a fake `IdentityMetadata`.  Why?  We
-    // want to paginate these objects.  http_pagination.rs provides a bunch of
-    // useful facilities -- notably `PaginatedById`.  `PaginatedById`
-    // requires being able to take an arbitrary object in the result set and get
-    // its id.  To do that, it uses the `ObjectIdentity` trait, which expects
-    // to be able to return an `IdentityMetadata` reference from an object.
-    // Finally, the pagination facilities just pull the `id` out of that.
-    //
-    // In this case (as well as others, like sleds and racks), we have ids, and
-    // we want to be able to paginate by id, but we don't have full identity
-    // metadata.  (Or we do, but it's similarly faked up.)  What we should
-    // probably do is create a new trait, say `ObjectId`, that returns _just_
-    // an id.  We can provide a blanket impl for anything that impls
-    // IdentityMetadata.  We can define one-off impls for structs like this
-    // one.  Then the id-only pagination interfaces can require just
-    // `ObjectId`.
-    #[serde(skip)]
-    pub identity: IdentityMetadata,
 }
 
 impl From<steno::SagaView> for Saga {
     fn from(s: steno::SagaView) -> Self {
-        Saga {
-            id: Uuid::from(s.id),
-            state: SagaState::from(s.state),
-            identity: IdentityMetadata {
-                // TODO-cleanup See the note in Saga above.
-                id: Uuid::from(s.id),
-                name: format!("saga-{}", s.id).parse().unwrap(),
-                description: format!("saga {}", s.id),
-                time_created: Utc::now(),
-                time_modified: Utc::now(),
-            },
-        }
+        Saga { id: Uuid::from(s.id), state: SagaState::from(s.state) }
     }
 }
 
@@ -1123,6 +1095,51 @@ pub enum IpNet {
     V6(Ipv6Net),
 }
 
+impl IpNet {
+    /// Return the first address in this subnet
+    pub fn first_address(&self) -> IpAddr {
+        match self {
+            IpNet::V4(inner) => IpAddr::from(inner.iter().next().unwrap()),
+            IpNet::V6(inner) => IpAddr::from(inner.iter().next().unwrap()),
+        }
+    }
+
+    /// Return the last address in this subnet.
+    ///
+    /// For a subnet of size 1, e.g., a /32, this is the same as the first
+    /// address.
+    // NOTE: This is a workaround for the fact that the `ipnetwork` crate's
+    // iterator provides only the `Iterator::next()` method. That means that
+    // finding the last address is linear in the size of the subnet, which is
+    // completely untenable and totally avoidable with some addition. In the
+    // long term, we should either put up a patch to the `ipnetwork` crate or
+    // move the `ipnet` crate, which does provide an efficient iterator
+    // implementation.
+    pub fn last_address(&self) -> IpAddr {
+        match self {
+            IpNet::V4(inner) => {
+                let base: u32 = inner.network().into();
+                let size = inner.size() - 1;
+                std::net::IpAddr::V4(std::net::Ipv4Addr::from(base + size))
+            }
+            IpNet::V6(inner) => {
+                let base: u128 = inner.network().into();
+                let size = inner.size() - 1;
+                std::net::IpAddr::V6(std::net::Ipv6Addr::from(base + size))
+            }
+        }
+    }
+}
+
+impl From<ipnetwork::IpNetwork> for IpNet {
+    fn from(n: ipnetwork::IpNetwork) -> Self {
+        match n {
+            ipnetwork::IpNetwork::V4(v4) => IpNet::V4(Ipv4Net(v4)),
+            ipnetwork::IpNetwork::V6(v6) => IpNet::V6(Ipv6Net(v6)),
+        }
+    }
+}
+
 impl From<Ipv4Net> for IpNet {
     fn from(n: Ipv4Net) -> IpNet {
         IpNet::V4(n)
@@ -1234,7 +1251,10 @@ impl JsonSchema for IpNet {
 /// Insert another level of schema indirection in order to provide an
 /// additional title for a subschema. This allows generators to infer a better
 /// variant name for an "untagged" enum.
-fn label_schema(
+// TODO-cleanup: We should move IpNet and this to
+// `omicron_nexus::external_api::shared`. It's public now because `IpRange`,
+// which is defined there, uses it.
+pub fn label_schema(
     label: &str,
     schema: schemars::schema::Schema,
 ) -> schemars::schema::Schema {
@@ -2448,5 +2468,53 @@ mod test {
         assert_eq!(format!(r#""{}""#, net_str), ser);
         let net_des = serde_json::from_str::<IpNet>(&ser).unwrap();
         assert_eq!(net, net_des);
+    }
+
+    #[test]
+    fn test_ipnet_first_last_address() {
+        use std::net::IpAddr;
+        use std::net::Ipv4Addr;
+        use std::net::Ipv6Addr;
+        let net: IpNet = "fd00::/128".parse().unwrap();
+        assert_eq!(
+            net.first_address(),
+            IpAddr::from(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0)),
+        );
+        assert_eq!(
+            net.last_address(),
+            IpAddr::from(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0)),
+        );
+
+        let net: IpNet = "fd00::/64".parse().unwrap();
+        assert_eq!(
+            net.first_address(),
+            IpAddr::from(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0)),
+        );
+        assert_eq!(
+            net.last_address(),
+            IpAddr::from(Ipv6Addr::new(
+                0xfd00, 0, 0, 0, 0xffff, 0xffff, 0xffff, 0xffff
+            )),
+        );
+
+        let net: IpNet = "10.0.0.0/16".parse().unwrap();
+        assert_eq!(
+            net.first_address(),
+            IpAddr::from(Ipv4Addr::new(10, 0, 0, 0)),
+        );
+        assert_eq!(
+            net.last_address(),
+            IpAddr::from(Ipv4Addr::new(10, 0, 255, 255)),
+        );
+
+        let net: IpNet = "10.0.0.0/32".parse().unwrap();
+        assert_eq!(
+            net.first_address(),
+            IpAddr::from(Ipv4Addr::new(10, 0, 0, 0)),
+        );
+        assert_eq!(
+            net.last_address(),
+            IpAddr::from(Ipv4Addr::new(10, 0, 0, 0)),
+        );
     }
 }
