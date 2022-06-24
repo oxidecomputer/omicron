@@ -8,6 +8,7 @@ use omicron_common::address::{
     Ipv6Subnet, ReservedRackSubnet, AZ_PREFIX, DNS_PORT, DNS_SERVER_PORT,
 };
 use slog::{info, Logger};
+use std::collections::HashMap;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use trust_dns_resolver::config::{
     NameServerConfig, Protocol, ResolverConfig, ResolverOpts,
@@ -15,6 +16,8 @@ use trust_dns_resolver::config::{
 use trust_dns_resolver::TokioAsyncResolver;
 
 pub type DnsError = crate::Error<crate::types::Error>;
+
+pub type AAAARecord = (crate::names::AAAA, SocketAddrV6);
 
 /// Describes how to find the DNS servers.
 ///
@@ -50,13 +53,6 @@ impl DnsAddressLookup for Ipv6Subnet<AZ_PREFIX> {
     }
 }
 
-/// Describes a service which may be inserted into DNS records.
-pub trait Service {
-    fn aaaa(&self) -> crate::names::AAAA;
-    fn srv(&self) -> crate::names::SRV;
-    fn address(&self) -> SocketAddrV6;
-}
-
 /// A connection used to update multiple DNS servers.
 pub struct Updater {
     log: Logger,
@@ -83,37 +79,15 @@ impl Updater {
 
     /// Inserts all service records into the DNS server.
     ///
-    /// This method is most efficient when records are sorted by SRV key.
+    /// Each SRV record should have one or more AAAA records.
     pub async fn insert_dns_records(
         &self,
-        records: &Vec<impl Service>,
+        records: &HashMap<crate::names::SRV, Vec<AAAARecord>>,
     ) -> Result<(), DnsError> {
-        let mut records = records.iter().peekable();
-
-        while let Some(record) = records.next() {
-            let srv = record.srv();
+        for (srv, aaaa) in records.iter() {
             info!(self.log, "Inserting DNS record: {:?}", srv);
 
-            match &srv {
-                &crate::names::SRV::Service(_) => {
-                    let mut aaaa = vec![(record.aaaa(), record.address())];
-                    while let Some(record) = records.peek() {
-                        if record.srv() == srv {
-                            let record = records.next().unwrap();
-                            aaaa.push((record.aaaa(), record.address()));
-                        } else {
-                            break;
-                        }
-                    }
-
-                    self.insert_dns_records_internal(aaaa, srv).await?;
-                }
-                &crate::names::SRV::Backend(_, _) => {
-                    let aaaa = vec![(record.aaaa(), record.address())];
-                    self.insert_dns_records_internal(aaaa, record.srv())
-                        .await?;
-                }
-            };
+            self.insert_dns_records_internal(aaaa, srv).await?;
         }
         Ok(())
     }
@@ -123,8 +97,8 @@ impl Updater {
     // - An SRV record, pointing to each of the AAAA records.
     async fn insert_dns_records_internal(
         &self,
-        aaaa: Vec<(crate::names::AAAA, SocketAddrV6)>,
-        srv_key: crate::names::SRV,
+        aaaa: &Vec<AAAARecord>,
+        srv_key: &crate::names::SRV,
     ) -> Result<(), DnsError> {
         let mut records = Vec::with_capacity(aaaa.len() + 1);
 
@@ -409,33 +383,6 @@ mod test {
         logctx.cleanup_successful();
     }
 
-    #[derive(Clone)]
-    struct TestServiceRecord {
-        aaaa: AAAA,
-        srv: SRV,
-        addr: SocketAddrV6,
-    }
-
-    impl TestServiceRecord {
-        fn new(aaaa: AAAA, srv: SRV, addr: SocketAddrV6) -> Self {
-            Self { aaaa, srv, addr }
-        }
-    }
-
-    impl Service for TestServiceRecord {
-        fn aaaa(&self) -> AAAA {
-            self.aaaa.clone()
-        }
-
-        fn srv(&self) -> SRV {
-            self.srv.clone()
-        }
-
-        fn address(&self) -> SocketAddrV6 {
-            self.addr
-        }
-    }
-
     // Insert and retreive a single DNS record.
     #[tokio::test]
     async fn insert_and_lookup_one_record() {
@@ -452,23 +399,28 @@ mod test {
             .expect("Error creating localhost resolver");
         let updater = Updater::new(&address_getter, logctx.log.clone());
 
-        let record = TestServiceRecord::new(
-            AAAA::Zone(Uuid::new_v4()),
+        let records = HashMap::from([(
             SRV::Service(ServiceName::Cockroach),
-            SocketAddrV6::new(
-                Ipv6Addr::from_str("ff::01").unwrap(),
-                12345,
-                0,
-                0,
-            ),
-        );
-        updater.insert_dns_records(&vec![record.clone()]).await.unwrap();
+            vec![(
+                AAAA::Zone(Uuid::new_v4()),
+                SocketAddrV6::new(
+                    Ipv6Addr::from_str("ff::01").unwrap(),
+                    12345,
+                    0,
+                    0,
+                ),
+            )],
+        )]);
+        updater.insert_dns_records(&records).await.unwrap();
 
         let ip = resolver
             .lookup_ipv6(SRV::Service(ServiceName::Cockroach))
             .await
             .expect("Should have been able to look up IP address");
-        assert_eq!(&ip, record.addr.ip());
+        assert_eq!(
+            &ip,
+            records[&SRV::Service(ServiceName::Cockroach)][0].1.ip()
+        );
 
         logctx.cleanup_successful();
     }
@@ -522,36 +474,31 @@ mod test {
             0,
         );
 
-        let records = vec![
+        let srv_crdb = SRV::Service(ServiceName::Cockroach);
+        let srv_clickhouse = SRV::Service(ServiceName::Clickhouse);
+        let srv_backend = SRV::Backend(BackendName::Crucible, Uuid::new_v4());
+
+        let records = HashMap::from([
             // Three Cockroach services
-            TestServiceRecord::new(
-                AAAA::Zone(Uuid::new_v4()),
-                SRV::Service(ServiceName::Cockroach),
-                cockroach_addrs[0],
-            ),
-            TestServiceRecord::new(
-                AAAA::Zone(Uuid::new_v4()),
-                SRV::Service(ServiceName::Cockroach),
-                cockroach_addrs[1],
-            ),
-            TestServiceRecord::new(
-                AAAA::Zone(Uuid::new_v4()),
-                SRV::Service(ServiceName::Cockroach),
-                cockroach_addrs[2],
+            (
+                srv_crdb.clone(),
+                vec![
+                    (AAAA::Zone(Uuid::new_v4()), cockroach_addrs[0]),
+                    (AAAA::Zone(Uuid::new_v4()), cockroach_addrs[1]),
+                    (AAAA::Zone(Uuid::new_v4()), cockroach_addrs[2]),
+                ],
             ),
             // One Clickhouse service
-            TestServiceRecord::new(
-                AAAA::Zone(Uuid::new_v4()),
-                SRV::Service(ServiceName::Clickhouse),
-                clickhouse_addr,
+            (
+                srv_clickhouse.clone(),
+                vec![(AAAA::Zone(Uuid::new_v4()), clickhouse_addr)],
             ),
             // One Backend service
-            TestServiceRecord::new(
-                AAAA::Zone(Uuid::new_v4()),
-                SRV::Backend(BackendName::Crucible, Uuid::new_v4()),
-                crucible_addr,
+            (
+                srv_backend.clone(),
+                vec![(AAAA::Zone(Uuid::new_v4()), crucible_addr)],
             ),
-        ];
+        ]);
         updater.insert_dns_records(&records).await.unwrap();
 
         // Look up Cockroach
@@ -570,7 +517,7 @@ mod test {
 
         // Look up Backend Service
         let ip = resolver
-            .lookup_ipv6(records[4].srv.clone())
+            .lookup_ipv6(srv_backend)
             .await
             .expect("Should have been able to look up IP address");
         assert_eq!(&ip, crucible_addr.ip());
@@ -578,15 +525,10 @@ mod test {
         // If we remove the AAAA records for two of the CRDB services,
         // only one will remain.
         updater
-            .dns_records_delete(&vec![DnsRecordKey {
-                name: records[0].aaaa.to_string(),
-            }])
-            .await
-            .expect("Should have been able to delete record");
-        updater
-            .dns_records_delete(&vec![DnsRecordKey {
-                name: records[1].aaaa.to_string(),
-            }])
+            .dns_records_delete(&vec![
+                DnsRecordKey { name: records[&srv_crdb][0].0.to_string() },
+                DnsRecordKey { name: records[&srv_crdb][1].0.to_string() },
+            ])
             .await
             .expect("Should have been able to delete record");
         let ip = resolver
@@ -614,37 +556,40 @@ mod test {
         let updater = Updater::new(&address_getter, logctx.log.clone());
 
         // Insert a record, observe that it exists.
-        let mut record = TestServiceRecord::new(
-            AAAA::Zone(Uuid::new_v4()),
-            SRV::Service(ServiceName::Cockroach),
-            SocketAddrV6::new(
-                Ipv6Addr::from_str("ff::01").unwrap(),
-                12345,
-                0,
-                0,
-            ),
-        );
-        updater.insert_dns_records(&vec![record.clone()]).await.unwrap();
+        let srv_crdb = SRV::Service(ServiceName::Cockroach);
+        let mut records = HashMap::from([(
+            srv_crdb.clone(),
+            vec![(
+                AAAA::Zone(Uuid::new_v4()),
+                SocketAddrV6::new(
+                    Ipv6Addr::from_str("ff::01").unwrap(),
+                    12345,
+                    0,
+                    0,
+                ),
+            )],
+        )]);
+        updater.insert_dns_records(&records).await.unwrap();
         let ip = resolver
             .lookup_ipv6(SRV::Service(ServiceName::Cockroach))
             .await
             .expect("Should have been able to look up IP address");
-        assert_eq!(&ip, record.addr.ip());
+        assert_eq!(&ip, records[&srv_crdb][0].1.ip());
 
         // If we insert the same record with a new address, it should be
         // updated.
-        record.addr = SocketAddrV6::new(
+        records.get_mut(&srv_crdb).unwrap()[0].1 = SocketAddrV6::new(
             Ipv6Addr::from_str("ee::02").unwrap(),
             54321,
             0,
             0,
         );
-        updater.insert_dns_records(&vec![record.clone()]).await.unwrap();
+        updater.insert_dns_records(&records).await.unwrap();
         let ip = resolver
             .lookup_ipv6(SRV::Service(ServiceName::Cockroach))
             .await
             .expect("Should have been able to look up IP address");
-        assert_eq!(&ip, record.addr.ip());
+        assert_eq!(&ip, records[&srv_crdb][0].1.ip());
 
         logctx.cleanup_successful();
     }
