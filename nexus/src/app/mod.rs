@@ -229,10 +229,6 @@ impl Nexus {
         &self.tunables
     }
 
-    pub fn rack_id(&self) -> Uuid {
-        self.rack_id
-    }
-
     pub async fn wait_for_populate(&self) -> Result<(), anyhow::Error> {
         let mut my_rx = self.populate_status.clone();
         loop {
