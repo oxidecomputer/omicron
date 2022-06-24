@@ -74,7 +74,10 @@ impl super::Nexus {
             })
             .collect();
 
-        // TODO: Actually supply datasets provided from the sled agent.
+        // TODO(https://github.com/oxidecomputer/omicron/pull/1216):
+        // Actually supply datasets provided from the sled agent.
+        //
+        // This requires corresponding changes on the RSS side.
         self.db_datastore
             .rack_set_initialized(opctx, rack_id, services, vec![])
             .await?;
