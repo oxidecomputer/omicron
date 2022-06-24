@@ -1077,7 +1077,11 @@ async fn ip_pools_get(
         .into_iter()
         .map(IpPool::from)
         .collect();
-        Ok(HttpResponseOk(ScanByNameOrId::results_page(&query, pools)?))
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            pools,
+            &marker_for_name_or_id,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
