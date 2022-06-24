@@ -7,6 +7,7 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 use omicron_nexus::external_api::views::Rack;
+use omicron_nexus::TestInterfaces;
 
 #[nexus_test]
 async fn test_list_own_rack(cptestctx: &ControlPlaneTestContext) {
