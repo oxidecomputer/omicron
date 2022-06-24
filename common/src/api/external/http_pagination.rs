@@ -92,12 +92,6 @@ pub trait ScanParams:
     /// Return the direction of the scan
     fn direction(&self) -> PaginationOrder;
 
-    /// Given an item, return the appropriate marker value
-    ///
-    /// For example, when scanning by name, this returns the "name" field of the
-    /// item.
-    fn marker_for_item<T: ObjectIdentity>(&self, t: &T) -> Self::MarkerValue;
-
     /// Given pagination parameters, return the current scan parameters
     ///
     /// This can fail if the pagination parameters are not self-consistent (e.g.,
@@ -112,28 +106,66 @@ pub trait ScanParams:
     ///
     /// `list` contains the items that should appear on the page.  It's not
     /// expected that consumers would override this implementation.
-    fn results_page<T>(
+    ///
+    /// `marker_for_item` is a function that returns the appropriate marker
+    /// value for a given item.  For example, when scanning by name, this
+    /// returns the "name" field of the item.
+    fn results_page<T, F>(
         query: &PaginationParams<Self, PageSelector<Self, Self::MarkerValue>>,
         list: Vec<T>,
+        marker_for_item: &F,
     ) -> Result<ResultsPage<T>, dropshot::HttpError>
     where
-        T: ObjectIdentity + Serialize,
+        F: Fn(&Self, &T) -> Self::MarkerValue,
+        T: Serialize,
     {
         let scan_params = Self::from_query(query)?;
-        ResultsPage::new(list, scan_params, page_selector_for)
+        let page_selector =
+            |item: &T, s: &Self| page_selector_for(item, s, marker_for_item);
+        ResultsPage::new(list, scan_params, page_selector)
+    }
+}
+
+// XXX-dap figure out where else to put this
+pub fn marker_for_object_identity_name<S, T: ObjectIdentity>(
+    _: &S,
+    t: &T,
+) -> Name {
+    t.identity().name.clone()
+}
+
+pub fn marker_for_object_identity_id<S, T: ObjectIdentity>(
+    _: &S,
+    t: &T,
+) -> Uuid {
+    t.identity().id
+}
+
+pub fn marker_for_object_identity_name_or_id<T: ObjectIdentity>(
+    scan: &ScanByNameOrId,
+    item: &T,
+) -> NameOrIdMarker {
+    let identity = item.identity();
+    match pagination_field_for_scan_params(scan) {
+        PagField::Name => NameOrIdMarker::Name(identity.name.clone()),
+        PagField::Id => NameOrIdMarker::Id(identity.id),
     }
 }
 
 /// See `dropshot::ResultsPage::new`
-fn page_selector_for<T, S, M>(item: &T, scan_params: &S) -> PageSelector<S, M>
+fn page_selector_for<F, T, S, M>(
+    item: &T,
+    scan_params: &S,
+    marker_for_item: &F,
+) -> PageSelector<S, M>
 where
-    T: ObjectIdentity,
+    F: Fn(&S, &T) -> M,
     S: ScanParams<MarkerValue = M>,
     M: Clone + Debug + DeserializeOwned + PartialEq + Serialize,
 {
     PageSelector {
         scan: scan_params.clone(),
-        last_seen: scan_params.marker_for_item(item),
+        last_seen: marker_for_item(scan_params, item),
     }
 }
 
@@ -206,9 +238,6 @@ impl ScanParams for ScanByName {
     fn direction(&self) -> PaginationOrder {
         PaginationOrder::Ascending
     }
-    fn marker_for_item<T: ObjectIdentity>(&self, item: &T) -> Name {
-        item.identity().name.clone()
-    }
     fn from_query(
         p: &PaginationParams<Self, PageSelector<Self, Self::MarkerValue>>,
     ) -> Result<&Self, HttpError> {
@@ -250,9 +279,6 @@ impl ScanParams for ScanById {
     type MarkerValue = Uuid;
     fn direction(&self) -> PaginationOrder {
         PaginationOrder::Ascending
-    }
-    fn marker_for_item<T: ObjectIdentity>(&self, item: &T) -> Uuid {
-        item.identity().id
     }
     fn from_query(p: &PaginatedById) -> Result<&Self, HttpError> {
         Ok(match p.page {
@@ -337,13 +363,14 @@ impl ScanParams for ScanByNameOrId {
         }
     }
 
-    fn marker_for_item<T: ObjectIdentity>(&self, item: &T) -> NameOrIdMarker {
-        let identity = item.identity();
-        match pagination_field_for_scan_params(self) {
-            PagField::Name => NameOrIdMarker::Name(identity.name.clone()),
-            PagField::Id => NameOrIdMarker::Id(identity.id),
-        }
-    }
+    // XXX-dap
+    // fn marker_for_item<T: ObjectIdentity>(&self, item: &T) -> NameOrIdMarker {
+    //     let identity = item.identity();
+    //     match pagination_field_for_scan_params(self) {
+    //         PagField::Name => NameOrIdMarker::Name(identity.name.clone()),
+    //         PagField::Id => NameOrIdMarker::Id(identity.id),
+    //     }
+    // }
 
     fn from_query(
         p: &PaginationParams<Self, PageSelector<Self, Self::MarkerValue>>,
@@ -446,6 +473,9 @@ mod test {
     use super::data_page_params_nameid_id_limit;
     use super::data_page_params_nameid_name_limit;
     use super::data_page_params_with_limit;
+    use super::marker_for_object_identity_id;
+    use super::marker_for_object_identity_name;
+    use super::marker_for_object_identity_name_or_id;
     use super::page_selector_for;
     use super::pagination_field_for_scan_params;
     use super::IdSortMode;
@@ -617,32 +647,34 @@ mod test {
     }
 
     /// Function for running a bunch of tests on a ScanParams type.
-    fn test_scan_param_common<S>(
+    fn test_scan_param_common<F, S>(
         list: &Vec<MyThing>,
         scan: &S,
         querystring: &str,
         item0_marker: &S::MarkerValue,
         itemlast_marker: &S::MarkerValue,
         scan_default: &S,
+        marker_for_item: &F,
     ) -> (
         PaginationParams<S, PageSelector<S, S::MarkerValue>>,
         PaginationParams<S, PageSelector<S, S::MarkerValue>>,
     )
     where
         S: ScanParams,
+        F: Fn(&S, &MyThing) -> S::MarkerValue,
     {
         let li = list.len() - 1;
 
         // Test basic parts of ScanParams interface.
-        assert_eq!(&scan.marker_for_item(&list[0]), item0_marker);
-        assert_eq!(&scan.marker_for_item(&list[li]), itemlast_marker);
+        assert_eq!(&marker_for_item(scan, &list[0]), item0_marker);
+        assert_eq!(&marker_for_item(scan, &list[li]), itemlast_marker);
 
         // Test page_selector_for().
-        let page_selector = page_selector_for(&list[0], scan);
+        let page_selector = page_selector_for(&list[0], scan, marker_for_item);
         assert_eq!(&page_selector.scan, scan);
         assert_eq!(&page_selector.last_seen, item0_marker);
 
-        let page_selector = page_selector_for(&list[li], scan);
+        let page_selector = page_selector_for(&list[li], scan, marker_for_item);
         assert_eq!(&page_selector.scan, scan);
         assert_eq!(&page_selector.last_seen, itemlast_marker);
 
@@ -659,7 +691,7 @@ mod test {
 
         // Generate a results page from that, verify it, pull the token out, and
         // use it to generate pagination parameters for a NextPage request.
-        let page = S::results_page(&p0, list.clone()).unwrap();
+        let page = S::results_page(&p0, list.clone(), marker_for_item).unwrap();
         assert_eq!(&page.items, list);
         assert!(page.next_page.is_some());
         let q = format!("page_token={}", page.next_page.unwrap());
@@ -694,6 +726,7 @@ mod test {
             &"thing0".parse().unwrap(),
             &"thing19".parse().unwrap(),
             &scan,
+            &marker_for_object_identity_name,
         );
         assert_eq!(scan.direction(), PaginationOrder::Ascending);
 
@@ -733,6 +766,7 @@ mod test {
             &list[0].identity.id,
             &list[list.len() - 1].identity.id,
             &scan,
+            &marker_for_object_identity_id,
         );
         assert_eq!(scan.direction(), PaginationOrder::Ascending);
 
@@ -798,6 +832,7 @@ mod test {
             &thing0_marker,
             &thinglast_marker,
             &ScanByNameOrId { sort_by: NameOrIdSortMode::NameAscending },
+            &marker_for_object_identity_name_or_id,
         );
 
         // Verify data pages based on the query params.
@@ -836,6 +871,7 @@ mod test {
             &thing0_marker,
             &thinglast_marker,
             &ScanByNameOrId { sort_by: NameOrIdSortMode::NameAscending },
+            &marker_for_object_identity_name_or_id,
         );
 
         // Verify data pages based on the query params.

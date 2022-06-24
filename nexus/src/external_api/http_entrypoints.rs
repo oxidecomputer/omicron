@@ -36,6 +36,9 @@ use dropshot::TypedBody;
 use dropshot::WhichPage;
 use omicron_common::api::external::http_pagination::data_page_params_nameid_id;
 use omicron_common::api::external::http_pagination::data_page_params_nameid_name;
+use omicron_common::api::external::http_pagination::marker_for_object_identity_id;
+use omicron_common::api::external::http_pagination::marker_for_object_identity_name;
+use omicron_common::api::external::http_pagination::marker_for_object_identity_name_or_id;
 use omicron_common::api::external::http_pagination::pagination_field_for_scan_params;
 use omicron_common::api::external::http_pagination::PagField;
 use omicron_common::api::external::http_pagination::PaginatedById;
@@ -335,7 +338,11 @@ async fn silos_get(
         .into_iter()
         .map(|p| p.into())
         .collect();
-        Ok(HttpResponseOk(ScanByNameOrId::results_page(&query, silos)?))
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            silos,
+            &marker_for_object_identity_name_or_id,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -495,6 +502,7 @@ async fn silos_get_identity_providers(
         Ok(HttpResponseOk(ScanByName::results_page(
             &query,
             identity_providers,
+            &marker_for_object_identity_name,
         )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -603,7 +611,11 @@ async fn organizations_get(
         .into_iter()
         .map(|p| p.into())
         .collect();
-        Ok(HttpResponseOk(ScanByNameOrId::results_page(&query, organizations)?))
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            organizations,
+            &marker_for_object_identity_name_or_id,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -821,7 +833,11 @@ async fn organization_projects_get(
         .into_iter()
         .map(|p| p.into())
         .collect();
-        Ok(HttpResponseOk(ScanByNameOrId::results_page(&query, projects)?))
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            projects,
+            &marker_for_object_identity_name_or_id,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1043,7 +1059,11 @@ async fn project_disks_get(
             .into_iter()
             .map(|d| d.into())
             .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(&query, disks)?))
+        Ok(HttpResponseOk(ScanByName::results_page(
+            &query,
+            disks,
+            &marker_for_object_identity_name,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1179,7 +1199,11 @@ async fn project_instances_get(
             .into_iter()
             .map(|i| i.into())
             .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(&query, instances)?))
+        Ok(HttpResponseOk(ScanByName::results_page(
+            &query,
+            instances,
+            &marker_for_object_identity_name,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1488,7 +1512,11 @@ async fn instance_disks_get(
             .into_iter()
             .map(|d| d.into())
             .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(&query, disks)?))
+        Ok(HttpResponseOk(ScanByName::results_page(
+            &query,
+            disks,
+            &marker_for_object_identity_name,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1587,7 +1615,11 @@ async fn images_get(
             .into_iter()
             .map(|d| d.into())
             .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(&query, images)?))
+        Ok(HttpResponseOk(ScanByName::results_page(
+            &query,
+            images,
+            &marker_for_object_identity_name,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1706,7 +1738,11 @@ async fn project_images_get(
             .into_iter()
             .map(|d| d.into())
             .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(&query, images)?))
+        Ok(HttpResponseOk(ScanByName::results_page(
+            &query,
+            images,
+            &marker_for_object_identity_name,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1858,7 +1894,11 @@ async fn instance_network_interfaces_get(
             .into_iter()
             .map(|d| d.into())
             .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(&query, interfaces)?))
+        Ok(HttpResponseOk(ScanByName::results_page(
+            &query,
+            interfaces,
+            &marker_for_object_identity_name,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -2044,7 +2084,11 @@ async fn project_snapshots_get(
             .into_iter()
             .map(|d| d.into())
             .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(&query, snapshots)?))
+        Ok(HttpResponseOk(ScanByName::results_page(
+            &query,
+            snapshots,
+            &marker_for_object_identity_name,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -2185,7 +2229,11 @@ async fn project_vpcs_get(
             .map(|p| p.into())
             .collect();
 
-        Ok(HttpResponseOk(ScanByName::results_page(&query, vpcs)?))
+        Ok(HttpResponseOk(ScanByName::results_page(
+            &query,
+            vpcs,
+            &marker_for_object_identity_name,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -2347,7 +2395,11 @@ async fn vpc_subnets_get(
             .into_iter()
             .map(|vpc| vpc.into())
             .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(&query, vpcs)?))
+        Ok(HttpResponseOk(ScanByName::results_page(
+            &query,
+            vpcs,
+            &marker_for_object_identity_name,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -2511,7 +2563,11 @@ async fn subnet_network_interfaces_get(
             .into_iter()
             .map(|interfaces| interfaces.into())
             .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(&query, interfaces)?))
+        Ok(HttpResponseOk(ScanByName::results_page(
+            &query,
+            interfaces,
+            &marker_for_object_identity_name,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -2617,7 +2673,11 @@ async fn vpc_routers_get(
             .into_iter()
             .map(|s| s.into())
             .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(&query, routers)?))
+        Ok(HttpResponseOk(ScanByName::results_page(
+            &query,
+            routers,
+            &marker_for_object_identity_name,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -2784,7 +2844,11 @@ async fn routers_routes_get(
             .into_iter()
             .map(|route| route.into())
             .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(&query, routes)?))
+        Ok(HttpResponseOk(ScanByName::results_page(
+            &query,
+            routes,
+            &marker_for_object_identity_name,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -2944,7 +3008,11 @@ async fn hardware_racks_get(
             .racks_list(&opctx, &data_page_params_for(&rqctx, &query)?)
             .await?;
         let view_list = to_list::<db::model::Rack, Rack>(rack_stream).await;
-        Ok(HttpResponseOk(ScanById::results_page(&query, view_list)?))
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            view_list,
+            &marker_for_object_identity_id,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -3000,7 +3068,11 @@ async fn hardware_sleds_get(
             .into_iter()
             .map(|s| s.into())
             .collect();
-        Ok(HttpResponseOk(ScanById::results_page(&query, sleds)?))
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            sleds,
+            &marker_for_object_identity_id,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -3074,7 +3146,11 @@ async fn sagas_get(
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let saga_stream = nexus.sagas_list(&opctx, &pagparams).await?;
         let view_list = to_list(saga_stream).await;
-        Ok(HttpResponseOk(ScanById::results_page(&query, view_list)?))
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            view_list,
+            &marker_for_object_identity_id,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -3131,7 +3207,11 @@ async fn users_get(
             .into_iter()
             .map(|i| i.into())
             .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(&query, users)?))
+        Ok(HttpResponseOk(ScanByName::results_page(
+            &query,
+            users,
+            &marker_for_object_identity_name,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -3299,7 +3379,11 @@ async fn sshkeys_get(
             .into_iter()
             .map(SshKey::from)
             .collect::<Vec<SshKey>>();
-        Ok(HttpResponseOk(ScanByName::results_page(&query, ssh_keys)?))
+        Ok(HttpResponseOk(ScanByName::results_page(
+            &query,
+            ssh_keys,
+            &marker_for_object_identity_name,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
