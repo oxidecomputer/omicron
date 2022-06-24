@@ -238,13 +238,18 @@ impl<'a> LookupPath<'a> {
 
     /// Select a resource of type Snapshot, identified by its id
     pub fn snapshot_id(self, id: Uuid) -> Snapshot<'a> {
-        Snapshot { key: SnapshotKey::PrimaryKey(Root { lookup_root: self }, id) }
+        Snapshot {
+            key: SnapshotKey::PrimaryKey(Root { lookup_root: self }, id),
+        }
     }
 
     /// Select a resource of type NetworkInterface, identified by its id
     pub fn network_interface_id(self, id: Uuid) -> NetworkInterface<'a> {
         NetworkInterface {
-            key: NetworkInterfaceKey::PrimaryKey(Root { lookup_root: self }, id),
+            key: NetworkInterfaceKey::PrimaryKey(
+                Root { lookup_root: self },
+                id,
+            ),
         }
     }
 

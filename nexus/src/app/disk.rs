@@ -398,7 +398,11 @@ impl super::Nexus {
         Err(self.unimplemented_todo(opctx, unimp).await)
     }
 
-    pub async fn snapshot_fetch_by_id(&self, opctx: &OpContext, id: Uuid) -> LookupResult<db::model::Snapshot> {
+    pub async fn snapshot_fetch_by_id(
+        &self,
+        opctx: &OpContext,
+        id: Uuid,
+    ) -> LookupResult<db::model::Snapshot> {
         let (.., db_snapshot) = LookupPath::new(opctx, &self.db_datastore)
             .snapshot_id(id)
             .fetch()

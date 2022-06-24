@@ -3393,13 +3393,11 @@ async fn sshkeys_delete_key(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-
-/// Path parameters for request by id 
+/// Path parameters for request by id
 #[derive(Deserialize, JsonSchema)]
 struct ByIdPathParams {
     id: Uuid,
 }
-
 
 /// Fetch an organization by id
 #[endpoint {
@@ -3571,9 +3569,8 @@ async fn by_id_network_interface_get(
     let id = &path.id;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let network_interface = nexus
-            .network_interface_fetch_by_id(&opctx, id)
-            .await?;
+        let network_interface =
+            nexus.network_interface_fetch_by_id(&opctx, id).await?;
         Ok(HttpResponseOk(network_interface.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
