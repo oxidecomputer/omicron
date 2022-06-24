@@ -45,6 +45,12 @@ struct ExpectedService {
     redundancy: ServiceRedundancy,
 }
 
+// NOTE: longer-term, when we integrate multi-rack support,
+// it is expected that Nexus will manage multiple racks
+// within the fleet, rather than simply per-rack services.
+//
+// When that happens, it is likely that many of the "per-rack"
+// services will become "per-fleet", such as Nexus and CRDB.
 const EXPECTED_SERVICES: [ExpectedService; 3] = [
     ExpectedService {
         kind: ServiceKind::InternalDNS,
