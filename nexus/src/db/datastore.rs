@@ -3232,7 +3232,7 @@ impl DataStore {
     ) -> ListResultVec<SiloUser> {
         use db::schema::silo_user::dsl;
 
-        opctx.authorize(authz::Action::ListChildren, authz_silo).await?;
+        opctx.authorize(authz::Action::Read, authz_silo).await?;
         paginated(dsl::silo_user, dsl::id, pagparams)
             .filter(dsl::time_deleted.is_null())
             .select(SiloUser::as_select())

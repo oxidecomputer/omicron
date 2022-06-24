@@ -1009,13 +1009,6 @@ lazy_static! {
             allowed_methods: vec![AllowedMethod::Get],
         },
 
-
-        VerifyEndpoint {
-            url: "/users",
-            visibility: Visibility::Public,
-            allowed_methods: vec![AllowedMethod::Get],
-        },
-
         /* Hardware */
 
         VerifyEndpoint {
