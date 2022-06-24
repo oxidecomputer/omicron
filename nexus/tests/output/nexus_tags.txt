@@ -119,6 +119,7 @@ API operations found with tag "silos"
 OPERATION ID                             URL PATH
 silo_saml_idp_create                     /silos/{silo_name}/saml_identity_providers
 silo_saml_idp_fetch                      /silos/{silo_name}/saml_identity_providers/{provider_name}
+silo_users_get                           /users
 silos_delete_silo                        /silos/{silo_name}
 silos_get                                /silos
 silos_get_identity_providers             /silos/{silo_name}/identity_providers

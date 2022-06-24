@@ -5549,6 +5549,66 @@
         }
       }
     },
+    "/users": {
+      "get": {
+        "tags": [
+          "silos"
+        ],
+        "summary": "List users",
+        "operationId": "silo_users_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      }
+    },
     "/users_builtin": {
       "get": {
         "tags": [
@@ -5594,7 +5654,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UserResultsPage"
+                  "$ref": "#/components/schemas/UserBuiltinResultsPage"
                 }
               }
             }
@@ -5634,7 +5694,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/User"
+                  "$ref": "#/components/schemas/UserBuiltin"
                 }
               }
             }
@@ -8705,6 +8765,19 @@
         "description": "Client view of a [`User`]",
         "type": "object",
         "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "UserBuiltin": {
+        "description": "Client view of a [`UserBuiltin`]",
+        "type": "object",
+        "properties": {
           "description": {
             "description": "human-readable free-form text about a resource",
             "type": "string"
@@ -8739,6 +8812,27 @@
           "name",
           "time_created",
           "time_modified"
+        ]
+      },
+      "UserBuiltinResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserBuiltin"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
         ]
       },
       "UserResultsPage": {
