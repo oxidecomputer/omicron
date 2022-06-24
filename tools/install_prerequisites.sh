@@ -140,6 +140,10 @@ fi
 # Install static console assets. These are used when packaging Nexus.
 ./tools/ci_download_console
 
+# Download the OpenAPI spec for maghemite. This is required to build the
+# ddm-admin-api crate.
+./tools/ci_download_maghemite_openapi
+
 # Install OPTE
 #
 # OPTE is a Rust package that is consumed by a kernel module called xde. This
