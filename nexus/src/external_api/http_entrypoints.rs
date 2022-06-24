@@ -3450,7 +3450,11 @@ async fn silo_users_get(
             .into_iter()
             .map(|i| i.into())
             .collect();
-        Ok(HttpResponseOk(ScanById::results_page(&query, users)?))
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            users,
+            &|_, user: &User| user.id,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
