@@ -42,6 +42,18 @@ impl super::Nexus {
         Ok(db_organization)
     }
 
+    pub async fn organization_fetch_by_id(
+        &self,
+        opctx: &OpContext,
+        organization_id: Uuid,
+    ) -> LookupResult<db::model::Organization> {
+        let (.., db_organization) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_id(organization_id)
+            .fetch()
+            .await?;
+        Ok(db_organization)
+    }
+
     pub async fn organizations_list_by_name(
         &self,
         opctx: &OpContext,

@@ -209,6 +209,13 @@ impl super::Nexus {
         Ok(db_vpc)
     }
 
+    pub async fn vpc_fetch_by_id(&self, opctx: &OpContext, vpc_id: Uuid) -> LookupResult<db::model::Vpc> {
+        let (.., db_vpc) = LookupPath::new(opctx, &self.db_datastore)
+            .vpc_id(vpc_id)
+            .await?;
+        Ok(db_vpc)
+    }
+
     pub async fn project_update_vpc(
         &self,
         opctx: &OpContext,

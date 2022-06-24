@@ -88,6 +88,18 @@ impl super::Nexus {
         Ok(db_project)
     }
 
+    pub async fn project_fetch_by_id(
+        &self,
+        opctx: &OpContext,
+        project_id: Uuid,
+    ) -> LookupResult<db::model::Project> {
+        let (.., db_project) = LookupPath::new(opctx, &self.db_datastore)
+            .project_id(project_id)
+            .fetch()
+            .await?;
+        Ok(db_project)
+    }
+
     pub async fn projects_list_by_name(
         &self,
         opctx: &OpContext,

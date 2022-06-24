@@ -208,6 +208,18 @@ pub fn external_api() -> NexusApiDescription {
         api.register(console_api::login)?;
         api.register(console_api::consume_credentials)?;
 
+        api.register(by_id_organization_get)?;
+        api.register(by_id_project_get)?;
+        api.register(by_id_instance_get)?;
+        api.register(by_id_disk_get)?;
+        api.register(by_id_image_get)?;
+        api.register(by_id_global_image_get)?;
+        api.register(by_id_snapshot_get)?;
+        api.register(by_id_vpc_get)?;
+        api.register(by_id_subnet_get)?;
+        api.register(by_id_network_interface_get)?;
+        api.register(by_id_router_get)?;
+
         Ok(())
     }
 
@@ -3380,14 +3392,169 @@ async fn sshkeys_delete_key(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-#[cfg(test)]
-mod test {
-    use super::external_api;
 
-    #[test]
-    fn test_nexus_tag_policy() {
-        // This will fail if any of the endpoints don't match the policy in
-        // ./tag-config.json
-        let _ = external_api();
-    }
+/// Path parameters for request by id 
+#[derive(Deserialize, JsonSchema)]
+struct ByIdPathParams {
+    id: Uuid,
 }
+
+
+/// Fetch an organization by id
+#[endpoint {
+    method = GET,
+    path = "/by_id/organizations/{id}",
+    tags = ["organizations"],
+}]
+async fn by_id_organization_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ByIdPathParams>,
+) -> Result<HttpResponseOk<Organization>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let id = &path.id;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let organization = nexus.organization_fetch_by_id(&opctx, id).await?;
+        Ok(HttpResponseOk(organization.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch a project by id
+#[endpoint {
+    method = GET,
+    path = "/by_id/projects/{id}",
+    tags = ["projects"],
+}]
+async fn by_id_project_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ByIdPathParams>,
+) -> Result<HttpResponseOk<Project>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let id = &path.id;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let project = nexus.project_fetch_by_id(&opctx, id).await?;
+        Ok(HttpResponseOk(project.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch an instance by id
+#[endpoint {
+    method = GET,
+    path = "/by_id/instances/{id}",
+    tags = ["instances"],
+}]
+async fn by_id_instance_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ByIdPathParams>,
+) -> Result<HttpResponseOk<Instance>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let id = &path.id;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let instance = nexus.instance_fetch_by_id(&opctx, id).await?;
+        Ok(HttpResponseOk(instance.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch a disk by id
+#[endpoint {
+    method = GET,
+    path = "/by_id/disks/{id}",
+    tags = ["disks"],
+}]
+async fn by_id_disk_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ByIdPathParams>,
+) -> Result<HttpResponseOk<Disk>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let id = &path.id;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let disk = nexus.disk_fetch_by_id(&opctx, id).await?;
+        Ok(HttpResponseOk(disk.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch an image by id
+#[endpoint {
+    method = GET,
+    path = "/by_id/images/{id}",
+    tags = ["images"],
+}]
+async fn by_id_image_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ByIdPathParams>,
+) -> Result<HttpResponseOk<Image>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let id = &path.id;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let image = nexus.image_fetch_by_id(&opctx, id).await?;
+        Ok(HttpResponseOk(image.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch a global image by id
+#[endpoint {
+    method = GET,
+    path = "/by_id/global-images/{id}",
+    tags = ["images:global"],
+}]
+async fn by_id_global_image_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ByIdPathParams>,
+) -> Result<HttpResponseOk<GlobalImage>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let id = &path.id;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let image = nexus.global_image_fetch_by_id(&opctx, id).await?;
+        Ok(HttpResponseOk(image.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch a snapshot by id
+#[endpoint {
+    method = GET,
+    path = "/by_id/snapshots/{id}",
+    tags = ["snapshots"],
+}]
+async fn by_id_snapshot_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ByIdPathParams>,
+) -> Result<HttpResponseOk<Snapshot>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let id = &path.id;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let snapshot = nexus.snapshot_fetch_by_id(&opctx, id).await?;
+        Ok(HttpResponseOk(snapshot.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch a network interface by id
+#[endpoint {
+    method = GET,
+    path = "/by_id/network-
