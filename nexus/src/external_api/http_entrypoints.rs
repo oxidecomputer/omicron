@@ -3579,6 +3579,7 @@ async fn by_id_network_interface_get(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Fetch a vpc by id
 #[endpoint {
     method = GET,
     path = "/by_id/vpcs/{id}",
@@ -3600,6 +3601,7 @@ async fn by_id_vpc_get(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Fetch a vpc subnet by id
 #[endpoint {
     method = GET,
     path = "/by_id/subnets/{id}",
@@ -3621,6 +3623,7 @@ async fn by_id_subnet_get(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Fetch a vpc router by id
 #[endpoint {
     method = GET,
     path = "/by_id/router/{id}",
@@ -3642,6 +3645,7 @@ async fn by_id_router_get(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Fetch a vpc router route by id
 #[endpoint {
     method = GET,
     path = "/by_id/route/{id}",
