@@ -408,18 +408,32 @@ impl From<model::Sled> for Sled {
     }
 }
 
-// BUILT-IN USERS
+// SILO USERS
 
 /// Client view of a [`User`]
-#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct User {
+    pub id: Uuid,
+}
+
+impl From<model::SiloUser> for User {
+    fn from(user: model::SiloUser) -> Self {
+        Self { id: user.id() }
+    }
+}
+
+// BUILT-IN USERS
+
+/// Client view of a [`UserBuiltin`]
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct UserBuiltin {
     // TODO-correctness is flattening here (and in all the other types) the
     // intent in RFD 4?
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 }
 
-impl From<model::UserBuiltin> for User {
+impl From<model::UserBuiltin> for UserBuiltin {
     fn from(user: model::UserBuiltin) -> Self {
         Self { identity: user.identity() }
     }

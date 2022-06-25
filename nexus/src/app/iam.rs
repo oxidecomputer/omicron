@@ -16,6 +16,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::UpdateResult;
+use uuid::Uuid;
 
 impl super::Nexus {
     // Global (fleet-wide) policy
@@ -52,6 +53,19 @@ impl super::Nexus {
             .map(|r| r.try_into())
             .collect::<Result<Vec<_>, _>>()?;
         Ok(shared::Policy { role_assignments })
+    }
+
+    // Silo users
+
+    pub async fn silo_users_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<db::model::SiloUser> {
+        let authz_silo = opctx.authn.silo_required()?;
+        self.db_datastore
+            .silo_users_list_by_id(opctx, &authz_silo, pagparams)
+            .await
     }
 
     // Built-in users

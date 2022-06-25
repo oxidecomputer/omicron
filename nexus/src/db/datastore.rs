@@ -3224,6 +3224,23 @@ impl DataStore {
             })
     }
 
+    pub async fn silo_users_list_by_id(
+        &self,
+        opctx: &OpContext,
+        authz_silo: &authz::Silo,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<SiloUser> {
+        use db::schema::silo_user::dsl;
+
+        opctx.authorize(authz::Action::Read, authz_silo).await?;
+        paginated(dsl::silo_user, dsl::id, pagparams)
+            .filter(dsl::time_deleted.is_null())
+            .select(SiloUser::as_select())
+            .load_async::<SiloUser>(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
     pub async fn users_builtin_list_by_name(
         &self,
         opctx: &OpContext,

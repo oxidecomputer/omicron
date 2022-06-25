@@ -130,6 +130,7 @@ API operations found with tag "silos"
 OPERATION ID                             URL PATH
 silo_saml_idp_create                     /silos/{silo_name}/saml_identity_providers
 silo_saml_idp_fetch                      /silos/{silo_name}/saml_identity_providers/{provider_name}
+silo_users_get                           /users
 silos_delete_silo                        /silos/{silo_name}
 silos_get                                /silos
 silos_get_identity_providers             /silos/{silo_name}/identity_providers
@@ -166,14 +167,14 @@ vpc_subnets_get_subnet                   /organizations/{organization_name}/proj
 vpc_subnets_post                         /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets
 vpc_subnets_put_subnet                   /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}
 
+API operations found with tag "system"
+OPERATION ID                             URL PATH
+builtin_users_get                        /users_builtin
+builtin_users_get_user                   /users_builtin/{user_name}
+
 API operations found with tag "updates"
 OPERATION ID                             URL PATH
 updates_refresh                          /updates/refresh
-
-API operations found with tag "users"
-OPERATION ID                             URL PATH
-users_get                                /users
-users_get_user                           /users/{user_name}
 
 API operations found with tag "vpcs"
 OPERATION ID                             URL PATH

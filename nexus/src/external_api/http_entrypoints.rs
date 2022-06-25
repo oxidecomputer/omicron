@@ -10,7 +10,8 @@ use super::{
     console_api, params, views,
     views::{
         GlobalImage, IdentityProvider, Image, Organization, Project, Rack,
-        Role, Silo, Sled, Snapshot, SshKey, User, Vpc, VpcRouter, VpcSubnet,
+        Role, Silo, Sled, Snapshot, SshKey, User, UserBuiltin, Vpc, VpcRouter,
+        VpcSubnet,
     },
 };
 use crate::authz;
@@ -199,8 +200,10 @@ pub fn external_api() -> NexusApiDescription {
         api.register(sagas_get)?;
         api.register(sagas_get_saga)?;
 
-        api.register(users_get)?;
-        api.register(users_get_user)?;
+        api.register(silo_users_get)?;
+
+        api.register(builtin_users_get)?;
+        api.register(builtin_users_get_user)?;
 
         api.register(timeseries_schema_get)?;
 
@@ -3427,18 +3430,51 @@ async fn sagas_get_saga(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+// Silo users
+
+/// List users
+#[endpoint {
+    method = GET,
+    path = "/users",
+    tags = ["silos"],
+}]
+async fn silo_users_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<User>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let pagparams = data_page_params_for(&rqctx, &query)?;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let users = nexus
+            .silo_users_list(&opctx, &pagparams)
+            .await?
+            .into_iter()
+            .map(|i| i.into())
+            .collect();
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            users,
+            &|_, user: &User| user.id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 // Built-in (system) users
 
 /// List the built-in system users
 #[endpoint {
     method = GET,
-    path = "/users",
-    tags = ["users"],
+    path = "/users_builtin",
+    tags = ["system"],
 }]
-async fn users_get(
+async fn builtin_users_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByName>,
-) -> Result<HttpResponseOk<ResultsPage<User>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<UserBuiltin>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
@@ -3471,13 +3507,13 @@ struct UserPathParam {
 /// Fetch a specific built-in system user
 #[endpoint {
     method = GET,
-    path = "/users/{user_name}",
-    tags = ["users"],
+    path = "/users_builtin/{user_name}",
+    tags = ["system"],
 }]
-async fn users_get_user(
+async fn builtin_users_get_user(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<UserPathParam>,
-) -> Result<HttpResponseOk<User>, HttpError> {
+) -> Result<HttpResponseOk<UserBuiltin>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
