@@ -6,7 +6,8 @@
 
 use super::config::SetupServiceConfig as Config;
 use crate::bootstrap::{
-    discovery::PeerMonitorObserver, rss_handle::BootstrapAgentHandle,
+    ddm_admin_client::{DdmAdminClient, DdmError},
+    rss_handle::BootstrapAgentHandle,
 };
 use crate::params::{DatasetEnsureBody, ServiceRequest, ServiceType};
 use crate::rack_setup::plan::service::{
@@ -33,10 +34,11 @@ use sled_agent_client::{
 use slog::Logger;
 use sprockets_host::Ed25519Certificate;
 use std::collections::{HashMap, HashSet};
+use std::iter;
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
-use tokio::sync::{Mutex, OnceCell};
+use tokio::sync::OnceCell;
 
 // The minimum number of sleds to initialize the rack.
 const MINIMUM_SLED_COUNT: usize = 1;
@@ -69,6 +71,9 @@ pub enum SetupServiceError {
     #[error("Error making HTTP request to Nexus: {0}")]
     NexusApi(#[from] NexusError<NexusTypes::Error>),
 
+    #[error("Error contacting ddmd: {0}")]
+    DdmError(#[from] DdmError),
+
     #[error("Failed to monitor for peers: {0}")]
     PeerMonitor(#[from] tokio::sync::broadcast::error::RecvError),
 
@@ -98,7 +103,6 @@ impl Service {
     pub(crate) fn new(
         log: Logger,
         config: Config,
-        peer_monitor: PeerMonitorObserver,
         local_bootstrap_agent: BootstrapAgentHandle,
         // TODO-cleanup: We should be collecting the device ID certs of all
         // trust quorum members over the management network. Currently we don't
@@ -107,7 +111,7 @@ impl Service {
         member_device_id_certs: Vec<Ed25519Certificate>,
     ) -> Self {
         let handle = tokio::task::spawn(async move {
-            let svc = ServiceInner::new(log.clone(), peer_monitor);
+            let svc = ServiceInner::new(log.clone());
             if let Err(e) = svc
                 .inject_rack_setup_requests(
                     &config,
@@ -158,17 +162,12 @@ enum PeerExpectation {
 /// The implementation of the Rack Setup Service.
 struct ServiceInner {
     log: Logger,
-    peer_monitor: Mutex<PeerMonitorObserver>,
     dns_servers: OnceCell<DnsUpdater>,
 }
 
 impl ServiceInner {
-    fn new(log: Logger, peer_monitor: PeerMonitorObserver) -> Self {
-        ServiceInner {
-            log,
-            peer_monitor: Mutex::new(peer_monitor),
-            dns_servers: OnceCell::new(),
-        }
+    fn new(log: Logger) -> Self {
+        ServiceInner { log, dns_servers: OnceCell::new() }
     }
 
     async fn initialize_datasets(
@@ -302,42 +301,67 @@ impl ServiceInner {
     async fn wait_for_peers(
         &self,
         expectation: PeerExpectation,
-    ) -> Result<Vec<Ipv6Addr>, SetupServiceError> {
-        let mut peer_monitor = self.peer_monitor.lock().await;
-        let (mut all_addrs, mut peer_rx) = peer_monitor.subscribe().await;
-        all_addrs.insert(peer_monitor.our_address());
+        our_bootstrap_address: Ipv6Addr,
+    ) -> Result<Vec<Ipv6Addr>, DdmError> {
+        let ddm_admin_client = DdmAdminClient::new(self.log.clone())?;
+        let addrs = retry_notify(
+            // TODO-correctness `internal_service_policy()` has potentially-long
+            // exponential backoff, which is probably not what we want. See
+            // https://github.com/oxidecomputer/omicron/issues/1270
+            internal_service_policy(),
+            || async {
+                let peer_addrs =
+                    ddm_admin_client.peer_addrs().await.map_err(|err| {
+                        BackoffError::transient(format!(
+                            "Failed getting peers from mg-ddm: {err}"
+                        ))
+                    })?;
 
-        loop {
-            {
+                let all_addrs = peer_addrs
+                    .chain(iter::once(our_bootstrap_address))
+                    .collect::<HashSet<_>>();
+
                 match expectation {
                     PeerExpectation::LoadOldPlan(ref expected) => {
                         if all_addrs.is_superset(expected) {
-                            return Ok(all_addrs
-                                .into_iter()
-                                .collect::<Vec<Ipv6Addr>>());
+                            Ok(all_addrs.into_iter().collect())
+                        } else {
+                            Err(BackoffError::transient(
+                                concat!(
+                                    "Waiting for a LoadOldPlan set ",
+                                    "of peers not found yet."
+                                )
+                                .to_string(),
+                            ))
                         }
-                        info!(self.log, "Waiting for a LoadOldPlan set of peers; not found yet.");
                     }
                     PeerExpectation::CreateNewPlan(wanted_peer_count) => {
                         if all_addrs.len() >= wanted_peer_count {
-                            return Ok(all_addrs
-                                .into_iter()
-                                .collect::<Vec<Ipv6Addr>>());
+                            Ok(all_addrs.into_iter().collect())
+                        } else {
+                            Err(BackoffError::transient(format!(
+                                "Waiting for {} peers (currently have {})",
+                                wanted_peer_count,
+                                all_addrs.len()
+                            )))
                         }
-                        info!(
-                            self.log,
-                            "Waiting for {} peers (currently have {})",
-                            wanted_peer_count,
-                            all_addrs.len(),
-                        );
                     }
                 }
-            }
+            },
+            |message, duration| {
+                info!(
+                    self.log,
+                    "{} (will retry after {:?})", message, duration
+                );
+            },
+        )
+        // `internal_service_policy()` retries indefinitely on transient errors
+        // (the only kind we produce), allowing us to `.unwrap()` without
+        // panicking
+        .await
+        .unwrap();
 
-            info!(self.log, "Waiting for more peers");
-            let new_peer = peer_rx.recv().await?;
-            all_addrs.insert(new_peer);
-        }
+        Ok(addrs)
     }
 
     async fn handoff_to_nexus(
@@ -508,7 +532,9 @@ impl ServiceInner {
         } else {
             PeerExpectation::CreateNewPlan(MINIMUM_SLED_COUNT)
         };
-        let addrs = self.wait_for_peers(expectation).await?;
+        let addrs = self
+            .wait_for_peers(expectation, local_bootstrap_agent.our_address())
+            .await?;
         info!(self.log, "Enough peers exist to enact RSS plan");
 
         // If we created a plan, reuse it. Otherwise, create a new plan.

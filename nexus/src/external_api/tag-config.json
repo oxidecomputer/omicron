@@ -38,6 +38,12 @@
         "url": "http://oxide.computer/docs/#xxx"
       }
     },
+    "ip-pools": {
+      "description": "IP Pools contain external IP addresses that can be assigned to virtual machine Instances.",
+      "external_docs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
     "login": {
       "description": "Authentication endpoints",
       "external_docs": {
@@ -128,14 +134,14 @@
         "url": "http://oxide.computer/docs/#xxx"
       }
     },
-    "updates": {
-      "description": "This tag should be moved into a operations tag",
+    "system": {
+      "description": "Internal system information",
       "external_docs": {
         "url": "http://oxide.computer/docs/#xxx"
       }
     },
-    "users": {
-      "description": "This tag should be moved into an IAM tag",
+    "updates": {
+      "description": "This tag should be moved into a operations tag",
       "external_docs": {
         "url": "http://oxide.computer/docs/#xxx"
       }
