@@ -310,6 +310,24 @@ pub struct NetworkInterfaceUpdate {
     pub make_primary: bool,
 }
 
+// IP POOLS
+
+/// Create-time parameters for an IP Pool.
+///
+/// See [`IpPool`](omicron_nexus::external_api::views::IpPool)
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct IpPoolCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+}
+
+/// Parameters for updating an IP Pool
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct IpPoolUpdate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParams,
+}
+
 // INSTANCES
 
 pub const MIN_MEMORY_SIZE_BYTES: u32 = 1 << 30; // 1 GiB
