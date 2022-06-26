@@ -25,6 +25,7 @@ mod disk;
 mod iam;
 mod image;
 mod instance;
+mod ip_pool;
 mod organization;
 mod oximeter;
 mod project;
