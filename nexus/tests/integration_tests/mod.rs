@@ -11,6 +11,7 @@ mod datasets;
 mod disks;
 mod images;
 mod instances;
+mod ip_pools;
 mod organizations;
 mod oximeter;
 mod projects;

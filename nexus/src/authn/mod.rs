@@ -192,7 +192,7 @@ impl Context {
         Context {
             kind: Kind::Authenticated(Details {
                 actor: Actor::SiloUser {
-                    silo_user_id: USER_TEST_PRIVILEGED.identity().id,
+                    silo_user_id: USER_TEST_PRIVILEGED.id(),
                     silo_id: USER_TEST_PRIVILEGED.silo_id,
                 },
             }),
@@ -207,7 +207,7 @@ impl Context {
         Context {
             kind: Kind::Authenticated(Details {
                 actor: Actor::SiloUser {
-                    silo_user_id: USER_TEST_UNPRIVILEGED.identity().id,
+                    silo_user_id: USER_TEST_UNPRIVILEGED.id(),
                     silo_id: USER_TEST_UNPRIVILEGED.silo_id,
                 },
             }),

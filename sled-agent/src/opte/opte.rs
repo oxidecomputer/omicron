@@ -107,17 +107,32 @@ impl OptePortAllocator {
         }?;
         let boundary_services = BoundaryServices::default();
         let name = self.next();
+        let vpcsub = match subnet {
+            IpNetwork::V4(ip4net) => {
+                // We assume that IpNetwork does not allow an invalid prefix.
+                Ok(Ipv4Cidr::new(
+                    ip4net.ip().into(),
+                    Ipv4PrefixLen::new(ip4net.prefix()).unwrap(),
+                ))
+            }
+            IpNetwork::V6(_) => Err(opte_ioctl::Error::InvalidArgument(
+                String::from("IPv6 is not yet supported for guest interfaces"),
+            )),
+        }?;
+
         let hdl = OpteHdl::open(OpteHdl::DLD_CTL)?;
         hdl.create_xde(
             &name,
             MacAddr::from(mac.into_array()),
             private_ip,
+            vpcsub,
             MacAddr::from(gateway.mac.into_array()),
             gateway_ip,
             boundary_services.ip,
             boundary_services.vni,
             vni,
             underlay_ip,
+            /* snat = */ None,
             /* passthru = */ false,
         )?;
 

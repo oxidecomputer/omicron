@@ -37,6 +37,9 @@ fn enable_mg_ddm_service_blocking(
     log: Logger,
     interface: AddrObject,
 ) -> Result<(), Error> {
+    // TODO-correctness Should we try to shut down / remove any existing mg-ddm
+    // service first? This appears to work fine as-is on a restart of the
+    // sled-agent service.
     info!(log, "Importing mg-ddm service"; "path" => MANIFEST_PATH);
     smf::Config::import().run(MANIFEST_PATH)?;
 
