@@ -10,8 +10,8 @@ use crate::bootstrap::ddm_admin_client::{DdmAdminClient, DdmError};
 use crate::bootstrap::params::SledAgentRequest;
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
 use crate::bootstrap::trust_quorum::{RackSecret, ShareDistribution};
-use crate::params::ServiceRequest;
-use crate::params::ServiceType;
+use crate::params::{ServiceRequest, ServiceType};
+use internal_dns_client::multiclient::{DnsError, Updater as DnsUpdater};
 use omicron_common::address::{
     get_sled_address, ReservedRackSubnet, DNS_PORT, DNS_SERVER_PORT,
 };
@@ -26,6 +26,7 @@ use std::iter;
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::path::PathBuf;
 use thiserror::Error;
+use tokio::sync::OnceCell;
 use uuid::Uuid;
 
 /// Describes errors which may occur while operating the setup service.
@@ -58,6 +59,9 @@ pub enum SetupServiceError {
 
     #[error("Failed to split rack secret: {0:?}")]
     SplitRackSecret(vsss_rs::Error),
+
+    #[error("Failed to access DNS servers: {0}")]
+    Dns(#[from] DnsError),
 }
 
 // The workload / information allocated to a single sled.
@@ -150,11 +154,12 @@ enum PeerExpectation {
 /// The implementation of the Rack Setup Service.
 struct ServiceInner {
     log: Logger,
+    dns_servers: OnceCell<DnsUpdater>,
 }
 
 impl ServiceInner {
     fn new(log: Logger) -> Self {
-        ServiceInner { log }
+        ServiceInner { log, dns_servers: OnceCell::new() }
     }
 
     async fn initialize_datasets(
@@ -601,6 +606,15 @@ impl ServiceInner {
         .into_iter()
         .collect::<Result<_, SetupServiceError>>()?;
 
+        let dns_servers = DnsUpdater::new(
+            &config.az_subnet(),
+            self.log.new(o!("client" => "DNS")),
+        );
+        self.dns_servers
+            .set(dns_servers)
+            .map_err(|_| ())
+            .expect("DNS servers should only be set once");
+
         // Issue the dataset initialization requests to all sleds.
         futures::future::join_all(plan.iter().map(
             |(_, allocation)| async move {
@@ -612,6 +626,19 @@ impl ServiceInner {
                     &allocation.services_request.datasets,
                 )
                 .await?;
+
+                let mut records = HashMap::new();
+                for dataset in &allocation.services_request.datasets {
+                    records
+                        .entry(dataset.srv())
+                        .or_insert_with(Vec::new)
+                        .push((dataset.aaaa(), dataset.address()));
+                }
+                self.dns_servers
+                    .get()
+                    .expect("DNS servers must be initialized first")
+                    .insert_dns_records(&records)
+                    .await?;
                 Ok(())
             },
         ))
@@ -641,6 +668,19 @@ impl ServiceInner {
                     .collect::<Vec<_>>();
 
                 self.initialize_services(sled_address, &all_services).await?;
+
+                let mut records = HashMap::new();
+                for service in &all_services {
+                    records
+                        .entry(service.srv())
+                        .or_insert_with(Vec::new)
+                        .push((service.aaaa(), service.address()));
+                }
+                self.dns_servers
+                    .get()
+                    .expect("DNS servers must be initialized first")
+                    .insert_dns_records(&records)
+                    .await?;
                 Ok(())
             },
         ))
