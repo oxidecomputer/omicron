@@ -12,7 +12,7 @@ use crate::illumos::zone::AddressRequest;
 use crate::params::{ServiceEnsureBody, ServiceRequest, ServiceType};
 use crate::zone::Zones;
 use dropshot::ConfigDropshot;
-use omicron_common::address::{Ipv6Subnet, RACK_PREFIX};
+use omicron_common::address::{Ipv6Subnet, OXIMETER_PORT, RACK_PREFIX};
 use omicron_common::nexus_config::{
     self, DeploymentConfig as NexusDeploymentConfig,
 };
@@ -204,11 +204,11 @@ impl ServiceManager {
         existing_zones: &mut Vec<RunningZone>,
         services: &Vec<ServiceRequest>,
     ) -> Result<(), Error> {
-        info!(self.log, "Ensuring services are initialized: {:?}", services);
         // TODO(https://github.com/oxidecomputer/omicron/issues/726):
         // As long as we ensure the requests don't overlap, we could
         // parallelize this request.
         for service in services {
+            info!(self.log, "Ensuring service is initialized: {:?}", service);
             // Before we bother allocating anything for this request, check if
             // this service has already been created.
             let expected_zone_name =
@@ -338,7 +338,7 @@ impl ServiceManager {
                         database: nexus_config::Database::FromUrl {
                             url: PostgresConfigWithUrl::from_str(
                                 "postgresql://root@[fd00:1122:3344:0101::2]:32221/omicron?sslmode=disable"
-                            ).unwrap()
+                            ).unwrap(),
                         }
                     };
 
@@ -434,8 +434,50 @@ impl ServiceManager {
                 ServiceType::Oximeter => {
                     info!(self.log, "Setting up oximeter service");
 
-                    // TODO: Implement with dynamic parameters, when address is
-                    // dynamically assigned.
+                    let address = service.addresses[0];
+                    running_zone
+                        .run_cmd(&[
+                            crate::illumos::zone::SVCCFG,
+                            "-s",
+                            &smf_name,
+                            "setprop",
+                            &format!("config/id={}", service.id),
+                        ])
+                        .map_err(|err| Error::ZoneCommand {
+                            intent: "set server ID".to_string(),
+                            err,
+                        })?;
+
+                    running_zone
+                        .run_cmd(&[
+                            crate::illumos::zone::SVCCFG,
+                            "-s",
+                            &smf_name,
+                            "setprop",
+                            &format!(
+                                "config/address=[{}]:{}",
+                                address, OXIMETER_PORT,
+                            ),
+                        ])
+                        .map_err(|err| Error::ZoneCommand {
+                            intent: "set server address".to_string(),
+                            err,
+                        })?;
+
+                    running_zone
+                        .run_cmd(&[
+                            crate::illumos::zone::SVCCFG,
+                            "-s",
+                            &default_smf_name,
+                            "refresh",
+                        ])
+                        .map_err(|err| Error::ZoneCommand {
+                            intent: format!(
+                                "Refresh SMF manifest {}",
+                                default_smf_name
+                            ),
+                            err,
+                        })?;
                 }
             }
 
@@ -494,7 +536,7 @@ impl ServiceManager {
                     // that removal implicitly.
                     warn!(
                         self.log,
-                        "Cannot request services on this sled, differing configurations: {:?}",
+                        "Cannot request services on this sled, differing configurations: {:#?}",
                         known_set.symmetric_difference(&requested_set)
                     );
                     return Err(Error::ServicesAlreadyConfigured);

@@ -50,7 +50,7 @@ fn test_oximeter_openapi() {
     // But we do know where it is at compile time, so we load it then.
     let config = include_str!("../../collector/config.toml");
     let config_path = write_config(config);
-    let exec = Exec::cmd(path_to_oximeter()).arg(&config_path).arg("--openapi");
+    let exec = Exec::cmd(path_to_oximeter()).arg("openapi");
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
     fs::remove_file(&config_path).expect("failed to remove temporary file");
     assert_exit_code(exit_status, EXIT_SUCCESS, &stderr_text);

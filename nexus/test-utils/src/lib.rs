@@ -18,7 +18,7 @@ use oximeter_collector::Oximeter;
 use oximeter_producer::Server as ProducerServer;
 use slog::o;
 use slog::Logger;
-use std::net::{IpAddr, Ipv6Addr, SocketAddr};
+use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::path::Path;
 use std::time::Duration;
 use uuid::Uuid;
@@ -199,21 +199,20 @@ pub async fn start_oximeter(
     id: Uuid,
 ) -> Result<Oximeter, String> {
     let db = oximeter_collector::DbConfig {
-        address: SocketAddr::new(Ipv6Addr::LOCALHOST.into(), db_port),
+        address: Some(SocketAddr::new(Ipv6Addr::LOCALHOST.into(), db_port)),
         batch_size: 10,
         batch_interval: 1,
     };
     let config = oximeter_collector::Config {
-        id,
-        nexus_address,
+        nexus_address: Some(nexus_address),
         db,
-        dropshot: ConfigDropshot {
-            bind_address: SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0),
-            ..Default::default()
-        },
         log: ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Error },
     };
-    Oximeter::with_logger(&config, log).await.map_err(|e| e.to_string())
+    let args = oximeter_collector::OximeterArguments {
+        id,
+        address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
+    };
+    Oximeter::with_logger(&config, &args, log).await.map_err(|e| e.to_string())
 }
 
 #[derive(Debug, Clone, oximeter::Target)]
