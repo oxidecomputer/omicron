@@ -543,9 +543,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "3.2.5"
+version = "3.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d53da17d37dba964b9b3ecb5c5a1f193a2762c700e6829201e645b9381c99dc7"
+checksum = "9f1fe12880bae935d142c8702d500c63a4e8634b6c3c57ad72bf978fc7b6249a"
 dependencies = [
  "atty",
  "bitflags",
@@ -560,9 +560,9 @@ dependencies = [
 
 [[package]]
 name = "clap_derive"
-version = "3.2.5"
+version = "3.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c11d40217d16aee8508cc8e5fde8b4ff24639758608e5374e731b53f85749fb9"
+checksum = "ed6db9e867166a43a53f7199b5e4d1f522a1e5bd626654be263c999ce59df39a"
 dependencies = [
  "heck 0.4.0",
  "proc-macro-error",
@@ -1098,6 +1098,22 @@ dependencies = [
  "serde",
  "serde_tokenstream",
  "syn",
+]
+
+[[package]]
+name = "ddm-admin-client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "omicron-zone-package",
+ "progenitor",
+ "progenitor-client",
+ "quote",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "slog",
+ "toml",
 ]
 
 [[package]]
@@ -1768,7 +1784,7 @@ name = "gateway-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 3.2.5",
+ "clap 3.2.6",
  "futures",
  "gateway-client",
  "libc",
@@ -2249,7 +2265,7 @@ dependencies = [
 [[package]]
 name = "illumos-ddi-dki"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=b998015#b9980158540d15d44cfc5d17fc0a5d1848c5e1ae"
+source = "git+https://github.com/oxidecomputer/opte?rev=5764c07#5764c0732a26c6d0e096ce1b8e871b44d8dc79e7"
 dependencies = [
  "illumos-sys-hdrs",
 ]
@@ -2257,7 +2273,7 @@ dependencies = [
 [[package]]
 name = "illumos-sys-hdrs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=b998015#b9980158540d15d44cfc5d17fc0a5d1848c5e1ae"
+source = "git+https://github.com/oxidecomputer/opte?rev=5764c07#5764c0732a26c6d0e096ce1b8e871b44d8dc79e7"
 
 [[package]]
 name = "impl-trait-for-tuples"
@@ -2314,7 +2330,7 @@ name = "internal-dns"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 3.2.5",
+ "clap 3.2.6",
  "dropshot",
  "expectorate",
  "internal-dns-client",
@@ -2344,11 +2360,23 @@ dependencies = [
 name = "internal-dns-client"
 version = "0.1.0"
 dependencies = [
+ "dropshot",
+ "futures",
+ "internal-dns",
+ "omicron-common 0.1.0",
+ "omicron-test-utils",
  "progenitor",
  "reqwest",
  "serde",
  "serde_json",
+ "sled",
  "slog",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "trust-dns-proto",
+ "trust-dns-resolver",
+ "uuid",
 ]
 
 [[package]]
@@ -2979,7 +3007,7 @@ name = "omicron-deploy"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 3.2.5",
+ "clap 3.2.6",
  "crossbeam",
  "omicron-package",
  "omicron-sled-agent",
@@ -2995,7 +3023,7 @@ dependencies = [
 name = "omicron-gateway"
 version = "0.1.0"
 dependencies = [
- "clap 3.2.5",
+ "clap 3.2.6",
  "dropshot",
  "expectorate",
  "futures",
@@ -3035,7 +3063,7 @@ dependencies = [
  "base64",
  "bb8",
  "chrono",
- "clap 3.2.5",
+ "clap 3.2.6",
  "cookie",
  "criterion",
  "crucible-agent-client",
@@ -3109,7 +3137,7 @@ name = "omicron-package"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 3.2.5",
+ "clap 3.2.6",
  "futures",
  "hex",
  "indicatif",
@@ -3144,12 +3172,14 @@ dependencies = [
  "bytes",
  "cfg-if 1.0.0",
  "chrono",
- "clap 3.2.5",
+ "clap 3.2.6",
  "crucible-agent-client",
+ "ddm-admin-client",
  "dropshot",
  "expectorate",
  "futures",
  "http",
+ "internal-dns-client",
  "ipnetwork",
  "libc",
  "macaddr",
@@ -3200,7 +3230,7 @@ name = "omicron-test-utils"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 3.2.5",
+ "clap 3.2.6",
  "dropshot",
  "expectorate",
  "futures",
@@ -3220,11 +3250,13 @@ dependencies = [
 
 [[package]]
 name = "omicron-zone-package"
-version = "0.2.1"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f71c6f5ec2330cbc04a9f1fc67f8d3dd5af24ac1394a02c98296611505333df"
+checksum = "5e4371f82156ede0edb2682b42f9f3f3f78fe27429838006eb66f659aa6d0743"
 dependencies = [
  "anyhow",
+ "chrono",
+ "filetime",
  "flate2",
  "reqwest",
  "serde",
@@ -3330,7 +3362,7 @@ dependencies = [
 [[package]]
 name = "opte"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=b998015#b9980158540d15d44cfc5d17fc0a5d1848c5e1ae"
+source = "git+https://github.com/oxidecomputer/opte?rev=5764c07#5764c0732a26c6d0e096ce1b8e871b44d8dc79e7"
 dependencies = [
  "anymap",
  "cfg-if 0.1.10",
@@ -3347,7 +3379,7 @@ dependencies = [
 [[package]]
 name = "opte-ioctl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=b998015#b9980158540d15d44cfc5d17fc0a5d1848c5e1ae"
+source = "git+https://github.com/oxidecomputer/opte?rev=5764c07#5764c0732a26c6d0e096ce1b8e871b44d8dc79e7"
 dependencies = [
  "libc",
  "libnet",
@@ -3436,9 +3468,10 @@ dependencies = [
 name = "oximeter-collector"
 version = "0.1.0"
 dependencies = [
- "clap 3.2.5",
+ "clap 3.2.6",
  "dropshot",
  "expectorate",
+ "internal-dns-client",
  "nexus-client 0.1.0",
  "omicron-common 0.1.0",
  "omicron-test-utils",
@@ -3466,7 +3499,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "chrono",
- "clap 3.2.5",
+ "clap 3.2.6",
  "dropshot",
  "itertools",
  "omicron-test-utils",
@@ -4134,9 +4167,9 @@ dependencies = [
 
 [[package]]
 name = "quote"
-version = "1.0.18"
+version = "1.0.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1feb54ed693b93a84e14094943b84b7c4eae204c512b7ccb95ab0c66d278ad1"
+checksum = "f53dc8cf16a769a6f677e09e7ff2cd4be1ea0f48754aac39520536962011de0d"
 dependencies = [
  "proc-macro2",
 ]
@@ -5268,7 +5301,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "clap 3.2.5",
+ "clap 3.2.6",
  "dropshot",
  "futures",
  "gateway-messages",
@@ -5337,7 +5370,7 @@ version = "0.1.0"
 source = "git+http://github.com/oxidecomputer/sprockets?rev=0361fd13ff19cda6696242fe40f1325fca30d3d1#0361fd13ff19cda6696242fe40f1325fca30d3d1"
 dependencies = [
  "anyhow",
- "clap 3.2.5",
+ "clap 3.2.6",
  "derive_more",
  "futures",
  "pin-project",

@@ -10,6 +10,7 @@ use crate::config;
 use crate::context::OpContext;
 use crate::db;
 use crate::populate::populate_start;
+use crate::populate::PopulateArgs;
 use crate::populate::PopulateStatus;
 use crate::saga_interface::SagaContext;
 use anyhow::anyhow;
@@ -25,6 +26,7 @@ mod disk;
 mod iam;
 mod image;
 mod instance;
+mod ip_pool;
 mod organization;
 mod oximeter;
 mod project;
@@ -55,14 +57,11 @@ pub struct Nexus {
     /// uuid for this nexus instance.
     id: Uuid,
 
-    /// uuid for this rack (TODO should also be in persistent storage)
+    /// uuid for this rack
     rack_id: Uuid,
 
     /// general server log
     log: Logger,
-
-    /// cached rack identity metadata
-    api_rack_identity: db::model::RackIdentity,
 
     /// persistent storage for resources in the control plane
     db_datastore: Arc<db::DataStore>,
@@ -140,14 +139,18 @@ impl Nexus {
             authn::Context::internal_db_init(),
             Arc::clone(&db_datastore),
         );
-        let populate_status =
-            populate_start(populate_ctx, Arc::clone(&db_datastore));
+
+        let populate_args = PopulateArgs::new(rack_id);
+        let populate_status = populate_start(
+            populate_ctx,
+            Arc::clone(&db_datastore),
+            populate_args,
+        );
 
         let nexus = Nexus {
             id: config.deployment.id,
             rack_id,
             log: log.new(o!()),
-            api_rack_identity: db::model::RackIdentity::new(rack_id),
             db_datastore: Arc::clone(&db_datastore),
             authz: Arc::clone(&authz),
             sec_client: Arc::clone(&sec_client),
@@ -221,6 +224,16 @@ impl Nexus {
     /// Returns an [`OpContext`] used for authenticating external requests
     pub fn opctx_external_authn(&self) -> &OpContext {
         &self.opctx_external_authn
+    }
+
+    /// Returns an [`OpContext`] used for balancing services.
+    pub fn opctx_for_service_balancer(&self) -> OpContext {
+        OpContext::for_background(
+            self.log.new(o!("component" => "ServiceBalancer")),
+            Arc::clone(&self.authz),
+            authn::Context::internal_service_balancer(),
+            Arc::clone(&self.db_datastore),
+        )
     }
 
     /// Used as the body of a "stub" endpoint -- one that's currently

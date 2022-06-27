@@ -75,6 +75,9 @@ CREATE TABLE omicron.public.sled (
     time_deleted TIMESTAMPTZ,
     rcgen INT NOT NULL,
 
+    /* FK into the Rack table */
+    rack_id UUID NOT NULL,
+
     /* The IP address and bound port of the sled agent server. */
     ip INET NOT NULL,
     port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
@@ -82,6 +85,11 @@ CREATE TABLE omicron.public.sled (
     /* The last address allocated to an Oxide service on this sled. */
     last_used_address INET NOT NULL
 );
+
+/* Add an index which lets us look up sleds on a rack */
+CREATE INDEX ON omicron.public.sled (
+    rack_id
+) WHERE time_deleted IS NULL;
 
 /*
  * Services
@@ -827,32 +835,6 @@ STORING (vpc_id, subnet_id, is_primary)
 WHERE
     time_deleted IS NULL;
 
-
-CREATE TYPE omicron.public.vpc_router_kind AS ENUM (
-    'system',
-    'custom'
-);
-
-CREATE TABLE omicron.public.vpc_router (
-    /* Identity metadata (resource) */
-    id UUID PRIMARY KEY,
-    name STRING(63) NOT NULL,
-    description STRING(512) NOT NULL,
-    time_created TIMESTAMPTZ NOT NULL,
-    time_modified TIMESTAMPTZ NOT NULL,
-    /* Indicates that the object has been deleted */
-    time_deleted TIMESTAMPTZ,
-    kind omicron.public.vpc_router_kind NOT NULL,
-    vpc_id UUID NOT NULL,
-    rcgen INT NOT NULL
-);
-
-CREATE UNIQUE INDEX ON omicron.public.vpc_router (
-    vpc_id,
-    name
-) WHERE
-    time_deleted IS NULL;
-
 CREATE TYPE omicron.public.vpc_firewall_rule_status AS ENUM (
     'disabled',
     'enabled'
@@ -904,6 +886,31 @@ CREATE UNIQUE INDEX ON omicron.public.vpc_firewall_rule (
 ) WHERE
     time_deleted IS NULL;
 
+CREATE TYPE omicron.public.vpc_router_kind AS ENUM (
+    'system',
+    'custom'
+);
+
+CREATE TABLE omicron.public.vpc_router (
+    /* Identity metadata (resource) */
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    /* Indicates that the object has been deleted */
+    time_deleted TIMESTAMPTZ,
+    kind omicron.public.vpc_router_kind NOT NULL,
+    vpc_id UUID NOT NULL,
+    rcgen INT NOT NULL
+);
+
+CREATE UNIQUE INDEX ON omicron.public.vpc_router (
+    vpc_id,
+    name
+) WHERE
+    time_deleted IS NULL;
+
 CREATE TYPE omicron.public.router_route_kind AS ENUM (
     'default',
     'vpc_subnet',
@@ -932,6 +939,62 @@ CREATE UNIQUE INDEX ON omicron.public.router_route (
     name
 ) WHERE
     time_deleted IS NULL;
+
+/*
+ * An IP Pool, a collection of zero or more IP ranges for external IPs.
+ */
+CREATE TABLE omicron.public.ip_pool (
+    /* Resource identity metadata */
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+
+    /* The collection's child-resource generation number */
+    rcgen INT8 NOT NULL
+);
+
+/*
+ * Index ensuring uniqueness of IP Pool names, globally.
+ */
+CREATE UNIQUE INDEX ON omicron.public.ip_pool (
+    name
+) WHERE
+    time_deleted IS NULL;
+
+/*
+ * IP Pools are made up of a set of IP ranges, which are start/stop addresses.
+ * Note that these need not be CIDR blocks or well-behaved subnets with a
+ * specific netmask.
+ */
+CREATE TABLE omicron.public.ip_pool_range (
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    first_address INET NOT NULL,
+    /* The range is inclusive of the last address. */
+    last_address INET NOT NULL,
+    ip_pool_id UUID NOT NULL
+);
+
+/* 
+ * These help Nexus enforce that the ranges within an IP Pool do not overlap
+ * with any other ranges. See `nexus/src/db/queries/ip_pool.rs` for the actual
+ * query which does that.
+ */
+CREATE UNIQUE INDEX ON omicron.public.ip_pool_range (
+    first_address
+)
+STORING (last_address)
+WHERE time_deleted IS NULL;
+CREATE UNIQUE INDEX ON omicron.public.ip_pool_range (
+    last_address
+)
+STORING (first_address)
+WHERE time_deleted IS NULL;
 
 /*******************************************************************/
 

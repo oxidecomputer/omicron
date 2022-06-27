@@ -5,11 +5,13 @@
 use std::net::Ipv6Addr;
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
+use dropshot::test_util::LogContext;
 use internal_dns_client::{
     types::{DnsKv, DnsRecord, DnsRecordKey, Srv},
     Client,
 };
+use omicron_test_utils::dev::test_setup_log;
 use trust_dns_proto::op::response_code::ResponseCode;
 use trust_dns_resolver::config::{
     NameServerConfig, Protocol, ResolverConfig, ResolverOpts,
@@ -19,7 +21,8 @@ use trust_dns_resolver::TokioAsyncResolver;
 
 #[tokio::test]
 pub async fn aaaa_crud() -> Result<(), anyhow::Error> {
-    let test_ctx = init_client_server("oxide.internal".into()).await?;
+    let test_ctx =
+        init_client_server("aaaa_crud", "oxide.internal".into()).await?;
     let client = &test_ctx.client;
     let resolver = &test_ctx.resolver;
 
@@ -64,7 +67,8 @@ pub async fn aaaa_crud() -> Result<(), anyhow::Error> {
 
 #[tokio::test]
 pub async fn srv_crud() -> Result<(), anyhow::Error> {
-    let test_ctx = init_client_server("oxide.internal".into()).await?;
+    let test_ctx =
+        init_client_server("srv_crud", "oxide.internal".into()).await?;
     let client = &test_ctx.client;
     let resolver = &test_ctx.resolver;
 
@@ -116,7 +120,9 @@ pub async fn srv_crud() -> Result<(), anyhow::Error> {
 
 #[tokio::test]
 pub async fn multi_record_crud() -> Result<(), anyhow::Error> {
-    let test_ctx = init_client_server("oxide.internal".into()).await?;
+    let test_ctx =
+        init_client_server("multi_record_crud", "oxide.internal".into())
+            .await?;
     let client = &test_ctx.client;
     let resolver = &test_ctx.resolver;
 
@@ -202,7 +208,8 @@ async fn lookup_ip_expect_nxdomain(resolver: &TokioAsyncResolver, name: &str) {
 
 #[tokio::test]
 pub async fn empty_record() -> Result<(), anyhow::Error> {
-    let test_ctx = init_client_server("oxide.internal".into()).await?;
+    let test_ctx =
+        init_client_server("empty_record", "oxide.internal".into()).await?;
     let client = &test_ctx.client;
     let resolver = &test_ctx.resolver;
 
@@ -231,19 +238,22 @@ pub async fn empty_record() -> Result<(), anyhow::Error> {
 
 #[tokio::test]
 pub async fn nxdomain() -> Result<(), anyhow::Error> {
-    let test_ctx = init_client_server("oxide.internal".into()).await?;
+    let test_ctx =
+        init_client_server("nxdomain", "oxide.internal".into()).await?;
     let resolver = &test_ctx.resolver;
 
     // asking for a nonexistent record within the domain of the internal DNS
     // server should result in an NXDOMAIN
     lookup_ip_expect_nxdomain(&resolver, "unicorn.oxide.internal").await;
 
+    test_ctx.cleanup().await;
     Ok(())
 }
 
 #[tokio::test]
 pub async fn servfail() -> Result<(), anyhow::Error> {
-    let test_ctx = init_client_server("oxide.internal".into()).await?;
+    let test_ctx =
+        init_client_server("servfail", "oxide.internal".into()).await?;
     let resolver = &test_ctx.resolver;
 
     // asking for a record outside the domain of the internal DNS
@@ -274,6 +284,7 @@ pub async fn servfail() -> Result<(), anyhow::Error> {
         },
     };
 
+    test_ctx.cleanup().await;
     Ok(())
 }
 
@@ -284,6 +295,7 @@ struct TestContext {
     dropshot_server:
         dropshot::HttpServer<Arc<internal_dns::dropshot_server::Context>>,
     tmp: tempdir::TempDir,
+    logctx: LogContext,
 }
 
 impl TestContext {
@@ -291,18 +303,17 @@ impl TestContext {
         drop(self.dns_server);
         self.dropshot_server.close().await.expect("Failed to clean up server");
         self.tmp.close().expect("Failed to clean up tmp directory");
+        self.logctx.cleanup_successful();
     }
 }
 
 async fn init_client_server(
+    test_name: &str,
     zone: String,
 ) -> Result<TestContext, anyhow::Error> {
     // initialize dns server config
-    let (tmp, config) = test_config()?;
-    let log = config
-        .log
-        .to_logger("internal-dns")
-        .context("failed to create logger")?;
+    let (tmp, config, logctx) = test_config(test_name)?;
+    let log = logctx.log.clone();
 
     // initialize dns server db
     let db = Arc::new(sled::open(&config.data.storage_path)?);
@@ -342,11 +353,21 @@ async fn init_client_server(
     let client =
         Client::new(&format!("http://{}", dropshot_server.local_addr()), log);
 
-    Ok(TestContext { client, resolver, dns_server, dropshot_server, tmp })
+    Ok(TestContext {
+        client,
+        resolver,
+        dns_server,
+        dropshot_server,
+        tmp,
+        logctx,
+    })
 }
 
 fn test_config(
-) -> Result<(tempdir::TempDir, internal_dns::Config), anyhow::Error> {
+    test_name: &str,
+) -> Result<(tempdir::TempDir, internal_dns::Config, LogContext), anyhow::Error>
+{
+    let logctx = test_setup_log(test_name);
     let tmp_dir = tempdir::TempDir::new("internal-dns-test")?;
     let mut storage_path = tmp_dir.path().to_path_buf();
     storage_path.push("test");
@@ -367,5 +388,5 @@ fn test_config(
         },
     };
 
-    Ok((tmp_dir, config))
+    Ok((tmp_dir, config, logctx))
 }

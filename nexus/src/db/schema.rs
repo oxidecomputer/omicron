@@ -136,6 +136,30 @@ table! {
 }
 
 table! {
+    ip_pool (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        rcgen -> Int8,
+    }
+}
+
+table! {
+    ip_pool_range (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        first_address -> Inet,
+        last_address -> Inet,
+        ip_pool_id -> Uuid,
+    }
+}
+
+table! {
     silo (id) {
         id -> Uuid,
         name -> Text,
@@ -297,6 +321,7 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         rcgen -> Int8,
 
+        rack_id -> Uuid,
         ip -> Inet,
         port -> Int4,
         last_used_address -> Inet,
@@ -526,6 +551,9 @@ table! {
         target_length -> Int8,
     }
 }
+
+allow_tables_to_appear_in_same_query!(ip_pool_range, ip_pool);
+joinable!(ip_pool_range -> ip_pool (ip_pool_id));
 
 allow_tables_to_appear_in_same_query!(
     dataset,
