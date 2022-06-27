@@ -3262,6 +3262,10 @@ impl DataStore {
         Ok(())
     }
 
+    /// Given an external ID, return
+    /// - Ok(Some(SiloUser)) if that external id refers to an existing silo user
+    /// - Ok(None) if it does not
+    /// - Err(...) if there was an error doing this lookup.
     pub async fn silo_user_fetch_by_external_id(
         &self,
         opctx: &OpContext,
@@ -3272,7 +3276,7 @@ impl DataStore {
 
         use db::schema::silo_user::dsl;
 
-        let mut silo_user_vec = dsl::silo_user
+        Ok(dsl::silo_user
             .filter(dsl::silo_id.eq(authz_silo.id()))
             .filter(dsl::external_id.eq(external_id.to_string()))
             .filter(dsl::time_deleted.is_null())
@@ -3280,21 +3284,14 @@ impl DataStore {
             .load_async::<SiloUser>(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
-            })?;
-
-        if silo_user_vec.is_empty() {
-            Ok(None)
-        } else {
-            if silo_user_vec.len() != 1 {
-                return Err(Error::internal_error(&format!(
-                    "more than one silo user with external id {:#}!",
-                    external_id
-                )));
-            }
-
-            Ok(Some(silo_user_vec.remove(0)))
-        }
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::SiloUser,
+                        LookupType::ByName(external_id.to_string()),
+                    ),
+                )
+            })?.pop())
     }
 
     /// Load built-in silos into the database
