@@ -339,11 +339,14 @@ impl InstanceInner {
             }
         }));
 
-        if self.serial_tty_task.is_none() {
-            let ws_uri = client.instance_serial_console_ws_uri();
-            self.serial_tty_task =
-                Some(SerialConsoleBuffer::new(ws_uri, self.log.clone()));
-        }
+        // XXX RPZ Need to disable this so I can access instance's
+        // serial console via propolis-cli.
+        //
+        // if self.serial_tty_task.is_none() {
+        //     let ws_uri = client.instance_serial_console_ws_uri();
+        //     self.serial_tty_task =
+        //         Some(SerialConsoleBuffer::new(ws_uri, self.log.clone()));
+        // }
 
         self.running_state = Some(RunningState {
             client,

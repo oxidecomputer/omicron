@@ -20,6 +20,7 @@ use opte::api::MacAddr;
 pub use opte::api::Vni;
 use opte::oxide_vpc::api::AddRouterEntryIpv4Req;
 use opte::oxide_vpc::api::RouterTarget;
+use opte::oxide_vpc::api::SNatCfg;
 use opte_ioctl::OpteHdl;
 use slog::Logger;
 use std::net::IpAddr;
@@ -120,6 +121,14 @@ impl OptePortAllocator {
             )),
         }?;
 
+        // XXX RPZ Attempting to abuse the SNAT config as a means for
+        // implementing public IP/NAT. Since ext_ip_hack is set to
+        // true, xde ignores the port range and does 1:1 NAT instead.
+        let rpz_nat = SNatCfg {
+            public_ip: opte::api::Ipv4Addr::from([10, 0, 0, 99]),
+            ports: std::ops::Range { start: 1, end: u16::MAX },
+        };
+
         let hdl = OpteHdl::open(OpteHdl::DLD_CTL)?;
         hdl.create_xde(
             &name,
@@ -132,7 +141,8 @@ impl OptePortAllocator {
             boundary_services.vni,
             vni,
             underlay_ip,
-            /* snat = */ None,
+            Some(rpz_nat),
+            /* ext_ip_hack = */ true,
             /* passthru = */ false,
         )?;
 
