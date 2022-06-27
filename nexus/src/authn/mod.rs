@@ -77,9 +77,11 @@ impl Context {
     ) -> Result<&Actor, omicron_common::api::external::Error> {
         match &self.kind {
             Kind::Authenticated(Details { actor }) => Ok(actor),
-            _ => Err(omicron_common::api::external::Error::Unauthenticated {
-                internal_message: "Actor required".to_string(),
-            }),
+            Kind::Unauthenticated => {
+                Err(omicron_common::api::external::Error::Unauthenticated {
+                    internal_message: "Actor required".to_string(),
+                })
+            }
         }
     }
 
