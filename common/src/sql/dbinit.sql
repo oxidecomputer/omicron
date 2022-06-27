@@ -1148,7 +1148,9 @@ CREATE TABLE omicron.public.device_access_token (
     time_created TIMESTAMPTZ NOT NULL
 );
 
--- Matches the primary key on client authentication records.
+-- Matches the primary key on device authorization records.
+-- The UNIQUE constraint is critical for ensuring that at most
+-- one token is ever created for a given device authorization flow.
 CREATE UNIQUE INDEX ON omicron.public.device_access_token (client_id, device_code);
 
 /*
