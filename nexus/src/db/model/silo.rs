@@ -6,7 +6,7 @@ use super::{Generation, Organization};
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::model::impl_enum_type;
 use crate::db::schema::{organization, silo};
-use crate::external_api::params;
+use crate::external_api::{shared, params};
 use db_macros::Resource;
 use std::io::Write;
 use uuid::Uuid;
@@ -25,11 +25,11 @@ impl_enum_type!(
     Jit => b"jit"
 );
 
-impl From<params::UserProvisionType> for UserProvisionType {
-    fn from(params: params::UserProvisionType) -> Self {
+impl From<shared::UserProvisionType> for UserProvisionType {
+    fn from(params: shared::UserProvisionType) -> Self {
         match params {
-            params::UserProvisionType::Fixed => UserProvisionType::Fixed,
-            params::UserProvisionType::Jit => UserProvisionType::Jit,
+            shared::UserProvisionType::Fixed => UserProvisionType::Fixed,
+            shared::UserProvisionType::Jit => UserProvisionType::Jit,
         }
     }
 }

@@ -8,7 +8,7 @@ use omicron_nexus::authn::silos::{
     IdentityProviderType, SamlIdentityProvider, SamlLoginPost,
 };
 use omicron_nexus::external_api::console_api;
-use omicron_nexus::external_api::params;
+use omicron_nexus::external_api::{params, shared};
 use omicron_nexus::external_api::views::{self, Silo};
 use omicron_nexus::TestInterfaces;
 
@@ -68,7 +68,7 @@ async fn test_create_a_saml_idp(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, params::UserProvisionType::Fixed)
+    create_silo(&client, SILO_NAME, true, shared::UserProvisionType::Fixed)
         .await;
 
     let silo: Silo =
@@ -184,7 +184,7 @@ async fn test_create_a_saml_idp_invalid_descriptor_truncated(
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, params::UserProvisionType::Fixed)
+    create_silo(&client, SILO_NAME, true, shared::UserProvisionType::Fixed)
         .await;
 
     let saml_idp_descriptor = {
@@ -242,7 +242,7 @@ async fn test_create_a_saml_idp_invalid_descriptor_no_redirect_binding(
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, params::UserProvisionType::Fixed)
+    create_silo(&client, SILO_NAME, true, shared::UserProvisionType::Fixed)
         .await;
 
     let saml_idp_descriptor = {
@@ -310,7 +310,7 @@ async fn test_create_a_hidden_silo_saml_idp(
 ) {
     let client = &cptestctx.external_client;
 
-    create_silo(&client, "hidden", false, params::UserProvisionType::Fixed)
+    create_silo(&client, "hidden", false, shared::UserProvisionType::Fixed)
         .await;
 
     // Valid IdP descriptor
@@ -377,7 +377,7 @@ async fn test_saml_idp_metadata_url_404(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, params::UserProvisionType::Fixed)
+    create_silo(&client, SILO_NAME, true, shared::UserProvisionType::Fixed)
         .await;
 
     let server = Server::run();
@@ -429,7 +429,7 @@ async fn test_saml_idp_metadata_url_invalid(
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, params::UserProvisionType::Fixed)
+    create_silo(&client, SILO_NAME, true, shared::UserProvisionType::Fixed)
         .await;
 
     NexusRequest::new(
@@ -488,7 +488,7 @@ async fn test_saml_idp_reject_keypair(cptestctx: &ControlPlaneTestContext) {
     );
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, params::UserProvisionType::Fixed)
+    create_silo(&client, SILO_NAME, true, shared::UserProvisionType::Fixed)
         .await;
 
     let test_cases = vec![
@@ -581,7 +581,7 @@ async fn test_saml_idp_rsa_keypair_ok(cptestctx: &ControlPlaneTestContext) {
     );
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, params::UserProvisionType::Fixed)
+    create_silo(&client, SILO_NAME, true, shared::UserProvisionType::Fixed)
         .await;
 
     NexusRequest::new(
@@ -892,7 +892,7 @@ async fn test_post_saml_response(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, params::UserProvisionType::Jit).await;
+    create_silo(&client, SILO_NAME, true, shared::UserProvisionType::Jit).await;
 
     let _silo_saml_idp: views::SamlIdentityProvider = object_create(
         client,
@@ -987,7 +987,7 @@ async fn test_post_saml_response_with_relay_state(
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, params::UserProvisionType::Jit).await;
+    create_silo(&client, SILO_NAME, true, shared::UserProvisionType::Jit).await;
 
     let _silo_saml_idp: views::SamlIdentityProvider = object_create(
         client,

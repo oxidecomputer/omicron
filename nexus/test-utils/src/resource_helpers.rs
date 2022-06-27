@@ -65,7 +65,7 @@ pub async fn create_silo(
     client: &ClientTestContext,
     silo_name: &str,
     discoverable: bool,
-    user_provision_type: params::UserProvisionType,
+    user_provision_type: shared::UserProvisionType,
 ) -> Silo {
     object_create(
         client,

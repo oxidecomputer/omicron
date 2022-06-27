@@ -8794,7 +8794,7 @@
         ]
       },
       "UserProvisionType": {
-        "description": "How users will be provisioned in a silo.",
+        "description": "How users will be provisioned in a silo during authentication.",
         "type": "string",
         "enum": [
           "fixed",

@@ -7,6 +7,7 @@
 use crate::authn;
 use crate::db::identity::{Asset, Resource};
 use crate::db::model;
+use crate::external_api::shared;
 use api_identity::ObjectIdentity;
 use omicron_common::api::external::{
     ByteCount, Digest, IdentityMetadata, Ipv4Net, Ipv6Net, Name,
@@ -19,23 +20,6 @@ use uuid::Uuid;
 
 // SILOS
 
-/// How users will be provisioned in a silo.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum UserProvisionType {
-    Fixed,
-    Jit,
-}
-
-impl From<model::UserProvisionType> for UserProvisionType {
-    fn from(model: model::UserProvisionType) -> UserProvisionType {
-        match model {
-            model::UserProvisionType::Fixed => UserProvisionType::Fixed,
-            model::UserProvisionType::Jit => UserProvisionType::Jit,
-        }
-    }
-}
-
 /// Client view of a ['Silo']
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Silo {
@@ -47,7 +31,7 @@ pub struct Silo {
     pub discoverable: bool,
 
     /// User provision type
-    pub user_provision_type: UserProvisionType,
+    pub user_provision_type: shared::UserProvisionType,
 }
 
 impl Into<Silo> for model::Silo {

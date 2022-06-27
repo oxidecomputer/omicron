@@ -132,6 +132,28 @@ impl TryFrom<db::model::IdentityType> for IdentityType {
     }
 }
 
+/// How users will be provisioned in a silo during authentication.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum UserProvisionType {
+    /// Do not automatically create users during authentication if they do not
+    /// exist in the database already.
+    Fixed,
+
+    /// Create users during authentication if they do not exist in the database
+    /// already, using information provided by the identity provider.
+    Jit,
+}
+
+impl From<db::model::UserProvisionType> for UserProvisionType {
+    fn from(model: db::model::UserProvisionType) -> UserProvisionType {
+        match model {
+            db::model::UserProvisionType::Fixed => UserProvisionType::Fixed,
+            db::model::UserProvisionType::Jit => UserProvisionType::Jit,
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::IdentityType;

@@ -5,11 +5,11 @@
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use omicron_common::api::external::{IdentityMetadataCreateParams, Name};
 use omicron_nexus::authn::silos::{AuthenticatedSubject, IdentityProviderType};
-use omicron_nexus::external_api::params;
+use omicron_nexus::external_api::{params, shared};
 use omicron_nexus::external_api::views::{
     self, IdentityProvider, Organization, SamlIdentityProvider, Silo,
 };
-use omicron_nexus::context::OpContext};
+use omicron_nexus::context::OpContext;
 use omicron_nexus::db::lookup::LookupPath;
 use omicron_nexus::TestInterfaces as _;
 use std::collections::HashSet;
@@ -38,10 +38,10 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
         &client,
         "discoverable",
         true,
-        params::UserProvisionType::Fixed,
+        shared::UserProvisionType::Fixed,
     )
     .await;
-    create_silo(&client, "hidden", false, params::UserProvisionType::Fixed)
+    create_silo(&client, "hidden", false, shared::UserProvisionType::Fixed)
         .await;
 
     // Verify GET /silos/{silo} works for both discoverable and not
@@ -408,7 +408,7 @@ async fn test_saml_idp_metadata_data_valid(
 ) {
     let client = &cptestctx.external_client;
 
-    create_silo(&client, "blahblah", true, params::UserProvisionType::Fixed)
+    create_silo(&client, "blahblah", true, shared::UserProvisionType::Fixed)
         .await;
 
     let silo_saml_idp: SamlIdentityProvider = object_create(
@@ -467,7 +467,7 @@ async fn test_saml_idp_metadata_data_truncated(
 ) {
     let client = &cptestctx.external_client;
 
-    create_silo(&client, "blahblah", true, params::UserProvisionType::Fixed)
+    create_silo(&client, "blahblah", true, shared::UserProvisionType::Fixed)
         .await;
 
     NexusRequest::new(
@@ -518,7 +518,7 @@ async fn test_saml_idp_metadata_data_invalid(
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, params::UserProvisionType::Fixed)
+    create_silo(&client, SILO_NAME, true, shared::UserProvisionType::Fixed)
         .await;
 
     NexusRequest::new(
@@ -557,7 +557,7 @@ async fn test_saml_idp_metadata_data_invalid(
 }
 
 struct TestSiloUserProvisionTypes {
-    provision_type: params::UserProvisionType,
+    provision_type: shared::UserProvisionType,
     existing_silo_user: bool,
     expect_user: bool,
 }
@@ -571,28 +571,28 @@ async fn test_silo_user_provision_types(cptestctx: &ControlPlaneTestContext) {
         // A silo configured with a "fixed" user provision type should fetch a
         // user if it exists already.
         TestSiloUserProvisionTypes {
-            provision_type: params::UserProvisionType::Fixed,
+            provision_type: shared::UserProvisionType::Fixed,
             existing_silo_user: true,
             expect_user: true,
         },
         // A silo configured with a "fixed" user provision type should not create a
         // user if one does not exist already.
         TestSiloUserProvisionTypes {
-            provision_type: params::UserProvisionType::Fixed,
+            provision_type: shared::UserProvisionType::Fixed,
             existing_silo_user: false,
             expect_user: false,
         },
         // A silo configured with a "JIT" user provision type should fetch a
         // user if it exists already.
         TestSiloUserProvisionTypes {
-            provision_type: params::UserProvisionType::Jit,
+            provision_type: shared::UserProvisionType::Jit,
             existing_silo_user: true,
             expect_user: true,
         },
         // A silo configured with a "JIT" user provision type should create a user
         // if one does not exist already.
         TestSiloUserProvisionTypes {
-            provision_type: params::UserProvisionType::Jit,
+            provision_type: shared::UserProvisionType::Jit,
             existing_silo_user: false,
             expect_user: true,
         },
@@ -650,7 +650,7 @@ async fn test_silo_user_fetch_by_external_id(cptestctx: &ControlPlaneTestContext
     let nexus = &cptestctx.server.apictx.nexus;
 
     let silo =
-        create_silo(&client, "test-silo", true, params::UserProvisionType::Fixed)
+        create_silo(&client, "test-silo", true, shared::UserProvisionType::Fixed)
             .await;
 
     let opctx = OpContext::for_tests(cptestctx.logctx.log.new(o!()), nexus.datastore().clone());
