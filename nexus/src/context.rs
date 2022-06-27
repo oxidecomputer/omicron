@@ -516,7 +516,7 @@ mod test {
 }
 
 #[async_trait]
-impl authn::external::SiloContext for Arc<ServerContext> {
+impl authn::external::SiloUserSilo for Arc<ServerContext> {
     async fn silo_user_silo(
         &self,
         silo_user_id: Uuid,

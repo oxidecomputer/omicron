@@ -115,7 +115,7 @@ pub enum SchemeResult {
 
 /// A context that can look up a Silo user's Silo.
 #[async_trait]
-pub trait SiloContext {
+pub trait SiloUserSilo {
     async fn silo_user_silo(&self, silo_user_id: Uuid) -> Result<Uuid, Reason>;
 }
 

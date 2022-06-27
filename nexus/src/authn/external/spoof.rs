@@ -8,7 +8,7 @@ use super::super::Details;
 use super::HttpAuthnScheme;
 use super::Reason;
 use super::SchemeResult;
-use super::SiloContext;
+use super::SiloUserSilo;
 use crate::authn;
 use crate::authn::Actor;
 use anyhow::anyhow;
@@ -77,7 +77,7 @@ pub struct HttpAuthnSpoof;
 #[async_trait]
 impl<T> HttpAuthnScheme<T> for HttpAuthnSpoof
 where
-    T: SiloContext + Send + Sync + 'static,
+    T: SiloUserSilo + Send + Sync + 'static,
 {
     fn name(&self) -> authn::SchemeName {
         SPOOF_SCHEME_NAME

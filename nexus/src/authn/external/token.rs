@@ -8,7 +8,7 @@ use super::super::Details;
 use super::HttpAuthnScheme;
 use super::Reason;
 use super::SchemeResult;
-use super::SiloContext;
+use super::SiloUserSilo;
 use crate::authn;
 use async_trait::async_trait;
 use headers::authorization::{Authorization, Bearer};
@@ -47,7 +47,7 @@ pub struct HttpAuthnToken;
 #[async_trait]
 impl<T> HttpAuthnScheme<T> for HttpAuthnToken
 where
-    T: SiloContext + TokenContext + Send + Sync + 'static,
+    T: SiloUserSilo + TokenContext + Send + Sync + 'static,
 {
     fn name(&self) -> authn::SchemeName {
         TOKEN_SCHEME_NAME
