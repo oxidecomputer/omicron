@@ -11,13 +11,14 @@ use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
 use omicron_common::api::external::IdentityMetadata;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
+use omicron_common::nexus_config;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
 use oximeter_collector::Oximeter;
 use oximeter_producer::Server as ProducerServer;
 use slog::o;
 use slog::Logger;
-use std::net::{IpAddr, Ipv6Addr, SocketAddr};
+use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::path::Path;
 use std::time::Duration;
 use uuid::Uuid;
@@ -75,7 +76,7 @@ pub fn load_test_config() -> omicron_nexus::Config {
     let config_file_path = Path::new("tests/config.test.toml");
     let mut config = omicron_nexus::Config::from_file(config_file_path)
         .expect("failed to load config.test.toml");
-    config.id = Uuid::new_v4();
+    config.deployment.id = Uuid::new_v4();
     config
 }
 
@@ -88,8 +89,7 @@ pub async fn test_setup_with_config(
     test_name: &str,
     config: &mut omicron_nexus::Config,
 ) -> ControlPlaneTestContext {
-    let logctx = LogContext::new(test_name, &config.log);
-    let rack_id = Uuid::parse_str(RACK_UUID).unwrap();
+    let logctx = LogContext::new(test_name, &config.pkg.log);
     let log = &logctx.log;
 
     // Start up CockroachDB.
@@ -99,12 +99,12 @@ pub async fn test_setup_with_config(
     let clickhouse = dev::clickhouse::ClickHouseInstance::new(0).await.unwrap();
 
     // Store actual address/port information for the databases after they start.
-    config.database.url = database.pg_config().clone();
-    config.timeseries_db.address.set_port(clickhouse.port());
+    config.deployment.database =
+        nexus_config::Database::FromUrl { url: database.pg_config().clone() };
+    config.pkg.timeseries_db.address.set_port(clickhouse.port());
 
-    let server = omicron_nexus::Server::start(&config, rack_id, &logctx.log)
-        .await
-        .unwrap();
+    let server =
+        omicron_nexus::Server::start(&config, &logctx.log).await.unwrap();
     server
         .apictx
         .nexus
@@ -137,6 +137,7 @@ pub async fn test_setup_with_config(
     // Set up an Oximeter collector server
     let collector_id = Uuid::parse_str(OXIMETER_UUID).unwrap();
     let oximeter = start_oximeter(
+        log.new(o!("component" => "oximeter")),
         server.http_server_internal.local_addr(),
         clickhouse.port(),
         collector_id,
@@ -192,26 +193,26 @@ pub async fn start_sled_agent(
 }
 
 pub async fn start_oximeter(
+    log: Logger,
     nexus_address: SocketAddr,
     db_port: u16,
     id: Uuid,
 ) -> Result<Oximeter, String> {
     let db = oximeter_collector::DbConfig {
-        address: SocketAddr::new(Ipv6Addr::LOCALHOST.into(), db_port),
+        address: Some(SocketAddr::new(Ipv6Addr::LOCALHOST.into(), db_port)),
         batch_size: 10,
         batch_interval: 1,
     };
     let config = oximeter_collector::Config {
-        id,
-        nexus_address,
+        nexus_address: Some(nexus_address),
         db,
-        dropshot: ConfigDropshot {
-            bind_address: SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0),
-            ..Default::default()
-        },
         log: ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Error },
     };
-    Oximeter::new(&config).await.map_err(|e| e.to_string())
+    let args = oximeter_collector::OximeterArguments {
+        id,
+        address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
+    };
+    Oximeter::with_logger(&config, &args, log).await.map_err(|e| e.to_string())
 }
 
 #[derive(Debug, Clone, oximeter::Target)]

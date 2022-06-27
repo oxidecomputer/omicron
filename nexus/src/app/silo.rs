@@ -82,7 +82,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         silo_name: &Name,
-    ) -> LookupResult<shared::Policy<authz::SiloRoles>> {
+    ) -> LookupResult<shared::Policy<authz::SiloRole>> {
         let (.., authz_silo) = LookupPath::new(opctx, &self.db_datastore)
             .silo_name(silo_name)
             .lookup_for(authz::Action::ReadPolicy)
@@ -102,8 +102,8 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         silo_name: &Name,
-        policy: &shared::Policy<authz::SiloRoles>,
-    ) -> UpdateResult<shared::Policy<authz::SiloRoles>> {
+        policy: &shared::Policy<authz::SiloRole>,
+    ) -> UpdateResult<shared::Policy<authz::SiloRole>> {
         let (.., authz_silo) = LookupPath::new(opctx, &self.db_datastore)
             .silo_name(silo_name)
             .lookup_for(authz::Action::ModifyPolicy)

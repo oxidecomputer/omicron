@@ -7,8 +7,10 @@
 use crate::authn;
 use crate::db::identity::{Asset, Resource};
 use crate::db::model;
-use crate::external_api::shared;
+use crate::external_api::shared::{self, IpRange};
 use api_identity::ObjectIdentity;
+use chrono::DateTime;
+use chrono::Utc;
 use omicron_common::api::external::{
     ByteCount, Digest, IdentityMetadata, Ipv4Net, Ipv6Net, Name,
     ObjectIdentity, RoleName,
@@ -17,6 +19,33 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddrV6;
 use uuid::Uuid;
+
+// IDENTITY METADATA
+
+/// Identity-related metadata that's included in "asset" public API objects
+/// (which generally have no name or description)
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
+pub struct AssetIdentityMetadata {
+    /// unique, immutable, system-controlled identifier for each resource
+    pub id: Uuid,
+    /// timestamp when this resource was created
+    pub time_created: chrono::DateTime<chrono::Utc>,
+    /// timestamp when this resource was last modified
+    pub time_modified: chrono::DateTime<chrono::Utc>,
+}
+
+impl<T> From<&T> for AssetIdentityMetadata
+where
+    T: Asset,
+{
+    fn from(t: &T) -> Self {
+        AssetIdentityMetadata {
+            id: t.id(),
+            time_created: t.time_created(),
+            time_modified: t.time_modified(),
+        }
+    }
+}
 
 // SILOS
 
@@ -323,49 +352,95 @@ impl From<model::VpcRouter> for VpcRouter {
     }
 }
 
-// RACKS
-
-/// Client view of an [`Rack`]
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct Rack {
+pub struct IpPool {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 }
 
+impl From<model::IpPool> for IpPool {
+    fn from(pool: model::IpPool) -> Self {
+        Self { identity: pool.identity() }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct IpPoolRange {
+    pub id: Uuid,
+    pub time_created: DateTime<Utc>,
+    pub range: IpRange,
+}
+
+impl From<model::IpPoolRange> for IpPoolRange {
+    fn from(range: model::IpPoolRange) -> Self {
+        Self {
+            id: range.id,
+            time_created: range.time_created,
+            range: IpRange::from(&range),
+        }
+    }
+}
+
+// RACKS
+
+/// Client view of an [`Rack`]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct Rack {
+    #[serde(flatten)]
+    pub identity: AssetIdentityMetadata,
+}
+
 impl From<model::Rack> for Rack {
     fn from(rack: model::Rack) -> Self {
-        Self { identity: rack.identity() }
+        Self { identity: AssetIdentityMetadata::from(&rack) }
     }
 }
 
 // SLEDS
 
 /// Client view of an [`Sled`]
-#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Sled {
     #[serde(flatten)]
-    pub identity: IdentityMetadata,
+    pub identity: AssetIdentityMetadata,
     pub service_address: SocketAddrV6,
 }
 
 impl From<model::Sled> for Sled {
     fn from(sled: model::Sled) -> Self {
-        Self { identity: sled.identity(), service_address: sled.address() }
+        Self {
+            identity: AssetIdentityMetadata::from(&sled),
+            service_address: sled.address(),
+        }
+    }
+}
+
+// SILO USERS
+
+/// Client view of a [`User`]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+pub struct User {
+    pub id: Uuid,
+}
+
+impl From<model::SiloUser> for User {
+    fn from(user: model::SiloUser) -> Self {
+        Self { id: user.id() }
     }
 }
 
 // BUILT-IN USERS
 
-/// Client view of a [`User`]
+/// Client view of a [`UserBuiltin`]
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct User {
+pub struct UserBuiltin {
     // TODO-correctness is flattening here (and in all the other types) the
     // intent in RFD 4?
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 }
 
-impl From<model::UserBuiltin> for User {
+impl From<model::UserBuiltin> for UserBuiltin {
     fn from(user: model::UserBuiltin) -> Self {
         Self { identity: user.identity() }
     }

@@ -308,6 +308,25 @@ has_relation(silo: Silo, "parent_silo", saml_identity_provider: SamlIdentityProv
 # Fleet.  None of these resources defines their own roles.
 #
 
+# Describes the policy for accessing "/ip-pools" in the API
+resource IpPoolList {
+	permissions = [
+	    "list_children",
+	    "modify",
+	    "create_child",
+	];
+
+	# Fleet Administrators can create or modify the IP Pools list.
+	relations = { parent_fleet: Fleet };
+	"modify" if "admin" on "parent_fleet";
+	"create_child" if "admin" on "parent_fleet";
+
+	# Fleet Viewers can list IP Pools
+	"list_children" if "viewer" on "parent_fleet";
+}
+has_relation(fleet: Fleet, "parent_fleet", ip_pool_list: IpPoolList)
+	if ip_pool_list.fleet = fleet;
+
 # Describes the policy for accessing "/images" (in the API)
 resource GlobalImageList {
 	permissions = [

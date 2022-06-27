@@ -2,6 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use internal_dns_client::names::{BackendName, ServiceName, AAAA, SRV};
+use omicron_common::address::OXIMETER_PORT;
 use omicron_common::api::external;
 use omicron_common::api::internal::nexus::{
     DiskRuntimeState, InstanceRuntimeState,
@@ -9,9 +11,7 @@ use omicron_common::api::internal::nexus::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Display, Formatter, Result as FormatResult};
-use std::net::IpAddr;
-use std::net::Ipv6Addr;
-use std::net::{SocketAddr, SocketAddrV6};
+use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use uuid::Uuid;
 
 /// Information required to construct a virtual network interface for a guest
@@ -193,7 +193,7 @@ pub struct InstanceSerialConsoleData {
 pub enum DatasetKind {
     CockroachDb {
         /// The addresses of all nodes within the cluster.
-        all_addresses: Vec<SocketAddr>,
+        all_addresses: Vec<SocketAddrV6>,
     },
     Crucible,
     Clickhouse,
@@ -228,7 +228,7 @@ impl std::fmt::Display for DatasetKind {
         use DatasetKind::*;
         let s = match self {
             Crucible => "crucible",
-            CockroachDb { .. } => "cockroach",
+            CockroachDb { .. } => "cockroachdb",
             Clickhouse => "clickhouse",
         };
         write!(f, "{}", s)
@@ -241,20 +241,36 @@ impl std::fmt::Display for DatasetKind {
 /// instantiated when the dataset is detected.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct DatasetEnsureBody {
+    // The UUID of the dataset, as well as the service using it directly.
+    pub id: Uuid,
     // The name (and UUID) of the Zpool which we are inserting into.
     pub zpool_id: Uuid,
     // The type of the filesystem.
     pub dataset_kind: DatasetKind,
     // The address on which the zone will listen for requests.
     pub address: SocketAddrV6,
-    // NOTE: We could insert a UUID here, if we want that to be set by the
-    // caller explicitly? Currently, the lack of a UUID implies that
-    // "at most one dataset type" exists within a zpool.
-    //
-    // It's unclear if this is actually necessary - making this change
-    // would also require the RSS to query existing datasets before
-    // requesting new ones (after all, we generally wouldn't want to
-    // create two CRDB datasets with different UUIDs on the same zpool).
+}
+
+impl DatasetEnsureBody {
+    pub fn aaaa(&self) -> AAAA {
+        AAAA::Zone(self.id)
+    }
+
+    pub fn srv(&self) -> SRV {
+        match self.dataset_kind {
+            DatasetKind::Crucible => {
+                SRV::Backend(BackendName::Crucible, self.id)
+            }
+            DatasetKind::Clickhouse => SRV::Service(ServiceName::Clickhouse),
+            DatasetKind::CockroachDb { .. } => {
+                SRV::Service(ServiceName::Cockroach)
+            }
+        }
+    }
+
+    pub fn address(&self) -> SocketAddrV6 {
+        self.address
+    }
 }
 
 impl From<DatasetEnsureBody> for sled_agent_client::types::DatasetEnsureBody {
@@ -263,14 +279,52 @@ impl From<DatasetEnsureBody> for sled_agent_client::types::DatasetEnsureBody {
             zpool_id: p.zpool_id,
             dataset_kind: p.dataset_kind.into(),
             address: p.address.to_string(),
+            id: p.id,
         }
     }
 }
 
+/// Describes service-specific parameters.
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ServiceType {
+    Nexus { internal_address: SocketAddrV6, external_address: SocketAddrV6 },
+    InternalDns { server_address: SocketAddrV6, dns_address: SocketAddrV6 },
+    Oximeter,
+}
+
+impl From<ServiceType> for sled_agent_client::types::ServiceType {
+    fn from(s: ServiceType) -> Self {
+        use sled_agent_client::types::ServiceType as AutoSt;
+        use ServiceType as St;
+
+        match s {
+            St::Nexus { internal_address, external_address } => AutoSt::Nexus {
+                internal_address: internal_address.to_string(),
+                external_address: external_address.to_string(),
+            },
+            St::InternalDns { server_address, dns_address } => {
+                AutoSt::InternalDns {
+                    server_address: server_address.to_string(),
+                    dns_address: dns_address.to_string(),
+                }
+            }
+            St::Oximeter => AutoSt::Oximeter,
+        }
+    }
+}
+
+/// Describes a request to create a service. This information
+/// should be sufficient for a Sled Agent to start a zone
+/// containing the requested service.
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]
 pub struct ServiceRequest {
+    // The UUID of the service to be initialized.
+    pub id: Uuid,
     // The name of the service to be created.
     pub name: String,
     // The addresses on which the service should listen for requests.
@@ -284,14 +338,44 @@ pub struct ServiceRequest {
     // is necessary to allow inter-zone traffic routing.
     #[serde(default)]
     pub gz_addresses: Vec<Ipv6Addr>,
+    // Any other service-specific parameters.
+    pub service_type: ServiceType,
+}
+
+impl ServiceRequest {
+    pub fn aaaa(&self) -> AAAA {
+        AAAA::Zone(self.id)
+    }
+
+    pub fn srv(&self) -> SRV {
+        match self.service_type {
+            ServiceType::InternalDns { .. } => {
+                SRV::Service(ServiceName::InternalDNS)
+            }
+            ServiceType::Nexus { .. } => SRV::Service(ServiceName::Nexus),
+            ServiceType::Oximeter => SRV::Service(ServiceName::Oximeter),
+        }
+    }
+
+    pub fn address(&self) -> SocketAddrV6 {
+        match self.service_type {
+            ServiceType::InternalDns { server_address, .. } => server_address,
+            ServiceType::Nexus { internal_address, .. } => internal_address,
+            ServiceType::Oximeter => {
+                SocketAddrV6::new(self.addresses[0], OXIMETER_PORT, 0, 0)
+            }
+        }
+    }
 }
 
 impl From<ServiceRequest> for sled_agent_client::types::ServiceRequest {
     fn from(s: ServiceRequest) -> Self {
         Self {
+            id: s.id,
             name: s.name,
             addresses: s.addresses,
             gz_addresses: s.gz_addresses,
+            service_type: s.service_type.into(),
         }
     }
 }

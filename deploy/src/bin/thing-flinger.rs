@@ -480,19 +480,16 @@ fn overlay_sled_agent(
 
     // TODO do we need any escaping here? this will definitely break if any dir
     // names have spaces
-    let dirs = sled_agent_dirs
-        .iter()
-        .map(|dir| format!(" --directories {}", dir.display()))
-        .collect::<String>();
+    let dirs = sled_agent_dirs.iter().map(|dir| format!(" {}", dir.display()));
 
     let cmd = format!(
         "sh -c 'for dir in {}; do mkdir -p $dir; done' && \
             cd {} && \
             cargo run {} --bin sled-agent-overlay-files -- {}",
-        dirs,
+        dirs.clone().collect::<String>(),
         config.builder.omicron_path.to_string_lossy(),
         config.release_arg(),
-        dirs
+        dirs.map(|dir| format!(" --directories {}", dir)).collect::<String>(),
     );
     ssh_exec(builder, &cmd, false)
 }

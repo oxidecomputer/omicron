@@ -10,6 +10,7 @@ use crate::config;
 use crate::context::OpContext;
 use crate::db;
 use crate::populate::populate_start;
+use crate::populate::PopulateArgs;
 use crate::populate::PopulateStatus;
 use crate::saga_interface::SagaContext;
 use anyhow::anyhow;
@@ -24,6 +25,7 @@ mod disk;
 mod iam;
 mod image;
 mod instance;
+mod ip_pool;
 mod organization;
 mod oximeter;
 mod project;
@@ -54,14 +56,11 @@ pub struct Nexus {
     /// uuid for this nexus instance.
     id: Uuid,
 
-    /// uuid for this rack (TODO should also be in persistent storage)
+    /// uuid for this rack
     rack_id: Uuid,
 
     /// general server log
     log: Logger,
-
-    /// cached rack identity metadata
-    api_rack_identity: db::model::RackIdentity,
 
     /// persistent storage for resources in the control plane
     db_datastore: Arc<db::DataStore>,
@@ -120,7 +119,7 @@ impl Nexus {
         authz: Arc<authz::Authz>,
     ) -> Arc<Nexus> {
         let pool = Arc::new(pool);
-        let my_sec_id = db::SecId::from(config.id);
+        let my_sec_id = db::SecId::from(config.deployment.id);
         let db_datastore = Arc::new(db::DataStore::new(Arc::clone(&pool)));
         let sec_store = Arc::new(db::CockroachDbSecStore::new(
             my_sec_id,
@@ -135,7 +134,7 @@ impl Nexus {
             sec_store,
         ));
         let timeseries_client =
-            oximeter_db::Client::new(config.timeseries_db.address, &log);
+            oximeter_db::Client::new(config.pkg.timeseries_db.address, &log);
 
         // TODO-cleanup We may want a first-class subsystem for managing startup
         // background tasks.  It could use a Future for each one, a status enum
@@ -147,22 +146,26 @@ impl Nexus {
             authn::Context::internal_db_init(),
             Arc::clone(&db_datastore),
         );
-        let populate_status =
-            populate_start(populate_ctx, Arc::clone(&db_datastore));
+
+        let populate_args = PopulateArgs::new(rack_id);
+        let populate_status = populate_start(
+            populate_ctx,
+            Arc::clone(&db_datastore),
+            populate_args,
+        );
 
         let nexus = Nexus {
-            id: config.id,
+            id: config.deployment.id,
             rack_id,
             log: log.new(o!()),
-            api_rack_identity: db::model::RackIdentity::new(rack_id),
             db_datastore: Arc::clone(&db_datastore),
             authz: Arc::clone(&authz),
             sec_client: Arc::clone(&sec_client),
             recovery_task: std::sync::Mutex::new(None),
             populate_status,
             timeseries_client,
-            updates_config: config.updates.clone(),
-            tunables: config.tunables.clone(),
+            updates_config: config.pkg.updates.clone(),
+            tunables: config.pkg.tunables.clone(),
             opctx_alloc: OpContext::for_background(
                 log.new(o!("component" => "InstanceAllocator")),
                 Arc::clone(&authz),
@@ -229,6 +232,16 @@ impl Nexus {
     /// Returns an [`OpContext`] used for authenticating external requests
     pub fn opctx_external_authn(&self) -> &OpContext {
         &self.opctx_external_authn
+    }
+
+    /// Returns an [`OpContext`] used for balancing services.
+    pub fn opctx_for_service_balancer(&self) -> OpContext {
+        OpContext::for_background(
+            self.log.new(o!("component" => "ServiceBalancer")),
+            Arc::clone(&self.authz),
+            authn::Context::internal_service_balancer(),
+            Arc::clone(&self.db_datastore),
+        )
     }
 
     /// Used as the body of a "stub" endpoint -- one that's currently

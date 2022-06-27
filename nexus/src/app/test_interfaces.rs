@@ -14,6 +14,9 @@ use uuid::Uuid;
 /// Exposes additional [`Nexus`] interfaces for use by the test suite
 #[async_trait]
 pub trait TestInterfaces {
+    /// Access the Rack ID of the currently executing Nexus.
+    fn rack_id(&self) -> Uuid;
+
     /// Returns the SledAgentClient for an Instance from its id.  We may also
     /// want to split this up into instance_lookup_by_id() and instance_sled(),
     /// but after all it's a test suite special to begin with.
@@ -42,6 +45,10 @@ pub trait TestInterfaces {
 
 #[async_trait]
 impl TestInterfaces for super::Nexus {
+    fn rack_id(&self) -> Uuid {
+        self.rack_id
+    }
+
     async fn instance_sled_by_id(
         &self,
         id: &Uuid,

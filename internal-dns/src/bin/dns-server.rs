@@ -54,20 +54,19 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let db = Arc::new(sled::open(&config.data.storage_path)?);
 
-    {
+    let _dns_server = {
         let db = db.clone();
         let log = log.clone();
         let dns_config = internal_dns::dns_server::Config {
             bind_address: dns_address.to_string(),
             zone: zone.to_string(),
         };
-        tokio::spawn(async move {
-            internal_dns::dns_server::run(log, db, dns_config).await
-        });
-    }
+        internal_dns::dns_server::run(log, db, dns_config).await?
+    };
 
-    let server = internal_dns::start_server(config, log, db).await?;
-    server
+    let dropshot_server =
+        internal_dns::start_dropshot_server(config, log, db).await?;
+    dropshot_server
         .await
         .map_err(|error_message| anyhow!("server exiting: {}", error_message))
 }

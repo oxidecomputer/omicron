@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "common",
+    "ddm-admin-client",
     "deploy",
     "gateway",
     "gateway-cli",
@@ -32,6 +33,7 @@ members = [
 
 default-members = [
     "common",
+    "ddm-admin-client",
     "deploy",
     "gateway",
     "gateway-cli",

@@ -39,6 +39,15 @@ lazy_static! {
             "used for seeding initial database data",
         );
 
+    /// Internal user for performing operations to manage the
+    /// provisioning of services across the fleet.
+    pub static ref USER_SERVICE_BALANCER: UserBuiltinConfig =
+        UserBuiltinConfig::new_static(
+            "001de000-05e4-4000-8000-00000000bac3",
+            "service-balancer",
+            "used for Nexus-driven service balancing",
+        );
+
     /// Internal user used by Nexus when handling internal API requests
     pub static ref USER_INTERNAL_API: UserBuiltinConfig =
         UserBuiltinConfig::new_static(
@@ -82,9 +91,11 @@ mod test {
     use super::USER_INTERNAL_API;
     use super::USER_INTERNAL_READ;
     use super::USER_SAGA_RECOVERY;
+    use super::USER_SERVICE_BALANCER;
 
     #[test]
     fn test_builtin_user_ids_are_valid() {
+        assert_valid_uuid(&USER_SERVICE_BALANCER.id);
         assert_valid_uuid(&USER_DB_INIT.id);
         assert_valid_uuid(&USER_INTERNAL_API.id);
         assert_valid_uuid(&USER_EXTERNAL_AUTHN.id);

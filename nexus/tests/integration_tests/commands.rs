@@ -76,8 +76,7 @@ fn test_nexus_invalid_config() {
     assert_eq!(
         stderr_text,
         format!(
-            "nexus: parse \"{}\": missing field \
-             `dropshot_external`\n",
+            "nexus: parse \"{}\": missing field `deployment`\n",
             config_path.display()
         ),
     );
