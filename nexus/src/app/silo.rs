@@ -180,19 +180,12 @@ impl super::Nexus {
                         silo_user_id,
                         authenticated_subject.external_id.clone(),
                     );
-                    self.db_datastore.silo_user_create(silo_user).await?;
+                    let silo_user = self.db_datastore.silo_user_create(silo_user).await?;
 
                     // TODO once groups exist, add user to groups
                     // TODO what roles do JITed users get?
 
-                    let (.., db_silo_user) =
-                        LookupPath::new(&opctx, &self.db_datastore)
-                            .silo_user_id(silo_user_id)
-                            .fetch()
-                            .await
-                            .unwrap();
-
-                    Ok(Some(db_silo_user))
+                    Ok(Some(silo_user))
                 }
             }
         }

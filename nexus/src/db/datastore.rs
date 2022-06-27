@@ -3247,19 +3247,19 @@ impl DataStore {
     pub async fn silo_user_create(
         &self,
         silo_user: SiloUser,
-    ) -> Result<(), Error> {
+    ) -> Result<SiloUser, Error> {
         use db::schema::silo_user::dsl;
 
-        let _ = diesel::insert_into(dsl::silo_user)
+        diesel::insert_into(dsl::silo_user)
             .values(silo_user)
             .on_conflict(dsl::id)
             .do_nothing()
-            .execute_async(self.pool())
+            .returning(SiloUser::as_returning())
+            .get_result_async(self.pool())
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(e, ErrorHandler::Server)
-            })?;
-        Ok(())
+            })
     }
 
     /// Given an external ID, return

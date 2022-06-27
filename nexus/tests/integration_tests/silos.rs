@@ -25,6 +25,7 @@ use crate::integration_tests::saml::SAML_IDP_DESCRIPTOR;
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 use omicron_nexus::authz::{self, SiloRoles};
+use uuid::Uuid;
 
 use httptest::{matchers::*, responders::*, Expectation, Server};
 
@@ -598,9 +599,6 @@ async fn test_silo_user_provision_types(cptestctx: &ControlPlaneTestContext) {
         },
     ];
 
-    let new_silo_user_id =
-        "06a95238-1ec7-4d5c-a47b-c33544f2db20".parse().unwrap();
-
     for test_case in test_cases {
         let silo =
             create_silo(&client, "test-silo", true, test_case.provision_type)
@@ -610,7 +608,7 @@ async fn test_silo_user_provision_types(cptestctx: &ControlPlaneTestContext) {
             nexus
                 .silo_user_create(
                     silo.identity.id,
-                    new_silo_user_id,
+                    Uuid::new_v4(),
                     "external@id.com".into(),
                 )
                 .await
