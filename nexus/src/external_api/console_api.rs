@@ -265,7 +265,7 @@ pub async fn login(
                                     .to_str()
                                     .map_err(|e| {
                                         HttpError::for_internal_error(format!(
-                                            "{}",
+                                            "referer header to_str failed! {}",
                                             e
                                         ))
                                     })?
@@ -275,7 +275,7 @@ pub async fn login(
                     };
 
                     Some(relay_state.to_encoded().map_err(|e| {
-                        HttpError::for_internal_error(format!("{}", e))
+                        HttpError::for_internal_error(format!("encoding relay state failed: {}", e))
                     })?)
                 } else {
                     None
