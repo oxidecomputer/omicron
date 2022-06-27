@@ -60,6 +60,7 @@ pub struct RequestBuilder<'a> {
     headers: http::HeaderMap<http::header::HeaderValue>,
     body: hyper::Body,
     error: Option<anyhow::Error>,
+    allow_non_dropshot_errors: bool,
 
     expected_status: Option<http::StatusCode>,
     allowed_headers: Option<Vec<http::header::HeaderName>>,
@@ -93,6 +94,7 @@ impl<'a> RequestBuilder<'a> {
             ]),
             expected_response_headers: http::HeaderMap::new(),
             error: None,
+            allow_non_dropshot_errors: false,
         }
     }
 
@@ -207,6 +209,13 @@ impl<'a> RequestBuilder<'a> {
                 self.expected_response_headers.append(name, value);
             }
         }
+        self
+    }
+
+    /// Allow non-dropshot error responses, i.e., errors that are not compatible
+    /// with `dropshot::HttpErrorResponseBody`.
+    pub fn allow_non_dropshot_errors(mut self) -> Self {
+        self.allow_non_dropshot_errors = true;
         self
     }
 
@@ -360,18 +369,19 @@ impl<'a> RequestBuilder<'a> {
             headers: response.headers().clone(),
             body: response_body,
         };
-        if status.is_client_error() || status.is_server_error() {
-            if let Ok(error_body) =
-                test_response.parsed_body::<dropshot::HttpErrorResponseBody>()
-            {
-                ensure!(
-                    error_body.request_id == request_id_header,
-                    "expected error response body to have request id {:?} \
-                     (to match request-id header), but found {:?}",
-                    request_id_header,
-                    error_body.request_id
-                );
-            }
+        if (status.is_client_error() || status.is_server_error())
+            && !self.allow_non_dropshot_errors
+        {
+            let error_body = test_response
+                .parsed_body::<dropshot::HttpErrorResponseBody>()
+                .context("parsing error body")?;
+            ensure!(
+                error_body.request_id == request_id_header,
+                "expected error response body to have request id {:?} \
+                (to match request-id header), but found {:?}",
+                request_id_header,
+                error_body.request_id
+            );
         }
 
         Ok(test_response)

@@ -29,16 +29,18 @@ async fn test_device_auth_flow(cptestctx: &ControlPlaneTestContext) {
 
     // Trying to authenticate without a `client_id` fails.
     RequestBuilder::new(testctx, Method::POST, "/device/auth")
+        .allow_non_dropshot_errors()
         .expect_status(Some(StatusCode::BAD_REQUEST))
         .execute()
         .await
-        .expect("client_id required to start client authentication flow");
+        .expect("failed to reject device auth start without client_id");
 
     let client_id = Uuid::new_v4();
     let authn_params = DeviceAuthRequestParams { client_id };
 
     // Using a JSON encoded body fails.
     RequestBuilder::new(testctx, Method::POST, "/device/auth")
+        .allow_non_dropshot_errors()
         .body(Some(&authn_params))
         .expect_status(Some(StatusCode::BAD_REQUEST))
         .execute()
@@ -48,6 +50,7 @@ async fn test_device_auth_flow(cptestctx: &ControlPlaneTestContext) {
     // Start a device authentication flow using a correctly encoded body.
     let auth_response: DeviceAuthResponse =
         RequestBuilder::new(testctx, Method::POST, "/device/auth")
+            .allow_non_dropshot_errors()
             .body_urlencoded(Some(&authn_params))
             .expect_status(Some(StatusCode::OK))
             .execute()
@@ -97,6 +100,7 @@ async fn test_device_auth_flow(cptestctx: &ControlPlaneTestContext) {
 
     // Confirmation must be authenticated.
     RequestBuilder::new(testctx, Method::POST, "/device/confirm")
+        .allow_non_dropshot_errors()
         .body(Some(&confirm_params))
         .expect_status(Some(StatusCode::UNAUTHORIZED))
         .execute()
@@ -112,6 +116,7 @@ async fn test_device_auth_flow(cptestctx: &ControlPlaneTestContext) {
     // A client polling for a token gets an OAuth error until confirmation.
     let error: OAuthError =
         RequestBuilder::new(testctx, Method::POST, "/device/token")
+            .allow_non_dropshot_errors()
             .body_urlencoded(Some(&token_params))
             .expect_status(Some(StatusCode::BAD_REQUEST))
             .execute()
@@ -135,6 +140,7 @@ async fn test_device_auth_flow(cptestctx: &ControlPlaneTestContext) {
     // Token should be granted after confirmation.
     let token: DeviceAccessTokenGrant = NexusRequest::new(
         RequestBuilder::new(testctx, Method::POST, "/device/token")
+            .allow_non_dropshot_errors()
             .body_urlencoded(Some(&token_params))
             .expect_status(Some(StatusCode::OK)),
     )
