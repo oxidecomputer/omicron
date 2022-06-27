@@ -4,8 +4,9 @@
 
 //! Task which ensures that expected Nexus services exist.
 
+use async_trait::async_trait;
 use crate::context::OpContext;
-use crate::db::datastore::DatasetRedundancy;
+use crate::db::datastore::{DataStore, DatasetRedundancy};
 use crate::db::identity::Asset;
 use crate::db::model::Dataset;
 use crate::db::model::DatasetKind;
@@ -15,7 +16,14 @@ use crate::db::model::Sled;
 use crate::db::model::Zpool;
 use crate::Nexus;
 use futures::stream::{self, StreamExt, TryStreamExt};
-use internal_dns_client::multiclient::Updater as DnsUpdater;
+use internal_dns_client::{
+    multiclient::{
+        AAAARecord,
+        DnsError,
+        Updater as DnsUpdater
+    },
+    names::SRV,
+};
 use omicron_common::address::{
     DNS_PORT, DNS_REDUNDANCY, DNS_SERVER_PORT, NEXUS_EXTERNAL_PORT,
     NEXUS_INTERNAL_PORT,
@@ -26,6 +34,7 @@ use slog::Logger;
 use std::collections::{HashMap, HashSet};
 use std::net::{Ipv6Addr, SocketAddrV6};
 use std::sync::Arc;
+use uuid::Uuid;
 
 // Policy for the number of services to be provisioned.
 #[derive(Debug)]
@@ -87,6 +96,62 @@ const EXPECTED_DATASETS: [ExpectedDataset; 3] = [
     },
 ];
 
+// A trait intended to aid testing.
+//
+// The non-test implementation should be as simple as possible.
+#[async_trait]
+trait SledClientInterface {
+    async fn services_put(&self, body: &SledAgentTypes::ServiceEnsureBody) -> Result<(), Error>;
+}
+
+#[async_trait]
+impl SledClientInterface for sled_agent_client::Client {
+    async fn services_put(&self, body: &SledAgentTypes::ServiceEnsureBody) -> Result<(), Error> {
+        self.services_put(body).await?;
+        Ok(())
+    }
+}
+
+// A trait intended to aid testing.
+//
+// The non-test implementation should be as simple as possible.
+#[async_trait]
+trait NexusInterface<SledClient: SledClientInterface> {
+    fn rack_id(&self) -> Uuid;
+    fn datastore(&self) -> &Arc<DataStore>;
+    async fn sled_client(&self, id: &Uuid) -> Result<Arc<SledClient>, Error>;
+}
+
+#[async_trait]
+impl NexusInterface<sled_agent_client::Client> for Nexus {
+    fn rack_id(&self) -> Uuid {
+        self.rack_id
+    }
+
+    fn datastore(&self) -> &Arc<DataStore> {
+        self.datastore()
+    }
+
+    async fn sled_client(&self, id: &Uuid) -> Result<Arc<sled_agent_client::Client>, Error> {
+        self.sled_client(id).await
+    }
+}
+
+// A trait intended to aid testing.
+//
+// The non-test implementation should be as simple as possible.
+#[async_trait]
+trait DnsUpdaterInterface {
+    async fn insert_dns_records(&self, records: &HashMap<SRV, Vec<AAAARecord>>) -> Result<(), DnsError>;
+}
+
+#[async_trait]
+impl DnsUpdaterInterface for DnsUpdater {
+    async fn insert_dns_records(&self, records: &HashMap<SRV, Vec<AAAARecord>>) -> Result<(), DnsError> {
+        self.insert_dns_records(records).await
+    }
+}
+
 pub struct ServiceBalancer {
     log: Logger,
     nexus: Arc<Nexus>,
@@ -94,12 +159,7 @@ pub struct ServiceBalancer {
 }
 
 impl ServiceBalancer {
-    pub fn new(log: Logger, nexus: Arc<Nexus>) -> Self {
-        let dns_updater = DnsUpdater::new(
-            &nexus.az_subnet(),
-            log.new(o!("component" => "DNS Updater")),
-        );
-
+    pub fn new(log: Logger, nexus: Arc<Nexus>, dns_updater: DnsUpdater) -> Self {
         Self { log, nexus, dns_updater }
     }
 
@@ -255,18 +315,14 @@ impl ServiceBalancer {
             .await
     }
 
-    // TODO: Consider using sagas to ensure the rollout of services.
-    //
-    // Not using sagas *happens* to be fine because these operations are
-    // re-tried periodically, but that's kind forcing a dependency on the
-    // caller.
     async fn ensure_services_provisioned(
         &self,
         opctx: &OpContext,
+        expected_services: &[ExpectedService],
     ) -> Result<(), Error> {
         // Provision services within the database.
         let mut svcs = vec![];
-        for expected_svc in &EXPECTED_SERVICES {
+        for expected_svc in expected_services {
             info!(self.log, "Ensuring service {:?} exists", expected_svc);
             match expected_svc.redundancy {
                 ServiceRedundancy::PerRack(desired_count) => {
@@ -385,9 +441,10 @@ impl ServiceBalancer {
     async fn ensure_datasets_provisioned(
         &self,
         opctx: &OpContext,
+        expected_datasets: &[ExpectedDataset]
     ) -> Result<(), Error> {
         // Provision all dataset types concurrently.
-        stream::iter(&EXPECTED_DATASETS)
+        stream::iter(expected_datasets)
             .map(Ok::<_, Error>)
             .try_for_each_concurrent(None, |expected_dataset| async move {
                 info!(
@@ -405,17 +462,168 @@ impl ServiceBalancer {
             .await
     }
 
-    // Provides a single point-in-time evaluation and adjustment of
-    // the services provisioned within the rack.
+    /// Provides a single point-in-time evaluation and adjustment of
+    /// the services provisioned within the rack.
+    ///
+    /// May adjust the provisioned services to meet the redundancy of the
+    /// rack, if necessary.
+    // TODO: Consider using sagas to ensure the rollout of services.
     //
-    // May adjust the provisioned services to meet the redundancy of the
-    // rack, if necessary.
+    // Not using sagas *happens* to be fine because these operations are
+    // re-tried periodically, but that's kind forcing a dependency on the
+    // caller.
     pub async fn balance_services(
         &self,
         opctx: &OpContext,
     ) -> Result<(), Error> {
-        self.ensure_datasets_provisioned(opctx).await?;
-        self.ensure_services_provisioned(opctx).await?;
+        self.ensure_datasets_provisioned(opctx, &EXPECTED_DATASETS).await?;
+        self.ensure_services_provisioned(opctx, &EXPECTED_SERVICES).await?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    use crate::{authn, authz};
+    use dropshot::test_util::LogContext;
+    use nexus_test_utils::db::test_setup_database;
+    use omicron_test_utils::dev;
+    use std::sync::Arc;
+
+    // TODO: maybe figure out what you *want* to test?
+    // I suspect we'll need to refactor this API for testability.
+    //
+    // - Dataset init:
+    //   - Call to DB
+    //  - For each new dataset...
+    //     - Call to Sled (filesystem put)
+    //     - Update DNS record
+    //
+    // - Service init:
+    //   - Call to DB
+    //   - For each sled...
+    //     - List svcs
+    //     - Put svcs
+    //  - For each new service...
+    //     - Update DNS record
+    //
+    // TODO: Also, idempotency check
+
+    struct ProvisionTest {
+        logctx: LogContext,
+        opctx: OpContext,
+        db: dev::db::CockroachInstance,
+        datastore: Arc<DataStore>,
+    }
+
+    impl ProvisionTest {
+        // Create the logger and setup the database.
+        async fn new(name: &str) -> Self {
+            let logctx = dev::test_setup_log(name);
+            let db = test_setup_database(&logctx.log).await;
+            let (_, datastore) =
+                crate::db::datastore::datastore_test(&logctx, &db).await;
+            let opctx = OpContext::for_background(
+                logctx.log.new(o!()),
+                Arc::new(authz::Authz::new(&logctx.log)),
+                authn::Context::internal_service_balancer(),
+                datastore.clone(),
+            );
+            Self {
+                logctx,
+                opctx,
+                db,
+                datastore,
+            }
+        }
+
+        async fn cleanup(mut self) {
+            self.db.cleanup().await.unwrap();
+            self.logctx.cleanup_successful();
+        }
+    }
+
+    #[derive(Clone)]
+    struct FakeNexus {
+        datastore: Arc<DataStore>,
+    }
+
+    #[derive(Clone)]
+    struct FakeDnsUpdater {
+
+    }
+
+    // TODO: interfaces:
+    //
+    // - Nexus
+    //   - Datastore: ✔
+    //   - Sled Client:
+    //   - Rack ID: easy
+    //   - Rack Subnet: easy
+    //
+    //
+    // - DNS service
+    //   - insert dns records
+
+    #[tokio::test]
+    async fn test_provision_dataset_on_all() {
+        let test = ProvisionTest::new("test_provision_dataset_on_all").await;
+
+        // TODO: move into "test"?
+        let nexus = Arc::new(FakeNexus {
+            datastore: test.datastore.clone(),
+        });
+        let dns_updater = FakeDnsUpdater {};
+
+        let service_balancer = ServiceBalancer::new(
+            test.logctx.log.clone(),
+            nexus.clone(),
+            dns_updater.clone(),
+        );
+
+        // TODO: Upsert zpools?
+        // TODO: Also, maybe add a test when invoking this fn on "no zpools".
+
+
+        // Make the request to the service balancer for Crucibles on all Zpools.
+        let expected_datasets = [
+            ExpectedDataset {
+                kind: DatasetKind::Crucible,
+                redundancy: DatasetRedundancy::OnAll,
+            }
+        ];
+        service_balancer.ensure_datasets_provisioned(
+            &test.opctx,
+            &expected_datasets,
+        ).await.unwrap();
+
+        // TODO: Validate that:
+        // - That "filesystem_put" was invoked ->  Store the calls?
+        // - That the DNS record was updated -> Store the records?
+
+        test.cleanup().await;
+    }
+
+    #[tokio::test]
+    async fn test_provision_dataset_per_rack() {
+        let expected_datasets = [
+            ExpectedDataset {
+                kind: DatasetKind::Crucible,
+                redundancy: DatasetRedundancy::PerRack(2),
+            }
+        ];
+        todo!();
+    }
+
+    #[tokio::test]
+    async fn test_provision_service_per_rack() {
+        todo!();
+    }
+
+    #[tokio::test]
+    async fn test_provision_service_dns_per_az() {
+        todo!();
     }
 }

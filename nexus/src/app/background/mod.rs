@@ -7,6 +7,7 @@
 mod services;
 
 use crate::app::Nexus;
+use internal_dns_client::multiclient::Updater as DnsUpdater;
 use std::sync::Arc;
 use tokio::task::{spawn, JoinHandle};
 
@@ -20,8 +21,13 @@ impl TaskRunner {
     pub fn new(nexus: Arc<Nexus>) -> Self {
         let handle = spawn(async move {
             let log = nexus.log.new(o!("component" => "BackgroundTaskRunner"));
+
+            let dns_updater = DnsUpdater::new(
+                &nexus.az_subnet(),
+                log.new(o!("component" => "DNS Updater")),
+            );
             let service_balancer =
-                services::ServiceBalancer::new(log.clone(), nexus.clone());
+                services::ServiceBalancer::new(log.clone(), nexus.clone(), dns_updater);
 
             loop {
                 // TODO: We may want triggers to exist here, to invoke this task
