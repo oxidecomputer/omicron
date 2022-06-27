@@ -8,6 +8,7 @@
 //! external API, but in order to avoid CORS issues for now, we are serving
 //! these routes directly from the external API.
 use super::views;
+use anyhow::Context;
 use crate::authn::{
     silos::IdentityProviderType, USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED,
 };
@@ -207,11 +208,15 @@ pub struct RelayState {
 
 impl RelayState {
     pub fn to_encoded(&self) -> Result<String, anyhow::Error> {
-        Ok(base64::encode(serde_json::to_string(&self)?))
+        Ok(base64::encode(serde_json::to_string(&self).context("encoding relay state")?))
     }
 
     pub fn from_encoded(encoded: String) -> Result<Self, anyhow::Error> {
-        Ok(serde_json::from_str(&String::from_utf8(base64::decode(encoded)?)?)?)
+        Ok(serde_json::from_str(
+            &String::from_utf8(
+                base64::decode(encoded).context("base64 decoding relay state")?
+            ).context("creating relay state string")?
+        ).context("json from relay state string")?)
     }
 }
 
