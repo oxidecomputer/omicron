@@ -238,7 +238,7 @@ pub async fn login(
         // unauthenticated.
         let opctx = nexus.opctx_external_authn();
 
-        let identity_provider = IdentityProviderType::lookup(
+        let (.., identity_provider) = IdentityProviderType::lookup(
             &nexus.datastore(),
             &opctx,
             &path_params.silo_name,
@@ -316,7 +316,7 @@ pub async fn consume_credentials(
         // unauthenticated.
         let opctx = nexus.opctx_external_authn();
 
-        let identity_provider = IdentityProviderType::lookup(
+        let (authz_silo, db_silo, identity_provider) = IdentityProviderType::lookup(
             &nexus.datastore(),
             &opctx,
             &path_params.silo_name,
@@ -352,7 +352,8 @@ pub async fn consume_credentials(
         let user = nexus
             .silo_user_from_authenticated_subject(
                 &opctx,
-                &path_params.silo_name,
+                &authz_silo,
+                &db_silo,
                 &authenticated_subject,
             )
             .await?;

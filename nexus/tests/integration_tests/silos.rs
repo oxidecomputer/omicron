@@ -618,10 +618,18 @@ async fn test_silo_user_provision_types(cptestctx: &ControlPlaneTestContext) {
         }
 
         let authn_opctx = nexus.opctx_external_authn();
+
+        let (authz_silo, db_silo) = LookupPath::new(&authn_opctx, &nexus.datastore())
+            .silo_name(&silo.identity.name.into())
+            .fetch()
+            .await
+            .unwrap();
+
         let existing_silo_user = nexus
             .silo_user_from_authenticated_subject(
                 &authn_opctx,
-                &silo.identity.name.into(),
+                &authz_silo,
+                &db_silo,
                 &AuthenticatedSubject {
                     external_id: "external@id.com".into(),
                     groups: vec![],

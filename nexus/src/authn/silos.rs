@@ -4,6 +4,7 @@
 
 //! Silo related authentication types and functions
 
+use crate::authz;
 use crate::context::OpContext;
 use crate::db::lookup::LookupPath;
 use crate::db::{model, DataStore};
@@ -73,7 +74,12 @@ impl IdentityProviderType {
         opctx: &OpContext,
         silo_name: &model::Name,
         provider_name: &model::Name,
-    ) -> LookupResult<Self> {
+    ) -> LookupResult<(authz::Silo, model::Silo, Self)> {
+        let (authz_silo, db_silo) = LookupPath::new(opctx, datastore)
+            .silo_name(silo_name)
+            .fetch()
+            .await?;
+
         let (.., identity_provider) = LookupPath::new(opctx, datastore)
             .silo_name(silo_name)
             .identity_provider_name(provider_name)
@@ -89,7 +95,7 @@ impl IdentityProviderType {
                         .fetch()
                         .await?;
 
-                Ok(IdentityProviderType::Saml(
+                let saml_identity_provider = IdentityProviderType::Saml(
                     saml_identity_provider.try_into()
                         .map_err(|e: anyhow::Error|
                             // If an error is encountered converting from the
@@ -103,7 +109,9 @@ impl IdentityProviderType {
                                 )
                             )
                         )?
-                ))
+                    );
+
+                Ok((authz_silo, db_silo, saml_identity_provider))
             }
         }
     }

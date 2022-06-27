@@ -141,13 +141,12 @@ impl super::Nexus {
     pub async fn silo_user_from_authenticated_subject(
         &self,
         opctx: &OpContext,
-        silo_name: &Name,
+        authz_silo: &authz::Silo,
+        db_silo: &db::model::Silo,
         authenticated_subject: &authn::silos::AuthenticatedSubject,
     ) -> LookupResult<Option<db::model::SiloUser>> {
-        let (authz_silo, db_silo) = LookupPath::new(opctx, &self.datastore())
-            .silo_name(silo_name)
-            .fetch_for(authz::Action::CreateChild) // XXX create user permission?
-            .await?;
+        // XXX create user permission?
+        opctx.authorize(authz::Action::CreateChild, authz_silo).await?;
 
         let existing_silo_user = self
             .datastore()
