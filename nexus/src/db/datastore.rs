@@ -3818,12 +3818,7 @@ impl DataStore {
             .returning(DeviceAuthRequest::as_returning())
             .get_result_async(self.pool_authorized(opctx).await?)
             .await
-            .map_err(|e| {
-                Error::internal_error(&format!(
-                    "error creating device authorization record: {:?}",
-                    e
-                ))
-            })
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     /// Look up a device authorization request by `user_code`.
@@ -3859,12 +3854,7 @@ impl DataStore {
             .returning(DeviceAccessToken::as_returning())
             .get_result_async(self.pool_authorized(opctx).await?)
             .await
-            .map_err(|e| {
-                Error::internal_error(&format!(
-                    "error creating device access token: {:?}",
-                    e
-                ))
-            })
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     /// Look up a granted device authorization token.
