@@ -234,7 +234,7 @@ impl SamlIdentityProvider {
             .map_err(|e| {
             HttpError::for_bad_request(
                 None,
-                format!("urlencoded::from_str failed! {}", e),
+                format!("error reading url encoded POST body! {}", e),
             )
         })?;
 
@@ -244,7 +244,7 @@ impl SamlIdentityProvider {
         .map_err(|e| {
             HttpError::for_bad_request(
                 None,
-                format!("base64 decode failed! {}", e),
+                format!("error base64 decoding SAMLResponse! {}", e),
             )
         })?;
 
@@ -254,14 +254,17 @@ impl SamlIdentityProvider {
         // little more safe than other languages.
         let raw_response_str = std::str::from_utf8(&raw_response_bytes)
             .map_err(|e| {
-                HttpError::for_bad_request(None, format!("not utf8! {}", e))
+                HttpError::for_bad_request(
+                    None,
+                    format!("decoded SAMLResponse not utf8 string! {}", e),
+                )
             })?;
 
         let saml_response: SAMLResponse =
             raw_response_str.parse().map_err(|e| {
                 HttpError::for_bad_request(
                     None,
-                    format!("not saml response! {}", e),
+                    format!("could not parse SAMLResponse string! {}", e),
                 )
             })?;
 
@@ -270,19 +273,19 @@ impl SamlIdentityProvider {
             .issuer
             .as_ref()
             .ok_or_else(|| {
-                HttpError::for_bad_request(None, "no issuer!".into())
+                HttpError::for_bad_request(None, "SAMLResponse has no issuer!".into())
             })?
             .value
             .as_ref()
             .ok_or_else(|| {
-                HttpError::for_bad_request(None, "blank issuer!".into())
+                HttpError::for_bad_request(None, "SAMLResponse has a blank issuer!".into())
             })?;
 
         if issuer != &self.idp_entity_id {
             return Err(HttpError::for_bad_request(
                 None,
                 format!(
-                    "issuer {} does not match idp entity id {}",
+                    "SAMLResponse issuer {} does not match configured idp entity id {}",
                     issuer, self.idp_entity_id,
                 ),
             ));
@@ -321,7 +324,7 @@ impl SamlIdentityProvider {
             .map_err(|e| {
                 HttpError::for_bad_request(
                     None,
-                    format!("service_provider.parse_response failed! {}", e),
+                    format!("could not extract SAMLResponse assertion! {}", e),
                 )
             })?;
 
@@ -329,7 +332,7 @@ impl SamlIdentityProvider {
         // Every assertion should also be signed. Check the signature and digest
         // schemes against an explicit allow list.
         let assertion_signature = assertion.signature.ok_or_else(|| {
-            HttpError::for_bad_request(None, "missing signature!".to_string())
+            HttpError::for_bad_request(None, "assertion is missing signature!".to_string())
         })?;
 
         let signature_algorithm: String =
