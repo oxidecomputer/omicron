@@ -22,7 +22,16 @@ pub struct NetworkInterface {
     pub mac: external::MacAddr,
     pub subnet: external::IpNet,
     pub vni: external::Vni,
+    pub primary: bool,
     pub slot: u8,
+}
+
+/// An external IP address used for external connectivity for an instance.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, JsonSchema)]
+pub struct ExternalIp {
+    pub ip: IpAddr,
+    pub first_port: u16,
+    pub last_port: u16,
 }
 
 /// Used to request a Disk state change
@@ -63,6 +72,7 @@ pub struct DiskEnsureBody {
 pub struct InstanceHardware {
     pub runtime: InstanceRuntimeState,
     pub nics: Vec<NetworkInterface>,
+    pub external_ip: ExternalIp,
     pub disks: Vec<propolis_client::api::DiskRequest>,
     pub cloud_init_bytes: Option<String>,
 }

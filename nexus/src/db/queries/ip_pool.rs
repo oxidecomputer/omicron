@@ -220,6 +220,8 @@ impl QueryFragment<Pg> for FilterOverlappingIpRanges {
         )?;
         out.push_sql(", ");
         out.push_bind_param::<sql_types::Uuid, Uuid>(&self.range.ip_pool_id)?;
+        out.push_sql(", ");
+        out.push_bind_param::<sql_types::BigInt, i64>(&self.range.rcgen)?;
 
         out.push_sql(" WHERE NOT EXISTS(");
         push_candidate_contains_record_subquery::<dsl::first_address>(

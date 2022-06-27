@@ -15,6 +15,7 @@ use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::identity_eq;
 use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::create_instance;
+use nexus_test_utils::resource_helpers::create_ip_pool;
 use nexus_test_utils::resource_helpers::create_organization;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::DiskTest;
@@ -62,6 +63,7 @@ fn get_disk_detach_url(instance_name: &str) -> String {
 }
 
 async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
+    create_ip_pool(&client, "p0", None).await;
     create_organization(&client, ORG_NAME).await;
     let project = create_project(client, ORG_NAME, PROJECT_NAME).await;
     project.identity.id

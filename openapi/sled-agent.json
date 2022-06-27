@@ -704,6 +704,31 @@
           "request_id"
         ]
       },
+      "ExternalIp": {
+        "description": "An external IP address used for external connectivity for an instance.",
+        "type": "object",
+        "properties": {
+          "first_port": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "ip": {
+            "type": "string",
+            "format": "ip"
+          },
+          "last_port": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "first_port",
+          "ip",
+          "last_port"
+        ]
+      },
       "Generation": {
         "description": "Generation numbers stored in the database, used for optimistic concurrency control",
         "type": "integer",
@@ -765,6 +790,9 @@
               "$ref": "#/components/schemas/DiskRequest"
             }
           },
+          "external_ip": {
+            "$ref": "#/components/schemas/ExternalIp"
+          },
           "nics": {
             "type": "array",
             "items": {
@@ -777,6 +805,7 @@
         },
         "required": [
           "disks",
+          "external_ip",
           "nics",
           "runtime"
         ]
@@ -1037,6 +1066,9 @@
           "name": {
             "$ref": "#/components/schemas/Name"
           },
+          "primary": {
+            "type": "boolean"
+          },
           "slot": {
             "type": "integer",
             "format": "uint8",
@@ -1053,6 +1085,7 @@
           "ip",
           "mac",
           "name",
+          "primary",
           "slot",
           "subnet",
           "vni"

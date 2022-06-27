@@ -156,6 +156,22 @@ table! {
         first_address -> Inet,
         last_address -> Inet,
         ip_pool_id -> Uuid,
+        rcgen -> Int8,
+    }
+}
+
+table! {
+    instance_external_ip (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        ip_pool_id -> Uuid,
+        ip_pool_range_id -> Uuid,
+        instance_id -> Uuid,
+        ip -> Inet,
+        first_port -> Int4,
+        last_port -> Int4,
     }
 }
 

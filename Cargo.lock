@@ -3073,6 +3073,7 @@ dependencies = [
  "httptest",
  "hyper",
  "ipnetwork",
+ "itertools",
  "lazy_static",
  "libc",
  "macaddr",
