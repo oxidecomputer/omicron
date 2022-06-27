@@ -2,7 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::db::schema::{client_authentication, client_token};
+//! Data structures and token generation routines for the OAuth 2.0
+//! Device Authorization Grant flow. See the module-level documentation
+//! on [`nexus::device_auth`] for an overview of how these are used.
+
+use crate::db::schema::{device_access_token, device_auth_request};
+
 use chrono::{DateTime, Duration, Utc};
 use rand::{distributions::Slice, rngs::StdRng, Rng, RngCore, SeedableRng};
 use uuid::Uuid;
@@ -10,12 +15,13 @@ use uuid::Uuid;
 /// Default timeout in seconds for client to authenticate for a token request.
 const CLIENT_AUTHENTICATION_TIMEOUT: i64 = 300;
 
-/// The initial record of a client authentication request.
-/// Does *not* include a token: that is only granted after
-/// the `user_code` has been relayed and login has succeeded.
+/// Initial record of an OAuth 2.0 Device Authorization Grant.
+/// Does *not* include a token; that is only granted after the
+/// `user_code` has been verified and login has succeeded.
+/// See RFC 8628 §§3.1-3.2.
 #[derive(Clone, Debug, Insertable, Queryable, Selectable)]
-#[diesel(table_name = client_authentication)]
-pub struct ClientAuthentication {
+#[diesel(table_name = device_auth_request)]
+pub struct DeviceAuthRequest {
     pub client_id: Uuid,
     pub device_code: String,
     pub user_code: String,
@@ -67,7 +73,7 @@ fn generate_user_code() -> String {
         .join("-")
 }
 
-impl ClientAuthentication {
+impl DeviceAuthRequest {
     pub fn new(client_id: Uuid) -> Self {
         let now = Utc::now();
         Self {
@@ -81,10 +87,11 @@ impl ClientAuthentication {
     }
 }
 
-/// A token granted after user authentication.
+/// An access token granted in response to a successful device authorization flow.
+// TODO-security: wrap token in an opaque struct to avoid accidental leaks.
 #[derive(Clone, Debug, Insertable, Queryable, Selectable)]
-#[diesel(table_name = client_token)]
-pub struct ClientToken {
+#[diesel(table_name = device_access_token)]
+pub struct DeviceAccessToken {
     pub token: String,
     pub client_id: Uuid,
     pub device_code: String,
@@ -92,7 +99,7 @@ pub struct ClientToken {
     pub time_created: DateTime<Utc>,
 }
 
-impl ClientToken {
+impl DeviceAccessToken {
     pub fn new(
         client_id: Uuid,
         device_code: String,

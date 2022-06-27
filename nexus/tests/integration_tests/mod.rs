@@ -5,10 +5,10 @@
 
 mod authn_http;
 mod basic;
-mod client_api;
 mod commands;
 mod console_api;
 mod datasets;
+mod device_auth;
 mod disks;
 mod images;
 mod instances;

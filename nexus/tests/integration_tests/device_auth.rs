@@ -5,11 +5,12 @@
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
-use omicron_nexus::external_api::client_api::{
-    AuthenticateParams, ClientVerificationParams, TokenRequestParams,
+use omicron_nexus::external_api::device_auth::{
+    DeviceAccessTokenRequestParams, DeviceAuthRequestParams,
+    DeviceAuthVerifyParams,
 };
 use omicron_nexus::external_api::views::{
-    ClientAuthentication, ClientTokenGrant, TokenType,
+    DeviceAccessTokenGrant, DeviceAccessTokenType, DeviceAuthResponse,
 };
 
 use http::{header, method::Method, StatusCode};
@@ -23,30 +24,30 @@ struct OAuthError {
 }
 
 #[nexus_test]
-async fn test_client_authentication(cptestctx: &ControlPlaneTestContext) {
+async fn test_device_auth_flow(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
     // Trying to authenticate without a `client_id` fails.
-    RequestBuilder::new(testctx, Method::POST, "/client/authenticate")
+    RequestBuilder::new(testctx, Method::POST, "/device/auth")
         .expect_status(Some(StatusCode::BAD_REQUEST))
         .execute()
         .await
         .expect("client_id required to start client authentication flow");
 
     let client_id = Uuid::new_v4();
-    let authn_params = AuthenticateParams { client_id };
+    let authn_params = DeviceAuthRequestParams { client_id };
 
     // Using a JSON encoded body fails.
-    RequestBuilder::new(testctx, Method::POST, "/client/authenticate")
+    RequestBuilder::new(testctx, Method::POST, "/device/auth")
         .body(Some(&authn_params))
         .expect_status(Some(StatusCode::BAD_REQUEST))
         .execute()
         .await
         .expect("failed to reject JSON encoded body");
 
-    // Start a client authentication flow using a correctly encoded body.
-    let client_authn: ClientAuthentication =
-        RequestBuilder::new(testctx, Method::POST, "/client/authenticate")
+    // Start a device authentication flow using a correctly encoded body.
+    let auth_response: DeviceAuthResponse =
+        RequestBuilder::new(testctx, Method::POST, "/device/auth")
             .body_urlencoded(Some(&authn_params))
             .expect_status(Some(StatusCode::OK))
             .execute()
@@ -56,23 +57,23 @@ async fn test_client_authentication(cptestctx: &ControlPlaneTestContext) {
             .expect("client authentication response");
 
     // Sanity-check the response.
-    let device_code = client_authn.device_code;
-    let user_code = client_authn.user_code;
-    assert!(client_authn.verification_uri.ends_with("/client/verify"));
-    assert!(client_authn.verification_uri_complete.ends_with(&user_code));
-    assert_eq!(client_authn.expires_in, 300);
+    let device_code = auth_response.device_code;
+    let user_code = auth_response.user_code;
+    assert!(auth_response.verification_uri.ends_with("/device/verify"));
+    assert!(auth_response.verification_uri_complete.ends_with(&user_code));
+    assert_eq!(auth_response.expires_in, 300);
 
     // Unauthenticated requests to the verification page redirect to login.
     RequestBuilder::new(
         testctx,
         Method::GET,
-        &format!("/client/verify?user_code={}", &user_code),
+        &format!("/device/verify?user_code={}", &user_code),
     )
     .expect_status(Some(StatusCode::FOUND))
     .expect_response_header(
         header::LOCATION,
         &format!(
-            "/spoof_login?state=%2Fclient%2Fverify%3Fuser_code%3D{}",
+            "/spoof_login?state=%2Fdevice%2Fverify%3Fuser_code%3D{}",
             &user_code
         ),
     )
@@ -83,7 +84,7 @@ async fn test_client_authentication(cptestctx: &ControlPlaneTestContext) {
     // Authenticated requests get the console verification page.
     assert!(NexusRequest::object_get(
         testctx,
-        &format!("/client/verify?user_code={}", &user_code),
+        &format!("/device/verify?user_code={}", &user_code),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -92,17 +93,17 @@ async fn test_client_authentication(cptestctx: &ControlPlaneTestContext) {
     .body
     .starts_with(b"<html>"));
 
-    let confirm_params = ClientVerificationParams { user_code };
+    let confirm_params = DeviceAuthVerifyParams { user_code };
 
     // Confirmation must be authenticated.
-    RequestBuilder::new(testctx, Method::POST, "/client/confirm")
+    RequestBuilder::new(testctx, Method::POST, "/device/confirm")
         .body(Some(&confirm_params))
         .expect_status(Some(StatusCode::UNAUTHORIZED))
         .execute()
         .await
         .expect("failed to 401 on unauthed confirmation");
 
-    let token_params = TokenRequestParams {
+    let token_params = DeviceAccessTokenRequestParams {
         grant_type: "urn:ietf:params:oauth:grant-type:device_code".to_string(),
         device_code,
         client_id,
@@ -110,7 +111,7 @@ async fn test_client_authentication(cptestctx: &ControlPlaneTestContext) {
 
     // A client polling for a token gets an OAuth error until confirmation.
     let error: OAuthError =
-        RequestBuilder::new(testctx, Method::POST, "/client/token")
+        RequestBuilder::new(testctx, Method::POST, "/device/token")
             .body_urlencoded(Some(&token_params))
             .expect_status(Some(StatusCode::BAD_REQUEST))
             .execute()
@@ -122,7 +123,7 @@ async fn test_client_authentication(cptestctx: &ControlPlaneTestContext) {
 
     // Authenticated confirmation should succeed.
     NexusRequest::new(
-        RequestBuilder::new(testctx, Method::POST, "/client/confirm")
+        RequestBuilder::new(testctx, Method::POST, "/device/confirm")
             .body(Some(&confirm_params))
             .expect_status(Some(StatusCode::OK)),
     )
@@ -132,8 +133,8 @@ async fn test_client_authentication(cptestctx: &ControlPlaneTestContext) {
     .expect("failed to confirm");
 
     // Token should be granted after confirmation.
-    let token: ClientTokenGrant = NexusRequest::new(
-        RequestBuilder::new(testctx, Method::POST, "/client/token")
+    let token: DeviceAccessTokenGrant = NexusRequest::new(
+        RequestBuilder::new(testctx, Method::POST, "/device/token")
             .body_urlencoded(Some(&token_params))
             .expect_status(Some(StatusCode::OK)),
     )
@@ -143,7 +144,7 @@ async fn test_client_authentication(cptestctx: &ControlPlaneTestContext) {
     .expect("failed to get token")
     .parsed_body()
     .expect("failed to deserialize token response");
-    assert_eq!(token.token_type, TokenType::Bearer);
+    assert_eq!(token.token_type, DeviceAccessTokenType::Bearer);
     assert_eq!(token.access_token.len(), 52);
     assert!(token.access_token.starts_with("oxide-token-"));
 }

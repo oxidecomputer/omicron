@@ -6,10 +6,10 @@
 
 mod block_size;
 mod bytecount;
-mod client_api;
 mod console_session;
 mod dataset;
 mod dataset_kind;
+mod device_auth;
 mod digest;
 mod disk;
 mod disk_state;
@@ -57,10 +57,10 @@ pub use self::macaddr::*;
 pub use self::u16::*;
 pub use block_size::*;
 pub use bytecount::*;
-pub use client_api::*;
 pub use console_session::*;
 pub use dataset::*;
 pub use dataset_kind::*;
+pub use device_auth::*;
 pub use digest::*;
 pub use disk::*;
 pub use disk_state::*;

@@ -533,7 +533,7 @@ impl authn::external::token::TokenContext for Arc<ServerContext> {
         token: String,
     ) -> Result<authn::Actor, authn::Reason> {
         let opctx = self.nexus.opctx_external_authn();
-        self.nexus.client_lookup_for_authn(opctx, token).await
+        self.nexus.device_access_token_actor(opctx, token).await
     }
 }
 

@@ -1118,15 +1118,14 @@ INSERT INTO omicron.public.user_builtin (
 );
 
 /*
- * API client authentication and token granting à la RFC 8628
- * (OAuth 2.0 Device Authorization Grant)
+ * OAuth 2.0 Device Authorization Grant (RFC 8628)
  */
 
--- Client authentication requests. In theory these records could
+-- Device authorization requests. In theory these records could
 -- (and probably should) be short-lived, and removed as soon as
 -- a token is granted.
 -- TODO-security: We should not grant a token more than once per record.
-CREATE TABLE omicron.public.client_authentication (
+CREATE TABLE omicron.public.device_auth_request (
     client_id UUID NOT NULL,
     device_code STRING(40) NOT NULL,
     user_code STRING(63) NOT NULL,
@@ -1137,11 +1136,11 @@ CREATE TABLE omicron.public.client_authentication (
 );
 
 -- Fast lookup by user_code for verification
-CREATE INDEX ON omicron.public.client_authentication (user_code);
+CREATE INDEX ON omicron.public.device_auth_request (user_code);
 
--- Tokens granted in response to user authentication.
--- TODO: expire tokens.
-CREATE TABLE omicron.public.client_token (
+-- Access tokens granted in response to successful device authorization flows.
+-- TODO-security: expire tokens.
+CREATE TABLE omicron.public.device_access_token (
     token STRING(40) PRIMARY KEY,
     client_id UUID NOT NULL,
     device_code STRING(40) NOT NULL,
@@ -1150,7 +1149,7 @@ CREATE TABLE omicron.public.client_token (
 );
 
 -- Matches the primary key on client authentication records.
-CREATE UNIQUE INDEX ON omicron.public.client_token (client_id, device_code);
+CREATE UNIQUE INDEX ON omicron.public.device_access_token (client_id, device_code);
 
 /*
  * Roles built into the system

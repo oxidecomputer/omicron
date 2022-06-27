@@ -471,7 +471,7 @@ table! {
 }
 
 table! {
-    client_authentication (client_id, device_code) {
+    device_auth_request (client_id, device_code) {
         client_id -> Uuid,
         device_code -> Text,
         user_code -> Text,
@@ -481,7 +481,7 @@ table! {
 }
 
 table! {
-    client_token (token) {
+    device_access_token (token) {
         token -> Text,
         client_id -> Uuid,
         device_code -> Text,

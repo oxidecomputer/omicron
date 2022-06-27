@@ -10,19 +10,19 @@
     "version": "0.0.1"
   },
   "paths": {
-    "/client/authenticate": {
+    "/device/auth": {
       "post": {
         "tags": [
           "hidden"
         ],
         "summary": "Start an OAuth 2.0 Device Authorization Grant",
-        "description": "This endpoint is designed to be accessed from an unauthenticated API client. It generates and records a `device_code` and `user_code` which must be verified and confirmed prior to a token being granted.",
-        "operationId": "client_authenticate",
+        "description": "This endpoint is designed to be accessed from an *unauthenticated* API client. It generates and records a `device_code` and `user_code` which must be verified and confirmed prior to a token being granted.",
+        "operationId": "device_auth_request",
         "requestBody": {
           "content": {
             "application/x-www-form-urlencoded": {
               "schema": {
-                "$ref": "#/components/schemas/AuthenticateParams"
+                "$ref": "#/components/schemas/DeviceAuthRequestParams"
               }
             }
           },
@@ -40,19 +40,19 @@
         }
       }
     },
-    "/client/confirm": {
+    "/device/confirm": {
       "post": {
         "tags": [
           "hidden"
         ],
         "summary": "Confirm an OAuth 2.0 Device Authorization Grant",
-        "description": "This endpoint is designed to be accessed by the user agent (browser), not the client requesting the token. So we do not actually return the token here; it will be returned in response to the poll on `/client/token`.",
-        "operationId": "client_confirm",
+        "description": "This endpoint is designed to be accessed by the user agent (browser), not the client requesting the token. So we do not actually return the token here; it will be returned in response to the poll on `/device/token`.",
+        "operationId": "device_auth_confirm",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ClientVerificationParams"
+                "$ref": "#/components/schemas/DeviceAuthVerifyParams"
               }
             }
           },
@@ -82,19 +82,19 @@
         }
       }
     },
-    "/client/token": {
+    "/device/token": {
       "post": {
         "tags": [
           "hidden"
         ],
-        "summary": "Finish an OAuth 2.0 Device Authorization Grant",
+        "summary": "Request a device access token",
         "description": "This endpoint should be polled by the client until the user code is verified and the grant is confirmed.",
-        "operationId": "client_grant_token",
+        "operationId": "device_access_token",
         "requestBody": {
           "content": {
             "application/x-www-form-urlencoded": {
               "schema": {
-                "$ref": "#/components/schemas/TokenRequestParams"
+                "$ref": "#/components/schemas/DeviceAccessTokenRequestParams"
               }
             }
           },
@@ -112,14 +112,14 @@
         }
       }
     },
-    "/client/verify": {
+    "/device/verify": {
       "get": {
         "tags": [
           "hidden"
         ],
         "summary": "Verify an OAuth 2.0 Device Authorization Grant",
-        "description": "Verify the user code and redirect to the login page. This endpoint should be accessed in a full user agent (e.g., a browser). If the user is not logged in, we redirect them to the login page and use the `state` parameter to get them back here on completion.",
-        "operationId": "client_verify",
+        "description": "This endpoint should be accessed in a full user agent (e.g., a browser). If the user is not logged in, we redirect them to the login page and use the `state` parameter to get them back here on completion. If they are logged in, serve up the console verification page so they can verify the user code.",
+        "operationId": "device_auth_verify",
         "parameters": [
           {
             "in": "query",
@@ -5796,18 +5796,6 @@
       }
     },
     "schemas": {
-      "AuthenticateParams": {
-        "type": "object",
-        "properties": {
-          "client_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "client_id"
-        ]
-      },
       "BlockSize": {
         "title": "disk block size in bytes",
         "type": "integer",
@@ -5822,17 +5810,6 @@
         "type": "integer",
         "format": "uint64",
         "minimum": 0
-      },
-      "ClientVerificationParams": {
-        "type": "object",
-        "properties": {
-          "user_code": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "user_code"
-        ]
       },
       "DatumType": {
         "description": "The type of an individual datum of a metric.",
@@ -5864,6 +5841,49 @@
         "required": [
           "private_key",
           "public_cert"
+        ]
+      },
+      "DeviceAccessTokenRequestParams": {
+        "type": "object",
+        "properties": {
+          "client_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "device_code": {
+            "type": "string"
+          },
+          "grant_type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_id",
+          "device_code",
+          "grant_type"
+        ]
+      },
+      "DeviceAuthRequestParams": {
+        "type": "object",
+        "properties": {
+          "client_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "client_id"
+        ]
+      },
+      "DeviceAuthVerifyParams": {
+        "type": "object",
+        "properties": {
+          "user_code": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_code"
         ]
       },
       "Digest": {
@@ -8883,26 +8903,6 @@
         },
         "required": [
           "items"
-        ]
-      },
-      "TokenRequestParams": {
-        "type": "object",
-        "properties": {
-          "client_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "device_code": {
-            "type": "string"
-          },
-          "grant_type": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "client_id",
-          "device_code",
-          "grant_type"
         ]
       },
       "User": {

@@ -52,8 +52,8 @@ use crate::db::{
         public_error_from_diesel_pool, ErrorHandler, TransactionError,
     },
     model::{
-        ClientAuthentication, ClientToken, ConsoleSession, Dataset,
-        DatasetKind, Disk, DiskRuntimeState, Generation, GlobalImage,
+        ConsoleSession, Dataset, DatasetKind, DeviceAccessToken,
+        DeviceAuthRequest, Disk, DiskRuntimeState, Generation, GlobalImage,
         IdentityProvider, IncompleteNetworkInterface, Instance,
         InstanceRuntimeState, Name, NetworkInterface, Organization,
         OrganizationUpdate, OximeterInfo, ProducerEndpoint, Project,
@@ -3802,39 +3802,42 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    // Client authentication and token granting
+    // OAuth 2.0 Device Authorization Grant
 
+    /// Start a device authorization grant flow by recording the request
+    /// and initial response parameters.
     // TODO-security: authz
-    pub async fn client_authenticate(
+    pub async fn device_auth_start(
         &self,
         opctx: &OpContext,
-        client_authn: ClientAuthentication,
-    ) -> CreateResult<ClientAuthentication> {
-        use db::schema::client_authentication::dsl;
-        diesel::insert_into(dsl::client_authentication)
-            .values(client_authn)
-            .returning(ClientAuthentication::as_returning())
+        auth_request: DeviceAuthRequest,
+    ) -> CreateResult<DeviceAuthRequest> {
+        use db::schema::device_auth_request::dsl;
+        diesel::insert_into(dsl::device_auth_request)
+            .values(auth_request)
+            .returning(DeviceAuthRequest::as_returning())
             .get_result_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 Error::internal_error(&format!(
-                    "error creating client authentication record: {:?}",
+                    "error creating device authorization record: {:?}",
                     e
                 ))
             })
     }
 
+    /// Look up a device authorization request by `user_code`.
     // TODO-security: authz
-    pub async fn client_verify(
+    pub async fn device_auth_get_request(
         &self,
         opctx: &OpContext,
         user_code: String,
-    ) -> LookupResult<ClientAuthentication> {
-        use db::schema::client_authentication::dsl;
-        dsl::client_authentication
+    ) -> LookupResult<DeviceAuthRequest> {
+        use db::schema::device_auth_request::dsl;
+        dsl::device_auth_request
             .filter(dsl::user_code.eq(user_code))
             .filter(dsl::time_expires.gt(Utc::now()))
-            .select(ClientAuthentication::as_select())
+            .select(DeviceAuthRequest::as_select())
             .get_result_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
@@ -3843,38 +3846,40 @@ impl DataStore {
             })
     }
 
+    /// Grant a device authorization token.
     // TODO-security: authz
-    pub async fn client_grant_token(
+    pub async fn device_auth_grant(
         &self,
         opctx: &OpContext,
-        client_token: ClientToken,
-    ) -> CreateResult<ClientToken> {
-        use db::schema::client_token::dsl;
-        diesel::insert_into(dsl::client_token)
-            .values(client_token)
-            .returning(ClientToken::as_returning())
+        access_token: DeviceAccessToken,
+    ) -> CreateResult<DeviceAccessToken> {
+        use db::schema::device_access_token::dsl;
+        diesel::insert_into(dsl::device_access_token)
+            .values(access_token)
+            .returning(DeviceAccessToken::as_returning())
             .get_result_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 Error::internal_error(&format!(
-                    "error creating client token: {:?}",
+                    "error creating device access token: {:?}",
                     e
                 ))
             })
     }
 
+    /// Look up a granted device authorization token.
     // TODO-security: authz
-    pub async fn client_get_token(
+    pub async fn device_auth_get_token(
         &self,
         opctx: &OpContext,
         client_id: Uuid,
         device_code: String,
-    ) -> LookupResult<ClientToken> {
-        use db::schema::client_token::dsl;
-        dsl::client_token
+    ) -> LookupResult<DeviceAccessToken> {
+        use db::schema::device_access_token::dsl;
+        dsl::device_access_token
             .filter(dsl::client_id.eq(client_id))
             .filter(dsl::device_code.eq(device_code))
-            .select(ClientToken::as_select())
+            .select(DeviceAccessToken::as_select())
             .get_result_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
@@ -3883,19 +3888,20 @@ impl DataStore {
             })
     }
 
+    /// Look up the actor (a Silo user) for whom a token was granted.
     // TODO-security: authz
-    pub async fn client_get_actor(
+    pub async fn device_access_token_actor(
         &self,
         opctx: &OpContext,
         token: String,
     ) -> LookupResult<Actor> {
-        use db::schema::client_token::dsl;
+        use db::schema::device_access_token::dsl;
         use db::schema::silo_user::dsl as silo_user_dsl;
 
         let pool = self.pool_authorized(opctx).await?;
-        let token = dsl::client_token
+        let token = dsl::device_access_token
             .filter(dsl::token.eq(token))
-            .select(ClientToken::as_select())
+            .select(DeviceAccessToken::as_select())
             .get_result_async(pool)
             .await
             .map_err(|e| {
