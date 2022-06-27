@@ -8,6 +8,7 @@ license = "MPL-2.0"
 [dependencies]
 clap = { version = "3.2", features = ["derive"] }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
+internal-dns-client = { path = "../../internal-dns-client" }
 nexus-client = { path = "../../nexus-client" }
 omicron-common = { path = "../../common" }
 oximeter = { path = "../oximeter" }
