@@ -269,10 +269,13 @@ pub async fn login(
                                 value
                                     .to_str()
                                     .map_err(|e| {
-                                        HttpError::for_internal_error(format!(
+                                        HttpError::for_bad_request(
+                                            None,
+                                            format!(
                                             "referer header to_str failed! {}",
                                             e
-                                        ))
+                                        ),
+                                        )
                                     })?
                                     .to_string(),
                             )
@@ -384,10 +387,10 @@ pub async fn consume_credentials(
             if let Some(referer) = &relay_state.referer {
                 referer.clone()
             } else {
-                "/organizations".to_string()
+                "/".to_string()
             }
         } else {
-            "/organizations".to_string()
+            "/".to_string()
         };
 
         debug!(
