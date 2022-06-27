@@ -273,12 +273,18 @@ impl SamlIdentityProvider {
             .issuer
             .as_ref()
             .ok_or_else(|| {
-                HttpError::for_bad_request(None, "SAMLResponse has no issuer!".into())
+                HttpError::for_bad_request(
+                    None,
+                    "SAMLResponse has no issuer!".into(),
+                )
             })?
             .value
             .as_ref()
             .ok_or_else(|| {
-                HttpError::for_bad_request(None, "SAMLResponse has a blank issuer!".into())
+                HttpError::for_bad_request(
+                    None,
+                    "SAMLResponse has a blank issuer!".into(),
+                )
             })?;
 
         if issuer != &self.idp_entity_id {
@@ -332,7 +338,10 @@ impl SamlIdentityProvider {
         // Every assertion should also be signed. Check the signature and digest
         // schemes against an explicit allow list.
         let assertion_signature = assertion.signature.ok_or_else(|| {
-            HttpError::for_bad_request(None, "assertion is missing signature!".to_string())
+            HttpError::for_bad_request(
+                None,
+                "assertion is missing signature!".to_string(),
+            )
         })?;
 
         let signature_algorithm: String =

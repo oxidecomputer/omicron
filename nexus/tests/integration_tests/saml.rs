@@ -8,8 +8,8 @@ use omicron_nexus::authn::silos::{
     IdentityProviderType, SamlIdentityProvider, SamlLoginPost,
 };
 use omicron_nexus::external_api::console_api;
-use omicron_nexus::external_api::{params, shared};
 use omicron_nexus::external_api::views::{self, Silo};
+use omicron_nexus::external_api::{params, shared};
 use omicron_nexus::TestInterfaces;
 
 use http::method::Method;
@@ -23,7 +23,8 @@ use httptest::{matchers::*, responders::*, Expectation, Server};
 
 // Valid SAML IdP entity descriptor from https://en.wikipedia.org/wiki/SAML_metadata#Identity_provider_metadata
 // note: no signing keys
-pub const SAML_IDP_DESCRIPTOR: &str = include_str!("data/saml_idp_descriptor.xml");
+pub const SAML_IDP_DESCRIPTOR: &str =
+    include_str!("data/saml_idp_descriptor.xml");
 
 // Create a SAML IdP
 #[nexus_test]

@@ -8,7 +8,6 @@
 //! external API, but in order to avoid CORS issues for now, we are serving
 //! these routes directly from the external API.
 use super::views;
-use anyhow::Context;
 use crate::authn::{
     silos::IdentityProviderType, USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED,
 };
@@ -24,6 +23,7 @@ use crate::{
     },
     db::identity::Asset,
 };
+use anyhow::Context;
 use dropshot::{
     endpoint, HttpError, HttpResponseOk, Path, Query, RequestContext, TypedBody,
 };
@@ -208,15 +208,20 @@ pub struct RelayState {
 
 impl RelayState {
     pub fn to_encoded(&self) -> Result<String, anyhow::Error> {
-        Ok(base64::encode(serde_json::to_string(&self).context("encoding relay state")?))
+        Ok(base64::encode(
+            serde_json::to_string(&self).context("encoding relay state")?,
+        ))
     }
 
     pub fn from_encoded(encoded: String) -> Result<Self, anyhow::Error> {
-        Ok(serde_json::from_str(
+        serde_json::from_str(
             &String::from_utf8(
-                base64::decode(encoded).context("base64 decoding relay state")?
-            ).context("creating relay state string")?
-        ).context("json from relay state string")?)
+                base64::decode(encoded)
+                    .context("base64 decoding relay state")?,
+            )
+            .context("creating relay state string")?,
+        )
+        .context("json from relay state string")
     }
 }
 
@@ -275,7 +280,10 @@ pub async fn login(
                     };
 
                     Some(relay_state.to_encoded().map_err(|e| {
-                        HttpError::for_internal_error(format!("encoding relay state failed: {}", e))
+                        HttpError::for_internal_error(format!(
+                            "encoding relay state failed: {}",
+                            e
+                        ))
                     })?)
                 } else {
                     None
@@ -321,13 +329,14 @@ pub async fn consume_credentials(
         // unauthenticated.
         let opctx = nexus.opctx_external_authn();
 
-        let (authz_silo, db_silo, identity_provider) = IdentityProviderType::lookup(
-            &nexus.datastore(),
-            &opctx,
-            &path_params.silo_name,
-            &path_params.provider_name,
-        )
-        .await?;
+        let (authz_silo, db_silo, identity_provider) =
+            IdentityProviderType::lookup(
+                &nexus.datastore(),
+                &opctx,
+                &path_params.silo_name,
+                &path_params.provider_name,
+            )
+            .await?;
 
         let (authenticated_subject, relay_state_string) =
             match identity_provider {

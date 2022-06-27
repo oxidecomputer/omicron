@@ -6,7 +6,7 @@ use super::{Generation, Organization};
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::model::impl_enum_type;
 use crate::db::schema::{organization, silo};
-use crate::external_api::{shared, params};
+use crate::external_api::{params, shared};
 use db_macros::Resource;
 use std::io::Write;
 use uuid::Uuid;

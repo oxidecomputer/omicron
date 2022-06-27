@@ -5,12 +5,12 @@
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use omicron_common::api::external::{IdentityMetadataCreateParams, Name};
 use omicron_nexus::authn::silos::{AuthenticatedSubject, IdentityProviderType};
-use omicron_nexus::external_api::{params, shared};
+use omicron_nexus::context::OpContext;
+use omicron_nexus::db::lookup::LookupPath;
 use omicron_nexus::external_api::views::{
     self, IdentityProvider, Organization, SamlIdentityProvider, Silo,
 };
-use omicron_nexus::context::OpContext;
-use omicron_nexus::db::lookup::LookupPath;
+use omicron_nexus::external_api::{params, shared};
 use omicron_nexus::TestInterfaces as _;
 use std::collections::HashSet;
 
@@ -617,11 +617,12 @@ async fn test_silo_user_provision_types(cptestctx: &ControlPlaneTestContext) {
 
         let authn_opctx = nexus.opctx_external_authn();
 
-        let (authz_silo, db_silo) = LookupPath::new(&authn_opctx, &nexus.datastore())
-            .silo_name(&silo.identity.name.into())
-            .fetch()
-            .await
-            .unwrap();
+        let (authz_silo, db_silo) =
+            LookupPath::new(&authn_opctx, &nexus.datastore())
+                .silo_name(&silo.identity.name.into())
+                .fetch()
+                .await
+                .unwrap();
 
         let existing_silo_user = nexus
             .silo_user_from_authenticated_subject(
@@ -651,22 +652,30 @@ async fn test_silo_user_provision_types(cptestctx: &ControlPlaneTestContext) {
 }
 
 #[nexus_test]
-async fn test_silo_user_fetch_by_external_id(cptestctx: &ControlPlaneTestContext) {
+async fn test_silo_user_fetch_by_external_id(
+    cptestctx: &ControlPlaneTestContext,
+) {
     let client = &cptestctx.external_client;
     let nexus = &cptestctx.server.apictx.nexus;
 
-    let silo =
-        create_silo(&client, "test-silo", true, shared::UserProvisionType::Fixed)
-            .await;
+    let silo = create_silo(
+        &client,
+        "test-silo",
+        true,
+        shared::UserProvisionType::Fixed,
+    )
+    .await;
 
-    let opctx = OpContext::for_tests(cptestctx.logctx.log.new(o!()), nexus.datastore().clone());
+    let opctx = OpContext::for_tests(
+        cptestctx.logctx.log.new(o!()),
+        nexus.datastore().clone(),
+    );
 
     let (authz_silo, _) = LookupPath::new(&opctx, &nexus.datastore())
         .silo_name(&Name::try_from("test-silo".to_string()).unwrap().into())
         .fetch_for(authz::Action::Read)
         .await
         .unwrap();
-
 
     // Create a user
     nexus
@@ -679,18 +688,22 @@ async fn test_silo_user_fetch_by_external_id(cptestctx: &ControlPlaneTestContext
         .unwrap();
 
     // Fetching by external id that's not in the db should be Ok(None)
-    let result = nexus.datastore().silo_user_fetch_by_external_id(
-        &opctx,
-        &authz_silo,
-        "123".into()).await;
+    let result = nexus
+        .datastore()
+        .silo_user_fetch_by_external_id(&opctx, &authz_silo, "123".into())
+        .await;
     assert!(result.is_ok());
     assert!(result.unwrap().is_none());
 
     // Fetching by external id that is should be Ok(Some)
-    let result = nexus.datastore().silo_user_fetch_by_external_id(
-        &opctx,
-        &authz_silo,
-        "5513e049dac9468de5bdff36ab17d04f".into()).await;
+    let result = nexus
+        .datastore()
+        .silo_user_fetch_by_external_id(
+            &opctx,
+            &authz_silo,
+            "5513e049dac9468de5bdff36ab17d04f".into(),
+        )
+        .await;
     assert!(result.is_ok());
     assert!(result.unwrap().is_some());
 }

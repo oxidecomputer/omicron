@@ -20,11 +20,7 @@ pub struct SiloUser {
 }
 
 impl SiloUser {
-    pub fn new(
-        silo_id: Uuid,
-        user_id: Uuid,
-        external_id: String,
-    ) -> Self {
+    pub fn new(silo_id: Uuid, user_id: Uuid, external_id: String) -> Self {
         Self { identity: SiloUserIdentity::new(user_id), silo_id, external_id }
     }
 }
