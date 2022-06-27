@@ -3988,7 +3988,7 @@ mod test {
 
         // Associate silo with user
         datastore
-            .silo_user_create(SiloUser::new(*SILO_ID, silo_user_id, None))
+            .silo_user_create(SiloUser::new(*SILO_ID, silo_user_id, "external_id".into()))
             .await
             .unwrap();
 
@@ -4487,7 +4487,7 @@ mod test {
         // Create a new Silo user so that we can lookup their keys.
         let silo_user_id = Uuid::new_v4();
         datastore
-            .silo_user_create(SiloUser::new(*SILO_ID, silo_user_id, None))
+            .silo_user_create(SiloUser::new(*SILO_ID, silo_user_id, "external@id".into()))
             .await
             .unwrap();
 

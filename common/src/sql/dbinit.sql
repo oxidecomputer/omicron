@@ -256,13 +256,12 @@ CREATE TABLE omicron.public.silo_user (
     time_deleted TIMESTAMPTZ,
 
     silo_id UUID NOT NULL,
-    external_id TEXT
+    external_id TEXT NOT NULL
 );
 
 /* This index lets us quickly find users for a given silo. */
-CREATE INDEX ON omicron.public.silo_user (
+CREATE UNIQUE INDEX ON omicron.public.silo_user (
     silo_id,
-    id,
     external_id
 ) WHERE
     time_deleted IS NULL;

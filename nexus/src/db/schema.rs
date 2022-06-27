@@ -158,7 +158,7 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
 
         silo_id -> Uuid,
-        external_id -> Nullable<Text>,
+        external_id -> Text,
     }
 }
 

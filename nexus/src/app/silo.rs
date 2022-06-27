@@ -179,7 +179,7 @@ impl super::Nexus {
                     let silo_user = db::model::SiloUser::new(
                         authz_silo.id(),
                         silo_user_id,
-                        Some(authenticated_subject.external_id.clone()),
+                        authenticated_subject.external_id.clone(),
                     );
                     self.db_datastore.silo_user_create(silo_user).await?;
 

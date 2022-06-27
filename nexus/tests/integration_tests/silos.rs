@@ -88,7 +88,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
         .silo_user_create(
             silos[0].identity.id, /* silo id */
             new_silo_user_id,
-            None,
+            "some_silo_user".into(),
         )
         .await
         .unwrap();
@@ -609,7 +609,7 @@ async fn test_silo_user_provision_types(cptestctx: &ControlPlaneTestContext) {
                 .silo_user_create(
                     silo.identity.id,
                     new_silo_user_id,
-                    Some("external@id.com".into()),
+                    "external@id.com".into(),
                 )
                 .await
                 .unwrap();
