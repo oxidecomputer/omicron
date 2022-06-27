@@ -3252,13 +3252,15 @@ async fn hardware_racks_get(
     let query = query_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let rack_stream = nexus
+        let racks = nexus
             .racks_list(&opctx, &data_page_params_for(&rqctx, &query)?)
-            .await?;
-        let view_list = to_list::<db::model::Rack, Rack>(rack_stream).await;
+            .await?
+            .into_iter()
+            .map(|r| r.into())
+            .collect();
         Ok(HttpResponseOk(ScanById::results_page(
             &query,
-            view_list,
+            racks,
             &|_, rack: &Rack| rack.identity.id,
         )?))
     };

@@ -15,6 +15,7 @@ mod ip_pools;
 mod organizations;
 mod oximeter;
 mod projects;
+mod rack;
 mod role_assignments;
 mod roles_builtin;
 mod router_routes;
