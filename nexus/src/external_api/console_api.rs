@@ -349,11 +349,6 @@ pub async fn consume_credentials(
                 None
             };
 
-        info!(
-            &apictx.log,
-            "authenticated subject is {}", authenticated_subject.external_id,
-        );
-
         let user = nexus
             .silo_user_from_authenticated_subject(
                 &opctx,
@@ -373,8 +368,6 @@ pub async fn consume_credentials(
 
         let user = user.unwrap();
 
-        info!(&apictx.log, "user id is {}", user.id());
-
         // always create a new console session if the user is POSTing here.
         let session = nexus.session_create(&opctx, user.id()).await?;
 
@@ -387,6 +380,15 @@ pub async fn consume_credentials(
         } else {
             "/organizations".to_string()
         };
+
+        debug!(
+            &apictx.log,
+            "successful login to silo {} using provider {}: authenticated subject {} = user id {}",
+            path_params.silo_name,
+            path_params.provider_name,
+            authenticated_subject.external_id,
+            user.id(),
+        );
 
         Ok(Response::builder()
             .status(StatusCode::FOUND)
