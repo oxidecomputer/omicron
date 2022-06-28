@@ -114,6 +114,17 @@ impl<'a> RequestBuilder<'a> {
         self
     }
 
+    /// Set the outgoing request body
+    ///
+    /// If `body` is `None`, the request body will be empty.
+    pub fn raw_body(mut self, body: Option<String>) -> Self {
+        match body {
+            Some(body) => self.body = hyper::Body::from(body),
+            None => self.body = hyper::Body::empty(),
+        };
+        self
+    }
+
     /// Set the outgoing request body to the result of serializing `body`
     ///
     /// If `body` is `None`, the request body will be empty.

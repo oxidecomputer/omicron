@@ -829,6 +829,17 @@
             "style": "simple"
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "default": {
             "description": "",
@@ -8906,6 +8917,14 @@
             "description": "timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
+          },
+          "user_provision_type": {
+            "description": "User provision type",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UserProvisionType"
+              }
+            ]
           }
         },
         "required": [
@@ -8914,7 +8933,8 @@
           "id",
           "name",
           "time_created",
-          "time_modified"
+          "time_modified",
+          "user_provision_type"
         ]
       },
       "SiloCreate": {
@@ -8929,12 +8949,16 @@
           },
           "name": {
             "$ref": "#/components/schemas/Name"
+          },
+          "user_provision_type": {
+            "$ref": "#/components/schemas/UserProvisionType"
           }
         },
         "required": [
           "description",
           "discoverable",
-          "name"
+          "name",
+          "user_provision_type"
         ]
       },
       "SiloResultsPage": {
@@ -9385,6 +9409,14 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "UserProvisionType": {
+        "description": "How users will be provisioned in a silo during authentication.",
+        "type": "string",
+        "enum": [
+          "fixed",
+          "jit"
         ]
       },
       "UserResultsPage": {

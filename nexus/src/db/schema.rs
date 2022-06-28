@@ -169,6 +169,7 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
 
         discoverable -> Bool,
+        user_provision_type -> crate::db::model::UserProvisionTypeEnum,
         rcgen -> Int8,
     }
 }
@@ -176,11 +177,12 @@ table! {
 table! {
     silo_user (id) {
         id -> Uuid,
-        silo_id -> Uuid,
-
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
+
+        silo_id -> Uuid,
+        external_id -> Text,
     }
 }
 

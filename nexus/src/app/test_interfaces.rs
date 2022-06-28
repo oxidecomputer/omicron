@@ -37,7 +37,10 @@ pub trait TestInterfaces {
         &self,
         silo_id: Uuid,
         silo_user_id: Uuid,
-    ) -> Result<(), Error>;
+        external_id: String,
+    ) -> Result<SiloUser, Error>;
+
+    fn set_samael_max_issue_delay(&self, max_issue_delay: chrono::Duration);
 }
 
 #[async_trait]
@@ -103,8 +106,14 @@ impl TestInterfaces for super::Nexus {
         &self,
         silo_id: Uuid,
         silo_user_id: Uuid,
-    ) -> Result<(), Error> {
-        let silo_user = SiloUser::new(silo_id, silo_user_id);
+        external_id: String,
+    ) -> Result<SiloUser, Error> {
+        let silo_user = SiloUser::new(silo_id, silo_user_id, external_id);
         self.db_datastore.silo_user_create(silo_user).await
+    }
+
+    fn set_samael_max_issue_delay(&self, max_issue_delay: chrono::Duration) {
+        let mut mid = self.samael_max_issue_delay.lock().unwrap();
+        *mid = Some(max_issue_delay);
     }
 }

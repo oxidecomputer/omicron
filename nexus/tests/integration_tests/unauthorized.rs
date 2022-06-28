@@ -6,7 +6,7 @@
 //! unauthorized users
 
 use super::endpoints::*;
-use crate::integration_tests::silos::SAML_IDP_DESCRIPTOR;
+use crate::integration_tests::saml::SAML_IDP_DESCRIPTOR;
 use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use headers::authorization::Credentials;

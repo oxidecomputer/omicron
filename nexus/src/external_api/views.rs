@@ -7,7 +7,7 @@
 use crate::authn;
 use crate::db::identity::{Asset, Resource};
 use crate::db::model;
-use crate::external_api::shared::IpRange;
+use crate::external_api::shared::{self, IpRange};
 use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
@@ -58,11 +58,18 @@ pub struct Silo {
     /// A silo where discoverable is false can be retrieved only by its id - it
     /// will not be part of the "list all silos" output.
     pub discoverable: bool,
+
+    /// User provision type
+    pub user_provision_type: shared::UserProvisionType,
 }
 
 impl Into<Silo> for model::Silo {
     fn into(self) -> Silo {
-        Silo { identity: self.identity(), discoverable: self.discoverable }
+        Silo {
+            identity: self.identity(),
+            discoverable: self.discoverable,
+            user_provision_type: self.user_provision_type.into(),
+        }
     }
 }
 

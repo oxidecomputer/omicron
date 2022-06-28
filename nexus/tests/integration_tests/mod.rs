@@ -19,6 +19,7 @@ mod rack;
 mod role_assignments;
 mod roles_builtin;
 mod router_routes;
+mod saml;
 mod silos;
 mod ssh_keys;
 mod subnet_allocation;
