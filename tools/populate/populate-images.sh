@@ -1,7 +1,8 @@
 #!/bin/bash
-
 # Populate an Oxide lab host running Omicron with images from server catacomb.
 
+set -eu
+CATACOMB_TUNNEL="[fd00:1122:3344:101::1]:8080"
 res=0
 echo "Populating debian"
 oxide api /images --method POST --input - <<EOF
@@ -15,17 +16,10 @@ oxide api /images --method POST --input - <<EOF
   },
   "source": {
       "type": "url",
-      "url": "http://[fd00:1122:3344:101::1]:8080/media/debian/debian-11-nocloud-amd64-20220503-998.raw"
+      "url": "http://${CATACOMB_TUNNEL}/media/debian/debian-11-nocloud-amd64-20220503-998.raw"
   }
 }
 EOF
-if [[ $? -ne 0 ]]; then
-    echo "Making image debian failed"
-    res=1
-else
-    echo "debian image created"
-fi
-
 
 echo "Populating focal"
 oxide api /images --method POST --input - <<EOF
@@ -39,16 +33,10 @@ oxide api /images --method POST --input - <<EOF
   },
   "source": {
       "type": "url",
-      "url": "http://[fd00:1122:3344:101::1]:8080/media/cloud/focal-server-cloudimg-amd64.raw"
+      "url": "http://${CATACOMB_TUNNEL}/media/cloud/focal-server-cloudimg-amd64.raw"
   }
 }
 EOF
-if [[ $? -ne 0 ]]; then
-    echo "Making image debian failed"
-    res=1
-else
-    echo "debian image created"
-fi
 
 echo "Populating ubuntu"
 oxide api /images --method POST --input - <<EOF
@@ -62,39 +50,25 @@ oxide api /images --method POST --input - <<EOF
   },
   "source": {
       "type": "url",
-      "url": "http://[fd00:1122:3344:101::1]:8080/media/ubuntu/ubuntu-22.04-live-server-amd64.iso"
+      "url": "http://${CATACOMB_TUNNEL}/media/ubuntu/ubuntu-22.04-live-server-amd64.iso"
   }
 }
 EOF
-if [[ $? -ne 0 ]]; then
-    echo "Making image debian failed"
-    res=1
-else
-    echo "debian image created"
-fi
-
-if [[ $res -ne 0 ]]; then
-    echo ""
-    echo "Failed creating some images"
-    echo ""
-else
-    echo "✔ All images populated"
-fi
 
 # A sanity check to see if access is working to catacomb
-curl_test=$(curl -w '%{http_code}\n' -s -o /dev/null http://[fd00:1122:3344:101::1]:8080/media/test.txt)
-if [[ $curl_test -ne 200 ]]; then
+curl_test=$(curl -w '%{http_code}\n' -s -o /dev/null http://${CATACOMB_TUNNEL}/media/test.txt)
+if [[ $curl_test -eq 200 ]]; then
+    echo "✔ Curl test to catacomb worked"
+else
     echo "To use these images, you need to have network access"
-    echo "to the catacomb lab system at fd00:1122:3344:101::1 port 8080"
+    echo "to the catacomb lab system at ${CATACOMB_TUNNEL}"
     echo ""
     echo "For example, I run this from the system \"sock\" to set up a tunnel:"
-    echo "ssh -L [fd00:1122:3344:101::1]:8080:catacomb:80 catacomb"
+    echo "ssh -L ${CATACOMB_TUNNEL}:catacomb:80 catacomb"
     echo "Leave that running in a different window while access is required"
     echo ""
     echo "Test of curl to catacomb failed"
-    echo "curl http://[fd00:1122:3344:101::1]:8080/media/test.txt"
+    echo "curl http://${CATACOMB_TUNNEL}/media/test.txt"
     res=1
-else
-    echo "✔ Curl test to catacomb worked"
 fi
 exit $res
