@@ -729,11 +729,11 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
         vec![
             views::User {
                 id: USER_TEST_PRIVILEGED.id(),
-                external_id: USER_TEST_PRIVILEGED.external_id.clone()
+                display_name: USER_TEST_PRIVILEGED.external_id.clone()
             },
             views::User {
                 id: USER_TEST_UNPRIVILEGED.id(),
-                external_id: USER_TEST_UNPRIVILEGED.external_id.clone()
+                display_name: USER_TEST_UNPRIVILEGED.external_id.clone()
             },
         ]
     );
@@ -762,15 +762,15 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
         vec![
             views::User {
                 id: USER_TEST_PRIVILEGED.id(),
-                external_id: USER_TEST_PRIVILEGED.external_id.clone()
+                display_name: USER_TEST_PRIVILEGED.external_id.clone()
             },
             views::User {
                 id: USER_TEST_UNPRIVILEGED.id(),
-                external_id: USER_TEST_UNPRIVILEGED.external_id.clone()
+                display_name: USER_TEST_UNPRIVILEGED.external_id.clone()
             },
             views::User {
                 id: new_silo_user_id,
-                external_id: new_silo_user_external_id.into(),
+                display_name: new_silo_user_external_id.into(),
             },
         ]
     );
