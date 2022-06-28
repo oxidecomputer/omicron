@@ -330,7 +330,6 @@ impl ServiceManager {
                                     key_file: PathBuf::from("/var/nexus/certs/key.pem"),
                                 }
                             ),
-                            ..Default::default()
                         },
                         dropshot_internal: ConfigDropshot {
                             bind_address: SocketAddr::V6(internal_address),
