@@ -4,6 +4,9 @@
 
 //! Background tasks managed by Nexus.
 
+#[cfg(test)]
+mod fakes;
+mod interfaces;
 mod services;
 
 use crate::app::Nexus;

@@ -4,9 +4,8 @@
 
 //! Task which ensures that expected Nexus services exist.
 
-use async_trait::async_trait;
 use crate::context::OpContext;
-use crate::db::datastore::{DataStore, DatasetRedundancy};
+use crate::db::datastore::DatasetRedundancy;
 use crate::db::identity::Asset;
 use crate::db::model::Dataset;
 use crate::db::model::DatasetKind;
@@ -14,16 +13,7 @@ use crate::db::model::Service;
 use crate::db::model::ServiceKind;
 use crate::db::model::Sled;
 use crate::db::model::Zpool;
-use crate::Nexus;
 use futures::stream::{self, StreamExt, TryStreamExt};
-use internal_dns_client::{
-    multiclient::{
-        AAAARecord,
-        DnsError,
-        Updater as DnsUpdater
-    },
-    names::SRV,
-};
 use omicron_common::address::{
     DNS_PORT, DNS_REDUNDANCY, DNS_SERVER_PORT, NEXUS_EXTERNAL_PORT,
     NEXUS_INTERNAL_PORT,
@@ -32,9 +22,10 @@ use omicron_common::api::external::Error;
 use sled_agent_client::types as SledAgentTypes;
 use slog::Logger;
 use std::collections::{HashMap, HashSet};
+use std::marker::PhantomData;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use std::sync::Arc;
-use uuid::Uuid;
+use super::interfaces::{DnsUpdaterInterface, NexusInterface, SledClientInterface};
 
 // Policy for the number of services to be provisioned.
 #[derive(Debug)]
@@ -96,71 +87,31 @@ const EXPECTED_DATASETS: [ExpectedDataset; 3] = [
     },
 ];
 
-// A trait intended to aid testing.
-//
-// The non-test implementation should be as simple as possible.
-#[async_trait]
-trait SledClientInterface {
-    async fn services_put(&self, body: &SledAgentTypes::ServiceEnsureBody) -> Result<(), Error>;
-}
-
-#[async_trait]
-impl SledClientInterface for sled_agent_client::Client {
-    async fn services_put(&self, body: &SledAgentTypes::ServiceEnsureBody) -> Result<(), Error> {
-        self.services_put(body).await?;
-        Ok(())
-    }
-}
-
-// A trait intended to aid testing.
-//
-// The non-test implementation should be as simple as possible.
-#[async_trait]
-trait NexusInterface<SledClient: SledClientInterface> {
-    fn rack_id(&self) -> Uuid;
-    fn datastore(&self) -> &Arc<DataStore>;
-    async fn sled_client(&self, id: &Uuid) -> Result<Arc<SledClient>, Error>;
-}
-
-#[async_trait]
-impl NexusInterface<sled_agent_client::Client> for Nexus {
-    fn rack_id(&self) -> Uuid {
-        self.rack_id
-    }
-
-    fn datastore(&self) -> &Arc<DataStore> {
-        self.datastore()
-    }
-
-    async fn sled_client(&self, id: &Uuid) -> Result<Arc<sled_agent_client::Client>, Error> {
-        self.sled_client(id).await
-    }
-}
-
-// A trait intended to aid testing.
-//
-// The non-test implementation should be as simple as possible.
-#[async_trait]
-trait DnsUpdaterInterface {
-    async fn insert_dns_records(&self, records: &HashMap<SRV, Vec<AAAARecord>>) -> Result<(), DnsError>;
-}
-
-#[async_trait]
-impl DnsUpdaterInterface for DnsUpdater {
-    async fn insert_dns_records(&self, records: &HashMap<SRV, Vec<AAAARecord>>) -> Result<(), DnsError> {
-        self.insert_dns_records(records).await
-    }
-}
-
-pub struct ServiceBalancer {
+/// Contains logic for balancing services within a fleet.
+///
+/// This struct operates on generic parameters to easily permit
+/// dependency injection via testing, but in production, practically
+/// operates on the same concrete types.
+pub struct ServiceBalancer<D, N, S>
+where
+    D: DnsUpdaterInterface,
+    N: NexusInterface<S>,
+    S: SledClientInterface,
+{
     log: Logger,
-    nexus: Arc<Nexus>,
-    dns_updater: DnsUpdater,
+    nexus: Arc<N>,
+    dns_updater: D,
+    phantom: PhantomData<S>,
 }
 
-impl ServiceBalancer {
-    pub fn new(log: Logger, nexus: Arc<Nexus>, dns_updater: DnsUpdater) -> Self {
-        Self { log, nexus, dns_updater }
+impl<D, N, S> ServiceBalancer<D, N, S>
+where
+    D: DnsUpdaterInterface,
+    N: NexusInterface<S>,
+    S: SledClientInterface,
+{
+    pub fn new(log: Logger, nexus: Arc<N>, dns_updater: D) -> Self {
+        Self { log, nexus, dns_updater, phantom: PhantomData }
     }
 
     // Reaches out to all sled agents implied in "services", and
@@ -299,7 +250,7 @@ impl ServiceBalancer {
     ) -> Result<Vec<Service>, Error> {
         self.nexus
             .datastore()
-            .ensure_rack_service(opctx, self.nexus.rack_id, kind, desired_count)
+            .ensure_rack_service(opctx, self.nexus.rack_id(), kind, desired_count)
             .await
     }
 
@@ -311,7 +262,7 @@ impl ServiceBalancer {
     ) -> Result<Vec<Service>, Error> {
         self.nexus
             .datastore()
-            .ensure_dns_service(opctx, self.nexus.rack_subnet, desired_count)
+            .ensure_dns_service(opctx, self.nexus.rack_subnet(), desired_count)
             .await
     }
 
@@ -361,7 +312,7 @@ impl ServiceBalancer {
         let new_datasets = self
             .nexus
             .datastore()
-            .ensure_rack_dataset(opctx, self.nexus.rack_id, kind, redundancy)
+            .ensure_rack_dataset(opctx, self.nexus.rack_id(), kind, redundancy)
             .await?;
 
         // Actually instantiate those datasets.
@@ -486,11 +437,17 @@ impl ServiceBalancer {
 mod test {
     use super::*;
 
+    use crate::app::background::fakes::{FakeDnsUpdater, FakeNexus};
     use crate::{authn, authz};
+    use crate::db::datastore::DataStore;
     use dropshot::test_util::LogContext;
+    use internal_dns_client::names::{AAAA, BackendName, SRV};
     use nexus_test_utils::db::test_setup_database;
+    use omicron_common::address::Ipv6Subnet;
+    use omicron_common::api::external::ByteCount;
     use omicron_test_utils::dev;
     use std::sync::Arc;
+    use uuid::Uuid;
 
     // TODO: maybe figure out what you *want* to test?
     // I suspect we'll need to refactor this API for testability.
@@ -545,47 +502,47 @@ mod test {
         }
     }
 
-    #[derive(Clone)]
-    struct FakeNexus {
-        datastore: Arc<DataStore>,
+    async fn create_test_sled(rack_id: Uuid, datastore: &DataStore) -> Uuid {
+        let bogus_addr = SocketAddrV6::new(
+            Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1),
+            8080,
+            0,
+            0,
+        );
+        let sled_id = Uuid::new_v4();
+        let sled = Sled::new(sled_id, bogus_addr.clone(), rack_id);
+        datastore.sled_upsert(sled).await.unwrap();
+        sled_id
     }
 
-    #[derive(Clone)]
-    struct FakeDnsUpdater {
-
+    async fn create_test_zpool(datastore: &DataStore, sled_id: Uuid) -> Uuid {
+        let zpool_id = Uuid::new_v4();
+        let zpool = Zpool::new(
+            zpool_id,
+            sled_id,
+            &crate::internal_api::params::ZpoolPutRequest {
+                size: ByteCount::from_gibibytes_u32(10),
+            },
+        );
+        datastore.zpool_upsert(zpool).await.unwrap();
+        zpool_id
     }
-
-    // TODO: interfaces:
-    //
-    // - Nexus
-    //   - Datastore: ✔
-    //   - Sled Client:
-    //   - Rack ID: easy
-    //   - Rack Subnet: easy
-    //
-    //
-    // - DNS service
-    //   - insert dns records
 
     #[tokio::test]
-    async fn test_provision_dataset_on_all() {
-        let test = ProvisionTest::new("test_provision_dataset_on_all").await;
+    async fn test_provision_dataset_on_all_no_zpools() {
+        let test = ProvisionTest::new("test_provision_dataset_on_all_no_zpools").await;
 
-        // TODO: move into "test"?
-        let nexus = Arc::new(FakeNexus {
-            datastore: test.datastore.clone(),
-        });
-        let dns_updater = FakeDnsUpdater {};
-
+        let rack_subnet = Ipv6Subnet::new(Ipv6Addr::LOCALHOST);
+        let nexus = FakeNexus::new(test.datastore.clone(), rack_subnet);
+        let dns_updater = FakeDnsUpdater::new();
         let service_balancer = ServiceBalancer::new(
             test.logctx.log.clone(),
             nexus.clone(),
             dns_updater.clone(),
         );
 
-        // TODO: Upsert zpools?
-        // TODO: Also, maybe add a test when invoking this fn on "no zpools".
-
+        // Setup: One sled, no zpools.
+        let sled_id = create_test_sled(nexus.rack_id(), &test.datastore).await;
 
         // Make the request to the service balancer for Crucibles on all Zpools.
         let expected_datasets = [
@@ -599,13 +556,90 @@ mod test {
             &expected_datasets,
         ).await.unwrap();
 
-        // TODO: Validate that:
-        // - That "filesystem_put" was invoked ->  Store the calls?
-        // - That the DNS record was updated -> Store the records?
+        // Observe that nothing was requested at the sled.
+        let sled = nexus.sled_client(&sled_id).await.unwrap();
+        assert!(sled.service_requests().is_empty());
+        assert!(sled.dataset_requests().is_empty());
+
+        // Observe that no DNS records were updated.
+        let records = dns_updater.records();
+        assert!(records.is_empty());
 
         test.cleanup().await;
     }
 
+    #[tokio::test]
+    async fn test_provision_dataset_on_all() {
+        let test = ProvisionTest::new("test_provision_dataset_on_all").await;
+
+        let rack_subnet = Ipv6Subnet::new(Ipv6Addr::LOCALHOST);
+        let nexus = FakeNexus::new(test.datastore.clone(), rack_subnet);
+        let dns_updater = FakeDnsUpdater::new();
+        let service_balancer = ServiceBalancer::new(
+            test.logctx.log.clone(),
+            nexus.clone(),
+            dns_updater.clone(),
+        );
+
+        // Setup: One sled, multiple zpools
+        let sled_id = create_test_sled(nexus.rack_id(), &test.datastore).await;
+        const ZPOOL_COUNT: usize = 3;
+        let mut zpools = vec![];
+        for _ in 0..ZPOOL_COUNT {
+            zpools.push(create_test_zpool(&test.datastore, sled_id).await);
+        }
+
+        // Make the request to the service balancer for Crucibles on all Zpools.
+        let expected_datasets = [
+            ExpectedDataset {
+                kind: DatasetKind::Crucible,
+                redundancy: DatasetRedundancy::OnAll,
+            }
+        ];
+        service_balancer.ensure_datasets_provisioned(
+            &test.opctx,
+            &expected_datasets,
+        ).await.unwrap();
+
+        // Observe that datasets were requested on each zpool.
+        let sled = nexus.sled_client(&sled_id).await.unwrap();
+        assert!(sled.service_requests().is_empty());
+        let dataset_requests = sled.dataset_requests();
+        assert_eq!(ZPOOL_COUNT, dataset_requests.len());
+        for request in &dataset_requests {
+            assert!(zpools.contains(&request.zpool_id), "Dataset request for unexpected zpool");
+            assert!(matches!(request.dataset_kind, SledAgentTypes::DatasetKind::Crucible));
+        }
+
+        // Observe that DNS records for each Crucible exist.
+        let records = dns_updater.records();
+        assert_eq!(ZPOOL_COUNT, records.len());
+        for (srv, aaaas) in &records {
+            assert_eq!(1, aaaas.len());
+            match srv {
+                SRV::Backend(BackendName::Crucible, dataset_id) => {
+                        let expected_address = dataset_requests.iter().find_map(|request| {
+                            if request.id == *dataset_id {
+                                Some(request.address)
+                            } else {
+                                None
+                            }
+                        }).unwrap();
+
+                        let (aaaa_name, dns_addr) = aaaas[0];
+                        assert_eq!(dns_addr.to_string(), expected_address);
+                        assert!(matches!(aaaa_name, AAAA::Zone(dataset_id)));
+                },
+                _ => panic!("Unexpected SRV record"),
+            }
+        }
+
+        test.cleanup().await;
+    }
+
+    // TODO: test provision outside rack
+
+    /*
     #[tokio::test]
     async fn test_provision_dataset_per_rack() {
         let expected_datasets = [
@@ -626,4 +660,5 @@ mod test {
     async fn test_provision_service_dns_per_az() {
         todo!();
     }
+    */
 }
