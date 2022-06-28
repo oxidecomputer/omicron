@@ -1,7 +1,5 @@
 #!/bin/bash
 
-set -eu
-
 # Creates a self-signed certificate.
 #
 # For those with access, certificates are available in:
@@ -9,9 +7,6 @@ set -eu
 # https://github.com/oxidecomputer/configs/tree/master/nginx/ssl/wildcard.oxide-preview.com
 
 set -eu
-
-SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-ARG0="$(basename ${BASH_SOURCE[0]})"
 
 # Set the CWD to Omicron's source.
 SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
