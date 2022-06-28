@@ -913,11 +913,7 @@ async fn test_post_saml_response(cptestctx: &ControlPlaneTestContext) {
     .await
     .expect("expected success");
 
-    assert!(result.headers["Location"]
-        .to_str()
-        .unwrap()
-        .to_string()
-        .ends_with("/organizations"));
+    assert_eq!(result.headers["Location"].to_str().unwrap(), "/");
 
     // ask whoami
     NexusRequest::new(
