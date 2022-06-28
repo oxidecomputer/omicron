@@ -534,4 +534,50 @@ mod test {
             );
         }
     }
+
+    #[test]
+    fn test_repo_configs_are_valid() {
+        // The example config file should be valid.
+        let config_path = "examples/config.toml";
+        println!("checking {:?}", config_path);
+        let example_config = Config::from_file(config_path)
+            .expect("example config file is not valid");
+
+        // The config file used for the tests should also be valid.  The tests
+        // won't clear the runway anyway if this file isn't valid.  But it's
+        // helpful to verify this here explicitly as well.
+        let config_path = "examples/config.toml";
+        println!("checking {:?}", config_path);
+        let _ = Config::from_file(config_path)
+            .expect("test config file is not valid");
+
+        // The partial config file that's used to deploy Nexus must also be
+        // valid.  However, it's missing the "deployment" section because that's
+        // generated at deployment time.  We'll serialize this section from the
+        // example config file (loaded above), append it to the contents of this
+        // file, and verify the whole thing.
+        #[derive(serde::Serialize)]
+        struct DummyConfig {
+            deployment: DeploymentConfig,
+        }
+        let config_path = "../smf/nexus/config-partial.toml";
+        println!(
+            "checking {:?} with example deployment section added",
+            config_path
+        );
+        let mut contents = std::fs::read_to_string(config_path)
+            .expect("failed to read Nexus SMF config file");
+        contents.push_str(
+            "\n\n\n \
+            # !! content below added by test_repo_configs_are_valid()\n\
+            \n\n\n",
+        );
+        let example_deployment = toml::to_string_pretty(&DummyConfig {
+            deployment: example_config.deployment,
+        })
+        .unwrap();
+        contents.push_str(&example_deployment);
+        let _: Config = toml::from_str(&contents)
+            .expect("Nexus SMF config file is not valid");
+    }
 }
