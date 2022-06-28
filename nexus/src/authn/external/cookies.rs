@@ -44,9 +44,7 @@ impl Extractor for Cookies {
         Ok(cookies.into())
     }
 
-    fn metadata(
-        _content_type: dropshot::ApiEndpointBodyContentType,
-    ) -> ExtractorMetadata {
+    fn metadata() -> ExtractorMetadata {
         ExtractorMetadata { paginated: false, parameters: vec![] }
     }
 }
