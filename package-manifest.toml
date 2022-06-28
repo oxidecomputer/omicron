@@ -25,6 +25,9 @@ to = "/var/svc/manifest/site/nexus"
 [[package.omicron-nexus.paths]]
 from = "out/console-assets"
 to = "/var/nexus/static"
+[[package.omicron-nexus.paths]]
+from = "out/certs"
+to = "/var/nexus/certs"
 
 [package.oximeter-collector]
 rust.binary_names = ["oximeter"]

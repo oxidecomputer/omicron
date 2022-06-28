@@ -324,6 +324,12 @@ impl ServiceManager {
                         dropshot_external: ConfigDropshot {
                             bind_address: SocketAddr::V6(external_address),
                             request_body_max_bytes: 1048576,
+                            tls: Some(
+                                dropshot::ConfigTls {
+                                    cert_file: PathBuf::from("/var/nexus/certs/cert.pem"),
+                                    key_file: PathBuf::from("/var/nexus/certs/key.pem"),
+                                }
+                            ),
                             ..Default::default()
                         },
                         dropshot_internal: ConfigDropshot {
