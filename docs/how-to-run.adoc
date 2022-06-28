@@ -43,6 +43,13 @@ the networking bits are temporary, so a reboot should always clear them.
 
 Both scripts must be run as root, e.g, `pfexec ./tools/create_virtual_hardware.sh`.
 
+=== Make me a certificate!
+
+Nexus's external interface will typically be served using public-facing x.509
+certificate. While we are still configuring the mechanism to integrate this real
+certificate into the package system, `./tools/create_self_signed_cert.sh` can be
+used to generate an equivalent self-signed certificate.
+
 == Deploying Omicron
 
 The control plane repository contains a packaging tool which bundles binaries
