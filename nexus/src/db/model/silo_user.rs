@@ -3,7 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::db::schema::silo_user;
-use chrono::{DateTime, Utc};
 use db_macros::Asset;
 use uuid::Uuid;
 
@@ -13,16 +12,15 @@ use uuid::Uuid;
 pub struct SiloUser {
     #[diesel(embed)]
     identity: SiloUserIdentity,
+
     pub silo_id: Uuid,
-    pub time_deleted: Option<DateTime<Utc>>,
+
+    /// The identity provider's ID for this user.
+    pub external_id: String,
 }
 
 impl SiloUser {
-    pub fn new(silo_id: Uuid, user_id: Uuid) -> Self {
-        Self {
-            identity: SiloUserIdentity::new(user_id),
-            silo_id,
-            time_deleted: None,
-        }
+    pub fn new(silo_id: Uuid, user_id: Uuid, external_id: String) -> Self {
+        Self { identity: SiloUserIdentity::new(user_id), silo_id, external_id }
     }
 }

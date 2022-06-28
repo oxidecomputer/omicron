@@ -91,6 +91,14 @@ pub struct Nexus {
 
     /// Operational context used for external request authentication
     opctx_external_authn: OpContext,
+
+    /// Max issue delay for samael crate - used only for testing
+    // the samael crate has an extra check (beyond the check against the SAML
+    // response NotOnOrAfter) that fails if the issue instant was too long ago.
+    // this amount of time is called "max issue delay" and we have to set that
+    // in order for our integration tests that POST static SAML responses to
+    // Nexus to not all fail.
+    samael_max_issue_delay: std::sync::Mutex<Option<chrono::Duration>>,
 }
 
 // TODO Is it possible to make some of these operations more generic?  A
@@ -170,6 +178,7 @@ impl Nexus {
                 authn::Context::external_authn(),
                 Arc::clone(&db_datastore),
             ),
+            samael_max_issue_delay: std::sync::Mutex::new(None),
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
@@ -424,6 +433,11 @@ impl Nexus {
 
     pub fn datastore(&self) -> &Arc<db::DataStore> {
         &self.db_datastore
+    }
+
+    pub fn samael_max_issue_delay(&self) -> Option<chrono::Duration> {
+        let mid = self.samael_max_issue_delay.lock().unwrap();
+        *mid
     }
 }
 

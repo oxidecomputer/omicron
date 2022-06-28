@@ -228,6 +228,11 @@ CREATE TABLE omicron.public.volume (
  * Silos
  */
 
+CREATE TYPE omicron.public.user_provision_type AS ENUM (
+  'fixed',
+  'jit'
+);
+
 CREATE TABLE omicron.public.silo (
     /* Identity metadata */
     id UUID PRIMARY KEY,
@@ -238,6 +243,7 @@ CREATE TABLE omicron.public.silo (
     time_deleted TIMESTAMPTZ,
 
     discoverable BOOL NOT NULL,
+    user_provision_type omicron.public.user_provision_type NOT NULL,
 
     /* child resource generation number, per RFD 192 */
     rcgen INT NOT NULL
@@ -253,18 +259,18 @@ CREATE UNIQUE INDEX ON omicron.public.silo (
  */
 CREATE TABLE omicron.public.silo_user (
     id UUID PRIMARY KEY,
-
-    silo_id UUID NOT NULL,
-
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
-    time_deleted TIMESTAMPTZ
+    time_deleted TIMESTAMPTZ,
+
+    silo_id UUID NOT NULL,
+    external_id TEXT NOT NULL
 );
 
 /* This index lets us quickly find users for a given silo. */
-CREATE INDEX ON omicron.public.silo_user (
+CREATE UNIQUE INDEX ON omicron.public.silo_user (
     silo_id,
-    id
+    external_id
 ) WHERE
     time_deleted IS NULL;
 
