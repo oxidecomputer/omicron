@@ -421,11 +421,12 @@ impl From<model::Sled> for Sled {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct User {
     pub id: Uuid,
+    pub external_id: String,
 }
 
 impl From<model::SiloUser> for User {
     fn from(user: model::SiloUser) -> Self {
-        Self { id: user.id() }
+        Self { id: user.id(), external_id: user.external_id }
     }
 }
 

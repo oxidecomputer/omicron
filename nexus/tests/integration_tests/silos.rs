@@ -727,8 +727,14 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(
         initial_silo_users,
         vec![
-            views::User { id: USER_TEST_PRIVILEGED.id() },
-            views::User { id: USER_TEST_UNPRIVILEGED.id() },
+            views::User {
+                id: USER_TEST_PRIVILEGED.id(),
+                external_id: USER_TEST_PRIVILEGED.external_id.clone()
+            },
+            views::User {
+                id: USER_TEST_UNPRIVILEGED.id(),
+                external_id: USER_TEST_UNPRIVILEGED.external_id.clone()
+            },
         ]
     );
 
@@ -736,8 +742,13 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
     // it, use a small limit to check that pagination is really working.
     let new_silo_user_id =
         "bd75d207-37f3-4769-b808-677ae04eaf23".parse().unwrap();
+    let new_silo_user_external_id = "can_we_see_them?";
     nexus
-        .silo_user_create(*SILO_ID, new_silo_user_id, "can_we_see_them?".into())
+        .silo_user_create(
+            *SILO_ID,
+            new_silo_user_id,
+            new_silo_user_external_id.into(),
+        )
         .await
         .unwrap();
 
@@ -749,9 +760,18 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(
         silo_users,
         vec![
-            views::User { id: USER_TEST_PRIVILEGED.id() },
-            views::User { id: USER_TEST_UNPRIVILEGED.id() },
-            views::User { id: new_silo_user_id },
+            views::User {
+                id: USER_TEST_PRIVILEGED.id(),
+                external_id: USER_TEST_PRIVILEGED.external_id.clone()
+            },
+            views::User {
+                id: USER_TEST_UNPRIVILEGED.id(),
+                external_id: USER_TEST_UNPRIVILEGED.external_id.clone()
+            },
+            views::User {
+                id: new_silo_user_id,
+                external_id: new_silo_user_external_id.into(),
+            },
         ]
     );
 
