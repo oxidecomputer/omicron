@@ -235,7 +235,7 @@ lazy_static! {
                 name: None,
                 description: Some(String::from("an updated description")),
             },
-            make_primary: false,
+            primary: false,
         }
     };
 }

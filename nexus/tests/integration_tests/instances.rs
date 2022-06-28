@@ -1244,7 +1244,7 @@ async fn test_instance_update_network_interfaces(
             name: Some(new_name.clone()),
             description: Some(new_description.clone()),
         },
-        make_primary: false,
+        primary: false,
     };
 
     // Verify we fail to update the NIC when the instance is running
@@ -1315,13 +1315,13 @@ async fn test_instance_update_network_interfaces(
     verify_unchanged_attributes(&primary_iface, &updated_primary_iface);
 
     // Try with the same request again, but this time only changing
-    // `make_primary`. This should have no effect.
+    // `primary`. This should have no effect.
     let updates = params::NetworkInterfaceUpdate {
         identity: IdentityMetadataUpdateParams {
             name: None,
             description: None,
         },
-        make_primary: true,
+        primary: true,
     };
     let updated_primary_iface1 = NexusRequest::object_put(
         client,
@@ -1418,7 +1418,7 @@ async fn test_instance_update_network_interfaces(
             name: None,
             description: None,
         },
-        make_primary: true,
+        primary: true,
     };
     let new_primary_iface = NexusRequest::object_put(
         client,

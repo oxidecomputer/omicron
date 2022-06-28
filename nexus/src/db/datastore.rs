@@ -2265,7 +2265,7 @@ impl DataStore {
             db::model::InstanceState::new(external::InstanceState::Stopped);
 
         // This is the actual query to update the target interface.
-        let make_primary = matches!(updates.make_primary, Some(true));
+        let primary = matches!(updates.primary, Some(true));
         let update_target_query = diesel::update(dsl::network_interface)
             .filter(dsl::id.eq(interface_id))
             .filter(dsl::time_deleted.is_null())
@@ -2281,7 +2281,7 @@ impl DataStore {
         type TxnError = TransactionError<NetworkInterfaceUpdateError>;
 
         let pool = self.pool_authorized(opctx).await?;
-        if make_primary {
+        if primary {
             pool.transaction(move |conn| {
                 let instance_state =
                     instance_query.get_result(conn)?.runtime_state.state;
@@ -2316,7 +2316,7 @@ impl DataStore {
             })
         } else {
             // In this case, we can just directly apply the updates. By
-            // construction, `updates.make_primary` is `None`, so nothing will
+            // construction, `updates.primary` is `None`, so nothing will
             // be done there. The other columns always need to be updated, and
             // we're only hitting a single row. Note that we still need to
             // verify the instance is stopped.

@@ -307,7 +307,7 @@ pub struct NetworkInterfaceUpdate {
     // change in the primary interface will result in changes to the DNS records
     // for the instance, though not the name.
     #[serde(default)]
-    pub make_primary: bool,
+    pub primary: bool,
 }
 
 // IP POOLS
