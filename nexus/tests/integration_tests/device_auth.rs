@@ -6,8 +6,7 @@ use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 use omicron_nexus::external_api::device_auth::{
-    DeviceAccessTokenRequestParams, DeviceAuthRequestParams,
-    DeviceAuthVerifyParams,
+    DeviceAccessTokenRequest, DeviceAuthRequest, DeviceAuthVerify,
 };
 use omicron_nexus::external_api::views::{
     DeviceAccessTokenGrant, DeviceAccessTokenType, DeviceAuthResponse,
@@ -36,7 +35,7 @@ async fn test_device_auth_flow(cptestctx: &ControlPlaneTestContext) {
         .expect("failed to reject device auth start without client_id");
 
     let client_id = Uuid::new_v4();
-    let authn_params = DeviceAuthRequestParams { client_id };
+    let authn_params = DeviceAuthRequest { client_id };
 
     // Using a JSON encoded body fails.
     RequestBuilder::new(testctx, Method::POST, "/device/auth")
@@ -96,7 +95,7 @@ async fn test_device_auth_flow(cptestctx: &ControlPlaneTestContext) {
     .body
     .starts_with(b"<html>"));
 
-    let confirm_params = DeviceAuthVerifyParams { user_code };
+    let confirm_params = DeviceAuthVerify { user_code };
 
     // Confirmation must be authenticated.
     RequestBuilder::new(testctx, Method::POST, "/device/confirm")
@@ -107,7 +106,7 @@ async fn test_device_auth_flow(cptestctx: &ControlPlaneTestContext) {
         .await
         .expect("failed to 401 on unauthed confirmation");
 
-    let token_params = DeviceAccessTokenRequestParams {
+    let token_params = DeviceAccessTokenRequest {
         grant_type: "urn:ietf:params:oauth:grant-type:device_code".to_string(),
         device_code,
         client_id,

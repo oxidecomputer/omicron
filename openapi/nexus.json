@@ -22,7 +22,7 @@
           "content": {
             "application/x-www-form-urlencoded": {
               "schema": {
-                "$ref": "#/components/schemas/DeviceAuthRequestParams"
+                "$ref": "#/components/schemas/DeviceAuthRequest"
               }
             }
           },
@@ -52,7 +52,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/DeviceAuthVerifyParams"
+                "$ref": "#/components/schemas/DeviceAuthVerify"
               }
             }
           },
@@ -94,7 +94,7 @@
           "content": {
             "application/x-www-form-urlencoded": {
               "schema": {
-                "$ref": "#/components/schemas/DeviceAccessTokenRequestParams"
+                "$ref": "#/components/schemas/DeviceAccessTokenRequest"
               }
             }
           },
@@ -6273,7 +6273,7 @@
           "public_cert"
         ]
       },
-      "DeviceAccessTokenRequestParams": {
+      "DeviceAccessTokenRequest": {
         "type": "object",
         "properties": {
           "client_id": {
@@ -6293,7 +6293,7 @@
           "grant_type"
         ]
       },
-      "DeviceAuthRequestParams": {
+      "DeviceAuthRequest": {
         "type": "object",
         "properties": {
           "client_id": {
@@ -6305,7 +6305,7 @@
           "client_id"
         ]
       },
-      "DeviceAuthVerifyParams": {
+      "DeviceAuthVerify": {
         "type": "object",
         "properties": {
           "user_code": {
