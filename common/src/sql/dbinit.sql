@@ -37,7 +37,6 @@
  */
 CREATE DATABASE omicron;
 CREATE USER omicron;
-GRANT INSERT, SELECT, UPDATE, DELETE ON DATABASE omicron to omicron;
 
 /*
  * Racks
@@ -1348,3 +1347,5 @@ INSERT INTO omicron.public.db_metadata (
 ) VALUES
     ( 'schema_version', '1.0.0' ),
     ( 'schema_time_created', CAST(NOW() AS STRING) );
+
+GRANT INSERT, SELECT, UPDATE, DELETE ON TABLE omicron.public.* to omicron;
