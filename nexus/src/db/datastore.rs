@@ -25,7 +25,7 @@ use super::error::diesel_pool_result_optional;
 use super::identity::{Asset, Resource};
 use super::pool::DbConnection;
 use super::Pool;
-use crate::authn;
+use crate::authn::{self, Actor};
 use crate::authz::{self, ApiResource};
 use crate::context::OpContext;
 use crate::db::collection_attach::{AttachError, DatastoreAttachTarget};
@@ -56,9 +56,10 @@ use crate::db::{
         public_error_from_diesel_pool, ErrorHandler, TransactionError,
     },
     model::{
-        ConsoleSession, Dataset, DatasetKind, Disk, DiskRuntimeState,
-        Generation, GlobalImage, IdentityProvider, IncompleteNetworkInterface,
-        Instance, InstanceRuntimeState, Name, NetworkInterface, Organization,
+        ConsoleSession, Dataset, DatasetKind, DeviceAccessToken,
+        DeviceAuthRequest, Disk, DiskRuntimeState, Generation, GlobalImage,
+        IdentityProvider, IncompleteNetworkInterface, Instance,
+        InstanceRuntimeState, Name, NetworkInterface, Organization,
         OrganizationUpdate, OximeterInfo, ProducerEndpoint, Project,
         ProjectUpdate, Rack, Region, RoleAssignment, RoleBuiltin, RouterRoute,
         RouterRouteUpdate, Service, Silo, SiloUser, Sled, SshKey,
@@ -151,6 +152,20 @@ impl DataStore {
     ) -> Result<&bb8::Pool<ConnectionManager<DbConnection>>, Error> {
         opctx.authorize(authz::Action::Query, &authz::DATABASE).await?;
         Ok(self.pool.pool())
+    }
+
+    pub async fn rack_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<Rack> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        use db::schema::rack::dsl;
+        paginated(dsl::rack, dsl::id, pagparams)
+            .select(Rack::as_select())
+            .load_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     /// Stores a new rack in the database.
@@ -3224,6 +3239,23 @@ impl DataStore {
             })
     }
 
+    pub async fn silo_users_list_by_id(
+        &self,
+        opctx: &OpContext,
+        authz_silo: &authz::Silo,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<SiloUser> {
+        use db::schema::silo_user::dsl;
+
+        opctx.authorize(authz::Action::Read, authz_silo).await?;
+        paginated(dsl::silo_user, dsl::id, pagparams)
+            .filter(dsl::time_deleted.is_null())
+            .select(SiloUser::as_select())
+            .load_async::<SiloUser>(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
     pub async fn users_builtin_list_by_name(
         &self,
         opctx: &OpContext,
@@ -3250,6 +3282,7 @@ impl DataStore {
         let builtin_users = [
             // Note: "db_init" is also a builtin user, but that one by necessity
             // is created with the database.
+            &*authn::USER_SERVICE_BALANCER,
             &*authn::USER_INTERNAL_API,
             &*authn::USER_INTERNAL_READ,
             &*authn::USER_EXTERNAL_AUTHN,
@@ -3499,27 +3532,61 @@ impl DataStore {
             })
     }
 
-    // NOTE: This function is only used for testing and for initial population
-    // of built-in users as silo users.  The error handling here assumes (1)
-    // that the caller expects no user input error from the database, and (2)
-    // that if a Silo user with the same id already exists in the database,
-    // that's not an error (it's assumed to be the same user).
+    /// Create a silo user
     pub async fn silo_user_create(
         &self,
         silo_user: SiloUser,
-    ) -> Result<(), Error> {
+    ) -> Result<SiloUser, Error> {
         use db::schema::silo_user::dsl;
 
-        let _ = diesel::insert_into(dsl::silo_user)
+        let silo_user_external_id = silo_user.external_id.clone();
+        diesel::insert_into(dsl::silo_user)
             .values(silo_user)
-            .on_conflict(dsl::id)
-            .do_nothing()
-            .execute_async(self.pool())
+            .returning(SiloUser::as_returning())
+            .get_result_async(self.pool())
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
-            })?;
-        Ok(())
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::Conflict(
+                        ResourceType::SiloUser,
+                        &silo_user_external_id,
+                    ),
+                )
+            })
+    }
+
+    /// Given an external ID, return
+    /// - Ok(Some(SiloUser)) if that external id refers to an existing silo user
+    /// - Ok(None) if it does not
+    /// - Err(...) if there was an error doing this lookup.
+    pub async fn silo_user_fetch_by_external_id(
+        &self,
+        opctx: &OpContext,
+        authz_silo: &authz::Silo,
+        external_id: &str,
+    ) -> Result<Option<SiloUser>, Error> {
+        opctx.authorize(authz::Action::ListChildren, authz_silo).await?;
+
+        use db::schema::silo_user::dsl;
+
+        Ok(dsl::silo_user
+            .filter(dsl::silo_id.eq(authz_silo.id()))
+            .filter(dsl::external_id.eq(external_id.to_string()))
+            .filter(dsl::time_deleted.is_null())
+            .select(SiloUser::as_select())
+            .load_async::<SiloUser>(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::SiloUser,
+                        LookupType::ByName(external_id.to_string()),
+                    ),
+                )
+            })?
+            .pop())
     }
 
     /// Load built-in silos into the database
@@ -4061,6 +4128,116 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
+    // OAuth 2.0 Device Authorization Grant
+
+    /// Start a device authorization grant flow by recording the request
+    /// and initial response parameters.
+    // TODO-security: authz
+    pub async fn device_auth_start(
+        &self,
+        opctx: &OpContext,
+        auth_request: DeviceAuthRequest,
+    ) -> CreateResult<DeviceAuthRequest> {
+        use db::schema::device_auth_request::dsl;
+        diesel::insert_into(dsl::device_auth_request)
+            .values(auth_request)
+            .returning(DeviceAuthRequest::as_returning())
+            .get_result_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    /// Look up a device authorization request by `user_code`.
+    // TODO-security: authz
+    pub async fn device_auth_get_request(
+        &self,
+        opctx: &OpContext,
+        user_code: String,
+    ) -> LookupResult<DeviceAuthRequest> {
+        use db::schema::device_auth_request::dsl;
+        dsl::device_auth_request
+            .filter(dsl::user_code.eq(user_code))
+            .filter(dsl::time_expires.gt(Utc::now()))
+            .select(DeviceAuthRequest::as_select())
+            .get_result_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                // TODO-correctness: better error (not found)
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            })
+    }
+
+    /// Grant a device authorization token.
+    // TODO-security: authz
+    pub async fn device_auth_grant(
+        &self,
+        opctx: &OpContext,
+        access_token: DeviceAccessToken,
+    ) -> CreateResult<DeviceAccessToken> {
+        use db::schema::device_access_token::dsl;
+        diesel::insert_into(dsl::device_access_token)
+            .values(access_token)
+            .returning(DeviceAccessToken::as_returning())
+            .get_result_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    /// Look up a granted device authorization token.
+    // TODO-security: authz
+    pub async fn device_auth_get_token(
+        &self,
+        opctx: &OpContext,
+        client_id: Uuid,
+        device_code: String,
+    ) -> LookupResult<DeviceAccessToken> {
+        use db::schema::device_access_token::dsl;
+        dsl::device_access_token
+            .filter(dsl::client_id.eq(client_id))
+            .filter(dsl::device_code.eq(device_code))
+            .select(DeviceAccessToken::as_select())
+            .get_result_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                // TODO-correctness: better error (not found)
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            })
+    }
+
+    /// Look up the actor (a Silo user) for whom a token was granted.
+    // TODO-security: authz
+    pub async fn device_access_token_actor(
+        &self,
+        opctx: &OpContext,
+        token: String,
+    ) -> LookupResult<Actor> {
+        use db::schema::device_access_token::dsl;
+        use db::schema::silo_user::dsl as silo_user_dsl;
+
+        let pool = self.pool_authorized(opctx).await?;
+        let token = dsl::device_access_token
+            .filter(dsl::token.eq(token))
+            .select(DeviceAccessToken::as_select())
+            .get_result_async(pool)
+            .await
+            .map_err(|e| {
+                // TODO-correctness: better error (not found)
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            })?;
+        let silo_user_id = token.silo_user_id;
+        let silo_id = silo_user_dsl::silo_user
+            .filter(silo_user_dsl::id.eq(silo_user_id))
+            .select(SiloUser::as_select())
+            .get_result_async(pool)
+            .await
+            .map_err(|e| {
+                // TODO-correctness: better error (not found)
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            })?
+            .silo_id;
+        Ok(Actor::SiloUser { silo_user_id, silo_id })
+    }
+
     // Test interfaces
 
     #[cfg(test)]
@@ -4213,7 +4390,11 @@ mod test {
 
         // Associate silo with user
         datastore
-            .silo_user_create(SiloUser::new(*SILO_ID, silo_user_id))
+            .silo_user_create(SiloUser::new(
+                *SILO_ID,
+                silo_user_id,
+                "external_id".into(),
+            ))
             .await
             .unwrap();
 
@@ -4714,7 +4895,11 @@ mod test {
         // Create a new Silo user so that we can lookup their keys.
         let silo_user_id = Uuid::new_v4();
         datastore
-            .silo_user_create(SiloUser::new(*SILO_ID, silo_user_id))
+            .silo_user_create(SiloUser::new(
+                *SILO_ID,
+                silo_user_id,
+                "external@id".into(),
+            ))
             .await
             .unwrap();
 

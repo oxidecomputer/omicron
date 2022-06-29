@@ -4,6 +4,7 @@
 
 //! Params define the request bodies of API endpoints for creating or updating resources.
 
+use crate::external_api::shared;
 use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
     InstanceCpuCount, Ipv4Net, Ipv6Net, Name,
@@ -25,6 +26,8 @@ pub struct SiloCreate {
     pub identity: IdentityMetadataCreateParams,
 
     pub discoverable: bool,
+
+    pub user_provision_type: shared::UserProvisionType,
 }
 
 // Silo identity providers

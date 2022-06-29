@@ -228,6 +228,11 @@ CREATE TABLE omicron.public.volume (
  * Silos
  */
 
+CREATE TYPE omicron.public.user_provision_type AS ENUM (
+  'fixed',
+  'jit'
+);
+
 CREATE TABLE omicron.public.silo (
     /* Identity metadata */
     id UUID PRIMARY KEY,
@@ -238,6 +243,7 @@ CREATE TABLE omicron.public.silo (
     time_deleted TIMESTAMPTZ,
 
     discoverable BOOL NOT NULL,
+    user_provision_type omicron.public.user_provision_type NOT NULL,
 
     /* child resource generation number, per RFD 192 */
     rcgen INT NOT NULL
@@ -253,18 +259,18 @@ CREATE UNIQUE INDEX ON omicron.public.silo (
  */
 CREATE TABLE omicron.public.silo_user (
     id UUID PRIMARY KEY,
-
-    silo_id UUID NOT NULL,
-
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
-    time_deleted TIMESTAMPTZ
+    time_deleted TIMESTAMPTZ,
+
+    silo_id UUID NOT NULL,
+    external_id TEXT NOT NULL
 );
 
 /* This index lets us quickly find users for a given silo. */
-CREATE INDEX ON omicron.public.silo_user (
+CREATE UNIQUE INDEX ON omicron.public.silo_user (
     silo_id,
-    id
+    external_id
 ) WHERE
     time_deleted IS NULL;
 
@@ -1180,6 +1186,41 @@ INSERT INTO omicron.public.user_builtin (
     NOW()
 );
 
+/*
+ * OAuth 2.0 Device Authorization Grant (RFC 8628)
+ */
+
+-- Device authorization requests. In theory these records could
+-- (and probably should) be short-lived, and removed as soon as
+-- a token is granted.
+-- TODO-security: We should not grant a token more than once per record.
+CREATE TABLE omicron.public.device_auth_request (
+    client_id UUID NOT NULL,
+    device_code STRING(40) NOT NULL,
+    user_code STRING(63) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_expires TIMESTAMPTZ NOT NULL,
+
+    PRIMARY KEY (client_id, device_code)
+);
+
+-- Fast lookup by user_code for verification
+CREATE INDEX ON omicron.public.device_auth_request (user_code);
+
+-- Access tokens granted in response to successful device authorization flows.
+-- TODO-security: expire tokens.
+CREATE TABLE omicron.public.device_access_token (
+    token STRING(40) PRIMARY KEY,
+    client_id UUID NOT NULL,
+    device_code STRING(40) NOT NULL,
+    silo_user_id UUID NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL
+);
+
+-- Matches the primary key on device authorization records.
+-- The UNIQUE constraint is critical for ensuring that at most
+-- one token is ever created for a given device authorization flow.
+CREATE UNIQUE INDEX ON omicron.public.device_access_token (client_id, device_code);
 
 /*
  * Roles built into the system

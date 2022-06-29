@@ -507,7 +507,7 @@ async fn test_instances_invalid_creation_returns_bad_request(
         .unwrap_err();
     assert!(error
         .message
-        .starts_with("unable to parse body: EOF while parsing an object"));
+        .starts_with("unable to parse JSON body: EOF while parsing an object"));
 
     let request_body = r##"
         {
@@ -529,7 +529,7 @@ async fn test_instances_invalid_creation_returns_bad_request(
         .unwrap_err();
     assert!(error
         .message
-        .starts_with("unable to parse body: invalid value: integer `-3`"));
+        .starts_with("unable to parse JSON body: invalid value: integer `-3`"));
 }
 
 #[nexus_test]

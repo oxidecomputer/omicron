@@ -7,7 +7,7 @@
 use crate::authn;
 use crate::db::identity::{Asset, Resource};
 use crate::db::model;
-use crate::external_api::shared::IpRange;
+use crate::external_api::shared::{self, IpRange};
 use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
@@ -58,11 +58,18 @@ pub struct Silo {
     /// A silo where discoverable is false can be retrieved only by its id - it
     /// will not be part of the "list all silos" output.
     pub discoverable: bool,
+
+    /// User provision type
+    pub user_provision_type: shared::UserProvisionType,
 }
 
 impl Into<Silo> for model::Silo {
     fn into(self) -> Silo {
-        Silo { identity: self.identity(), discoverable: self.discoverable }
+        Silo {
+            identity: self.identity(),
+            discoverable: self.discoverable,
+            user_provision_type: self.user_provision_type.into(),
+        }
     }
 }
 
@@ -408,18 +415,32 @@ impl From<model::Sled> for Sled {
     }
 }
 
-// BUILT-IN USERS
+// SILO USERS
 
 /// Client view of a [`User`]
-#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct User {
+    pub id: Uuid,
+}
+
+impl From<model::SiloUser> for User {
+    fn from(user: model::SiloUser) -> Self {
+        Self { id: user.id() }
+    }
+}
+
+// BUILT-IN USERS
+
+/// Client view of a [`UserBuiltin`]
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct UserBuiltin {
     // TODO-correctness is flattening here (and in all the other types) the
     // intent in RFD 4?
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 }
 
-impl From<model::UserBuiltin> for User {
+impl From<model::UserBuiltin> for UserBuiltin {
     fn from(user: model::UserBuiltin) -> Self {
         Self { identity: user.identity() }
     }
@@ -480,4 +501,76 @@ impl From<model::SshKey> for SshKey {
             public_key: ssh_key.public_key,
         }
     }
+}
+
+// OAUTH 2.0 DEVICE AUTHORIZATION REQUESTS & TOKENS
+
+/// Response to an initial device authorization request.
+/// See RFC 8628 §3.2 (Device Authorization Response).
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct DeviceAuthResponse {
+    /// The device verification code.
+    pub device_code: String,
+
+    /// The end-user verification code.
+    pub user_code: String,
+
+    /// The end-user verification URI on the authorization server.
+    /// The URI should be short and easy to remember as end users
+    /// may be asked to manually type it into their user agent.
+    pub verification_uri: String,
+
+    /// A verification URI that includes the `user_code`,
+    /// which is designed for non-textual transmission.
+    pub verification_uri_complete: String,
+
+    /// The lifetime in seconds of the `device_code` and `user_code`.
+    pub expires_in: u16,
+}
+
+impl DeviceAuthResponse {
+    // We need the host to construct absolute verification URIs.
+    pub fn from_model(model: model::DeviceAuthRequest, host: &str) -> Self {
+        Self {
+            // TODO-security: use HTTPS
+            verification_uri: format!("http://{}/device/verify", host),
+            verification_uri_complete: format!(
+                "http://{}/device/verify?user_code={}",
+                host, &model.user_code
+            ),
+            user_code: model.user_code,
+            device_code: model.device_code,
+            expires_in: model
+                .time_expires
+                .signed_duration_since(model.time_created)
+                .num_seconds() as u16,
+        }
+    }
+}
+
+/// Successful access token grant. See RFC 6749 §5.1.
+/// TODO-security: `expires_in`, `refresh_token`, etc.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct DeviceAccessTokenGrant {
+    /// The access token issued to the client.
+    pub access_token: String,
+
+    /// The type of the token issued, as described in RFC 6749 §7.1.
+    pub token_type: DeviceAccessTokenType,
+}
+
+impl From<model::DeviceAccessToken> for DeviceAccessTokenGrant {
+    fn from(access_token: model::DeviceAccessToken) -> Self {
+        Self {
+            access_token: format!("oxide-token-{}", access_token.token),
+            token_type: DeviceAccessTokenType::Bearer,
+        }
+    }
+}
+
+/// The kind of token granted.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum DeviceAccessTokenType {
+    Bearer,
 }

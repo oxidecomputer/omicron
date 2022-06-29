@@ -10,6 +10,139 @@
     "version": "0.0.1"
   },
   "paths": {
+    "/device/auth": {
+      "post": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "Start an OAuth 2.0 Device Authorization Grant",
+        "description": "This endpoint is designed to be accessed from an *unauthenticated* API client. It generates and records a `device_code` and `user_code` which must be verified and confirmed prior to a token being granted.",
+        "operationId": "device_auth_request",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceAuthRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/device/confirm": {
+      "post": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "Confirm an OAuth 2.0 Device Authorization Grant",
+        "description": "This endpoint is designed to be accessed by the user agent (browser), not the client requesting the token. So we do not actually return the token here; it will be returned in response to the poll on `/device/token`.",
+        "operationId": "device_auth_confirm",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceAuthVerify"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Null",
+                  "type": "string",
+                  "enum": [
+                    null
+                  ]
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/device/token": {
+      "post": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "Request a device access token",
+        "description": "This endpoint should be polled by the client until the user code is verified and the grant is confirmed.",
+        "operationId": "device_access_token",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceAccessTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/device/verify": {
+      "get": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "Verify an OAuth 2.0 Device Authorization Grant",
+        "description": "This endpoint should be accessed in a full user agent (e.g., a browser). If the user is not logged in, we redirect them to the login page and use the `state` parameter to get them back here on completion. If they are logged in, serve up the console verification page so they can verify the user code.",
+        "operationId": "device_auth_verify",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "user_code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/hardware/racks": {
       "get": {
         "tags": [
@@ -829,6 +962,17 @@
             "style": "simple"
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "default": {
             "description": "",
@@ -5911,10 +6055,70 @@
     "/users": {
       "get": {
         "tags": [
-          "users"
+          "silos"
+        ],
+        "summary": "List users",
+        "operationId": "silo_users_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      }
+    },
+    "/users_builtin": {
+      "get": {
+        "tags": [
+          "system"
         ],
         "summary": "List the built-in system users",
-        "operationId": "users_get",
+        "operationId": "builtin_users_get",
         "parameters": [
           {
             "in": "query",
@@ -5953,7 +6157,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UserResultsPage"
+                  "$ref": "#/components/schemas/UserBuiltinResultsPage"
                 }
               }
             }
@@ -5968,13 +6172,13 @@
         "x-dropshot-pagination": true
       }
     },
-    "/users/{user_name}": {
+    "/users_builtin/{user_name}": {
       "get": {
         "tags": [
-          "users"
+          "system"
         ],
         "summary": "Fetch a specific built-in system user",
-        "operationId": "users_get_user",
+        "operationId": "builtin_users_get_user",
         "parameters": [
           {
             "in": "path",
@@ -5993,7 +6197,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/User"
+                  "$ref": "#/components/schemas/UserBuiltin"
                 }
               }
             }
@@ -6067,6 +6271,49 @@
         "required": [
           "private_key",
           "public_cert"
+        ]
+      },
+      "DeviceAccessTokenRequest": {
+        "type": "object",
+        "properties": {
+          "client_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "device_code": {
+            "type": "string"
+          },
+          "grant_type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_id",
+          "device_code",
+          "grant_type"
+        ]
+      },
+      "DeviceAuthRequest": {
+        "type": "object",
+        "properties": {
+          "client_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "client_id"
+        ]
+      },
+      "DeviceAuthVerify": {
+        "type": "object",
+        "properties": {
+          "user_code": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_code"
         ]
       },
       "Digest": {
@@ -8846,6 +9093,14 @@
             "description": "timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
+          },
+          "user_provision_type": {
+            "description": "User provision type",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UserProvisionType"
+              }
+            ]
           }
         },
         "required": [
@@ -8854,7 +9109,8 @@
           "id",
           "name",
           "time_created",
-          "time_modified"
+          "time_modified",
+          "user_provision_type"
         ]
       },
       "SiloCreate": {
@@ -8869,12 +9125,16 @@
           },
           "name": {
             "$ref": "#/components/schemas/Name"
+          },
+          "user_provision_type": {
+            "$ref": "#/components/schemas/UserProvisionType"
           }
         },
         "required": [
           "description",
           "discoverable",
-          "name"
+          "name",
+          "user_provision_type"
         ]
       },
       "SiloResultsPage": {
@@ -9257,6 +9517,19 @@
         "description": "Client view of a [`User`]",
         "type": "object",
         "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "UserBuiltin": {
+        "description": "Client view of a [`UserBuiltin`]",
+        "type": "object",
+        "properties": {
           "description": {
             "description": "human-readable free-form text about a resource",
             "type": "string"
@@ -9291,6 +9564,35 @@
           "name",
           "time_created",
           "time_modified"
+        ]
+      },
+      "UserBuiltinResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserBuiltin"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "UserProvisionType": {
+        "description": "How users will be provisioned in a silo during authentication.",
+        "type": "string",
+        "enum": [
+          "fixed",
+          "jit"
         ]
       },
       "UserResultsPage": {
@@ -10352,15 +10654,15 @@
       }
     },
     {
-      "name": "updates",
-      "description": "This tag should be moved into a operations tag",
+      "name": "system",
+      "description": "Internal system information",
       "externalDocs": {
         "url": "http://oxide.computer/docs/#xxx"
       }
     },
     {
-      "name": "users",
-      "description": "This tag should be moved into an IAM tag",
+      "name": "updates",
+      "description": "This tag should be moved into a operations tag",
       "externalDocs": {
         "url": "http://oxide.computer/docs/#xxx"
       }

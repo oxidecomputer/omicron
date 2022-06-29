@@ -35,6 +35,7 @@ pub use crate::db::fixed_data::user_builtin::USER_EXTERNAL_AUTHN;
 pub use crate::db::fixed_data::user_builtin::USER_INTERNAL_API;
 pub use crate::db::fixed_data::user_builtin::USER_INTERNAL_READ;
 pub use crate::db::fixed_data::user_builtin::USER_SAGA_RECOVERY;
+pub use crate::db::fixed_data::user_builtin::USER_SERVICE_BALANCER;
 use crate::db::model::ConsoleSession;
 
 use crate::authz;
@@ -170,6 +171,11 @@ impl Context {
         Context::context_for_builtin_user(USER_DB_INIT.id)
     }
 
+    /// Returns an authenticated context for Nexus-driven service balancing.
+    pub fn internal_service_balancer() -> Context {
+        Context::context_for_builtin_user(USER_SERVICE_BALANCER.id)
+    }
+
     fn context_for_builtin_user(user_builtin_id: Uuid) -> Context {
         Context {
             kind: Kind::Authenticated(Details {
@@ -217,6 +223,7 @@ mod test {
     use super::USER_INTERNAL_API;
     use super::USER_INTERNAL_READ;
     use super::USER_SAGA_RECOVERY;
+    use super::USER_SERVICE_BALANCER;
     use super::USER_TEST_PRIVILEGED;
     use super::USER_TEST_UNPRIVILEGED;
     use crate::db::fixed_data::user_builtin::USER_EXTERNAL_AUTHN;
@@ -251,6 +258,10 @@ mod test {
         let actor = authn.actor().unwrap();
         assert_eq!(actor.actor_id(), USER_DB_INIT.id);
 
+        let authn = Context::internal_service_balancer();
+        let actor = authn.actor().unwrap();
+        assert_eq!(actor.actor_id(), USER_SERVICE_BALANCER.id);
+
         let authn = Context::internal_saga_recovery();
         let actor = authn.actor().unwrap();
         assert_eq!(actor.actor_id(), USER_SAGA_RECOVERY.id);
@@ -265,10 +276,10 @@ mod test {
 /// that's specific to whether they're authenticated (or not)
 #[derive(Clone, Debug, Deserialize, Serialize)]
 enum Kind {
-    /// Client successfully authenticated
-    Authenticated(Details),
     /// Client did not attempt to authenticate
     Unauthenticated,
+    /// Client successfully authenticated
+    Authenticated(Details),
 }
 
 /// Describes the actor that was authenticated

@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::db;
-use crate::external_api::params;
+use crate::external_api::{params, shared};
 use lazy_static::lazy_static;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 
@@ -19,6 +19,7 @@ lazy_static! {
                 description: "default silo".to_string(),
             },
             discoverable: false,
+            user_provision_type: shared::UserProvisionType::Fixed,
         }
     );
 }
