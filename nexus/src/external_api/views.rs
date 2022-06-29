@@ -427,7 +427,11 @@ pub struct User {
 
 impl From<model::SiloUser> for User {
     fn from(user: model::SiloUser) -> Self {
-        Self { id: user.id(), display_name: user.external_id }
+        Self {
+            id: user.id(),
+            // TODO the use of external_id as display_name is temporary
+            display_name: user.external_id,
+        }
     }
 }
 
