@@ -448,6 +448,7 @@ pub struct SamlLoginPost {
     pub relay_state: Option<String>,
 }
 
+#[derive(Debug)]
 pub struct AuthenticatedSubject {
     pub external_id: String,
     pub silo_role: Option<authz::SiloRole>,
