@@ -192,6 +192,14 @@ impl super::Nexus {
             let mut policy =
                 self.silo_fetch_policy(opctx, &db_silo.name()).await?;
 
+            warn!(
+                &self.log,
+                "silo user {} gets role {:?} from authenticated subject {:?}",
+                silo_user.id(),
+                silo_role,
+                authenticated_subject
+            );
+
             policy.add_or_update_role_assignment(
                 shared::IdentityType::SiloUser,
                 silo_user.id(),
