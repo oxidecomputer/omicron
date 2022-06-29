@@ -421,11 +421,17 @@ impl From<model::Sled> for Sled {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct User {
     pub id: Uuid,
+    /** Human-readable name that can identify the user */
+    pub display_name: String,
 }
 
 impl From<model::SiloUser> for User {
     fn from(user: model::SiloUser) -> Self {
-        Self { id: user.id() }
+        Self {
+            id: user.id(),
+            // TODO the use of external_id as display_name is temporary
+            display_name: user.external_id,
+        }
     }
 }
 

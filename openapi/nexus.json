@@ -9517,12 +9517,17 @@
         "description": "Client view of a [`User`]",
         "type": "object",
         "properties": {
+          "display_name": {
+            "description": "Human-readable name that can identify the user",
+            "type": "string"
+          },
           "id": {
             "type": "string",
             "format": "uuid"
           }
         },
         "required": [
+          "display_name",
           "id"
         ]
       },
