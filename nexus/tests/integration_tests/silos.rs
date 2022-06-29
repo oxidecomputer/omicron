@@ -834,4 +834,33 @@ async fn test_silo_role_from_authenticated_subject(
             .role_name,
         SiloRole::Collaborator,
     );
+
+    // Update their roles if the authenticated subject changes
+    let existing_silo_user = nexus
+        .silo_user_from_authenticated_subject(
+            &authn_opctx,
+            &authz_silo,
+            &db_silo,
+            &AuthenticatedSubject {
+                external_id: "external2@id.com".into(),
+                silo_role: Some(SiloRole::Admin),
+                groups: vec![],
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+    let policy =
+        nexus.silo_fetch_policy(&authn_opctx, &silo_name).await.unwrap();
+    assert_eq!(
+        policy
+            .find_role_assignment(
+                IdentityType::SiloUser,
+                existing_silo_user.id()
+            )
+            .unwrap()
+            .role_name,
+        SiloRole::Admin,
+    );
 }
