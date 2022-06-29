@@ -7,7 +7,7 @@
 use super::views::IpPool;
 use super::views::IpPoolRange;
 use super::{
-    console_api, params, views,
+    console_api, device_auth, params, views,
     views::{
         GlobalImage, IdentityProvider, Image, Organization, Project, Rack,
         Role, Silo, Sled, Snapshot, SshKey, User, UserBuiltin, Vpc, VpcRouter,
@@ -225,6 +225,11 @@ pub fn external_api() -> NexusApiDescription {
 
         api.register(console_api::login)?;
         api.register(console_api::consume_credentials)?;
+
+        api.register(device_auth::device_auth_request)?;
+        api.register(device_auth::device_auth_verify)?;
+        api.register(device_auth::device_auth_confirm)?;
+        api.register(device_auth::device_access_token)?;
 
         Ok(())
     }

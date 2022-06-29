@@ -498,6 +498,26 @@ table! {
 }
 
 table! {
+    device_auth_request (client_id, device_code) {
+        client_id -> Uuid,
+        device_code -> Text,
+        user_code -> Text,
+        time_created -> Timestamptz,
+        time_expires -> Timestamptz,
+    }
+}
+
+table! {
+    device_access_token (token) {
+        token -> Text,
+        client_id -> Uuid,
+        device_code -> Text,
+        silo_user_id -> Uuid,
+        time_created -> Timestamptz,
+    }
+}
+
+table! {
     role_builtin (resource_type, role_name) {
         resource_type -> Text,
         role_name -> Text,

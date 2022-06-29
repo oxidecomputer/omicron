@@ -8,6 +8,7 @@ mod basic;
 mod commands;
 mod console_api;
 mod datasets;
+mod device_auth;
 mod disks;
 mod images;
 mod instances;

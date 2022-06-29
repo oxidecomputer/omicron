@@ -12,6 +12,7 @@ use dropshot::ResultsPage;
 use headers::authorization::Credentials;
 use omicron_nexus::authn::external::spoof;
 use omicron_nexus::db::identity::Asset;
+use serde_urlencoded;
 use std::convert::TryInto;
 use std::fmt::Debug;
 
@@ -59,6 +60,7 @@ pub struct RequestBuilder<'a> {
     headers: http::HeaderMap<http::header::HeaderValue>,
     body: hyper::Body,
     error: Option<anyhow::Error>,
+    allow_non_dropshot_errors: bool,
 
     expected_status: Option<http::StatusCode>,
     allowed_headers: Option<Vec<http::header::HeaderName>>,
@@ -92,6 +94,7 @@ impl<'a> RequestBuilder<'a> {
             ]),
             expected_response_headers: http::HeaderMap::new(),
             error: None,
+            allow_non_dropshot_errors: false,
         }
     }
 
@@ -141,6 +144,29 @@ impl<'a> RequestBuilder<'a> {
             None => self.body = hyper::Body::empty(),
         };
         self
+    }
+
+    /// Set the outgoing request body using URL encoding
+    /// and set the content type appropriately
+    ///
+    /// If `body` is `None`, the request body will be empty.
+    pub fn body_urlencoded<RequestBodyType: serde::Serialize>(
+        mut self,
+        body: Option<&RequestBodyType>,
+    ) -> Self {
+        let new_body = body.map(|b| {
+            serde_urlencoded::to_string(b)
+                .context("failed to URL-encode request body")
+        });
+        match new_body {
+            Some(Err(error)) => self.error = Some(error),
+            Some(Ok(new_body)) => self.body = hyper::Body::from(new_body),
+            None => self.body = hyper::Body::empty(),
+        };
+        self.header(
+            http::header::CONTENT_TYPE,
+            "application/x-www-form-urlencoded",
+        )
     }
 
     /// Record that we expect to get status code `expected_status` in the
@@ -194,6 +220,13 @@ impl<'a> RequestBuilder<'a> {
                 self.expected_response_headers.append(name, value);
             }
         }
+        self
+    }
+
+    /// Allow non-dropshot error responses, i.e., errors that are not compatible
+    /// with `dropshot::HttpErrorResponseBody`.
+    pub fn allow_non_dropshot_errors(mut self) -> Self {
+        self.allow_non_dropshot_errors = true;
         self
     }
 
@@ -347,14 +380,16 @@ impl<'a> RequestBuilder<'a> {
             headers: response.headers().clone(),
             body: response_body,
         };
-        if status.is_client_error() || status.is_server_error() {
+        if (status.is_client_error() || status.is_server_error())
+            && !self.allow_non_dropshot_errors
+        {
             let error_body = test_response
                 .parsed_body::<dropshot::HttpErrorResponseBody>()
                 .context("parsing error body")?;
             ensure!(
                 error_body.request_id == request_id_header,
                 "expected error response body to have request id {:?} \
-                (to match request-id header), bout found {:?}",
+                (to match request-id header), but found {:?}",
                 request_id_header,
                 error_body.request_id
             );
