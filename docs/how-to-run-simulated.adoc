@@ -129,7 +129,7 @@ $ cargo run --bin=sled-agent-sim -- $(uuidgen) [::1]:12345 127.0.0.1:12221
 +
 [source,text]
 ----
-$ cargo run --bin=oximeter -- oximeter/collector/config.toml
+$ cargo run --bin=oximeter run --id $(uuidgen) --address [::1]:12223 -- oximeter/collector/config.toml
 Dec 02 18:00:01.062 INFO starting oximeter server
 Dec 02 18:00:01.062 DEBG creating ClickHouse client
 Dec 02 18:00:01.068 DEBG initializing ClickHouse database, component: clickhouse-client, collector_id: 1da65e5b-210c-4859-a7d7-200c1e659972, component: oximeter-agent
