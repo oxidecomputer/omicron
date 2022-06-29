@@ -47,7 +47,7 @@ where
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct DeviceAuthRequestParams {
+pub struct DeviceAuthRequest {
     pub client_id: Uuid,
 }
 
@@ -64,7 +64,7 @@ pub struct DeviceAuthRequestParams {
 }]
 pub async fn device_auth_request(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    params: TypedBody<DeviceAuthRequestParams>,
+    params: TypedBody<DeviceAuthRequest>,
 ) -> Result<Response<Body>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -108,7 +108,7 @@ pub async fn device_auth_request(
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct DeviceAuthVerifyParams {
+pub struct DeviceAuthVerify {
     pub user_code: String,
 }
 
@@ -126,7 +126,7 @@ pub struct DeviceAuthVerifyParams {
 }]
 pub async fn device_auth_verify(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    params: Query<DeviceAuthVerifyParams>,
+    params: Query<DeviceAuthVerify>,
 ) -> Result<Response<Body>, HttpError> {
     // If the user is authenticated, serve the console verification page.
     if let Ok(opctx) = OpContext::for_external_api(&rqctx).await {
@@ -160,7 +160,7 @@ pub async fn device_auth_verify(
 }]
 pub async fn device_auth_confirm(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    params: TypedBody<DeviceAuthVerifyParams>,
+    params: TypedBody<DeviceAuthVerify>,
 ) -> Result<HttpResponseOk<()>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -177,7 +177,7 @@ pub async fn device_auth_confirm(
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct DeviceAccessTokenRequestParams {
+pub struct DeviceAccessTokenRequest {
     pub grant_type: String,
     pub device_code: String,
     pub client_id: Uuid,
@@ -202,7 +202,7 @@ pub enum DeviceAccessTokenResponse {
 }]
 pub async fn device_access_token(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    params: TypedBody<DeviceAccessTokenRequestParams>,
+    params: TypedBody<DeviceAccessTokenRequest>,
 ) -> Result<Response<Body>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
