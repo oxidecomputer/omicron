@@ -6,7 +6,7 @@
 
 use crate::context::OpContext;
 use crate::db;
-use crate::db::identity::Resource;
+use crate::db::identity::{Asset, Resource};
 use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
 use crate::db::model::SshKey;
@@ -157,11 +157,8 @@ impl super::Nexus {
             )
             .await?;
 
-        if let Some(existing_silo_user) = existing_silo_user {
-            // TODO once groups exist, add user to any new groups if the
-            // authenticated subject's group membership does not match the
-            // existing silo user's.
-            Ok(Some(existing_silo_user))
+        let silo_user = if let Some(existing_silo_user) = existing_silo_user {
+            existing_silo_user
         } else {
             // In this branch, no user exists for the authenticated subject
             // external id. The next action depends on the silo's user provision
@@ -169,7 +166,9 @@ impl super::Nexus {
             match db_silo.user_provision_type {
                 // If the user provision type is fixed, do not a new user if one
                 // does not exist.
-                db::model::UserProvisionType::Fixed => Ok(None),
+                db::model::UserProvisionType::Fixed => {
+                    return Ok(None);
+                }
 
                 // If the user provision type is JIT, then create the user if it
                 // does not exist.
@@ -183,13 +182,30 @@ impl super::Nexus {
                     let silo_user =
                         self.db_datastore.silo_user_create(silo_user).await?;
 
-                    // TODO once groups exist, add user to groups
-                    // TODO what roles do JITed users get?
-
-                    Ok(Some(silo_user))
+                    silo_user
                 }
             }
+        };
+
+        // add or update roles from authenticated subject
+        if let Some(silo_role) = authenticated_subject.silo_role {
+            let mut policy =
+                self.silo_fetch_policy(opctx, &db_silo.name()).await?;
+
+            policy.add_or_update_role_assignment(
+                shared::IdentityType::SiloUser,
+                silo_user.id(),
+                silo_role,
+            );
+
+            self.silo_update_policy(opctx, &db_silo.name(), &policy).await?;
         }
+
+        // TODO once groups exist, add user to any new groups if the
+        // authenticated subject's group membership does not match the
+        // existing silo user's.
+
+        Ok(Some(silo_user))
     }
 
     // SSH Keys

@@ -297,7 +297,7 @@ pub async fn grant_iam<T>(
     grant_user: Uuid,
     run_as: AuthnMode,
 ) where
-    T: serde::Serialize + serde::de::DeserializeOwned,
+    T: serde::Serialize + serde::de::DeserializeOwned + std::clone::Clone,
 {
     let policy_url = format!("{}/policy", grant_resource_url);
     let existing_policy: shared::Policy<T> =

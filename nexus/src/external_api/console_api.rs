@@ -387,10 +387,10 @@ pub async fn consume_credentials(
             if let Some(referer) = &relay_state.referer {
                 referer.clone()
             } else {
-                "/".to_string()
+                "/orgs".to_string()
             }
         } else {
-            "/".to_string()
+            "/orgs".to_string()
         };
 
         debug!(

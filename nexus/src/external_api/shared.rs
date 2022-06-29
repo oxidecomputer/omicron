@@ -40,10 +40,54 @@ pub const MAX_ROLE_ASSIGNMENTS_PER_RESOURCE: usize = 64;
 /// access to this resource.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[schemars(rename = "{AllowedRoles}Policy")]
-pub struct Policy<AllowedRoles: serde::de::DeserializeOwned> {
+pub struct Policy<AllowedRoles: serde::de::DeserializeOwned + std::clone::Clone>
+{
     /// Roles directly assigned on this resource
     #[serde(deserialize_with = "role_assignments_deserialize")]
     pub role_assignments: Vec<RoleAssignment<AllowedRoles>>,
+}
+
+impl<AllowedRoles: serde::de::DeserializeOwned + std::clone::Clone>
+    Policy<AllowedRoles>
+{
+    pub fn add_or_update_role_assignment(
+        &mut self,
+        identity_type: IdentityType,
+        identity_id: Uuid,
+        role_name: AllowedRoles,
+    ) {
+        let updated = match self.role_assignments.iter_mut().find(|ref x| {
+            x.identity_type == identity_type && x.identity_id == identity_id
+        }) {
+            Some(role_assignment) => {
+                role_assignment.role_name = role_name.clone();
+                true
+            }
+
+            None => false,
+        };
+
+        if !updated {
+            self.role_assignments.push(RoleAssignment {
+                identity_type,
+                identity_id,
+                role_name,
+            });
+        }
+    }
+
+    pub fn find_role_assignment(
+        &self,
+        identity_type: IdentityType,
+        identity_id: Uuid,
+    ) -> Option<RoleAssignment<AllowedRoles>> {
+        self.role_assignments
+            .iter()
+            .find(|ref x| {
+                x.identity_type == identity_type && x.identity_id == identity_id
+            })
+            .cloned()
+    }
 }
 
 fn role_assignments_deserialize<'de, D, R>(

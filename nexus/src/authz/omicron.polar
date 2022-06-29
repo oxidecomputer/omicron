@@ -140,6 +140,10 @@ resource Silo {
 	# external authenticator has to create silo users
 	"list_children" if "external-authenticator" on "parent_fleet";
 	"create_child" if "external-authenticator" on "parent_fleet";
+
+	# external authenticator has to read and modify policy
+	"read" if "external-authenticator" on "parent_fleet";
+	"modify" if "external-authenticator" on "parent_fleet";
 }
 
 has_relation(fleet: Fleet, "parent_fleet", silo: Silo)

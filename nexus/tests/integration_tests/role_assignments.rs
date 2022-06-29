@@ -360,7 +360,7 @@ where
     'a: 'd,
     'b: 'd,
     'c: 'd,
-    T: serde::de::DeserializeOwned,
+    T: serde::de::DeserializeOwned + std::clone::Clone,
 {
     async move {
         // For these resources, the initial policy is totally empty.
@@ -523,7 +523,7 @@ async fn run_test<T: RoleAssignmentTest>(
     test_case.verify_initial(client, &current_policy).await;
 }
 
-async fn policy_fetch<T: serde::de::DeserializeOwned>(
+async fn policy_fetch<T: serde::de::DeserializeOwned + std::clone::Clone>(
     client: &ClientTestContext,
     policy_url: &str,
 ) -> shared::Policy<T> {

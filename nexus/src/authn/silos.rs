@@ -387,16 +387,41 @@ impl SamlIdentityProvider {
         })?;
 
         // Extract group membership attributes
+        let mut silo_role = None;
         let mut groups = vec![];
 
         if let Some(attribute_statements) = &assertion.attribute_statements {
             for attribute_statement in attribute_statements {
                 for attribute in &attribute_statement.attributes {
                     if let Some(name) = &attribute.name {
+                        // TODO make these names configurable?
+
                         if name == "groups" {
                             for attribute_value in &attribute.values {
                                 if let Some(value) = &attribute_value.value {
                                     groups.push(value.clone());
+                                }
+                            }
+                        }
+
+                        if name == "silo-role" {
+                            if attribute.values.len() == 1 {
+                                for attribute_value in &attribute.values {
+                                    if let Some(value) = &attribute_value.value
+                                    {
+                                        silo_role = match value.as_str() {
+                                            "admin" => {
+                                                Some(authz::SiloRole::Admin)
+                                            }
+                                            "collaborator" => Some(
+                                                authz::SiloRole::Collaborator,
+                                            ),
+                                            "viewer" => {
+                                                Some(authz::SiloRole::Viewer)
+                                            }
+                                            _ => None,
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -407,6 +432,7 @@ impl SamlIdentityProvider {
 
         let authenticated_subject = AuthenticatedSubject {
             external_id: subject_name_id.value.clone(),
+            silo_role,
             groups,
         };
 
@@ -424,5 +450,6 @@ pub struct SamlLoginPost {
 
 pub struct AuthenticatedSubject {
     pub external_id: String,
+    pub silo_role: Option<authz::SiloRole>,
     pub groups: Vec<String>,
 }

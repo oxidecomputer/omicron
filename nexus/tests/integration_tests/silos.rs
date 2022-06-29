@@ -7,6 +7,7 @@ use omicron_common::api::external::{IdentityMetadataCreateParams, Name};
 use omicron_nexus::authn::silos::{AuthenticatedSubject, IdentityProviderType};
 use omicron_nexus::context::OpContext;
 use omicron_nexus::db::lookup::LookupPath;
+use omicron_nexus::external_api::shared::IdentityType;
 use omicron_nexus::external_api::views::{
     self, IdentityProvider, Organization, SamlIdentityProvider, Silo,
 };
@@ -634,6 +635,7 @@ async fn test_silo_user_provision_types(cptestctx: &ControlPlaneTestContext) {
                 &db_silo,
                 &AuthenticatedSubject {
                     external_id: "external@id.com".into(),
+                    silo_role: None,
                     groups: vec![],
                 },
             )
@@ -757,4 +759,79 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
 
     // TODO-coverage When we have a way to remove or invalidate Silo Users, we
     // should test that doing so causes them to stop appearing in the list.
+}
+
+#[nexus_test]
+async fn test_silo_role_from_authenticated_subject(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.apictx.nexus;
+
+    let silo =
+        create_silo(&client, "test-silo", true, shared::UserProvisionType::Jit)
+            .await;
+
+    let authn_opctx = nexus.opctx_external_authn();
+
+    let silo_name = silo.identity.name.clone().into();
+
+    let (authz_silo, db_silo) =
+        LookupPath::new(&authn_opctx, &nexus.datastore())
+            .silo_name(&silo_name)
+            .fetch()
+            .await
+            .unwrap();
+
+    // JIT a user without any role, assert the policy doesn't have a role for
+    // them
+    let existing_silo_user = nexus
+        .silo_user_from_authenticated_subject(
+            &authn_opctx,
+            &authz_silo,
+            &db_silo,
+            &AuthenticatedSubject {
+                external_id: "external@id.com".into(),
+                silo_role: None,
+                groups: vec![],
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+    let policy =
+        nexus.silo_fetch_policy(&authn_opctx, &silo_name).await.unwrap();
+    assert!(policy
+        .find_role_assignment(IdentityType::SiloUser, existing_silo_user.id())
+        .is_none());
+
+    // JIT a user with a role, assert the policy does have a role for them
+    let existing_silo_user = nexus
+        .silo_user_from_authenticated_subject(
+            &authn_opctx,
+            &authz_silo,
+            &db_silo,
+            &AuthenticatedSubject {
+                external_id: "external2@id.com".into(),
+                silo_role: Some(SiloRole::Collaborator),
+                groups: vec![],
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+    let policy =
+        nexus.silo_fetch_policy(&authn_opctx, &silo_name).await.unwrap();
+    assert_eq!(
+        policy
+            .find_role_assignment(
+                IdentityType::SiloUser,
+                existing_silo_user.id()
+            )
+            .unwrap()
+            .role_name,
+        SiloRole::Collaborator,
+    );
 }
