@@ -9,4 +9,5 @@
  * initialization code and dbwipe.sql.
  */
 DROP DATABASE IF EXISTS omicron;
+ALTER DEFAULT PRIVILEGES FOR ROLE root REVOKE ALL ON TABLES FROM omicron;
 DROP USER IF EXISTS omicron;
