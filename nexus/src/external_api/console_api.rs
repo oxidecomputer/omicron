@@ -496,25 +496,33 @@ pub struct LoginUrlQuery {
 /// Generate URL to IdP login form. Optional `state` param is included in query
 /// string if present, and will typically represent the URL to send the user
 /// back to after successful login.
+// TODO this does not know anything about IdPs, and it should. When the user is
+// logged out and hits an auth-gated route, if there are multiple IdPs and we
+// don't known which one they want to use, we need to send them to a page that
+// will allow them to choose among discoverable IdPs. However, there may be ways
+// to give ourselves a hint about which one they want, for example, by storing
+// that info in a browser cookie when they log in. When their session ends, we
+// will not be able to look at the dead session to find the silo or IdP (well,
+// maybe we can but we probably shouldn't) but we can look at the cookie and
+// default to sending them to the IdP indicated (though if they don't want that
+// one we need to make sure they can get to a different one). If there is no
+// cookie, we send them to the selector page. In any case, none of this is done
+// here yet. We go to /spoof_login no matter what.
 fn get_login_url(state: Option<String>) -> String {
-    // assume state is not URL encoded, so no risk of double encoding (dropshot
-    // decodes it on the way in)
+    // assume state is not already URL encoded
     let query = match state {
-        Some(state) if state.is_empty() => None,
-        Some(state) => {
+        Some(state) if !state.is_empty() => {
             serde_urlencoded::to_string(LoginUrlQuery { state: Some(state) })
-                .ok() // in the hard-to-imagine event it's not serializable, no query
+                .ok() // in the strange event it's not serializable, no query
         }
-        None => None,
+        _ => None,
     };
     // Once we have IdP integration, this will be a URL for the IdP login page.
     // For now we point to our own placeholder login page.
-    let mut url = "/spoof_login".to_string();
-    if let Some(query) = query {
-        url.push('?');
-        url.push_str(query.as_str());
+    match query {
+        Some(query) => format!("/spoof_login?{query}"),
+        None => "/spoof_login".to_string(),
     }
-    url
 }
 
 /// Redirect to IdP login URL
@@ -571,11 +579,11 @@ pub async fn console_index_or_login_redirect(
     // otherwise redirect to idp
 
     // put the current URI in the query string to redirect back to after login
-    let uri = rqctx.request.lock().await.uri().clone();
+    let uri = rqctx.request.lock().await.uri().to_string();
 
     Ok(Response::builder()
         .status(StatusCode::FOUND)
-        .header(http::header::LOCATION, get_login_url(Some(uri.to_string())))
+        .header(http::header::LOCATION, get_login_url(Some(uri)))
         .body("".into())?)
 }
 
