@@ -343,6 +343,16 @@ impl ServiceManager {
             match service.service_type {
                 ServiceType::Nexus { internal_address, external_address } => {
                     info!(self.log, "Setting up Nexus service");
+
+                    // TODO: Remove once Nexus traffic is transmitted over OPTE.
+                    let gateway4 = crate::sled_agent::get_gz_ipv4(gateway);
+                    running_zone.add_default_route4(gateway4).await.map_err(|err| {
+                        Error::ZoneCommand { intent: "Adding Route".to_string(), err }
+                    })?;
+
+                    // TODO: Do i need to add a route from the GZ to this zone
+                    // too?
+
                     // The address of Nexus' external interface is a special
                     // case; it may be an IPv4 address.
                     let addr_request = AddressRequest::new_static(external_address.ip(), None);

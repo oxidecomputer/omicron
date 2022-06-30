@@ -25,7 +25,7 @@ use omicron_common::api::{
     internal::nexus::UpdateArtifact,
 };
 use slog::Logger;
-use std::net::SocketAddrV6;
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -88,6 +88,30 @@ impl From<Error> for omicron_common::api::external::Error {
             internal_message: err.to_string(),
         }
     }
+}
+
+// TODO: Remove once Nexus traffic is transmitted over OPTE.
+// This is a hack necessary for routing IPv4 traffic to zones hosting external
+// services.
+//
+// Here's the deal: For a sled IPv6 addresses, different portions of the
+// prefix act like indices:
+//
+// fd00:1122:3344:0101::/64
+// |              | ^^ Sled
+// |              ^^ Rack
+// ^^^^^^^^^^^^^ AZ
+//
+// These IPv6 addresses are allocated uniquely to sleds. However, for
+// our short-term hackish purposes, we'd like to allocate IPv4 addresses
+// on the underlay too, so we can do the routing we need to do.
+//
+// We'd like this to be as lightweight as possible. Rather than
+// explicitly provisioning anything in nexus, we piggyback on the
+// existing IPv6 address. By grabbing the "sled octet" from the IPv6
+// address, we get a rack-wide unique identifier.
+pub fn get_gz_ipv4(ip6: Ipv6Addr) -> Ipv4Addr {
+    Ipv4Addr::new(10, 0, ip6.octets()[7], 1)
 }
 
 /// Describes an executing Sled Agent object.
@@ -157,6 +181,14 @@ impl SledAgent {
             etherstub_vnic.clone(),
             *sled_address.ip(),
             "sled6",
+        )
+        .map_err(|err| Error::SledSubnet { err })?;
+
+        // TODO: Remove once Nexus traffic is transmitted over OPTE.
+        Zones::ensure_has_global_zone_v4_address(
+            etherstub_vnic.clone(),
+            get_gz_ipv4(*sled_address.ip()),
+            "sled4",
         )
         .map_err(|err| Error::SledSubnet { err })?;
 

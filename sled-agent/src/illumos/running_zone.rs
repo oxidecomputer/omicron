@@ -11,7 +11,7 @@ use crate::illumos::zone::{AddressRequest, ZONE_PREFIX};
 use crate::opte::OptePort;
 use ipnetwork::IpNetwork;
 use slog::Logger;
-use std::net::Ipv6Addr;
+use std::net::{Ipv4Addr, Ipv6Addr};
 use std::path::PathBuf;
 
 #[cfg(test)]
@@ -182,6 +182,19 @@ impl RunningZone {
             "-inet6",
             "default",
             "-inet6",
+            &gateway.to_string(),
+        ])?;
+        Ok(())
+    }
+
+    pub async fn add_default_route4(
+        &self,
+        gateway: Ipv4Addr,
+    ) -> Result<(), RunCommandError> {
+        self.run_cmd(&[
+            "/usr/sbin/route",
+            "add",
+            "default",
             &gateway.to_string(),
         ])?;
         Ok(())
