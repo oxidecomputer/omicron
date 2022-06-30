@@ -153,7 +153,6 @@ impl RunningZone {
         &self,
         addrtype: AddressRequest,
     ) -> Result<IpNetwork, EnsureAddressError> {
-        info!(self.inner.log, "Adding address: {:?}", addrtype);
         let name = match addrtype {
             AddressRequest::Dhcp => "omicron",
             AddressRequest::Static(net) => match net.ip() {
@@ -161,6 +160,15 @@ impl RunningZone {
                 std::net::IpAddr::V6(_) => "omicron6",
             },
         };
+        self.ensure_address_with_name(addrtype, name).await
+    }
+
+    pub async fn ensure_address_with_name(
+        &self,
+        addrtype: AddressRequest,
+        name: &str,
+    ) -> Result<IpNetwork, EnsureAddressError> {
+        info!(self.inner.log, "Adding address: {:?}", addrtype);
         let addrobj = AddrObject::new(self.inner.control_vnic.name(), name)
             .map_err(|err| EnsureAddressError::AddrObject {
                 request: addrtype,

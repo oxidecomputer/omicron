@@ -114,6 +114,15 @@ pub fn get_gz_ipv4(ip6: Ipv6Addr) -> Ipv4Addr {
     Ipv4Addr::new(10, 0, ip6.octets()[7], 1)
 }
 
+// TODO: Remove once Nexus traffic is transmitted over OPTE.
+//
+// Input: The sled underlay IPv6 address.
+// Output: A private IPv4 address Nexus should use for routing
+// to / from the GZ.
+pub fn get_nexus_private_ipv4(ip6: Ipv6Addr) -> Ipv4Addr {
+    Ipv4Addr::new(10, 0, ip6.octets()[7], 2)
+}
+
 /// Describes an executing Sled Agent object.
 ///
 /// Contains both a connection to the Nexus, as well as managed instances.

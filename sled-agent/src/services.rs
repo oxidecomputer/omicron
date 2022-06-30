@@ -344,19 +344,32 @@ impl ServiceManager {
                 ServiceType::Nexus { internal_address, external_address } => {
                     info!(self.log, "Setting up Nexus service");
 
-                    // TODO: Remove once Nexus traffic is transmitted over OPTE.
-                    let gateway4 = crate::sled_agent::get_gz_ipv4(gateway);
-                    running_zone.add_default_route4(gateway4).await.map_err(|err| {
-                        Error::ZoneCommand { intent: "Adding Route".to_string(), err }
-                    })?;
-
-                    // TODO: Do i need to add a route from the GZ to this zone
-                    // too?
-
                     // The address of Nexus' external interface is a special
                     // case; it may be an IPv4 address.
                     let addr_request = AddressRequest::new_static(external_address.ip(), None);
-                    running_zone.ensure_address(addr_request).await?;
+                    running_zone.ensure_address_with_name(addr_request, "public").await?;
+
+                    // TODO: Remove once Nexus traffic is transmitted over OPTE.
+                    match external_address.ip() {
+                        IpAddr::V4(_) => {
+                            // Create an address which is routable from the GZ's
+                            // Ipv4 address.
+                            let private_addr4 = crate::sled_agent::get_nexus_private_ipv4(self.underlay_address);
+                            let addr_request = AddressRequest::new_static(IpAddr::V4(private_addr4), None);
+                            running_zone.ensure_address_with_name(addr_request, "private").await?;
+
+                            // Create a default route back through the GZ's
+                            // underlay.
+                            let gateway4 = crate::sled_agent::get_gz_ipv4(self.underlay_address);
+                            running_zone.add_default_route4(gateway4).await.map_err(|err| {
+                                Error::ZoneCommand { intent: "Adding Route".to_string(), err }
+                            })?;
+
+                            // TODO: Do i need to add a route from the GZ to this zone
+                            // too?
+                        }
+                        _ => (),
+                    }
 
                     // Nexus takes a separate config file for parameters which
                     // cannot be known at packaging time.
