@@ -2265,7 +2265,7 @@ dependencies = [
 [[package]]
 name = "illumos-ddi-dki"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=5764c07#5764c0732a26c6d0e096ce1b8e871b44d8dc79e7"
+source = "git+https://github.com/oxidecomputer/opte?rev=7089b7858b713cc4d540d3870a0a2436595ac308#7089b7858b713cc4d540d3870a0a2436595ac308"
 dependencies = [
  "illumos-sys-hdrs",
 ]
@@ -2273,7 +2273,7 @@ dependencies = [
 [[package]]
 name = "illumos-sys-hdrs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=5764c07#5764c0732a26c6d0e096ce1b8e871b44d8dc79e7"
+source = "git+https://github.com/oxidecomputer/opte?rev=7089b7858b713cc4d540d3870a0a2436595ac308#7089b7858b713cc4d540d3870a0a2436595ac308"
 
 [[package]]
 name = "impl-trait-for-tuples"
@@ -3364,7 +3364,7 @@ dependencies = [
 [[package]]
 name = "opte"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=5764c07#5764c0732a26c6d0e096ce1b8e871b44d8dc79e7"
+source = "git+https://github.com/oxidecomputer/opte?rev=7089b7858b713cc4d540d3870a0a2436595ac308#7089b7858b713cc4d540d3870a0a2436595ac308"
 dependencies = [
  "anymap",
  "cfg-if 0.1.10",
@@ -3381,7 +3381,7 @@ dependencies = [
 [[package]]
 name = "opte-ioctl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=5764c07#5764c0732a26c6d0e096ce1b8e871b44d8dc79e7"
+source = "git+https://github.com/oxidecomputer/opte?rev=7089b7858b713cc4d540d3870a0a2436595ac308#7089b7858b713cc4d540d3870a0a2436595ac308"
 dependencies = [
  "libc",
  "libnet",
