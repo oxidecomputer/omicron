@@ -230,7 +230,7 @@ impl ServiceManager {
                 &[],
                 // devices=
                 &[],
-                // vnics=
+                // opte_ports=
                 vec![],
             )
             .await?;
@@ -277,7 +277,7 @@ impl ServiceManager {
                 //
                 // This is currently being used for the DNS service.
                 //
-                // TODO: consider limitng the number of GZ addresses which
+                // TODO: consider limiting the number of GZ addresses which
                 // can be supplied - now that we're actively using it, we
                 // aren't really handling the "many GZ addresses" case, and it
                 // doesn't seem necessary now.
@@ -315,6 +315,10 @@ impl ServiceManager {
             match service.service_type {
                 ServiceType::Nexus { internal_address, external_address } => {
                     info!(self.log, "Setting up Nexus service");
+                    // The address of Nexus' external interface is a special
+                    // case; it may be an IPv4 address.
+                    let addr_request = AddressRequest::new_static(external_address.ip(), None);
+                    running_zone.ensure_address(addr_request).await?;
 
                     // Nexus takes a separate config file for parameters which
                     // cannot be known at packaging time.
@@ -322,7 +326,7 @@ impl ServiceManager {
                         id: service.id,
                         rack_id: self.rack_id,
                         dropshot_external: ConfigDropshot {
-                            bind_address: SocketAddr::V6(external_address),
+                            bind_address: external_address,
                             request_body_max_bytes: 1048576,
                             ..Default::default()
                         },
@@ -578,7 +582,7 @@ mod test {
         svc,
         zone::MockZones,
     };
-    use std::net::{Ipv6Addr, SocketAddrV6};
+    use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
     use std::os::unix::process::ExitStatusExt;
     use uuid::Uuid;
 
@@ -607,12 +611,19 @@ mod test {
             assert_eq!(name, EXPECTED_ZONE_NAME);
             Ok(())
         });
+
+        // Ensure the address exists
+        let ensure_address_ctx = MockZones::ensure_address_context();
+        ensure_address_ctx.expect().return_once(|_, _, _| {
+            Ok(ipnetwork::IpNetwork::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 64).unwrap())
+        });
+
         // Wait for the networking service.
         let wait_ctx = svc::wait_for_service_context();
         wait_ctx.expect().return_once(|_, _| Ok(()));
         // Import the manifest, enable the service
         let execute_ctx = crate::illumos::execute_context();
-        execute_ctx.expect().times(3).returning(|_| {
+        execute_ctx.expect().times(..).returning(|_| {
             Ok(std::process::Output {
                 status: std::process::ExitStatus::from_raw(0),
                 stdout: vec![],
@@ -624,6 +635,7 @@ mod test {
             Box::new(create_vnic_ctx),
             Box::new(install_ctx),
             Box::new(boot_ctx),
+            Box::new(ensure_address_ctx),
             Box::new(wait_ctx),
             Box::new(execute_ctx),
         ]
@@ -637,22 +649,9 @@ mod test {
             services: vec![ServiceRequest {
                 id,
                 name: SVC_NAME.to_string(),
-                addresses: vec![],
+                addresses: vec![Ipv6Addr::LOCALHOST],
                 gz_addresses: vec![],
-                service_type: ServiceType::Nexus {
-                    internal_address: SocketAddrV6::new(
-                        Ipv6Addr::LOCALHOST,
-                        0,
-                        0,
-                        0,
-                    ),
-                    external_address: SocketAddrV6::new(
-                        Ipv6Addr::LOCALHOST,
-                        0,
-                        0,
-                        0,
-                    ),
-                },
+                service_type: ServiceType::Oximeter,
             }],
         })
         .await
@@ -666,22 +665,9 @@ mod test {
             services: vec![ServiceRequest {
                 id,
                 name: SVC_NAME.to_string(),
-                addresses: vec![],
+                addresses: vec![Ipv6Addr::LOCALHOST],
                 gz_addresses: vec![],
-                service_type: ServiceType::Nexus {
-                    internal_address: SocketAddrV6::new(
-                        Ipv6Addr::LOCALHOST,
-                        0,
-                        0,
-                        0,
-                    ),
-                    external_address: SocketAddrV6::new(
-                        Ipv6Addr::LOCALHOST,
-                        0,
-                        0,
-                        0,
-                    ),
-                },
+                service_type: ServiceType::Oximeter,
             }],
         })
         .await

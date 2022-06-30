@@ -290,7 +290,7 @@ impl From<DatasetEnsureBody> for sled_agent_client::types::DatasetEnsureBody {
 )]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServiceType {
-    Nexus { internal_address: SocketAddrV6, external_address: SocketAddrV6 },
+    Nexus { internal_address: SocketAddrV6, external_address: SocketAddr },
     InternalDns { server_address: SocketAddrV6, dns_address: SocketAddrV6 },
     Oximeter,
 }
