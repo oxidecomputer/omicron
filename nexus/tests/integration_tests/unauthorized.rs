@@ -156,6 +156,16 @@ lazy_static! {
             url: "/silos",
             body: serde_json::to_value(&*DEMO_SILO_CREATE).unwrap(),
         },
+        // Create an IP pool
+        SetupReq {
+            url: &*DEMO_IP_POOLS_URL,
+            body: serde_json::to_value(&*DEMO_IP_POOL_CREATE).unwrap(),
+        },
+        // Create an IP Pool range
+        SetupReq {
+            url: &*DEMO_IP_POOL_RANGES_ADD_URL,
+            body: serde_json::to_value(&*DEMO_IP_POOL_RANGE).unwrap(),
+        },
         // Create an Organization
         SetupReq {
             url: "/organizations",
@@ -206,11 +216,6 @@ lazy_static! {
             url: &*SAML_IDENTITY_PROVIDERS_URL,
             body: serde_json::to_value(&*SAML_IDENTITY_PROVIDER).unwrap(),
         },
-        // Create an IP pool
-        SetupReq {
-            url: &*DEMO_IP_POOLS_URL,
-            body: serde_json::to_value(&*DEMO_IP_POOL_CREATE).unwrap(),
-        }
     ];
 }
 

@@ -14,6 +14,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_client::types::ExternalIp;
 use sled_agent_client::types::InstanceEnsureBody;
 use sled_agent_client::types::InstanceHardware;
 use sled_agent_client::types::InstanceMigrateParams;
@@ -162,10 +163,17 @@ async fn sim_instance_migrate(
         )),
         ..old_runtime
     };
+    let external_ip = osagactx
+        .datastore()
+        .instance_lookup_external_ip(&opctx, instance_id)
+        .await
+        .map_err(ActionError::action_failed)
+        .map(ExternalIp::from)?;
     let instance_hardware = InstanceHardware {
         runtime: runtime.into(),
         // TODO: populate NICs
         nics: vec![],
+        external_ip,
         // TODO: populate disks
         disks: vec![],
         // TODO: populate cloud init bytes
