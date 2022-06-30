@@ -124,7 +124,7 @@ HELIOS_NETDEV_REPO_PATH="$XDE_DIR/$(basename "$HELIOS_NETDEV_REPO_URL")"
 # The xde repo provides a full OS/Net incorporation, with updated kernel bits
 # that the `xde` kernel module and OPTE rely on.
 XDE_REPO_BASE_URL="https://buildomat.eng.oxide.computer/public/file/oxidecomputer/os-build/xde"
-XDE_REPO_COMMIT="fc0717b76a92d1e317955ec33477133257982670"
+XDE_REPO_COMMIT="bd79a6eb03c6622760297887458d0601ebc188eb"
 XDE_REPO_URL="$XDE_REPO_BASE_URL/$XDE_REPO_COMMIT/repo.p5p"
 XDE_REPO_SHA_URL="$XDE_REPO_BASE_URL/$XDE_REPO_COMMIT/repo.p5p.sha256"
 XDE_REPO_PATH="$XDE_DIR/$(basename "$XDE_REPO_URL")"

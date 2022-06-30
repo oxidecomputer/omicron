@@ -16,6 +16,11 @@ rust.binary_names = ["nexus"]
 rust.release = true
 service_name = "nexus"
 zone = true
+setup_hint = """
+- Run `./tools/ci_download_console` to download the web console assets
+- Run `pkg install library/postgresql-13` to download Postgres libraries
+"""
+
 [[package.omicron-nexus.paths]]
 from = "/opt/ooce/pgsql-13/lib/amd64"
 to = "/opt/ooce/pgsql-13/lib/amd64"
@@ -38,6 +43,7 @@ to = "/var/svc/manifest/site/oximeter"
 [package.clickhouse]
 service_name = "clickhouse"
 zone = true
+setup_hint = "Run `./tools/ci_download_clickhouse` to download the necessary binaries"
 [[package.clickhouse.paths]]
 from = "out/clickhouse"
 to = "/opt/oxide/clickhouse"
@@ -48,6 +54,7 @@ to = "/var/svc/manifest/site/clickhouse"
 [package.cockroachdb]
 service_name = "cockroachdb"
 zone = true
+setup_hint = "Run `./tools/ci_download_cockroachdb` to download the necessary binaries"
 [[package.cockroachdb.paths]]
 from = "out/cockroachdb"
 to = "/opt/oxide/cockroachdb"

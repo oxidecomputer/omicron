@@ -17,8 +17,7 @@ use crate::illumos::dladm::{self, Dladm, PhysicalLink};
 use crate::illumos::zone::Zones;
 use crate::server::Server as SledServer;
 use crate::sp::SpHandle;
-use ddm_admin_client::types::Ipv6Prefix;
-use omicron_common::address::get_sled_address;
+use omicron_common::address::{get_sled_address, Ipv6Subnet};
 use omicron_common::api::external::{Error as ExternalError, MacAddr};
 use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
@@ -88,6 +87,7 @@ pub(crate) struct Agent {
     sled_agent: Mutex<Option<SledServer>>,
     sled_config: SledConfig,
     sp: Option<SpHandle>,
+    ddmd_client: DdmAdminClient,
 }
 
 fn get_sled_agent_request_path() -> PathBuf {
@@ -174,10 +174,8 @@ impl Agent {
 
         // Start trying to notify ddmd of our bootstrap address so it can
         // advertise it to other sleds.
-        tokio::spawn(advertise_bootstrap_address_via_ddmd(
-            ba_log.clone(),
-            address,
-        ));
+        let ddmd_client = DdmAdminClient::new(log.clone())?;
+        ddmd_client.advertise_prefix(Ipv6Subnet::new(address));
 
         let agent = Agent {
             log: ba_log,
@@ -188,6 +186,7 @@ impl Agent {
             sled_agent: Mutex::new(None),
             sled_config,
             sp,
+            ddmd_client,
         };
 
         let request_path = get_sled_agent_request_path();
@@ -289,6 +288,19 @@ impl Agent {
             message: format!("Recording Sled Agent request to {path:?}"),
             err,
         })?;
+
+        // Start trying to notify ddmd of our sled prefix so it can
+        // advertise it to other sleds.
+        //
+        // TODO-security This ddmd_client is used to advertise both this
+        // (underlay) address and our bootstrap address. Bootstrap addresses are
+        // unauthenticated (connections made on them are auth'd via sprockets),
+        // but underlay addresses should be exchanged via authenticated channels
+        // between ddmd instances. It's TBD how that will work, but presumably
+        // we'll need to do something different here for underlay vs bootstrap
+        // addrs (either talk to a differently-configured ddmd, or include info
+        // indicating which kind of address we're advertising).
+        self.ddmd_client.advertise_prefix(request.subnet);
 
         Ok(SledAgentResponse { id: self.sled_config.id })
     }
@@ -467,21 +479,6 @@ impl Agent {
 
         Ok(())
     }
-}
-
-async fn advertise_bootstrap_address_via_ddmd(log: Logger, address: Ipv6Addr) {
-    let prefix = Ipv6Prefix { addr: address, mask: 64 };
-    retry_notify(internal_service_policy(), || async {
-        let client = DdmAdminClient::new(log.clone())?;
-        client.advertise_prefix(prefix).await?;
-        Ok(())
-    }, |err, duration| {
-        info!(
-            log,
-            "Failed to notify ddmd of our address (will retry after {duration:?}";
-            "err" => %err,
-        );
-    }).await.unwrap();
 }
 
 #[cfg(test)]
