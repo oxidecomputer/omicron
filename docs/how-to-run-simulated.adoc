@@ -137,5 +137,7 @@ Dec 02 18:00:01.093 DEBG registered endpoint, path: /producers, method: POST, lo
 ...
 ----
 
-Once everything is up and running, you can use `curl` directly to hit either of
-the servers.  But it's easier to use the xref:cli.adoc[`oxide` CLI].
+Once everything is up and running, you can use the system in a few ways:
+
+* Use the browser-based console.  The Nexus log output will show what IP address and port it's listening on.  This is also configured in the config file.  If you're using the defaults, you can reach the console at `http://127.0.0.1:12220/orgs`.  Depending on the environment where you're running this, you may need an ssh tunnel or the like to reach this from your browser.
+* Use the xref:cli.adoc[`oxide` CLI].

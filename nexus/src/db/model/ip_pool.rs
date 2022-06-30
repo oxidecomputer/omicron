@@ -70,9 +70,15 @@ pub struct IpPoolRange {
     pub time_created: DateTime<Utc>,
     pub time_modified: DateTime<Utc>,
     pub time_deleted: Option<DateTime<Utc>>,
+    /// First (lowest) address in the range, inclusive.
     pub first_address: IpNetwork,
+    /// Last (highest) address in the range, inclusive.
     pub last_address: IpNetwork,
+    /// Foreign-key to the `ip_pool` table with the parent pool for this range
     pub ip_pool_id: Uuid,
+    /// The child resource generation number, tracking IP addresses allocated or
+    /// used from this range.
+    pub rcgen: i64,
 }
 
 impl IpPoolRange {
@@ -94,6 +100,7 @@ impl IpPoolRange {
             first_address: IpNetwork::from(range.first_address()),
             last_address: IpNetwork::from(range.last_address()),
             ip_pool_id,
+            rcgen: 0,
         }
     }
 }

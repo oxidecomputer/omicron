@@ -6,6 +6,7 @@
 //! building the sled agent on non-illumos systems.
 
 use crate::illumos::vnic::Vnic;
+use crate::params::ExternalIp;
 use ipnetwork::IpNetwork;
 use macaddr::MacAddr6;
 use slog::Logger;
@@ -63,6 +64,7 @@ impl OptePortAllocator {
         subnet: IpNetwork,
         vni: Vni,
         underlay_ip: Ipv6Addr,
+        external_ip: Option<ExternalIp>,
     ) -> Result<OptePort, Error> {
         // TODO-completess: Remove IPv4 restrictions once OPTE supports virtual
         // IPv6 networks.
@@ -91,6 +93,7 @@ impl OptePortAllocator {
             mac,
             vni,
             underlay_ip,
+            external_ip,
             gateway,
             boundary_services,
             vnic: None,
@@ -159,6 +162,7 @@ pub struct OptePort {
     mac: MacAddr6,
     vni: Vni,
     underlay_ip: Ipv6Addr,
+    external_ip: Option<ExternalIp>,
     gateway: Gateway,
     boundary_services: BoundaryServices,
     vnic: Option<Vnic>,
