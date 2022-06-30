@@ -1352,6 +1352,8 @@ impl DataStore {
 
     // External IP addresses
 
+    /// Create an external IP address for an instance.
+    // TODO-correctness: This should be made idempotent.
     pub async fn allocate_instance_external_ip(
         &self,
         opctx: &OpContext,
@@ -1375,25 +1377,40 @@ impl DataStore {
             })
     }
 
+    /// Deallocate the external IP address with the provided ID.
+    ///
+    /// To support idempotency, such as in saga operations, this method returns
+    /// an extra boolean, rather than the usual `DeleteResult`. The meaning of
+    /// return values are:
+    ///
+    /// - `Ok(true)`: The record was deleted during this call
+    /// - `Ok(false)`: The record was already deleted, such as by a previous
+    /// call
+    /// - `Err(_)`: Any other condition, including a non-existent record.
     pub async fn deallocate_instance_external_ip(
         &self,
         opctx: &OpContext,
         ip_id: Uuid,
-    ) -> DeleteResult {
+    ) -> Result<bool, Error> {
         use db::schema::instance_external_ip::dsl;
         let now = Utc::now();
         diesel::update(dsl::instance_external_ip)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(ip_id))
             .set(dsl::time_deleted.eq(now))
-            .execute_async(self.pool_authorized(opctx).await?)
+            .check_if_exists::<InstanceExternalIp>(ip_id)
+            .execute_and_check(self.pool_authorized(opctx).await?)
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
-            })?;
-        Ok(())
+            .map(|r| match r.status {
+                UpdateStatus::Updated => true,
+                UpdateStatus::NotUpdatedButExists => false,
+            })
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
+    /// Delete all external IP addresses associated with the provided instance
+    /// ID.
+    // TODO-correctness: This should be made idempotent.
     pub async fn deallocate_instance_external_ip_by_instance_id(
         &self,
         opctx: &OpContext,
@@ -4321,6 +4338,7 @@ mod test {
     use crate::db::fixed_data::silo::SILO_ID;
     use crate::db::identity::Resource;
     use crate::db::lookup::LookupPath;
+    use crate::db::model::InstanceExternalIp;
     use crate::db::model::{ConsoleSession, DatasetKind, Project, ServiceKind};
     use crate::external_api::params;
     use chrono::{Duration, Utc};
@@ -5060,6 +5078,66 @@ mod test {
         }
 
         // Clean up.
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_deallocate_instance_external_ip_is_idempotent() {
+        use crate::db::schema::instance_external_ip::dsl;
+
+        let logctx = dev::test_setup_log("test_table_scan");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        // Create a record.
+        let now = Utc::now();
+        let ip = InstanceExternalIp {
+            id: Uuid::new_v4(),
+            time_created: now,
+            time_modified: now,
+            time_deleted: None,
+            ip_pool_id: Uuid::new_v4(),
+            ip_pool_range_id: Uuid::new_v4(),
+            instance_id: Uuid::new_v4(),
+            ip: ipnetwork::IpNetwork::from(IpAddr::from(Ipv4Addr::new(
+                10, 0, 0, 1,
+            ))),
+            first_port: crate::db::model::SqlU16(0),
+            last_port: crate::db::model::SqlU16(10),
+        };
+        diesel::insert_into(dsl::instance_external_ip)
+            .values(ip)
+            .execute_async(datastore.pool())
+            .await
+            .unwrap();
+
+        // Delete it twice, make sure we get the right sentinel return values.
+        let deleted = datastore
+            .deallocate_instance_external_ip(&opctx, ip.id)
+            .await
+            .unwrap();
+        assert!(
+            deleted,
+            "Got unexpected sentinel value back when \
+            deleting external IP the first time"
+        );
+        let deleted = datastore
+            .deallocate_instance_external_ip(&opctx, ip.id)
+            .await
+            .unwrap();
+        assert!(
+            !deleted,
+            "Got unexpected sentinel value back when \
+            deleting external IP the second time"
+        );
+
+        // Deleting a non-existing record fails
+        assert!(datastore
+            .deallocate_instance_external_ip(&opctx, Uuid::nil())
+            .await
+            .is_err());
+
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

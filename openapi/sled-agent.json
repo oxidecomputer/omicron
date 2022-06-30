@@ -709,15 +709,18 @@
         "type": "object",
         "properties": {
           "first_port": {
+            "description": "The first port used for instance NAT, inclusive.",
             "type": "integer",
             "format": "uint16",
             "minimum": 0
           },
           "ip": {
+            "description": "The external address provided to the instance",
             "type": "string",
             "format": "ip"
           },
           "last_port": {
+            "description": "The last port used for instance NAT, also inclusive.",
             "type": "integer",
             "format": "uint16",
             "minimum": 0

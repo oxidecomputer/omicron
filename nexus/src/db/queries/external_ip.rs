@@ -607,7 +607,7 @@ mod tests {
         );
 
         // Allocate one more, ensure it's the next chunk after the second one
-        // from the original loop. At this point
+        // from the original loop.
         let instance_id = Uuid::new_v4();
         let ip = context
             .db_datastore

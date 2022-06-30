@@ -29,8 +29,11 @@ pub struct NetworkInterface {
 /// An external IP address used for external connectivity for an instance.
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, JsonSchema)]
 pub struct ExternalIp {
+    /// The external address provided to the instance
     pub ip: IpAddr,
+    /// The first port used for instance NAT, inclusive.
     pub first_port: u16,
+    /// The last port used for instance NAT, also inclusive.
     pub last_port: u16,
 }
 
