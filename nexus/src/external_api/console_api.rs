@@ -558,22 +558,8 @@ pub async fn session_me(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-// Dropshot does not have route match ranking and does not allow overlapping
-// route definitions, so we cannot have a catchall `/*` route for console pages
-// and then also define, e.g., `/api/blah/blah` and give the latter priority
-// because it's a more specific match. So for now we simply give the console
-// catchall route a prefix to avoid overlap. Long-term, if a route prefix is
-// part of the solution, we would probably prefer it to be on the API endpoints,
-// not on the console pages. Conveniently, all the console page routes start
-// with /orgs already.
-#[endpoint {
-   method = GET,
-   path = "/orgs/{path:.*}",
-   unpublished = true,
-}]
-pub async fn console_page(
+async fn console_page_inner(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    _path_params: Path<RestPathParam>,
 ) -> Result<Response<Body>, HttpError> {
     let opctx = OpContext::for_external_api(&rqctx).await;
 
@@ -597,6 +583,38 @@ pub async fn console_page(
         .status(StatusCode::FOUND)
         .header(http::header::LOCATION, get_login_url(None))
         .body("".into())?)
+}
+
+// Dropshot does not have route match ranking and does not allow overlapping
+// route definitions, so we cannot have a catchall `/*` route for console pages
+// and then also define, e.g., `/api/blah/blah` and give the latter priority
+// because it's a more specific match. So for now we simply give the console
+// catchall route a prefix to avoid overlap. Long-term, if a route prefix is
+// part of the solution, we would probably prefer it to be on the API endpoints,
+// not on the console pages. Conveniently, all the console page routes start
+// with /orgs already.
+#[endpoint {
+   method = GET,
+   path = "/orgs/{path:.*}",
+   unpublished = true,
+}]
+pub async fn console_page(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    _path_params: Path<RestPathParam>,
+) -> Result<Response<Body>, HttpError> {
+    console_page_inner(rqctx).await
+}
+
+#[endpoint {
+   method = GET,
+   path = "/settings/{path:.*}",
+   unpublished = true,
+}]
+pub async fn console_settings_page(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    _path_params: Path<RestPathParam>,
+) -> Result<Response<Body>, HttpError> {
+    console_page_inner(rqctx).await
 }
 
 /// Fetch a static asset from `<static_dir>/assets`. 404 on virtually all
