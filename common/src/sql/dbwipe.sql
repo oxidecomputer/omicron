@@ -9,5 +9,11 @@
  * initialization code and dbwipe.sql.
  */
 DROP DATABASE IF EXISTS omicron;
+
+/*
+ * This is silly, but we throw an error if the user was already deleted.
+ * Create the user so we can always delete it.
+ */
+CREATE USER IF NOT EXISTS omicron;
 ALTER DEFAULT PRIVILEGES FOR ROLE root REVOKE ALL ON TABLES FROM omicron;
 DROP USER IF EXISTS omicron;
