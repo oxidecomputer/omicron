@@ -13,7 +13,7 @@ dropshot = {  git = "https://github.com/oxidecomputer/dropshot", branch = "main"
 futures = "0.3.21"
 http = "0.2.7"
 hyper = "0.14"
-ipnetwork = "0.18"
+ipnetwork = "0.19"
 macaddr = { version = "1.0.1", features = [ "serde_std" ] }
 rand = "0.8.4"
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls", "stream"] }

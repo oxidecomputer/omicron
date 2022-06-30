@@ -26,7 +26,7 @@ hex = "0.4.3"
 http = "0.2.7"
 hyper = "0.14"
 db-macros = { path = "src/db/db-macros" }
-ipnetwork = "0.18"
+ipnetwork = "0.19"
 lazy_static = "1.4.0"
 libc = "0.2.126"
 macaddr = { version = "1.0.1", features = [ "serde_std" ]}
