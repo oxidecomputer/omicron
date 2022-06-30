@@ -3395,6 +3395,7 @@ impl DataStore {
 
         opctx.authorize(authz::Action::Read, authz_silo).await?;
         paginated(dsl::silo_user, dsl::id, pagparams)
+            .filter(dsl::silo_id.eq(authz_silo.id()))
             .filter(dsl::time_deleted.is_null())
             .select(SiloUser::as_select())
             .load_async::<SiloUser>(self.pool_authorized(opctx).await?)
