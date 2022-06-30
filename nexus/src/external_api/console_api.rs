@@ -558,7 +558,7 @@ pub async fn session_me(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-async fn console_page_inner(
+pub async fn console_index_or_login_redirect(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
 ) -> Result<Response<Body>, HttpError> {
     let opctx = OpContext::for_external_api(&rqctx).await;
@@ -602,7 +602,7 @@ pub async fn console_page(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     _path_params: Path<RestPathParam>,
 ) -> Result<Response<Body>, HttpError> {
-    console_page_inner(rqctx).await
+    console_index_or_login_redirect(rqctx).await
 }
 
 #[endpoint {
@@ -614,7 +614,7 @@ pub async fn console_settings_page(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     _path_params: Path<RestPathParam>,
 ) -> Result<Response<Body>, HttpError> {
-    console_page_inner(rqctx).await
+    console_index_or_login_redirect(rqctx).await
 }
 
 /// Fetch a static asset from `<static_dir>/assets`. 404 on virtually all
