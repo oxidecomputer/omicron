@@ -125,7 +125,18 @@ pub struct DeviceAuthVerify {
 }]
 pub async fn device_auth_verify(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    params: Query<DeviceAuthVerify>,
+    _params: Query<DeviceAuthVerify>,
+) -> Result<Response<Body>, HttpError> {
+    console_index_or_login_redirect(rqctx).await
+}
+
+#[endpoint {
+    method = GET,
+    path = "/device/success",
+    unpublished = true,
+}]
+pub async fn device_auth_success(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
 ) -> Result<Response<Body>, HttpError> {
     console_index_or_login_redirect(rqctx).await
 }

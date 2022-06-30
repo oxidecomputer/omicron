@@ -228,6 +228,7 @@ pub fn external_api() -> NexusApiDescription {
 
         api.register(device_auth::device_auth_request)?;
         api.register(device_auth::device_auth_verify)?;
+        api.register(device_auth::device_auth_success)?;
         api.register(device_auth::device_auth_confirm)?;
         api.register(device_auth::device_access_token)?;
 
