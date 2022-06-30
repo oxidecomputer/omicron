@@ -686,7 +686,7 @@ mod test {
         svc,
         zone::MockZones,
     };
-    use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
+    use std::net::Ipv6Addr;
     use std::os::unix::process::ExitStatusExt;
     use uuid::Uuid;
 
