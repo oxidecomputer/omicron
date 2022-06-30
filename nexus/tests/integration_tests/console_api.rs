@@ -10,20 +10,31 @@ use std::env::current_dir;
 use nexus_test_utils::http_testing::{
     AuthnMode, NexusRequest, RequestBuilder, TestResponse,
 };
+use nexus_test_utils::resource_helpers::grant_iam;
 use nexus_test_utils::{
     load_test_config, test_setup_with_config, ControlPlaneTestContext,
 };
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_nexus::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
+use omicron_nexus::authz::SiloRole;
+use omicron_nexus::db::fixed_data::silo::DEFAULT_SILO;
 use omicron_nexus::db::identity::Asset;
 use omicron_nexus::external_api::console_api::SpoofLoginBody;
 use omicron_nexus::external_api::params::OrganizationCreate;
-use omicron_nexus::external_api::views;
+use omicron_nexus::external_api::{shared, views};
+
+// XXX-dap TODO-coverage tests to add:
+// - attempt to log out using somebody else's session cookie shouldn't work --
+//   is this possible?
+//   - this might have to be a datastore-level test
+// - attempt to create a session for a built-in user and then log out shouldn't
+//   work
 
 #[nexus_test]
 async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
+    let nexus = &cptestctx.server.apictx.nexus;
 
     // logout always gives the same response whether you have a session or not
     RequestBuilder::new(&testctx, Method::POST, "/logout")
@@ -61,6 +72,29 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
         .await
         .expect("failed to 302 on unauthed console page request");
 
+    // Our test uses the "unprivileged" user to make sure login/logout works
+    // without other privileges.  However, they _do_ need the privilege to
+    // create Organizations because we'll be testing that as a smoke test.
+    // We'll remove that privilege afterwards.
+    let silo_url = format!("/silos/{}", DEFAULT_SILO.identity.name);
+    let policy_url = format!("{}/policy", policy_url);
+    let initial_policy: shared::Policy<SiloRole> =
+        NexusRequest::object_get(testctx, &policy_url)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .expect("failed to fetch Silo policy")
+            .parsed_body()
+            .expect("failed to parse Silo policy");
+    grant_iam(
+        testctx,
+        &policy_url,
+        SiloRole::Collaborator,
+        USER_TEST_UNPRIVILEGED.id(),
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
     // now make same requests with cookie
     RequestBuilder::new(&testctx, Method::POST, "/organizations")
         .header(header::COOKIE, &session_token)
@@ -77,6 +111,12 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
         .execute()
         .await
         .expect("failed to get console page with session cookie");
+
+    NexusRequest::object_put(testctx, &policy_url, Some(&initial_policy))
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to restore Silo policy");
 
     // logout with an actual session should delete the session in the db
     RequestBuilder::new(&testctx, Method::POST, "/logout")
@@ -282,7 +322,7 @@ fn get_header_value(resp: TestResponse, header_name: HeaderName) -> String {
 
 async fn log_in_and_extract_token(testctx: &ClientTestContext) -> String {
     let login = RequestBuilder::new(&testctx, Method::POST, "/login")
-        .body(Some(&SpoofLoginBody { username: "privileged".to_string() }))
+        .body(Some(&SpoofLoginBody { username: "unprivileged".to_string() }))
         .expect_status(Some(StatusCode::OK))
         .execute()
         .await
