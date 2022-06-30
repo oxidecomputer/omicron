@@ -10,6 +10,7 @@ use crate::illumos::running_zone::{InstalledZone, RunningZone};
 use crate::illumos::vnic::VnicAllocator;
 use crate::illumos::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use crate::illumos::zone::AddressRequest;
+use crate::illumos::{execute, PFEXEC};
 use crate::params::{ServiceEnsureBody, ServiceRequest, ServiceType};
 use crate::zone::Zones;
 use dropshot::ConfigDropshot;
@@ -57,6 +58,9 @@ pub enum Error {
         #[source]
         err: crate::illumos::running_zone::RunCommandError,
     },
+
+    #[error("Installing GZ route to IPv4 address: {0}")]
+    GzIpv4Route(crate::illumos::ExecutionError),
 
     #[error("Failed to boot zone: {0}")]
     ZoneBoot(#[from] crate::illumos::running_zone::BootError),
@@ -346,27 +350,57 @@ impl ServiceManager {
 
                     // The address of Nexus' external interface is a special
                     // case; it may be an IPv4 address.
-                    let addr_request = AddressRequest::new_static(external_address.ip(), None);
-                    running_zone.ensure_address_with_name(addr_request, "public").await?;
+                    let addr_request =
+                        AddressRequest::new_static(external_address.ip(), None);
+                    running_zone
+                        .ensure_address_with_name(addr_request, "public")
+                        .await?;
 
                     // TODO: Remove once Nexus traffic is transmitted over OPTE.
                     match external_address.ip() {
-                        IpAddr::V4(_) => {
+                        IpAddr::V4(public_addr4) => {
                             // Create an address which is routable from the GZ's
                             // Ipv4 address.
-                            let private_addr4 = crate::sled_agent::get_nexus_private_ipv4(self.underlay_address);
-                            let addr_request = AddressRequest::new_static(IpAddr::V4(private_addr4), None);
-                            running_zone.ensure_address_with_name(addr_request, "private").await?;
+                            let private_addr4 =
+                                crate::sled_agent::get_nexus_private_ipv4(
+                                    self.underlay_address,
+                                );
+                            let addr_request = AddressRequest::new_static(
+                                IpAddr::V4(private_addr4),
+                                None,
+                            );
+                            running_zone
+                                .ensure_address_with_name(
+                                    addr_request,
+                                    "private",
+                                )
+                                .await?;
 
                             // Create a default route back through the GZ's
                             // underlay.
-                            let gateway4 = crate::sled_agent::get_gz_ipv4(self.underlay_address);
-                            running_zone.add_default_route4(gateway4).await.map_err(|err| {
-                                Error::ZoneCommand { intent: "Adding Route".to_string(), err }
-                            })?;
+                            let gateway4 = crate::sled_agent::get_gz_ipv4(
+                                self.underlay_address,
+                            );
+                            running_zone
+                                .add_default_route4(gateway4)
+                                .await
+                                .map_err(|err| Error::ZoneCommand {
+                                    intent: "Adding Route".to_string(),
+                                    err,
+                                })?;
 
-                            // TODO: Do i need to add a route from the GZ to this zone
-                            // too?
+                            // Add a route from the GZ to this zone, using the
+                            // private address as a gateway.
+                            let mut command =
+                                std::process::Command::new(PFEXEC);
+                            let cmd = command.args(&[
+                                "/usr/sbin/route",
+                                "add",
+                                &public_addr4.to_string(),
+                                &private_addr4.to_string(),
+                            ]);
+                            execute(cmd)
+                                .map_err(|err| Error::GzIpv4Route(err))?;
                         }
                         _ => (),
                     }
@@ -666,7 +700,8 @@ mod test {
         // Ensure the address exists
         let ensure_address_ctx = MockZones::ensure_address_context();
         ensure_address_ctx.expect().return_once(|_, _, _| {
-            Ok(ipnetwork::IpNetwork::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 64).unwrap())
+            Ok(ipnetwork::IpNetwork::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 64)
+                .unwrap())
         });
 
         // Wait for the networking service.

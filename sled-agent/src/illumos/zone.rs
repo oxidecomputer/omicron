@@ -557,10 +557,7 @@ impl Zones {
             Self::ensure_address(
                 None,
                 &AddrObject::new(&link.0, name).unwrap(),
-                AddressRequest::new_static(
-                    IpAddr::V4(address),
-                    None,
-                ),
+                AddressRequest::new_static(IpAddr::V4(address), None),
             )
             .map_err(|err| anyhow!(err))?;
             Ok(())
