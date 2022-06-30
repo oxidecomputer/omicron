@@ -845,7 +845,7 @@ dependencies = [
 [[package]]
 name = "crucible-agent-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=8314eeddd228ec0d76cefa40c4a41d3e2611ac18#8314eeddd228ec0d76cefa40c4a41d3e2611ac18"
+source = "git+https://github.com/oxidecomputer/crucible?rev=010560590837c3e59e2d12576edf28fe6b940540#010560590837c3e59e2d12576edf28fe6b940540"
 dependencies = [
  "anyhow",
  "chrono",
