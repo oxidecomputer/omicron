@@ -399,7 +399,26 @@ impl ServiceManager {
                                 &public_addr4.to_string(),
                                 &private_addr4.to_string(),
                             ]);
+
                             execute(cmd)
+                                .map(|_| ())
+                                .or_else(|err| {
+                                    // If the command failed because the entry
+                                    // already exists in the global zone, we're
+                                    // good to continue.
+                                    match err {
+                                        crate::illumos::ExecutionError::CommandFailure {
+                                            ref stdout,
+                                            ..
+                                        } => {
+                                            if stdout.contains("entry exists") {
+                                                return Ok(());
+                                            }
+                                        }
+                                        _ => (),
+                                    }
+                                    return Err(err);
+                                })
                                 .map_err(|err| Error::GzIpv4Route(err))?;
                         }
                         _ => (),
