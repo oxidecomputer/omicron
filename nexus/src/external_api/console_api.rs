@@ -496,17 +496,15 @@ pub struct LoginUrlQuery {
 /// Generate URL to IdP login form. Optional `state` param is included in query
 /// string if present, and will typically represent the URL to send the user
 /// back to after successful login.
-pub fn get_login_url(state: Option<String>) -> String {
+fn get_login_url(state: Option<String>) -> String {
     // assume state is not URL encoded, so no risk of double encoding (dropshot
     // decodes it on the way in)
     let query = match state {
         Some(state) if state.is_empty() => None,
-        Some(state) => Some(
+        Some(state) => {
             serde_urlencoded::to_string(LoginUrlQuery { state: Some(state) })
-                // unwrap is safe because query.state was just deserialized out
-                // of a query param, so we know it's serializable
-                .unwrap(),
-        ),
+                .ok() // in the hard-to-imagine event it's not serializable, no query
+        }
         None => None,
     };
     // Once we have IdP integration, this will be a URL for the IdP login page.
@@ -563,15 +561,7 @@ pub async fn console_index_or_login_redirect(
 ) -> Result<Response<Body>, HttpError> {
     let opctx = OpContext::for_external_api(&rqctx).await;
 
-    // if authed, serve HTML page with bundle in script tag
-
-    // HTML doesn't need to be static -- we'll probably find a reason to do some
-    // minimal templating, e.g., putting a CSRF token in the page
-
-    // amusingly, at least to start out, I don't think we care about the path
-    // because the real routing is all client-side. we serve the same HTML
-    // regardless, the app starts on the client and renders the right page and
-    // makes the right API requests.
+    // if authed, serve console index.html with JS bundle in script tag
     if let Ok(opctx) = opctx {
         if opctx.authn.actor().is_some() {
             return serve_console_index(rqctx.context()).await;
@@ -579,9 +569,13 @@ pub async fn console_index_or_login_redirect(
     }
 
     // otherwise redirect to idp
+
+    // put the current URI in the query string to redirect back to after login
+    let uri = rqctx.request.lock().await.uri().clone();
+
     Ok(Response::builder()
         .status(StatusCode::FOUND)
-        .header(http::header::LOCATION, get_login_url(None))
+        .header(http::header::LOCATION, get_login_url(Some(uri.to_string())))
         .body("".into())?)
 }
 
