@@ -3669,14 +3669,8 @@ impl DataStore {
             .execute_async(self.pool_authorized(opctx).await?)
             .await
             .map(|_rows_deleted| ())
-            .map_err(|e| {
-                // TODO-correctness TODO-availability This should be using
-                // public_error_from_diesel_pool()
-                Error::internal_error(&format!(
-                    "error deleting outdated available artifacts: {:?}",
-                    e
-                ))
-            })
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .internal_context("deleting outdated available artifacts")
     }
 
     /// Create a silo user
