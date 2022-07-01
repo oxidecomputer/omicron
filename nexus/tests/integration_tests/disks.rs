@@ -17,6 +17,7 @@ use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::create_instance;
 use nexus_test_utils::resource_helpers::create_organization;
 use nexus_test_utils::resource_helpers::create_project;
+use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
@@ -26,6 +27,8 @@ use omicron_common::api::external::DiskState;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::Name;
+use omicron_common::api::external::Saga;
+use omicron_common::api::external::SagaState;
 use omicron_nexus::TestInterfaces as _;
 use omicron_nexus::{external_api::params, Nexus};
 use sled_agent_client::TestInterfaces as _;
@@ -884,6 +887,122 @@ async fn test_disk_too_big(cptestctx: &ControlPlaneTestContext) {
         RequestBuilder::new(client, Method::POST, &disks_url)
             .body(Some(&new_disk))
             .expect_status(Some(StatusCode::SERVICE_UNAVAILABLE)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+}
+
+// Test disk size accounting
+#[nexus_test]
+async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    // Create one 10 GB dataset with three regions
+    let _test = DiskTest::new(&cptestctx).await;
+
+    create_org_and_project(client).await;
+
+    // Ask for a 7 gibibyte disk, this should succeed
+    let disk_size = ByteCount::try_from(7u64 * 1024 * 1024 * 1024).unwrap();
+    let disks_url = get_disks_url();
+
+    let disk_one = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "disk-one".parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
+        size: disk_size,
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&disk_one))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Ask for a 5 gibibyte disk, this should fail because there isn't space
+    // available.
+    let disk_size = ByteCount::try_from(5u64 * 1024 * 1024 * 1024).unwrap();
+    let disk_two = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "disk-two".parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
+        size: disk_size,
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&disk_two))
+            .expect_status(Some(StatusCode::SERVICE_UNAVAILABLE)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Delete the first disk, freeing up 7 gibibytes.
+    let disk_url = format!("{}/{}", disks_url, "disk-one");
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::DELETE, &disk_url)
+            .expect_status(Some(StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("unexpected success");
+
+    // Wait for the disk delete saga to be done, otherwise size will not be
+    // freed up!
+    for i in 0..5 {
+        let sagas =
+            objects_list_page_authz::<Saga>(client, "/sagas").await.items;
+
+        if sagas.is_empty() {
+            panic!("no saga?!");
+        }
+
+        if !sagas.iter().any(|x| x.state == SagaState::Running) {
+            // all sagas are done - either they succeeded or failed
+            break;
+        }
+
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+        if i == 4 {
+            panic!("waited too long!");
+        }
+    }
+
+    // Ask for a 10 gibibyte disk.
+    let disk_size = ByteCount::try_from(10u64 * 1024 * 1024 * 1024).unwrap();
+    let disk_three = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "disk-three".parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
+        size: disk_size,
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&disk_three))
+            .expect_status(Some(StatusCode::CREATED)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()

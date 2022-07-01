@@ -689,7 +689,7 @@ impl DataStore {
         use db::schema::region::dsl as region_dsl;
 
         // Remove the regions, collecting datasets they're from.
-        let (dataset_id, size) = diesel::delete(region_dsl::region)
+        let datasets_id_and_size = diesel::delete(region_dsl::region)
             .filter(region_dsl::volume_id.eq(volume_id))
             .returning((
                 region_dsl::dataset_id,
@@ -697,7 +697,7 @@ impl DataStore {
                     * region_dsl::blocks_per_extent
                     * region_dsl::extent_count,
             ))
-            .get_result_async::<(Uuid, i64)>(self.pool())
+            .get_results_async::<(Uuid, i64)>(self.pool())
             .await
             .map_err(|e| {
                 Error::internal_error(&format!(
@@ -707,17 +707,19 @@ impl DataStore {
             })?;
 
         // Update those datasets to which the regions belonged.
-        diesel::update(dataset_dsl::dataset)
-            .filter(dataset_dsl::id.eq(dataset_id))
-            .set(dataset_dsl::size_used.eq(dataset_dsl::size_used - size))
-            .execute_async(self.pool())
-            .await
-            .map_err(|e| {
-                Error::internal_error(&format!(
-                    "error updating dataset space: {:?}",
-                    e
-                ))
-            })?;
+        for (dataset_id, size) in datasets_id_and_size {
+            diesel::update(dataset_dsl::dataset)
+                .filter(dataset_dsl::id.eq(dataset_id))
+                .set(dataset_dsl::size_used.eq(dataset_dsl::size_used - size))
+                .execute_async(self.pool())
+                .await
+                .map_err(|e| {
+                    Error::internal_error(&format!(
+                        "error updating dataset space: {:?}",
+                        e
+                    ))
+                })?;
+        }
 
         Ok(())
     }

@@ -573,6 +573,18 @@ pub struct IdentityMetadata {
     pub time_modified: DateTime<Utc>,
 }
 
+impl Default for IdentityMetadata {
+    fn default() -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            name: "a".parse().unwrap(),
+            description: "".into(),
+            time_created: Utc::now(),
+            time_modified: Utc::now(),
+        }
+    }
+}
+
 /// Create-time identity-related parameters
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct IdentityMetadataCreateParams {
@@ -867,7 +879,7 @@ impl DiskState {
 // These are currently only intended for observability by developers.  We will
 // eventually want to flesh this out into something more observable for end
 // users.
-#[derive(ObjectIdentity, Clone, Debug, Serialize, JsonSchema)]
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Saga {
     pub id: Uuid,
     pub state: SagaState,
@@ -908,7 +920,7 @@ impl From<steno::SagaView> for Saga {
     }
 }
 
-#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum SagaState {
     Running,
@@ -916,7 +928,7 @@ pub enum SagaState {
     Failed { error_node_name: String, error_info: SagaErrorInfo },
 }
 
-#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(tag = "error", rename_all = "snake_case")]
 pub enum SagaErrorInfo {
     ActionFailed { source_error: serde_json::Value },
