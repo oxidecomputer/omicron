@@ -24,13 +24,6 @@ use omicron_nexus::external_api::console_api::SpoofLoginBody;
 use omicron_nexus::external_api::params::OrganizationCreate;
 use omicron_nexus::external_api::{shared, views};
 
-// XXX-dap TODO-coverage tests to add:
-// - attempt to log out using somebody else's session cookie shouldn't work --
-//   is this possible?
-//   - this might have to be a datastore-level test
-// - attempt to create a session for a built-in user and then log out shouldn't
-//   work
-
 #[nexus_test]
 async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;

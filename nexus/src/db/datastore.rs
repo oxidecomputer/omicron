@@ -4593,6 +4593,7 @@ mod test {
             duplicate,
             Err(Error::InternalError { internal_message: _ })
         ));
+        // XXX-dap not an internal error!
 
         // update last used (i.e., renew token)
         let authz_session = authz::ConsoleSession::new(
@@ -4616,12 +4617,29 @@ mod test {
             .unwrap();
         assert!(fetched.time_last_used > session.time_last_used);
 
-        // delete it and fetch should come back with nothing
+        // deleting it using `opctx` (which represents the test-privileged user)
+        // should succeed but not do anything -- you can't delete someone else's
+        // session
         let delete =
             datastore.session_hard_delete(&opctx, &authz_session).await;
         assert_eq!(delete, Ok(()));
+        let fetched = LookupPath::new(&opctx, &datastore)
+            .console_session_token(&token)
+            .fetch()
+            .await;
+        assert!(fetched.is_ok());
 
-        // this will be a not found after #347
+        // delete it and fetch should come back with nothing
+        let silo_user_opctx = OpContext::for_background(
+            logctx.log.new(o!()),
+            Arc::new(authz::Authz::new(&logctx.log)),
+            authn::Context::test_silo_user(*SILO_ID, silo_user_id),
+            Arc::clone(&datastore),
+        );
+        let delete = datastore
+            .session_hard_delete(&silo_user_opctx, &authz_session)
+            .await;
+        assert_eq!(delete, Ok(()));
         let fetched = LookupPath::new(&opctx, &datastore)
             .console_session_token(&token)
             .fetch()
