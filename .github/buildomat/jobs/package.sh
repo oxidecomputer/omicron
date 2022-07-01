@@ -19,6 +19,7 @@ rustc --version
 ptime -m ./tools/ci_download_clickhouse
 ptime -m ./tools/ci_download_cockroachdb
 ptime -m ./tools/ci_download_console
+ptime -m ./tools/ci_download_maghemite_openapi
 
 ptime -m cargo run --locked --release --bin omicron-package -- package
 
