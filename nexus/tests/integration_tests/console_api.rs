@@ -19,7 +19,7 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_nexus::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
 use omicron_nexus::authz::SiloRole;
 use omicron_nexus::db::fixed_data::silo::DEFAULT_SILO;
-use omicron_nexus::db::identity::Asset;
+use omicron_nexus::db::identity::{Asset, Resource};
 use omicron_nexus::external_api::console_api::SpoofLoginBody;
 use omicron_nexus::external_api::params::OrganizationCreate;
 use omicron_nexus::external_api::{shared, views};
@@ -34,7 +34,6 @@ use omicron_nexus::external_api::{shared, views};
 #[nexus_test]
 async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
 
     // logout always gives the same response whether you have a session or not
     RequestBuilder::new(&testctx, Method::POST, "/logout")
@@ -76,8 +75,8 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
     // without other privileges.  However, they _do_ need the privilege to
     // create Organizations because we'll be testing that as a smoke test.
     // We'll remove that privilege afterwards.
-    let silo_url = format!("/silos/{}", DEFAULT_SILO.identity.name);
-    let policy_url = format!("{}/policy", policy_url);
+    let silo_url = format!("/silos/{}", DEFAULT_SILO.identity().name);
+    let policy_url = format!("{}/policy", silo_url);
     let initial_policy: shared::Policy<SiloRole> =
         NexusRequest::object_get(testctx, &policy_url)
             .authn_as(AuthnMode::PrivilegedUser)
@@ -88,7 +87,7 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
             .expect("failed to parse Silo policy");
     grant_iam(
         testctx,
-        &policy_url,
+        &silo_url,
         SiloRole::Collaborator,
         USER_TEST_UNPRIVILEGED.id(),
         AuthnMode::PrivilegedUser,
