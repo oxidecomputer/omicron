@@ -25,7 +25,7 @@ use super::error::diesel_pool_result_optional;
 use super::identity::{Asset, Resource};
 use super::pool::DbConnection;
 use super::Pool;
-use crate::authn::{self, Actor};
+use crate::authn;
 use crate::authz::{self, ApiResource};
 use crate::context::OpContext;
 use crate::db::collection_attach::{AttachError, DatastoreAttachTarget};
@@ -4279,12 +4279,18 @@ impl DataStore {
 
     /// Start a device authorization grant flow by recording the request
     /// and initial response parameters.
-    // TODO-security: authz
-    pub async fn device_auth_start(
+    pub async fn device_auth_request_create(
         &self,
         opctx: &OpContext,
         auth_request: DeviceAuthRequest,
     ) -> CreateResult<DeviceAuthRequest> {
+        opctx
+            .authorize(
+                authz::Action::CreateChild,
+                &authz::DEVICE_AUTH_REQUEST_LIST,
+            )
+            .await?;
+
         use db::schema::device_auth_request::dsl;
         diesel::insert_into(dsl::device_auth_request)
             .values(auth_request)
@@ -4294,33 +4300,34 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    /// Look up a device authorization request by `user_code`.
-    // TODO-security: authz
-    pub async fn device_auth_get_request(
+    /// Delete a device authorization request.
+    pub async fn device_auth_request_hard_delete(
         &self,
         opctx: &OpContext,
-        user_code: String,
-    ) -> LookupResult<DeviceAuthRequest> {
+        authz_request: &authz::DeviceAuthRequest,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Delete, authz_request).await?;
+
         use db::schema::device_auth_request::dsl;
-        dsl::device_auth_request
-            .filter(dsl::user_code.eq(user_code))
-            .filter(dsl::time_expires.gt(Utc::now()))
-            .select(DeviceAuthRequest::as_select())
-            .get_result_async(self.pool_authorized(opctx).await?)
+        diesel::delete(dsl::device_auth_request)
+            .filter(dsl::user_code.eq(authz_request.id()))
+            .execute_async(self.pool_authorized(opctx).await?)
             .await
-            .map_err(|e| {
-                // TODO-correctness: better error (not found)
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
-            })
+            .map(|rows_deleted| assert_eq!(rows_deleted, 1))
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    /// Grant a device authorization token.
-    // TODO-security: authz
-    pub async fn device_auth_grant(
+    /// Create a device access token record. The token may already
+    /// be expired if the device auth flow was not completed in time.
+    pub async fn device_access_token_create(
         &self,
         opctx: &OpContext,
+        authz_user: &authz::SiloUser,
         access_token: DeviceAccessToken,
     ) -> CreateResult<DeviceAccessToken> {
+        assert_eq!(authz_user.id(), access_token.silo_user_id);
+        opctx.authorize(authz::Action::CreateChild, authz_user).await?;
+
         use db::schema::device_access_token::dsl;
         diesel::insert_into(dsl::device_access_token)
             .values(access_token)
@@ -4330,9 +4337,9 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    /// Look up a granted device authorization token.
+    /// Look up a granted device access token.
     // TODO-security: authz
-    pub async fn device_auth_get_token(
+    pub async fn device_access_token_fetch(
         &self,
         opctx: &OpContext,
         client_id: Uuid,
@@ -4346,43 +4353,16 @@ impl DataStore {
             .get_result_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                // TODO-correctness: better error (not found)
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::DeviceAccessToken,
+                        LookupType::ByCompositeId(
+                            "client_id, device_code".to_string(),
+                        ),
+                    ),
+                )
             })
-    }
-
-    /// Look up the actor (a Silo user) for whom a token was granted.
-    // TODO-security: authz
-    pub async fn device_access_token_actor(
-        &self,
-        opctx: &OpContext,
-        token: String,
-    ) -> LookupResult<Actor> {
-        use db::schema::device_access_token::dsl;
-        use db::schema::silo_user::dsl as silo_user_dsl;
-
-        let pool = self.pool_authorized(opctx).await?;
-        let token = dsl::device_access_token
-            .filter(dsl::token.eq(token))
-            .select(DeviceAccessToken::as_select())
-            .get_result_async(pool)
-            .await
-            .map_err(|e| {
-                // TODO-correctness: better error (not found)
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
-            })?;
-        let silo_user_id = token.silo_user_id;
-        let silo_id = silo_user_dsl::silo_user
-            .filter(silo_user_dsl::id.eq(silo_user_id))
-            .select(SiloUser::as_select())
-            .get_result_async(pool)
-            .await
-            .map_err(|e| {
-                // TODO-correctness: better error (not found)
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
-            })?
-            .silo_id;
-        Ok(Actor::SiloUser { silo_user_id, silo_id })
     }
 
     // Test interfaces

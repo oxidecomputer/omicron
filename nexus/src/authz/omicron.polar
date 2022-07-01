@@ -355,6 +355,25 @@ resource ConsoleSessionList {
 has_relation(fleet: Fleet, "parent_fleet", collection: ConsoleSessionList)
 	if collection.fleet = fleet;
 
+# Describes the policy for creating and managing device authorization requests.
+resource DeviceAuthRequestList {
+	permissions = [ "create_child" ];
+	relations = { parent_fleet: Fleet };
+	"create_child" if "external-authenticator" on "parent_fleet";
+}
+has_relation(fleet: Fleet, "parent_fleet", collection: DeviceAuthRequestList)
+	if collection.fleet = fleet;
+
+# Describes the policy for creating and managing device access tokens.
+resource DeviceAccessToken {
+	permissions = [ "read" ];
+        relations = { silo_user: SiloUser };
+
+	"read" if "read" on "silo_user";
+}
+has_relation(user: SiloUser, "silo_user", access_token: DeviceAccessToken)
+	if access_token.silo_user = user;
+
 # These rules grants the external authenticator role the permissions it needs to
 # read silo users and modify their sessions.  This is necessary for login to
 # work.
@@ -362,10 +381,16 @@ has_permission(actor: AuthenticatedActor, "read", silo: Silo)
 	if has_role(actor, "external-authenticator", silo.fleet);
 has_permission(actor: AuthenticatedActor, "read", user: SiloUser)
 	if has_role(actor, "external-authenticator", user.silo.fleet);
+
 has_permission(actor: AuthenticatedActor, "read", session: ConsoleSession)
 	if has_role(actor, "external-authenticator", session.fleet);
 has_permission(actor: AuthenticatedActor, "modify", session: ConsoleSession)
 	if has_role(actor, "external-authenticator", session.fleet);
+
+has_permission(actor: AuthenticatedActor, "read", device_auth: DeviceAuthRequest)
+	if has_role(actor, "external-authenticator", device_auth.fleet);
+has_permission(actor: AuthenticatedActor, "read", device_token: DeviceAccessToken)
+	if has_role(actor, "external-authenticator", device_token.fleet);
 
 has_permission(actor: AuthenticatedActor, "read", identity_provider: IdentityProvider)
 	if has_role(actor, "external-authenticator", identity_provider.silo.fleet);

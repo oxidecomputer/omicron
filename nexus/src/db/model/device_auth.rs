@@ -85,6 +85,10 @@ impl DeviceAuthRequest {
                 + Duration::seconds(CLIENT_AUTHENTICATION_TIMEOUT),
         }
     }
+
+    pub fn id(&self) -> String {
+        self.user_code.clone()
+    }
 }
 
 /// An access token granted in response to a successful device authorization flow.
@@ -97,6 +101,7 @@ pub struct DeviceAccessToken {
     pub device_code: String,
     pub silo_user_id: Uuid,
     pub time_created: DateTime<Utc>,
+    pub time_expires: Option<DateTime<Utc>>,
 }
 
 impl DeviceAccessToken {
@@ -111,7 +116,17 @@ impl DeviceAccessToken {
             device_code,
             silo_user_id,
             time_created: Utc::now(),
+            time_expires: None,
         }
+    }
+
+    pub fn id(&self) -> String {
+        self.token.clone()
+    }
+
+    pub fn expires(mut self, time: DateTime<Utc>) -> Self {
+        self.time_expires = Some(time);
+        self
     }
 }
 

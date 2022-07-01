@@ -95,7 +95,8 @@ pub async fn device_auth_request(
             },
         };
 
-        let model = nexus.device_auth_request(&opctx, params.client_id).await?;
+        let model =
+            nexus.device_auth_request_create(&opctx, params.client_id).await?;
         build_oauth_response(
             StatusCode::OK,
             &DeviceAuthResponse::from_model(model, host),
@@ -162,7 +163,11 @@ pub async fn device_auth_confirm(
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let &actor = opctx.authn.actor_required()?;
         let _token = nexus
-            .device_auth_verify(&opctx, params.user_code, actor.actor_id())
+            .device_auth_request_verify(
+                &opctx,
+                params.user_code,
+                actor.actor_id(),
+            )
             .await?;
         Ok(HttpResponseOk(()))
     };
@@ -215,7 +220,7 @@ pub async fn device_access_token(
         let opctx = nexus.opctx_external_authn();
         use DeviceAccessTokenResponse::*;
         match nexus
-            .device_access_token_lookup(
+            .device_access_token_fetch(
                 &opctx,
                 params.client_id,
                 params.device_code,
