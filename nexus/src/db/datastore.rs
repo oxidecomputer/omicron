@@ -4593,7 +4593,6 @@ mod test {
             duplicate,
             Err(Error::InternalError { internal_message: _ })
         ));
-        // XXX-dap not an internal error!
 
         // update last used (i.e., renew token)
         let authz_session = authz::ConsoleSession::new(
