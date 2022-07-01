@@ -136,6 +136,46 @@ table! {
 }
 
 table! {
+    ip_pool (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        rcgen -> Int8,
+    }
+}
+
+table! {
+    ip_pool_range (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        first_address -> Inet,
+        last_address -> Inet,
+        ip_pool_id -> Uuid,
+        rcgen -> Int8,
+    }
+}
+
+table! {
+    instance_external_ip (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        ip_pool_id -> Uuid,
+        ip_pool_range_id -> Uuid,
+        instance_id -> Uuid,
+        ip -> Inet,
+        first_port -> Int4,
+        last_port -> Int4,
+    }
+}
+
+table! {
     silo (id) {
         id -> Uuid,
         name -> Text,
@@ -145,6 +185,7 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
 
         discoverable -> Bool,
+        user_provision_type -> crate::db::model::UserProvisionTypeEnum,
         rcgen -> Int8,
     }
 }
@@ -152,11 +193,12 @@ table! {
 table! {
     silo_user (id) {
         id -> Uuid,
-        silo_id -> Uuid,
-
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
+
+        silo_id -> Uuid,
+        external_id -> Text,
     }
 }
 
@@ -297,6 +339,7 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         rcgen -> Int8,
 
+        rack_id -> Uuid,
         ip -> Inet,
         port -> Int4,
         last_used_address -> Inet,
@@ -471,6 +514,26 @@ table! {
 }
 
 table! {
+    device_auth_request (client_id, device_code) {
+        client_id -> Uuid,
+        device_code -> Text,
+        user_code -> Text,
+        time_created -> Timestamptz,
+        time_expires -> Timestamptz,
+    }
+}
+
+table! {
+    device_access_token (token) {
+        token -> Text,
+        client_id -> Uuid,
+        device_code -> Text,
+        silo_user_id -> Uuid,
+        time_created -> Timestamptz,
+    }
+}
+
+table! {
     role_builtin (resource_type, role_name) {
         resource_type -> Text,
         role_name -> Text,
@@ -506,6 +569,9 @@ table! {
         target_length -> Int8,
     }
 }
+
+allow_tables_to_appear_in_same_query!(ip_pool_range, ip_pool);
+joinable!(ip_pool_range -> ip_pool (ip_pool_id));
 
 allow_tables_to_appear_in_same_query!(
     dataset,

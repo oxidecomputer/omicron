@@ -7,7 +7,10 @@
 use crate::authn;
 use crate::db::identity::{Asset, Resource};
 use crate::db::model;
+use crate::external_api::shared::{self, IpRange};
 use api_identity::ObjectIdentity;
+use chrono::DateTime;
+use chrono::Utc;
 use omicron_common::api::external::{
     ByteCount, Digest, IdentityMetadata, Ipv4Net, Ipv6Net, Name,
     ObjectIdentity, RoleName,
@@ -16,6 +19,33 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddrV6;
 use uuid::Uuid;
+
+// IDENTITY METADATA
+
+/// Identity-related metadata that's included in "asset" public API objects
+/// (which generally have no name or description)
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
+pub struct AssetIdentityMetadata {
+    /// unique, immutable, system-controlled identifier for each resource
+    pub id: Uuid,
+    /// timestamp when this resource was created
+    pub time_created: chrono::DateTime<chrono::Utc>,
+    /// timestamp when this resource was last modified
+    pub time_modified: chrono::DateTime<chrono::Utc>,
+}
+
+impl<T> From<&T> for AssetIdentityMetadata
+where
+    T: Asset,
+{
+    fn from(t: &T) -> Self {
+        AssetIdentityMetadata {
+            id: t.id(),
+            time_created: t.time_created(),
+            time_modified: t.time_modified(),
+        }
+    }
+}
 
 // SILOS
 
@@ -28,11 +58,18 @@ pub struct Silo {
     /// A silo where discoverable is false can be retrieved only by its id - it
     /// will not be part of the "list all silos" output.
     pub discoverable: bool,
+
+    /// User provision type
+    pub user_provision_type: shared::UserProvisionType,
 }
 
 impl Into<Silo> for model::Silo {
     fn into(self) -> Silo {
-        Silo { identity: self.identity(), discoverable: self.discoverable }
+        Silo {
+            identity: self.identity(),
+            discoverable: self.discoverable,
+            user_provision_type: self.user_provision_type.into(),
+        }
     }
 }
 
@@ -315,49 +352,101 @@ impl From<model::VpcRouter> for VpcRouter {
     }
 }
 
-// RACKS
-
-/// Client view of an [`Rack`]
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct Rack {
+pub struct IpPool {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 }
 
+impl From<model::IpPool> for IpPool {
+    fn from(pool: model::IpPool) -> Self {
+        Self { identity: pool.identity() }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct IpPoolRange {
+    pub id: Uuid,
+    pub time_created: DateTime<Utc>,
+    pub range: IpRange,
+}
+
+impl From<model::IpPoolRange> for IpPoolRange {
+    fn from(range: model::IpPoolRange) -> Self {
+        Self {
+            id: range.id,
+            time_created: range.time_created,
+            range: IpRange::from(&range),
+        }
+    }
+}
+
+// RACKS
+
+/// Client view of an [`Rack`]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct Rack {
+    #[serde(flatten)]
+    pub identity: AssetIdentityMetadata,
+}
+
 impl From<model::Rack> for Rack {
     fn from(rack: model::Rack) -> Self {
-        Self { identity: rack.identity() }
+        Self { identity: AssetIdentityMetadata::from(&rack) }
     }
 }
 
 // SLEDS
 
 /// Client view of an [`Sled`]
-#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Sled {
     #[serde(flatten)]
-    pub identity: IdentityMetadata,
+    pub identity: AssetIdentityMetadata,
     pub service_address: SocketAddrV6,
 }
 
 impl From<model::Sled> for Sled {
     fn from(sled: model::Sled) -> Self {
-        Self { identity: sled.identity(), service_address: sled.address() }
+        Self {
+            identity: AssetIdentityMetadata::from(&sled),
+            service_address: sled.address(),
+        }
+    }
+}
+
+// SILO USERS
+
+/// Client view of a [`User`]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+pub struct User {
+    pub id: Uuid,
+    /** Human-readable name that can identify the user */
+    pub display_name: String,
+}
+
+impl From<model::SiloUser> for User {
+    fn from(user: model::SiloUser) -> Self {
+        Self {
+            id: user.id(),
+            // TODO the use of external_id as display_name is temporary
+            display_name: user.external_id,
+        }
     }
 }
 
 // BUILT-IN USERS
 
-/// Client view of a [`User`]
+/// Client view of a [`UserBuiltin`]
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct User {
+pub struct UserBuiltin {
     // TODO-correctness is flattening here (and in all the other types) the
     // intent in RFD 4?
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 }
 
-impl From<model::UserBuiltin> for User {
+impl From<model::UserBuiltin> for UserBuiltin {
     fn from(user: model::UserBuiltin) -> Self {
         Self { identity: user.identity() }
     }
@@ -418,4 +507,76 @@ impl From<model::SshKey> for SshKey {
             public_key: ssh_key.public_key,
         }
     }
+}
+
+// OAUTH 2.0 DEVICE AUTHORIZATION REQUESTS & TOKENS
+
+/// Response to an initial device authorization request.
+/// See RFC 8628 §3.2 (Device Authorization Response).
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct DeviceAuthResponse {
+    /// The device verification code.
+    pub device_code: String,
+
+    /// The end-user verification code.
+    pub user_code: String,
+
+    /// The end-user verification URI on the authorization server.
+    /// The URI should be short and easy to remember as end users
+    /// may be asked to manually type it into their user agent.
+    pub verification_uri: String,
+
+    /// A verification URI that includes the `user_code`,
+    /// which is designed for non-textual transmission.
+    pub verification_uri_complete: String,
+
+    /// The lifetime in seconds of the `device_code` and `user_code`.
+    pub expires_in: u16,
+}
+
+impl DeviceAuthResponse {
+    // We need the host to construct absolute verification URIs.
+    pub fn from_model(model: model::DeviceAuthRequest, host: &str) -> Self {
+        Self {
+            // TODO-security: use HTTPS
+            verification_uri: format!("http://{}/device/verify", host),
+            verification_uri_complete: format!(
+                "http://{}/device/verify?user_code={}",
+                host, &model.user_code
+            ),
+            user_code: model.user_code,
+            device_code: model.device_code,
+            expires_in: model
+                .time_expires
+                .signed_duration_since(model.time_created)
+                .num_seconds() as u16,
+        }
+    }
+}
+
+/// Successful access token grant. See RFC 6749 §5.1.
+/// TODO-security: `expires_in`, `refresh_token`, etc.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct DeviceAccessTokenGrant {
+    /// The access token issued to the client.
+    pub access_token: String,
+
+    /// The type of the token issued, as described in RFC 6749 §7.1.
+    pub token_type: DeviceAccessTokenType,
+}
+
+impl From<model::DeviceAccessToken> for DeviceAccessTokenGrant {
+    fn from(access_token: model::DeviceAccessToken) -> Self {
+        Self {
+            access_token: format!("oxide-token-{}", access_token.token),
+            token_type: DeviceAccessTokenType::Bearer,
+        }
+    }
+}
+
+/// The kind of token granted.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum DeviceAccessTokenType {
+    Bearer,
 }

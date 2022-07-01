@@ -2,6 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use internal_dns_client::names::{BackendName, ServiceName, AAAA, SRV};
+use omicron_common::address::OXIMETER_PORT;
 use omicron_common::api::external;
 use omicron_common::api::internal::nexus::{
     DiskRuntimeState, InstanceRuntimeState,
@@ -20,7 +22,19 @@ pub struct NetworkInterface {
     pub mac: external::MacAddr,
     pub subnet: external::IpNet,
     pub vni: external::Vni,
+    pub primary: bool,
     pub slot: u8,
+}
+
+/// An external IP address used for external connectivity for an instance.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, JsonSchema)]
+pub struct ExternalIp {
+    /// The external address provided to the instance
+    pub ip: IpAddr,
+    /// The first port used for instance NAT, inclusive.
+    pub first_port: u16,
+    /// The last port used for instance NAT, also inclusive.
+    pub last_port: u16,
 }
 
 /// Used to request a Disk state change
@@ -61,6 +75,7 @@ pub struct DiskEnsureBody {
 pub struct InstanceHardware {
     pub runtime: InstanceRuntimeState,
     pub nics: Vec<NetworkInterface>,
+    pub external_ip: ExternalIp,
     pub disks: Vec<propolis_client::api::DiskRequest>,
     pub cloud_init_bytes: Option<String>,
 }
@@ -226,7 +241,7 @@ impl std::fmt::Display for DatasetKind {
         use DatasetKind::*;
         let s = match self {
             Crucible => "crucible",
-            CockroachDb { .. } => "cockroach",
+            CockroachDb { .. } => "cockroachdb",
             Clickhouse => "clickhouse",
         };
         write!(f, "{}", s)
@@ -247,14 +262,28 @@ pub struct DatasetEnsureBody {
     pub dataset_kind: DatasetKind,
     // The address on which the zone will listen for requests.
     pub address: SocketAddrV6,
-    // NOTE: We could insert a UUID here, if we want that to be set by the
-    // caller explicitly? Currently, the lack of a UUID implies that
-    // "at most one dataset type" exists within a zpool.
-    //
-    // It's unclear if this is actually necessary - making this change
-    // would also require the RSS to query existing datasets before
-    // requesting new ones (after all, we generally wouldn't want to
-    // create two CRDB datasets with different UUIDs on the same zpool).
+}
+
+impl DatasetEnsureBody {
+    pub fn aaaa(&self) -> AAAA {
+        AAAA::Zone(self.id)
+    }
+
+    pub fn srv(&self) -> SRV {
+        match self.dataset_kind {
+            DatasetKind::Crucible => {
+                SRV::Backend(BackendName::Crucible, self.id)
+            }
+            DatasetKind::Clickhouse => SRV::Service(ServiceName::Clickhouse),
+            DatasetKind::CockroachDb { .. } => {
+                SRV::Service(ServiceName::Cockroach)
+            }
+        }
+    }
+
+    pub fn address(&self) -> SocketAddrV6 {
+        self.address
+    }
 }
 
 impl From<DatasetEnsureBody> for sled_agent_client::types::DatasetEnsureBody {
@@ -324,6 +353,32 @@ pub struct ServiceRequest {
     pub gz_addresses: Vec<Ipv6Addr>,
     // Any other service-specific parameters.
     pub service_type: ServiceType,
+}
+
+impl ServiceRequest {
+    pub fn aaaa(&self) -> AAAA {
+        AAAA::Zone(self.id)
+    }
+
+    pub fn srv(&self) -> SRV {
+        match self.service_type {
+            ServiceType::InternalDns { .. } => {
+                SRV::Service(ServiceName::InternalDNS)
+            }
+            ServiceType::Nexus { .. } => SRV::Service(ServiceName::Nexus),
+            ServiceType::Oximeter => SRV::Service(ServiceName::Oximeter),
+        }
+    }
+
+    pub fn address(&self) -> SocketAddrV6 {
+        match self.service_type {
+            ServiceType::InternalDns { server_address, .. } => server_address,
+            ServiceType::Nexus { internal_address, .. } => internal_address,
+            ServiceType::Oximeter => {
+                SocketAddrV6::new(self.addresses[0], OXIMETER_PORT, 0, 0)
+            }
+        }
+    }
 }
 
 impl From<ServiceRequest> for sled_agent_client::types::ServiceRequest {

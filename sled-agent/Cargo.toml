@@ -15,8 +15,10 @@ chrono = { version = "0.4", features = [ "serde" ] }
 clap = { version = "3.2", features = ["derive"] }
 # Only used by the simulated sled agent.
 crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "8314eeddd228ec0d76cefa40c4a41d3e2611ac18" }
+ddm-admin-client = { path = "../ddm-admin-client" }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
 futures = "0.3.21"
+internal-dns-client = { path = "../internal-dns-client" }
 ipnetwork = "0.18"
 libc = "0.2.126"
 macaddr = { version = "1.0.1", features = [ "serde_std" ] }
@@ -52,8 +54,8 @@ vsss-rs = { version = "2.0.0-pre2", default-features = false, features = ["std"]
 zone = "0.1"
 
 [target.'cfg(target_os = "illumos")'.dependencies]
-opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "b998015" }
-opte = { git = "https://github.com/oxidecomputer/opte", rev = "b998015", features = [ "api", "std" ] }
+opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "5764c07" }
+opte = { git = "https://github.com/oxidecomputer/opte", rev = "5764c07", features = [ "api", "std" ] }
 
 [dev-dependencies]
 expectorate = "1.0.5"

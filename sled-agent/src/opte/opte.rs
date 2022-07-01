@@ -11,6 +11,7 @@ use crate::illumos::dladm::Dladm;
 use crate::illumos::dladm::PhysicalLink;
 use crate::illumos::vnic::Vnic;
 use crate::illumos::zone::Zones;
+use crate::params::ExternalIp;
 use ipnetwork::IpNetwork;
 use macaddr::MacAddr6;
 use opte::api::IpCidr;
@@ -20,6 +21,7 @@ use opte::api::MacAddr;
 pub use opte::api::Vni;
 use opte::oxide_vpc::api::AddRouterEntryIpv4Req;
 use opte::oxide_vpc::api::RouterTarget;
+use opte::oxide_vpc::api::SNatCfg;
 use opte_ioctl::OpteHdl;
 use slog::Logger;
 use std::net::IpAddr;
@@ -89,6 +91,7 @@ impl OptePortAllocator {
         subnet: IpNetwork,
         vni: Vni,
         underlay_ip: Ipv6Addr,
+        external_ip: Option<ExternalIp>,
     ) -> Result<OptePort, Error> {
         // TODO-completess: Remove IPv4 restrictions once OPTE supports virtual
         // IPv6 networks.
@@ -107,17 +110,58 @@ impl OptePortAllocator {
         }?;
         let boundary_services = BoundaryServices::default();
         let name = self.next();
+        let vpcsub = match subnet {
+            IpNetwork::V4(ip4net) => {
+                // We assume that IpNetwork does not allow an invalid prefix.
+                Ok(Ipv4Cidr::new(
+                    ip4net.ip().into(),
+                    Ipv4PrefixLen::new(ip4net.prefix()).unwrap(),
+                ))
+            }
+            IpNetwork::V6(_) => Err(opte_ioctl::Error::InvalidArgument(
+                String::from("IPv6 is not yet supported for guest interfaces"),
+            )),
+        }?;
+
+        // Describe the source NAT for this instance.
+        let snat = match external_ip {
+            Some(ip) => {
+                let public_ip = match ip.ip {
+                    IpAddr::V4(ip) => ip.into(),
+                    IpAddr::V6(_) => {
+                        return Err(opte_ioctl::Error::InvalidArgument(
+                            String::from("IPv6 is not yet supported for external addresses")
+                        ).into());
+                    }
+                };
+                // OPTE's `SnatCfg` accepts a `std::ops::Range`, but the first/last
+                // port representation in the database and Nexus is inclusive of the
+                // last port. At the moment, that means we need to add 1 to the
+                // last port in the request data. However, if last port is
+                // `u16::MAX`, that would overflow and panic. We'll use saturating
+                // add for now, and live with missing the last port.
+                //
+                // TODO-correctness: Support the last port, see
+                // https://github.com/oxidecomputer/omicron/issues/1292
+                let ports = ip.first_port..ip.last_port.saturating_add(1);
+                Some(SNatCfg { public_ip, ports })
+            }
+            None => None,
+        };
+
         let hdl = OpteHdl::open(OpteHdl::DLD_CTL)?;
         hdl.create_xde(
             &name,
             MacAddr::from(mac.into_array()),
             private_ip,
+            vpcsub,
             MacAddr::from(gateway.mac.into_array()),
             gateway_ip,
             boundary_services.ip,
             boundary_services.vni,
             vni,
             underlay_ip,
+            snat,
             /* passthru = */ false,
         )?;
 
@@ -183,6 +227,7 @@ impl OptePortAllocator {
             mac,
             vni,
             underlay_ip,
+            external_ip,
             gateway,
             boundary_services,
             vnic,
@@ -250,6 +295,9 @@ pub struct OptePort {
     mac: MacAddr6,
     vni: Vni,
     underlay_ip: Ipv6Addr,
+    // The external IP information for this port, or None if it has no external
+    // connectivity. Only the primary interface has Some(_) here.
+    external_ip: Option<ExternalIp>,
     gateway: Gateway,
     boundary_services: BoundaryServices,
     // TODO-correctness: Remove this once we can put Viona directly on top of an

@@ -4,11 +4,14 @@
 
 //! Handler functions (entrypoints) for external HTTP APIs
 
+use super::views::IpPool;
+use super::views::IpPoolRange;
 use super::{
-    console_api, params, views,
+    console_api, device_auth, params, views,
     views::{
         GlobalImage, IdentityProvider, Image, Organization, Project, Rack,
-        Role, Silo, Sled, Snapshot, SshKey, User, Vpc, VpcRouter, VpcSubnet,
+        Role, Silo, Sled, Snapshot, SshKey, User, UserBuiltin, Vpc, VpcRouter,
+        VpcSubnet,
     },
 };
 use crate::authz;
@@ -34,8 +37,11 @@ use dropshot::RequestContext;
 use dropshot::ResultsPage;
 use dropshot::TypedBody;
 use dropshot::WhichPage;
+use ipnetwork::IpNetwork;
 use omicron_common::api::external::http_pagination::data_page_params_nameid_id;
 use omicron_common::api::external::http_pagination::data_page_params_nameid_name;
+use omicron_common::api::external::http_pagination::marker_for_name;
+use omicron_common::api::external::http_pagination::marker_for_name_or_id;
 use omicron_common::api::external::http_pagination::pagination_field_for_scan_params;
 use omicron_common::api::external::http_pagination::PagField;
 use omicron_common::api::external::http_pagination::PaginatedById;
@@ -102,6 +108,16 @@ pub fn external_api() -> NexusApiDescription {
         api.register(organization_projects_put_project)?;
         api.register(organization_projects_get_project_policy)?;
         api.register(organization_projects_put_project_policy)?;
+
+        api.register(ip_pools_get)?;
+        api.register(ip_pools_post)?;
+        api.register(ip_pools_get_ip_pool)?;
+        api.register(ip_pools_delete_ip_pool)?;
+        api.register(ip_pools_put_ip_pool)?;
+
+        api.register(ip_pool_ranges_get)?;
+        api.register(ip_pool_ranges_add)?;
+        api.register(ip_pool_ranges_delete)?;
 
         api.register(project_disks_get)?;
         api.register(project_disks_post)?;
@@ -184,8 +200,10 @@ pub fn external_api() -> NexusApiDescription {
         api.register(sagas_get)?;
         api.register(sagas_get_saga)?;
 
-        api.register(users_get)?;
-        api.register(users_get_user)?;
+        api.register(silo_users_get)?;
+
+        api.register(builtin_users_get)?;
+        api.register(builtin_users_get_user)?;
 
         api.register(timeseries_schema_get)?;
 
@@ -220,6 +238,11 @@ pub fn external_api() -> NexusApiDescription {
         api.register(by_id_router_get)?;
         api.register(by_id_route_get)?;
         api.register(by_id_network_interface_get)?;
+
+        api.register(device_auth::device_auth_request)?;
+        api.register(device_auth::device_auth_verify)?;
+        api.register(device_auth::device_auth_confirm)?;
+        api.register(device_auth::device_access_token)?;
 
         Ok(())
     }
@@ -348,7 +371,11 @@ async fn silos_get(
         .into_iter()
         .map(|p| p.into())
         .collect();
-        Ok(HttpResponseOk(ScanByNameOrId::results_page(&query, silos)?))
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            silos,
+            &marker_for_name_or_id,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -508,6 +535,7 @@ async fn silos_get_identity_providers(
         Ok(HttpResponseOk(ScanByName::results_page(
             &query,
             identity_providers,
+            &marker_for_name,
         )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -616,7 +644,11 @@ async fn organizations_get(
         .into_iter()
         .map(|p| p.into())
         .collect();
-        Ok(HttpResponseOk(ScanByNameOrId::results_page(&query, organizations)?))
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            organizations,
+            &marker_for_name_or_id,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -834,7 +866,11 @@ async fn organization_projects_get(
         .into_iter()
         .map(|p| p.into())
         .collect();
-        Ok(HttpResponseOk(ScanByNameOrId::results_page(&query, projects)?))
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            projects,
+            &marker_for_name_or_id,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1023,6 +1059,239 @@ async fn organization_projects_put_project_policy(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+// IP Pools
+
+#[derive(Deserialize, JsonSchema)]
+pub struct IpPoolPathParam {
+    pub pool_name: Name,
+}
+
+/// List IP Pools.
+#[endpoint {
+    method = GET,
+    path = "/ip-pools",
+    tags = ["ip-pools"],
+}]
+async fn ip_pools_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<PaginatedByNameOrId>,
+) -> Result<HttpResponseOk<ResultsPage<IpPool>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let params = ScanByNameOrId::from_query(&query)?;
+        let field = pagination_field_for_scan_params(params);
+        let pools = match field {
+            PagField::Id => {
+                let page_selector = data_page_params_nameid_id(&rqctx, &query)?;
+                nexus.ip_pools_list_by_id(&opctx, &page_selector).await?
+            }
+            PagField::Name => {
+                let page_selector =
+                    data_page_params_nameid_name(&rqctx, &query)?
+                        .map_name(|n| Name::ref_cast(n));
+                nexus.ip_pools_list_by_name(&opctx, &page_selector).await?
+            }
+        }
+        .into_iter()
+        .map(IpPool::from)
+        .collect();
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            pools,
+            &marker_for_name_or_id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Create a new IP Pool.
+#[endpoint {
+    method = POST,
+    path = "/ip-pools",
+    tags = ["ip-pools"],
+}]
+async fn ip_pools_post(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    pool_params: TypedBody<params::IpPoolCreate>,
+) -> Result<HttpResponseCreated<views::IpPool>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let pool_params = pool_params.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let pool = nexus.ip_pool_create(&opctx, &pool_params).await?;
+        Ok(HttpResponseCreated(IpPool::from(pool)))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch a single IP Pool.
+#[endpoint {
+    method = GET,
+    path = "/ip-pools/{pool_name}",
+    tags = ["ip-pools"],
+}]
+async fn ip_pools_get_ip_pool(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<IpPoolPathParam>,
+) -> Result<HttpResponseOk<views::IpPool>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let pool_name = &path.pool_name;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let pool = nexus.ip_pool_fetch(&opctx, pool_name).await?;
+        Ok(HttpResponseOk(IpPool::from(pool)))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Delete an IP Pool.
+#[endpoint {
+    method = DELETE,
+    path = "/ip-pools/{pool_name}",
+    tags = ["ip-pools"],
+}]
+async fn ip_pools_delete_ip_pool(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<IpPoolPathParam>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let pool_name = &path.pool_name;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        nexus.ip_pool_delete(&opctx, pool_name).await?;
+        Ok(HttpResponseDeleted())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Update an IP Pool.
+#[endpoint {
+    method = PUT,
+    path = "/ip-pools/{pool_name}",
+    tags = ["ip-pools"],
+}]
+async fn ip_pools_put_ip_pool(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<IpPoolPathParam>,
+    updates: TypedBody<params::IpPoolUpdate>,
+) -> Result<HttpResponseOk<views::IpPool>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let pool_name = &path.pool_name;
+    let updates = updates.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let pool = nexus.ip_pool_update(&opctx, pool_name, &updates).await?;
+        Ok(HttpResponseOk(pool.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+type IpPoolRangePaginationParams = PaginationParams<EmptyScanParams, IpNetwork>;
+
+/// List the ranges of IP addresses within an existing IP Pool.
+///
+/// Note that ranges are listed sorted by their first address.
+#[endpoint {
+    method = GET,
+    path = "/ip-pools/{pool_name}/ranges",
+    tags = ["ip-pools"],
+}]
+async fn ip_pool_ranges_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<IpPoolPathParam>,
+    query_params: Query<IpPoolRangePaginationParams>,
+) -> Result<HttpResponseOk<ResultsPage<IpPoolRange>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let path = path_params.into_inner();
+    let pool_name = &path.pool_name;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let marker = match query.page {
+            WhichPage::First(_) => None,
+            WhichPage::Next(ref addr) => Some(addr),
+        };
+        let pag_params = DataPageParams {
+            limit: rqctx.page_limit(&query)?,
+            direction: PaginationOrder::Ascending,
+            marker,
+        };
+        let ranges = nexus
+            .ip_pool_list_ranges(&opctx, pool_name, &pag_params)
+            .await?
+            .into_iter()
+            .map(|range| range.into())
+            .collect();
+        Ok(HttpResponseOk(ResultsPage::new(
+            ranges,
+            &EmptyScanParams {},
+            |range: &IpPoolRange, _| {
+                IpNetwork::from(range.range.first_address())
+            },
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Add a new range to an existing IP Pool.
+#[endpoint {
+    method = POST,
+    path = "/ip-pools/{pool_name}/ranges/add",
+    tags = ["ip-pools"],
+}]
+async fn ip_pool_ranges_add(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<IpPoolPathParam>,
+    range_params: TypedBody<shared::IpRange>,
+) -> Result<HttpResponseCreated<IpPoolRange>, HttpError> {
+    let apictx = &rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let pool_name = &path.pool_name;
+    let range = range_params.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let out = nexus.ip_pool_add_range(&opctx, pool_name, &range).await?;
+        Ok(HttpResponseCreated(out.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Remove a range from an existing IP Pool.
+#[endpoint {
+    method = POST,
+    path = "/ip-pools/{pool_name}/ranges/delete",
+    tags = ["ip-pools"],
+}]
+async fn ip_pool_ranges_delete(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<IpPoolPathParam>,
+    range_params: TypedBody<shared::IpRange>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = &rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let pool_name = &path.pool_name;
+    let range = range_params.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        nexus.ip_pool_delete_range(&opctx, pool_name, &range).await?;
+        Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 // Disks
 
 /// List disks in a project.
@@ -1056,7 +1325,11 @@ async fn project_disks_get(
             .into_iter()
             .map(|d| d.into())
             .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(&query, disks)?))
+        Ok(HttpResponseOk(ScanByName::results_page(
+            &query,
+            disks,
+            &marker_for_name,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1192,7 +1465,11 @@ async fn project_instances_get(
             .into_iter()
             .map(|i| i.into())
             .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(&query, instances)?))
+        Ok(HttpResponseOk(ScanByName::results_page(
+            &query,
+            instances,
+            &marker_for_name,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1501,7 +1778,11 @@ async fn instance_disks_get(
             .into_iter()
             .map(|d| d.into())
             .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(&query, disks)?))
+        Ok(HttpResponseOk(ScanByName::results_page(
+            &query,
+            disks,
+            &marker_for_name,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1600,7 +1881,11 @@ async fn images_get(
             .into_iter()
             .map(|d| d.into())
             .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(&query, images)?))
+        Ok(HttpResponseOk(ScanByName::results_page(
+            &query,
+            images,
+            &marker_for_name,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1719,7 +2004,11 @@ async fn project_images_get(
             .into_iter()
             .map(|d| d.into())
             .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(&query, images)?))
+        Ok(HttpResponseOk(ScanByName::results_page(
+            &query,
+            images,
+            &marker_for_name,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1871,7 +2160,11 @@ async fn instance_network_interfaces_get(
             .into_iter()
             .map(|d| d.into())
             .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(&query, interfaces)?))
+        Ok(HttpResponseOk(ScanByName::results_page(
+            &query,
+            interfaces,
+            &marker_for_name,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -2057,7 +2350,11 @@ async fn project_snapshots_get(
             .into_iter()
             .map(|d| d.into())
             .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(&query, snapshots)?))
+        Ok(HttpResponseOk(ScanByName::results_page(
+            &query,
+            snapshots,
+            &marker_for_name,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -2198,7 +2495,11 @@ async fn project_vpcs_get(
             .map(|p| p.into())
             .collect();
 
-        Ok(HttpResponseOk(ScanByName::results_page(&query, vpcs)?))
+        Ok(HttpResponseOk(ScanByName::results_page(
+            &query,
+            vpcs,
+            &marker_for_name,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -2360,7 +2661,11 @@ async fn vpc_subnets_get(
             .into_iter()
             .map(|vpc| vpc.into())
             .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(&query, vpcs)?))
+        Ok(HttpResponseOk(ScanByName::results_page(
+            &query,
+            vpcs,
+            &marker_for_name,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -2524,7 +2829,11 @@ async fn subnet_network_interfaces_get(
             .into_iter()
             .map(|interfaces| interfaces.into())
             .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(&query, interfaces)?))
+        Ok(HttpResponseOk(ScanByName::results_page(
+            &query,
+            interfaces,
+            &marker_for_name,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -2630,7 +2939,11 @@ async fn vpc_routers_get(
             .into_iter()
             .map(|s| s.into())
             .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(&query, routers)?))
+        Ok(HttpResponseOk(ScanByName::results_page(
+            &query,
+            routers,
+            &marker_for_name,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -2797,7 +3110,11 @@ async fn routers_routes_get(
             .into_iter()
             .map(|route| route.into())
             .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(&query, routes)?))
+        Ok(HttpResponseOk(ScanByName::results_page(
+            &query,
+            routes,
+            &marker_for_name,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -2953,11 +3270,17 @@ async fn hardware_racks_get(
     let query = query_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let rack_stream = nexus
+        let racks = nexus
             .racks_list(&opctx, &data_page_params_for(&rqctx, &query)?)
-            .await?;
-        let view_list = to_list::<db::model::Rack, Rack>(rack_stream).await;
-        Ok(HttpResponseOk(ScanById::results_page(&query, view_list)?))
+            .await?
+            .into_iter()
+            .map(|r| r.into())
+            .collect();
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            racks,
+            &|_, rack: &Rack| rack.identity.id,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -3013,7 +3336,11 @@ async fn hardware_sleds_get(
             .into_iter()
             .map(|s| s.into())
             .collect();
-        Ok(HttpResponseOk(ScanById::results_page(&query, sleds)?))
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            sleds,
+            &|_, sled: &Sled| sled.identity.id,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -3087,7 +3414,11 @@ async fn sagas_get(
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let saga_stream = nexus.sagas_list(&opctx, &pagparams).await?;
         let view_list = to_list(saga_stream).await;
-        Ok(HttpResponseOk(ScanById::results_page(&query, view_list)?))
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            view_list,
+            &|_, saga: &Saga| saga.id,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -3119,18 +3450,51 @@ async fn sagas_get_saga(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+// Silo users
+
+/// List users
+#[endpoint {
+    method = GET,
+    path = "/users",
+    tags = ["silos"],
+}]
+async fn silo_users_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<User>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let pagparams = data_page_params_for(&rqctx, &query)?;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let users = nexus
+            .silo_users_list(&opctx, &pagparams)
+            .await?
+            .into_iter()
+            .map(|i| i.into())
+            .collect();
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            users,
+            &|_, user: &User| user.id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 // Built-in (system) users
 
 /// List the built-in system users
 #[endpoint {
     method = GET,
-    path = "/users",
-    tags = ["users"],
+    path = "/users_builtin",
+    tags = ["system"],
 }]
-async fn users_get(
+async fn builtin_users_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByName>,
-) -> Result<HttpResponseOk<ResultsPage<User>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<UserBuiltin>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
@@ -3144,7 +3508,11 @@ async fn users_get(
             .into_iter()
             .map(|i| i.into())
             .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(&query, users)?))
+        Ok(HttpResponseOk(ScanByName::results_page(
+            &query,
+            users,
+            &marker_for_name,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -3159,13 +3527,13 @@ struct UserPathParam {
 /// Fetch a specific built-in system user
 #[endpoint {
     method = GET,
-    path = "/users/{user_name}",
-    tags = ["users"],
+    path = "/users_builtin/{user_name}",
+    tags = ["system"],
 }]
-async fn users_get_user(
+async fn builtin_users_get_user(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<UserPathParam>,
-) -> Result<HttpResponseOk<User>, HttpError> {
+) -> Result<HttpResponseOk<UserBuiltin>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -3312,7 +3680,11 @@ async fn sshkeys_get(
             .into_iter()
             .map(SshKey::from)
             .collect::<Vec<SshKey>>();
-        Ok(HttpResponseOk(ScanByName::results_page(&query, ssh_keys)?))
+        Ok(HttpResponseOk(ScanByName::results_page(
+            &query,
+            ssh_keys,
+            &marker_for_name,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

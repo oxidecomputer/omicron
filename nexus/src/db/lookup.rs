@@ -226,6 +226,20 @@ impl<'a> LookupPath<'a> {
         }
     }
 
+    /// Select a resource of type IpPool, identified by its name
+    pub fn ip_pool_name<'b, 'c>(self, name: &'b Name) -> IpPool<'c>
+    where
+        'a: 'c,
+        'b: 'c,
+    {
+        IpPool { key: IpPoolKey::Name(Root { lookup_root: self }, name) }
+    }
+
+    /// Select a resource of type IpPool, identified by its id
+    pub fn ip_pool_id(self, id: Uuid) -> IpPool<'a> {
+        IpPool { key: IpPoolKey::PrimaryKey(Root { lookup_root: self }, id) }
+    }
+
     /// Select a resource of type Disk, identified by its id
     pub fn disk_id(self, id: Uuid) -> Disk<'a> {
         Disk { key: DiskKey::PrimaryKey(Root { lookup_root: self }, id) }
@@ -449,6 +463,15 @@ lookup_resource! {
         { column_name = "silo_id", rust_type = Uuid },
         { column_name = "id", rust_type = Uuid }
     ]
+}
+
+lookup_resource! {
+    name = "IpPool",
+    ancestors = [],
+    children = [],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid }]
 }
 
 lookup_resource! {

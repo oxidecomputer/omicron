@@ -137,6 +137,61 @@ impl super::Nexus {
         Ok(db_silo_user)
     }
 
+    /// Based on an authenticated subject, fetch or create a silo user
+    pub async fn silo_user_from_authenticated_subject(
+        &self,
+        opctx: &OpContext,
+        authz_silo: &authz::Silo,
+        db_silo: &db::model::Silo,
+        authenticated_subject: &authn::silos::AuthenticatedSubject,
+    ) -> LookupResult<Option<db::model::SiloUser>> {
+        // XXX create user permission?
+        opctx.authorize(authz::Action::CreateChild, authz_silo).await?;
+
+        let existing_silo_user = self
+            .datastore()
+            .silo_user_fetch_by_external_id(
+                opctx,
+                &authz_silo,
+                &authenticated_subject.external_id,
+            )
+            .await?;
+
+        if let Some(existing_silo_user) = existing_silo_user {
+            // TODO once groups exist, add user to any new groups if the
+            // authenticated subject's group membership does not match the
+            // existing silo user's.
+            Ok(Some(existing_silo_user))
+        } else {
+            // In this branch, no user exists for the authenticated subject
+            // external id. The next action depends on the silo's user provision
+            // type.
+            match db_silo.user_provision_type {
+                // If the user provision type is fixed, do not a new user if one
+                // does not exist.
+                db::model::UserProvisionType::Fixed => Ok(None),
+
+                // If the user provision type is JIT, then create the user if it
+                // does not exist.
+                db::model::UserProvisionType::Jit => {
+                    let silo_user_id = Uuid::new_v4();
+                    let silo_user = db::model::SiloUser::new(
+                        authz_silo.id(),
+                        silo_user_id,
+                        authenticated_subject.external_id.clone(),
+                    );
+                    let silo_user =
+                        self.db_datastore.silo_user_create(silo_user).await?;
+
+                    // TODO once groups exist, add user to groups
+                    // TODO what roles do JITed users get?
+
+                    Ok(Some(silo_user))
+                }
+            }
+        }
+    }
+
     // SSH Keys
 
     pub async fn ssh_key_create(

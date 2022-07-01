@@ -26,6 +26,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::internal::nexus;
+use sled_agent_client::types::ExternalIp;
 use sled_agent_client::types::InstanceRuntimeStateMigrateParams;
 use sled_agent_client::types::InstanceRuntimeStateRequested;
 use sled_agent_client::types::InstanceStateRequested;
@@ -211,7 +212,15 @@ impl super::Nexus {
                 .fetch()
                 .await?;
 
-        self.db_datastore.project_delete_instance(opctx, &authz_instance).await
+        self.db_datastore
+            .project_delete_instance(opctx, &authz_instance)
+            .await?;
+        self.db_datastore
+            .deallocate_instance_external_ip_by_instance_id(
+                opctx,
+                authz_instance.id(),
+            )
+            .await
     }
 
     pub async fn project_instance_migrate(
@@ -478,6 +487,12 @@ impl super::Nexus {
             .derive_guest_network_interface_info(&opctx, &authz_instance)
             .await?;
 
+        let external_ip = self
+            .db_datastore
+            .instance_lookup_external_ip(&opctx, authz_instance.id())
+            .await
+            .map(ExternalIp::from)?;
+
         // Gather the SSH public keys of the actor make the request so
         // that they may be injected into the new image via cloud-init.
         // TODO-security: this should be replaced with a lookup based on
@@ -514,6 +529,7 @@ impl super::Nexus {
                 db_instance.runtime().clone(),
             ),
             nics,
+            external_ip,
             disks: disk_reqs,
             cloud_init_bytes: Some(base64::encode(
                 db_instance.generate_cidata(&public_keys)?,

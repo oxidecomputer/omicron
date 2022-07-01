@@ -43,11 +43,12 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<Oso, anyhow::Error> {
         AuthenticatedActor::get_polar_class(),
         Database::get_polar_class(),
         Fleet::get_polar_class(),
+        IpPoolList::get_polar_class(),
         GlobalImageList::get_polar_class(),
         ConsoleSessionList::get_polar_class(),
     ];
     for c in classes {
-        trace!(log, "registering Oso class"; "class" => &c.name);
+        info!(log, "registering Oso class"; "class" => &c.name);
         oso.register_class(c).context("registering class")?;
     }
 
@@ -57,6 +58,7 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<Oso, anyhow::Error> {
         Project::init(),
         Disk::init(),
         Instance::init(),
+        IpPool::init(),
         NetworkInterface::init(),
         Vpc::init(),
         VpcRouter::init(),
@@ -83,11 +85,11 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<Oso, anyhow::Error> {
         .join("\n");
 
     for init in generated_inits {
-        trace!(log, "registering Oso class"; "class" => &init.polar_class.name);
+        info!(log, "registering Oso class"; "class" => &init.polar_class.name);
         oso.register_class(init.polar_class).context("registering class")?;
     }
 
-    trace!(log, "full Oso configuration"; "config" => &polar_config);
+    info!(log, "full Oso configuration"; "config" => &polar_config);
     oso.load_str(&polar_config).context("loading Polar (Oso) config")?;
     Ok(oso)
 }

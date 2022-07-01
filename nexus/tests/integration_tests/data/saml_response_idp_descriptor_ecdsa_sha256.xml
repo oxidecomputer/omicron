@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<md:EntityDescriptor xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata" entityID="https://some.idp.test/oxide_rack/">
+  <md:IDPSSODescriptor WantAuthnRequestsSigned="false" protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
+    <md:KeyDescriptor use="signing">
+      <ds:KeyInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#">
+        <ds:X509Data>
+          <ds:X509Certificate>MIIB0TCCAXagAwIBAgIUFrkxTnQdOAY/7qJw7hJE99G4MOIwCgYIKoZIzj0EAwIwRjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1TYW4gRnJhbmNpc2NvMRIwEAYDVQQDEwlzYW1sLnRlc3QwHhcNMjIwNTA0MTgxNDAwWhcNMjcwNTAzMTgxNDAwWjBGMQswCQYDVQQGEwJVUzELMAkGA1UECBMCQ0ExFjAUBgNVBAcTDVNhbiBGcmFuY2lzY28xEjAQBgNVBAMTCXNhbWwudGVzdDBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABMgWYNrJmHdkCegHMHKGSK9kPL7YYB4tYNlGK3s/FseZQUvMMOoz0ot7E6kBtPo+Gk+KnoYrJBBqp9ibXIvu9WyjQjBAMA4GA1UdDwEB/wQEAwIBBjAPBgNVHRMBAf8EBTADAQH/MB0GA1UdDgQWBBRYXi3sj9FVb0R7DsaU/9P2OT/49TAKBggqhkjOPQQDAgNJADBGAiEA74YxpJxWJeWl9r1KQw1dcJ2GtNTr4bH9LVDMaRt2kGkCIQDz7Vufp+bIl5AFdAcJzri6LyyZ4xzkViFenAkdxtcqnQ==</ds:X509Certificate>
+        </ds:X509Data>
+      </ds:KeyInfo>
+    </md:KeyDescriptor>
+    <md:SingleLogoutService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="https://some.idp.test/oxide_rack/"/>
+    <md:NameIDFormat>urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress</md:NameIDFormat>
+    <md:SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="https://some.idp.test/oxide_rack/"/>
+  </md:IDPSSODescriptor>
+</md:EntityDescriptor>
