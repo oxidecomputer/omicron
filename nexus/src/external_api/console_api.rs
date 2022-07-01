@@ -496,27 +496,33 @@ pub struct LoginUrlQuery {
 /// Generate URL to IdP login form. Optional `state` param is included in query
 /// string if present, and will typically represent the URL to send the user
 /// back to after successful login.
-pub fn get_login_url(state: Option<String>) -> String {
-    // assume state is not URL encoded, so no risk of double encoding (dropshot
-    // decodes it on the way in)
+// TODO this does not know anything about IdPs, and it should. When the user is
+// logged out and hits an auth-gated route, if there are multiple IdPs and we
+// don't known which one they want to use, we need to send them to a page that
+// will allow them to choose among discoverable IdPs. However, there may be ways
+// to give ourselves a hint about which one they want, for example, by storing
+// that info in a browser cookie when they log in. When their session ends, we
+// will not be able to look at the dead session to find the silo or IdP (well,
+// maybe we can but we probably shouldn't) but we can look at the cookie and
+// default to sending them to the IdP indicated (though if they don't want that
+// one we need to make sure they can get to a different one). If there is no
+// cookie, we send them to the selector page. In any case, none of this is done
+// here yet. We go to /spoof_login no matter what.
+fn get_login_url(state: Option<String>) -> String {
+    // assume state is not already URL encoded
     let query = match state {
-        Some(state) if state.is_empty() => None,
-        Some(state) => Some(
+        Some(state) if !state.is_empty() => {
             serde_urlencoded::to_string(LoginUrlQuery { state: Some(state) })
-                // unwrap is safe because query.state was just deserialized out
-                // of a query param, so we know it's serializable
-                .unwrap(),
-        ),
-        None => None,
+                .ok() // in the strange event it's not serializable, no query
+        }
+        _ => None,
     };
     // Once we have IdP integration, this will be a URL for the IdP login page.
     // For now we point to our own placeholder login page.
-    let mut url = "/spoof_login".to_string();
-    if let Some(query) = query {
-        url.push('?');
-        url.push_str(query.as_str());
+    match query {
+        Some(query) => format!("/spoof_login?{query}"),
+        None => "/spoof_login".to_string(),
     }
-    url
 }
 
 /// Redirect to IdP login URL
@@ -558,6 +564,29 @@ pub async fn session_me(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+pub async fn console_index_or_login_redirect(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+) -> Result<Response<Body>, HttpError> {
+    let opctx = OpContext::for_external_api(&rqctx).await;
+
+    // if authed, serve console index.html with JS bundle in script tag
+    if let Ok(opctx) = opctx {
+        if opctx.authn.actor().is_some() {
+            return serve_console_index(rqctx.context()).await;
+        }
+    }
+
+    // otherwise redirect to idp
+
+    // put the current URI in the query string to redirect back to after login
+    let uri = rqctx.request.lock().await.uri().to_string();
+
+    Ok(Response::builder()
+        .status(StatusCode::FOUND)
+        .header(http::header::LOCATION, get_login_url(Some(uri)))
+        .body("".into())?)
+}
+
 // Dropshot does not have route match ranking and does not allow overlapping
 // route definitions, so we cannot have a catchall `/*` route for console pages
 // and then also define, e.g., `/api/blah/blah` and give the latter priority
@@ -575,28 +604,19 @@ pub async fn console_page(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     _path_params: Path<RestPathParam>,
 ) -> Result<Response<Body>, HttpError> {
-    let opctx = OpContext::for_external_api(&rqctx).await;
+    console_index_or_login_redirect(rqctx).await
+}
 
-    // if authed, serve HTML page with bundle in script tag
-
-    // HTML doesn't need to be static -- we'll probably find a reason to do some
-    // minimal templating, e.g., putting a CSRF token in the page
-
-    // amusingly, at least to start out, I don't think we care about the path
-    // because the real routing is all client-side. we serve the same HTML
-    // regardless, the app starts on the client and renders the right page and
-    // makes the right API requests.
-    if let Ok(opctx) = opctx {
-        if opctx.authn.actor().is_some() {
-            return serve_console_index(rqctx.context()).await;
-        }
-    }
-
-    // otherwise redirect to idp
-    Ok(Response::builder()
-        .status(StatusCode::FOUND)
-        .header(http::header::LOCATION, get_login_url(None))
-        .body("".into())?)
+#[endpoint {
+   method = GET,
+   path = "/settings/{path:.*}",
+   unpublished = true,
+}]
+pub async fn console_settings_page(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    _path_params: Path<RestPathParam>,
+) -> Result<Response<Body>, HttpError> {
+    console_index_or_login_redirect(rqctx).await
 }
 
 /// Fetch a static asset from `<static_dir>/assets`. 404 on virtually all
