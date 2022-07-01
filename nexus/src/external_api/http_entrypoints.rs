@@ -131,7 +131,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(instance_reboot)?;
         api.register(instance_start)?;
         api.register(instance_stop)?;
-        api.register(instance_console)?;
+        api.register(instance_serial_console)?;
 
         // Globally-scoped Images API
         api.register(image_global_list)?;
@@ -165,14 +165,13 @@ pub fn external_api() -> NexusApiDescription {
         api.register(vpc_subnet_create)?;
         api.register(vpc_subnet_delete)?;
         api.register(vpc_subnet_update)?;
+        api.register(vpc_subnet_list_network_interfaces)?;
 
-        api.register(vpc_subnet_list_nics)?;
-
-        api.register(instance_nic_create)?;
-        api.register(instance_nic_list)?;
-        api.register(instance_nic_view)?;
-        api.register(instance_nic_update)?;
-        api.register(instance_nic_delete)?;
+        api.register(instance_network_interface_create)?;
+        api.register(instance_network_interface_list)?;
+        api.register(instance_network_interface_view)?;
+        api.register(instance_network_interface_update)?;
+        api.register(instance_network_interface_delete)?;
 
         api.register(vpc_router_list)?;
         api.register(vpc_router_view)?;
@@ -180,14 +179,14 @@ pub fn external_api() -> NexusApiDescription {
         api.register(vpc_router_delete)?;
         api.register(vpc_router_update)?;
 
-        api.register(vpc_firewall_list_rules)?;
-        api.register(vpc_firewall_update_rules)?;
-
         api.register(vpc_router_list_routes)?;
         api.register(vpc_router_view_route)?;
         api.register(vpc_router_create_route)?;
         api.register(vpc_router_delete_route)?;
         api.register(vpc_router_update_route)?;
+
+        api.register(vpc_firewall_list_rules)?;
+        api.register(vpc_firewall_update_rules)?;
 
         api.register(rack_list)?;
         api.register(rack_view)?;
@@ -1705,10 +1704,10 @@ async fn instance_stop(
 /// Get contents of an instance's serial console.
 #[endpoint {
     method = GET,
-    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/serial",
+    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/serial-console",
     tags = ["instances"],
 }]
-async fn instance_console(
+async fn instance_serial_console(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstancePathParam>,
     query_params: Query<params::InstanceSerialConsoleRequest>,
@@ -2124,7 +2123,7 @@ async fn image_delete(
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces",
     tags = ["instances"],
 }]
-async fn instance_nic_list(
+async fn instance_network_interface_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByName>,
     path_params: Path<InstancePathParam>,
@@ -2166,7 +2165,7 @@ async fn instance_nic_list(
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces",
     tags = ["instances"],
 }]
-async fn instance_nic_create(
+async fn instance_network_interface_create(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstancePathParam>,
     interface_params: TypedBody<params::NetworkInterfaceCreate>,
@@ -2212,7 +2211,7 @@ pub struct NetworkInterfacePathParam {
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}",
     tags = ["instances"],
 }]
-async fn instance_nic_delete(
+async fn instance_network_interface_delete(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<NetworkInterfacePathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
@@ -2245,7 +2244,7 @@ async fn instance_nic_delete(
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}",
     tags = ["instances"],
 }]
-async fn instance_nic_view(
+async fn instance_network_interface_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<NetworkInterfacePathParam>,
 ) -> Result<HttpResponseOk<NetworkInterface>, HttpError> {
@@ -2278,7 +2277,7 @@ async fn instance_nic_view(
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}",
     tags = ["instances"],
 }]
-async fn instance_nic_update(
+async fn instance_network_interface_update(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<NetworkInterfacePathParam>,
     updated_iface: TypedBody<params::NetworkInterfaceUpdate>,
@@ -2795,7 +2794,7 @@ async fn vpc_subnet_update(
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}/network-interfaces",
     tags = ["vpcs"],
 }]
-async fn vpc_subnet_list_nics(
+async fn vpc_subnet_list_network_interfaces(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByName>,
     path_params: Path<VpcSubnetPathParam>,

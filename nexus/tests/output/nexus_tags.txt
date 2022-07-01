@@ -38,7 +38,6 @@ image_global_view                        /images/{image_name}
 
 API operations found with tag "instances"
 OPERATION ID                             URL PATH
-instance_console                         /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/serial
 instance_create                          /organizations/{organization_name}/projects/{project_name}/instances
 instance_delete                          /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}
 instance_disk_attach                     /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/attach
@@ -46,12 +45,13 @@ instance_disk_detach                     /organizations/{organization_name}/proj
 instance_disk_list                       /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks
 instance_list                            /organizations/{organization_name}/projects/{project_name}/instances
 instance_migrate                         /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/migrate
-instance_nic_create                      /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces
-instance_nic_delete                      /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}
-instance_nic_list                        /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces
-instance_nic_update                      /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}
-instance_nic_view                        /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}
+instance_network_interface_create        /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces
+instance_network_interface_delete        /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}
+instance_network_interface_list          /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces
+instance_network_interface_update        /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}
+instance_network_interface_view          /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}
 instance_reboot                          /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/reboot
+instance_serial_console                  /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/serial-console
 instance_start                           /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/start
 instance_stop                            /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/stop
 instance_view                            /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}
@@ -167,7 +167,7 @@ vpc_router_view_route                    /organizations/{organization_name}/proj
 vpc_subnet_create                        /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets
 vpc_subnet_delete                        /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}
 vpc_subnet_list                          /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets
-vpc_subnet_list_nics                     /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}/network-interfaces
+vpc_subnet_list_network_interfaces       /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}/network-interfaces
 vpc_subnet_update                        /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}
 vpc_subnet_view                          /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}
 vpc_update                               /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}

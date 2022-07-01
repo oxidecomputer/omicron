@@ -2576,7 +2576,7 @@
           "instances"
         ],
         "summary": "List network interfaces attached to this instance.",
-        "operationId": "instance_nic_list",
+        "operationId": "instance_network_interface_list",
         "parameters": [
           {
             "in": "query",
@@ -2661,7 +2661,7 @@
           "instances"
         ],
         "summary": "Create a network interface for an instance.",
-        "operationId": "instance_nic_create",
+        "operationId": "instance_network_interface_create",
         "parameters": [
           {
             "in": "path",
@@ -2727,7 +2727,7 @@
           "instances"
         ],
         "summary": "Get an interface attached to an instance.",
-        "operationId": "instance_nic_view",
+        "operationId": "instance_network_interface_view",
         "parameters": [
           {
             "in": "path",
@@ -2790,7 +2790,7 @@
           "instances"
         ],
         "summary": "Update information about an instance's network interface",
-        "operationId": "instance_nic_update",
+        "operationId": "instance_network_interface_update",
         "parameters": [
           {
             "in": "path",
@@ -2864,7 +2864,7 @@
         ],
         "summary": "Detach a network interface from an instance.",
         "description": "Note that the primary interface for an instance cannot be deleted if there are any secondary interfaces. A new primary interface must be designated first. The primary interface can be deleted if there are no secondary interfaces.",
-        "operationId": "instance_nic_delete",
+        "operationId": "instance_network_interface_delete",
         "parameters": [
           {
             "in": "path",
@@ -2972,13 +2972,13 @@
         }
       }
     },
-    "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/serial": {
+    "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/serial-console": {
       "get": {
         "tags": [
           "instances"
         ],
         "summary": "Get contents of an instance's serial console.",
-        "operationId": "instance_console",
+        "operationId": "instance_serial_console",
         "parameters": [
           {
             "in": "path",
@@ -5032,7 +5032,7 @@
           "vpcs"
         ],
         "summary": "List network interfaces in a VPC subnet.",
-        "operationId": "vpc_subnet_list_nics",
+        "operationId": "vpc_subnet_list_network_interfaces",
         "parameters": [
           {
             "in": "query",
