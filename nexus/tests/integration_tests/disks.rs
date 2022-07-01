@@ -820,9 +820,9 @@ async fn test_disk_reject_total_size_not_divisible_by_min_disk_size(
     );
 }
 
-// Test disks backed by multiple regions
+// Test disks backed by multiple region sets (one region set being three regions)
 #[nexus_test]
-async fn test_disk_backed_by_multiple_regions(
+async fn test_disk_backed_by_multiple_region_sets(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
