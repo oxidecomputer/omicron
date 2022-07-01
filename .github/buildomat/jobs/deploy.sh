@@ -4,7 +4,7 @@
 #: variety = "basic"
 #: target = "lab-netdev"
 #: output_rules = [
-#:	"/var/oxide/sled-agent.log",
+#:	"/var/svc/log/system-illumos-sled-agent:default.log",
 #: ]
 #: skip_clone = true
 #:
@@ -83,17 +83,8 @@ OMICRON_NO_UNINSTALL=1 \
 # Wait up to 5 minutes for RSS to say it's done
 for _i in {1..30}; do
 	sleep 10
-	grep 'Finished setting up services' /var/oxide/sled-agent.log && break
+	grep "Finished setting up services" "$(svcs -L sled-agent)" && break
 done
 
 # TODO: write tests and run the resulting test bin here
-curl --fail-with-body -i http://[fd00:1122:3344:0101::3]:12220
-
-#
-# XXX I don't think we need to do this, as merely exiting the build job will
-# cause the build job to exit and the host to reboot, discarding the ramdisk
-# state.  Note also that doing this here appears to delete "/var/oxide/*",
-# which includes the log file we might wish to preserve.
-#
-# # ptime -m pfexec ./target/release/omicron-package uninstall
-# # ptime -m pfexec ./tools/destroy_virtual_hardware.sh
+curl --fail-with-body -i http://[fd00:1122:3344:0101::3]:12220/spoof_login

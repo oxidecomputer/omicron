@@ -16,10 +16,8 @@ set -o xtrace
 cargo --version
 rustc --version
 
-ptime -m ./tools/ci_download_clickhouse
-ptime -m ./tools/ci_download_cockroachdb
-ptime -m ./tools/ci_download_console
-ptime -m ./tools/ci_download_maghemite_openapi
+sed -i -e 's^pfexec ./tools/install_opte.sh^true^' ./tools/install_prerequisites.sh
+ptime -m ./tools/install_prerequisites.sh -yp
 
 ptime -m cargo run --locked --release --bin omicron-package -- package
 
