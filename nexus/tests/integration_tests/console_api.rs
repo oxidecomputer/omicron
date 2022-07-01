@@ -189,11 +189,23 @@ async fn test_assets(cptestctx: &ControlPlaneTestContext) {
 
     // existing file is returned
     let resp = RequestBuilder::new(&testctx, Method::GET, "/assets/hello.txt")
+        .expect_status(Some(StatusCode::OK))
         .execute()
         .await
         .expect("failed to get existing file");
 
     assert_eq!(resp.body, "hello there".as_bytes());
+
+    // file with existing gzipped version is returned
+    let resp =
+        RequestBuilder::new(&testctx, Method::GET, "/assets/gzipped.txt")
+            .expect_status(Some(StatusCode::OK))
+            .expect_response_header(http::header::CONTENT_ENCODING, "gzip")
+            .execute()
+            .await
+            .expect("failed to get existing file");
+
+    assert_eq!(resp.body, "pretend this is gzipped beep boop".as_bytes());
 }
 
 #[tokio::test]

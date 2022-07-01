@@ -619,6 +619,17 @@ pub async fn console_settings_page(
     console_index_or_login_redirect(rqctx).await
 }
 
+fn with_gz_ext(path: Vec<String>) -> Vec<String> {
+    if path.len() == 0 {
+        return path;
+    }
+
+    let mut new_path = path.clone();
+    let last = new_path.pop().unwrap(); // we know there's one there
+    new_path.push(format!("{last}.gz"));
+    new_path
+}
+
 /// Fetch a static asset from `<static_dir>/assets`. 404 on virtually all
 /// errors. No auth. NO SENSITIVE FILES.
 #[endpoint {
@@ -633,11 +644,32 @@ pub async fn asset(
     let apictx = rqctx.context();
     let path = path_params.into_inner().path;
 
-    let file = match &apictx.console_config.static_dir {
-        // important: we only serve assets from assets/ within static_dir
-        Some(static_dir) => find_file(path, &static_dir.join("assets")),
-        _ => Err(not_found("static_dir undefined")),
-    }?;
+    // bail unless the extension is allowed
+    let filename = path.last().ok_or(not_found("no path"))?;
+    let ext = PathBuf::from(filename)
+        .extension()
+        .map(|ext| ext.to_os_string())
+        .unwrap_or_else(|| OsString::from("disallowed"));
+    if !ALLOWED_EXTENSIONS.contains(&ext) {
+        return Err(not_found("file extension not allowed"));
+    }
+
+    // important: we only serve assets from assets/ within static_dir
+    let assets_dir = &apictx
+        .console_config
+        .static_dir
+        .as_ref()
+        .ok_or(not_found("static_dir undefined"))?
+        .join("assets");
+
+    let path_gz = with_gz_ext(path.clone());
+
+    // try to find the gzipped version, fall back to non-gz
+    let (file, gzipped) = match find_file(path_gz, &assets_dir) {
+        Ok(file) => (file, true),
+        _ => (find_file(path, &assets_dir)?, false),
+    };
+
     let file_contents = tokio::fs::read(&file)
         .await
         .map_err(|e| not_found(&format!("accessing {:?}: {:#}", file, e)))?;
@@ -647,11 +679,19 @@ pub async fn asset(
         .first()
         .map_or_else(|| "text/plain".to_string(), |m| m.to_string());
 
-    Ok(Response::builder()
+    let mut resp = Response::builder()
         .status(StatusCode::OK)
         .header(http::header::CONTENT_TYPE, &content_type)
-        .header(http::header::CACHE_CONTROL, cache_control_header_value(apictx))
-        .body(file_contents.into())?)
+        .header(
+            http::header::CACHE_CONTROL,
+            cache_control_header_value(apictx),
+        );
+
+    if gzipped {
+        resp = resp.header(http::header::CONTENT_ENCODING, "gzip");
+    }
+
+    Ok(resp.body(file_contents.into())?)
 }
 
 fn cache_control_header_value(apictx: &Arc<ServerContext>) -> String {
@@ -694,14 +734,6 @@ lazy_static! {
     );
 }
 
-fn file_ext_allowed(path: &PathBuf) -> bool {
-    let ext = path
-        .extension()
-        .map(|ext| ext.to_os_string())
-        .unwrap_or_else(|| OsString::from("disallowed"));
-    ALLOWED_EXTENSIONS.contains(&ext)
-}
-
 /// Starting from `root_dir`, follow the segments of `path` down the file tree
 /// until we find a file (or not). Do not follow symlinks.
 fn find_file(
@@ -732,10 +764,6 @@ fn find_file(
     // can't serve a directory
     if current.is_dir() {
         return Err(not_found("expected a non-directory"));
-    }
-
-    if !file_ext_allowed(&current) {
-        return Err(not_found("file extension not allowed"));
     }
 
     Ok(current)
@@ -820,20 +848,5 @@ mod test {
         let error = find_file(get_path(path_str), &root).unwrap_err();
         assert_eq!(error.status_code, StatusCode::NOT_FOUND);
         assert_eq!(error.internal_message, "attempted to follow a symlink");
-    }
-
-    #[test]
-    fn test_find_file_404_on_disallowed_ext() {
-        let root = current_dir().unwrap();
-        let error =
-            find_file(get_path("tests/static/assets/blocked.ext"), &root)
-                .unwrap_err();
-        assert_eq!(error.status_code, StatusCode::NOT_FOUND);
-        assert_eq!(error.internal_message, "file extension not allowed",);
-
-        let error = find_file(get_path("tests/static/assets/no_ext"), &root)
-            .unwrap_err();
-        assert_eq!(error.status_code, StatusCode::NOT_FOUND);
-        assert_eq!(error.internal_message, "file extension not allowed");
     }
 }
