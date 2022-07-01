@@ -16,7 +16,7 @@
           "disks"
         ],
         "summary": "Fetch a disk by id",
-        "operationId": "by_id_disk_get",
+        "operationId": "disk_get_by_id",
         "parameters": [
           {
             "in": "path",
@@ -55,7 +55,7 @@
           "images:global"
         ],
         "summary": "Fetch a global image by id",
-        "operationId": "by_id_global_image_get",
+        "operationId": "global_image_get_by_id",
         "parameters": [
           {
             "in": "path",
@@ -94,7 +94,7 @@
           "images"
         ],
         "summary": "Fetch an image by id",
-        "operationId": "by_id_image_get",
+        "operationId": "image_get_by_id",
         "parameters": [
           {
             "in": "path",
@@ -133,7 +133,7 @@
           "instances"
         ],
         "summary": "Fetch an instance by id",
-        "operationId": "by_id_instance_get",
+        "operationId": "instance_get_by_id",
         "parameters": [
           {
             "in": "path",
@@ -172,7 +172,7 @@
           "instances"
         ],
         "summary": "Fetch a network interface by id",
-        "operationId": "by_id_network_interface_get",
+        "operationId": "network_interface_get_by_id",
         "parameters": [
           {
             "in": "path",
@@ -211,7 +211,7 @@
           "organizations"
         ],
         "summary": "Fetch an organization by id",
-        "operationId": "by_id_organization_get",
+        "operationId": "organization_get_by_id",
         "parameters": [
           {
             "in": "path",
@@ -250,7 +250,7 @@
           "projects"
         ],
         "summary": "Fetch a project by id",
-        "operationId": "by_id_project_get",
+        "operationId": "project_get_by_id",
         "parameters": [
           {
             "in": "path",
@@ -289,7 +289,7 @@
           "routes"
         ],
         "summary": "Fetch a vpc router route by id",
-        "operationId": "by_id_route_get",
+        "operationId": "route_get_by_id",
         "parameters": [
           {
             "in": "path",
@@ -328,7 +328,7 @@
           "routers"
         ],
         "summary": "Fetch a vpc router by id",
-        "operationId": "by_id_router_get",
+        "operationId": "router_get_by_id",
         "parameters": [
           {
             "in": "path",
@@ -367,7 +367,7 @@
           "snapshots"
         ],
         "summary": "Fetch a snapshot by id",
-        "operationId": "by_id_snapshot_get",
+        "operationId": "snapshot_get_by_id",
         "parameters": [
           {
             "in": "path",
@@ -406,7 +406,7 @@
           "subnets"
         ],
         "summary": "Fetch a vpc subnet by id",
-        "operationId": "by_id_subnet_get",
+        "operationId": "subnet_get_by_id",
         "parameters": [
           {
             "in": "path",
@@ -445,7 +445,7 @@
           "vpcs"
         ],
         "summary": "Fetch a vpc by id",
-        "operationId": "by_id_vpc_get",
+        "operationId": "vpc_get_by_id",
         "parameters": [
           {
             "in": "path",

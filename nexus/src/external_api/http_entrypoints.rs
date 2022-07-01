@@ -226,18 +226,18 @@ pub fn external_api() -> NexusApiDescription {
         api.register(console_api::login)?;
         api.register(console_api::consume_credentials)?;
 
-        api.register(by_id_organization_get)?;
-        api.register(by_id_project_get)?;
-        api.register(by_id_instance_get)?;
-        api.register(by_id_disk_get)?;
-        api.register(by_id_image_get)?;
-        api.register(by_id_global_image_get)?;
-        api.register(by_id_snapshot_get)?;
-        api.register(by_id_vpc_get)?;
-        api.register(by_id_subnet_get)?;
-        api.register(by_id_router_get)?;
-        api.register(by_id_route_get)?;
-        api.register(by_id_network_interface_get)?;
+        api.register(organization_get_by_id)?;
+        api.register(project_get_by_id)?;
+        api.register(instance_get_by_id)?;
+        api.register(disk_get_by_id)?;
+        api.register(image_get_by_id)?;
+        api.register(global_image_get_by_id)?;
+        api.register(snapshot_get_by_id)?;
+        api.register(vpc_get_by_id)?;
+        api.register(subnet_get_by_id)?;
+        api.register(router_get_by_id)?;
+        api.register(route_get_by_id)?;
+        api.register(network_interface_get_by_id)?;
 
         api.register(device_auth::device_auth_request)?;
         api.register(device_auth::device_auth_verify)?;
@@ -3777,7 +3777,7 @@ struct ByIdPathParams {
     path = "/by_id/organizations/{id}",
     tags = ["organizations"],
 }]
-async fn by_id_organization_get(
+async fn organization_get_by_id(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ByIdPathParams>,
 ) -> Result<HttpResponseOk<Organization>, HttpError> {
@@ -3799,7 +3799,7 @@ async fn by_id_organization_get(
     path = "/by_id/projects/{id}",
     tags = ["projects"],
 }]
-async fn by_id_project_get(
+async fn project_get_by_id(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ByIdPathParams>,
 ) -> Result<HttpResponseOk<Project>, HttpError> {
@@ -3821,7 +3821,7 @@ async fn by_id_project_get(
     path = "/by_id/instances/{id}",
     tags = ["instances"],
 }]
-async fn by_id_instance_get(
+async fn instance_get_by_id(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ByIdPathParams>,
 ) -> Result<HttpResponseOk<Instance>, HttpError> {
@@ -3843,7 +3843,7 @@ async fn by_id_instance_get(
     path = "/by_id/disks/{id}",
     tags = ["disks"],
 }]
-async fn by_id_disk_get(
+async fn disk_get_by_id(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ByIdPathParams>,
 ) -> Result<HttpResponseOk<Disk>, HttpError> {
@@ -3865,7 +3865,7 @@ async fn by_id_disk_get(
     path = "/by_id/images/{id}",
     tags = ["images"],
 }]
-async fn by_id_image_get(
+async fn image_get_by_id(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ByIdPathParams>,
 ) -> Result<HttpResponseOk<Image>, HttpError> {
@@ -3887,7 +3887,7 @@ async fn by_id_image_get(
     path = "/by_id/global-images/{id}",
     tags = ["images:global"],
 }]
-async fn by_id_global_image_get(
+async fn global_image_get_by_id(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ByIdPathParams>,
 ) -> Result<HttpResponseOk<GlobalImage>, HttpError> {
@@ -3909,7 +3909,7 @@ async fn by_id_global_image_get(
     path = "/by_id/snapshots/{id}",
     tags = ["snapshots"],
 }]
-async fn by_id_snapshot_get(
+async fn snapshot_get_by_id(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ByIdPathParams>,
 ) -> Result<HttpResponseOk<Snapshot>, HttpError> {
@@ -3931,7 +3931,7 @@ async fn by_id_snapshot_get(
     path = "/by_id/network-interfaces/{id}",
     tags = ["instances"],
 }]
-async fn by_id_network_interface_get(
+async fn network_interface_get_by_id(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ByIdPathParams>,
 ) -> Result<HttpResponseOk<NetworkInterface>, HttpError> {
@@ -3954,7 +3954,7 @@ async fn by_id_network_interface_get(
     path = "/by_id/vpcs/{id}",
     tags = ["vpcs"],
 }]
-async fn by_id_vpc_get(
+async fn vpc_get_by_id(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ByIdPathParams>,
 ) -> Result<HttpResponseOk<Vpc>, HttpError> {
@@ -3976,7 +3976,7 @@ async fn by_id_vpc_get(
     path = "/by_id/subnets/{id}",
     tags = ["subnets"],
 }]
-async fn by_id_subnet_get(
+async fn subnet_get_by_id(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ByIdPathParams>,
 ) -> Result<HttpResponseOk<VpcSubnet>, HttpError> {
@@ -3998,7 +3998,7 @@ async fn by_id_subnet_get(
     path = "/by_id/router/{id}",
     tags = ["routers"],
 }]
-async fn by_id_router_get(
+async fn router_get_by_id(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ByIdPathParams>,
 ) -> Result<HttpResponseOk<VpcRouter>, HttpError> {
@@ -4020,7 +4020,7 @@ async fn by_id_router_get(
     path = "/by_id/route/{id}",
     tags = ["routes"]
 }]
-async fn by_id_route_get(
+async fn route_get_by_id(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ByIdPathParams>,
 ) -> Result<HttpResponseOk<RouterRoute>, HttpError> {

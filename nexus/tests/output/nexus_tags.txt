@@ -1,6 +1,6 @@
 API operations found with tag "disks"
 OPERATION ID                             URL PATH
-by_id_disk_get                           /by_id/disks/{id}
+disk_get_by_id                           /by_id/disks/{id}
 project_disks_delete_disk                /organizations/{organization_name}/projects/{project_name}/disks/{disk_name}
 project_disks_get                        /organizations/{organization_name}/projects/{project_name}/disks
 project_disks_get_disk                   /organizations/{organization_name}/projects/{project_name}/disks/{disk_name}
@@ -23,7 +23,7 @@ spoof_login                              /login
 
 API operations found with tag "images"
 OPERATION ID                             URL PATH
-by_id_image_get                          /by_id/images/{id}
+image_get_by_id                          /by_id/images/{id}
 project_images_delete_image              /organizations/{organization_name}/projects/{project_name}/images/{image_name}
 project_images_get                       /organizations/{organization_name}/projects/{project_name}/images
 project_images_get_image                 /organizations/{organization_name}/projects/{project_name}/images/{image_name}
@@ -31,7 +31,7 @@ project_images_post                      /organizations/{organization_name}/proj
 
 API operations found with tag "images:global"
 OPERATION ID                             URL PATH
-by_id_global_image_get                   /by_id/global-images/{id}
+global_image_get_by_id                   /by_id/global-images/{id}
 images_delete_image                      /images/{image_name}
 images_get                               /images
 images_get_image                         /images/{image_name}
@@ -39,16 +39,16 @@ images_post                              /images
 
 API operations found with tag "instances"
 OPERATION ID                             URL PATH
-by_id_instance_get                       /by_id/instances/{id}
-by_id_network_interface_get              /by_id/network-interfaces/{id}
 instance_disks_attach                    /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/attach
 instance_disks_detach                    /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/detach
 instance_disks_get                       /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks
+instance_get_by_id                       /by_id/instances/{id}
 instance_network_interfaces_delete_interface /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}
 instance_network_interfaces_get          /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces
 instance_network_interfaces_get_interface /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}
 instance_network_interfaces_post         /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces
 instance_network_interfaces_put_interface /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}
+network_interface_get_by_id              /by_id/network-interfaces/{id}
 project_instances_delete_instance        /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}
 project_instances_get                    /organizations/{organization_name}/projects/{project_name}/instances
 project_instances_get_instance           /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}
@@ -81,7 +81,7 @@ timeseries_schema_get                    /timeseries/schema
 
 API operations found with tag "organizations"
 OPERATION ID                             URL PATH
-by_id_organization_get                   /by_id/organizations/{id}
+organization_get_by_id                   /by_id/organizations/{id}
 organization_get_policy                  /organizations/{organization_name}/policy
 organization_put_policy                  /organizations/{organization_name}/policy
 organizations_delete_organization        /organizations/{organization_name}
@@ -97,7 +97,6 @@ policy_put                               /policy
 
 API operations found with tag "projects"
 OPERATION ID                             URL PATH
-by_id_project_get                        /by_id/projects/{id}
 organization_projects_delete_project     /organizations/{organization_name}/projects/{project_name}
 organization_projects_get                /organizations/{organization_name}/projects
 organization_projects_get_project        /organizations/{organization_name}/projects/{project_name}
@@ -105,6 +104,7 @@ organization_projects_get_project_policy /organizations/{organization_name}/proj
 organization_projects_post               /organizations/{organization_name}/projects
 organization_projects_put_project        /organizations/{organization_name}/projects/{project_name}
 organization_projects_put_project_policy /organizations/{organization_name}/projects/{project_name}/policy
+project_get_by_id                        /by_id/projects/{id}
 
 API operations found with tag "racks"
 OPERATION ID                             URL PATH
@@ -118,7 +118,7 @@ roles_get_role                           /roles/{role_name}
 
 API operations found with tag "routers"
 OPERATION ID                             URL PATH
-by_id_router_get                         /by_id/router/{id}
+router_get_by_id                         /by_id/router/{id}
 vpc_routers_delete_router                /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}
 vpc_routers_get                          /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers
 vpc_routers_get_router                   /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}
@@ -127,7 +127,7 @@ vpc_routers_put_router                   /organizations/{organization_name}/proj
 
 API operations found with tag "routes"
 OPERATION ID                             URL PATH
-by_id_route_get                          /by_id/route/{id}
+route_get_by_id                          /by_id/route/{id}
 routers_routes_delete_route              /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}
 routers_routes_get                       /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes
 routers_routes_get_route                 /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}
@@ -159,11 +159,11 @@ hardware_sleds_get_sled                  /hardware/sleds/{sled_id}
 
 API operations found with tag "snapshots"
 OPERATION ID                             URL PATH
-by_id_snapshot_get                       /by_id/snapshots/{id}
 project_snapshots_delete_snapshot        /organizations/{organization_name}/projects/{project_name}/snapshots/{snapshot_name}
 project_snapshots_get                    /organizations/{organization_name}/projects/{project_name}/snapshots
 project_snapshots_get_snapshot           /organizations/{organization_name}/projects/{project_name}/snapshots/{snapshot_name}
 project_snapshots_post                   /organizations/{organization_name}/projects/{project_name}/snapshots
+snapshot_get_by_id                       /by_id/snapshots/{id}
 
 API operations found with tag "sshkeys"
 OPERATION ID                             URL PATH
@@ -174,7 +174,7 @@ sshkeys_post                             /session/me/sshkeys
 
 API operations found with tag "subnets"
 OPERATION ID                             URL PATH
-by_id_subnet_get                         /by_id/subnets/{id}
+subnet_get_by_id                         /by_id/subnets/{id}
 subnet_network_interfaces_get            /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}/network-interfaces
 vpc_subnets_delete_subnet                /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}
 vpc_subnets_get                          /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets
@@ -193,10 +193,10 @@ updates_refresh                          /updates/refresh
 
 API operations found with tag "vpcs"
 OPERATION ID                             URL PATH
-by_id_vpc_get                            /by_id/vpcs/{id}
 project_vpcs_delete_vpc                  /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}
 project_vpcs_get                         /organizations/{organization_name}/projects/{project_name}/vpcs
 project_vpcs_get_vpc                     /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}
 project_vpcs_post                        /organizations/{organization_name}/projects/{project_name}/vpcs
 project_vpcs_put_vpc                     /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}
+vpc_get_by_id                            /by_id/vpcs/{id}
 
