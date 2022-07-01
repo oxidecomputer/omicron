@@ -346,6 +346,10 @@ resource GlobalImageList {
 has_relation(fleet: Fleet, "parent_fleet", global_image_list: GlobalImageList)
 	if global_image_list.fleet = fleet;
 
+# Any authenticated user can list and read global images
+has_permission(_actor: AuthenticatedActor, "list_children", _global_image_list: GlobalImageList);
+has_permission(_actor: AuthenticatedActor, "read", _global_image: GlobalImage);
+
 # Describes the policy for creating and managing web console sessions.
 resource ConsoleSessionList {
 	permissions = [ "create_child" ];

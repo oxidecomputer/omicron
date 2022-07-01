@@ -313,6 +313,21 @@ lazy_static! {
             },
             disk: DEMO_DISK_NAME.clone(),
         };
+
+    // SSH keys
+    pub static ref DEMO_SSHKEYS_URL: &'static str = "/session/me/sshkeys";
+    pub static ref DEMO_SSHKEY_NAME: Name = "aaaaa-ssh-key".parse().unwrap();
+    pub static ref DEMO_SSHKEY_CREATE: params::SshKeyCreate = params::SshKeyCreate {
+        identity: IdentityMetadataCreateParams {
+            name: DEMO_SSHKEY_NAME.clone(),
+            description: "a demo key".to_string(),
+        },
+
+        public_key: "AAAAAAAAAAAAAAA".to_string(),
+    };
+
+    pub static ref DEMO_SPECIFIC_SSHKEY_URL: String =
+        format!("{}/{}", *DEMO_SSHKEYS_URL, *DEMO_SSHKEY_NAME);
 }
 
 lazy_static! {
@@ -346,6 +361,7 @@ lazy_static! {
 ///
 /// These structs are also used to check whether we're covering all endpoints in
 /// the public OpenAPI spec.
+#[derive(Debug)]
 pub struct VerifyEndpoint {
     /// URL path for the HTTP resource to test
     ///
@@ -356,16 +372,8 @@ pub struct VerifyEndpoint {
     /// "/organizations/{organization_name}".
     pub url: &'static str,
 
-    /// Specifies whether an HTTP resource handled by this endpoint is visible
-    /// to unauthenticated or unauthorized users
-    ///
-    /// If it's [`Visibility::Public`] (like "/organizations"), unauthorized
-    /// users can expect to get back a 401 or 403 when they attempt to access
-    /// it.  If it's [`Visibility::Protected`] (like a specific Organization),
-    /// unauthorized users will get a 404.
-    pub visibility: Visibility,
-
-    /// Specifies what HTTP methods are supported for this HTTP resource
+    /// Specifies what HTTP methods are supported for this HTTP resource, along
+    /// with its authz visibility.
     ///
     /// The test runner tests a variety of HTTP methods.  For each method, if
     /// it's not in this list, we expect a 405 "Method Not Allowed" response.
@@ -378,21 +386,39 @@ pub struct VerifyEndpoint {
 }
 
 /// Describes the visibility of an HTTP resource
+#[derive(Debug)]
 pub enum Visibility {
-    /// All users can see the resource (including unauthenticated or
-    /// unauthorized users)
+    /// Any authenticated user can see the resource, it is not protected by
+    /// authz policy.
     ///
-    /// "/organizations" is Public, for example.
-    Public,
+    /// "/images" doesn't require a permission grant, for example.
+    PublicNoPermissionRequired,
 
-    /// Only users with certain privileges can see this endpoint
+    /// All authenticated users can see the resource (including unauthorized
+    /// users) but permissions are required to access.
+    ///
+    /// "/organizations", for example.
+    PublicPermissionRequired,
+
+    /// Only authenticated users with certain privileges can see this endpoint
     ///
     /// "/organizations/demo-org" is not public, for example.
     Protected,
 }
 
-/// Describes an HTTP method supported by a particular API endpoint
-pub enum AllowedMethod {
+/// Describes an HTTP method supported by a particular API endpoint, and its
+/// authz visibility
+#[derive(Debug)]
+pub struct AllowedMethod {
+    pub method: MethodAndBody,
+
+    /// Specifies whether an HTTP resource handled by this endpoint is visible
+    /// to unauthorized users. See [`Visibility`] for more information.
+    pub visibility: Visibility,
+}
+
+#[derive(Debug, Clone)]
+pub enum MethodAndBody {
     /// HTTP "DELETE" method
     Delete,
     /// HTTP "GET" method
@@ -425,16 +451,16 @@ pub enum AllowedMethod {
     Put(serde_json::Value),
 }
 
-impl AllowedMethod {
+impl MethodAndBody {
     /// Returns the [`http::Method`] used to make a request for this HTTP method
     pub fn http_method(&self) -> &'static http::Method {
         match self {
-            AllowedMethod::Delete => &Method::DELETE,
-            AllowedMethod::Get => &Method::GET,
-            AllowedMethod::GetNonexistent => &Method::GET,
-            AllowedMethod::GetUnimplemented => &Method::GET,
-            AllowedMethod::Post(_) => &Method::POST,
-            AllowedMethod::Put(_) => &Method::PUT,
+            MethodAndBody::Delete => &Method::DELETE,
+            MethodAndBody::Get => &Method::GET,
+            MethodAndBody::GetNonexistent => &Method::GET,
+            MethodAndBody::GetUnimplemented => &Method::GET,
+            MethodAndBody::Post(_) => &Method::POST,
+            MethodAndBody::Put(_) => &Method::PUT,
         }
     }
 
@@ -444,12 +470,12 @@ impl AllowedMethod {
     /// If this returns `None`, the request body should be empty.
     pub fn body(&self) -> Option<&serde_json::Value> {
         match self {
-            AllowedMethod::Delete
-            | AllowedMethod::Get
-            | AllowedMethod::GetNonexistent
-            | AllowedMethod::GetUnimplemented => None,
-            AllowedMethod::Post(body) => Some(&body),
-            AllowedMethod::Put(body) => Some(&body),
+            MethodAndBody::Delete
+            | MethodAndBody::Get
+            | MethodAndBody::GetNonexistent
+            | MethodAndBody::GetUnimplemented => None,
+            MethodAndBody::Post(body) => Some(&body),
+            MethodAndBody::Put(body) => Some(&body),
         }
     }
 }
@@ -463,150 +489,216 @@ lazy_static! {
         // Global IAM policy
         VerifyEndpoint {
             url: *POLICY_URL,
-            visibility: Visibility::Public,
             allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Put(
-                    serde_json::to_value(
-                        &shared::Policy::<authz::FleetRole> {
-                            role_assignments: vec![]
-                        }
-                    ).unwrap()
-                ),
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::PublicPermissionRequired,
+                },
+                AllowedMethod {
+                    method: MethodAndBody::Put(
+                        serde_json::to_value(
+                            &shared::Policy::<authz::FleetRole> {
+                                role_assignments: vec![]
+                            }
+                        ).unwrap()
+                    ),
+                    visibility: Visibility::PublicPermissionRequired,
+                },
             ],
         },
 
         // IP Pools top-level endpoint
         VerifyEndpoint {
             url: *DEMO_IP_POOLS_URL,
-            visibility: Visibility::Public,
             allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_IP_POOL_CREATE).unwrap()
-                ),
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::PublicPermissionRequired,
+                },
+                AllowedMethod {
+                    method: MethodAndBody::Post(
+                        serde_json::to_value(&*DEMO_IP_POOL_CREATE).unwrap()
+                    ),
+                    visibility: Visibility::PublicPermissionRequired,
+                },
             ],
         },
 
         // Single IP Pool endpoint
         VerifyEndpoint {
             url: &*DEMO_IP_POOL_URL,
-            visibility: Visibility::Protected,
             allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Put(
-                    serde_json::to_value(&*DEMO_IP_POOL_UPDATE).unwrap()
-                ),
-                AllowedMethod::Delete,
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::Protected,
+                },
+                AllowedMethod {
+                    method: MethodAndBody::Put(
+                        serde_json::to_value(&*DEMO_IP_POOL_UPDATE).unwrap()
+                    ),
+                    visibility: Visibility::Protected,
+                },
+                AllowedMethod {
+                    method: MethodAndBody::Delete,
+                    visibility: Visibility::Protected,
+                },
             ],
         },
 
         // IP Pool ranges endpoint
         VerifyEndpoint {
             url: &*DEMO_IP_POOL_RANGES_URL,
-            visibility: Visibility::Protected,
             allowed_methods: vec![
-                AllowedMethod::Get
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::Protected,
+                },
             ],
         },
 
         // IP Pool ranges/add endpoint
         VerifyEndpoint {
             url: &*DEMO_IP_POOL_RANGES_ADD_URL,
-            visibility: Visibility::Protected,
             allowed_methods: vec![
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_IP_POOL_RANGE).unwrap()
-                ),
+                AllowedMethod {
+                    method: MethodAndBody::Post(
+                        serde_json::to_value(&*DEMO_IP_POOL_RANGE).unwrap()
+                    ),
+                    visibility: Visibility::Protected,
+                },
             ],
         },
 
         // IP Pool ranges/delete endpoint
         VerifyEndpoint {
             url: &*DEMO_IP_POOL_RANGES_DEL_URL,
-            visibility: Visibility::Protected,
             allowed_methods: vec![
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_IP_POOL_RANGE).unwrap()
-                ),
+                AllowedMethod {
+                    method: MethodAndBody::Post(
+                        serde_json::to_value(&*DEMO_IP_POOL_RANGE).unwrap()
+                    ),
+                    visibility: Visibility::Protected,
+                },
             ],
         },
 
         /* Silos */
         VerifyEndpoint {
             url: "/silos",
-            visibility: Visibility::Public,
             allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_SILO_CREATE).unwrap()
-                )
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::PublicPermissionRequired,
+                },
+                AllowedMethod {
+                    method: MethodAndBody::Post(
+                        serde_json::to_value(&*DEMO_SILO_CREATE).unwrap()
+                    ),
+                    visibility: Visibility::PublicPermissionRequired,
+                },
             ],
         },
         VerifyEndpoint {
             url: &*DEMO_SILO_URL,
-            visibility: Visibility::Protected,
             allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Delete,
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::Protected,
+                },
+                AllowedMethod {
+                    method: MethodAndBody::Delete,
+                    visibility: Visibility::Protected,
+                },
             ],
         },
         VerifyEndpoint {
             url: &*DEMO_SILO_POLICY_URL,
-            visibility: Visibility::Protected,
             allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Put(
-                    serde_json::to_value(
-                        &shared::Policy::<authz::SiloRole> {
-                            role_assignments: vec![]
-                        }
-                    ).unwrap()
-                ),
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::Protected,
+                },
+                AllowedMethod {
+                    method: MethodAndBody::Put(
+                        serde_json::to_value(
+                            &shared::Policy::<authz::SiloRole> {
+                                role_assignments: vec![]
+                            }
+                        ).unwrap()
+                    ),
+                    visibility: Visibility::Protected,
+                },
             ],
         },
 
+        VerifyEndpoint {
+            url: "/users",
+            allowed_methods: vec![
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::PublicNoPermissionRequired,
+                },
+            ],
+        },
 
         /* Organizations */
 
         VerifyEndpoint {
             url: "/organizations",
-            visibility: Visibility::Public,
             allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_ORG_CREATE).unwrap()
-                )
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::PublicPermissionRequired,
+                },
+                AllowedMethod {
+                    method: MethodAndBody::Post(
+                        serde_json::to_value(&*DEMO_ORG_CREATE).unwrap()
+                    ),
+                    visibility: Visibility::PublicPermissionRequired,
+                },
             ],
         },
         VerifyEndpoint {
             url: &*DEMO_ORG_URL,
-            visibility: Visibility::Protected,
             allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Delete,
-                AllowedMethod::Put(
-                    serde_json::to_value(&params::OrganizationUpdate {
-                        identity: IdentityMetadataUpdateParams {
-                            name: None,
-                            description: Some("different".to_string())
-                        }
-                    }).unwrap()
-                ),
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::Protected,
+                },
+                AllowedMethod {
+                    method: MethodAndBody::Delete,
+                    visibility: Visibility::Protected,
+                },
+                AllowedMethod {
+                    method: MethodAndBody::Put(
+                        serde_json::to_value(&params::OrganizationUpdate {
+                            identity: IdentityMetadataUpdateParams {
+                                name: None,
+                                description: Some("different".to_string())
+                            }
+                        }).unwrap()
+                    ),
+                    visibility: Visibility::Protected,
+                },
             ],
         },
         VerifyEndpoint {
             url: &*DEMO_ORG_POLICY_URL,
-            visibility: Visibility::Protected,
             allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Put(
-                    serde_json::to_value(
-                        &shared::Policy::<authz::OrganizationRole> {
-                            role_assignments: vec![]
-                        }
-                    ).unwrap()
-                ),
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::Protected,
+                },
+                AllowedMethod {
+                    method: MethodAndBody::Put(
+                        serde_json::to_value(
+                            &shared::Policy::<authz::OrganizationRole> {
+                                role_assignments: vec![]
+                            }
+                        ).unwrap()
+                    ),
+                    visibility: Visibility::Protected,
+                }
             ],
         },
 
@@ -622,123 +714,174 @@ lazy_static! {
         // incredibly expensive to determine in general.
         VerifyEndpoint {
             url: &*DEMO_ORG_PROJECTS_URL,
-            visibility: Visibility::Protected,
             allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_PROJECT_CREATE).unwrap()
-                ),
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::Protected,
+                },
+                AllowedMethod {
+                    method: MethodAndBody::Post(
+                        serde_json::to_value(&*DEMO_PROJECT_CREATE).unwrap()
+                    ),
+                    visibility: Visibility::Protected,
+                },
             ],
         },
         VerifyEndpoint {
             url: &*DEMO_PROJECT_URL,
-            visibility: Visibility::Protected,
             allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Delete,
-                AllowedMethod::Put(
-                    serde_json::to_value(params::ProjectUpdate{
-                        identity: IdentityMetadataUpdateParams {
-                            name: None,
-                            description: Some("different".to_string())
-                        },
-                    }).unwrap()
-                ),
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::Protected,
+                },
+                AllowedMethod {
+                    method: MethodAndBody::Delete,
+                    visibility: Visibility::Protected,
+                },
+                AllowedMethod {
+                    method: MethodAndBody::Put(
+                        serde_json::to_value(params::ProjectUpdate{
+                            identity: IdentityMetadataUpdateParams {
+                                name: None,
+                                description: Some("different".to_string())
+                            },
+                        }).unwrap()
+                    ),
+                    visibility: Visibility::Protected,
+                },
             ],
         },
         VerifyEndpoint {
             url: &*DEMO_PROJECT_POLICY_URL,
-            visibility: Visibility::Protected,
             allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Put(
-                    serde_json::to_value(
-                        &shared::Policy::<authz::ProjectRole> {
-                            role_assignments: vec![]
-                        }
-                    ).unwrap()
-                ),
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::Protected,
+                },
+                AllowedMethod {
+                    method: MethodAndBody::Put(
+                        serde_json::to_value(
+                            &shared::Policy::<authz::ProjectRole> {
+                                role_assignments: vec![]
+                            }
+                        ).unwrap()
+                    ),
+                    visibility: Visibility::Protected,
+                },
             ],
         },
 
         /* VPCs */
         VerifyEndpoint {
             url: &*DEMO_PROJECT_URL_VPCS,
-            visibility: Visibility::Protected,
             allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_VPC_CREATE).unwrap()
-                ),
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::Protected,
+                },
+                AllowedMethod {
+                    method: MethodAndBody::Post(
+                        serde_json::to_value(&*DEMO_VPC_CREATE).unwrap()
+                    ),
+                    visibility: Visibility::Protected,
+                },
             ],
         },
 
         VerifyEndpoint {
             url: &*DEMO_VPC_URL,
-            visibility: Visibility::Protected,
             allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Put(
-                    serde_json::to_value(&params::VpcUpdate {
-                        identity: IdentityMetadataUpdateParams {
-                            name: None,
-                            description: Some("different".to_string())
-                        },
-                        dns_name: None,
-                    }).unwrap()
-                ),
-                AllowedMethod::Delete,
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::Protected,
+                },
+                AllowedMethod {
+                    method: MethodAndBody::Put(
+                        serde_json::to_value(&params::VpcUpdate {
+                            identity: IdentityMetadataUpdateParams {
+                                name: None,
+                                description: Some("different".to_string())
+                            },
+                            dns_name: None,
+                        }).unwrap()
+                    ),
+                    visibility: Visibility::Protected,
+                },
+                AllowedMethod {
+                    method: MethodAndBody::Delete,
+                    visibility: Visibility::Protected,
+                },
             ],
         },
 
         /* Firewall rules */
         VerifyEndpoint {
             url: &*DEMO_VPC_URL_FIREWALL_RULES,
-            visibility: Visibility::Protected,
             allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Put(
-                    serde_json::to_value(VpcFirewallRuleUpdateParams {
-                        rules: vec![],
-                    }).unwrap()
-                ),
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::Protected,
+                },
+                AllowedMethod {
+                    method: MethodAndBody::Put(
+                        serde_json::to_value(VpcFirewallRuleUpdateParams {
+                            rules: vec![],
+                        }).unwrap()
+                    ),
+                    visibility: Visibility::Protected,
+                },
             ],
         },
 
         /* VPC Subnets */
         VerifyEndpoint {
             url: &*DEMO_VPC_URL_SUBNETS,
-            visibility: Visibility::Protected,
             allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_VPC_SUBNET_CREATE).unwrap()
-                ),
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::Protected,
+                },
+                AllowedMethod {
+                    method: MethodAndBody::Post(
+                        serde_json::to_value(&*DEMO_VPC_SUBNET_CREATE).unwrap()
+                    ),
+                    visibility: Visibility::Protected,
+                },
             ],
         },
 
         VerifyEndpoint {
             url: &*DEMO_VPC_SUBNET_URL,
-            visibility: Visibility::Protected,
             allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Put(
-                    serde_json::to_value(&params::VpcSubnetUpdate {
-                        identity: IdentityMetadataUpdateParams {
-                            name: None,
-                            description: Some("different".to_string())
-                        },
-                    }).unwrap()
-                ),
-                AllowedMethod::Delete,
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::Protected,
+                },
+                AllowedMethod {
+                    method: MethodAndBody::Put(
+                        serde_json::to_value(&params::VpcSubnetUpdate {
+                            identity: IdentityMetadataUpdateParams {
+                                name: None,
+                                description: Some("different".to_string())
+                            },
+                        }).unwrap()
+                    ),
+                    visibility: Visibility::Protected,
+                },
+                AllowedMethod {
+                    method: MethodAndBody::Delete,
+                    visibility: Visibility::Protected,
+                },
             ],
         },
 
         VerifyEndpoint {
             url: &*DEMO_VPC_SUBNET_INTERFACES_URL,
-            visibility: Visibility::Protected,
             allowed_methods: vec![
-                AllowedMethod::Get,
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::Protected,
+                },
             ],
         },
 
@@ -746,29 +889,42 @@ lazy_static! {
 
         VerifyEndpoint {
             url: &*DEMO_VPC_URL_ROUTERS,
-            visibility: Visibility::Protected,
             allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_VPC_ROUTER_CREATE).unwrap()
-                ),
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::Protected,
+                },
+                AllowedMethod {
+                    method: MethodAndBody::Post(
+                        serde_json::to_value(&*DEMO_VPC_ROUTER_CREATE).unwrap()
+                    ),
+                    visibility: Visibility::Protected,
+                },
             ],
         },
 
         VerifyEndpoint {
             url: &*DEMO_VPC_ROUTER_URL,
-            visibility: Visibility::Protected,
             allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Put(
-                    serde_json::to_value(&params::VpcRouterUpdate {
-                        identity: IdentityMetadataUpdateParams {
-                            name: None,
-                            description: Some("different".to_string())
-                        },
-                    }).unwrap()
-                ),
-                AllowedMethod::Delete,
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::Protected,
+                },
+                AllowedMethod {
+                    method: MethodAndBody::Put(
+                        serde_json::to_value(&params::VpcRouterUpdate {
+                            identity: IdentityMetadataUpdateParams {
+                                name: None,
+                                description: Some("different".to_string())
+                            },
+                        }).unwrap()
+                    ),
+                    visibility: Visibility::Protected,
+                },
+                AllowedMethod {
+                    method: MethodAndBody::Delete,
+                    visibility: Visibility::Protected,
+                },
             ],
         },
 
@@ -776,86 +932,114 @@ lazy_static! {
 
         VerifyEndpoint {
             url: &*DEMO_VPC_ROUTER_URL_ROUTES,
-            visibility: Visibility::Protected,
             allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_ROUTER_ROUTE_CREATE).unwrap()
-                ),
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::Protected,
+                },
+                AllowedMethod {
+                    method: MethodAndBody::Post(
+                        serde_json::to_value(&*DEMO_ROUTER_ROUTE_CREATE).unwrap()
+                    ),
+                    visibility: Visibility::Protected,
+                },
             ],
         },
 
         VerifyEndpoint {
             url: &*DEMO_ROUTER_ROUTE_URL,
-            visibility: Visibility::Protected,
             allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Put(
-                    serde_json::to_value(&RouterRouteUpdateParams {
-                        identity: IdentityMetadataUpdateParams {
-                            name: None,
-                            description: Some("different".to_string())
-                        },
-                        target: RouteTarget::Ip(
-                            IpAddr::from(Ipv4Addr::new(127, 0, 0, 1))),
-                        destination: RouteDestination::Subnet(
-                            "loopback".parse().unwrap()),
-                    }).unwrap()
-                ),
-                AllowedMethod::Delete,
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::Protected,
+                },
+                AllowedMethod {
+                    method: MethodAndBody::Put(
+                        serde_json::to_value(&RouterRouteUpdateParams {
+                            identity: IdentityMetadataUpdateParams {
+                                name: None,
+                                description: Some("different".to_string())
+                            },
+                            target: RouteTarget::Ip(
+                                IpAddr::from(Ipv4Addr::new(127, 0, 0, 1))),
+                            destination: RouteDestination::Subnet(
+                                "loopback".parse().unwrap()),
+                        }).unwrap()
+                    ),
+                    visibility: Visibility::Protected,
+                },
+                AllowedMethod {
+                    method: MethodAndBody::Delete,
+                    visibility: Visibility::Protected,
+                },
             ],
         },
-
 
         /* Disks */
 
         VerifyEndpoint {
             url: &*DEMO_PROJECT_URL_DISKS,
-            visibility: Visibility::Protected,
             allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_DISK_CREATE).unwrap()
-                ),
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::Protected,
+                },
+                AllowedMethod {
+                    method: MethodAndBody::Post(
+                        serde_json::to_value(&*DEMO_DISK_CREATE).unwrap()
+                    ),
+                    visibility: Visibility::Protected,
+                },
             ],
         },
 
         VerifyEndpoint {
             url: &*DEMO_DISK_URL,
-            visibility: Visibility::Protected,
             allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Delete,
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::Protected,
+                },
+                AllowedMethod {
+                    method: MethodAndBody::Delete,
+                    visibility: Visibility::Protected,
+                },
             ],
         },
 
         VerifyEndpoint {
             url: &*DEMO_INSTANCE_DISKS_URL,
-            visibility: Visibility::Protected,
             allowed_methods: vec![
-                AllowedMethod::Get,
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::Protected,
+                },
             ],
         },
         VerifyEndpoint {
             url: &*DEMO_INSTANCE_DISKS_ATTACH_URL,
-            visibility: Visibility::Protected,
             allowed_methods: vec![
-                AllowedMethod::Post(
-                    serde_json::to_value(params::DiskIdentifier {
-                        name: DEMO_DISK_NAME.clone()
-                    }).unwrap()
-                )
+                AllowedMethod {
+                    method: MethodAndBody::Post(
+                        serde_json::to_value(params::DiskIdentifier {
+                            name: DEMO_DISK_NAME.clone()
+                        }).unwrap()
+                    ),
+                    visibility: Visibility::Protected,
+                },
             ],
         },
         VerifyEndpoint {
             url: &*DEMO_INSTANCE_DISKS_DETACH_URL,
-            visibility: Visibility::Protected,
             allowed_methods: vec![
-                AllowedMethod::Post(
-                    serde_json::to_value(params::DiskIdentifier {
-                        name: DEMO_DISK_NAME.clone()
-                    }).unwrap()
-                )
+                AllowedMethod {
+                    method: MethodAndBody::Post(
+                        serde_json::to_value(params::DiskIdentifier {
+                            name: DEMO_DISK_NAME.clone()
+                        }).unwrap()
+                    ),
+                    visibility: Visibility::Protected,
+                },
             ],
         },
 
@@ -863,21 +1047,31 @@ lazy_static! {
 
         VerifyEndpoint {
             url: &*DEMO_PROJECT_URL_IMAGES,
-            visibility: Visibility::Protected,
             allowed_methods: vec![
-                AllowedMethod::GetUnimplemented,
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_IMAGE_CREATE).unwrap()
-                ),
+                AllowedMethod {
+                    method: MethodAndBody::GetUnimplemented,
+                    visibility: Visibility::Protected,
+                },
+                AllowedMethod {
+                    method: MethodAndBody::Post(
+                        serde_json::to_value(&*DEMO_IMAGE_CREATE).unwrap()
+                    ),
+                    visibility: Visibility::Protected,
+                },
             ],
         },
 
         VerifyEndpoint {
             url: &*DEMO_PROJECT_IMAGE_URL,
-            visibility: Visibility::Protected,
             allowed_methods: vec![
-                AllowedMethod::GetUnimplemented,
-                AllowedMethod::Delete,
+                AllowedMethod {
+                    method: MethodAndBody::GetUnimplemented,
+                    visibility: Visibility::Protected,
+                },
+                AllowedMethod {
+                    method: MethodAndBody::Delete,
+                    visibility: Visibility::Protected,
+                },
             ],
         },
 
@@ -885,104 +1079,147 @@ lazy_static! {
 
         VerifyEndpoint {
             url: &*DEMO_PROJECT_URL_SNAPSHOTS,
-            visibility: Visibility::Protected,
             allowed_methods: vec![
-                AllowedMethod::GetUnimplemented,
-                AllowedMethod::Post(
-                    serde_json::to_value(DEMO_SNAPSHOT_CREATE.clone()).unwrap(),
-                )
+                AllowedMethod {
+                    method: MethodAndBody::GetUnimplemented,
+                    visibility: Visibility::Protected,
+                },
+                AllowedMethod {
+                    method: MethodAndBody::Post(
+                        serde_json::to_value(DEMO_SNAPSHOT_CREATE.clone()).unwrap(),
+                    ),
+                    visibility: Visibility::Protected,
+                },
             ]
         },
         VerifyEndpoint {
             url: &*DEMO_SNAPSHOT_URL,
-            visibility: Visibility::Protected,
             allowed_methods: vec![
-                AllowedMethod::GetUnimplemented,
-                AllowedMethod::Delete,
+                AllowedMethod {
+                    method: MethodAndBody::GetUnimplemented,
+                    visibility: Visibility::Protected,
+                },
+                AllowedMethod {
+                    method: MethodAndBody::Delete,
+                    visibility: Visibility::Protected,
+                },
             ]
         },
 
         /* Instances */
         VerifyEndpoint {
             url: &*DEMO_PROJECT_URL_INSTANCES,
-            visibility: Visibility::Protected,
             allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_INSTANCE_CREATE).unwrap()
-                ),
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::Protected,
+                },
+                AllowedMethod {
+                    method: MethodAndBody::Post(
+                        serde_json::to_value(&*DEMO_INSTANCE_CREATE).unwrap()
+                    ),
+                    visibility: Visibility::Protected,
+                },
             ],
         },
 
         VerifyEndpoint {
             url: &*DEMO_INSTANCE_URL,
-            visibility: Visibility::Protected,
             allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Delete,
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::Protected,
+                },
+                AllowedMethod {
+                    method: MethodAndBody::Delete,
+                    visibility: Visibility::Protected,
+                },
             ],
         },
 
         VerifyEndpoint {
             url: &*DEMO_INSTANCE_START_URL,
-            visibility: Visibility::Protected,
             allowed_methods: vec![
-                AllowedMethod::Post(serde_json::Value::Null)
+                AllowedMethod {
+                    method: MethodAndBody::Post(serde_json::Value::Null),
+                    visibility: Visibility::Protected,
+                },
             ],
         },
         VerifyEndpoint {
             url: &*DEMO_INSTANCE_STOP_URL,
-            visibility: Visibility::Protected,
             allowed_methods: vec![
-                AllowedMethod::Post(serde_json::Value::Null)
+                AllowedMethod {
+                    method: MethodAndBody::Post(serde_json::Value::Null),
+                    visibility: Visibility::Protected,
+                },
             ],
         },
         VerifyEndpoint {
             url: &*DEMO_INSTANCE_REBOOT_URL,
-            visibility: Visibility::Protected,
             allowed_methods: vec![
-                AllowedMethod::Post(serde_json::Value::Null)
+                AllowedMethod {
+                    method: MethodAndBody::Post(serde_json::Value::Null),
+                    visibility: Visibility::Protected,
+                },
             ],
         },
         VerifyEndpoint {
             url: &*DEMO_INSTANCE_MIGRATE_URL,
-            visibility: Visibility::Protected,
             allowed_methods: vec![
-                AllowedMethod::Post(serde_json::to_value(
-                    params::InstanceMigrate {
-                        dst_sled_id: uuid::Uuid::new_v4(),
-                    }
-                ).unwrap()),
+                AllowedMethod {
+                    method: MethodAndBody::Post(serde_json::to_value(
+                        params::InstanceMigrate {
+                            dst_sled_id: uuid::Uuid::new_v4(),
+                        }
+                    ).unwrap()),
+                    visibility: Visibility::Protected,
+                },
             ],
         },
         VerifyEndpoint {
             url: &*DEMO_INSTANCE_SERIAL_URL,
-            visibility: Visibility::Protected,
             allowed_methods: vec![
-                AllowedMethod::GetNonexistent // has required query parameters
+                AllowedMethod {
+                    method: MethodAndBody::GetNonexistent, // has required query parameters
+                    visibility: Visibility::Protected,
+                },
             ],
         },
 
         /* Instance NICs */
         VerifyEndpoint {
             url: &*DEMO_INSTANCE_NICS_URL,
-            visibility: Visibility::Protected,
             allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_INSTANCE_NIC_CREATE).unwrap()
-                ),
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::Protected,
+                },
+                AllowedMethod {
+                    method: MethodAndBody::Post(
+                        serde_json::to_value(&*DEMO_INSTANCE_NIC_CREATE).unwrap()
+                    ),
+                    visibility: Visibility::Protected,
+                },
             ],
         },
         VerifyEndpoint {
             url: &*DEMO_INSTANCE_NIC_URL,
-            visibility: Visibility::Protected,
             allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Delete,
-                AllowedMethod::Put(
-                    serde_json::to_value(&*DEMO_INSTANCE_NIC_PUT).unwrap()
-                ),
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::Protected,
+                },
+                AllowedMethod {
+                    method: MethodAndBody::Delete,
+                    visibility: Visibility::Protected,
+                },
+                AllowedMethod {
+                    method: MethodAndBody::Put(
+                        serde_json::to_value(&*DEMO_INSTANCE_NIC_PUT).unwrap()
+                    ),
+                    visibility: Visibility::Protected,
+                },
             ],
         },
 
@@ -990,128 +1227,238 @@ lazy_static! {
 
         VerifyEndpoint {
             url: "/roles",
-            visibility: Visibility::Public,
-            allowed_methods: vec![AllowedMethod::Get],
+            allowed_methods: vec![
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::PublicPermissionRequired,
+                },
+            ],
         },
         VerifyEndpoint {
             url: "/roles/fleet.admin",
-            visibility: Visibility::Protected,
-            allowed_methods: vec![AllowedMethod::Get],
+            allowed_methods: vec![
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::Protected,
+                },
+            ],
         },
 
         VerifyEndpoint {
             url: "/users_builtin",
-            visibility: Visibility::Public,
-            allowed_methods: vec![AllowedMethod::Get],
+            allowed_methods: vec![
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::PublicPermissionRequired,
+                },
+            ],
         },
         VerifyEndpoint {
             url: &*URL_USERS_DB_INIT,
-            visibility: Visibility::Protected,
-            allowed_methods: vec![AllowedMethod::Get],
+            allowed_methods: vec![
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::Protected,
+                },
+            ],
         },
 
         /* Hardware */
 
         VerifyEndpoint {
             url: "/hardware/racks",
-            visibility: Visibility::Public,
-            allowed_methods: vec![AllowedMethod::Get],
+            allowed_methods: vec![
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::PublicPermissionRequired,
+                },
+            ],
         },
 
         VerifyEndpoint {
             url: &*HARDWARE_RACK_URL,
-            visibility: Visibility::Protected,
-            allowed_methods: vec![AllowedMethod::Get],
+            allowed_methods: vec![
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::Protected,
+                },
+            ],
         },
 
         VerifyEndpoint {
             url: "/hardware/sleds",
-            visibility: Visibility::Public,
-            allowed_methods: vec![AllowedMethod::Get],
+            allowed_methods: vec![
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::PublicPermissionRequired,
+                },
+            ],
         },
 
         VerifyEndpoint {
             url: &*HARDWARE_SLED_URL,
-            visibility: Visibility::Protected,
-            allowed_methods: vec![AllowedMethod::Get],
+            allowed_methods: vec![
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::Protected,
+                },
+            ],
         },
 
         /* Sagas */
 
         VerifyEndpoint {
             url: "/sagas",
-            visibility: Visibility::Public,
-            allowed_methods: vec![AllowedMethod::Get],
+            allowed_methods: vec![
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::PublicPermissionRequired,
+                },
+            ],
         },
 
         VerifyEndpoint {
             url: "/sagas/48a1b8c8-fc1c-6fea-9de9-fdeb8dda7823",
-            visibility: Visibility::Public,
-            allowed_methods: vec![AllowedMethod::GetNonexistent],
+            allowed_methods: vec![
+                AllowedMethod {
+                    method: MethodAndBody::GetNonexistent,
+                    visibility: Visibility::PublicPermissionRequired,
+                },
+            ],
         },
 
         /* Timeseries schema */
 
         VerifyEndpoint {
             url: "/timeseries/schema",
-            visibility: Visibility::Public,
-            allowed_methods: vec![AllowedMethod::Get],
+            allowed_methods: vec![
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::PublicPermissionRequired,
+                },
+            ],
         },
 
         /* Updates */
 
         VerifyEndpoint {
             url: "/updates/refresh",
-            visibility: Visibility::Public,
-            allowed_methods: vec![AllowedMethod::Post(
-                serde_json::Value::Null
-            )],
+            allowed_methods: vec![
+                AllowedMethod {
+                    method: MethodAndBody::Post(
+                        serde_json::Value::Null
+                    ),
+                    visibility: Visibility::PublicPermissionRequired,
+                },
+            ],
         },
 
         /* Global Images */
 
         VerifyEndpoint {
             url: "/images",
-            visibility: Visibility::Public,
             allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_GLOBAL_IMAGE_CREATE).unwrap()
-                ),
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::PublicNoPermissionRequired,
+                },
+                AllowedMethod {
+                    method: MethodAndBody::Post(
+                        serde_json::to_value(&*DEMO_GLOBAL_IMAGE_CREATE).unwrap()
+                    ),
+                    visibility: Visibility::PublicPermissionRequired,
+                },
             ],
         },
 
         VerifyEndpoint {
             url: &*DEMO_GLOBAL_IMAGE_URL,
-            visibility: Visibility::Protected,
             allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Delete,
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::PublicNoPermissionRequired,
+                },
+                AllowedMethod {
+                    method: MethodAndBody::Delete,
+                    visibility: Visibility::Protected, // XXX is this right?
+                },
             ],
         },
 
         /* Silo identity providers */
 
-        /*
         VerifyEndpoint {
-            url: &*IDENTITY_PROVIDERS_URL, // in ignore list
-            visibility: Visibility::Public,
+            url: &*IDENTITY_PROVIDERS_URL,
             allowed_methods: vec![
-                AllowedMethod::Get,
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::PublicNoPermissionRequired,
+                },
             ],
         },
-        */
+
         VerifyEndpoint {
             url: &*SAML_IDENTITY_PROVIDERS_URL,
-            visibility: Visibility::Public,
-            allowed_methods: vec![AllowedMethod::Post(
-                serde_json::to_value(&*SAML_IDENTITY_PROVIDER).unwrap(),
-            )],
+            allowed_methods: vec![
+                AllowedMethod {
+                    method: MethodAndBody::Post(
+                        serde_json::to_value(&*SAML_IDENTITY_PROVIDER).unwrap(),
+                    ),
+                    visibility: Visibility::PublicPermissionRequired,
+                },
+            ],
         },
         VerifyEndpoint {
             url: &*SPECIFIC_SAML_IDENTITY_PROVIDER_URL,
-            visibility: Visibility::Protected,
-            allowed_methods: vec![AllowedMethod::Get],
+            allowed_methods: vec![
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::Protected,
+                },
+            ],
+        },
+
+        /* Misc */
+
+        VerifyEndpoint {
+            url: "/session/me",
+            allowed_methods: vec![
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::PublicNoPermissionRequired,
+                },
+            ],
+        },
+
+        /* SSH keys */
+
+        VerifyEndpoint {
+            url: &*DEMO_SSHKEYS_URL,
+            allowed_methods: vec![
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::Protected, // XXX is this right?
+                },
+                AllowedMethod {
+                    method: MethodAndBody::Post(
+                        serde_json::to_value(&*DEMO_SSHKEY_CREATE).unwrap(),
+                    ),
+                    visibility: Visibility::Protected, // XXX is this right?
+                },
+            ],
+        },
+        VerifyEndpoint {
+            url: &*DEMO_SPECIFIC_SSHKEY_URL,
+            allowed_methods: vec![
+                AllowedMethod {
+                    method: MethodAndBody::Get,
+                    visibility: Visibility::Protected, // XXX is this right?
+                },
+                AllowedMethod {
+                    method: MethodAndBody::Delete,
+                    visibility: Visibility::Protected, // XXX is this right?
+                },
+            ],
         },
     ];
 }
