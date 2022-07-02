@@ -79,15 +79,11 @@ impl Client {
         //  to/from the database, as well as the cost of parsing them for each measurement, only to
         //  promptly throw away almost all of them (except for the first).
         let timeseries_name = TimeseriesName::try_from(timeseries_name)?;
-        let schema = self
-            .schema_for_timeseries(&timeseries_name)
-            .await?
-            .ok_or_else(|| {
-                Error::QueryError(format!(
-                    "No such timeseries: '{}'",
-                    timeseries_name
-                ))
-            })?;
+        let schema = match self.schema_for_timeseries(&timeseries_name).await? {
+            Some(schema) => schema,
+            // If the timeseries doesn't exist, just return an empty Vec.
+            None => return Ok(Vec::new()),
+        };
         let mut query_builder = query::SelectQueryBuilder::new(&schema)
             .start_time(start_time)
             .end_time(end_time);

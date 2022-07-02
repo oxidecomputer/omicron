@@ -3,6 +3,7 @@ OPERATION ID                             URL PATH
 project_disks_delete_disk                /organizations/{organization_name}/projects/{project_name}/disks/{disk_name}
 project_disks_get                        /organizations/{organization_name}/projects/{project_name}/disks
 project_disks_get_disk                   /organizations/{organization_name}/projects/{project_name}/disks/{disk_name}
+project_disks_get_metrics                /organizations/{organization_name}/projects/{project_name}/disks/{disk_name}/metrics/{metric_name}
 project_disks_post                       /organizations/{organization_name}/projects/{project_name}/disks
 
 API operations found with tag "firewall"

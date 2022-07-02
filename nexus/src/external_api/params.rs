@@ -5,6 +5,8 @@
 //! Params define the request bodies of API endpoints for creating or updating resources.
 
 use crate::external_api::shared;
+use chrono::{DateTime, Utc};
+use dropshot::PaginationParams;
 use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
     InstanceCpuCount, Ipv4Net, Ipv6Net, Name,
@@ -778,6 +780,18 @@ pub struct SshKeyCreate {
     /// SSH public key, e.g., `"ssh-ed25519 AAAAC3NzaC..."`
     pub public_key: String,
 }
+
+// METRICS
+
+/// Query parameters common to resource metrics endpoints.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ResourceMetrics {
+    pub start_time: DateTime<Utc>,
+    pub end_time: DateTime<Utc>,
+}
+
+pub type ResourceMetricsPagination =
+    PaginationParams<ResourceMetrics, ResourceMetrics>;
 
 #[cfg(test)]
 mod test {

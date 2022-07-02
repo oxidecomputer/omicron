@@ -8,6 +8,8 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::Asset;
+use crate::external_api::params::ResourceMetrics;
+use crate::external_api::params::ResourceMetricsPagination;
 use crate::internal_api::params::OximeterInfo;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -16,6 +18,8 @@ use omicron_common::api::external::PaginationOrder;
 use omicron_common::api::internal::nexus;
 use omicron_common::backoff;
 use oximeter_client::Client as OximeterClient;
+use oximeter_db::query::Timestamp;
+use oximeter_db::Measurement;
 use oximeter_db::TimeseriesSchema;
 use oximeter_db::TimeseriesSchemaPaginationParams;
 use oximeter_producer::register;
@@ -162,14 +166,74 @@ impl super::Nexus {
         self.timeseries_client
             .timeseries_schema_list(&pag_params.page, limit)
             .await
-            .map_err(|e| match e {
-                oximeter_db::Error::DatabaseUnavailable(_) => {
-                    Error::ServiceUnavailable {
-                        internal_message: e.to_string(),
-                    }
-                }
-                _ => Error::InternalError { internal_message: e.to_string() },
-            })
+            .map_err(map_oximeter_err)
+    }
+
+    pub async fn select_timeseries(
+        &self,
+        timeseries_name: &str,
+        criteria: &[&str],
+        interval: Duration,
+        query_params: ResourceMetricsPagination,
+        limit: NonZeroU32,
+    ) -> Result<dropshot::ResultsPage<Measurement>, Error> {
+        #[inline]
+        fn no_results() -> dropshot::ResultsPage<Measurement> {
+            dropshot::ResultsPage { next_page: None, items: Vec::new() }
+        }
+
+        let query = match query_params.page {
+            dropshot::WhichPage::First(query) => query,
+            dropshot::WhichPage::Next(query) => query,
+        };
+        let start_time = query.start_time;
+        if start_time >= query.end_time {
+            return Ok(no_results());
+        }
+        let max_timeframe = chrono::Duration::from_std(interval * limit.get())
+            .map_err(|e| Error::internal_error(&e.to_string()))?;
+        let end_time = query.end_time.min(start_time + max_timeframe);
+
+        let timeseries_list = self
+            .timeseries_client
+            .select_timeseries_with(
+                timeseries_name,
+                criteria,
+                Some(Timestamp::Inclusive(start_time)),
+                Some(Timestamp::Exclusive(end_time)),
+            )
+            .await
+            .map_err(map_oximeter_err)?;
+
+        if timeseries_list.len() > 1 {
+            return Err(Error::internal_error(&format!(
+                "expected 1 timeseries but got {} ({:?} {:?})",
+                timeseries_list.len(),
+                timeseries_name,
+                criteria
+            )));
+        }
+
+        Ok(if let Some(timeseries) = timeseries_list.into_iter().next() {
+            let next_start_time = end_time;
+
+            dropshot::ResultsPage {
+                next_page: if next_start_time >= query.end_time {
+                    None
+                } else {
+                    Some(base64::encode_config(
+                        serde_json::to_string(&ResourceMetrics {
+                            start_time: next_start_time,
+                            end_time: query.end_time,
+                        })?,
+                        base64::URL_SAFE,
+                    ))
+                },
+                items: timeseries.measurements,
+            }
+        } else {
+            no_results()
+        })
     }
 
     // Internal helper to build an Oximeter client from its ID and address (common data between
@@ -207,5 +271,14 @@ impl super::Nexus {
             SocketAddr::from((info.ip.ip(), info.port.try_into().unwrap()));
         let id = info.id;
         Ok((self.build_oximeter_client(&id, address), id))
+    }
+}
+
+fn map_oximeter_err(error: oximeter_db::Error) -> Error {
+    match error {
+        oximeter_db::Error::DatabaseUnavailable(_) => {
+            Error::ServiceUnavailable { internal_message: error.to_string() }
+        }
+        _ => Error::InternalError { internal_message: error.to_string() },
     }
 }

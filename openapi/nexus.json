@@ -1803,6 +1803,112 @@
         }
       }
     },
+    "/organizations/{organization_name}/projects/{project_name}/disks/{disk_name}/metrics/{metric_name}": {
+      "get": {
+        "tags": [
+          "disks"
+        ],
+        "summary": "Fetch metrics for a disk.",
+        "operationId": "project_disks_get_metrics",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "disk_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "metric_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/DiskMetricName"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "organization_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "project_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "query",
+            "name": "end_time",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "start_time",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeasurementResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      }
+    },
     "/organizations/{organization_name}/projects/{project_name}/images": {
       "get": {
         "tags": [
@@ -6226,6 +6332,194 @@
       }
     },
     "schemas": {
+      "BinRangedouble": {
+        "description": "A type storing a range over `T`.\n\nThis type supports ranges similar to the `RangeTo`, `Range` and `RangeFrom` types in the standard library. Those cover `(..end)`, `(start..end)`, and `(start..)` respectively.",
+        "oneOf": [
+          {
+            "description": "A range unbounded below and exclusively above, `..end`.",
+            "type": "object",
+            "properties": {
+              "end": {
+                "type": "number",
+                "format": "double"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range_to"
+                ]
+              }
+            },
+            "required": [
+              "end",
+              "type"
+            ]
+          },
+          {
+            "description": "A range bounded inclusively below and exclusively above, `start..end`.",
+            "type": "object",
+            "properties": {
+              "end": {
+                "type": "number",
+                "format": "double"
+              },
+              "start": {
+                "type": "number",
+                "format": "double"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range"
+                ]
+              }
+            },
+            "required": [
+              "end",
+              "start",
+              "type"
+            ]
+          },
+          {
+            "description": "A range bounded inclusively below and unbounded above, `start..`.",
+            "type": "object",
+            "properties": {
+              "start": {
+                "type": "number",
+                "format": "double"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range_from"
+                ]
+              }
+            },
+            "required": [
+              "start",
+              "type"
+            ]
+          }
+        ]
+      },
+      "BinRangeint64": {
+        "description": "A type storing a range over `T`.\n\nThis type supports ranges similar to the `RangeTo`, `Range` and `RangeFrom` types in the standard library. Those cover `(..end)`, `(start..end)`, and `(start..)` respectively.",
+        "oneOf": [
+          {
+            "description": "A range unbounded below and exclusively above, `..end`.",
+            "type": "object",
+            "properties": {
+              "end": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range_to"
+                ]
+              }
+            },
+            "required": [
+              "end",
+              "type"
+            ]
+          },
+          {
+            "description": "A range bounded inclusively below and exclusively above, `start..end`.",
+            "type": "object",
+            "properties": {
+              "end": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "start": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range"
+                ]
+              }
+            },
+            "required": [
+              "end",
+              "start",
+              "type"
+            ]
+          },
+          {
+            "description": "A range bounded inclusively below and unbounded above, `start..`.",
+            "type": "object",
+            "properties": {
+              "start": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range_from"
+                ]
+              }
+            },
+            "required": [
+              "start",
+              "type"
+            ]
+          }
+        ]
+      },
+      "Bindouble": {
+        "description": "Type storing bin edges and a count of samples within it.",
+        "type": "object",
+        "properties": {
+          "count": {
+            "description": "The total count of samples in this bin.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "range": {
+            "description": "The range of the support covered by this bin.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BinRangedouble"
+              }
+            ]
+          }
+        },
+        "required": [
+          "count",
+          "range"
+        ]
+      },
+      "Binint64": {
+        "description": "Type storing bin edges and a count of samples within it.",
+        "type": "object",
+        "properties": {
+          "count": {
+            "description": "The total count of samples in this bin.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "range": {
+            "description": "The range of the support covered by this bin.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BinRangeint64"
+              }
+            ]
+          }
+        },
+        "required": [
+          "count",
+          "range"
+        ]
+      },
       "BlockSize": {
         "title": "disk block size in bytes",
         "type": "integer",
@@ -6240,6 +6534,216 @@
         "type": "integer",
         "format": "uint64",
         "minimum": 0
+      },
+      "Cumulativedouble": {
+        "description": "A cumulative or counter data type.",
+        "type": "object",
+        "properties": {
+          "start_time": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "value": {
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "required": [
+          "start_time",
+          "value"
+        ]
+      },
+      "Cumulativeint64": {
+        "description": "A cumulative or counter data type.",
+        "type": "object",
+        "properties": {
+          "start_time": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "value": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "start_time",
+          "value"
+        ]
+      },
+      "Datum": {
+        "description": "A `Datum` is a single sampled data point from a metric.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "type": "boolean"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "bool"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "i64"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "type": "number",
+                "format": "double"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "f64"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "string"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "uint8",
+                  "minimum": 0
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "bytes"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "$ref": "#/components/schemas/Cumulativeint64"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "cumulative_i64"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "$ref": "#/components/schemas/Cumulativedouble"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "cumulative_f64"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "$ref": "#/components/schemas/Histogramint64"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "histogram_i64"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "$ref": "#/components/schemas/Histogramdouble"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "histogram_f64"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
+          }
+        ]
       },
       "DatumType": {
         "description": "The type of an individual datum of a metric.",
@@ -6959,6 +7463,58 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "Histogramdouble": {
+        "description": "A simple type for managing a histogram metric.\n\nA histogram maintains the count of any number of samples, over a set of bins. Bins are specified on construction via their _left_ edges, inclusive. There can't be any \"gaps\" in the bins, and an additional bin may be added to the left, right, or both so that the bins extend to the entire range of the support.\n\nNote that any gaps, unsorted bins, or non-finite values will result in an error.\n\nExample ------- ```rust use oximeter::histogram::{BinRange, Histogram};\n\nlet edges = [0i64, 10, 20]; let mut hist = Histogram::new(&edges).unwrap(); assert_eq!(hist.n_bins(), 4); // One additional bin for the range (20..) assert_eq!(hist.n_samples(), 0); hist.sample(4); hist.sample(100); assert_eq!(hist.n_samples(), 2);\n\nlet data = hist.iter().collect::<Vec<_>>(); assert_eq!(data[0].range, BinRange::range(i64::MIN, 0)); // An additional bin for `..0` assert_eq!(data[0].count, 0); // Nothing is in this bin\n\nassert_eq!(data[1].range, BinRange::range(0, 10)); // The range `0..10` assert_eq!(data[1].count, 1); // 4 is sampled into this bin ```\n\nNotes -----\n\nHistograms may be constructed either from their left bin edges, or from a sequence of ranges. In either case, the left-most bin may be converted upon construction. In particular, if the left-most value is not equal to the minimum of the support, a new bin will be added from the minimum to that provided value. If the left-most value _is_ the support's minimum, because the provided bin was unbounded below, such as `(..0)`, then that bin will be converted into one bounded below, `(MIN..0)` in this case.\n\nThe short of this is that, most of the time, it shouldn't matter. If one specifies the extremes of the support as their bins, be aware that the left-most may be converted from a `BinRange::RangeTo` into a `BinRange::Range`. In other words, the first bin of a histogram is _always_ a `Bin::Range` or a `Bin::RangeFrom` after construction. In fact, every bin is one of those variants, the `BinRange::RangeTo` is only provided as a convenience during construction.",
+        "type": "object",
+        "properties": {
+          "bins": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Bindouble"
+            }
+          },
+          "n_samples": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "start_time": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "bins",
+          "n_samples",
+          "start_time"
+        ]
+      },
+      "Histogramint64": {
+        "description": "A simple type for managing a histogram metric.\n\nA histogram maintains the count of any number of samples, over a set of bins. Bins are specified on construction via their _left_ edges, inclusive. There can't be any \"gaps\" in the bins, and an additional bin may be added to the left, right, or both so that the bins extend to the entire range of the support.\n\nNote that any gaps, unsorted bins, or non-finite values will result in an error.\n\nExample ------- ```rust use oximeter::histogram::{BinRange, Histogram};\n\nlet edges = [0i64, 10, 20]; let mut hist = Histogram::new(&edges).unwrap(); assert_eq!(hist.n_bins(), 4); // One additional bin for the range (20..) assert_eq!(hist.n_samples(), 0); hist.sample(4); hist.sample(100); assert_eq!(hist.n_samples(), 2);\n\nlet data = hist.iter().collect::<Vec<_>>(); assert_eq!(data[0].range, BinRange::range(i64::MIN, 0)); // An additional bin for `..0` assert_eq!(data[0].count, 0); // Nothing is in this bin\n\nassert_eq!(data[1].range, BinRange::range(0, 10)); // The range `0..10` assert_eq!(data[1].count, 1); // 4 is sampled into this bin ```\n\nNotes -----\n\nHistograms may be constructed either from their left bin edges, or from a sequence of ranges. In either case, the left-most bin may be converted upon construction. In particular, if the left-most value is not equal to the minimum of the support, a new bin will be added from the minimum to that provided value. If the left-most value _is_ the support's minimum, because the provided bin was unbounded below, such as `(..0)`, then that bin will be converted into one bounded below, `(MIN..0)` in this case.\n\nThe short of this is that, most of the time, it shouldn't matter. If one specifies the extremes of the support as their bins, be aware that the left-most may be converted from a `BinRange::RangeTo` into a `BinRange::Range`. In other words, the first bin of a histogram is _always_ a `Bin::Range` or a `Bin::RangeFrom` after construction. In fact, every bin is one of those variants, the `BinRange::RangeTo` is only provided as a convenience during construction.",
+        "type": "object",
+        "properties": {
+          "bins": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Binint64"
+            }
+          },
+          "n_samples": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "start_time": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "bins",
+          "n_samples",
+          "start_time"
         ]
       },
       "IdentityProvider": {
@@ -7863,6 +8419,44 @@
         "pattern": "^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$",
         "minLength": 17,
         "maxLength": 17
+      },
+      "Measurement": {
+        "description": "A `Measurement` is a timestamped datum from a single metric",
+        "type": "object",
+        "properties": {
+          "datum": {
+            "$ref": "#/components/schemas/Datum"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "datum",
+          "timestamp"
+        ]
+      },
+      "MeasurementResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Measurement"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
       },
       "Name": {
         "title": "A name used in the API",
@@ -10499,6 +11093,17 @@
           "name_ascending",
           "name_descending",
           "id_ascending"
+        ]
+      },
+      "DiskMetricName": {
+        "type": "string",
+        "enum": [
+          "activated",
+          "flush",
+          "read",
+          "read_bytes",
+          "write",
+          "write_bytes"
         ]
       }
     }
