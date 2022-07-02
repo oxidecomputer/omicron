@@ -203,7 +203,6 @@ pub struct InstanceSerialConsoleData {
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Copy, Hash,
 )]
-#[serde(rename_all = "snake_case")]
 pub enum DendriteAsic {
     #[serde(rename = "tofino_asic")]
     TofinoAsic,

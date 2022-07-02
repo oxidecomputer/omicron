@@ -408,7 +408,7 @@
         "enum": [
           "tofino_asic",
           "tofino_stub",
-          "soft_npu"
+          "softnpu"
         ]
       },
       "DiskEnsureBody": {
