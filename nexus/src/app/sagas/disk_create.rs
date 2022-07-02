@@ -417,6 +417,7 @@ async fn sdc_regions_ensure(
     let mut rng = StdRng::from_entropy();
     let volume_construction_request =
         sled_agent_client::types::VolumeConstructionRequest::Volume {
+            id: Uuid::new_v4(),
             block_size,
             sub_volumes: vec![
                 sled_agent_client::types::VolumeConstructionRequest::Region {
@@ -424,6 +425,7 @@ async fn sdc_regions_ensure(
                     // gen of 0 is here, these regions were just allocated.
                     gen: 0,
                     opts: sled_agent_client::types::CrucibleOpts {
+                        id: Uuid::new_v4(),
                         target: datasets_and_regions
                             .iter()
                             .map(|(dataset, region)| {
@@ -455,8 +457,6 @@ async fn sdc_regions_ensure(
                         // TODO open a control socket for the whole volume, not
                         // in the sub volumes
                         control: None,
-                        metric_register: None,
-                        metric_collect: None,
                     },
                 },
             ],

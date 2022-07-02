@@ -102,9 +102,11 @@ impl super::Nexus {
                 })?;
 
                 let volume_construction_request = sled_agent_client::types::VolumeConstructionRequest::Volume {
+                    id: Uuid::new_v4(),
                     block_size: db_block_size.to_bytes().into(),
                     sub_volumes: vec![
                         sled_agent_client::types::VolumeConstructionRequest::Url {
+                            id: Uuid::new_v4(),
                             block_size: db_block_size.to_bytes().into(),
                             url: url.clone(),
                         }
@@ -224,9 +226,11 @@ impl super::Nexus {
                 let block_size: u64 = db_block_size.to_bytes() as u64;
 
                 let volume_construction_request = sled_agent_client::types::VolumeConstructionRequest::Volume {
+                    id: Uuid::new_v4(),
                     block_size,
                     sub_volumes: vec![
                         sled_agent_client::types::VolumeConstructionRequest::File {
+                            id: Uuid::new_v4(),
                             block_size,
                             path: "/opt/oxide/propolis-server/blob/alpine.iso".into(),
                         }
