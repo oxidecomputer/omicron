@@ -124,3 +124,20 @@ commit = "2be097ddd1d3fd8e7f56bc0a4bfd696253b11454"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
 sha256 = "94218915ec6fed75dcc81d736bd5e9ef62c9eb651a67a943b297d94d6b390941"
+
+[external_package.dendrite]
+service_name = "dendrite"
+zone = true
+[external_package.dendrite.source]
+# To manually override the package source:
+#
+# 1. Build the zone image manually
+#   1a. cd <dendrite tree>
+#   1b. cargo build --features=<tofino_stub|tofino_asic|softnpu>
+#   1c. cargo xtask dist -o
+# 2. Copy the output zone image from dendrite/out to omicron/out
+# 3. Use type = "manual" instead of the "prebuilt"
+type = "prebuilt"
+repo = "dendrite"
+commit = "4f3f9c6617d21164117664650b6fb843bbc28b39"
+sha256 = "8348bde61569ff27df50baa99afdbd0b7dfc91d23a2b46bba42a6d4b98c420c2"

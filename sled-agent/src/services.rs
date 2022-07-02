@@ -507,6 +507,21 @@ impl ServiceManager {
                             err,
                         })?;
                 }
+                ServiceType::Dendrite { asic } => {
+                    info!(self.log, "Setting up dendrite service");
+                    running_zone
+                        .run_cmd(&[
+                            crate::illumos::zone::SVCCFG,
+                            "-s",
+                            &smf_name,
+                            "setprop",
+                            &format!("config/asic={}", asic),
+                        ])
+                        .map_err(|err| Error::ZoneCommand {
+                            intent: "set dendrite asic type".to_string(),
+                            err,
+                        })?;
+                }
             }
 
             debug!(self.log, "enabling service");

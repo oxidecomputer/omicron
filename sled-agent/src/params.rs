@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use internal_dns_client::names::{BackendName, ServiceName, AAAA, SRV};
-use omicron_common::address::OXIMETER_PORT;
+use omicron_common::address::{DENDRITE_PORT, OXIMETER_PORT};
 use omicron_common::api::external;
 use omicron_common::api::internal::nexus::{
     DiskRuntimeState, InstanceRuntimeState,
@@ -199,6 +199,44 @@ pub struct InstanceSerialConsoleData {
     pub last_byte_offset: u64,
 }
 
+// The type of networking 'ASIC' the Dendrite service is expected to manage
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Copy, Hash,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum DendriteAsic {
+    #[serde(rename = "tofino_asic")]
+    TofinoAsic,
+    #[serde(rename = "tofino_stub")]
+    TofinoStub,
+    #[serde(rename = "softnpu")]
+    SoftNpu,
+}
+
+impl std::fmt::Display for DendriteAsic {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                DendriteAsic::TofinoAsic => "tofino_asic",
+                DendriteAsic::TofinoStub => "tofino_stub",
+                DendriteAsic::SoftNpu => "softnpu",
+            }
+        )
+    }
+}
+
+impl From<DendriteAsic> for sled_agent_client::types::DendriteAsic {
+    fn from(a: DendriteAsic) -> Self {
+        match a {
+            DendriteAsic::TofinoAsic => Self::TofinoAsic,
+            DendriteAsic::TofinoStub => Self::TofinoStub,
+            DendriteAsic::SoftNpu => Self::SoftNpu,
+        }
+    }
+}
+
 /// The type of a dataset, and an auxiliary information necessary
 /// to successfully launch a zone managing the associated data.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
@@ -306,6 +344,7 @@ pub enum ServiceType {
     Nexus { internal_address: SocketAddrV6, external_address: SocketAddrV6 },
     InternalDns { server_address: SocketAddrV6, dns_address: SocketAddrV6 },
     Oximeter,
+    Dendrite { asic: DendriteAsic },
 }
 
 impl From<ServiceType> for sled_agent_client::types::ServiceType {
@@ -325,6 +364,7 @@ impl From<ServiceType> for sled_agent_client::types::ServiceType {
                 }
             }
             St::Oximeter => AutoSt::Oximeter,
+            St::Dendrite { asic } => AutoSt::Dendrite { asic: asic.into() },
         }
     }
 }
@@ -367,6 +407,7 @@ impl ServiceRequest {
             }
             ServiceType::Nexus { .. } => SRV::Service(ServiceName::Nexus),
             ServiceType::Oximeter => SRV::Service(ServiceName::Oximeter),
+            ServiceType::Dendrite { .. } => SRV::Service(ServiceName::Dendrite),
         }
     }
 
@@ -376,6 +417,9 @@ impl ServiceRequest {
             ServiceType::Nexus { internal_address, .. } => internal_address,
             ServiceType::Oximeter => {
                 SocketAddrV6::new(self.addresses[0], OXIMETER_PORT, 0, 0)
+            }
+            ServiceType::Dendrite { .. } => {
+                SocketAddrV6::new(self.addresses[0], DENDRITE_PORT, 0, 0)
             }
         }
     }
