@@ -624,14 +624,16 @@ fn with_gz_ext(path: Vec<String>) -> Vec<String> {
         return path;
     }
 
-    let mut new_path = path.clone();
+    let mut new_path = path;
     let last = new_path.pop().unwrap(); // we know there's one there
     new_path.push(format!("{last}.gz"));
     new_path
 }
 
 /// Fetch a static asset from `<static_dir>/assets`. 404 on virtually all
-/// errors. No auth. NO SENSITIVE FILES.
+/// errors. No auth. NO SENSITIVE FILES. Will serve a gzipped version if the
+/// `.gz` file is present in the directory and `Accept-Encoding: gzip` is
+/// present on the request.
 #[endpoint {
    method = GET,
    path = "/assets/{path:.*}",
@@ -644,9 +646,10 @@ pub async fn asset(
     let apictx = rqctx.context();
     let path = path_params.into_inner().path;
 
-    // bail unless the extension is allowed
-    let filename = path.last().ok_or(not_found("no path"))?;
-    let ext = PathBuf::from(filename)
+    // Bail unless the extension is allowed
+    let filename =
+        PathBuf::from(path.last().ok_or_else(|| not_found("no path"))?);
+    let ext = filename
         .extension()
         .map(|ext| ext.to_os_string())
         .unwrap_or_else(|| OsString::from("disallowed"));
@@ -654,28 +657,39 @@ pub async fn asset(
         return Err(not_found("file extension not allowed"));
     }
 
-    // important: we only serve assets from assets/ within static_dir
+    // We only serve assets from assets/ within static_dir
     let assets_dir = &apictx
         .console_config
         .static_dir
         .as_ref()
-        .ok_or(not_found("static_dir undefined"))?
+        .ok_or_else(|| not_found("static_dir undefined"))?
         .join("assets");
+
+    let request = &rqctx.request.lock().await;
+    let accept_encoding = request.headers().get(http::header::ACCEPT_ENCODING);
+
+    let accept_gz = accept_encoding.map_or(false, |val| {
+        val.to_str().map_or(false, |s| s.contains("gzip"))
+    });
 
     let path_gz = with_gz_ext(path.clone());
 
-    // try to find the gzipped version, fall back to non-gz
-    let (file, gzipped) = match find_file(path_gz, &assets_dir) {
-        Ok(file) => (file, true),
-        _ => (find_file(path, &assets_dir)?, false),
-    };
+    // If req accepts gzip and we have a gzipped version, serve that. Otherwise
+    // fall back to non-gz. If neither file found, bubble up 404.
+    let (file_path, set_content_encoding_gzip) =
+        match (accept_gz, find_file(path_gz, &assets_dir)) {
+            (true, Ok(gzipped_file)) => (gzipped_file, true),
+            _ => (find_file(path, &assets_dir)?, false),
+        };
 
-    let file_contents = tokio::fs::read(&file)
-        .await
-        .map_err(|e| not_found(&format!("accessing {:?}: {:#}", file, e)))?;
+    // File read is the same regardless of gzip
+    let file_contents = tokio::fs::read(&file_path).await.map_err(|e| {
+        not_found(&format!("accessing {:?}: {:#}", file_path, e))
+    })?;
 
-    // Derive the MIME type from the file name
-    let content_type = mime_guess::from_path(&file)
+    // Derive the MIME type from the file name. Have to use filename and not
+    // file_path because the latter might have a .gz on the end.
+    let content_type = mime_guess::from_path(filename)
         .first()
         .map_or_else(|| "text/plain".to_string(), |m| m.to_string());
 
@@ -687,7 +701,7 @@ pub async fn asset(
             cache_control_header_value(apictx),
         );
 
-    if gzipped {
+    if set_content_encoding_gzip {
         resp = resp.header(http::header::CONTENT_ENCODING, "gzip");
     }
 
