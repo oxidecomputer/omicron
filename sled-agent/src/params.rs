@@ -203,13 +203,11 @@ pub struct InstanceSerialConsoleData {
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Copy, Hash,
 )]
+#[serde(rename_all = "snake_case")]
 pub enum DendriteAsic {
-    #[serde(rename = "tofino_asic")]
     TofinoAsic,
-    #[serde(rename = "tofino_stub")]
     TofinoStub,
-    #[serde(rename = "softnpu")]
-    SoftNpu,
+    Softnpu,
 }
 
 impl std::fmt::Display for DendriteAsic {
@@ -220,7 +218,7 @@ impl std::fmt::Display for DendriteAsic {
             match self {
                 DendriteAsic::TofinoAsic => "tofino_asic",
                 DendriteAsic::TofinoStub => "tofino_stub",
-                DendriteAsic::SoftNpu => "softnpu",
+                DendriteAsic::Softnpu => "softnpu",
             }
         )
     }
@@ -231,7 +229,7 @@ impl From<DendriteAsic> for sled_agent_client::types::DendriteAsic {
         match a {
             DendriteAsic::TofinoAsic => Self::TofinoAsic,
             DendriteAsic::TofinoStub => Self::TofinoStub,
-            DendriteAsic::SoftNpu => Self::SoftNpu,
+            DendriteAsic::Softnpu => Self::Softnpu,
         }
     }
 }
