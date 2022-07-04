@@ -676,11 +676,14 @@ pub async fn asset(
 
     // If req accepts gzip and we have a gzipped version, serve that. Otherwise
     // fall back to non-gz. If neither file found, bubble up 404.
-    let (file_path, set_content_encoding_gzip) =
-        match (accept_gz, find_file(path_gz, &assets_dir)) {
-            (true, Ok(gzipped_file)) => (gzipped_file, true),
+    let (file_path, set_content_encoding_gzip) = if accept_gz {
+        match find_file(path_gz, &assets_dir) {
+            Ok(gzipped_file) => (gzipped_file, true),
             _ => (find_file(path, &assets_dir)?, false),
-        };
+        }
+    } else {
+        (find_file(path, &assets_dir)?, false)
+    };
 
     // File read is the same regardless of gzip
     let file_contents = tokio::fs::read(&file_path).await.map_err(|e| {
