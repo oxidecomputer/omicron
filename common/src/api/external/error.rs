@@ -11,6 +11,7 @@ use crate::api::external::ResourceType;
 use dropshot::HttpError;
 use serde::Deserialize;
 use serde::Serialize;
+use std::fmt::Display;
 use uuid::Uuid;
 
 /// An error that can be generated within a control plane component
@@ -171,6 +172,58 @@ impl Error {
     /// ok, but in the old Nexus would otherwise be a 500.
     pub fn type_version_mismatch(message: &str) -> Error {
         Error::TypeVersionMismatch { internal_message: message.to_owned() }
+    }
+
+    /// Given an [`Error`] with an internal message, return the same error with
+    /// `context` prepended to it to provide more context
+    ///
+    /// If the error has no internal message, then it is returned unchanged.
+    fn prepend_internal_message<C>(self, context: C) -> Error
+    where
+        C: Display + Send + Sync + 'static,
+    {
+        match self {
+            Error::ObjectNotFound { .. }
+            | Error::ObjectAlreadyExists { .. }
+            | Error::InvalidRequest { .. }
+            | Error::InvalidValue { .. }
+            | Error::Forbidden => self,
+            Error::Unauthenticated { internal_message } => {
+                Error::Unauthenticated {
+                    internal_message: format!(
+                        "{}: {}",
+                        context, internal_message
+                    ),
+                }
+            }
+            Error::InternalError { internal_message } => Error::InternalError {
+                internal_message: format!("{}: {}", context, internal_message),
+            },
+            Error::ServiceUnavailable { internal_message } => {
+                Error::ServiceUnavailable {
+                    internal_message: format!(
+                        "{}: {}",
+                        context, internal_message
+                    ),
+                }
+            }
+            Error::MethodNotAllowed { internal_message } => {
+                Error::MethodNotAllowed {
+                    internal_message: format!(
+                        "{}: {}",
+                        context, internal_message
+                    ),
+                }
+            }
+            Error::TypeVersionMismatch { internal_message } => {
+                Error::TypeVersionMismatch {
+                    internal_message: format!(
+                        "{}: {}",
+                        context, internal_message
+                    ),
+                }
+            }
+        }
     }
 }
 
@@ -359,9 +412,62 @@ macro_rules! bail_unless {
     };
 }
 
+/// Implements a pattern similar to [`anyhow::Context`] for providing extra
+/// context for internal error messages
+///
+/// Unlike `anyhow::Context`, this does not add a new Error to the cause chain.
+/// It replaces the given Error with one that has the modified
+/// `internal_message`.
+///
+/// If the given `Error` variant does not have an `internal_message`, then this
+/// currently returns an equivalent Error to what was given, without prepending
+/// anything to anything.  Future work could add internal context to all
+/// variants.
+///
+/// ## Example
+///
+/// ```
+/// use omicron_common::api::external::Error;
+/// use omicron_common::api::external::InternalContext;
+///
+/// let error: Result<(), Error> = Err(Error::internal_error("boom"));
+/// assert_eq!(
+///     error.internal_context("uh-oh").unwrap_err().to_string(),
+///     "Internal Error: uh-oh: boom"
+/// );
+/// ```
+pub trait InternalContext<T> {
+    fn internal_context<C>(self, s: C) -> Result<T, Error>
+    where
+        C: Display + Send + Sync + 'static;
+
+    fn with_internal_context<C, F>(self, f: F) -> Result<T, Error>
+    where
+        C: Display + Send + Sync + 'static,
+        F: FnOnce() -> C;
+}
+
+impl<T> InternalContext<T> for Result<T, Error> {
+    fn internal_context<C>(self, context: C) -> Result<T, Error>
+    where
+        C: Display + Send + Sync + 'static,
+    {
+        self.map_err(|error| error.prepend_internal_message(context))
+    }
+
+    fn with_internal_context<C, F>(self, make_context: F) -> Result<T, Error>
+    where
+        C: Display + Send + Sync + 'static,
+        F: FnOnce() -> C,
+    {
+        self.map_err(|error| error.prepend_internal_message(make_context()))
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::Error;
+    use super::InternalContext;
 
     #[test]
     fn test_bail_unless() {
@@ -406,5 +512,31 @@ mod test {
                 panic!("got something other than an InternalError");
             }
         }
+    }
+
+    #[test]
+    fn test_context() {
+        // test `internal_context()` and (separately) `InternalError` variant
+        let error: Result<(), Error> = Err(Error::internal_error("boom"));
+        match error.internal_context("uh-oh") {
+            Err(Error::InternalError { internal_message }) => {
+                assert_eq!(internal_message, "uh-oh: boom");
+            }
+            _ => panic!("returned wrong type"),
+        };
+
+        // test `with_internal_context()` and (separately) `ServiceUnavailable`
+        // variant
+        let error: Result<(), Error> = Err(Error::unavail("boom"));
+        match error.with_internal_context(|| format!("uh-oh (#{:2})", 2)) {
+            Err(Error::ServiceUnavailable { internal_message }) => {
+                assert_eq!(internal_message, "uh-oh (# 2): boom");
+            }
+            _ => panic!("returned wrong type"),
+        };
+
+        // test using a variant that doesn't have an internal error
+        let error: Result<(), Error> = Err(Error::Forbidden);
+        assert!(matches!(error.internal_context("foo"), Err(Error::Forbidden)));
     }
 }
