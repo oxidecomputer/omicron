@@ -33,6 +33,7 @@ pub const SLED_AGENT_PORT: u16 = 12345;
 
 /// The port propolis-server listens on inside the propolis zone.
 pub const PROPOLIS_PORT: u16 = 12400;
+pub const COCKROACH_PORT: u16 = 32221;
 pub const CLICKHOUSE_PORT: u16 = 8123;
 pub const OXIMETER_PORT: u16 = 12223;
 

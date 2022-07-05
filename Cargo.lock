@@ -3079,6 +3079,7 @@ dependencies = [
  "http",
  "httptest",
  "hyper",
+ "internal-dns-client",
  "ipnetwork",
  "itertools",
  "lazy_static",
