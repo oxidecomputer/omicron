@@ -82,9 +82,6 @@ panic = "abort"
 #[patch."https://github.com/oxidecomputer/crucible"]
 #crucible = { path = "../crucible/upstairs" }
 
-[patch."https://github.com/njaremko/samael"]
-samael = { git = "https://github.com/oxidecomputer/samael", branch = "dynamic" }
-
 #
 # Local client generation during development.
 #

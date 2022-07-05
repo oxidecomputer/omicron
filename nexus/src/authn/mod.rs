@@ -276,10 +276,10 @@ mod test {
 /// that's specific to whether they're authenticated (or not)
 #[derive(Clone, Debug, Deserialize, Serialize)]
 enum Kind {
-    /// Client successfully authenticated
-    Authenticated(Details),
     /// Client did not attempt to authenticate
     Unauthenticated,
+    /// Client successfully authenticated
+    Authenticated(Details),
 }
 
 /// Describes the actor that was authenticated

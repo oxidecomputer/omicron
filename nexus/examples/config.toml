@@ -4,7 +4,7 @@
 
 [console]
 # Directory for static assets. Absolute path or relative to CWD.
-static_dir = "nexus/static" # TODO: figure out value
+static_dir = "out/console-assets"
 cache_control_max_age_minutes = 10
 session_idle_timeout_minutes = 60
 session_absolute_timeout_minutes = 480
@@ -15,7 +15,7 @@ session_absolute_timeout_minutes = 480
 # working on authentication or authorization.
 [authn]
 # TODO(https://github.com/oxidecomputer/omicron/issues/372): Remove "spoof".
-schemes_external = ["spoof", "session_cookie"]
+schemes_external = ["spoof", "session_cookie", "client_token"]
 
 [log]
 # Show log messages of this level and more severe

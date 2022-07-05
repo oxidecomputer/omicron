@@ -116,7 +116,10 @@ async fn test_console_pages(cptestctx: &ControlPlaneTestContext) {
     // request to console page route without auth should redirect to IdP
     let _ = RequestBuilder::new(&testctx, Method::GET, "/orgs/irrelevant-path")
         .expect_status(Some(StatusCode::FOUND))
-        .expect_response_header(header::LOCATION, "/spoof_login")
+        .expect_response_header(
+            header::LOCATION,
+            "/spoof_login?state=%2Forgs%2Firrelevant-path",
+        )
         .execute()
         .await
         .expect("failed to redirect to IdP on auth failure");

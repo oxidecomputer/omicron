@@ -23,6 +23,7 @@ use crate::{
     },
     db::identity::Asset,
 };
+use anyhow::Context;
 use dropshot::{
     endpoint, HttpError, HttpResponseOk, Path, Query, RequestContext, TypedBody,
 };
@@ -91,10 +92,137 @@ pub async fn spoof_login(
         .body("ok".into())?) // TODO: what do we return from login?
 }
 
+// Silos have one or more identity providers, and an unauthenticated user will
+// be asked to authenticate to one of those below. Silo identity provider
+// selection is currently performed as a name on the /login/ path. This will
+// probably change in the future.
+//
+// Nexus currently supports using a SAML identity provider (IdP), and both login
+// and logout flows are explained below:
+//
+// SAML login flow
+// --------------
+//
+// (Note that https://duo.com/blog/the-beer-drinkers-guide-to-saml is a good
+// reference)
+//
+// Nexus in this case is the service provider (SP), and when the silo identity
+// provider is type SAML, SP initiated login flow will begin when the user does
+// a GET /login/{silo_name}/{provider_name}.
+//
+// But before that, as an example, say an unauthenticated user (or a user whose
+// credentials have expired) tries to navigate to:
+//
+//   GET /organizations/myorg
+//
+// If the user has expired credentials, their user id can be looked up from
+// their session token, and perhaps even the last identity provider name they
+// used may also be stored in their cookie. The appropriate login URL can be
+// created.
+//
+// TODO If the user does not have this information it's unclear what should
+// happen.  If they know the silo name they are trying to log into, they could
+// `GET /silos/{silo_name}/identity_providers` in order to list available
+// identity providers. If not, TODO.
+//
+// Once the appropriate login URL is created, the user's browser is redirected:
+//
+//   GET /login/{silo_name}/{provider_name}
+//
+// For identity provider type SAML, this will cause Nexus to send a AuthnRequest
+// to the selected IdP in the SAMLRequest parameter. It will optionally be
+// signed depending if a signing key pair was supplied in the SAML provider
+// configuration. Nexus currently supports the Redirect binding, meaning the
+// user's browser will be redirected to their IdP's SSO login url:
+//
+//   https://some.idp.test/auth/saml?SAMLRequest=...&RelayState=...
+//
+// If the request has a signature, the query above will also contain SigAlg and
+// Signature params:
+//
+//   https://some.idp.test/auth/saml?SAMLRequest=...&RelayState=...&SigAlg=...&Signature=...
+//
+// SAMLRequest is base64 encoded zlib compressed XML, and RelayState can be
+// anything - Nexus currently encodes the referer header so that when SAML login
+// is successful the user can be sent back to where they were originally.
+//
+// The user will then authenticate with that IdP, and if successful will be
+// redirected back to the SP (Nexus) with a POST:
+//
+//   POST /login/{silo_name}/{provider_name}
+//
+// The body of this POST will contain a URL encoded payload that includes the
+// IdP's SAMLResponse plus optional relay state:
+//
+//   SAMLResponse=...&RelayState=...
+//
+// The RelayState will match what was sent as part of the initial redirect to
+// the IdP. The SAMLResponse will contain (among other things) the IdP's
+// assertion that this user has authenticated correctly, and provide information
+// about that user. Note that there is no Signature on the whole POST body, just
+// embedded in the SAMLResponse!
+//
+// The IdP's SAMLResponse will authenticate a subject, and from this external
+// subject a silo user has to be created or retrieved (depending on the Silo's
+// user provision type). After that, users will be redirected to the referer in
+// the relay state, or to `/organizations`.
+//
+// SAML logout flow
+// ----------------
+//
+// ** TODO SAML logout is currently unimplemented! **
+//
+// SAML logout is either SP initiated or IDP initiated.
+//
+// For SP inititated, a user will navigate to some yet-to-be-determined Nexus
+// URL. Something like:
+//
+//   GET /logout/{silo_name}/{provider_name}
+//
+// Nexus will redirect them to their IdP in order to perform the logout:
+//
+//   https://some.idp.test/auth/saml?SAMLRequest=...&RelayState=...
+//
+// where a LogoutRequest will be sent in the SAMLRequest parameter. If
+// successful, the IDP will redirect the user's browser back to:
+//
+//   POST /logout/{silo_name}/{provider_name}?SAMLRequest=...
+//
+// where there will be a LogoutRequest in the SAMLRequest parameter (where now
+// the IDP is requesting logout in the SP).
+//
+// For IDP inititated, the IDP can spontaneously POST a LogoutRequest to
+//
+//   /logout/{silo_name}/{provider_name}
+
 #[derive(Deserialize, JsonSchema)]
 pub struct LoginToProviderPathParam {
     pub silo_name: crate::db::model::Name,
     pub provider_name: crate::db::model::Name,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RelayState {
+    pub referer: Option<String>,
+}
+
+impl RelayState {
+    pub fn to_encoded(&self) -> Result<String, anyhow::Error> {
+        Ok(base64::encode(
+            serde_json::to_string(&self).context("encoding relay state")?,
+        ))
+    }
+
+    pub fn from_encoded(encoded: String) -> Result<Self, anyhow::Error> {
+        serde_json::from_str(
+            &String::from_utf8(
+                base64::decode(encoded)
+                    .context("base64 decoding relay state")?,
+            )
+            .context("creating relay state string")?,
+        )
+        .context("json from relay state string")
+    }
 }
 
 /// Ask the user to login to their identity provider
@@ -114,12 +242,13 @@ pub async fn login(
     let handler = async {
         let nexus = &apictx.nexus;
         let path_params = path_params.into_inner();
+        let request = &rqctx.request.lock().await;
 
         // Use opctx_external_authn because this request will be
         // unauthenticated.
         let opctx = nexus.opctx_external_authn();
 
-        let identity_provider = IdentityProviderType::lookup(
+        let (.., identity_provider) = IdentityProviderType::lookup(
             &nexus.datastore(),
             &opctx,
             &path_params.silo_name,
@@ -129,7 +258,40 @@ pub async fn login(
 
         match identity_provider {
             IdentityProviderType::Saml(saml_identity_provider) => {
-                let relay_state = None;
+                // Relay state is sent to the IDP, to be sent back to the SP after a
+                // successful login.
+                let relay_state: Option<String> = if let Some(value) =
+                    request.headers().get(hyper::header::REFERER)
+                {
+                    let relay_state = RelayState {
+                        referer: {
+                            Some(
+                                value
+                                    .to_str()
+                                    .map_err(|e| {
+                                        HttpError::for_bad_request(
+                                            None,
+                                            format!(
+                                            "referer header to_str failed! {}",
+                                            e
+                                        ),
+                                        )
+                                    })?
+                                    .to_string(),
+                            )
+                        },
+                    };
+
+                    Some(relay_state.to_encoded().map_err(|e| {
+                        HttpError::for_internal_error(format!(
+                            "encoding relay state failed: {}",
+                            e
+                        ))
+                    })?)
+                } else {
+                    None
+                };
+
                 let sign_in_url =
                     saml_identity_provider.sign_in_url(relay_state).map_err(
                         |e| HttpError::for_internal_error(e.to_string()),
@@ -159,6 +321,7 @@ pub async fn login(
 pub async fn consume_credentials(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<LoginToProviderPathParam>,
+    body_bytes: dropshot::UntypedBody,
 ) -> Result<Response<Body>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
@@ -169,19 +332,87 @@ pub async fn consume_credentials(
         // unauthenticated.
         let opctx = nexus.opctx_external_authn();
 
-        let identity_provider = IdentityProviderType::lookup(
-            &nexus.datastore(),
-            &opctx,
-            &path_params.silo_name,
-            &path_params.provider_name,
-        )
-        .await?;
+        let (authz_silo, db_silo, identity_provider) =
+            IdentityProviderType::lookup(
+                &nexus.datastore(),
+                &opctx,
+                &path_params.silo_name,
+                &path_params.provider_name,
+            )
+            .await?;
 
-        match identity_provider {
-            IdentityProviderType::Saml(_saml_identity_provider) => {
-                todo!()
-            }
+        let (authenticated_subject, relay_state_string) =
+            match identity_provider {
+                IdentityProviderType::Saml(saml_identity_provider) => {
+                    let body_bytes = body_bytes.as_str()?;
+                    saml_identity_provider.authenticated_subject(
+                        &body_bytes,
+                        nexus.samael_max_issue_delay(),
+                    )?
+                }
+            };
+
+        let relay_state: Option<RelayState> =
+            if let Some(value) = relay_state_string {
+                Some(RelayState::from_encoded(value).map_err(|e| {
+                    HttpError::for_internal_error(format!("{}", e))
+                })?)
+            } else {
+                None
+            };
+
+        let user = nexus
+            .silo_user_from_authenticated_subject(
+                &opctx,
+                &authz_silo,
+                &db_silo,
+                &authenticated_subject,
+            )
+            .await?;
+
+        if user.is_none() {
+            info!(&apictx.log, "user is none");
+            return Ok(Response::builder()
+                .status(StatusCode::UNAUTHORIZED)
+                .header(header::SET_COOKIE, clear_session_cookie_header_value())
+                .body("unauthorized".into())?); // TODO: failed login response body?
         }
+
+        let user = user.unwrap();
+
+        // always create a new console session if the user is POSTing here.
+        let session = nexus.session_create(&opctx, user.id()).await?;
+
+        let next_url = if let Some(relay_state) = &relay_state {
+            if let Some(referer) = &relay_state.referer {
+                referer.clone()
+            } else {
+                "/".to_string()
+            }
+        } else {
+            "/".to_string()
+        };
+
+        debug!(
+            &apictx.log,
+            "successful login to silo {} using provider {}: authenticated subject {} = user id {}",
+            path_params.silo_name,
+            path_params.provider_name,
+            authenticated_subject.external_id,
+            user.id(),
+        );
+
+        Ok(Response::builder()
+            .status(StatusCode::FOUND)
+            .header(http::header::LOCATION, next_url)
+            .header(
+                header::SET_COOKIE,
+                session_cookie_header_value(
+                    &session.token,
+                    apictx.session_idle_timeout(),
+                ),
+            )
+            .body("".into())?) // TODO: what do we return from login?
     };
     // TODO this doesn't work because the response is Response<Body>
     //apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -265,27 +496,33 @@ pub struct LoginUrlQuery {
 /// Generate URL to IdP login form. Optional `state` param is included in query
 /// string if present, and will typically represent the URL to send the user
 /// back to after successful login.
+// TODO this does not know anything about IdPs, and it should. When the user is
+// logged out and hits an auth-gated route, if there are multiple IdPs and we
+// don't known which one they want to use, we need to send them to a page that
+// will allow them to choose among discoverable IdPs. However, there may be ways
+// to give ourselves a hint about which one they want, for example, by storing
+// that info in a browser cookie when they log in. When their session ends, we
+// will not be able to look at the dead session to find the silo or IdP (well,
+// maybe we can but we probably shouldn't) but we can look at the cookie and
+// default to sending them to the IdP indicated (though if they don't want that
+// one we need to make sure they can get to a different one). If there is no
+// cookie, we send them to the selector page. In any case, none of this is done
+// here yet. We go to /spoof_login no matter what.
 fn get_login_url(state: Option<String>) -> String {
-    // assume state is not URL encoded, so no risk of double encoding (dropshot
-    // decodes it on the way in)
+    // assume state is not already URL encoded
     let query = match state {
-        Some(state) if state.is_empty() => None,
-        Some(state) => Some(
+        Some(state) if !state.is_empty() => {
             serde_urlencoded::to_string(LoginUrlQuery { state: Some(state) })
-                // unwrap is safe because query.state was just deserialized out
-                // of a query param, so we know it's serializable
-                .unwrap(),
-        ),
-        None => None,
+                .ok() // in the strange event it's not serializable, no query
+        }
+        _ => None,
     };
     // Once we have IdP integration, this will be a URL for the IdP login page.
     // For now we point to our own placeholder login page.
-    let mut url = "/spoof_login".to_string();
-    if let Some(query) = query {
-        url.push('?');
-        url.push_str(query.as_str());
+    match query {
+        Some(query) => format!("/spoof_login?{query}"),
+        None => "/spoof_login".to_string(),
     }
-    url
 }
 
 /// Redirect to IdP login URL
@@ -327,6 +564,29 @@ pub async fn session_me(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+pub async fn console_index_or_login_redirect(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+) -> Result<Response<Body>, HttpError> {
+    let opctx = OpContext::for_external_api(&rqctx).await;
+
+    // if authed, serve console index.html with JS bundle in script tag
+    if let Ok(opctx) = opctx {
+        if opctx.authn.actor().is_some() {
+            return serve_console_index(rqctx.context()).await;
+        }
+    }
+
+    // otherwise redirect to idp
+
+    // put the current URI in the query string to redirect back to after login
+    let uri = rqctx.request.lock().await.uri().to_string();
+
+    Ok(Response::builder()
+        .status(StatusCode::FOUND)
+        .header(http::header::LOCATION, get_login_url(Some(uri)))
+        .body("".into())?)
+}
+
 // Dropshot does not have route match ranking and does not allow overlapping
 // route definitions, so we cannot have a catchall `/*` route for console pages
 // and then also define, e.g., `/api/blah/blah` and give the latter priority
@@ -344,28 +604,19 @@ pub async fn console_page(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     _path_params: Path<RestPathParam>,
 ) -> Result<Response<Body>, HttpError> {
-    let opctx = OpContext::for_external_api(&rqctx).await;
+    console_index_or_login_redirect(rqctx).await
+}
 
-    // if authed, serve HTML page with bundle in script tag
-
-    // HTML doesn't need to be static -- we'll probably find a reason to do some
-    // minimal templating, e.g., putting a CSRF token in the page
-
-    // amusingly, at least to start out, I don't think we care about the path
-    // because the real routing is all client-side. we serve the same HTML
-    // regardless, the app starts on the client and renders the right page and
-    // makes the right API requests.
-    if let Ok(opctx) = opctx {
-        if opctx.authn.actor().is_some() {
-            return serve_console_index(rqctx.context()).await;
-        }
-    }
-
-    // otherwise redirect to idp
-    Ok(Response::builder()
-        .status(StatusCode::FOUND)
-        .header(http::header::LOCATION, get_login_url(None))
-        .body("".into())?)
+#[endpoint {
+   method = GET,
+   path = "/settings/{path:.*}",
+   unpublished = true,
+}]
+pub async fn console_settings_page(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    _path_params: Path<RestPathParam>,
+) -> Result<Response<Body>, HttpError> {
+    console_index_or_login_redirect(rqctx).await
 }
 
 /// Fetch a static asset from `<static_dir>/assets`. 404 on virtually all
@@ -410,7 +661,7 @@ fn cache_control_header_value(apictx: &Arc<ServerContext>) -> String {
     )
 }
 
-async fn serve_console_index(
+pub async fn serve_console_index(
     apictx: &Arc<ServerContext>,
 ) -> Result<Response<Body>, HttpError> {
     let static_dir = &apictx

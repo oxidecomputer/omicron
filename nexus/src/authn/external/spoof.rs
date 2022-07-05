@@ -8,6 +8,7 @@ use super::super::Details;
 use super::HttpAuthnScheme;
 use super::Reason;
 use super::SchemeResult;
+use super::SiloUserSilo;
 use crate::authn;
 use crate::authn::Actor;
 use anyhow::anyhow;
@@ -76,7 +77,7 @@ pub struct HttpAuthnSpoof;
 #[async_trait]
 impl<T> HttpAuthnScheme<T> for HttpAuthnSpoof
 where
-    T: SpoofContext + Send + Sync + 'static,
+    T: SiloUserSilo + Send + Sync + 'static,
 {
     fn name(&self) -> authn::SchemeName {
         SPOOF_SCHEME_NAME
@@ -140,11 +141,6 @@ fn authn_spoof_parse_id(
         .context("parsing header value as UUID")
         .map(|silo_user_id| Some(silo_user_id))
         .map_err(|source| Reason::BadFormat { source })
-}
-
-#[async_trait]
-pub trait SpoofContext {
-    async fn silo_user_silo(&self, silo_user_id: Uuid) -> Result<Uuid, Reason>;
 }
 
 /// Returns a value of the `Authorization` header for this actor that will be

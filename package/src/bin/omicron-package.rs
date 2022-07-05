@@ -276,7 +276,12 @@ async fn do_package(config: &Config, output_directory: &Path) -> Result<()> {
                     .create_with_progress(&progress, &output_directory)
                     .await
                     .with_context(|| {
-                        format!("failed to create {package_name} in {output_directory:?}")
+                        let msg = format!("failed to create {package_name} in {output_directory:?}");
+                        if let Some(hint) = &package.setup_hint {
+                            format!("{msg}\nHint: {hint}")
+                        } else {
+                            msg
+                        }
                     })?;
                 progress.finish();
                 Ok(())

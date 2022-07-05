@@ -421,7 +421,7 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     .parsed_body::<HttpErrorResponseBody>()
     .unwrap();
     assert!(error.message.starts_with(
-        "unable to parse body: name contains invalid character: \"_\" \
+        "unable to parse JSON body: name contains invalid character: \"_\" \
          (allowed characters are lowercase ASCII, digits, and \"-\""
     ));
 
