@@ -364,16 +364,6 @@ resource DeviceAuthRequestList {
 has_relation(fleet: Fleet, "parent_fleet", collection: DeviceAuthRequestList)
 	if collection.fleet = fleet;
 
-# Describes the policy for creating and managing device access tokens.
-resource DeviceAccessToken {
-	permissions = [ "read" ];
-        relations = { silo_user: SiloUser };
-
-	"read" if "read" on "silo_user";
-}
-has_relation(user: SiloUser, "silo_user", access_token: DeviceAccessToken)
-	if access_token.silo_user = user;
-
 # These rules grants the external authenticator role the permissions it needs to
 # read silo users and modify their sessions.  This is necessary for login to
 # work.

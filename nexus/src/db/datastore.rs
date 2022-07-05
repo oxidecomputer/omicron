@@ -4338,7 +4338,12 @@ impl DataStore {
     }
 
     /// Look up a granted device access token.
-    // TODO-security: authz
+    /// Note: since this lookup is not by a primary key or name,
+    /// (though it does use a unique index), it does not fit the
+    /// usual lookup machinery pattern. It therefore does include
+    /// any authz checks. However, the device code is a single-use
+    /// high-entropy random token, and so should not be guessable
+    /// by an attacker.
     pub async fn device_access_token_fetch(
         &self,
         opctx: &OpContext,
