@@ -5,23 +5,16 @@
 //! Test-only implementations of interfaces used by background tasks.
 
 use super::interfaces::{
-    DnsUpdaterInterface,
-    NexusInterface,
-    SledClientInterface,
+    DnsUpdaterInterface, NexusInterface, SledClientInterface,
 };
 
-use async_trait::async_trait;
 use crate::db::datastore::DataStore;
+use async_trait::async_trait;
 use internal_dns_client::{
-    multiclient::{
-        AAAARecord,
-        DnsError,
-    },
+    multiclient::{AAAARecord, DnsError},
     names::SRV,
 };
-use omicron_common::address::{
-    RACK_PREFIX, Ipv6Subnet,
-};
+use omicron_common::address::{Ipv6Subnet, RACK_PREFIX};
 use omicron_common::api::external::Error;
 use sled_agent_client::types as SledAgentTypes;
 use std::collections::HashMap;
@@ -44,20 +37,19 @@ pub struct FakeSledClient {
 
 impl FakeSledClient {
     fn new() -> Arc<Self> {
-        Arc::new(
-            Self {
-                inner: Arc::new(Mutex::new(
-                    FakeSledClientInner {
-                        service_request: None,
-                        dataset_requests: vec![],
-                    }
-                ))
-            }
-        )
+        Arc::new(Self {
+            inner: Arc::new(Mutex::new(FakeSledClientInner {
+                service_request: None,
+                dataset_requests: vec![],
+            })),
+        })
     }
 
     pub fn service_requests(&self) -> Vec<SledAgentTypes::ServiceRequest> {
-        self.inner.lock().unwrap().service_request
+        self.inner
+            .lock()
+            .unwrap()
+            .service_request
             .as_ref()
             .map(|request| request.services.clone())
             .unwrap_or(vec![])
@@ -70,13 +62,23 @@ impl FakeSledClient {
 
 #[async_trait]
 impl SledClientInterface for FakeSledClient {
-    async fn services_put(&self, body: &SledAgentTypes::ServiceEnsureBody) -> Result<(), Error> {
-        let old = self.inner.lock().unwrap().service_request.replace(body.clone());
-        assert!(old.is_none(), "Should only set services once (was {old:?}, inserted {body:?})");
+    async fn services_put(
+        &self,
+        body: &SledAgentTypes::ServiceEnsureBody,
+    ) -> Result<(), Error> {
+        let old =
+            self.inner.lock().unwrap().service_request.replace(body.clone());
+        assert!(
+            old.is_none(),
+            "Should only set services once (was {old:?}, inserted {body:?})"
+        );
         Ok(())
     }
 
-    async fn filesystem_put(&self, body: &SledAgentTypes::DatasetEnsureBody) -> Result<(), Error> {
+    async fn filesystem_put(
+        &self,
+        body: &SledAgentTypes::DatasetEnsureBody,
+    ) -> Result<(), Error> {
         self.inner.lock().unwrap().dataset_requests.push(body.clone());
         Ok(())
     }
@@ -94,7 +96,10 @@ pub struct FakeNexus {
 }
 
 impl FakeNexus {
-    pub fn new(datastore: Arc<DataStore>, rack_subnet: Ipv6Subnet<RACK_PREFIX>) -> Arc<Self> {
+    pub fn new(
+        datastore: Arc<DataStore>,
+        rack_subnet: Ipv6Subnet<RACK_PREFIX>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             datastore,
             rack_id: Uuid::new_v4(),
@@ -118,8 +123,12 @@ impl NexusInterface<FakeSledClient> for FakeNexus {
         &self.datastore
     }
 
-    async fn sled_client(&self, id: &Uuid) -> Result<Arc<FakeSledClient>, Error> {
-        let sled = self.sleds
+    async fn sled_client(
+        &self,
+        id: &Uuid,
+    ) -> Result<Arc<FakeSledClient>, Error> {
+        let sled = self
+            .sleds
             .lock()
             .unwrap()
             .entry(*id)
@@ -140,9 +149,7 @@ pub struct FakeDnsUpdater {
 
 impl FakeDnsUpdater {
     pub fn new() -> Self {
-        Self {
-            records: Arc::new(Mutex::new(HashMap::new())),
-        }
+        Self { records: Arc::new(Mutex::new(HashMap::new())) }
     }
 
     // Get a copy of all records.
@@ -153,11 +160,17 @@ impl FakeDnsUpdater {
 
 #[async_trait]
 impl DnsUpdaterInterface for FakeDnsUpdater {
-    async fn insert_dns_records(&self, records: &HashMap<SRV, Vec<AAAARecord>>) -> Result<(), DnsError> {
+    async fn insert_dns_records(
+        &self,
+        records: &HashMap<SRV, Vec<AAAARecord>>,
+    ) -> Result<(), DnsError> {
         let mut our_records = self.records.lock().unwrap();
         for (k, v) in records {
             let old = our_records.insert(k.clone(), v.clone());
-            assert!(old.is_none(), "Inserted key {k}, but found old value: {old:?}");
+            assert!(
+                old.is_none(),
+                "Inserted key {k}, but found old value: {old:?}"
+            );
         }
         Ok(())
     }

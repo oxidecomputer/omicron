@@ -4,6 +4,9 @@
 
 //! Task which ensures that expected Nexus services exist.
 
+use super::interfaces::{
+    DnsUpdaterInterface, NexusInterface, SledClientInterface,
+};
 use crate::context::OpContext;
 use crate::db::datastore::DatasetRedundancy;
 use crate::db::identity::Asset;
@@ -25,7 +28,6 @@ use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use std::sync::Arc;
-use super::interfaces::{DnsUpdaterInterface, NexusInterface, SledClientInterface};
 
 // Policy for the number of services to be provisioned.
 #[derive(Debug)]
@@ -250,7 +252,12 @@ where
     ) -> Result<Vec<Service>, Error> {
         self.nexus
             .datastore()
-            .ensure_rack_service(opctx, self.nexus.rack_id(), kind, desired_count)
+            .ensure_rack_service(
+                opctx,
+                self.nexus.rack_id(),
+                kind,
+                desired_count,
+            )
             .await
     }
 
@@ -392,7 +399,7 @@ where
     async fn ensure_datasets_provisioned(
         &self,
         opctx: &OpContext,
-        expected_datasets: &[ExpectedDataset]
+        expected_datasets: &[ExpectedDataset],
     ) -> Result<(), Error> {
         // Provision all dataset types concurrently.
         stream::iter(expected_datasets)
@@ -438,10 +445,10 @@ mod test {
     use super::*;
 
     use crate::app::background::fakes::{FakeDnsUpdater, FakeNexus};
-    use crate::{authn, authz};
     use crate::db::datastore::DataStore;
+    use crate::{authn, authz};
     use dropshot::test_util::LogContext;
-    use internal_dns_client::names::{AAAA, BackendName, SRV};
+    use internal_dns_client::names::{BackendName, AAAA, SRV};
     use nexus_test_utils::db::test_setup_database;
     use omicron_common::address::Ipv6Subnet;
     use omicron_common::api::external::ByteCount;
@@ -488,12 +495,7 @@ mod test {
                 authn::Context::internal_service_balancer(),
                 datastore.clone(),
             );
-            Self {
-                logctx,
-                opctx,
-                db,
-                datastore,
-            }
+            Self { logctx, opctx, db, datastore }
         }
 
         async fn cleanup(mut self) {
@@ -530,7 +532,8 @@ mod test {
 
     #[tokio::test]
     async fn test_provision_dataset_on_all_no_zpools() {
-        let test = ProvisionTest::new("test_provision_dataset_on_all_no_zpools").await;
+        let test =
+            ProvisionTest::new("test_provision_dataset_on_all_no_zpools").await;
 
         let rack_subnet = Ipv6Subnet::new(Ipv6Addr::LOCALHOST);
         let nexus = FakeNexus::new(test.datastore.clone(), rack_subnet);
@@ -545,16 +548,16 @@ mod test {
         let sled_id = create_test_sled(nexus.rack_id(), &test.datastore).await;
 
         // Make the request to the service balancer for Crucibles on all Zpools.
-        let expected_datasets = [
-            ExpectedDataset {
-                kind: DatasetKind::Crucible,
-                redundancy: DatasetRedundancy::OnAll,
-            }
-        ];
-        service_balancer.ensure_datasets_provisioned(
-            &test.opctx,
-            &expected_datasets,
-        ).await.unwrap();
+        //
+        // However, with no zpools, this is a no-op.
+        let expected_datasets = [ExpectedDataset {
+            kind: DatasetKind::Crucible,
+            redundancy: DatasetRedundancy::OnAll,
+        }];
+        service_balancer
+            .ensure_datasets_provisioned(&test.opctx, &expected_datasets)
+            .await
+            .unwrap();
 
         // Observe that nothing was requested at the sled.
         let sled = nexus.sled_client(&sled_id).await.unwrap();
@@ -569,8 +572,9 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_provision_dataset_on_all() {
-        let test = ProvisionTest::new("test_provision_dataset_on_all").await;
+    async fn test_provision_dataset_on_all_zpools() {
+        let test =
+            ProvisionTest::new("test_provision_dataset_on_all_zpools").await;
 
         let rack_subnet = Ipv6Subnet::new(Ipv6Addr::LOCALHOST);
         let nexus = FakeNexus::new(test.datastore.clone(), rack_subnet);
@@ -590,16 +594,14 @@ mod test {
         }
 
         // Make the request to the service balancer for Crucibles on all Zpools.
-        let expected_datasets = [
-            ExpectedDataset {
-                kind: DatasetKind::Crucible,
-                redundancy: DatasetRedundancy::OnAll,
-            }
-        ];
-        service_balancer.ensure_datasets_provisioned(
-            &test.opctx,
-            &expected_datasets,
-        ).await.unwrap();
+        let expected_datasets = [ExpectedDataset {
+            kind: DatasetKind::Crucible,
+            redundancy: DatasetRedundancy::OnAll,
+        }];
+        service_balancer
+            .ensure_datasets_provisioned(&test.opctx, &expected_datasets)
+            .await
+            .unwrap();
 
         // Observe that datasets were requested on each zpool.
         let sled = nexus.sled_client(&sled_id).await.unwrap();
@@ -607,29 +609,47 @@ mod test {
         let dataset_requests = sled.dataset_requests();
         assert_eq!(ZPOOL_COUNT, dataset_requests.len());
         for request in &dataset_requests {
-            assert!(zpools.contains(&request.zpool_id), "Dataset request for unexpected zpool");
-            assert!(matches!(request.dataset_kind, SledAgentTypes::DatasetKind::Crucible));
+            assert!(
+                zpools.contains(&request.zpool_id),
+                "Dataset request for unexpected zpool"
+            );
+            assert!(matches!(
+                request.dataset_kind,
+                SledAgentTypes::DatasetKind::Crucible
+            ));
         }
 
         // Observe that DNS records for each Crucible exist.
         let records = dns_updater.records();
         assert_eq!(ZPOOL_COUNT, records.len());
-        for (srv, aaaas) in &records {
-            assert_eq!(1, aaaas.len());
+        for (srv, aaaas) in records {
             match srv {
                 SRV::Backend(BackendName::Crucible, dataset_id) => {
-                        let expected_address = dataset_requests.iter().find_map(|request| {
-                            if request.id == *dataset_id {
-                                Some(request.address)
+                    let expected_address = dataset_requests
+                        .iter()
+                        .find_map(|request| {
+                            if request.id == dataset_id {
+                                Some(request.address.clone())
                             } else {
                                 None
                             }
-                        }).unwrap();
+                        })
+                        .unwrap();
 
-                        let (aaaa_name, dns_addr) = aaaas[0];
-                        assert_eq!(dns_addr.to_string(), expected_address);
-                        assert!(matches!(aaaa_name, AAAA::Zone(dataset_id)));
-                },
+                    assert_eq!(1, aaaas.len());
+                    let (aaaa_name, dns_addr) = &aaaas[0];
+                    assert_eq!(dns_addr.to_string(), expected_address);
+                    if let AAAA::Zone(zone_id) = aaaa_name {
+                        assert_eq!(
+                            *zone_id, dataset_id,
+                            "Expected AAAA UUID to match SRV record",
+                        );
+                    } else {
+                        panic!(
+                            "Expected AAAA record for Zone from {aaaa_name}"
+                        );
+                    }
+                }
                 _ => panic!("Unexpected SRV record"),
             }
         }
@@ -637,20 +657,72 @@ mod test {
         test.cleanup().await;
     }
 
-    // TODO: test provision outside rack
-
-    /*
     #[tokio::test]
     async fn test_provision_dataset_per_rack() {
-        let expected_datasets = [
-            ExpectedDataset {
-                kind: DatasetKind::Crucible,
-                redundancy: DatasetRedundancy::PerRack(2),
-            }
-        ];
-        todo!();
+        let test = ProvisionTest::new("test_provision_dataset_per_rack").await;
+
+        let rack_subnet = Ipv6Subnet::new(Ipv6Addr::LOCALHOST);
+        let nexus = FakeNexus::new(test.datastore.clone(), rack_subnet);
+        let dns_updater = FakeDnsUpdater::new();
+        let service_balancer = ServiceBalancer::new(
+            test.logctx.log.clone(),
+            nexus.clone(),
+            dns_updater.clone(),
+        );
+
+        // Setup: Create a couple sleds on the first rack, and create a third
+        // sled on a "different rack".
+        //
+        // Each sled gets a single zpool.
+        let mut zpools = vec![];
+
+        let sled1_id = create_test_sled(nexus.rack_id(), &test.datastore).await;
+        zpools.push(create_test_zpool(&test.datastore, sled1_id).await);
+
+        let sled2_id = create_test_sled(nexus.rack_id(), &test.datastore).await;
+        zpools.push(create_test_zpool(&test.datastore, sled2_id).await);
+
+        let other_rack_id = Uuid::new_v4();
+        let other_rack_sled_id =
+            create_test_sled(other_rack_id, &test.datastore).await;
+        zpools
+            .push(create_test_zpool(&test.datastore, other_rack_sled_id).await);
+
+        // Ask for one dataset per rack.
+        let expected_datasets = [ExpectedDataset {
+            kind: DatasetKind::Cockroach,
+            redundancy: DatasetRedundancy::PerRack(1),
+        }];
+        service_balancer
+            .ensure_datasets_provisioned(&test.opctx, &expected_datasets)
+            .await
+            .unwrap();
+
+        // Observe that the datasets were requested on each rack.
+        let sled = nexus.sled_client(&sled1_id).await.unwrap();
+        let requests = sled.dataset_requests();
+        assert_eq!(1, requests.len());
+        assert_eq!(zpools[0], requests[0].zpool_id);
+        let sled = nexus.sled_client(&sled2_id).await.unwrap();
+        let requests = sled.dataset_requests();
+        assert_eq!(0, requests.len());
+
+        // TODO: This is currently failing, because the API to
+        // "ensure_rack_dataset" takes a single rack ID.
+        //
+        // I think "ensure_rack_service" would likely suffer from a similar
+        // issue; namely, that the requests will be scoped to a single rack.
+        //
+        // TODO: We could iterate over racks IDs? Would that be so awful?
+        let sled = nexus.sled_client(&other_rack_sled_id).await.unwrap();
+        let requests = sled.dataset_requests();
+        assert_eq!(1, requests.len());
+        assert_eq!(zpools[2], requests[0].zpool_id);
+
+        test.cleanup().await;
     }
 
+    /*
     #[tokio::test]
     async fn test_provision_service_per_rack() {
         todo!();

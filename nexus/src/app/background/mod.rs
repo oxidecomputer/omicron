@@ -29,8 +29,11 @@ impl TaskRunner {
                 &nexus.az_subnet(),
                 log.new(o!("component" => "DNS Updater")),
             );
-            let service_balancer =
-                services::ServiceBalancer::new(log.clone(), nexus.clone(), dns_updater);
+            let service_balancer = services::ServiceBalancer::new(
+                log.clone(),
+                nexus.clone(),
+                dns_updater,
+            );
 
             loop {
                 // TODO: We may want triggers to exist here, to invoke this task

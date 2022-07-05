@@ -5046,7 +5046,7 @@ mod test {
     };
     use omicron_test_utils::dev;
     use std::collections::{HashMap, HashSet};
-    use std::net::{Ipv6Addr, SocketAddrV6};
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
     use std::sync::Arc;
     use uuid::Uuid;
 
