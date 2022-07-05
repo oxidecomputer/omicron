@@ -32,7 +32,9 @@ fi
 echo "Using $PHYSICAL_LINK as physical link"
 
 function success {
+    set +x
     echo -e "\e[1;36m$1\e[0m"
+    set -x
 }
 
 # Create the ZFS zpools required for the sled agent, backed by file-based vdevs.

@@ -320,6 +320,7 @@ impl Drop for OptePort {
 
 /// Delete all xde devices on the system.
 pub fn delete_all_xde_devices(log: &Logger) -> Result<(), Error> {
+    // Delete the VNICs as well.
     let hdl = OpteHdl::open(OpteHdl::DLD_CTL)?;
     for port_info in hdl.list_ports()?.ports.into_iter() {
         let name = &port_info.name;
