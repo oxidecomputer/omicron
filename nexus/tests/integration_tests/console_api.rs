@@ -198,6 +198,21 @@ async fn test_assets(cptestctx: &ControlPlaneTestContext) {
     // make sure we're not including the gzip header on non-gzipped files
     assert_eq!(resp.headers.get(http::header::CONTENT_ENCODING), None);
 
+    // file in a directory is returned
+    let resp = RequestBuilder::new(
+        &testctx,
+        Method::GET,
+        "/assets/a_directory/another_file.txt",
+    )
+    .expect_status(Some(StatusCode::OK))
+    .execute()
+    .await
+    .expect("failed to get existing file");
+
+    assert_eq!(resp.body, "some words".as_bytes());
+    // make sure we're not including the gzip header on non-gzipped files
+    assert_eq!(resp.headers.get(http::header::CONTENT_ENCODING), None);
+
     // file with only gzipped version 404s if request doesn't have accept-encoding: gzip
     let _ = RequestBuilder::new(&testctx, Method::GET, "/assets/gzip-only.txt")
         .expect_status(Some(StatusCode::NOT_FOUND))

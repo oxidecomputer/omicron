@@ -619,14 +619,14 @@ pub async fn console_settings_page(
     console_index_or_login_redirect(rqctx).await
 }
 
-fn with_gz_ext(path: Vec<String>) -> Vec<String> {
-    if path.len() == 0 {
-        return path;
-    }
-
-    let mut new_path = path;
-    let last = new_path.pop().unwrap(); // we know there's one there
-    new_path.push(format!("{last}.gz"));
+/// Make a new PathBuf with `.gz` on the end
+fn with_gz_ext(path: &PathBuf) -> PathBuf {
+    let mut new_path = path.clone();
+    let new_ext = match path.extension().map(|ext| ext.to_str()) {
+        Some(Some(curr_ext)) => format!("{curr_ext}.gz"),
+        _ => "gz".to_string(),
+    };
+    new_path.set_extension(new_ext);
     new_path
 }
 
@@ -644,15 +644,12 @@ pub async fn asset(
     path_params: Path<RestPathParam>,
 ) -> Result<Response<Body>, HttpError> {
     let apictx = rqctx.context();
-    let path = path_params.into_inner().path;
+    let path = PathBuf::from_iter(path_params.into_inner().path);
 
     // Bail unless the extension is allowed
-    let filename =
-        PathBuf::from(path.last().ok_or_else(|| not_found("no path"))?);
-    let ext = filename
+    let ext = path
         .extension()
-        .map(|ext| ext.to_os_string())
-        .unwrap_or_else(|| OsString::from("disallowed"));
+        .map_or_else(|| OsString::from("disallowed"), |ext| ext.to_os_string());
     if !ALLOWED_EXTENSIONS.contains(&ext) {
         return Err(not_found("file extension not allowed"));
     }
@@ -667,39 +664,33 @@ pub async fn asset(
 
     let request = &rqctx.request.lock().await;
     let accept_encoding = request.headers().get(http::header::ACCEPT_ENCODING);
-
     let accept_gz = accept_encoding.map_or(false, |val| {
         val.to_str().map_or(false, |s| s.contains("gzip"))
     });
 
-    let path_gz = with_gz_ext(path.clone());
-
     // If req accepts gzip and we have a gzipped version, serve that. Otherwise
     // fall back to non-gz. If neither file found, bubble up 404.
-    let (file_path, set_content_encoding_gzip) =
-        match accept_gz.then(|| find_file(path_gz, &assets_dir)) {
-            Some(Ok(gzipped_file)) => (gzipped_file, true),
-            _ => (find_file(path, &assets_dir)?, false),
+    let (path_to_read, set_content_encoding_gzip) =
+        match accept_gz.then(|| find_file(&with_gz_ext(&path), &assets_dir)) {
+            Some(Ok(gzipped_path)) => (gzipped_path, true),
+            _ => (find_file(&path, &assets_dir)?, false),
         };
 
     // File read is the same regardless of gzip
-    let file_contents = tokio::fs::read(&file_path).await.map_err(|e| {
-        not_found(&format!("accessing {:?}: {:#}", file_path, e))
+    let file_contents = tokio::fs::read(&path_to_read).await.map_err(|e| {
+        not_found(&format!("accessing {:?}: {:#}", path_to_read, e))
     })?;
 
-    // Derive the MIME type from the file name. Have to use filename and not
-    // file_path because the latter might have a .gz on the end.
-    let content_type = mime_guess::from_path(filename)
-        .first()
-        .map_or_else(|| "text/plain".to_string(), |m| m.to_string());
+    // Derive the MIME type from the file name (can't use path_to_read because
+    // it might end with .gz)
+    let content_type = path.file_name().map_or("text/plain", |f| {
+        mime_guess::from_path(f).first_raw().unwrap_or("text/plain")
+    });
 
     let mut resp = Response::builder()
         .status(StatusCode::OK)
-        .header(http::header::CONTENT_TYPE, &content_type)
-        .header(
-            http::header::CACHE_CONTROL,
-            cache_control_header_value(apictx),
-        );
+        .header(http::header::CONTENT_TYPE, content_type)
+        .header(http::header::CACHE_CONTROL, cache_control_value(apictx));
 
     if set_content_encoding_gzip {
         resp = resp.header(http::header::CONTENT_ENCODING, "gzip");
@@ -708,11 +699,9 @@ pub async fn asset(
     Ok(resp.body(file_contents.into())?)
 }
 
-fn cache_control_header_value(apictx: &Arc<ServerContext>) -> String {
-    format!(
-        "max-age={}",
-        apictx.console_config.cache_control_max_age.num_seconds()
-    )
+fn cache_control_value(apictx: &Arc<ServerContext>) -> String {
+    let max_age = apictx.console_config.cache_control_max_age.num_seconds();
+    format!("max-age={max_age}")
 }
 
 pub async fn serve_console_index(
@@ -730,7 +719,7 @@ pub async fn serve_console_index(
     Ok(Response::builder()
         .status(StatusCode::OK)
         .header(http::header::CONTENT_TYPE, "text/html; charset=UTF-8")
-        .header(http::header::CACHE_CONTROL, cache_control_header_value(apictx))
+        .header(http::header::CACHE_CONTROL, cache_control_value(apictx))
         .body(file_contents.into())?)
 }
 
@@ -750,12 +739,9 @@ lazy_static! {
 
 /// Starting from `root_dir`, follow the segments of `path` down the file tree
 /// until we find a file (or not). Do not follow symlinks.
-fn find_file(
-    path: Vec<String>,
-    root_dir: &PathBuf,
-) -> Result<PathBuf, HttpError> {
+fn find_file(path: &PathBuf, root_dir: &PathBuf) -> Result<PathBuf, HttpError> {
     let mut current = root_dir.to_owned(); // start from `root_dir`
-    for segment in &path {
+    for segment in path.into_iter() {
         // If we hit a non-directory thing already and we still have segments
         // left in the path, bail. We have nowhere to go.
         if !current.is_dir() {
@@ -789,24 +775,22 @@ mod test {
     use http::StatusCode;
     use std::{env::current_dir, path::PathBuf};
 
-    fn get_path(path_str: &str) -> Vec<String> {
-        path_str.split("/").map(|s| s.to_string()).collect()
-    }
-
     #[test]
     fn test_find_file_finds_file() {
         let root = current_dir().unwrap();
-        let file = find_file(get_path("tests/static/assets/hello.txt"), &root);
+        let file =
+            find_file(&PathBuf::from("tests/static/assets/hello.txt"), &root);
         assert!(file.is_ok());
-        let file = find_file(get_path("tests/static/index.html"), &root);
+        let file = find_file(&PathBuf::from("tests/static/index.html"), &root);
         assert!(file.is_ok());
     }
 
     #[test]
     fn test_find_file_404_on_nonexistent() {
         let root = current_dir().unwrap();
-        let error = find_file(get_path("tests/static/nonexistent.svg"), &root)
-            .unwrap_err();
+        let error =
+            find_file(&PathBuf::from("tests/static/nonexistent.svg"), &root)
+                .unwrap_err();
         assert_eq!(error.status_code, StatusCode::NOT_FOUND);
         assert_eq!(error.internal_message, "failed to get file metadata",);
     }
@@ -814,9 +798,11 @@ mod test {
     #[test]
     fn test_find_file_404_on_nonexistent_nested() {
         let root = current_dir().unwrap();
-        let error =
-            find_file(get_path("tests/static/a/b/c/nonexistent.svg"), &root)
-                .unwrap_err();
+        let error = find_file(
+            &PathBuf::from("tests/static/a/b/c/nonexistent.svg"),
+            &root,
+        )
+        .unwrap_err();
         assert_eq!(error.status_code, StatusCode::NOT_FOUND);
         assert_eq!(error.internal_message, "failed to get file metadata")
     }
@@ -825,7 +811,7 @@ mod test {
     fn test_find_file_404_on_directory() {
         let root = current_dir().unwrap();
         let error =
-            find_file(get_path("tests/static/assets/a_directory"), &root)
+            find_file(&PathBuf::from("tests/static/assets/a_directory"), &root)
                 .unwrap_err();
         assert_eq!(error.status_code, StatusCode::NOT_FOUND);
         assert_eq!(error.internal_message, "expected a non-directory");
@@ -845,7 +831,7 @@ mod test {
             .is_symlink());
 
         // so we 404
-        let error = find_file(get_path(path_str), &root).unwrap_err();
+        let error = find_file(&PathBuf::from(path_str), &root).unwrap_err();
         assert_eq!(error.status_code, StatusCode::NOT_FOUND);
         assert_eq!(error.internal_message, "attempted to follow a symlink");
     }
@@ -859,7 +845,7 @@ mod test {
         assert!(root.join(PathBuf::from(path_str)).exists());
 
         // but it 404s because the path goes through a symlink
-        let error = find_file(get_path(path_str), &root).unwrap_err();
+        let error = find_file(&PathBuf::from(path_str), &root).unwrap_err();
         assert_eq!(error.status_code, StatusCode::NOT_FOUND);
         assert_eq!(error.internal_message, "attempted to follow a symlink");
     }
