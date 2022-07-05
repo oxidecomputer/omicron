@@ -37,7 +37,7 @@
  */
 CREATE DATABASE omicron;
 CREATE USER omicron;
-GRANT INSERT, SELECT, UPDATE, DELETE ON DATABASE omicron to omicron;
+ALTER DEFAULT PRIVILEGES GRANT INSERT, SELECT, UPDATE, DELETE ON TABLES to omicron;
 
 /*
  * Racks
@@ -245,6 +245,11 @@ CREATE TABLE omicron.public.volume (
  * Silos
  */
 
+CREATE TYPE omicron.public.user_provision_type AS ENUM (
+  'fixed',
+  'jit'
+);
+
 CREATE TABLE omicron.public.silo (
     /* Identity metadata */
     id UUID PRIMARY KEY,
@@ -255,6 +260,7 @@ CREATE TABLE omicron.public.silo (
     time_deleted TIMESTAMPTZ,
 
     discoverable BOOL NOT NULL,
+    user_provision_type omicron.public.user_provision_type NOT NULL,
 
     /* child resource generation number, per RFD 192 */
     rcgen INT NOT NULL
@@ -270,18 +276,18 @@ CREATE UNIQUE INDEX ON omicron.public.silo (
  */
 CREATE TABLE omicron.public.silo_user (
     id UUID PRIMARY KEY,
-
-    silo_id UUID NOT NULL,
-
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
-    time_deleted TIMESTAMPTZ
+    time_deleted TIMESTAMPTZ,
+
+    silo_id UUID NOT NULL,
+    external_id TEXT NOT NULL
 );
 
 /* This index lets us quickly find users for a given silo. */
-CREATE INDEX ON omicron.public.silo_user (
+CREATE UNIQUE INDEX ON omicron.public.silo_user (
     silo_id,
-    id
+    external_id
 ) WHERE
     time_deleted IS NULL;
 
@@ -994,7 +1000,9 @@ CREATE TABLE omicron.public.ip_pool_range (
     first_address INET NOT NULL,
     /* The range is inclusive of the last address. */
     last_address INET NOT NULL,
-    ip_pool_id UUID NOT NULL
+    ip_pool_id UUID NOT NULL,
+    /* Tracks child resources, IP addresses allocated out of this range. */
+    rcgen INT8 NOT NULL
 );
 
 /* 
@@ -1012,6 +1020,66 @@ CREATE UNIQUE INDEX ON omicron.public.ip_pool_range (
 )
 STORING (first_address)
 WHERE time_deleted IS NULL;
+
+/*
+ * External IP addresses used for instance source NAT.
+ *
+ * NOTE: This currently stores only address and port information for the
+ * automatic source NAT supplied for all guest instances. It does not currently
+ * store information about ephemeral or floating IPs.
+ */
+CREATE TABLE omicron.public.instance_external_ip (
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+
+    /* FK to the `ip_pool` table. */
+    ip_pool_id UUID NOT NULL,
+
+    /* FK to the `ip_pool_range` table. */
+    ip_pool_range_id UUID NOT NULL,
+
+    /* FK to the `instance` table. */
+    instance_id UUID NOT NULL,
+
+    /* The actual external IP address. */
+    ip INET NOT NULL,
+
+    /* The first port in the allowed range, inclusive. */
+    first_port INT4 NOT NULL,
+
+    /* The last port in the allowed range, also inclusive. */
+    last_port INT4 NOT NULL
+);
+
+/*
+ * Index used to support quickly looking up children of the IP Pool range table,
+ * when checking for allocated addresses during deletion.
+ */
+CREATE INDEX ON omicron.public.instance_external_ip (
+    ip_pool_id,
+    ip_pool_range_id
+)
+    WHERE time_deleted IS NULL;
+
+/*
+ * Index used to enforce uniqueness of external IPs
+ *
+ * NOTE: This relies on the uniqueness constraint of IP addresses across all
+ * pools, _and_ on the fact that the number of ports assigned to each instance
+ * is fixed at compile time.
+ */
+CREATE UNIQUE INDEX ON omicron.public.instance_external_ip (
+    ip,
+    first_port
+)
+    WHERE time_deleted IS NULL;
+
+CREATE INDEX ON omicron.public.instance_external_ip (
+    instance_id
+)
+    WHERE time_deleted IS NULL;
 
 /*******************************************************************/
 
@@ -1197,6 +1265,41 @@ INSERT INTO omicron.public.user_builtin (
     NOW()
 );
 
+/*
+ * OAuth 2.0 Device Authorization Grant (RFC 8628)
+ */
+
+-- Device authorization requests. In theory these records could
+-- (and probably should) be short-lived, and removed as soon as
+-- a token is granted.
+-- TODO-security: We should not grant a token more than once per record.
+CREATE TABLE omicron.public.device_auth_request (
+    client_id UUID NOT NULL,
+    device_code STRING(40) NOT NULL,
+    user_code STRING(63) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_expires TIMESTAMPTZ NOT NULL,
+
+    PRIMARY KEY (client_id, device_code)
+);
+
+-- Fast lookup by user_code for verification
+CREATE INDEX ON omicron.public.device_auth_request (user_code);
+
+-- Access tokens granted in response to successful device authorization flows.
+-- TODO-security: expire tokens.
+CREATE TABLE omicron.public.device_access_token (
+    token STRING(40) PRIMARY KEY,
+    client_id UUID NOT NULL,
+    device_code STRING(40) NOT NULL,
+    silo_user_id UUID NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL
+);
+
+-- Matches the primary key on device authorization records.
+-- The UNIQUE constraint is critical for ensuring that at most
+-- one token is ever created for a given device authorization flow.
+CREATE UNIQUE INDEX ON omicron.public.device_access_token (client_id, device_code);
 
 /*
  * Roles built into the system

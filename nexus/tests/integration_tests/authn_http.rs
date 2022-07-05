@@ -21,9 +21,9 @@ use http::header::HeaderValue;
 use omicron_nexus::authn::external::session_cookie;
 use omicron_nexus::authn::external::spoof;
 use omicron_nexus::authn::external::spoof::HttpAuthnSpoof;
-use omicron_nexus::authn::external::spoof::SpoofContext;
 use omicron_nexus::authn::external::spoof::SPOOF_SCHEME_NAME;
 use omicron_nexus::authn::external::HttpAuthnScheme;
+use omicron_nexus::authn::external::SiloUserSilo;
 use omicron_nexus::db::fixed_data::silo::SILO_ID;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -311,7 +311,7 @@ struct WhoamiServerState {
 }
 
 #[async_trait]
-impl SpoofContext for WhoamiServerState {
+impl SiloUserSilo for WhoamiServerState {
     async fn silo_user_silo(
         &self,
         silo_user_id: Uuid,

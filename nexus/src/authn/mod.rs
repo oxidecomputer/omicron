@@ -204,12 +204,18 @@ impl Context {
     /// (for testing only)
     #[cfg(test)]
     pub fn unprivileged_test_user() -> Context {
+        Self::test_silo_user(
+            USER_TEST_UNPRIVILEGED.silo_id,
+            USER_TEST_UNPRIVILEGED.id(),
+        )
+    }
+
+    /// Returns an authenticated context for a given silo user
+    #[cfg(test)]
+    pub fn test_silo_user(silo_id: Uuid, silo_user_id: Uuid) -> Context {
         Context {
             kind: Kind::Authenticated(Details {
-                actor: Actor::SiloUser {
-                    silo_user_id: USER_TEST_UNPRIVILEGED.id(),
-                    silo_id: USER_TEST_UNPRIVILEGED.silo_id,
-                },
+                actor: Actor::SiloUser { silo_user_id, silo_id },
             }),
             schemes_tried: Vec::new(),
         }
@@ -276,10 +282,10 @@ mod test {
 /// that's specific to whether they're authenticated (or not)
 #[derive(Clone, Debug, Deserialize, Serialize)]
 enum Kind {
-    /// Client successfully authenticated
-    Authenticated(Details),
     /// Client did not attempt to authenticate
     Unauthenticated,
+    /// Client successfully authenticated
+    Authenticated(Details),
 }
 
 /// Describes the actor that was authenticated

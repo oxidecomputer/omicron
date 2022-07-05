@@ -25,7 +25,7 @@ use super::error::diesel_pool_result_optional;
 use super::identity::{Asset, Resource};
 use super::pool::DbConnection;
 use super::Pool;
-use crate::authn;
+use crate::authn::{self, Actor};
 use crate::authz::{self, ApiResource};
 use crate::context::OpContext;
 use crate::db::collection_attach::{AttachError, DatastoreAttachTarget};
@@ -38,12 +38,15 @@ use crate::db::fixed_data::role_builtin::BUILTIN_ROLES;
 use crate::db::fixed_data::silo::DEFAULT_SILO;
 use crate::db::lookup::LookupPath;
 use crate::db::model::DatabaseString;
+use crate::db::model::IncompleteInstanceExternalIp;
 use crate::db::model::IncompleteVpc;
+use crate::db::model::InstanceExternalIp;
 use crate::db::model::IpPool;
 use crate::db::model::IpPoolRange;
 use crate::db::model::IpPoolUpdate;
 use crate::db::model::NetworkInterfaceUpdate;
 use crate::db::model::Vpc;
+use crate::db::queries::external_ip::NextExternalIp;
 use crate::db::queries::ip_pool::FilterOverlappingIpRanges;
 use crate::db::queries::network_interface;
 use crate::db::queries::vpc::InsertVpcQuery;
@@ -56,9 +59,10 @@ use crate::db::{
         public_error_from_diesel_pool, ErrorHandler, TransactionError,
     },
     model::{
-        ConsoleSession, Dataset, DatasetKind, Disk, DiskRuntimeState,
-        Generation, GlobalImage, IdentityProvider, IncompleteNetworkInterface,
-        Instance, InstanceRuntimeState, Name, NetworkInterface, Organization,
+        ConsoleSession, Dataset, DatasetKind, DeviceAccessToken,
+        DeviceAuthRequest, Disk, DiskRuntimeState, Generation, GlobalImage,
+        IdentityProvider, IncompleteNetworkInterface, Instance,
+        InstanceRuntimeState, Name, NetworkInterface, Organization,
         OrganizationUpdate, OximeterInfo, ProducerEndpoint, Project,
         ProjectUpdate, Rack, Region, RoleAssignment, RoleBuiltin, RouterRoute,
         RouterRouteUpdate, Service, ServiceKind, Silo, SiloUser, Sled, SshKey,
@@ -86,7 +90,6 @@ use omicron_common::address::{
     Ipv6Subnet, ReservedRackSubnet, DNS_REDUNDANCY, RACK_PREFIX,
 };
 use omicron_common::api;
-use omicron_common::api::external;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -95,6 +98,7 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use omicron_common::api::external::{self, InternalContext};
 use omicron_common::api::external::{
     CreateResult, IdentityMetadataCreateParams,
 };
@@ -1802,39 +1806,179 @@ impl DataStore {
         authz_pool: &authz::IpPool,
         range: &IpRange,
     ) -> DeleteResult {
+        use db::schema::instance_external_ip;
         use db::schema::ip_pool_range::dsl;
         opctx.authorize(authz::Action::Modify, authz_pool).await?;
-        let now = Utc::now();
 
-        // We can just delete the range, provided that it the exact first/last
-        // address pair exists. We are guaranteed that concurrent modifications
-        // don't affect this, since this query will be serialized with any
-        // requests to insert a new range, which must be non-overlapping.
+        let pool_id = authz_pool.id();
         let first_address = range.first_address();
         let last_address = range.last_address();
         let first_net = ipnetwork::IpNetwork::from(first_address);
         let last_net = ipnetwork::IpNetwork::from(last_address);
-        let updated_rows = diesel::update(dsl::ip_pool_range)
-            .filter(dsl::first_address.eq(first_net))
-            .filter(dsl::last_address.eq(last_net))
+
+        // Fetch the range itself, if it exists. We'll need to protect against
+        // concurrent inserts of new external IPs from the target range by
+        // comparing the rcgen.
+        let range = diesel_pool_result_optional(
+            dsl::ip_pool_range
+                .filter(dsl::ip_pool_id.eq(pool_id))
+                .filter(dsl::first_address.eq(first_net))
+                .filter(dsl::last_address.eq(last_net))
+                .filter(dsl::time_deleted.is_null())
+                .select(IpPoolRange::as_select())
+                .get_result_async::<IpPoolRange>(
+                    self.pool_authorized(opctx).await?,
+                )
+                .await,
+        )
+        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?
+        .ok_or_else(|| {
+            Error::invalid_request(
+                format!(
+                    "The provided range {}-{} does not exist",
+                    first_address, last_address,
+                )
+                .as_str(),
+            )
+        })?;
+
+        // Find external IPs allocated out of this pool and range.
+        let range_id = range.id;
+        let has_children = diesel::dsl::select(diesel::dsl::exists(
+            instance_external_ip::table
+                .filter(instance_external_ip::dsl::ip_pool_id.eq(pool_id))
+                .filter(
+                    instance_external_ip::dsl::ip_pool_range_id.eq(range_id),
+                )
+                .filter(instance_external_ip::dsl::time_deleted.is_null()),
+        ))
+        .get_result_async::<bool>(self.pool_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
+        if has_children {
+            return Err(Error::invalid_request(
+                "IP pool ranges cannot be deleted while \
+                    external IP addresses are allocated from them",
+            ));
+        }
+
+        // Delete the range, conditional on the rcgen not having changed. This
+        // protects the delete from occuring if clients allocated a new external
+        // IP address in between the above check for children and this query.
+        let rcgen = range.rcgen;
+        let now = Utc::now();
+        let updated_rows = diesel::update(
+            dsl::ip_pool_range
+                .find(range_id)
+                .filter(dsl::time_deleted.is_null())
+                .filter(dsl::rcgen.eq(rcgen)),
+        )
+        .set(dsl::time_deleted.eq(now))
+        .execute_async(self.pool_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
+        if updated_rows == 1 {
+            Ok(())
+        } else {
+            Err(Error::invalid_request(
+                "IP range deletion failed due to concurrent modification",
+            ))
+        }
+    }
+
+    // External IP addresses
+
+    /// Create an external IP address for an instance.
+    // TODO-correctness: This should be made idempotent.
+    pub async fn allocate_instance_external_ip(
+        &self,
+        opctx: &OpContext,
+        instance_id: Uuid,
+    ) -> CreateResult<InstanceExternalIp> {
+        let query =
+            NextExternalIp::new(IncompleteInstanceExternalIp::new(instance_id));
+        query
+            .get_result_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                use async_bb8_diesel::ConnectionError::Query;
+                use async_bb8_diesel::PoolError::Connection;
+                use diesel::result::Error::NotFound;
+                match e {
+                    Connection(Query(NotFound)) => Error::invalid_request(
+                        "No external IP addresses available for new instance",
+                    ),
+                    _ => public_error_from_diesel_pool(e, ErrorHandler::Server),
+                }
+            })
+    }
+
+    /// Deallocate the external IP address with the provided ID.
+    ///
+    /// To support idempotency, such as in saga operations, this method returns
+    /// an extra boolean, rather than the usual `DeleteResult`. The meaning of
+    /// return values are:
+    ///
+    /// - `Ok(true)`: The record was deleted during this call
+    /// - `Ok(false)`: The record was already deleted, such as by a previous
+    /// call
+    /// - `Err(_)`: Any other condition, including a non-existent record.
+    pub async fn deallocate_instance_external_ip(
+        &self,
+        opctx: &OpContext,
+        ip_id: Uuid,
+    ) -> Result<bool, Error> {
+        use db::schema::instance_external_ip::dsl;
+        let now = Utc::now();
+        diesel::update(dsl::instance_external_ip)
             .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(ip_id))
+            .set(dsl::time_deleted.eq(now))
+            .check_if_exists::<InstanceExternalIp>(ip_id)
+            .execute_and_check(self.pool_authorized(opctx).await?)
+            .await
+            .map(|r| match r.status {
+                UpdateStatus::Updated => true,
+                UpdateStatus::NotUpdatedButExists => false,
+            })
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    /// Delete all external IP addresses associated with the provided instance
+    /// ID.
+    // TODO-correctness: This should be made idempotent.
+    pub async fn deallocate_instance_external_ip_by_instance_id(
+        &self,
+        opctx: &OpContext,
+        instance_id: Uuid,
+    ) -> DeleteResult {
+        use db::schema::instance_external_ip::dsl;
+        let now = Utc::now();
+        diesel::update(dsl::instance_external_ip)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::instance_id.eq(instance_id))
             .set(dsl::time_deleted.eq(now))
             .execute_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(e, ErrorHandler::Server)
             })?;
-        if updated_rows == 1 {
-            Ok(())
-        } else {
-            Err(Error::invalid_request(
-                format!(
-                    "The provided range {}-{} does not exist",
-                    first_address, last_address,
-                )
-                .as_str(),
-            ))
-        }
+        Ok(())
+    }
+
+    pub async fn instance_lookup_external_ip(
+        &self,
+        opctx: &OpContext,
+        instance_id: Uuid,
+    ) -> LookupResult<InstanceExternalIp> {
+        use db::schema::instance_external_ip::dsl;
+        dsl::instance_external_ip
+            .filter(dsl::instance_id.eq(instance_id))
+            .filter(dsl::time_deleted.is_null())
+            .select(InstanceExternalIp::as_select())
+            .get_result_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     // Instances
@@ -2683,6 +2827,7 @@ impl DataStore {
             ipv4_block: db::model::Ipv4Net,
             ipv6_block: db::model::Ipv6Net,
             vni: db::model::Vni,
+            primary: bool,
             slot: i16,
         }
 
@@ -2699,6 +2844,7 @@ impl DataStore {
                     mac: sled_client_types::MacAddr::from(nic.mac.0),
                     subnet: sled_client_types::IpNet::from(ip_subnet),
                     vni: sled_client_types::Vni::from(nic.vni.0),
+                    primary: nic.primary,
                     slot: u8::try_from(nic.slot).unwrap(),
                 }
             }
@@ -2723,6 +2869,7 @@ impl DataStore {
                 vpc_subnet::ipv4_block,
                 vpc_subnet::ipv6_block,
                 vpc::vni,
+                network_interface::is_primary,
                 network_interface::slot,
             ))
             .get_results_async::<NicInfo>(self.pool_authorized(opctx).await?)
@@ -3757,10 +3904,35 @@ impl DataStore {
         opctx: &OpContext,
         authz_session: &authz::ConsoleSession,
     ) -> DeleteResult {
-        opctx.authorize(authz::Action::Delete, authz_session).await?;
+        // We don't do a typical authz check here.  Instead, knowing that every
+        // user is allowed to delete their own session, the query below filters
+        // on the session's silo_user_id matching the current actor's id.
+        //
+        // We could instead model this more like other authz checks.  That would
+        // involve fetching the session record from the database, storing the
+        // associated silo_user_id into the `authz::ConsoleSession`, and having
+        // an Oso rule saying you can delete a session whose associated silo
+        // user matches the authenticated actor.  This would be a fair bit more
+        // complicated and more work at runtime work than what we're doing here.
+        // The tradeoff is that we're effectively encoding policy here, but it
+        // seems worth it in this case.
+        let actor = opctx.authn.actor_required()?;
+
+        // This check shouldn't be required in that there should be no overlap
+        // between silo user ids and other types of identity ids.  But it's easy
+        // to check, and if we add another type of Actor, we'll be forced here
+        // to consider if they should be able to have console sessions and log
+        // out of them.
+        let silo_user_id = match actor.actor_type() {
+            IdentityType::SiloUser => actor.actor_id(),
+            IdentityType::UserBuiltin => {
+                return Err(Error::invalid_request("not a Silo user"))
+            }
+        };
 
         use db::schema::console_session::dsl;
         diesel::delete(dsl::console_session)
+            .filter(dsl::silo_user_id.eq(silo_user_id))
             .filter(dsl::token.eq(authz_session.id()))
             .execute_async(self.pool_authorized(opctx).await?)
             .await
@@ -3783,6 +3955,7 @@ impl DataStore {
 
         opctx.authorize(authz::Action::Read, authz_silo).await?;
         paginated(dsl::silo_user, dsl::id, pagparams)
+            .filter(dsl::silo_id.eq(authz_silo.id()))
             .filter(dsl::time_deleted.is_null())
             .select(SiloUser::as_select())
             .load_async::<SiloUser>(self.pool_authorized(opctx).await?)
@@ -4056,37 +4229,65 @@ impl DataStore {
             .execute_async(self.pool_authorized(opctx).await?)
             .await
             .map(|_rows_deleted| ())
-            .map_err(|e| {
-                // TODO-correctness TODO-availability This should be using
-                // public_error_from_diesel_pool()
-                Error::internal_error(&format!(
-                    "error deleting outdated available artifacts: {:?}",
-                    e
-                ))
-            })
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .internal_context("deleting outdated available artifacts")
     }
 
-    // NOTE: This function is only used for testing and for initial population
-    // of built-in users as silo users.  The error handling here assumes (1)
-    // that the caller expects no user input error from the database, and (2)
-    // that if a Silo user with the same id already exists in the database,
-    // that's not an error (it's assumed to be the same user).
+    /// Create a silo user
     pub async fn silo_user_create(
         &self,
         silo_user: SiloUser,
-    ) -> Result<(), Error> {
+    ) -> Result<SiloUser, Error> {
         use db::schema::silo_user::dsl;
 
-        let _ = diesel::insert_into(dsl::silo_user)
+        let silo_user_external_id = silo_user.external_id.clone();
+        diesel::insert_into(dsl::silo_user)
             .values(silo_user)
-            .on_conflict(dsl::id)
-            .do_nothing()
-            .execute_async(self.pool())
+            .returning(SiloUser::as_returning())
+            .get_result_async(self.pool())
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
-            })?;
-        Ok(())
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::Conflict(
+                        ResourceType::SiloUser,
+                        &silo_user_external_id,
+                    ),
+                )
+            })
+    }
+
+    /// Given an external ID, return
+    /// - Ok(Some(SiloUser)) if that external id refers to an existing silo user
+    /// - Ok(None) if it does not
+    /// - Err(...) if there was an error doing this lookup.
+    pub async fn silo_user_fetch_by_external_id(
+        &self,
+        opctx: &OpContext,
+        authz_silo: &authz::Silo,
+        external_id: &str,
+    ) -> Result<Option<SiloUser>, Error> {
+        opctx.authorize(authz::Action::ListChildren, authz_silo).await?;
+
+        use db::schema::silo_user::dsl;
+
+        Ok(dsl::silo_user
+            .filter(dsl::silo_id.eq(authz_silo.id()))
+            .filter(dsl::external_id.eq(external_id.to_string()))
+            .filter(dsl::time_deleted.is_null())
+            .select(SiloUser::as_select())
+            .load_async::<SiloUser>(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::SiloUser,
+                        LookupType::ByName(external_id.to_string()),
+                    ),
+                )
+            })?
+            .pop())
     }
 
     /// Load built-in silos into the database
@@ -4499,6 +4700,7 @@ impl DataStore {
     ) -> CreateResult<SshKey> {
         assert_eq!(authz_user.id(), ssh_key.silo_user_id);
         opctx.authorize(authz::Action::CreateChild, authz_user).await?;
+        let name = ssh_key.name().to_string();
 
         use db::schema::ssh_key::dsl;
         diesel::insert_into(dsl::ssh_key)
@@ -4507,10 +4709,10 @@ impl DataStore {
             .get_result_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                Error::internal_error(&format!(
-                    "error creating SSH key: {:?}",
-                    e
-                ))
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::Conflict(ResourceType::SshKey, &name),
+                )
             })
     }
 
@@ -4658,6 +4860,116 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
+    // OAuth 2.0 Device Authorization Grant
+
+    /// Start a device authorization grant flow by recording the request
+    /// and initial response parameters.
+    // TODO-security: authz
+    pub async fn device_auth_start(
+        &self,
+        opctx: &OpContext,
+        auth_request: DeviceAuthRequest,
+    ) -> CreateResult<DeviceAuthRequest> {
+        use db::schema::device_auth_request::dsl;
+        diesel::insert_into(dsl::device_auth_request)
+            .values(auth_request)
+            .returning(DeviceAuthRequest::as_returning())
+            .get_result_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    /// Look up a device authorization request by `user_code`.
+    // TODO-security: authz
+    pub async fn device_auth_get_request(
+        &self,
+        opctx: &OpContext,
+        user_code: String,
+    ) -> LookupResult<DeviceAuthRequest> {
+        use db::schema::device_auth_request::dsl;
+        dsl::device_auth_request
+            .filter(dsl::user_code.eq(user_code))
+            .filter(dsl::time_expires.gt(Utc::now()))
+            .select(DeviceAuthRequest::as_select())
+            .get_result_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                // TODO-correctness: better error (not found)
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            })
+    }
+
+    /// Grant a device authorization token.
+    // TODO-security: authz
+    pub async fn device_auth_grant(
+        &self,
+        opctx: &OpContext,
+        access_token: DeviceAccessToken,
+    ) -> CreateResult<DeviceAccessToken> {
+        use db::schema::device_access_token::dsl;
+        diesel::insert_into(dsl::device_access_token)
+            .values(access_token)
+            .returning(DeviceAccessToken::as_returning())
+            .get_result_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    /// Look up a granted device authorization token.
+    // TODO-security: authz
+    pub async fn device_auth_get_token(
+        &self,
+        opctx: &OpContext,
+        client_id: Uuid,
+        device_code: String,
+    ) -> LookupResult<DeviceAccessToken> {
+        use db::schema::device_access_token::dsl;
+        dsl::device_access_token
+            .filter(dsl::client_id.eq(client_id))
+            .filter(dsl::device_code.eq(device_code))
+            .select(DeviceAccessToken::as_select())
+            .get_result_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                // TODO-correctness: better error (not found)
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            })
+    }
+
+    /// Look up the actor (a Silo user) for whom a token was granted.
+    // TODO-security: authz
+    pub async fn device_access_token_actor(
+        &self,
+        opctx: &OpContext,
+        token: String,
+    ) -> LookupResult<Actor> {
+        use db::schema::device_access_token::dsl;
+        use db::schema::silo_user::dsl as silo_user_dsl;
+
+        let pool = self.pool_authorized(opctx).await?;
+        let token = dsl::device_access_token
+            .filter(dsl::token.eq(token))
+            .select(DeviceAccessToken::as_select())
+            .get_result_async(pool)
+            .await
+            .map_err(|e| {
+                // TODO-correctness: better error (not found)
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            })?;
+        let silo_user_id = token.silo_user_id;
+        let silo_id = silo_user_dsl::silo_user
+            .filter(silo_user_dsl::id.eq(silo_user_id))
+            .select(SiloUser::as_select())
+            .get_result_async(pool)
+            .await
+            .map_err(|e| {
+                // TODO-correctness: better error (not found)
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            })?
+            .silo_id;
+        Ok(Actor::SiloUser { silo_user_id, silo_id })
+    }
+
     // Test interfaces
 
     #[cfg(test)]
@@ -4724,6 +5036,7 @@ mod test {
     use crate::db::identity::Asset;
     use crate::db::identity::Resource;
     use crate::db::lookup::LookupPath;
+    use crate::db::model::InstanceExternalIp;
     use crate::db::model::{ConsoleSession, DatasetKind, Project, ServiceKind};
     use crate::external_api::params;
     use chrono::{Duration, Utc};
@@ -4809,7 +5122,11 @@ mod test {
 
         // Associate silo with user
         datastore
-            .silo_user_create(SiloUser::new(*SILO_ID, silo_user_id))
+            .silo_user_create(SiloUser::new(
+                *SILO_ID,
+                silo_user_id,
+                "external_id".into(),
+            ))
             .await
             .unwrap();
 
@@ -4858,12 +5175,29 @@ mod test {
             .unwrap();
         assert!(fetched.time_last_used > session.time_last_used);
 
-        // delete it and fetch should come back with nothing
+        // deleting it using `opctx` (which represents the test-privileged user)
+        // should succeed but not do anything -- you can't delete someone else's
+        // session
         let delete =
             datastore.session_hard_delete(&opctx, &authz_session).await;
         assert_eq!(delete, Ok(()));
+        let fetched = LookupPath::new(&opctx, &datastore)
+            .console_session_token(&token)
+            .fetch()
+            .await;
+        assert!(fetched.is_ok());
 
-        // this will be a not found after #347
+        // delete it and fetch should come back with nothing
+        let silo_user_opctx = OpContext::for_background(
+            logctx.log.new(o!()),
+            Arc::new(authz::Authz::new(&logctx.log)),
+            authn::Context::test_silo_user(*SILO_ID, silo_user_id),
+            Arc::clone(&datastore),
+        );
+        let delete = datastore
+            .session_hard_delete(&silo_user_opctx, &authz_session)
+            .await;
+        assert_eq!(delete, Ok(()));
         let fetched = LookupPath::new(&opctx, &datastore)
             .console_session_token(&token)
             .fetch()
@@ -5306,7 +5640,11 @@ mod test {
         // Create a new Silo user so that we can lookup their keys.
         let silo_user_id = Uuid::new_v4();
         datastore
-            .silo_user_create(SiloUser::new(*SILO_ID, silo_user_id))
+            .silo_user_create(SiloUser::new(
+                *SILO_ID,
+                silo_user_id,
+                "external@id".into(),
+            ))
             .await
             .unwrap();
 
@@ -5356,7 +5694,9 @@ mod test {
             .await;
         assert!(matches!(
             duplicate,
-            Err(Error::InternalError { internal_message: _ })
+            Err(Error::ObjectAlreadyExists { type_name, object_name })
+                if type_name == ResourceType::SshKey
+                    && object_name == "sshkey"
         ));
 
         // Delete the key we just created.
@@ -5940,6 +6280,66 @@ mod test {
         }
 
         // Clean up.
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_deallocate_instance_external_ip_is_idempotent() {
+        use crate::db::schema::instance_external_ip::dsl;
+
+        let logctx = dev::test_setup_log("test_table_scan");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        // Create a record.
+        let now = Utc::now();
+        let ip = InstanceExternalIp {
+            id: Uuid::new_v4(),
+            time_created: now,
+            time_modified: now,
+            time_deleted: None,
+            ip_pool_id: Uuid::new_v4(),
+            ip_pool_range_id: Uuid::new_v4(),
+            instance_id: Uuid::new_v4(),
+            ip: ipnetwork::IpNetwork::from(IpAddr::from(Ipv4Addr::new(
+                10, 0, 0, 1,
+            ))),
+            first_port: crate::db::model::SqlU16(0),
+            last_port: crate::db::model::SqlU16(10),
+        };
+        diesel::insert_into(dsl::instance_external_ip)
+            .values(ip)
+            .execute_async(datastore.pool())
+            .await
+            .unwrap();
+
+        // Delete it twice, make sure we get the right sentinel return values.
+        let deleted = datastore
+            .deallocate_instance_external_ip(&opctx, ip.id)
+            .await
+            .unwrap();
+        assert!(
+            deleted,
+            "Got unexpected sentinel value back when \
+            deleting external IP the first time"
+        );
+        let deleted = datastore
+            .deallocate_instance_external_ip(&opctx, ip.id)
+            .await
+            .unwrap();
+        assert!(
+            !deleted,
+            "Got unexpected sentinel value back when \
+            deleting external IP the second time"
+        );
+
+        // Deleting a non-existing record fails
+        assert!(datastore
+            .deallocate_instance_external_ip(&opctx, Uuid::nil())
+            .await
+            .is_err());
+
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

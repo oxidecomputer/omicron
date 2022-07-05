@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 pub mod console_api;
+pub mod device_auth;
 pub mod http_entrypoints;
 pub mod params;
 pub mod shared;

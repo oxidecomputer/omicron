@@ -14,6 +14,7 @@ use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::create_instance_with_nics;
+use nexus_test_utils::resource_helpers::create_ip_pool;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::{create_organization, create_project};
 use nexus_test_utils::ControlPlaneTestContext;
@@ -80,6 +81,7 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
     let project_name = "springfield-squidport";
 
     // Create a project that we'll use for testing.
+    create_ip_pool(&client, "p0", None).await;
     create_organization(&client, organization_name).await;
     create_project(&client, organization_name, project_name).await;
     let url_instances = format!(

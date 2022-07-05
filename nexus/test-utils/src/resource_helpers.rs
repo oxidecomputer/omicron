@@ -20,6 +20,9 @@ use omicron_nexus::crucible_agent_client::types::State as RegionState;
 use omicron_nexus::external_api::params;
 use omicron_nexus::external_api::shared;
 use omicron_nexus::external_api::shared::IdentityType;
+use omicron_nexus::external_api::shared::IpRange;
+use omicron_nexus::external_api::views::IpPool;
+use omicron_nexus::external_api::views::IpPoolRange;
 use omicron_nexus::external_api::views::{
     Organization, Project, Silo, Vpc, VpcRouter,
 };
@@ -61,10 +64,49 @@ where
         .unwrap()
 }
 
+/// Create an IP pool with a single range for testing.
+///
+/// The IP range may be specified if it's important for testing the behavior
+/// around specific subnets, or a large subnet (2 ** 16 addresses) will be
+/// provided, if the `ip_range` argument is `None`.
+pub async fn create_ip_pool(
+    client: &ClientTestContext,
+    pool_name: &str,
+    ip_range: Option<IpRange>,
+) -> (IpPool, IpPoolRange) {
+    let ip_range = ip_range.unwrap_or_else(|| {
+        use std::net::Ipv4Addr;
+        IpRange::try_from((
+            Ipv4Addr::new(10, 0, 0, 0),
+            Ipv4Addr::new(10, 0, 255, 255),
+        ))
+        .unwrap()
+    });
+    let pool = object_create(
+        client,
+        "/ip-pools",
+        &params::IpPoolCreate {
+            identity: IdentityMetadataCreateParams {
+                name: pool_name.parse().unwrap(),
+                description: String::from("an ip pool"),
+            },
+        },
+    )
+    .await;
+    let range = object_create(
+        client,
+        format!("/ip-pools/{}/ranges/add", pool_name).as_str(),
+        &ip_range,
+    )
+    .await;
+    (pool, range)
+}
+
 pub async fn create_silo(
     client: &ClientTestContext,
     silo_name: &str,
     discoverable: bool,
+    user_provision_type: shared::UserProvisionType,
 ) -> Silo {
     object_create(
         client,
@@ -75,6 +117,7 @@ pub async fn create_silo(
                 description: "a silo".to_string(),
             },
             discoverable,
+            user_provision_type,
         },
     )
     .await

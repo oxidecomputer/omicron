@@ -10,6 +10,7 @@ use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::create_disk;
+use nexus_test_utils::resource_helpers::create_ip_pool;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::DiskTest;
 use omicron_common::api::external::ByteCount;
@@ -40,6 +41,7 @@ use nexus_test_utils::resource_helpers::{
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 
+static POOL_NAME: &str = "p0";
 static ORGANIZATION_NAME: &str = "test-org";
 static PROJECT_NAME: &str = "springfield-squidport";
 
@@ -52,6 +54,7 @@ fn get_instances_url() -> String {
 }
 
 async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
+    create_ip_pool(&client, "p0", None).await;
     create_organization(&client, ORGANIZATION_NAME).await;
     let project = create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
     project.identity.id
@@ -121,7 +124,8 @@ async fn test_instances_create_reboot_halt(
     let apictx = &cptestctx.server.apictx;
     let nexus = &apictx.nexus;
 
-    // Create a project that we'll use for testing.
+    // Create an IP pool and  project that we'll use for testing.
+    create_ip_pool(&client, POOL_NAME, None).await;
     create_organization(&client, ORGANIZATION_NAME).await;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",
@@ -424,7 +428,8 @@ async fn test_instances_delete_fails_when_running_succeeds_when_stopped(
     let apictx = &cptestctx.server.apictx;
     let nexus = &apictx.nexus;
 
-    // Create a project that we'll use for testing.
+    // Create an IP pool and project that we'll use for testing.
+    create_ip_pool(&client, POOL_NAME, None).await;
     create_organization(&client, ORGANIZATION_NAME).await;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",
@@ -507,7 +512,7 @@ async fn test_instances_invalid_creation_returns_bad_request(
         .unwrap_err();
     assert!(error
         .message
-        .starts_with("unable to parse body: EOF while parsing an object"));
+        .starts_with("unable to parse JSON body: EOF while parsing an object"));
 
     let request_body = r##"
         {
@@ -529,7 +534,7 @@ async fn test_instances_invalid_creation_returns_bad_request(
         .unwrap_err();
     assert!(error
         .message
-        .starts_with("unable to parse body: invalid value: integer `-3`"));
+        .starts_with("unable to parse JSON body: invalid value: integer `-3`"));
 }
 
 #[nexus_test]
@@ -548,7 +553,8 @@ async fn test_instance_create_saga_removes_instance_database_record(
     // conflicted, should the second provision have succeeded.
     let client = &cptestctx.external_client;
 
-    // Create test organization and project
+    // Create test IP pool, organization and project
+    create_ip_pool(&client, POOL_NAME, None).await;
     create_organization(&client, ORGANIZATION_NAME).await;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",
@@ -656,7 +662,8 @@ async fn test_instance_with_single_explicit_ip_address(
 ) {
     let client = &cptestctx.external_client;
 
-    // Create test organization and project
+    // Create test IP pool, organization and project
+    create_ip_pool(&client, POOL_NAME, None).await;
     create_organization(&client, ORGANIZATION_NAME).await;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",
@@ -729,7 +736,8 @@ async fn test_instance_with_new_custom_network_interfaces(
 ) {
     let client = &cptestctx.external_client;
 
-    // Create test organization and project
+    // Create test IP pool, organization and project
+    create_ip_pool(&client, POOL_NAME, None).await;
     create_organization(&client, ORGANIZATION_NAME).await;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",
@@ -884,7 +892,8 @@ async fn test_instance_create_delete_network_interface(
     let client = &cptestctx.external_client;
     let nexus = &cptestctx.server.apictx.nexus;
 
-    // Create test organization and project
+    // Create test IP pool, organization and project
+    create_ip_pool(&client, POOL_NAME, None).await;
     create_organization(&client, ORGANIZATION_NAME).await;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",
@@ -1132,7 +1141,8 @@ async fn test_instance_update_network_interfaces(
     let client = &cptestctx.external_client;
     let nexus = &cptestctx.server.apictx.nexus;
 
-    // Create test organization and project
+    // Create test IP pool, organization and project
+    create_ip_pool(&client, POOL_NAME, None).await;
     create_organization(&client, ORGANIZATION_NAME).await;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",
@@ -1608,11 +1618,13 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
 async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
+    const POOL_NAME: &str = "p0";
     const ORGANIZATION_NAME: &str = "bobs-barrel-of-bytes";
     const PROJECT_NAME: &str = "bit-barrel";
 
     // Test pre-reqs
     DiskTest::new(&cptestctx).await;
+    create_ip_pool(&client, POOL_NAME, None).await;
     create_organization(&client, ORGANIZATION_NAME).await;
     create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
@@ -1697,11 +1709,13 @@ async fn test_attach_eight_disks_to_instance(
 ) {
     let client = &cptestctx.external_client;
 
+    const POOL_NAME: &str = "p0";
     const ORGANIZATION_NAME: &str = "bobs-barrel-of-bytes";
     const PROJECT_NAME: &str = "bit-barrel";
 
     // Test pre-reqs
     DiskTest::new(&cptestctx).await;
+    create_ip_pool(&client, POOL_NAME, None).await;
     create_organization(&client, ORGANIZATION_NAME).await;
     create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
@@ -2038,11 +2052,13 @@ async fn test_disks_detached_when_instance_destroyed(
 ) {
     let client = &cptestctx.external_client;
 
+    const POOL_NAME: &str = "p0";
     const ORGANIZATION_NAME: &str = "bobs-barrel-of-bytes";
     const PROJECT_NAME: &str = "bit-barrel";
 
     // Test pre-reqs
     DiskTest::new(&cptestctx).await;
+    create_ip_pool(&client, POOL_NAME, None).await;
     create_organization(&client, ORGANIZATION_NAME).await;
     create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
@@ -2282,6 +2298,7 @@ async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
     let nexus = &apictx.nexus;
 
     // Create a project that we'll use for testing.
+    create_ip_pool(&client, POOL_NAME, None).await;
     create_organization(&client, ORGANIZATION_NAME).await;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",

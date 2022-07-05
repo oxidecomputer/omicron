@@ -4,13 +4,12 @@
 
 //! Interactions with the Oxide Packet Transformation Engine (OPTE)
 
-use crate::illumos::addrobj;
-use crate::illumos::addrobj::AddrObject;
+use crate::common::underlay;
 use crate::illumos::dladm;
 use crate::illumos::dladm::Dladm;
 use crate::illumos::dladm::PhysicalLink;
 use crate::illumos::vnic::Vnic;
-use crate::illumos::zone::Zones;
+use crate::params::ExternalIp;
 use ipnetwork::IpNetwork;
 use macaddr::MacAddr6;
 use opte::api::IpCidr;
@@ -20,6 +19,7 @@ use opte::api::MacAddr;
 pub use opte::api::Vni;
 use opte::oxide_vpc::api::AddRouterEntryIpv4Req;
 use opte::oxide_vpc::api::RouterTarget;
+use opte::oxide_vpc::api::SNatCfg;
 use opte_ioctl::OpteHdl;
 use slog::Logger;
 use std::net::IpAddr;
@@ -27,9 +27,6 @@ use std::net::Ipv6Addr;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-
-// Names of VNICs used as underlay devices for the xde driver.
-const XDE_VNIC_NAMES: [&str; 2] = ["net0", "net1"];
 
 // Prefix used to identify xde data links.
 const XDE_LINK_PREFIX: &str = "opte";
@@ -42,11 +39,8 @@ pub enum Error {
     #[error("Failed to wrap OPTE port in a VNIC: {0}")]
     CreateVnic(#[from] dladm::CreateVnicError),
 
-    #[error("Failed to create an IPv6 link-local address for xde underlay devices: {0}")]
-    UnderlayDeviceAddress(#[from] crate::illumos::ExecutionError),
-
     #[error("Failed to get VNICs for xde underlay devices: {0}")]
-    GetVnic(#[from] crate::illumos::dladm::GetVnicError),
+    GetVnic(#[from] underlay::Error),
 
     #[error(
         "No xde driver configuration file exists at '/kernel/drv/xde.conf'"
@@ -59,9 +53,6 @@ pub enum Error {
         driver which are compatible."
     )]
     IncompatibleKernel,
-
-    #[error(transparent)]
-    BadAddrObj(#[from] addrobj::ParseError),
 }
 
 #[derive(Debug, Clone)]
@@ -89,6 +80,7 @@ impl OptePortAllocator {
         subnet: IpNetwork,
         vni: Vni,
         underlay_ip: Ipv6Addr,
+        external_ip: Option<ExternalIp>,
     ) -> Result<OptePort, Error> {
         // TODO-completess: Remove IPv4 restrictions once OPTE supports virtual
         // IPv6 networks.
@@ -120,6 +112,32 @@ impl OptePortAllocator {
             )),
         }?;
 
+        // Describe the source NAT for this instance.
+        let snat = match external_ip {
+            Some(ip) => {
+                let public_ip = match ip.ip {
+                    IpAddr::V4(ip) => ip.into(),
+                    IpAddr::V6(_) => {
+                        return Err(opte_ioctl::Error::InvalidArgument(
+                            String::from("IPv6 is not yet supported for external addresses")
+                        ).into());
+                    }
+                };
+                // OPTE's `SnatCfg` accepts a `std::ops::Range`, but the first/last
+                // port representation in the database and Nexus is inclusive of the
+                // last port. At the moment, that means we need to add 1 to the
+                // last port in the request data. However, if last port is
+                // `u16::MAX`, that would overflow and panic. We'll use saturating
+                // add for now, and live with missing the last port.
+                //
+                // TODO-correctness: Support the last port, see
+                // https://github.com/oxidecomputer/omicron/issues/1292
+                let ports = ip.first_port..ip.last_port.saturating_add(1);
+                Some(SNatCfg { public_ip, ports })
+            }
+            None => None,
+        };
+
         let hdl = OpteHdl::open(OpteHdl::DLD_CTL)?;
         hdl.create_xde(
             &name,
@@ -132,7 +150,7 @@ impl OptePortAllocator {
             boundary_services.vni,
             vni,
             underlay_ip,
-            /* snat = */ None,
+            snat,
             /* passthru = */ false,
         )?;
 
@@ -198,6 +216,7 @@ impl OptePortAllocator {
             mac,
             vni,
             underlay_ip,
+            external_ip,
             gateway,
             boundary_services,
             vnic,
@@ -265,6 +284,9 @@ pub struct OptePort {
     mac: MacAddr6,
     vni: Vni,
     underlay_ip: Ipv6Addr,
+    // The external IP information for this port, or None if it has no external
+    // connectivity. Only the primary interface has Some(_) here.
+    external_ip: Option<ExternalIp>,
     gateway: Gateway,
     boundary_services: BoundaryServices,
     // TODO-correctness: Remove this once we can put Viona directly on top of an
@@ -319,7 +341,7 @@ pub fn initialize_xde_driver(log: &Logger) -> Result<(), Error> {
     if !std::path::Path::new("/kernel/drv/xde.conf").exists() {
         return Err(Error::NoXdeConf);
     }
-    let underlay_nics = find_chelsio_links()?;
+    let underlay_nics = underlay::find_nics()?;
     info!(log, "using '{:?}' as data links for xde driver", underlay_nics);
     if underlay_nics.len() < 2 {
         const MESSAGE: &str = concat!(
@@ -333,13 +355,10 @@ pub fn initialize_xde_driver(log: &Logger) -> Result<(), Error> {
             String::from(MESSAGE),
         )));
     }
-    for nic in &underlay_nics {
-        let addrobj = AddrObject::new(&nic.0, "linklocal")?;
-        Zones::ensure_has_link_local_v6_address(None, &addrobj)?;
-    }
-    match OpteHdl::open(OpteHdl::DLD_CTL)?
-        .set_xde_underlay(&underlay_nics[0].0, &underlay_nics[1].0)
-    {
+    match OpteHdl::open(OpteHdl::DLD_CTL)?.set_xde_underlay(
+        underlay_nics[0].interface(),
+        underlay_nics[1].interface(),
+    ) {
         Ok(_) => Ok(()),
         // Handle the specific case where the kernel appears to be unaware of
         // xde at all. This implies the developer has not installed the correct
@@ -363,15 +382,4 @@ pub fn initialize_xde_driver(log: &Logger) -> Result<(), Error> {
         )) => Ok(()),
         Err(e) => Err(e.into()),
     }
-}
-
-fn find_chelsio_links() -> Result<Vec<PhysicalLink>, Error> {
-    // TODO-correctness: This should eventually be determined by a call to
-    // `Dladm` to get the real Chelsio links on a Gimlet. These will likely be
-    // called `cxgbeN`, but we explicitly call them `netN` to be clear that
-    // they're likely VNICs for the time being.
-    Ok(XDE_VNIC_NAMES
-        .into_iter()
-        .map(|name| PhysicalLink(name.to_string()))
-        .collect())
 }

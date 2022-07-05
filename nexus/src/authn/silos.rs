@@ -4,6 +4,7 @@
 
 //! Silo related authentication types and functions
 
+use crate::authz;
 use crate::context::OpContext;
 use crate::db::lookup::LookupPath;
 use crate::db::{model, DataStore};
@@ -15,11 +16,17 @@ use samael::metadata::ContactType;
 use samael::metadata::EntityDescriptor;
 use samael::metadata::NameIdFormat;
 use samael::metadata::HTTP_REDIRECT_BINDING;
+use samael::schema::Response as SAMLResponse;
 use samael::service_provider::ServiceProvider;
 use samael::service_provider::ServiceProviderBuilder;
 
+use dropshot::HttpError;
+use serde::{Deserialize, Serialize};
+
+#[derive(Deserialize)]
 pub struct SamlIdentityProvider {
     pub idp_metadata_document_string: String,
+    pub idp_entity_id: String,
     pub sp_client_id: String,
     pub acs_url: String,
     pub slo_url: String,
@@ -35,6 +42,7 @@ impl TryFrom<model::SamlIdentityProvider> for SamlIdentityProvider {
     ) -> Result<Self, Self::Error> {
         let provider = SamlIdentityProvider {
             idp_metadata_document_string: model.idp_metadata_document_string,
+            idp_entity_id: model.idp_entity_id,
             sp_client_id: model.sp_client_id,
             acs_url: model.acs_url,
             slo_url: model.slo_url,
@@ -66,7 +74,12 @@ impl IdentityProviderType {
         opctx: &OpContext,
         silo_name: &model::Name,
         provider_name: &model::Name,
-    ) -> LookupResult<Self> {
+    ) -> LookupResult<(authz::Silo, model::Silo, Self)> {
+        let (authz_silo, db_silo) = LookupPath::new(opctx, datastore)
+            .silo_name(silo_name)
+            .fetch()
+            .await?;
+
         let (.., identity_provider) = LookupPath::new(opctx, datastore)
             .silo_name(silo_name)
             .identity_provider_name(provider_name)
@@ -82,7 +95,7 @@ impl IdentityProviderType {
                         .fetch()
                         .await?;
 
-                Ok(IdentityProviderType::Saml(
+                let saml_identity_provider = IdentityProviderType::Saml(
                     saml_identity_provider.try_into()
                         .map_err(|e: anyhow::Error|
                             // If an error is encountered converting from the
@@ -96,7 +109,9 @@ impl IdentityProviderType {
                                 )
                             )
                         )?
-                ))
+                    );
+
+                Ok((authz_silo, db_silo, saml_identity_provider))
             }
         }
     }
@@ -205,4 +220,209 @@ impl SamlIdentityProvider {
             Ok(None)
         }
     }
+
+    pub fn authenticated_subject(
+        &self,
+        body_bytes: &str,
+        max_issue_delay: Option<chrono::Duration>,
+    ) -> Result<(AuthenticatedSubject, Option<String>), HttpError> {
+        // Given a post body, decode that as a SAMLResponse. With POST binding,
+        // the SAMLResponse will be POSTed to Nexus as a base64 encoded XML
+        // file, with optional relay state being whatever Nexus sent as part of
+        // the SAMLRequest.
+        let saml_post: SamlLoginPost = serde_urlencoded::from_str(body_bytes)
+            .map_err(|e| {
+            HttpError::for_bad_request(
+                None,
+                format!("error reading url encoded POST body! {}", e),
+            )
+        })?;
+
+        let raw_response_bytes = base64::decode(
+            saml_post.saml_response.as_bytes(),
+        )
+        .map_err(|e| {
+            HttpError::for_bad_request(
+                None,
+                format!("error base64 decoding SAMLResponse! {}", e),
+            )
+        })?;
+
+        // This base64 decoded string is the SAMLResponse XML. Be aware that
+        // parsing unauthenticated arbitrary XML is garbage and a source of
+        // bugs. Samael uses serde to deserialize XML, so that at least is a
+        // little more safe than other languages.
+        let raw_response_str = std::str::from_utf8(&raw_response_bytes)
+            .map_err(|e| {
+                HttpError::for_bad_request(
+                    None,
+                    format!("decoded SAMLResponse not utf8 string! {}", e),
+                )
+            })?;
+
+        let saml_response: SAMLResponse =
+            raw_response_str.parse().map_err(|e| {
+                HttpError::for_bad_request(
+                    None,
+                    format!("could not parse SAMLResponse string! {}", e),
+                )
+            })?;
+
+        // Match issuer of SAMLResponse to this object's IDP entity id.
+        let issuer = saml_response
+            .issuer
+            .as_ref()
+            .ok_or_else(|| {
+                HttpError::for_bad_request(
+                    None,
+                    "SAMLResponse has no issuer!".into(),
+                )
+            })?
+            .value
+            .as_ref()
+            .ok_or_else(|| {
+                HttpError::for_bad_request(
+                    None,
+                    "SAMLResponse has a blank issuer!".into(),
+                )
+            })?;
+
+        if issuer != &self.idp_entity_id {
+            return Err(HttpError::for_bad_request(
+                None,
+                format!(
+                    "SAMLResponse issuer {} does not match configured idp entity id {}",
+                    issuer, self.idp_entity_id,
+                ),
+            ));
+        }
+
+        // Drop the parsed SAMLResponse, create a samael ServiceProvider object,
+        // and use it to parse the same SAMLResponse string into a
+        // samael::Assertion but now in the context of the service provider.
+        //
+        // Notably based on the way samael is written this will validate any
+        // signatures, and elide parts of the XML that are not signed.
+        drop(saml_response);
+
+        let idp_metadata: EntityDescriptor =
+            self.idp_metadata_document_string.parse().map_err(|e| {
+                HttpError::for_internal_error(format!(
+                    "idp_metadata_document_string bad! {}",
+                    e
+                ))
+            })?;
+
+        let mut service_provider =
+            self.make_service_provider(idp_metadata).map_err(|e| {
+                HttpError::for_internal_error(format!(
+                    "make_service_provider failed! {}",
+                    e
+                ))
+            })?;
+
+        if let Some(max_issue_delay) = max_issue_delay {
+            service_provider.max_issue_delay = max_issue_delay;
+        }
+
+        let assertion = service_provider
+            .parse_base64_response(&saml_post.saml_response, None)
+            .map_err(|e| {
+                HttpError::for_bad_request(
+                    None,
+                    format!("could not extract SAMLResponse assertion! {}", e),
+                )
+            })?;
+
+        // If the response isn't signed, then parse_response above will fail.
+        // Every assertion should also be signed. Check the signature and digest
+        // schemes against an explicit allow list.
+        let assertion_signature = assertion.signature.ok_or_else(|| {
+            HttpError::for_bad_request(
+                None,
+                "assertion is missing signature!".to_string(),
+            )
+        })?;
+
+        let signature_algorithm: String =
+            assertion_signature.signed_info.signature_method.algorithm;
+
+        match signature_algorithm.as_str() {
+            // List taken from Signature section of
+            // https://www.w3.org/TR/xmldsig-core1/#sec-AlgID, removing
+            // discouraged items.
+
+            // Required
+            "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256" |
+            "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256" |
+            // Optional
+            "http://www.w3.org/2001/04/xmldsig-more#rsa-sha224" |
+            "http://www.w3.org/2001/04/xmldsig-more#rsa-sha384" |
+            "http://www.w3.org/2001/04/xmldsig-more#rsa-sha512" |
+            "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha224" |
+            "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha384" |
+            "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha512" |
+            "http://www.w3.org/2009/xmldsig11#dsa-sha256" => {}
+
+            _ => {
+                return Err(
+                    HttpError::for_bad_request(
+                        None,
+                        format!("signature algorithm {} is not allowed", signature_algorithm),
+                    )
+                );
+            }
+        }
+
+        // What is being asserted? Extract subject
+        let subject = assertion.subject.ok_or_else(|| {
+            HttpError::for_bad_request(None, "no subject in assertion".into())
+        })?;
+
+        let subject_name_id = &subject.name_id.ok_or_else(|| {
+            HttpError::for_bad_request(
+                None,
+                "no subject name id in assertion".into(),
+            )
+        })?;
+
+        // Extract group membership attributes
+        let mut groups = vec![];
+
+        if let Some(attribute_statements) = &assertion.attribute_statements {
+            for attribute_statement in attribute_statements {
+                for attribute in &attribute_statement.attributes {
+                    if let Some(name) = &attribute.name {
+                        if name == "groups" {
+                            for attribute_value in &attribute.values {
+                                if let Some(value) = &attribute_value.value {
+                                    groups.push(value.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let authenticated_subject = AuthenticatedSubject {
+            external_id: subject_name_id.value.clone(),
+            groups,
+        };
+
+        Ok((authenticated_subject, saml_post.relay_state))
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SamlLoginPost {
+    #[serde(rename = "SAMLResponse")]
+    pub saml_response: String,
+    #[serde(rename = "RelayState")]
+    pub relay_state: Option<String>,
+}
+
+pub struct AuthenticatedSubject {
+    pub external_id: String,
+    pub groups: Vec<String>,
 }

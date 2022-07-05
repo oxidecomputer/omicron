@@ -141,6 +141,17 @@ fn saga_instance_create() -> SagaTemplate<SagaInstanceCreate> {
         new_action_noop_undo(sic_create_network_interfaces),
     );
 
+    // Grab an external IP address and port range for the guest's Internet
+    // Gateway, allowing external connectivity.
+    template_builder.append(
+        "external_ip",
+        "ExternalIp",
+        ActionFunc::new_action(
+            sic_allocate_external_ip,
+            sic_allocate_external_ip_undo,
+        ),
+    );
+
     // Saga actions must be atomic - they have to fully complete or fully abort.
     // This is because Steno assumes that the saga actions are atomic and
     // therefore undo actions are *not* run for the failing node.
@@ -465,6 +476,40 @@ async fn sic_create_network_interfaces_undo(
         .map_err(ActionError::action_failed)?;
     datastore
         .instance_delete_all_network_interfaces(&opctx, &authz_instance)
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(())
+}
+
+/// Create an external IP address for the instance.
+async fn sic_allocate_external_ip(
+    sagactx: ActionContext<SagaInstanceCreate>,
+) -> Result<Uuid, ActionError> {
+    let osagactx = sagactx.user_data();
+    let datastore = osagactx.datastore();
+    let saga_params = sagactx.saga_params();
+    let opctx =
+        OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
+    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+    let external_ip = datastore
+        .allocate_instance_external_ip(&opctx, instance_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(external_ip.id)
+}
+
+/// Destroy / release an external IP address allocated for the instance.
+async fn sic_allocate_external_ip_undo(
+    sagactx: ActionContext<SagaInstanceCreate>,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let datastore = osagactx.datastore();
+    let saga_params = sagactx.saga_params();
+    let opctx =
+        OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
+    let ip_id = sagactx.lookup::<Uuid>("external_ip")?;
+    datastore
+        .deallocate_instance_external_ip(&opctx, ip_id)
         .await
         .map_err(ActionError::action_failed)?;
     Ok(())

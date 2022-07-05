@@ -18,7 +18,8 @@ lazy_static! {
         db::model::SiloUser::new(
             *db::fixed_data::silo::SILO_ID,
             // "4007" looks a bit like "root".
-            "001de000-05e4-4000-8000-000000004007".parse().unwrap()
+            "001de000-05e4-4000-8000-000000004007".parse().unwrap(),
+            "privileged".into(),
         );
 
     /// Role assignments needed for the privileged user
@@ -43,7 +44,8 @@ lazy_static! {
         db::model::SiloUser::new(
             *db::fixed_data::silo::SILO_ID,
             // 60001 is the decimal uid for "nobody" on Helios.
-            "001de000-05e4-4000-8000-000000060001".parse().unwrap()
+            "001de000-05e4-4000-8000-000000060001".parse().unwrap(),
+            "unprivileged".into(),
         );
 }
 
