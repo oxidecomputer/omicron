@@ -55,6 +55,7 @@ lazy_static! {
             },
             discoverable: true,
             user_provision_type: shared::UserProvisionType::Fixed,
+            admin_group_name: None,
         };
 
     // Organization used for testing
@@ -339,6 +340,8 @@ lazy_static! {
             technical_contact_email: "technical@fake".to_string(),
 
             signing_keypair: None,
+
+            group_attribute_name: None,
         };
 }
 

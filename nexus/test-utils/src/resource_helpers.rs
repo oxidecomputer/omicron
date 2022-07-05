@@ -118,6 +118,7 @@ pub async fn create_silo(
             },
             discoverable,
             user_provision_type,
+            admin_group_name: None,
         },
     )
     .await

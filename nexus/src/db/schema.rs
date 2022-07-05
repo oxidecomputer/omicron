@@ -186,6 +186,8 @@ table! {
 
         discoverable -> Bool,
         user_provision_type -> crate::db::model::UserProvisionTypeEnum,
+        admin_group_name -> Nullable<Text>,
+
         rcgen -> Int8,
     }
 }
@@ -199,6 +201,26 @@ table! {
 
         silo_id -> Uuid,
         external_id -> Text,
+    }
+}
+
+table! {
+    silo_group (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+
+        silo_id -> Uuid,
+    }
+}
+
+table! {
+    silo_group_membership (silo_group_id, silo_user_id) {
+        silo_group_id -> Uuid,
+        silo_user_id -> Uuid,
     }
 }
 
@@ -236,6 +258,7 @@ table! {
         technical_contact_email -> Text,
         public_cert -> Nullable<Text>,
         private_key -> Nullable<Text>,
+        group_attribute_name -> Nullable<Text>,
     }
 }
 

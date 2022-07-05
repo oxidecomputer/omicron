@@ -7041,7 +7041,8 @@
         "description": "Describes what kind of identity is described by an id",
         "type": "string",
         "enum": [
-          "silo_user"
+          "silo_user",
+          "silo_group"
         ]
       },
       "IdpMetadataSource": {
@@ -8998,6 +8999,11 @@
           "description": {
             "type": "string"
           },
+          "group_attribute_name": {
+            "nullable": true,
+            "description": "if set, attributes with this name will be considered to denote a user's group membership, where the values will be the group names.",
+            "type": "string"
+          },
           "idp_entity_id": {
             "description": "idp's entity id",
             "type": "string"
@@ -9117,6 +9123,11 @@
         "description": "Create-time parameters for a [`Silo`](crate::external_api::views::Silo)",
         "type": "object",
         "properties": {
+          "admin_group_name": {
+            "nullable": true,
+            "description": "if set, this group will be created and granted the silo admin role",
+            "type": "string"
+          },
           "description": {
             "type": "string"
           },

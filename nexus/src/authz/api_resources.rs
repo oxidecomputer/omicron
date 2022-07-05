@@ -689,6 +689,14 @@ authz_resource! {
 }
 
 authz_resource! {
+    name = "SiloGroup",
+    parent = "Silo",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = Custom,
+}
+
+authz_resource! {
     name = "IdentityProvider",
     parent = "Silo",
     primary_key = Uuid,

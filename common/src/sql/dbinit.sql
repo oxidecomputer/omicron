@@ -244,6 +244,7 @@ CREATE TABLE omicron.public.silo (
 
     discoverable BOOL NOT NULL,
     user_provision_type omicron.public.user_provision_type NOT NULL,
+    admin_group_name TEXT,
 
     /* child resource generation number, per RFD 192 */
     rcgen INT NOT NULL
@@ -274,13 +275,53 @@ CREATE UNIQUE INDEX ON omicron.public.silo_user (
 ) WHERE
     time_deleted IS NULL;
 
-CREATE TYPE omicron.public.provider_type AS ENUM (
-  'saml'
+/*
+ * Silo groups
+ */
+
+CREATE TABLE omicron.public.silo_group (
+    id UUID PRIMARY KEY,
+    name STRING(128) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+
+    silo_id UUID NOT NULL
+);
+
+CREATE UNIQUE INDEX ON omicron.public.silo_group (
+    name,
+    silo_id
+) WHERE
+    time_deleted IS NULL;
+
+/*
+ * Silo group membership
+ */
+
+CREATE TABLE omicron.public.silo_group_membership (
+    silo_group_id UUID NOT NULL,
+    silo_user_id UUID NOT NULL
+);
+
+CREATE UNIQUE INDEX ON omicron.public.silo_group_membership (
+    silo_group_id,
+    silo_user_id
+);
+
+CREATE INDEX ON omicron.public.silo_group_membership (
+    silo_user_id
 );
 
 /*
  * Silo identity provider list
  */
+
+CREATE TYPE omicron.public.provider_type AS ENUM (
+  'saml'
+);
+
 CREATE TABLE omicron.public.identity_provider (
     /* Identity metadata */
     id UUID PRIMARY KEY,
@@ -329,7 +370,9 @@ CREATE TABLE omicron.public.saml_identity_provider (
     technical_contact_email TEXT NOT NULL,
 
     public_cert TEXT,
-    private_key TEXT
+    private_key TEXT,
+
+    group_attribute_name TEXT
 );
 
 CREATE INDEX ON omicron.public.saml_identity_provider (
@@ -1346,7 +1389,8 @@ CREATE TABLE omicron.public.role_builtin (
 
 CREATE TYPE omicron.public.identity_type AS ENUM (
   'user_builtin',
-  'silo_user'
+  'silo_user',
+  'silo_group'
 );
 
 CREATE TABLE omicron.public.role_assignment (

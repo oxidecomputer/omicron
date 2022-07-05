@@ -31,6 +31,7 @@ use httptest::{matchers::*, responders::*, Expectation, Server};
 use omicron_nexus::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
 use omicron_nexus::db::fixed_data::silo::SILO_ID;
 use omicron_nexus::db::identity::Asset;
+use omicron_nexus::db::identity::Resource;
 
 #[nexus_test]
 async fn test_silos(cptestctx: &ControlPlaneTestContext) {
@@ -211,6 +212,40 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
         .expect_err("unexpected success");
 }
 
+// Test that admin group is created if admin_group_name is applied.
+#[nexus_test]
+async fn test_silo_admin_group(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.apictx.nexus;
+
+    let silo: Silo = object_create(
+        client,
+        "/silos",
+        &params::SiloCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "silo-name".parse().unwrap(),
+                description: "a silo".to_string(),
+            },
+            discoverable: false,
+            user_provision_type: shared::UserProvisionType::Jit,
+            admin_group_name: Some("administrator".into()),
+        },
+    )
+    .await;
+
+    let authn_opctx = nexus.opctx_external_authn();
+
+    let name: Name = "administrator".parse().unwrap();
+
+    let (.., _db_silo_group) =
+        LookupPath::new(&authn_opctx, &nexus.datastore())
+            .silo_name(&silo.identity.name.into())
+            .silo_group_name(&name.into())
+            .fetch()
+            .await
+            .unwrap();
+}
+
 // Test listing providers
 #[nexus_test]
 async fn test_listing_identity_providers(cptestctx: &ControlPlaneTestContext) {
@@ -259,6 +294,8 @@ async fn test_listing_identity_providers(cptestctx: &ControlPlaneTestContext) {
             technical_contact_email: "technical@fake".to_string(),
 
             signing_keypair: None,
+
+            group_attribute_name: None,
         },
     )
     .await;
@@ -286,6 +323,8 @@ async fn test_listing_identity_providers(cptestctx: &ControlPlaneTestContext) {
             technical_contact_email: "technical@fake".to_string(),
 
             signing_keypair: None,
+
+            group_attribute_name: None,
         },
     )
     .await;
@@ -346,6 +385,8 @@ async fn test_deleting_a_silo_deletes_the_idp(
             technical_contact_email: "technical@fake".to_string(),
 
             signing_keypair: None,
+
+            group_attribute_name: None,
         },
     )
     .await;
@@ -438,6 +479,8 @@ async fn test_saml_idp_metadata_data_valid(
             technical_contact_email: "technical@fake".to_string(),
 
             signing_keypair: None,
+
+            group_attribute_name: None,
         },
     )
     .await;
@@ -505,6 +548,8 @@ async fn test_saml_idp_metadata_data_truncated(
             technical_contact_email: "technical@fake".to_string(),
 
             signing_keypair: None,
+
+            group_attribute_name: None,
         }))
         .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -551,6 +596,8 @@ async fn test_saml_idp_metadata_data_invalid(
             technical_contact_email: "technical@fake".to_string(),
 
             signing_keypair: None,
+
+            group_attribute_name: None,
         }))
         .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -828,4 +875,413 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
 
     // TODO-coverage When we have a way to remove or invalidate Silo Users, we
     // should test that doing so causes them to stop appearing in the list.
+}
+
+#[nexus_test]
+async fn test_silo_groups_jit(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.apictx.nexus;
+
+    let silo =
+        create_silo(&client, "test-silo", true, shared::UserProvisionType::Jit)
+            .await;
+
+    // Create a user in advance
+    let silo_user_id = Uuid::new_v4();
+    nexus
+        .silo_user_create(
+            silo.identity.id,
+            silo_user_id,
+            "external@id.com".into(),
+        )
+        .await
+        .unwrap();
+
+    let authn_opctx = nexus.opctx_external_authn();
+
+    let (authz_silo, db_silo) =
+        LookupPath::new(&authn_opctx, &nexus.datastore())
+            .silo_name(&silo.identity.name.into())
+            .fetch()
+            .await
+            .unwrap();
+
+    // Should create two groups from the authenticated subject
+    let existing_silo_user = nexus
+        .silo_user_from_authenticated_subject(
+            &authn_opctx,
+            &authz_silo,
+            &db_silo,
+            &AuthenticatedSubject {
+                external_id: "external@id.com".into(),
+                groups: vec!["a-group".into(), "b-group".into()],
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+    let group_memberships = nexus
+        .datastore()
+        .silo_group_membership_for_user(
+            &authn_opctx,
+            &authz_silo,
+            existing_silo_user.id(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(group_memberships.len(), 2);
+
+    let mut group_names = vec![];
+
+    for group_membership in &group_memberships {
+        let (.., db_group) = LookupPath::new(&authn_opctx, nexus.datastore())
+            .silo_group_id(group_membership.silo_group_id)
+            .fetch()
+            .await
+            .unwrap();
+
+        group_names.push(db_group.name().to_string());
+    }
+
+    assert!(group_names.contains(&"a-group".to_string()));
+    assert!(group_names.contains(&"b-group".to_string()));
+}
+
+#[nexus_test]
+async fn test_silo_groups_fixed(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.apictx.nexus;
+
+    let silo = create_silo(
+        &client,
+        "test-silo",
+        true,
+        shared::UserProvisionType::Fixed,
+    )
+    .await;
+
+    // Create a user in advance
+    let silo_user_id = Uuid::new_v4();
+    nexus
+        .silo_user_create(
+            silo.identity.id,
+            silo_user_id,
+            "external@id.com".into(),
+        )
+        .await
+        .unwrap();
+
+    let authn_opctx = nexus.opctx_external_authn();
+
+    let (authz_silo, db_silo) =
+        LookupPath::new(&authn_opctx, &nexus.datastore())
+            .silo_name(&silo.identity.name.into())
+            .fetch()
+            .await
+            .unwrap();
+
+    // Should not create groups from the authenticated subject
+    let existing_silo_user = nexus
+        .silo_user_from_authenticated_subject(
+            &authn_opctx,
+            &authz_silo,
+            &db_silo,
+            &AuthenticatedSubject {
+                external_id: "external@id.com".into(),
+                groups: vec!["a-group".into(), "b-group".into()],
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+    let group_memberships = nexus
+        .datastore()
+        .silo_group_membership_for_user(
+            &authn_opctx,
+            &authz_silo,
+            existing_silo_user.id(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(group_memberships.len(), 0);
+}
+
+#[nexus_test]
+async fn test_silo_groups_bad_group_name(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.apictx.nexus;
+
+    let silo =
+        create_silo(&client, "test-silo", true, shared::UserProvisionType::Jit)
+            .await;
+
+    // Create a user in advance
+    let silo_user_id = Uuid::new_v4();
+    nexus
+        .silo_user_create(
+            silo.identity.id,
+            silo_user_id,
+            "external@id.com".into(),
+        )
+        .await
+        .unwrap();
+
+    let authn_opctx = nexus.opctx_external_authn();
+
+    let (authz_silo, db_silo) =
+        LookupPath::new(&authn_opctx, &nexus.datastore())
+            .silo_name(&silo.identity.name.into())
+            .fetch()
+            .await
+            .unwrap();
+
+    // Do not accept group names that are not parseable as Name
+    nexus
+        .silo_user_from_authenticated_subject(
+            &authn_opctx,
+            &authz_silo,
+            &db_silo,
+            &AuthenticatedSubject {
+                external_id: "external@id.com".into(),
+                groups: vec!["a_group".into()],
+            },
+        )
+        .await
+        .expect_err("unexpected success");
+}
+
+#[nexus_test]
+async fn test_silo_groups_remove_from_one_group(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.apictx.nexus;
+
+    let silo =
+        create_silo(&client, "test-silo", true, shared::UserProvisionType::Jit)
+            .await;
+
+    // Create a user in advance
+    let silo_user_id = Uuid::new_v4();
+    nexus
+        .silo_user_create(
+            silo.identity.id,
+            silo_user_id,
+            "external@id.com".into(),
+        )
+        .await
+        .unwrap();
+
+    let authn_opctx = nexus.opctx_external_authn();
+
+    let (authz_silo, db_silo) =
+        LookupPath::new(&authn_opctx, &nexus.datastore())
+            .silo_name(&silo.identity.name.into())
+            .fetch()
+            .await
+            .unwrap();
+
+    // Add to two groups
+    let existing_silo_user = nexus
+        .silo_user_from_authenticated_subject(
+            &authn_opctx,
+            &authz_silo,
+            &db_silo,
+            &AuthenticatedSubject {
+                external_id: "external@id.com".into(),
+                groups: vec!["a-group".into(), "b-group".into()],
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+    // Check those groups were created and the user was added
+    let group_memberships = nexus
+        .datastore()
+        .silo_group_membership_for_user(
+            &authn_opctx,
+            &authz_silo,
+            existing_silo_user.id(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(group_memberships.len(), 2);
+
+    let mut group_names = vec![];
+
+    for group_membership in &group_memberships {
+        let (.., db_group) = LookupPath::new(&authn_opctx, nexus.datastore())
+            .silo_group_id(group_membership.silo_group_id)
+            .fetch()
+            .await
+            .unwrap();
+
+        group_names.push(db_group.name().to_string());
+    }
+
+    assert!(group_names.contains(&"a-group".to_string()));
+    assert!(group_names.contains(&"b-group".to_string()));
+
+    // Then remove their membership from one group
+    let existing_silo_user = nexus
+        .silo_user_from_authenticated_subject(
+            &authn_opctx,
+            &authz_silo,
+            &db_silo,
+            &AuthenticatedSubject {
+                external_id: "external@id.com".into(),
+                groups: vec!["b-group".into()],
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+    let group_memberships = nexus
+        .datastore()
+        .silo_group_membership_for_user(
+            &authn_opctx,
+            &authz_silo,
+            existing_silo_user.id(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(group_memberships.len(), 1);
+
+    let mut group_names = vec![];
+
+    for group_membership in &group_memberships {
+        let (.., db_group) = LookupPath::new(&authn_opctx, nexus.datastore())
+            .silo_group_id(group_membership.silo_group_id)
+            .fetch()
+            .await
+            .unwrap();
+
+        group_names.push(db_group.name().to_string());
+    }
+
+    assert!(group_names.contains(&"b-group".to_string()));
+}
+
+#[nexus_test]
+async fn test_silo_groups_remove_from_both_groups(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.apictx.nexus;
+
+    let silo =
+        create_silo(&client, "test-silo", true, shared::UserProvisionType::Jit)
+            .await;
+
+    // Create a user in advance
+    let silo_user_id = Uuid::new_v4();
+    nexus
+        .silo_user_create(
+            silo.identity.id,
+            silo_user_id,
+            "external@id.com".into(),
+        )
+        .await
+        .unwrap();
+
+    let authn_opctx = nexus.opctx_external_authn();
+
+    let (authz_silo, db_silo) =
+        LookupPath::new(&authn_opctx, &nexus.datastore())
+            .silo_name(&silo.identity.name.into())
+            .fetch()
+            .await
+            .unwrap();
+
+    // Add to two groups
+    let existing_silo_user = nexus
+        .silo_user_from_authenticated_subject(
+            &authn_opctx,
+            &authz_silo,
+            &db_silo,
+            &AuthenticatedSubject {
+                external_id: "external@id.com".into(),
+                groups: vec!["a-group".into(), "b-group".into()],
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+    // Check those groups were created and the user was added
+    let group_memberships = nexus
+        .datastore()
+        .silo_group_membership_for_user(
+            &authn_opctx,
+            &authz_silo,
+            existing_silo_user.id(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(group_memberships.len(), 2);
+
+    let mut group_names = vec![];
+
+    for group_membership in &group_memberships {
+        let (.., db_group) = LookupPath::new(&authn_opctx, nexus.datastore())
+            .silo_group_id(group_membership.silo_group_id)
+            .fetch()
+            .await
+            .unwrap();
+
+        group_names.push(db_group.name().to_string());
+    }
+
+    assert!(group_names.contains(&"a-group".to_string()));
+    assert!(group_names.contains(&"b-group".to_string()));
+
+    // Then remove from both groups, and add to a new one
+    let existing_silo_user = nexus
+        .silo_user_from_authenticated_subject(
+            &authn_opctx,
+            &authz_silo,
+            &db_silo,
+            &AuthenticatedSubject {
+                external_id: "external@id.com".into(),
+                groups: vec!["c-group".into()],
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+    let group_memberships = nexus
+        .datastore()
+        .silo_group_membership_for_user(
+            &authn_opctx,
+            &authz_silo,
+            existing_silo_user.id(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(group_memberships.len(), 1);
+
+    let mut group_names = vec![];
+
+    for group_membership in &group_memberships {
+        let (.., db_group) = LookupPath::new(&authn_opctx, nexus.datastore())
+            .silo_group_id(group_membership.silo_group_id)
+            .fetch()
+            .await
+            .unwrap();
+
+        group_names.push(db_group.name().to_string());
+    }
+
+    assert!(group_names.contains(&"c-group".to_string()));
 }

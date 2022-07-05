@@ -120,6 +120,7 @@ where
 #[serde(rename_all = "snake_case")]
 pub enum IdentityType {
     SiloUser,
+    SiloGroup,
 }
 
 impl TryFrom<db::model::IdentityType> for IdentityType {
@@ -131,6 +132,7 @@ impl TryFrom<db::model::IdentityType> for IdentityType {
                 Err(anyhow!("unsupported db identity type: {:?}", other))
             }
             db::model::IdentityType::SiloUser => Ok(IdentityType::SiloUser),
+            db::model::IdentityType::SiloGroup => Ok(IdentityType::SiloGroup),
         }
     }
 }

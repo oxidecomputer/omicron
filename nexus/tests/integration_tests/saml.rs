@@ -75,6 +75,8 @@ async fn test_create_a_saml_idp(cptestctx: &ControlPlaneTestContext) {
             technical_contact_email: "technical@fake".to_string(),
 
             signing_keypair: None,
+
+            group_attribute_name: None,
         },
     )
     .await;
@@ -189,6 +191,8 @@ async fn test_create_a_saml_idp_invalid_descriptor_truncated(
             technical_contact_email: "technical@fake".to_string(),
 
             signing_keypair: None,
+
+            group_attribute_name: None,
         }))
         .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -258,6 +262,8 @@ async fn test_create_a_saml_idp_invalid_descriptor_no_redirect_binding(
             technical_contact_email: "technical@fake".to_string(),
 
             signing_keypair: None,
+
+            group_attribute_name: None,
         }))
         .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -309,6 +315,8 @@ async fn test_create_a_hidden_silo_saml_idp(
             technical_contact_email: "technical@fake".to_string(),
 
             signing_keypair: None,
+
+            group_attribute_name: None,
         },
     )
     .await;
@@ -376,6 +384,8 @@ async fn test_saml_idp_metadata_url_404(cptestctx: &ControlPlaneTestContext) {
             technical_contact_email: "technical@fake".to_string(),
 
             signing_keypair: None,
+
+            group_attribute_name: None,
         }))
         .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -422,6 +432,8 @@ async fn test_saml_idp_metadata_url_invalid(
             technical_contact_email: "technical@fake".to_string(),
 
             signing_keypair: None,
+
+            group_attribute_name: None,
         }))
         .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -519,6 +531,8 @@ async fn test_saml_idp_reject_keypair(cptestctx: &ControlPlaneTestContext) {
                 technical_contact_email: "technical@fake".to_string(),
 
                 signing_keypair: Some(test_case),
+
+                group_attribute_name: None,
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
         )
@@ -577,6 +591,8 @@ async fn test_saml_idp_rsa_keypair_ok(cptestctx: &ControlPlaneTestContext) {
                 public_cert: RSA_KEY_1_PUBLIC.to_string(),
                 private_key: RSA_KEY_1_PRIVATE.to_string(),
             }),
+
+            group_attribute_name: None,
         }))
         .expect_status(Some(StatusCode::CREATED)),
     )
@@ -616,6 +632,8 @@ fn test_correct_saml_response() {
 
         public_cert: None,
         private_key: None,
+
+        group_attribute_name: None,
     };
 
     let body_bytes = serde_urlencoded::to_string(SamlLoginPost {
@@ -660,6 +678,8 @@ fn test_correct_saml_response_ecdsa_sha256() {
 
         public_cert: None,
         private_key: None,
+
+        group_attribute_name: None,
     };
 
     let body_bytes = serde_urlencoded::to_string(SamlLoginPost {
@@ -703,6 +723,8 @@ fn test_accept_saml_response_only_assertion_signed() {
 
         public_cert: None,
         private_key: None,
+
+        group_attribute_name: None,
     };
 
     let body_bytes = serde_urlencoded::to_string(SamlLoginPost {
@@ -740,6 +762,8 @@ fn test_reject_unsigned_saml_response() {
 
         public_cert: None,
         private_key: None,
+
+        group_attribute_name: None,
     };
 
     let body_bytes = serde_urlencoded::to_string(SamlLoginPost {
@@ -780,6 +804,8 @@ fn test_reject_saml_response_with_xml_comment() {
 
         public_cert: None,
         private_key: None,
+
+        group_attribute_name: None,
     };
 
     let body_bytes = serde_urlencoded::to_string(SamlLoginPost {
@@ -817,6 +843,8 @@ fn test_correct_saml_response_with_group_attributes() {
 
         public_cert: None,
         private_key: None,
+
+        group_attribute_name: Some("groups".into()),
     };
 
     let body_bytes = serde_urlencoded::to_string(SamlLoginPost {
@@ -847,6 +875,53 @@ fn test_correct_saml_response_with_group_attributes() {
         authenticated_subject.groups,
         vec!["SRE".to_string(), "Admins".to_string()]
     );
+    assert_eq!(relay_state, None);
+}
+
+// Test receiving a correct SAML response that has group attributes but not the
+// same group_attribute_name
+#[test]
+fn test_correct_saml_response_with_group_attributes_wrong_attribute_name() {
+    let silo_saml_identity_provider = SamlIdentityProvider {
+        idp_metadata_document_string: SAML_RESPONSE_IDP_DESCRIPTOR.to_string(),
+
+        idp_entity_id: "https://some.idp.test/oxide_rack/".to_string(),
+        sp_client_id: "https://customer.site/oxide_rack/saml".to_string(),
+        acs_url: "https://customer.site/oxide_rack/saml".to_string(),
+        slo_url: "http://slo".to_string(),
+        technical_contact_email: "technical@fake".to_string(),
+
+        public_cert: None,
+        private_key: None,
+
+        group_attribute_name: Some("something".into()),
+    };
+
+    let body_bytes = serde_urlencoded::to_string(SamlLoginPost {
+        saml_response: base64::encode(&SAML_RESPONSE_WITH_GROUPS),
+        relay_state: None,
+    })
+    .unwrap();
+
+    let (authenticated_subject, relay_state) = silo_saml_identity_provider
+        .authenticated_subject(
+            &body_bytes,
+            // Set max_issue_delay so that SAMLResponse is valid
+            Some(
+                chrono::Utc::now()
+                    - "2022-05-04T15:36:12.631Z"
+                        .parse::<chrono::DateTime<chrono::Utc>>()
+                        .unwrap()
+                    + chrono::Duration::seconds(60),
+            ),
+        )
+        .unwrap();
+
+    assert_eq!(
+        authenticated_subject.external_id,
+        "some@customer.com".to_string()
+    );
+    assert!(authenticated_subject.groups.is_empty());
     assert_eq!(relay_state, None);
 }
 
@@ -881,6 +956,8 @@ async fn test_post_saml_response(cptestctx: &ControlPlaneTestContext) {
             technical_contact_email: "technical@fake".to_string(),
 
             signing_keypair: None,
+
+            group_attribute_name: None,
         },
     )
     .await;
@@ -972,6 +1049,8 @@ async fn test_post_saml_response_with_relay_state(
             technical_contact_email: "technical@fake".to_string(),
 
             signing_keypair: None,
+
+            group_attribute_name: None,
         },
     )
     .await;

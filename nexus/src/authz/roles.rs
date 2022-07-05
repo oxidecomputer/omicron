@@ -37,6 +37,7 @@
 use super::api_resources::ApiResource;
 use crate::authn;
 use crate::context::OpContext;
+use crate::db::model::IdentityType;
 use crate::db::DataStore;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ResourceType;
@@ -157,6 +158,40 @@ pub async fn load_roles_for_resource(
         for role_asgn in roles {
             assert_eq!(resource_type.to_string(), role_asgn.resource_type);
             roleset.insert(resource_type, resource_id, &role_asgn.role_name);
+        }
+
+        // Get roles from silo user's group membership
+        if actor.silo_id().is_some() {
+            let silo_group_memberships = datastore
+                .silo_group_membership_for_user_no_authz(
+                    opctx,
+                    actor.actor_id(),
+                )
+                .await?;
+
+            for silo_group_membership in silo_group_memberships {
+                let roles = datastore
+                    .role_asgn_list_for(
+                        opctx,
+                        IdentityType::SiloGroup,
+                        silo_group_membership.silo_group_id,
+                        resource_type,
+                        resource_id,
+                    )
+                    .await?;
+
+                for role_asgn in roles {
+                    assert_eq!(
+                        resource_type.to_string(),
+                        role_asgn.resource_type
+                    );
+                    roleset.insert(
+                        resource_type,
+                        resource_id,
+                        &role_asgn.role_name,
+                    );
+                }
+            }
         }
     }
 

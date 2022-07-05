@@ -249,6 +249,23 @@ resource SiloUser {
 has_relation(silo: Silo, "parent_silo", user: SiloUser)
 	if user.silo = silo;
 
+resource SiloGroup {
+	permissions = [
+	    "list_children",
+	    "modify",
+	    "read",
+	    "create_child",
+	];
+
+	relations = { parent_silo: Silo };
+	"list_children" if "viewer" on "parent_silo";
+	"read" if "viewer" on "parent_silo";
+	"modify" if "admin" on "parent_silo";
+	"create_child" if "admin" on "parent_silo";
+}
+has_relation(silo: Silo, "parent_silo", group: SiloGroup)
+	if group.silo = silo;
+
 resource SshKey {
 	permissions = [ "read", "modify" ];
 	relations = { silo_user: SiloUser };
@@ -362,6 +379,10 @@ has_permission(actor: AuthenticatedActor, "read", silo: Silo)
 	if has_role(actor, "external-authenticator", silo.fleet);
 has_permission(actor: AuthenticatedActor, "read", user: SiloUser)
 	if has_role(actor, "external-authenticator", user.silo.fleet);
+has_permission(actor: AuthenticatedActor, "read", group: SiloGroup)
+	if has_role(actor, "external-authenticator", group.silo.fleet);
+has_permission(actor: AuthenticatedActor, "modify", group: SiloGroup)
+	if has_role(actor, "external-authenticator", group.silo.fleet);
 has_permission(actor: AuthenticatedActor, "read", session: ConsoleSession)
 	if has_role(actor, "external-authenticator", session.fleet);
 has_permission(actor: AuthenticatedActor, "modify", session: ConsoleSession)

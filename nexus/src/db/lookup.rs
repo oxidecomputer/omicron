@@ -334,6 +334,13 @@ impl<'a> LookupPath<'a> {
         }
     }
 
+    /// Select a resource of type SiloGroup, identified by its id
+    pub fn silo_group_id(self, id: Uuid) -> SiloGroup<'a> {
+        SiloGroup {
+            key: SiloGroupKey::PrimaryKey(Root { lookup_root: self }, id),
+        }
+    }
+
     /// Select a resource of type Rack, identified by its id
     pub fn rack_id(self, id: Uuid) -> Rack<'a> {
         Rack { key: RackKey::PrimaryKey(Root { lookup_root: self }, id) }
@@ -416,7 +423,7 @@ impl<'a> Root<'a> {
 lookup_resource! {
     name = "Silo",
     ancestors = [],
-    children = [ "Organization", "IdentityProvider", "SamlIdentityProvider" ],
+    children = [ "Organization", "IdentityProvider", "SamlIdentityProvider", "SiloGroup"],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -427,6 +434,15 @@ lookup_resource! {
     ancestors = [ "Silo" ],
     children = [ "SshKey" ],
     lookup_by_name = false,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "SiloGroup",
+    ancestors = [ "Silo" ],
+    children = [],
+    lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
 }
