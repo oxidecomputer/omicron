@@ -3369,10 +3369,35 @@ impl DataStore {
         opctx: &OpContext,
         authz_session: &authz::ConsoleSession,
     ) -> DeleteResult {
-        opctx.authorize(authz::Action::Delete, authz_session).await?;
+        // We don't do a typical authz check here.  Instead, knowing that every
+        // user is allowed to delete their own session, the query below filters
+        // on the session's silo_user_id matching the current actor's id.
+        //
+        // We could instead model this more like other authz checks.  That would
+        // involve fetching the session record from the database, storing the
+        // associated silo_user_id into the `authz::ConsoleSession`, and having
+        // an Oso rule saying you can delete a session whose associated silo
+        // user matches the authenticated actor.  This would be a fair bit more
+        // complicated and more work at runtime work than what we're doing here.
+        // The tradeoff is that we're effectively encoding policy here, but it
+        // seems worth it in this case.
+        let actor = opctx.authn.actor_required()?;
+
+        // This check shouldn't be required in that there should be no overlap
+        // between silo user ids and other types of identity ids.  But it's easy
+        // to check, and if we add another type of Actor, we'll be forced here
+        // to consider if they should be able to have console sessions and log
+        // out of them.
+        let silo_user_id = match actor.actor_type() {
+            IdentityType::SiloUser => actor.actor_id(),
+            IdentityType::UserBuiltin => {
+                return Err(Error::invalid_request("not a Silo user"))
+            }
+        };
 
         use db::schema::console_session::dsl;
         diesel::delete(dsl::console_session)
+            .filter(dsl::silo_user_id.eq(silo_user_id))
             .filter(dsl::token.eq(authz_session.id()))
             .execute_async(self.pool_authorized(opctx).await?)
             .await
@@ -4586,12 +4611,29 @@ mod test {
             .unwrap();
         assert!(fetched.time_last_used > session.time_last_used);
 
-        // delete it and fetch should come back with nothing
+        // deleting it using `opctx` (which represents the test-privileged user)
+        // should succeed but not do anything -- you can't delete someone else's
+        // session
         let delete =
             datastore.session_hard_delete(&opctx, &authz_session).await;
         assert_eq!(delete, Ok(()));
+        let fetched = LookupPath::new(&opctx, &datastore)
+            .console_session_token(&token)
+            .fetch()
+            .await;
+        assert!(fetched.is_ok());
 
-        // this will be a not found after #347
+        // delete it and fetch should come back with nothing
+        let silo_user_opctx = OpContext::for_background(
+            logctx.log.new(o!()),
+            Arc::new(authz::Authz::new(&logctx.log)),
+            authn::Context::test_silo_user(*SILO_ID, silo_user_id),
+            Arc::clone(&datastore),
+        );
+        let delete = datastore
+            .session_hard_delete(&silo_user_opctx, &authz_session)
+            .await;
+        assert_eq!(delete, Ok(()));
         let fetched = LookupPath::new(&opctx, &datastore)
             .console_session_token(&token)
             .fetch()
