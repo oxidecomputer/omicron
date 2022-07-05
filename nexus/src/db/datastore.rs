@@ -87,7 +87,6 @@ use diesel::upsert::excluded;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use ipnetwork::IpNetwork;
 use omicron_common::api;
-use omicron_common::api::external;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -96,6 +95,7 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use omicron_common::api::external::{self, InternalContext};
 use omicron_common::api::external::{
     CreateResult, IdentityMetadataCreateParams,
 };
@@ -3669,14 +3669,8 @@ impl DataStore {
             .execute_async(self.pool_authorized(opctx).await?)
             .await
             .map(|_rows_deleted| ())
-            .map_err(|e| {
-                // TODO-correctness TODO-availability This should be using
-                // public_error_from_diesel_pool()
-                Error::internal_error(&format!(
-                    "error deleting outdated available artifacts: {:?}",
-                    e
-                ))
-            })
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .internal_context("deleting outdated available artifacts")
     }
 
     /// Create a silo user
@@ -4116,6 +4110,7 @@ impl DataStore {
     ) -> CreateResult<SshKey> {
         assert_eq!(authz_user.id(), ssh_key.silo_user_id);
         opctx.authorize(authz::Action::CreateChild, authz_user).await?;
+        let name = ssh_key.name().to_string();
 
         use db::schema::ssh_key::dsl;
         diesel::insert_into(dsl::ssh_key)
@@ -4124,10 +4119,10 @@ impl DataStore {
             .get_result_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                Error::internal_error(&format!(
-                    "error creating SSH key: {:?}",
-                    e
-                ))
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::Conflict(ResourceType::SshKey, &name),
+                )
             })
     }
 
@@ -5097,7 +5092,9 @@ mod test {
             .await;
         assert!(matches!(
             duplicate,
-            Err(Error::InternalError { internal_message: _ })
+            Err(Error::ObjectAlreadyExists { type_name, object_name })
+                if type_name == ResourceType::SshKey
+                    && object_name == "sshkey"
         ));
 
         // Delete the key we just created.
