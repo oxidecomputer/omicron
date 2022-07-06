@@ -113,7 +113,7 @@ impl DeviceAccessToken {
         silo_user_id: Uuid,
     ) -> Self {
         let now = Utc::now();
-        assert!(time_requested < now);
+        assert!(time_requested <= now);
         Self {
             token: generate_token(),
             client_id,
