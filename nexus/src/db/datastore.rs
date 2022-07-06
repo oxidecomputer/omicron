@@ -3392,7 +3392,7 @@ impl DataStore {
         // out of them.
         let silo_user_id = match actor.actor_type() {
             IdentityType::SiloUser => actor.actor_id(),
-            IdentityType::UserBuiltin => {
+            IdentityType::UserBuiltin | IdentityType::SiloGroup => {
                 return Err(Error::invalid_request("not a Silo user"))
             }
         };
