@@ -107,7 +107,12 @@ impl super::Nexus {
             // can get a proper "denied" message on its next poll.
             let token = token.expires(db_request.time_expires);
             self.db_datastore
-                .device_access_token_create(opctx, &authz_request, &authz_user, token)
+                .device_access_token_create(
+                    opctx,
+                    &authz_request,
+                    &authz_user,
+                    token,
+                )
                 .await?;
             Err(Error::InvalidRequest {
                 message: "device authorization request expired".to_string(),
@@ -115,7 +120,12 @@ impl super::Nexus {
         } else {
             // TODO-security: set an expiration time for the valid token.
             self.db_datastore
-                .device_access_token_create(opctx, &authz_request, &authz_user, token)
+                .device_access_token_create(
+                    opctx,
+                    &authz_request,
+                    &authz_user,
+                    token,
+                )
                 .await
         }
     }
