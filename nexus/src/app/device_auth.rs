@@ -161,8 +161,11 @@ impl super::Nexus {
             .device_access_token(&token)
             .fetch()
             .await
-            .map_err(|_| Reason::UnknownActor {
-                actor: "from bearer token".to_string(),
+            .map_err(|e| match e {
+                Error::ObjectNotFound { .. } => Reason::UnknownActor {
+                    actor: "from device access token".to_string(),
+                },
+                e => Reason::UnknownError { source: e },
             })?;
 
         let silo_user_id = db_access_token.silo_user_id;
@@ -170,8 +173,11 @@ impl super::Nexus {
             .silo_user_id(silo_user_id)
             .fetch()
             .await
-            .map_err(|_| Reason::UnknownActor {
-                actor: silo_user_id.to_string(),
+            .map_err(|e| match e {
+                Error::ObjectNotFound { .. } => {
+                    Reason::UnknownActor { actor: silo_user_id.to_string() }
+                }
+                e => Reason::UnknownError { source: e },
             })?;
         let silo_id = db_silo_user.silo_id;
 
