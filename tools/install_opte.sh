@@ -17,17 +17,21 @@ if [[ "$(uname)" != "SunOS" ]]; then
     exit 1
 fi
 
-if [[ $(id -u) -ne 0 ]]; then
-    echo "This must be run as root"
-    exit 1
-fi
-
 SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 cd "${SOURCE_DIR}/.."
 OMICRON_TOP="$PWD"
 OUT_DIR="$OMICRON_TOP/out"
 XDE_DIR="$OUT_DIR/xde"
 mkdir -p "$XDE_DIR"
+
+# Create a temporary directory in which to download artifacts, removing it on
+# exit
+DOWNLOAD_DIR="$(mktemp -t -d)"
+trap remove_download_dir EXIT ERR
+
+function remove_download_dir {
+    rm -rf $DOWNLOAD_DIR
+}
 
 # Compute the SHA256 of the path in $1, returning just the sum
 function file_sha {
@@ -37,18 +41,20 @@ function file_sha {
 # Download a file from $1 and compare its sha256 to the value provided in $2
 function download_and_check_sha {
     local URL="$1"
-    local FILENAME="$(basename "$URL")"
-    local OUT_PATH="$XDE_DIR/$FILENAME"
     local SHA="$2"
+    local FILENAME="$(basename "$URL")"
+    local DOWNLOAD_PATH="$(mktemp -p $DOWNLOAD_DIR)"
+    local OUT_PATH="$XDE_DIR/$FILENAME"
 
     # Check if the file already exists, with the expected SHA
     if ! [[ -f "$OUT_PATH" ]] || [[ "$SHA" != "$(file_sha "$OUT_PATH")" ]]; then
-        curl -L -o "$OUT_PATH" "$URL" 2> /dev/null
-        local ACTUAL_SHA="$(sha256sum "$OUT_PATH" | cut -d ' ' -f 1)"
+        curl -L -o "$DOWNLOAD_PATH" "$URL" 2> /dev/null
+        local ACTUAL_SHA="$(sha256sum "$DOWNLOAD_PATH" | cut -d ' ' -f 1)"
         if [[ "$ACTUAL_SHA" != "$SHA" ]]; then
             echo "SHA mismatch downloding file $FILENAME"
             exit 1
         fi
+        mv -f "$DOWNLOAD_PATH" "$OUT_PATH"
         echo "\"$OUT_PATH\" downloaded and has verified SHA"
     else
         echo "\"$OUT_PATH\" already exists with correct SHA"
@@ -80,7 +86,7 @@ function helios_dev_stickiness {
 function ensure_helios_dev_is_non_sticky {
     local STICKINESS="$(helios_dev_stickiness)"
     if [[ "$STICKINESS" = "sticky" ]]; then
-        pkg set-publisher --non-sticky helios-dev
+        pfexec pkg set-publisher --non-sticky helios-dev
         STICKINESS="$(helios_dev_stickiness)"
         if [[ "$STICKINESS" = "sticky" ]]; then
             echo "Failed to make helios-dev publisher non-sticky"
@@ -101,22 +107,22 @@ function add_publisher {
     if [[ "$N_PUBLISHERS" -gt 1 ]]; then
         echo "More than one publisher named \"$PUBLISHER_NAME\" found"
         echo "Removing all publishers and installing from scratch"
-        pkg unset-publisher "$PUBLISHER_NAME"
-        pkg set-publisher -p "$ARCHIVE_PATH" --search-first
+        pfexec pkg unset-publisher "$PUBLISHER_NAME"
+        pfexec pkg set-publisher -p "$ARCHIVE_PATH" --search-first
     elif [[ "$N_PUBLISHERS" -eq 1 ]]; then
         echo "Publisher \"$PUBLISHER_NAME\" already exists, setting"
         echo "the origin to "$ARCHIVE_PATH""
-        pkg set-publisher --origin-uri "$ARCHIVE_PATH" --search-first "$PUBLISHER_NAME"
+        pfexec pkg set-publisher --origin-uri "$ARCHIVE_PATH" --search-first "$PUBLISHER_NAME"
     else
         echo "Publisher \"$PUBLISHER_NAME\" does not exist, adding"
-        pkg set-publisher -p "$ARCHIVE_PATH" --search-first
+        pfexec pkg set-publisher -p "$ARCHIVE_PATH" --search-first
     fi
 }
 
 # `helios-netdev` provides the xde kernel driver and the `opteadm` userland tool
 # for interacting with it.
 HELIOS_NETDEV_BASE_URL="https://buildomat.eng.oxide.computer/public/file/oxidecomputer/opte/repo"
-HELIOS_NETDEV_COMMIT="5764c0732a26c6d0e096ce1b8e871b44d8dc79e7"
+HELIOS_NETDEV_COMMIT="6bc29a925cf328863e4f371bc4bec7a512269314"
 HELIOS_NETDEV_REPO_URL="$HELIOS_NETDEV_BASE_URL/$HELIOS_NETDEV_COMMIT/opte.p5p"
 HELIOS_NETDEV_REPO_SHA_URL="$HELIOS_NETDEV_BASE_URL/$HELIOS_NETDEV_COMMIT/opte.p5p.sha256"
 HELIOS_NETDEV_REPO_PATH="$XDE_DIR/$(basename "$HELIOS_NETDEV_REPO_URL")"
@@ -144,7 +150,7 @@ add_publisher "$XDE_REPO_PATH"
 
 # Actually install the xde kernel module and opteadm tool
 RC=0
-pkg install -v pkg://helios-netdev/driver/network/opte || RC=$?
+pfexec pkg install -v pkg://helios-netdev/driver/network/opte || RC=$?
 if [[ "$RC" -ne 0 ]] && [[ "$RC" -ne 4 ]]; then
     echo "Installing xde kernel driver and opteadm tool failed"
     exit "$RC"
@@ -161,7 +167,7 @@ fi
 # Install the kernel bits required for the xde kernel driver to operate
 # correctly
 RC=0
-pkg install -v pkg://on-nightly/consolidation/osnet/osnet-incorporation* || RC=$?
+pfexec pkg install -v pkg://on-nightly/consolidation/osnet/osnet-incorporation* || RC=$?
 if [[ "$RC" -eq 0 ]]; then
     echo "The xde kernel driver, opteadm tool, and xde-related kernel bits"
     echo "have successfully been installed. A reboot may be required to activate"
