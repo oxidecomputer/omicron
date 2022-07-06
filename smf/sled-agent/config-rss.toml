@@ -56,7 +56,8 @@ gz_addresses = []
 [request.service.service_type]
 type = "nexus"
 internal_address = "[fd00:1122:3344:0101::3]:12221"
-external_address = "172.20.15.226:80"
+# NOTE: In the lab, use "172.20.15.226"
+external_address = "192.168.1.20:80"
 
 # TODO(https://github.com/oxidecomputer/omicron/issues/732): Nexus
 # should allocate Oximeter services.

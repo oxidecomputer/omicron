@@ -5,6 +5,7 @@
 //! Utilities to manage running zones.
 
 use crate::illumos::addrobj::AddrObject;
+use crate::illumos::dladm::Etherstub;
 use crate::illumos::svc::wait_for_service;
 use crate::illumos::vnic::{Vnic, VnicAllocator};
 use crate::illumos::zone::{AddressRequest, ZONE_PREFIX};
@@ -180,6 +181,31 @@ impl RunningZone {
         Ok(network)
     }
 
+    // TODO: Remove once Nexus uses OPTE - external addresses should generally
+    // be served via OPTE.
+    pub async fn ensure_external_address_with_name(
+        &self,
+        addrtype: AddressRequest,
+        name: &str,
+    ) -> Result<IpNetwork, EnsureAddressError> {
+        info!(self.inner.log, "Adding address: {:?}", addrtype);
+        let addrobj = AddrObject::new(
+                self.inner.physical_vnic
+                    .as_ref()
+                    .expect("Cannot allocate external address on zone without physical VNIC")
+                    .name(),
+                name
+            )
+            .map_err(|err| EnsureAddressError::AddrObject {
+                request: addrtype,
+                zone: self.inner.name.clone(),
+                err,
+            })?;
+        let network =
+            Zones::ensure_address(Some(&self.inner.name), &addrobj, addrtype)?;
+        Ok(network)
+    }
+
     pub async fn add_default_route(
         &self,
         gateway: Ipv6Addr,
@@ -270,6 +296,7 @@ impl RunningZone {
                 //
                 // Re-initialize guest_vnic state by inspecting the zone.
                 opte_ports: vec![],
+                physical_vnic: None,
             },
         })
     }
@@ -322,6 +349,10 @@ pub struct InstalledZone {
 
     // OPTE devices for the guest network interfaces
     opte_ports: Vec<OptePort>,
+
+    // Physical VNIC possibly provisioned to the zone.
+    // TODO: Remove once Nexus traffic is transmitted over OPTE.
+    physical_vnic: Option<Vnic>,
 }
 
 impl InstalledZone {
@@ -348,12 +379,13 @@ impl InstalledZone {
 
     pub async fn install(
         log: &Logger,
-        vnic_allocator: &VnicAllocator,
+        vnic_allocator: &VnicAllocator<Etherstub>,
         service_name: &str,
         unique_name: Option<&str>,
         datasets: &[zone::Dataset],
         devices: &[zone::Device],
         opte_ports: Vec<OptePort>,
+        physical_vnic: Option<Vnic>,
     ) -> Result<InstalledZone, InstallZoneError> {
         let control_vnic = vnic_allocator.new_control(None).map_err(|err| {
             InstallZoneError::CreateVnic {
@@ -366,10 +398,17 @@ impl InstalledZone {
         let zone_image_path =
             PathBuf::from(&format!("/opt/oxide/{}.tar.gz", service_name));
 
+        let phys_iter = if let Some(ref vnic) = physical_vnic {
+            vec![vnic.name().to_string()].into_iter()
+        } else {
+            vec![].into_iter()
+        };
+
         let net_device_names: Vec<String> = opte_ports
             .iter()
             .map(|port| port.vnic().name().to_string())
             .chain(std::iter::once(control_vnic.name().to_string()))
+            .chain(phys_iter)
             .collect();
 
         Zones::install_omicron_zone(
@@ -391,6 +430,7 @@ impl InstalledZone {
             name: zone_name,
             control_vnic,
             opte_ports,
+            physical_vnic,
         })
     }
 }

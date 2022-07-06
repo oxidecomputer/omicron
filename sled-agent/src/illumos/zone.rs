@@ -10,7 +10,7 @@ use slog::Logger;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use crate::illumos::addrobj::AddrObject;
-use crate::illumos::dladm::{EtherstubVnic, VNIC_PREFIX_CONTROL};
+use crate::illumos::dladm::{EtherstubVnic, PhysicalLink, VNIC_PREFIX_CONTROL};
 use crate::illumos::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use crate::illumos::{execute, PFEXEC};
 use omicron_common::address::SLED_PREFIX;
@@ -102,7 +102,7 @@ pub struct EnsureAddressError {
 #[error("Failed to create address {address} with name {name} in the GZ on {link:?}: {err}. Note to developers: {extra_note}")]
 pub struct EnsureGzAddressError {
     address: IpAddr,
-    link: EtherstubVnic,
+    link: String,
     name: String,
     #[source]
     err: anyhow::Error,
@@ -543,13 +543,13 @@ impl Zones {
 
     // TODO: Remove once Nexus traffic is transmitted over OPTE.
     pub fn ensure_has_global_zone_v4_address(
-        link: EtherstubVnic,
+        link: PhysicalLink,
         address: Ipv4Addr,
         name: &str,
     ) -> Result<(), EnsureGzAddressError> {
         // Call the guts of this function within a closure to make it easier
         // to wrap the error with appropriate context.
-        |link: EtherstubVnic, address, name| -> Result<(), anyhow::Error> {
+        |link: PhysicalLink, address, name| -> Result<(), anyhow::Error> {
             // Ensure that a static IPv4 address has been allocated
             // to the Global Zone. Without this, we don't have a way
             // to route to IP addresses that we want to create in
@@ -564,7 +564,7 @@ impl Zones {
         }(link.clone(), address, name)
         .map_err(|err| EnsureGzAddressError {
             address: IpAddr::V4(address),
-            link,
+            link: link.0.clone(),
             name: name.to_string(),
             err,
             extra_note: "".to_string(),
@@ -612,7 +612,7 @@ impl Zones {
         }(link.clone(), address, name)
         .map_err(|err| EnsureGzAddressError {
             address: IpAddr::V6(address),
-            link,
+            link: link.0.clone(),
             name: name.to_string(),
             err,
             extra_note:
