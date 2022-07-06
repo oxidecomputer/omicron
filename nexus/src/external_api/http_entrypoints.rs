@@ -268,7 +268,7 @@ pub fn external_api() -> NexusApiDescription {
 //
 // Operations beyond list, create, view, delete, and update should use a
 // descriptive noun or verb, again bearing in mind that this will be
-// transcribed into the CLI:
+// transcribed into the CLI and SDKs:
 //
 //   POST   -> instance_reboot
 //   POST   -> instance_stop
