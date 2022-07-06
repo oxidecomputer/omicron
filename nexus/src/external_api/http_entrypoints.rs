@@ -84,6 +84,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(organization_list)?;
         api.register(organization_create)?;
         api.register(organization_view)?;
+        api.register(organization_view_by_id)?;
         api.register(organization_delete)?;
         api.register(organization_update)?;
         api.register(organization_policy_view)?;
@@ -92,6 +93,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(project_list)?;
         api.register(project_create)?;
         api.register(project_view)?;
+        api.register(project_view_by_id)?;
         api.register(project_delete)?;
         api.register(project_update)?;
         api.register(project_policy_view)?;
@@ -110,11 +112,13 @@ pub fn external_api() -> NexusApiDescription {
         api.register(disk_list)?;
         api.register(disk_create)?;
         api.register(disk_view)?;
+        api.register(disk_view_by_id)?;
         api.register(disk_delete)?;
 
         api.register(instance_list)?;
         api.register(instance_create)?;
         api.register(instance_view)?;
+        api.register(instance_view_by_id)?;
         api.register(instance_delete)?;
         api.register(instance_migrate)?;
         api.register(instance_reboot)?;
@@ -126,6 +130,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(image_list)?;
         api.register(image_create)?;
         api.register(image_view)?;
+        api.register(image_view_by_id)?;
         api.register(image_delete)?;
 
         api.register(instance_disk_list)?;
@@ -135,16 +140,19 @@ pub fn external_api() -> NexusApiDescription {
         api.register(snapshot_list)?;
         api.register(snapshot_create)?;
         api.register(snapshot_view)?;
+        api.register(snapshot_view_by_id)?;
         api.register(snapshot_delete)?;
 
         api.register(vpc_list)?;
         api.register(vpc_create)?;
         api.register(vpc_view)?;
+        api.register(vpc_view_by_id)?;
         api.register(vpc_update)?;
         api.register(vpc_delete)?;
 
         api.register(vpc_subnet_list)?;
         api.register(vpc_subnet_view)?;
+        api.register(vpc_subnet_view_by_id)?;
         api.register(vpc_subnet_create)?;
         api.register(vpc_subnet_delete)?;
         api.register(vpc_subnet_update)?;
@@ -153,17 +161,20 @@ pub fn external_api() -> NexusApiDescription {
         api.register(instance_network_interface_create)?;
         api.register(instance_network_interface_list)?;
         api.register(instance_network_interface_view)?;
+        api.register(instance_network_interface_view_by_id)?;
         api.register(instance_network_interface_update)?;
         api.register(instance_network_interface_delete)?;
 
         api.register(vpc_router_list)?;
         api.register(vpc_router_view)?;
+        api.register(vpc_router_view_by_id)?;
         api.register(vpc_router_create)?;
         api.register(vpc_router_delete)?;
         api.register(vpc_router_update)?;
 
         api.register(vpc_router_route_list)?;
         api.register(vpc_router_route_view)?;
+        api.register(vpc_router_route_view_by_id)?;
         api.register(vpc_router_route_create)?;
         api.register(vpc_router_route_delete)?;
         api.register(vpc_router_route_update)?;
@@ -207,6 +218,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(image_global_list)?;
         api.register(image_global_create)?;
         api.register(image_global_view)?;
+        api.register(image_global_view_by_id)?;
         api.register(image_global_delete)?;
 
         api.register(updates_refresh)?;
@@ -223,19 +235,6 @@ pub fn external_api() -> NexusApiDescription {
 
         api.register(console_api::login)?;
         api.register(console_api::consume_credentials)?;
-
-        api.register(organization_get_by_id)?;
-        api.register(project_get_by_id)?;
-        api.register(instance_get_by_id)?;
-        api.register(disk_get_by_id)?;
-        api.register(image_get_by_id)?;
-        api.register(global_image_get_by_id)?;
-        api.register(snapshot_get_by_id)?;
-        api.register(vpc_get_by_id)?;
-        api.register(subnet_get_by_id)?;
-        api.register(router_get_by_id)?;
-        api.register(route_get_by_id)?;
-        api.register(network_interface_get_by_id)?;
 
         api.register(device_auth::device_auth_request)?;
         api.register(device_auth::device_auth_verify)?;
