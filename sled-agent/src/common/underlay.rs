@@ -36,7 +36,7 @@ pub fn find_nics() -> Result<Vec<AddrObject>, Error> {
     Ok(addr_objs)
 }
 
-fn find_chelsio_links() -> Result<Vec<PhysicalLink>, Error> {
+pub(crate) fn find_chelsio_links() -> Result<Vec<PhysicalLink>, Error> {
     // TODO-correctness: This should eventually be determined by a call to
     // `Dladm` to get the real Chelsio links on a Gimlet. These will likely be
     // called `cxgbeN`, but we explicitly call them `netN` to be clear that
