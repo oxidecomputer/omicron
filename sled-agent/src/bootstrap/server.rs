@@ -13,13 +13,11 @@ use super::trust_quorum::ShareDistribution;
 use super::views::Response;
 use super::views::ResponseEnvelope;
 use crate::bootstrap::maghemite;
+use crate::common::underlay;
 use crate::config::Config as SledConfig;
-use crate::illumos::addrobj::AddrObject;
-use crate::illumos::dladm::VnicSource;
 use crate::sp::AsyncReadWrite;
 use crate::sp::SpHandle;
 use crate::sp::SprocketsRole;
-use crate::zone::Zones;
 use slog::Drain;
 use slog::Logger;
 use std::net::Ipv6Addr;
@@ -67,27 +65,21 @@ impl Server {
             debug!(log, "registered DTrace probes");
         }
 
-        // Ensure we have a link-local inet6 address.
-        let link = sled_config
-            .get_link()
-            .map_err(|err| format!("Failed to find physical link: {err}"))?;
-
-        let mg_interface = AddrObject::new(link.name(), "linklocal")
-            .expect("unexpected failure creating AddrObject");
-        Zones::ensure_has_link_local_v6_address(None, &mg_interface).map_err(
-            |err| {
-                format!(
-                    "Failed to ensure link-local address for {}: {}",
-                    mg_interface, err
-                )
-            },
-        )?;
+        // Find address objects to pass to maghemite.
+        let mg_addr_objs = underlay::find_nics().map_err(|err| {
+            format!("Failed to find address objects for maghemite: {err}")
+        })?;
+        if mg_addr_objs.is_empty() {
+            return Err(
+                "underlay::find_nics() returned 0 address objects".to_string()
+            );
+        }
 
         // Turn on the maghemite routing service.
         // TODO-correctness Eventually we need mg-ddm to listen on multiple
         // interfaces (link-local addresses of both NICs).
         info!(log, "Starting mg-ddm service");
-        maghemite::enable_mg_ddm_service(log.clone(), mg_interface)
+        maghemite::enable_mg_ddm_service(log.clone(), mg_addr_objs[0].clone())
             .await
             .map_err(|err| format!("Failed to start mg-ddm: {err}"))?;
 

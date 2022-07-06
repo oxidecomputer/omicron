@@ -224,12 +224,15 @@ mod test {
     use crate::illumos::{dladm::MockDladm, zone::MockZones};
     use crate::instance::MockInstance;
     use crate::nexus::LazyNexusClient;
+    use crate::params::ExternalIp;
     use crate::params::InstanceStateRequested;
     use chrono::Utc;
     use omicron_common::api::external::{
         ByteCount, Generation, InstanceCpuCount, InstanceState,
     };
     use omicron_common::api::internal::nexus::InstanceRuntimeState;
+    use std::net::IpAddr;
+    use std::net::Ipv4Addr;
 
     static INST_UUID_STR: &str = "e398c5d5-5059-4e55-beac-3a1071083aaa";
 
@@ -261,6 +264,11 @@ mod test {
                 time_updated: Utc::now(),
             },
             nics: vec![],
+            external_ip: ExternalIp {
+                ip: IpAddr::from(Ipv4Addr::new(10, 0, 0, 1)),
+                first_port: 0,
+                last_port: 1 << 14 - 1,
+            },
             disks: vec![],
             cloud_init_bytes: None,
         }

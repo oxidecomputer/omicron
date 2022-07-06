@@ -54,6 +54,7 @@ lazy_static! {
                 description: String::from(""),
             },
             discoverable: true,
+            user_provision_type: shared::UserProvisionType::Fixed,
         };
 
     // Organization used for testing
@@ -293,8 +294,8 @@ lazy_static! {
             },
         };
     pub static ref DEMO_IP_POOL_RANGE: IpRange = IpRange::V4(Ipv4Range::new(
-        std::net::Ipv4Addr::new(10, 0, 0, 1),
-        std::net::Ipv4Addr::new(10, 0, 0, 2),
+        std::net::Ipv4Addr::new(10, 0, 0, 0),
+        std::net::Ipv4Addr::new(10, 0, 0, 255),
     ).unwrap());
     pub static ref DEMO_IP_POOL_RANGES_URL: String = format!("{}/ranges", *DEMO_IP_POOL_URL);
     pub static ref DEMO_IP_POOL_RANGES_ADD_URL: String = format!("{}/add", *DEMO_IP_POOL_RANGES_URL);

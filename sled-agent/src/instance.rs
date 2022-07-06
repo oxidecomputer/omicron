@@ -15,6 +15,7 @@ use crate::instance_manager::InstanceTicket;
 use crate::nexus::LazyNexusClient;
 use crate::opte::OptePort;
 use crate::opte::OptePortAllocator;
+use crate::params::ExternalIp;
 use crate::params::NetworkInterface;
 use crate::params::{
     InstanceHardware, InstanceMigrateParams, InstanceRuntimeStateRequested,
@@ -212,6 +213,7 @@ struct InstanceInner {
     underlay_addr: Ipv6Addr,
     port_allocator: OptePortAllocator,
     requested_nics: Vec<NetworkInterface>,
+    external_ip: ExternalIp,
 
     // Disk related properties
     requested_disks: Vec<DiskRequest>,
@@ -477,6 +479,7 @@ impl Instance {
             underlay_addr,
             port_allocator,
             requested_nics: initial.nics,
+            external_ip: initial.external_ip,
             requested_disks: initial.disks,
             cloud_init_bytes: initial.cloud_init_bytes,
             state: InstanceStates::new(initial.runtime),
@@ -497,12 +500,15 @@ impl Instance {
         let mut ports = Vec::with_capacity(inner.requested_nics.len());
         for nic in inner.requested_nics.iter() {
             let vni = crate::opte::Vni::new(nic.vni).expect("Invalid VNI");
+            let external_ip =
+                if nic.primary { Some(inner.external_ip) } else { None };
             let port = inner.port_allocator.new_port(
                 nic.ip,
                 *nic.mac,
                 ipnetwork::IpNetwork::from(nic.subnet),
                 vni,
                 inner.underlay_addr,
+                external_ip,
             )?;
             info!(inner.log, "created OPTE port for guest"; "port_info" => ?port);
             ports.push(port);
@@ -763,12 +769,15 @@ mod test {
     use crate::illumos::dladm::Etherstub;
     use crate::nexus::LazyNexusClient;
     use crate::opte::OptePortAllocator;
+    use crate::params::ExternalIp;
     use crate::params::InstanceStateRequested;
     use chrono::Utc;
     use omicron_common::api::external::{
         ByteCount, Generation, InstanceCpuCount, InstanceState,
     };
     use omicron_common::api::internal::nexus::InstanceRuntimeState;
+    use std::net::IpAddr;
+    use std::net::Ipv4Addr;
 
     static INST_UUID_STR: &str = "e398c5d5-5059-4e55-beac-3a1071083aaa";
     static PROPOLIS_UUID_STR: &str = "ed895b13-55d5-4e0b-88e9-3f4e74d0d936";
@@ -805,6 +814,11 @@ mod test {
                 time_updated: Utc::now(),
             },
             nics: vec![],
+            external_ip: ExternalIp {
+                ip: IpAddr::from(Ipv4Addr::new(10, 0, 0, 1)),
+                first_port: 0,
+                last_port: 1 << 14 - 1,
+            },
             disks: vec![],
             cloud_init_bytes: None,
         }

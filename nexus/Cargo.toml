@@ -10,7 +10,7 @@ path = "../rpaths"
 [dependencies]
 anyhow = "1.0"
 async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "ab1f49e0b3f95557aa96bf593282199fafeef4bd" }
-async-trait = "0.1.53"
+async-trait = "0.1.56"
 authz-macros = { path = "src/authz/authz-macros" }
 base64 = "0.13.0"
 bb8 = "0.8.0"
@@ -119,6 +119,7 @@ features = [ "serde", "v4" ]
 [dev-dependencies]
 criterion = { version = "0.3", features = [ "async_tokio" ] }
 expectorate = "1.0.5"
+itertools = "0.10.3"
 nexus-test-utils-macros = { path = "test-utils-macros" }
 nexus-test-utils = { path = "test-utils" }
 omicron-test-utils = { path = "../test-utils" }

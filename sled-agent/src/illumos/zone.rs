@@ -424,7 +424,7 @@ impl Zones {
         let prefix =
             if let Some(zone) = zone { vec![ZLOGIN, zone] } else { vec![] };
 
-        let interface = format!("{}/", addrobj.interface());
+        let interface = format!("{}", addrobj);
         let show_addr_args =
             &[IPADM, "show-addr", "-p", "-o", "TYPE", &interface];
 
