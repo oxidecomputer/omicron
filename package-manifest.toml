@@ -139,5 +139,5 @@ zone = true
 # 3. Use type = "manual" instead of the "prebuilt"
 type = "prebuilt"
 repo = "dendrite"
-commit = "4f3f9c6617d21164117664650b6fb843bbc28b39"
-sha256 = "8348bde61569ff27df50baa99afdbd0b7dfc91d23a2b46bba42a6d4b98c420c2"
+commit = "e752af977c167fa64625231a74bedcbfa5457008"
+sha256 = "ddb7c271f4d4b68332adc69b32f90e728f07b1395e01cffd7e71230c2c648c63"
