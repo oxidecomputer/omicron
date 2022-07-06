@@ -4323,14 +4323,34 @@ impl DataStore {
             .values(access_token)
             .returning(DeviceAccessToken::as_returning());
 
+        #[derive(Debug)]
+        enum TokenGrantError {
+            ConcurrentRequests,
+        }
+        type TxnError = TransactionError<TokenGrantError>;
+
         self.pool_authorized(opctx)
             .await?
             .transaction(move |conn| {
-                delete_request.execute(conn)?;
-                Ok(insert_token.get_result(conn)?)
+                if delete_request.execute(conn)? == 1 {
+                    Ok(insert_token.get_result(conn)?)
+                } else {
+                    Err(TxnError::CustomError(
+                        TokenGrantError::ConcurrentRequests,
+                    ))
+                }
             })
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| match e {
+                TxnError::CustomError(TokenGrantError::ConcurrentRequests) => {
+                    Error::invalid_request(
+                        "token grant failed due to concurrent requests",
+                    )
+                }
+                TxnError::Pool(e) => {
+                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                }
+            })
     }
 
     /// Look up a granted device access token.
