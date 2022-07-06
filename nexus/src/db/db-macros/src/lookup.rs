@@ -533,6 +533,13 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
             self.fetch_for(authz::Action::Read).await
         }
 
+        /// Turn the Result<T, E> of [`fetch`] into a Result<Option<T>, E>.
+        pub async fn optional_fetch(
+            &self,
+        ) -> LookupResult<Option<(#(authz::#path_types,)* model::#resource_name)>> {
+            self.optional_fetch_for(authz::Action::Read).await
+        }
+
         /// Fetch the record corresponding to the selected resource and
         /// check whether the caller is allowed to do the specified `action`
         ///
@@ -567,6 +574,25 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
             #silo_check_fetch
         }
 
+        /// Turn the Result<T, E> of [`fetch_for`] into a Result<Option<T>, E>.
+        pub async fn optional_fetch_for(
+            &self,
+            action: authz::Action,
+        ) -> LookupResult<Option<(#(authz::#path_types,)* model::#resource_name)>> {
+            let result = self.fetch_for(action).await;
+
+            match result {
+                Err(Error::ObjectNotFound {
+                    type_name: _,
+                    lookup_type: _,
+                }) => Ok(None),
+
+                _ => {
+                    Ok(Some(result?))
+                }
+            }
+        }
+
         /// Fetch an `authz` object for the selected resource and check
         /// whether the caller is allowed to do the specified `action`
         ///
@@ -586,6 +612,25 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
             opctx.authorize(action, &#resource_authz_name).await?;
             Ok((#(#path_authz_names,)*))
             #silo_check_lookup
+        }
+
+        /// Turn the Result<T, E> of [`lookup_for`] into a Result<Option<T>, E>.
+        pub async fn optional_lookup_for(
+            &self,
+            action: authz::Action,
+        ) -> LookupResult<Option<(#(authz::#path_types,)*)>> {
+            let result = self.lookup_for(action).await;
+
+            match result {
+                Err(Error::ObjectNotFound {
+                    type_name: _,
+                    lookup_type: _,
+                }) => Ok(None),
+
+                _ => {
+                    Ok(Some(result?))
+                }
+            }
         }
 
         /// Fetch the "authz" objects for the selected resource and all its

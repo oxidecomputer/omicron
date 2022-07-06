@@ -306,25 +306,12 @@ impl super::Nexus {
         authz_silo: &authz::Silo,
         silo_group_name: &Name,
     ) -> LookupResult<Option<db::model::SiloGroup>> {
-        // XXX would be nice if LookupPath had optional fetch, this whole
-        // routine could be elided :)
-        let result = LookupPath::new(opctx, &self.datastore())
+        Ok(LookupPath::new(opctx, &self.datastore())
             .silo_id(authz_silo.id())
             .silo_group_name(&silo_group_name.clone())
-            .fetch()
-            .await;
-
-        match result {
-            Err(Error::ObjectNotFound {
-                type_name: _type_name,
-                lookup_type: _lookup_type,
-            }) => Ok(None),
-
-            _ => {
-                let (.., db_silo_group) = result?;
-                Ok(Some(db_silo_group))
-            }
-        }
+            .optional_fetch()
+            .await?
+            .map(|(.., db_silo_group)| db_silo_group))
     }
 
     pub async fn silo_group_lookup_or_create_by_name(
