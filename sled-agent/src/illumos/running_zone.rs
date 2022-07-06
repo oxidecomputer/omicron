@@ -377,6 +377,7 @@ impl InstalledZone {
         zone_name
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn install(
         log: &Logger,
         vnic_allocator: &VnicAllocator<Etherstub>,

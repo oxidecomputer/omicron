@@ -160,19 +160,6 @@ impl SledAgent {
         )
         .map_err(|err| Error::SledSubnet { err })?;
 
-        // TODO: I'd like a more automated way of doing this, but where should
-        // this address come from? It seems a bit odd to provide it at
-        // config-time, since presumably this needs to be in the same range
-        // as the user-provided IP pools.
-        /*
-        Zones::ensure_has_global_zone_v4_address(
-            config.get_link()?,
-            "172.20.15.238".parse().unwrap(),
-            "sledv4",
-        )
-        .map_err(|err| Error::SledSubnet { err })?;
-        */
-
         // Initialize the xde kernel driver with the underlay devices.
         crate::opte::initialize_xde_driver(&log)?;
 

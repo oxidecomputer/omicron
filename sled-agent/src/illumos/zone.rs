@@ -7,10 +7,10 @@
 use anyhow::anyhow;
 use ipnetwork::IpNetwork;
 use slog::Logger;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::{IpAddr, Ipv6Addr};
 
 use crate::illumos::addrobj::AddrObject;
-use crate::illumos::dladm::{EtherstubVnic, PhysicalLink, VNIC_PREFIX_CONTROL};
+use crate::illumos::dladm::{EtherstubVnic, VNIC_PREFIX_CONTROL};
 use crate::illumos::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use crate::illumos::{execute, PFEXEC};
 use omicron_common::address::SLED_PREFIX;
@@ -538,37 +538,6 @@ impl Zones {
 
         let cmd = command.args(args);
         execute(cmd)?;
-        Ok(())
-    }
-
-    // TODO: Remove once Nexus traffic is transmitted over OPTE.
-    pub fn ensure_has_global_zone_v4_address(
-        link: PhysicalLink,
-        address: Ipv4Addr,
-        name: &str,
-    ) -> Result<(), EnsureGzAddressError> {
-        // Call the guts of this function within a closure to make it easier
-        // to wrap the error with appropriate context.
-        |link: PhysicalLink, address, name| -> Result<(), anyhow::Error> {
-            // Ensure that a static IPv4 address has been allocated
-            // to the Global Zone. Without this, we don't have a way
-            // to route to IP addresses that we want to create in
-            // the non-GZ.
-            Self::ensure_address(
-                None,
-                &AddrObject::new(&link.0, name).unwrap(),
-                AddressRequest::new_static(IpAddr::V4(address), None),
-            )
-            .map_err(|err| anyhow!(err))?;
-            Ok(())
-        }(link.clone(), address, name)
-        .map_err(|err| EnsureGzAddressError {
-            address: IpAddr::V4(address),
-            link: link.0.clone(),
-            name: name.to_string(),
-            err,
-            extra_note: "".to_string(),
-        })?;
         Ok(())
     }
 
