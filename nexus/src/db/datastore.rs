@@ -4325,23 +4325,32 @@ impl DataStore {
 
         #[derive(Debug)]
         enum TokenGrantError {
+            RequestNotFound,
             ConcurrentRequests,
         }
         type TxnError = TransactionError<TokenGrantError>;
 
         self.pool_authorized(opctx)
             .await?
-            .transaction(move |conn| {
-                if delete_request.execute(conn)? == 1 {
-                    Ok(insert_token.get_result(conn)?)
-                } else {
-                    Err(TxnError::CustomError(
-                        TokenGrantError::ConcurrentRequests,
-                    ))
+            .transaction(move |conn| match delete_request.execute(conn)? {
+                0 => {
+                    Err(TxnError::CustomError(TokenGrantError::RequestNotFound))
                 }
+                1 => Ok(insert_token.get_result(conn)?),
+                _ => Err(TxnError::CustomError(
+                    TokenGrantError::ConcurrentRequests,
+                )),
             })
             .await
             .map_err(|e| match e {
+                TxnError::CustomError(TokenGrantError::RequestNotFound) => {
+                    Error::ObjectNotFound {
+                        type_name: ResourceType::DeviceAuthRequest,
+                        lookup_type: LookupType::ByCompositeId(
+                            authz_request.id(),
+                        ),
+                    }
+                }
                 TxnError::CustomError(TokenGrantError::ConcurrentRequests) => {
                     Error::invalid_request(
                         "token grant failed due to concurrent requests",
