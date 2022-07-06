@@ -61,9 +61,9 @@ OPERATION ID                             URL PATH
 ip_pool_create                           /ip-pools
 ip_pool_delete                           /ip-pools/{pool_name}
 ip_pool_list                             /ip-pools
-ip_pool_range_create                     /ip-pools/{pool_name}/ranges/add
-ip_pool_range_delete                     /ip-pools/{pool_name}/ranges/delete
+ip_pool_range_add                        /ip-pools/{pool_name}/ranges/add
 ip_pool_range_list                       /ip-pools/{pool_name}/ranges
+ip_pool_range_remove                     /ip-pools/{pool_name}/ranges/remove
 ip_pool_update                           /ip-pools/{pool_name}
 ip_pool_view                             /ip-pools/{pool_name}
 
@@ -96,10 +96,10 @@ OPERATION ID                             URL PATH
 project_create                           /organizations/{organization_name}/projects
 project_delete                           /organizations/{organization_name}/projects/{project_name}
 project_list                             /organizations/{organization_name}/projects
+project_policy_update                    /organizations/{organization_name}/projects/{project_name}/policy
+project_policy_view                      /organizations/{organization_name}/projects/{project_name}/policy
 project_update                           /organizations/{organization_name}/projects/{project_name}
-project_update_policy                    /organizations/{organization_name}/projects/{project_name}/policy
 project_view                             /organizations/{organization_name}/projects/{project_name}
-project_view_policy                      /organizations/{organization_name}/projects/{project_name}/policy
 
 API operations found with tag "roles"
 OPERATION ID                             URL PATH
@@ -121,15 +121,15 @@ session_sshkey_view                      /session/me/sshkeys/{ssh_key_name}
 API operations found with tag "silos"
 OPERATION ID                             URL PATH
 silo_create                              /silos
+silo_delete                              /silos/{silo_name}
 silo_identity_provider_create            /silos/{silo_name}/saml_identity_providers
 silo_identity_provider_list              /silos/{silo_name}/identity_providers
 silo_identity_provider_view              /silos/{silo_name}/saml_identity_providers/{provider_name}
 silo_list                                /silos
-silo_list_users                          /users
 silo_policy_update                       /silos/{silo_name}/policy
 silo_policy_view                         /silos/{silo_name}/policy
 silo_view                                /silos/{silo_name}
-solo_delete                              /silos/{silo_name}
+user_list                                /users
 
 API operations found with tag "snapshots"
 OPERATION ID                             URL PATH
@@ -151,19 +151,19 @@ API operations found with tag "vpcs"
 OPERATION ID                             URL PATH
 vpc_create                               /organizations/{organization_name}/projects/{project_name}/vpcs
 vpc_delete                               /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}
-vpc_firewall_list_rules                  /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/firewall/rules
-vpc_firewall_update_rules                /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/firewall/rules
+vpc_firewall_rules_update                /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/firewall/rules
+vpc_firewall_rules_view                  /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/firewall/rules
 vpc_list                                 /organizations/{organization_name}/projects/{project_name}/vpcs
 vpc_router_create                        /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers
-vpc_router_create_route                  /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes
 vpc_router_delete                        /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}
-vpc_router_delete_route                  /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}
 vpc_router_list                          /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers
-vpc_router_list_routes                   /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes
+vpc_router_route_create                  /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes
+vpc_router_route_delete                  /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}
+vpc_router_route_list                    /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes
+vpc_router_route_update                  /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}
+vpc_router_route_view                    /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}
 vpc_router_update                        /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}
-vpc_router_update_route                  /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}
 vpc_router_view                          /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}
-vpc_router_view_route                    /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}
 vpc_subnet_create                        /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets
 vpc_subnet_delete                        /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}
 vpc_subnet_list                          /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets

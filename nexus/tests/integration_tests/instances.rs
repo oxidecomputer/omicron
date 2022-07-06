@@ -2298,17 +2298,17 @@ async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
     let nexus = &apictx.nexus;
 
     // Create a project that we'll use for testing.
-    create_ip_pool(&client, POOL_NAME, None).await;
-    create_organization(&client, ORGANIZATION_NAME).await;
+    create_ip_pool(client, POOL_NAME, None).await;
+    create_organization(client, ORGANIZATION_NAME).await;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",
         ORGANIZATION_NAME, PROJECT_NAME
     );
-    let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
+    let _ = create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
     // Make sure we get a 404 if we try to access the serial console before creation.
     let instance_serial_url =
-        format!("{}/kris-picks/serial?from_start=0", url_instances);
+        format!("{}/kris-picks/serial-console?from_start=0", url_instances);
     let error: HttpErrorResponseBody = NexusRequest::expect_failure(
         client,
         StatusCode::NOT_FOUND,

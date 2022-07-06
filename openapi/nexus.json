@@ -785,7 +785,7 @@
           "ip-pools"
         ],
         "summary": "Add a new range to an existing IP Pool.",
-        "operationId": "ip_pool_range_create",
+        "operationId": "ip_pool_range_add",
         "parameters": [
           {
             "in": "path",
@@ -827,13 +827,13 @@
         }
       }
     },
-    "/ip-pools/{pool_name}/ranges/delete": {
+    "/ip-pools/{pool_name}/ranges/remove": {
       "post": {
         "tags": [
           "ip-pools"
         ],
         "summary": "Remove a range from an existing IP Pool.",
-        "operationId": "ip_pool_range_delete",
+        "operationId": "ip_pool_range_remove",
         "parameters": [
           {
             "in": "path",
@@ -3182,7 +3182,7 @@
           "projects"
         ],
         "summary": "Fetch the IAM policy for this Project",
-        "operationId": "project_view_policy",
+        "operationId": "project_policy_view",
         "parameters": [
           {
             "in": "path",
@@ -3229,7 +3229,7 @@
           "projects"
         ],
         "summary": "Update the IAM policy for this Project",
-        "operationId": "project_update_policy",
+        "operationId": "project_policy_update",
         "parameters": [
           {
             "in": "path",
@@ -3832,7 +3832,7 @@
           "vpcs"
         ],
         "summary": "List firewall rules for a VPC.",
-        "operationId": "vpc_firewall_list_rules",
+        "operationId": "vpc_firewall_rules_view",
         "parameters": [
           {
             "in": "path",
@@ -3886,7 +3886,7 @@
           "vpcs"
         ],
         "summary": "Replace the firewall rules for a VPC",
-        "operationId": "vpc_firewall_update_rules",
+        "operationId": "vpc_firewall_rules_update",
         "parameters": [
           {
             "in": "path",
@@ -4297,7 +4297,7 @@
           "vpcs"
         ],
         "summary": "List a Router's routes",
-        "operationId": "vpc_router_list_routes",
+        "operationId": "vpc_router_route_list",
         "parameters": [
           {
             "in": "query",
@@ -4391,7 +4391,7 @@
           "vpcs"
         ],
         "summary": "Create a VPC Router",
-        "operationId": "vpc_router_create_route",
+        "operationId": "vpc_router_route_create",
         "parameters": [
           {
             "in": "path",
@@ -4466,7 +4466,7 @@
           "vpcs"
         ],
         "summary": "Get a VPC Router route",
-        "operationId": "vpc_router_view_route",
+        "operationId": "vpc_router_route_view",
         "parameters": [
           {
             "in": "path",
@@ -4538,7 +4538,7 @@
           "vpcs"
         ],
         "summary": "Update a Router route",
-        "operationId": "vpc_router_update_route",
+        "operationId": "vpc_router_route_update",
         "parameters": [
           {
             "in": "path",
@@ -4620,7 +4620,7 @@
           "vpcs"
         ],
         "summary": "Delete a route from its router",
-        "operationId": "vpc_router_delete_route",
+        "operationId": "vpc_router_route_delete",
         "parameters": [
           {
             "in": "path",
@@ -5700,7 +5700,7 @@
           "silos"
         ],
         "summary": "Delete a specific silo.",
-        "operationId": "solo_delete",
+        "operationId": "silo_delete",
         "parameters": [
           {
             "in": "path",
@@ -6058,7 +6058,7 @@
           "silos"
         ],
         "summary": "List users",
-        "operationId": "silo_list_users",
+        "operationId": "user_list",
         "parameters": [
           {
             "in": "query",

@@ -81,17 +81,6 @@ pub fn external_api() -> NexusApiDescription {
         api.register(policy_view)?;
         api.register(policy_update)?;
 
-        api.register(silo_list)?;
-        api.register(silo_create)?;
-        api.register(silo_view)?;
-        api.register(solo_delete)?;
-        api.register(silo_identity_provider_list)?;
-        api.register(silo_policy_view)?;
-        api.register(silo_policy_update)?;
-
-        api.register(silo_identity_provider_create)?;
-        api.register(silo_identity_provider_view)?;
-
         api.register(organization_list)?;
         api.register(organization_create)?;
         api.register(organization_view)?;
@@ -105,8 +94,8 @@ pub fn external_api() -> NexusApiDescription {
         api.register(project_view)?;
         api.register(project_delete)?;
         api.register(project_update)?;
-        api.register(project_view_policy)?;
-        api.register(project_update_policy)?;
+        api.register(project_policy_view)?;
+        api.register(project_policy_update)?;
 
         api.register(ip_pool_list)?;
         api.register(ip_pool_create)?;
@@ -115,8 +104,8 @@ pub fn external_api() -> NexusApiDescription {
         api.register(ip_pool_update)?;
 
         api.register(ip_pool_range_list)?;
-        api.register(ip_pool_range_create)?;
-        api.register(ip_pool_range_delete)?;
+        api.register(ip_pool_range_add)?;
+        api.register(ip_pool_range_remove)?;
 
         api.register(disk_list)?;
         api.register(disk_create)?;
@@ -132,12 +121,6 @@ pub fn external_api() -> NexusApiDescription {
         api.register(instance_start)?;
         api.register(instance_stop)?;
         api.register(instance_serial_console)?;
-
-        // Globally-scoped Images API
-        api.register(image_global_list)?;
-        api.register(image_global_create)?;
-        api.register(image_global_view)?;
-        api.register(image_global_delete)?;
 
         // Project-scoped images API
         api.register(image_list)?;
@@ -179,26 +162,22 @@ pub fn external_api() -> NexusApiDescription {
         api.register(vpc_router_delete)?;
         api.register(vpc_router_update)?;
 
-        api.register(vpc_router_list_routes)?;
-        api.register(vpc_router_view_route)?;
-        api.register(vpc_router_create_route)?;
-        api.register(vpc_router_delete_route)?;
-        api.register(vpc_router_update_route)?;
+        api.register(vpc_router_route_list)?;
+        api.register(vpc_router_route_view)?;
+        api.register(vpc_router_route_create)?;
+        api.register(vpc_router_route_delete)?;
+        api.register(vpc_router_route_update)?;
 
-        api.register(vpc_firewall_list_rules)?;
-        api.register(vpc_firewall_update_rules)?;
+        api.register(vpc_firewall_rules_view)?;
+        api.register(vpc_firewall_rules_update)?;
 
         api.register(rack_list)?;
         api.register(rack_view)?;
         api.register(sled_list)?;
         api.register(sled_view)?;
 
-        api.register(updates_refresh)?;
-
         api.register(saga_list)?;
         api.register(saga_view)?;
-
-        api.register(silo_list_users)?;
 
         api.register(system_user_list)?;
         api.register(system_user_view)?;
@@ -213,6 +192,27 @@ pub fn external_api() -> NexusApiDescription {
         api.register(session_sshkey_create)?;
         api.register(session_sshkey_delete)?;
 
+        // Fleet-wide API operations
+        api.register(silo_list)?;
+        api.register(silo_create)?;
+        api.register(silo_view)?;
+        api.register(silo_delete)?;
+        api.register(silo_identity_provider_list)?;
+        api.register(silo_policy_view)?;
+        api.register(silo_policy_update)?;
+
+        api.register(silo_identity_provider_create)?;
+        api.register(silo_identity_provider_view)?;
+
+        api.register(image_global_list)?;
+        api.register(image_global_create)?;
+        api.register(image_global_view)?;
+        api.register(image_global_delete)?;
+
+        api.register(updates_refresh)?;
+        api.register(user_list)?;
+
+        // Console API operations
         api.register(console_api::spoof_login)?;
         api.register(console_api::spoof_login_form)?;
         api.register(console_api::login_redirect)?;
@@ -421,7 +421,7 @@ async fn silo_view(
     path = "/silos/{silo_name}",
     tags = ["silos"],
 }]
-async fn solo_delete(
+async fn silo_delete(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<SiloPathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
@@ -990,7 +990,7 @@ async fn project_update(
     path = "/organizations/{organization_name}/projects/{project_name}/policy",
     tags = ["projects"],
 }]
-async fn project_view_policy(
+async fn project_policy_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::ProjectRole>>, HttpError> {
@@ -1016,7 +1016,7 @@ async fn project_view_policy(
     path = "/organizations/{organization_name}/projects/{project_name}/policy",
     tags = ["projects"],
 }]
-async fn project_update_policy(
+async fn project_policy_update(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
     new_policy: TypedBody<shared::Policy<authz::ProjectRole>>,
@@ -1231,14 +1231,13 @@ async fn ip_pool_range_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-// TODO shouldn't this just be a POST on /ip-pools/{pool_name}/ranges?
 /// Add a new range to an existing IP Pool.
 #[endpoint {
     method = POST,
     path = "/ip-pools/{pool_name}/ranges/add",
     tags = ["ip-pools"],
 }]
-async fn ip_pool_range_create(
+async fn ip_pool_range_add(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<IpPoolPathParam>,
     range_params: TypedBody<shared::IpRange>,
@@ -1256,15 +1255,13 @@ async fn ip_pool_range_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-// TODO should this be a DELETE on a path that includes the range_id?
-// TODO are we missing a GET on a particular range_id?
 /// Remove a range from an existing IP Pool.
 #[endpoint {
     method = POST,
-    path = "/ip-pools/{pool_name}/ranges/delete",
+    path = "/ip-pools/{pool_name}/ranges/remove",
     tags = ["ip-pools"],
 }]
-async fn ip_pool_range_delete(
+async fn ip_pool_range_remove(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<IpPoolPathParam>,
     range_params: TypedBody<shared::IpRange>,
@@ -2830,13 +2827,14 @@ async fn vpc_subnet_list_network_interfaces(
 
 // VPC Firewalls
 
+// TODO Is the number of firewall rules bounded?
 /// List firewall rules for a VPC.
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/firewall/rules",
     tags = ["vpcs"],
 }]
-async fn vpc_firewall_list_rules(
+async fn vpc_firewall_rules_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcPathParam>,
 ) -> Result<HttpResponseOk<VpcFirewallRules>, HttpError> {
@@ -2869,7 +2867,7 @@ async fn vpc_firewall_list_rules(
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/firewall/rules",
     tags = ["vpcs"],
 }]
-async fn vpc_firewall_update_rules(
+async fn vpc_firewall_rules_update(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcPathParam>,
     router_params: TypedBody<VpcFirewallRuleUpdateParams>,
@@ -3075,7 +3073,7 @@ async fn vpc_router_update(
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes",
     tags = ["vpcs"],
 }]
-async fn vpc_router_list_routes(
+async fn vpc_router_route_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByName>,
     path_params: Path<VpcRouterPathParam>,
@@ -3125,7 +3123,7 @@ struct RouterRoutePathParam {
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}",
     tags = ["vpcs"],
 }]
-async fn vpc_router_view_route(
+async fn vpc_router_route_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<RouterRoutePathParam>,
 ) -> Result<HttpResponseOk<RouterRoute>, HttpError> {
@@ -3155,7 +3153,7 @@ async fn vpc_router_view_route(
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes",
     tags = ["vpcs"],
 }]
-async fn vpc_router_create_route(
+async fn vpc_router_route_create(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcRouterPathParam>,
     create_params: TypedBody<RouterRouteCreateParams>,
@@ -3187,7 +3185,7 @@ async fn vpc_router_create_route(
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}",
     tags = ["vpcs"],
 }]
-async fn vpc_router_delete_route(
+async fn vpc_router_route_delete(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<RouterRoutePathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
@@ -3217,7 +3215,7 @@ async fn vpc_router_delete_route(
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}",
     tags = ["vpcs"],
 }]
-async fn vpc_router_update_route(
+async fn vpc_router_route_update(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<RouterRoutePathParam>,
     router_params: TypedBody<RouterRouteUpdateParams>,
@@ -3448,7 +3446,7 @@ async fn saga_view(
     path = "/users",
     tags = ["silos"],
 }]
-async fn silo_list_users(
+async fn user_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<User>>, HttpError> {
@@ -3536,7 +3534,6 @@ async fn system_user_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-// TODO is this the right interface?
 /// List all timeseries schema
 #[endpoint {
     method = GET,

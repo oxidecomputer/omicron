@@ -199,7 +199,7 @@ lazy_static! {
     pub static ref DEMO_INSTANCE_NICS_URL: String =
         format!("{}/network-interfaces", *DEMO_INSTANCE_URL);
     pub static ref DEMO_INSTANCE_SERIAL_URL: String =
-        format!("{}/serial", *DEMO_INSTANCE_URL);
+        format!("{}/serial-console", *DEMO_INSTANCE_URL);
     pub static ref DEMO_INSTANCE_CREATE: params::InstanceCreate =
         params::InstanceCreate {
             identity: IdentityMetadataCreateParams {
@@ -299,7 +299,7 @@ lazy_static! {
     ).unwrap());
     pub static ref DEMO_IP_POOL_RANGES_URL: String = format!("{}/ranges", *DEMO_IP_POOL_URL);
     pub static ref DEMO_IP_POOL_RANGES_ADD_URL: String = format!("{}/add", *DEMO_IP_POOL_RANGES_URL);
-    pub static ref DEMO_IP_POOL_RANGES_DEL_URL: String = format!("{}/delete", *DEMO_IP_POOL_RANGES_URL);
+    pub static ref DEMO_IP_POOL_RANGES_DEL_URL: String = format!("{}/remove", *DEMO_IP_POOL_RANGES_URL);
 
     // Snapshots
     pub static ref DEMO_SNAPSHOT_NAME: Name = "demo-snapshot".parse().unwrap();
