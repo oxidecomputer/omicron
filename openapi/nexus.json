@@ -120,17 +120,6 @@
         "summary": "Verify an OAuth 2.0 Device Authorization Grant",
         "description": "This endpoint should be accessed in a full user agent (e.g., a browser). If the user is not logged in, we redirect them to the login page and use the `state` parameter to get them back here on completion. If they are logged in, serve up the console verification page so they can verify the user code.",
         "operationId": "device_auth_verify",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "user_code",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "style": "form"
-          }
-        ],
         "responses": {
           "default": {
             "description": "",
