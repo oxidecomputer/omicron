@@ -5,7 +5,10 @@
 use super::{
     impl_authenticated_saga_params, saga_generate_uuid, AuthenticatedSagaParams,
 };
-use crate::app::{MAX_DISKS_PER_INSTANCE, MAX_NICS_PER_INSTANCE};
+use crate::app::{
+    MAX_DISKS_PER_INSTANCE, MAX_EPHEMERAL_IPS_PER_INSTANCE,
+    MAX_NICS_PER_INSTANCE,
+};
 use crate::context::OpContext;
 use crate::db::identity::Resource;
 use crate::db::lookup::LookupPath;
@@ -141,15 +144,39 @@ fn saga_instance_create() -> SagaTemplate<SagaInstanceCreate> {
         new_action_noop_undo(sic_create_network_interfaces),
     );
 
-    // Grab an external IP address and port range for the guest's Internet
-    // Gateway, allowing external connectivity.
+    // Allocate an external IP address for the default outbound connectivity,
+    // i.e., instance source NAT. We first allocate the ID, for the same reason
+    // we do so in the case of network interfaces.
     template_builder.append(
-        "external_ip",
-        "ExternalIp",
+        "snat_ip_id",
+        "SnatIpId",
         ActionFunc::new_action(
-            sic_allocate_external_ip,
-            sic_allocate_external_ip_undo,
+            sic_allocate_instance_snat_ip_id,
+            sic_allocate_temporary_external_ips_undo,
         ),
+    );
+    template_builder.append(
+        "snat_ip",
+        "SnatIp",
+        new_action_noop_undo(sic_allocate_instance_snat_ip),
+    );
+
+    // Allocate IDs for each requested _Ephemeral_ IP address.
+    //
+    // While it's not yet implemented, we need to _attach_ existing Floating
+    // IPs, not create new ones.
+    template_builder.append(
+        "ephemeral_ip_ids",
+        "EphemeralIpIds",
+        ActionFunc::new_action(
+            sic_allocate_instance_ephemeral_ip_ids,
+            sic_allocate_temporary_external_ips_undo,
+        ),
+    );
+    template_builder.append(
+        "ephemeral_ips",
+        "EphemeralIps",
+        new_action_noop_undo(sic_allocate_instance_ephemeral_ips),
     );
 
     // Saga actions must be atomic - they have to fully complete or fully abort.
@@ -481,25 +508,38 @@ async fn sic_create_network_interfaces_undo(
     Ok(())
 }
 
-/// Create an external IP address for the instance.
-async fn sic_allocate_external_ip(
-    sagactx: ActionContext<SagaInstanceCreate>,
+/// Create an ID for an external IP address for instance source NAT.
+async fn sic_allocate_instance_snat_ip_id(
+    _: ActionContext<SagaInstanceCreate>,
 ) -> Result<Uuid, ActionError> {
+    Ok(Uuid::new_v4())
+}
+
+/// Create an external IP address for instance source NAT.
+async fn sic_allocate_instance_snat_ip(
+    sagactx: ActionContext<SagaInstanceCreate>,
+) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
     let saga_params = sagactx.saga_params();
     let opctx =
         OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
-    let external_ip = datastore
-        .allocate_instance_external_ip(&opctx, instance_id)
+    let ip_id = sagactx.lookup::<Uuid>("snat_ip_id")?;
+    datastore
+        .allocate_instance_snat_ip(
+            &opctx,
+            ip_id,
+            saga_params.project_id,
+            instance_id,
+        )
         .await
         .map_err(ActionError::action_failed)?;
-    Ok(external_ip.id)
+    Ok(())
 }
 
-/// Destroy / release an external IP address allocated for the instance.
-async fn sic_allocate_external_ip_undo(
+/// Destroy all allocated _temporary_ external IPs (SNAT or Ephemeral)
+async fn sic_allocate_temporary_external_ips_undo(
     sagactx: ActionContext<SagaInstanceCreate>,
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
@@ -507,11 +547,76 @@ async fn sic_allocate_external_ip_undo(
     let saga_params = sagactx.saga_params();
     let opctx =
         OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
-    let ip_id = sagactx.lookup::<Uuid>("external_ip")?;
+    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
     datastore
-        .deallocate_instance_external_ip(&opctx, ip_id)
+        .deallocate_instance_external_ip_by_instance_id(&opctx, instance_id)
         .await
         .map_err(ActionError::action_failed)?;
+    Ok(())
+}
+
+/// Create an ID for each external Ephemeral IP address.
+async fn sic_allocate_instance_ephemeral_ip_ids(
+    sagactx: ActionContext<SagaInstanceCreate>,
+) -> Result<Vec<Uuid>, ActionError> {
+    let saga_params = sagactx.saga_params();
+    if saga_params.create_params.external_ips.len()
+        > MAX_EPHEMERAL_IPS_PER_INSTANCE as _
+    {
+        return Err(ActionError::action_failed(Error::invalid_request(
+            format!(
+                "At most {} Ephemeral IP(s) are supported",
+                MAX_EPHEMERAL_IPS_PER_INSTANCE
+            )
+            .as_str(),
+        )));
+    }
+    Ok(saga_params
+        .create_params
+        .external_ips
+        .iter()
+        .filter_map(|ip| {
+            if matches!(ip, params::ExternalIpCreate::Ephemeral { .. }) {
+                Some(Uuid::new_v4())
+            } else {
+                None
+            }
+        })
+        .collect())
+}
+
+/// Create the requested Ephemeral IPs for the instance.
+async fn sic_allocate_instance_ephemeral_ips(
+    sagactx: ActionContext<SagaInstanceCreate>,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let datastore = osagactx.datastore();
+    let saga_params = sagactx.saga_params();
+    let opctx =
+        OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
+    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+    let ids = sagactx.lookup::<Vec<Uuid>>("ephemeral_ip_ids")?;
+
+    // Collect the list of all pool names for the Ephemeral IPs.
+    let pool_names = saga_params.create_params.external_ips.iter().map(|ip| {
+        match ip {
+            params::ExternalIpCreate::Ephemeral { ref pool_name } => {
+                pool_name.as_ref().map(|n| db::model::Name(n.clone()))
+            } // TODO-completeness: Implement Floating IPs
+        }
+    });
+    for (id, pool_name) in ids.into_iter().zip(pool_names) {
+        datastore
+            .allocate_instance_ephemeral_ip(
+                &opctx,
+                id,
+                saga_params.project_id,
+                instance_id,
+                pool_name,
+            )
+            .await
+            .map_err(ActionError::action_failed)?;
+    }
     Ok(())
 }
 

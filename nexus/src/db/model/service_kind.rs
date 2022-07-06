@@ -5,7 +5,6 @@
 use super::impl_enum_type;
 use crate::internal_api;
 use serde::{Deserialize, Serialize};
-use std::io::Write;
 
 impl_enum_type!(
     #[derive(SqlType, Debug, QueryId)]

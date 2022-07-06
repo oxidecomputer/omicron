@@ -13,6 +13,7 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::Resource;
 use crate::db::lookup::LookupPath;
+use crate::db::model::IpKind;
 use crate::db::model::Name;
 use crate::db::queries::network_interface;
 use crate::external_api::params;
@@ -216,12 +217,15 @@ impl super::Nexus {
         self.db_datastore
             .project_delete_instance(opctx, &authz_instance)
             .await?;
+        // Ignore the count of addresses deleted, since we're not sure how many
+        // exist at this point.
         self.db_datastore
             .deallocate_instance_external_ip_by_instance_id(
                 opctx,
                 authz_instance.id(),
             )
-            .await
+            .await?;
+        Ok(())
     }
 
     pub async fn project_instance_migrate(
@@ -488,11 +492,20 @@ impl super::Nexus {
             .derive_guest_network_interface_info(&opctx, &authz_instance)
             .await?;
 
-        let external_ip = self
+        // Collect the external IPs for the instance.
+        //
+        // For now, we take the Ephemeral IP, if it exists, or the SNAT IP if not.
+        // TODO-correctness: Handle multiple IP addresses
+        // TODO-correctness: Handle Floating IPs
+        let (ephemeral_ips, snat_ip): (Vec<_>, Vec<_>) = self
             .db_datastore
-            .instance_lookup_external_ip(&opctx, authz_instance.id())
-            .await
-            .map(ExternalIp::from)?;
+            .instance_lookup_external_ips(&opctx, authz_instance.id())
+            .await?
+            .into_iter()
+            .partition(|ip| ip.kind == IpKind::Ephemeral);
+        let external_ip = ExternalIp::from(
+            ephemeral_ips.into_iter().chain(snat_ip).next().unwrap(),
+        );
 
         // Gather the SSH public keys of the actor make the request so
         // that they may be injected into the new image via cloud-init.

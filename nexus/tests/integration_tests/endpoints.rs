@@ -198,6 +198,8 @@ lazy_static! {
         format!("{}/detach", *DEMO_INSTANCE_DISKS_URL);
     pub static ref DEMO_INSTANCE_NICS_URL: String =
         format!("{}/network-interfaces", *DEMO_INSTANCE_URL);
+    pub static ref DEMO_INSTANCE_EXTERNAL_IPS_URL: String =
+        format!("{}/external-ips", *DEMO_INSTANCE_URL);
     pub static ref DEMO_INSTANCE_SERIAL_URL: String =
         format!("{}/serial-console", *DEMO_INSTANCE_URL);
     pub static ref DEMO_INSTANCE_CREATE: params::InstanceCreate =
@@ -212,6 +214,9 @@ lazy_static! {
             user_data: vec![],
             network_interfaces:
                 params::InstanceNetworkInterfaceAttachment::Default,
+            external_ips: vec![
+                params::ExternalIpCreate::Ephemeral { pool_name: None }
+            ],
             disks: vec![],
         };
 
@@ -284,6 +289,7 @@ lazy_static! {
                 name: DEMO_IP_POOL_NAME.clone(),
                 description: String::from("an IP pool"),
             },
+            project: None,
         };
     pub static ref DEMO_IP_POOL_URL: String = format!("/ip-pools/{}", *DEMO_IP_POOL_NAME);
     pub static ref DEMO_IP_POOL_UPDATE: params::IpPoolUpdate =
@@ -1173,6 +1179,14 @@ lazy_static! {
                     serde_json::to_value(&*DEMO_INSTANCE_NIC_PUT).unwrap()
                 ),
             ],
+        },
+
+        /* Instance external IP addresses */
+        VerifyEndpoint {
+            url: &*DEMO_INSTANCE_EXTERNAL_IPS_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![AllowedMethod::Get],
         },
 
         /* IAM */

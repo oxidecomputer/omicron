@@ -7,7 +7,6 @@ use crate::db::schema::{identity_provider, saml_identity_provider};
 use db_macros::Resource;
 
 use serde::{Deserialize, Serialize};
-use std::io::Write;
 use uuid::Uuid;
 
 impl_enum_type!(

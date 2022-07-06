@@ -8,7 +8,6 @@ use crate::db::model::impl_enum_type;
 use crate::db::schema::{organization, silo};
 use crate::external_api::{params, shared};
 use db_macros::Resource;
-use std::io::Write;
 use uuid::Uuid;
 
 impl_enum_type!(

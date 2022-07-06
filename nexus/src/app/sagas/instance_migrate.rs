@@ -7,6 +7,7 @@ use super::{impl_authenticated_saga_params, saga_generate_uuid};
 use crate::authn;
 use crate::context::OpContext;
 use crate::db::identity::Resource;
+use crate::db::model::IpKind;
 use crate::external_api::params;
 use crate::saga_interface::SagaContext;
 use lazy_static::lazy_static;
@@ -163,12 +164,23 @@ async fn sim_instance_migrate(
         )),
         ..old_runtime
     };
-    let external_ip = osagactx
+
+    // Collect the external IPs for the instance.
+    //
+    // For now, we take the Ephemeral IP, if it exists, or the SNAT IP if not.
+    // TODO-correctness: Handle multiple IP addresses
+    // TODO-correctness: Handle Floating IPs
+    let (ephemeral_ips, snat_ip): (Vec<_>, Vec<_>) = osagactx
         .datastore()
-        .instance_lookup_external_ip(&opctx, instance_id)
+        .instance_lookup_external_ips(&opctx, instance_id)
         .await
-        .map_err(ActionError::action_failed)
-        .map(ExternalIp::from)?;
+        .map_err(ActionError::action_failed)?
+        .into_iter()
+        .partition(|ip| ip.kind == IpKind::Ephemeral);
+    let external_ip = ExternalIp::from(
+        ephemeral_ips.into_iter().chain(snat_ip).next().unwrap(),
+    );
+
     let instance_hardware = InstanceHardware {
         runtime: runtime.into(),
         // TODO: populate NICs

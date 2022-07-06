@@ -7,6 +7,9 @@
 
 use crate::db::model::IncompleteInstanceExternalIp;
 use crate::db::model::InstanceExternalIp;
+use crate::db::model::IpKind;
+use crate::db::model::IpKindEnum;
+use crate::db::model::Name;
 use crate::db::pool::DbConnection;
 use crate::db::schema;
 use chrono::DateTime;
@@ -78,9 +81,12 @@ const MAX_PORT: i32 = u16::MAX as _;
 ///     (
 ///         SELECT
 ///             <ip_id> AS id,
+///             <name> AS name,
+///             <description> AS description,
 ///             <now> AS time_created,
 ///             <now> AS time_modified,
 ///             NULL AS time_deleted,
+///             <project_id> AS project_id,
 ///             <instance_id> AS instance_id,
 ///             ip_pool_id,
 ///             ip_pool_range_id,
@@ -99,6 +105,8 @@ const MAX_PORT: i32 = u16::MAX as _;
 ///                 FROM
 ///                     ip_pool_range
 ///                 WHERE
+///                     project_id = <project_id> OR
+///                     project_id IS NULL AND
 ///                     time_deleted IS NULL
 ///             )
 ///         CROSS JOIN
@@ -122,23 +130,13 @@ const MAX_PORT: i32 = u16::MAX as _;
 ///             (ip, first_port, time_deleted IS NULL) =
 ///             (candidate_ip, candidate_first_port, TRUE)
 ///         WHERE
-///             ip IS NULL AND
-///             first_port IS NULL AND
-///             time_deleted IS NULL
+///             ip IS NULL
+///         ORDER BY
+///             candidate_ip, candidate_first_port
 ///         LIMIT 1
 ///     )
-///     RETURNING
-///         id,
-///         time_created,
-///         time_modified,
-///         time_deleted,
-///         instance_id,
-///         ip_pool_id,
-///         ip_pool_range_id,
-///         ip,
-///         first_port,
-///         last_port
-///     ),
+///     RETURNING *
+/// ),
 /// updated_pool AS (
 ///     UPDATE SET
 ///         ip_pool_range
@@ -173,7 +171,8 @@ const MAX_PORT: i32 = u16::MAX as _;
 pub struct NextExternalIp {
     // TODO-completeness: Add `ip_pool_id`, and restrict search to it.
     ip: IncompleteInstanceExternalIp,
-    // Number of ports reserved per IP address
+    // Number of ports reserved per IP address. Only applicable if the IP kind
+    // is snat.
     n_ports_per_chunk: i32,
     // The offset from the first port to the last, inclusive. This is required
     // because the ranges must not overlap and `generate_series` is inclusive of
@@ -203,30 +202,44 @@ impl NextExternalIp {
 
         // NOTE: These columns must be selected in the order in which they
         // appear in the table, to avoid needing to push the explicit column
-        // names as well.
-        out.push_bind_param::<sql_types::Uuid, Uuid>(&self.ip.id)?;
+        // names in the RETURNING clause and final SELECT from the CTE.
+
+        // Id
+        out.push_bind_param::<sql_types::Uuid, Uuid>(self.ip.id())?;
         out.push_sql(" AS ");
         out.push_identifier(dsl::id::NAME)?;
         out.push_sql(", ");
 
+        // Name, possibly null
+        out.push_bind_param::<sql_types::Nullable<sql_types::Text>, Option<Name>>(self.ip.name())?;
+        out.push_sql(" AS ");
+        out.push_identifier(dsl::name::NAME)?;
+        out.push_sql(", ");
+
+        // Description, possibly null
+        out.push_bind_param::<sql_types::Nullable<sql_types::Text>, Option<String>>(self.ip.description())?;
+        out.push_sql(" AS ");
+        out.push_identifier(dsl::description::NAME)?;
+        out.push_sql(", ");
+
         // Time-created
         out.push_bind_param::<sql_types::Timestamptz, DateTime<Utc>>(
-            &self.ip.time_created,
+            self.ip.time_created(),
         )?;
         out.push_sql(" AS ");
         out.push_identifier(dsl::time_created::NAME)?;
         out.push_sql(", ");
 
-        // Time-modified
+        // Time-modified, same as created
         out.push_bind_param::<sql_types::Timestamptz, DateTime<Utc>>(
-            &self.ip.time_modified,
+            self.ip.time_created(),
         )?;
         out.push_sql(" AS ");
         out.push_identifier(dsl::time_modified::NAME)?;
         out.push_sql(", ");
 
-        // Time-modified
-        out.push_bind_param::<sql_types::Nullable<sql_types::Timestamptz>, Option<DateTime<Utc>>>(&self.ip.time_deleted)?;
+        // Time-deleted
+        out.push_bind_param::<sql_types::Nullable<sql_types::Timestamptz>, Option<DateTime<Utc>>>(&None)?;
         out.push_sql(" AS ");
         out.push_identifier(dsl::time_deleted::NAME)?;
         out.push_sql(", ");
@@ -239,10 +252,22 @@ impl NextExternalIp {
         out.push_identifier(dsl::ip_pool_range_id::NAME)?;
         out.push_sql(", ");
 
+        // Project ID
+        out.push_bind_param::<sql_types::Uuid, Uuid>(self.ip.project_id())?;
+        out.push_sql(" AS ");
+        out.push_identifier(dsl::project_id::NAME)?;
+        out.push_sql(", ");
+
         // Instance ID
-        out.push_bind_param::<sql_types::Uuid, Uuid>(&self.ip.instance_id)?;
+        out.push_bind_param::<sql_types::Nullable<sql_types::Uuid>, Option<Uuid>>(self.ip.instance_id())?;
         out.push_sql(" AS ");
         out.push_identifier(dsl::instance_id::NAME)?;
+        out.push_sql(", ");
+
+        // IP kind
+        out.push_bind_param::<IpKindEnum, IpKind>(self.ip.kind())?;
+        out.push_sql(" AS ");
+        out.push_identifier(dsl::kind::NAME)?;
         out.push_sql(", ");
 
         // Candidate IP from the subquery
@@ -260,27 +285,97 @@ impl NextExternalIp {
         self.push_port_sequence_subquery(out.reborrow())?;
         out.push_sql(") LEFT OUTER JOIN ");
         INSTANCE_EXTERNAL_IP_FROM_CLAUSE.walk_ast(out.reborrow())?;
-        out.push_sql(" ON (");
+
+        // This is for SNAT IPs. For floating or ephemeral, we don't want to
+        // consider the port in the JOIN, just the address (_any_ port chunk
+        // means we can't use that address for the floating/ephemeral IP).
+        // Something like:
+        //
+        // ON (ip, time_deleted IS NULL) = (candidate_ip, TRUE)
+        //
+        // We'll also need to change how we generate the port sequence subquery.
+        // It should always be 0, basically, but not sure the best way to do
+        // that. SELECT 0? That should work:
+        //
+        // SELECT 0 as candidate_first_port, 65535 as candidate_last_port
+
+        // The JOIN conditions depend on the IP type. For automatic SNAT IP
+        // addresses, we need to consider existing records with their port
+        // ranges. That's because we want to allow providing two different
+        // chunks of ports from the same IP to two different guests.
+        //
+        // However, for Floating and Ephemeral IPs, we need to reserve the
+        // entire port range. Guests may start listening on any port, and we
+        // need to allow inbound connections to that port. (It can't be
+        // rewritten on the way in.)
+        //
+        // In the first case the JOIN conditions look like:
+        //
+        // ```sql
+        // ON
+        //     (ip, first_port, time_deleted IS NULL) =
+        //     (candidate_ip, candidate_first_port, TRUE)
+        // ```
+        //
+        // I.e., we're considering records in the list of possibles to match
+        // when the IP and the first port both match an existing record.
+        //
+        // In the second case, the conditions are:
+        //
+        // ```sql
+        // ON (ip, time_deleted IS NULL) = (candidate_ip, TRUE)
+        // ```
+        //
+        // Here, we don't care what the port is. Any record in the table that
+        // has that IP should be considered a match.
+        //
+        // In either case, we follow this with a filter `WHERE ip IS NULL`,
+        // meaning we select the candidate address and first port that does not
+        // have a matching record in the table already.
+        if matches!(self.ip.kind(), &IpKind::SNat) {
+            out.push_sql(" ON (");
+            out.push_identifier(dsl::ip::NAME)?;
+            out.push_sql(", ");
+            out.push_identifier(dsl::first_port::NAME)?;
+            out.push_sql(", ");
+            out.push_identifier(dsl::time_deleted::NAME)?;
+            out.push_sql(
+                " IS NULL) = (candidate_ip, candidate_first_port, TRUE) ",
+            );
+        } else {
+            out.push_sql(" ON (");
+            out.push_identifier(dsl::ip::NAME)?;
+            out.push_sql(", ");
+            out.push_identifier(dsl::time_deleted::NAME)?;
+            out.push_sql(" IS NULL) = (candidate_ip, TRUE) ");
+        }
+
+        // In all cases, we're selecting rows from the join that don't have a
+        // match in the existing table.
+        //
+        // This is a bit subtle. The join condition considers rows a match if
+        // the `time_deleted` is null. That means that if the record has been
+        // soft-deleted, it won't be considered a match, and thus both the IP
+        // and first port (in the join result) will be null. Note that there
+        // _is_ a record in the `instance_external_ip` table that has that IP
+        // and possibly first port, but since it's been soft-deleted, it's not a
+        // match. In that case, we can get away with _only_ filtering the join
+        // results on the IP from the `instance_external_ip` table being NULL.
+        out.push_sql(" WHERE ");
         out.push_identifier(dsl::ip::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::first_port::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::time_deleted::NAME)?;
         out.push_sql(
-            " IS NULL) = (candidate_ip, candidate_first_port, TRUE) WHERE ",
+            " IS NULL \
+            ORDER BY candidate_ip, candidate_first_port \
+            LIMIT 1) RETURNING *",
         );
-        out.push_identifier(dsl::ip::NAME)?;
-        out.push_sql(" IS NULL AND ");
-        out.push_identifier(dsl::first_port::NAME)?;
-        out.push_sql(" IS NULL AND ");
-        out.push_identifier(dsl::time_deleted::NAME)?;
-        out.push_sql(" IS NULL LIMIT 1) RETURNING *");
 
         Ok(())
     }
 
     // Push a subquery that selects the sequence of IP addresses, from each range in
-    // each IP Pool, along with the pool/range IDs.
+    // each IP Pool, along with the pool/range IDs. Note that we only allow
+    // allocation out of IP Pools that match the project_id of the instance, or
+    // which have no project ID (the pool is not restricted to a project)
     //
     // ```sql
     // SELECT
@@ -292,6 +387,7 @@ impl NextExternalIp {
     // FROM
     //     ip_pool_range
     // WHERE
+    //     (project_id = <project_id> OR project_id IS NULL) AND
     //     time_deleted IS NULL
     // ```
     fn push_address_sequence_subquery<'a>(
@@ -311,14 +407,27 @@ impl NextExternalIp {
         out.push_identifier(dsl::first_address::NAME)?;
         out.push_sql(") AS candidate_ip FROM ");
         IP_POOL_RANGE_FROM_CLAUSE.walk_ast(out.reborrow())?;
-        out.push_sql(" WHERE ");
+        out.push_sql(" WHERE (");
+        out.push_identifier(dsl::project_id::NAME)?;
+        out.push_sql(" = ");
+        out.push_bind_param::<sql_types::Uuid, Uuid>(self.ip.project_id())?;
+        out.push_sql(" OR ");
+        out.push_identifier(dsl::project_id::NAME)?;
+        out.push_sql(" IS NULL) AND ");
         out.push_identifier(dsl::time_deleted::NAME)?;
         out.push_sql(" IS NULL");
         Ok(())
     }
 
     // Push a subquery that selects the possible values for a first port, based on
-    // the defined spacing.
+    // the defined spacing. Note that there are two forms, depending on whether
+    // the IP type we're allocating for is Floating/Ephemeral, or an SNAT IP
+    // address.
+    //
+    // For SNAT addresses, we want to provide port ranges. Those ranges must not
+    // overlap between different records, but there will be more than one record
+    // with the same IP. This subquery then generates the port-range chunks
+    // sequentially.
     //
     // ```sql
     // SELECT
@@ -330,17 +439,38 @@ impl NextExternalIp {
     //     generate_series(0, <MAX_PORT>, <NUM_SOURCE_NAT_PORTS>)
     //         AS candidate_first_port
     // ```
+    //
+    // For Floating or Ephemeral IP addresses, we reserve the entire port range
+    // for the guest. In this case, we generate the static values 0 and 65535:
+    //
+    // ```sql
+    // SELECT
+    //     0 AS candidate_first_port,
+    //     65535 AS candidate_last_port
+    // ```
     fn push_port_sequence_subquery<'a>(
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
     ) -> QueryResult<()> {
-        out.push_sql("SELECT candidate_first_port, candidate_first_port + ");
-        out.push_bind_param::<sql_types::Int4, i32>(&self.last_port_offset)?;
-        out.push_sql(" AS candidate_last_port FROM generate_series(0, ");
-        out.push_bind_param::<sql_types::Int4, i32>(&MAX_PORT)?;
-        out.push_sql(", ");
-        out.push_bind_param::<sql_types::Int4, i32>(&self.n_ports_per_chunk)?;
-        out.push_sql(") AS candidate_first_port");
+        if matches!(self.ip.kind(), &IpKind::SNat) {
+            out.push_sql(
+                "SELECT candidate_first_port, candidate_first_port + ",
+            );
+            out.push_bind_param::<sql_types::Int4, i32>(
+                &self.last_port_offset,
+            )?;
+            out.push_sql(" AS candidate_last_port FROM generate_series(0, ");
+            out.push_bind_param::<sql_types::Int4, i32>(&MAX_PORT)?;
+            out.push_sql(", ");
+            out.push_bind_param::<sql_types::Int4, i32>(
+                &self.n_ports_per_chunk,
+            )?;
+            out.push_sql(") AS candidate_first_port");
+        } else {
+            out.push_sql("SELECT 0 AS candidate_first_port, ");
+            out.push_bind_param::<sql_types::Int4, i32>(&MAX_PORT)?;
+            out.push_sql(" AS candidate_last_port");
+        }
         Ok(())
     }
 
@@ -419,6 +549,7 @@ mod tests {
     use crate::context::OpContext;
     use crate::db::datastore::DataStore;
     use crate::db::identity::Resource;
+    use crate::db::model::IpKind;
     use crate::db::model::IpPool;
     use crate::db::model::IpPoolRange;
     use crate::external_api::shared::IpRange;
@@ -454,11 +585,22 @@ mod tests {
             Self { logctx, opctx, db, db_datastore }
         }
 
-        async fn create_ip_pool(&self, name: &str, range: IpRange) {
-            let pool = IpPool::new(&IdentityMetadataCreateParams {
-                name: String::from(name).parse().unwrap(),
-                description: format!("ip pool {}", name),
-            });
+        async fn create_ip_pool(
+            &self,
+            name: &str,
+            range: IpRange,
+            project_id: Option<Uuid>,
+        ) {
+            // Create with no org/project name, set project_id manually.
+            let mut pool = IpPool::new(
+                &IdentityMetadataCreateParams {
+                    name: String::from(name).parse().unwrap(),
+                    description: format!("ip pool {}", name),
+                },
+                None,
+            );
+            pool.project_id = project_id;
+
             diesel::insert_into(crate::db::schema::ip_pool::dsl::ip_pool)
                 .values(pool.clone())
                 .execute_async(
@@ -470,7 +612,7 @@ mod tests {
                 .await
                 .expect("Failed to create IP Pool");
 
-            let pool_range = IpPoolRange::new(&range, pool.id());
+            let pool_range = IpPoolRange::new(&range, pool.id(), project_id);
             diesel::insert_into(
                 crate::db::schema::ip_pool_range::dsl::ip_pool_range,
             )
@@ -498,14 +640,21 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 1),
         ))
         .unwrap();
-        context.create_ip_pool("p0", range).await;
+        context.create_ip_pool("p0", range, None).await;
+        let project_id = Uuid::new_v4();
         for first_port in
             (0..super::MAX_PORT).step_by(super::NUM_SOURCE_NAT_PORTS)
         {
+            let id = Uuid::new_v4();
             let instance_id = Uuid::new_v4();
             let ip = context
                 .db_datastore
-                .allocate_instance_external_ip(&context.opctx, instance_id)
+                .allocate_instance_snat_ip(
+                    &context.opctx,
+                    id,
+                    project_id,
+                    instance_id,
+                )
                 .await
                 .expect("Failed to allocate instance external IP address");
             assert_eq!(ip.ip.ip(), range.first_address());
@@ -520,7 +669,12 @@ mod tests {
         let instance_id = Uuid::new_v4();
         let err = context
             .db_datastore
-            .allocate_instance_external_ip(&context.opctx, instance_id)
+            .allocate_instance_snat_ip(
+                &context.opctx,
+                Uuid::new_v4(),
+                project_id,
+                instance_id,
+            )
             .await
             .expect_err(
                 "An error should be received when the IP pools are exhausted",
@@ -549,7 +703,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 3),
         ))
         .unwrap();
-        context.create_ip_pool("p0", range).await;
+        context.create_ip_pool("p0", range, None).await;
 
         // TODO-completess: Implementing Iterator for IpRange would be nice.
         let addresses = [
@@ -562,11 +716,17 @@ mod tests {
 
         // Allocate two addresses
         let mut ips = Vec::with_capacity(2);
+        let project_id = Uuid::new_v4();
         for (expected_ip, expected_first_port) in external_ips.clone().take(2) {
             let instance_id = Uuid::new_v4();
             let ip = context
                 .db_datastore
-                .allocate_instance_external_ip(&context.opctx, instance_id)
+                .allocate_instance_snat_ip(
+                    &context.opctx,
+                    Uuid::new_v4(),
+                    project_id,
+                    instance_id,
+                )
                 .await
                 .expect("Failed to allocate instance external IP address");
             assert_eq!(ip.ip.ip(), expected_ip);
@@ -590,9 +750,15 @@ mod tests {
         let instance_id = Uuid::new_v4();
         let ip = context
             .db_datastore
-            .allocate_instance_external_ip(&context.opctx, instance_id)
+            .allocate_instance_snat_ip(
+                &context.opctx,
+                Uuid::new_v4(),
+                project_id,
+                instance_id,
+            )
             .await
             .expect("Failed to allocate instance external IP address");
+        println!("{:?}\n{:?}", ip, ips[0]);
         assert_eq!(
             ip.ip, ips[0].ip,
             "Expected to reallocate external IPs sequentially"
@@ -611,7 +777,12 @@ mod tests {
         let instance_id = Uuid::new_v4();
         let ip = context
             .db_datastore
-            .allocate_instance_external_ip(&context.opctx, instance_id)
+            .allocate_instance_snat_ip(
+                &context.opctx,
+                Uuid::new_v4(),
+                project_id,
+                instance_id,
+            )
             .await
             .expect("Failed to allocate instance external IP address");
         let (expected_ip, expected_first_port) = external_ips.nth(2).unwrap();
@@ -621,6 +792,115 @@ mod tests {
             + (super::NUM_SOURCE_NAT_PORTS - 1) as i32)
             as u16;
         assert_eq!(ip.last_port.0, expected_last_port);
+
+        context.success().await;
+    }
+
+    #[tokio::test]
+    async fn test_next_external_ip_with_ephemeral_takes_whole_port_range() {
+        let context = TestContext::new(
+            "test_next_external_ip_with_ephemeral_takes_whole_port_range",
+        )
+        .await;
+        let range = IpRange::try_from((
+            Ipv4Addr::new(10, 0, 0, 1),
+            Ipv4Addr::new(10, 0, 0, 3),
+        ))
+        .unwrap();
+        context.create_ip_pool("p0", range, None).await;
+
+        let instance_id = Uuid::new_v4();
+        let project_id = Uuid::new_v4();
+        let id = Uuid::new_v4();
+        let pool_name = None;
+
+        let ip = context
+            .db_datastore
+            .allocate_instance_ephemeral_ip(
+                &context.opctx,
+                id,
+                project_id,
+                instance_id,
+                pool_name,
+            )
+            .await
+            .expect("Failed to allocate instance ephemeral IP address");
+        assert_eq!(ip.kind, IpKind::Ephemeral);
+        assert_eq!(ip.ip.ip(), range.first_address());
+        assert_eq!(ip.first_port.0, 0);
+        assert_eq!(ip.last_port.0, u16::MAX);
+
+        context.success().await;
+    }
+
+    #[tokio::test]
+    async fn test_next_external_ip_is_restricted_to_projects() {
+        let context =
+            TestContext::new("test_next_external_ip_is_restricted_to_projects")
+                .await;
+
+        // Create one pool restricted to a project, and one not.
+        let project_id = Uuid::new_v4();
+        let first_range = IpRange::try_from((
+            Ipv4Addr::new(10, 0, 0, 1),
+            Ipv4Addr::new(10, 0, 0, 3),
+        ))
+        .unwrap();
+        context.create_ip_pool("p0", first_range, Some(project_id)).await;
+
+        let second_range = IpRange::try_from((
+            Ipv4Addr::new(10, 0, 0, 4),
+            Ipv4Addr::new(10, 0, 0, 6),
+        ))
+        .unwrap();
+        context.create_ip_pool("p1", second_range, None).await;
+
+        // Allocating an address on an instance in a _different_ project should
+        // get an address from the second pool.
+        let instance_id = Uuid::new_v4();
+        let instance_project_id = Uuid::new_v4();
+        let id = Uuid::new_v4();
+        let pool_name = None;
+
+        let ip = context
+            .db_datastore
+            .allocate_instance_ephemeral_ip(
+                &context.opctx,
+                id,
+                instance_project_id,
+                instance_id,
+                pool_name,
+            )
+            .await
+            .expect("Failed to allocate instance ephemeral IP address");
+        assert_eq!(ip.kind, IpKind::Ephemeral);
+        assert_eq!(ip.ip.ip(), second_range.first_address());
+        assert_eq!(ip.first_port.0, 0);
+        assert_eq!(ip.last_port.0, u16::MAX);
+        assert_eq!(ip.project_id, instance_project_id);
+
+        // Allocating an address on an instance in the same project should get
+        // an address from the first pool.
+        let instance_id = Uuid::new_v4();
+        let id = Uuid::new_v4();
+        let pool_name = None;
+
+        let ip = context
+            .db_datastore
+            .allocate_instance_ephemeral_ip(
+                &context.opctx,
+                id,
+                project_id,
+                instance_id,
+                pool_name,
+            )
+            .await
+            .expect("Failed to allocate instance ephemeral IP address");
+        assert_eq!(ip.kind, IpKind::Ephemeral);
+        assert_eq!(ip.ip.ip(), first_range.first_address());
+        assert_eq!(ip.first_port.0, 0);
+        assert_eq!(ip.last_port.0, u16::MAX);
+        assert_eq!(ip.project_id, project_id);
 
         context.success().await;
     }

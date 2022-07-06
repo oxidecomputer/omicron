@@ -24,6 +24,10 @@ use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NetworkInterface;
+use omicron_nexus::external_api::shared::IpKind;
+use omicron_nexus::external_api::shared::IpRange;
+use omicron_nexus::external_api::shared::Ipv4Range;
+use omicron_nexus::external_api::views::ExternalIp;
 use omicron_nexus::TestInterfaces as _;
 use omicron_nexus::{external_api::params, Nexus};
 use sled_agent_client::TestInterfaces as _;
@@ -54,7 +58,7 @@ fn get_instances_url() -> String {
 }
 
 async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
-    create_ip_pool(&client, "p0", None).await;
+    create_ip_pool(&client, "p0", None, None).await;
     create_organization(&client, ORGANIZATION_NAME).await;
     let project = create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
     project.identity.id
@@ -125,7 +129,7 @@ async fn test_instances_create_reboot_halt(
     let nexus = &apictx.nexus;
 
     // Create an IP pool and  project that we'll use for testing.
-    create_ip_pool(&client, POOL_NAME, None).await;
+    create_ip_pool(&client, POOL_NAME, None, None).await;
     create_organization(&client, ORGANIZATION_NAME).await;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",
@@ -168,6 +172,7 @@ async fn test_instances_create_reboot_halt(
                 user_data: vec![],
                 network_interfaces:
                     params::InstanceNetworkInterfaceAttachment::Default,
+                external_ips: vec![],
                 disks: vec![],
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
@@ -429,7 +434,7 @@ async fn test_instances_delete_fails_when_running_succeeds_when_stopped(
     let nexus = &apictx.nexus;
 
     // Create an IP pool and project that we'll use for testing.
-    create_ip_pool(&client, POOL_NAME, None).await;
+    create_ip_pool(&client, POOL_NAME, None, None).await;
     create_organization(&client, ORGANIZATION_NAME).await;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",
@@ -554,7 +559,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
     let client = &cptestctx.external_client;
 
     // Create test IP pool, organization and project
-    create_ip_pool(&client, POOL_NAME, None).await;
+    create_ip_pool(&client, POOL_NAME, None, None).await;
     create_organization(&client, ORGANIZATION_NAME).await;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",
@@ -590,6 +595,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
         hostname: String::from("inst"),
         user_data: vec![],
         network_interfaces: interface_params.clone(),
+        external_ips: vec![],
         disks: vec![],
     };
     let response =
@@ -612,6 +618,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
         hostname: String::from("inst2"),
         user_data: vec![],
         network_interfaces: interface_params,
+        external_ips: vec![],
         disks: vec![],
     };
     let _ =
@@ -663,7 +670,7 @@ async fn test_instance_with_single_explicit_ip_address(
     let client = &cptestctx.external_client;
 
     // Create test IP pool, organization and project
-    create_ip_pool(&client, POOL_NAME, None).await;
+    create_ip_pool(&client, POOL_NAME, None, None).await;
     create_organization(&client, ORGANIZATION_NAME).await;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",
@@ -699,6 +706,7 @@ async fn test_instance_with_single_explicit_ip_address(
         hostname: String::from("nic-test"),
         user_data: vec![],
         network_interfaces: interface_params,
+        external_ips: vec![],
         disks: vec![],
     };
     let response =
@@ -737,7 +745,7 @@ async fn test_instance_with_new_custom_network_interfaces(
     let client = &cptestctx.external_client;
 
     // Create test IP pool, organization and project
-    create_ip_pool(&client, POOL_NAME, None).await;
+    create_ip_pool(&client, POOL_NAME, None, None).await;
     create_organization(&client, ORGANIZATION_NAME).await;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",
@@ -817,6 +825,7 @@ async fn test_instance_with_new_custom_network_interfaces(
         hostname: String::from("nic-test"),
         user_data: vec![],
         network_interfaces: interface_params,
+        external_ips: vec![],
         disks: vec![],
     };
     let response =
@@ -893,7 +902,7 @@ async fn test_instance_create_delete_network_interface(
     let nexus = &cptestctx.server.apictx.nexus;
 
     // Create test IP pool, organization and project
-    create_ip_pool(&client, POOL_NAME, None).await;
+    create_ip_pool(&client, POOL_NAME, None, None).await;
     create_organization(&client, ORGANIZATION_NAME).await;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",
@@ -932,6 +941,7 @@ async fn test_instance_create_delete_network_interface(
         hostname: String::from("nic-test"),
         user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::None,
+        external_ips: vec![],
         disks: vec![],
     };
     let response =
@@ -1142,7 +1152,7 @@ async fn test_instance_update_network_interfaces(
     let nexus = &cptestctx.server.apictx.nexus;
 
     // Create test IP pool, organization and project
-    create_ip_pool(&client, POOL_NAME, None).await;
+    create_ip_pool(&client, POOL_NAME, None, None).await;
     create_organization(&client, ORGANIZATION_NAME).await;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",
@@ -1181,6 +1191,7 @@ async fn test_instance_update_network_interfaces(
         hostname: String::from("nic-test"),
         user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::None,
+        external_ips: vec![],
         disks: vec![],
     };
     let response =
@@ -1583,6 +1594,7 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
         hostname: String::from("nic-test"),
         user_data: vec![],
         network_interfaces: interface_params,
+        external_ips: vec![],
         disks: vec![],
     };
     let builder =
@@ -1624,7 +1636,7 @@ async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
 
     // Test pre-reqs
     DiskTest::new(&cptestctx).await;
-    create_ip_pool(&client, POOL_NAME, None).await;
+    create_ip_pool(&client, POOL_NAME, None, None).await;
     create_organization(&client, ORGANIZATION_NAME).await;
     create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
@@ -1659,6 +1671,7 @@ async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
         hostname: String::from("nfs"),
         user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![],
         disks: vec![params::InstanceDiskAttachment::Attach(
             params::InstanceDiskAttach {
                 name: Name::try_from(String::from("probablydata")).unwrap(),
@@ -1715,7 +1728,7 @@ async fn test_attach_eight_disks_to_instance(
 
     // Test pre-reqs
     DiskTest::new(&cptestctx).await;
-    create_ip_pool(&client, POOL_NAME, None).await;
+    create_ip_pool(&client, POOL_NAME, None, None).await;
     create_organization(&client, ORGANIZATION_NAME).await;
     create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
@@ -1757,6 +1770,7 @@ async fn test_attach_eight_disks_to_instance(
         hostname: String::from("nfs"),
         user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![],
         disks: (0..8)
             .map(|i| {
                 params::InstanceDiskAttachment::Attach(
@@ -1863,6 +1877,7 @@ async fn test_cannot_attach_nine_disks_to_instance(
         hostname: String::from("nfs"),
         user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![],
         disks: (0..9)
             .map(|i| {
                 params::InstanceDiskAttachment::Attach(
@@ -1919,11 +1934,14 @@ async fn test_cannot_attach_nine_disks_to_instance(
 async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
+    // Test pre-reqs
+    const POOL_NAME: &str = "p0";
     const ORGANIZATION_NAME: &str = "bobs-barrel-of-bytes";
     const PROJECT_NAME: &str = "bit-barrel";
 
     // Test pre-reqs
     DiskTest::new(&cptestctx).await;
+    create_ip_pool(&client, POOL_NAME, None, None).await;
     create_organization(&client, ORGANIZATION_NAME).await;
     create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
@@ -1990,6 +2008,7 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
         hostname: String::from("nfs"),
         user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![],
         disks: (0..8)
             .map(|i| {
                 params::InstanceDiskAttachment::Attach(
@@ -2058,7 +2077,7 @@ async fn test_disks_detached_when_instance_destroyed(
 
     // Test pre-reqs
     DiskTest::new(&cptestctx).await;
-    create_ip_pool(&client, POOL_NAME, None).await;
+    create_ip_pool(&client, POOL_NAME, None, None).await;
     create_organization(&client, ORGANIZATION_NAME).await;
     create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
@@ -2104,6 +2123,7 @@ async fn test_disks_detached_when_instance_destroyed(
         hostname: String::from("nfs"),
         user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![],
         disks: (0..8)
             .map(|i| {
                 params::InstanceDiskAttachment::Attach(
@@ -2219,6 +2239,7 @@ async fn test_instances_memory_rejected_less_than_min_memory_size(
             b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
                 .to_vec(),
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![],
         disks: vec![],
     };
 
@@ -2267,6 +2288,7 @@ async fn test_instances_memory_not_divisible_by_min_memory_size(
             b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
                 .to_vec(),
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![],
         disks: vec![],
     };
 
@@ -2298,7 +2320,7 @@ async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
     let nexus = &apictx.nexus;
 
     // Create a project that we'll use for testing.
-    create_ip_pool(client, POOL_NAME, None).await;
+    create_ip_pool(client, POOL_NAME, None, None).await;
     create_organization(client, ORGANIZATION_NAME).await;
     let url_instances = format!(
         "/organizations/{}/projects/{}/instances",
@@ -2379,6 +2401,99 @@ async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
         .execute()
         .await
         .unwrap();
+}
+
+#[nexus_test]
+async fn test_instance_ephemeral_ip_from_correct_project(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // Create test organization and two projects.
+    create_organization(&client, ORGANIZATION_NAME).await;
+    let url_instances = format!(
+        "/organizations/{}/projects/{}/instances",
+        ORGANIZATION_NAME, PROJECT_NAME
+    );
+    let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
+    let _ = create_project(&client, ORGANIZATION_NAME, "restricted").await;
+
+    // Create two IP pools.
+    //
+    // The first is restricted to the "restricted" project, the second unrestricted.
+    let project_path = params::ProjectPath {
+        organization: Name::try_from(ORGANIZATION_NAME.to_string()).unwrap(),
+        project: Name::try_from("restricted".to_string()).unwrap(),
+    };
+    let first_range = IpRange::V4(
+        Ipv4Range::new(
+            std::net::Ipv4Addr::new(10, 0, 0, 1),
+            std::net::Ipv4Addr::new(10, 0, 0, 5),
+        )
+        .unwrap(),
+    );
+    let second_range = IpRange::V4(
+        Ipv4Range::new(
+            std::net::Ipv4Addr::new(10, 1, 0, 1),
+            std::net::Ipv4Addr::new(10, 1, 0, 5),
+        )
+        .unwrap(),
+    );
+    create_ip_pool(
+        &client,
+        "restricted-pool",
+        Some(first_range),
+        Some(project_path),
+    )
+    .await;
+    create_ip_pool(&client, "unrestricted-pool", Some(second_range), None)
+        .await;
+
+    // Create an instance in the default project, not the "dummy" project
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: Name::try_from(String::from("ip-pool-test")).unwrap(),
+            description: String::from("instance to test IP Pool restriction"),
+        },
+        ncpus: InstanceCpuCount::try_from(2).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(4),
+        hostname: String::from("inst"),
+        user_data: vec![],
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![params::ExternalIpCreate::Ephemeral {
+            pool_name: None,
+        }],
+        disks: vec![],
+    };
+    let response =
+        NexusRequest::objects_post(client, &url_instances, &instance_params)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .expect("Failed to create first instance");
+    let _ = response.parsed_body::<Instance>().unwrap();
+
+    // Fetch the external IPs for the instance.
+    let ips_url = format!(
+        "{}/{}/external-ips",
+        url_instances, instance_params.identity.name
+    );
+    let ips = NexusRequest::object_get(client, &ips_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Failed to fetch external IPs")
+        .parsed_body::<Vec<ExternalIp>>()
+        .expect("Failed to parse external IPs");
+    assert_eq!(ips.len(), 1);
+    assert_eq!(ips[0].kind, IpKind::Ephemeral);
+    assert!(
+        ips[0].ip >= second_range.first_address()
+            && ips[0].ip <= second_range.last_address(),
+        "Expected the Ephemeral IP to come from the second address \
+        range, since the first is reserved for a project different from \
+        the instance's project."
+    );
 }
 
 async fn instance_get(

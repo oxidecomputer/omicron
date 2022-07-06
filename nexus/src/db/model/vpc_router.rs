@@ -8,7 +8,6 @@ use crate::db::schema::{router_route, vpc_router};
 use crate::external_api::params;
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
-use std::io::Write;
 use uuid::Uuid;
 
 impl_enum_type!(
