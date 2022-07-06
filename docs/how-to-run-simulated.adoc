@@ -27,7 +27,7 @@ Prerequisite software may be installed with the following script:
 
 [source,text]
 ----
-$ ./tools/install_prerequisites.sh
+$ ./tools/install_builder_prerequisites.sh
 ----
 
 == Running
