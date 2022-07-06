@@ -94,11 +94,6 @@ impl super::Nexus {
             .await?;
         assert_eq!(authz_user.id(), silo_user_id);
 
-        // Delete the request regardless of whether it's still valid.
-        self.db_datastore
-            .device_auth_request_hard_delete(opctx, &authz_request)
-            .await?;
-
         // Create an access token record.
         let token = DeviceAccessToken::new(
             db_request.client_id,
@@ -112,7 +107,7 @@ impl super::Nexus {
             // can get a proper "denied" message on its next poll.
             let token = token.expires(db_request.time_expires);
             self.db_datastore
-                .device_access_token_create(opctx, &authz_user, token)
+                .device_access_token_create(opctx, &authz_request, &authz_user, token)
                 .await?;
             Err(Error::InvalidRequest {
                 message: "device authorization request expired".to_string(),
@@ -120,7 +115,7 @@ impl super::Nexus {
         } else {
             // TODO-security: set an expiration time for the valid token.
             self.db_datastore
-                .device_access_token_create(opctx, &authz_user, token)
+                .device_access_token_create(opctx, &authz_request, &authz_user, token)
                 .await
         }
     }

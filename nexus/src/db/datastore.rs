@@ -4300,39 +4300,35 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    /// Delete a device authorization request.
-    pub async fn device_auth_request_hard_delete(
-        &self,
-        opctx: &OpContext,
-        authz_request: &authz::DeviceAuthRequest,
-    ) -> DeleteResult {
-        opctx.authorize(authz::Action::Delete, authz_request).await?;
-
-        use db::schema::device_auth_request::dsl;
-        diesel::delete(dsl::device_auth_request)
-            .filter(dsl::user_code.eq(authz_request.id()))
-            .execute_async(self.pool_authorized(opctx).await?)
-            .await
-            .map(|rows_deleted| assert_eq!(rows_deleted, 1))
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
-    }
-
-    /// Create a device access token record. The token may already
-    /// be expired if the device auth flow was not completed in time.
+    /// Remove the device authorization request and create a new device
+    /// access token record. The token may already be expired if the flow
+    /// was not completed in time.
     pub async fn device_access_token_create(
         &self,
         opctx: &OpContext,
+        authz_request: &authz::DeviceAuthRequest,
         authz_user: &authz::SiloUser,
         access_token: DeviceAccessToken,
     ) -> CreateResult<DeviceAccessToken> {
         assert_eq!(authz_user.id(), access_token.silo_user_id);
+        opctx.authorize(authz::Action::Delete, authz_request).await?;
         opctx.authorize(authz::Action::CreateChild, authz_user).await?;
 
-        use db::schema::device_access_token::dsl;
-        diesel::insert_into(dsl::device_access_token)
+        use db::schema::device_auth_request::dsl as request_dsl;
+        let delete_request = diesel::delete(request_dsl::device_auth_request)
+            .filter(request_dsl::user_code.eq(authz_request.id()));
+
+        use db::schema::device_access_token::dsl as token_dsl;
+        let insert_token = diesel::insert_into(token_dsl::device_access_token)
             .values(access_token)
-            .returning(DeviceAccessToken::as_returning())
-            .get_result_async(self.pool_authorized(opctx).await?)
+            .returning(DeviceAccessToken::as_returning());
+
+        self.pool_authorized(opctx)
+            .await?
+            .transaction(move |conn| {
+                delete_request.execute(conn)?;
+                Ok(insert_token.get_result(conn)?)
+            })
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
