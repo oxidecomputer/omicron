@@ -140,8 +140,8 @@ snapshot_view                            /organizations/{organization_name}/proj
 
 API operations found with tag "system"
 OPERATION ID                             URL PATH
-system_user_list                         /users_builtin
-system_user_view                         /users_builtin/{user_name}
+system_user_list                         /system/user
+system_user_view                         /system/user/{user_name}
 
 API operations found with tag "updates"
 OPERATION ID                             URL PATH

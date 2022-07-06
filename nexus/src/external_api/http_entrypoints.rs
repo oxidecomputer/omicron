@@ -3476,7 +3476,7 @@ async fn user_list(
 /// List the built-in system users
 #[endpoint {
     method = GET,
-    path = "/users_builtin",
+    path = "/system/user",
     tags = ["system"],
 }]
 async fn system_user_list(
@@ -3515,7 +3515,7 @@ struct UserPathParam {
 /// Fetch a specific built-in system user
 #[endpoint {
     method = GET,
-    path = "/users_builtin/{user_name}",
+    path = "/system/user/{user_name}",
     tags = ["system"],
 }]
 async fn system_user_view(
