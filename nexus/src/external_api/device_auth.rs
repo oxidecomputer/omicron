@@ -9,7 +9,7 @@
 //! are for requesting access tokens that will be managed and used by
 //! the client to make other API requests.
 
-use super::console_api::{get_login_url, serve_console_index};
+use super::console_api::console_index_or_login_redirect;
 use super::views::{DeviceAccessTokenGrant, DeviceAuthResponse};
 use crate::context::OpContext;
 use crate::db::model::DeviceAccessToken;
@@ -21,7 +21,6 @@ use http::{header, Response, StatusCode};
 use hyper::Body;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_urlencoded;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -126,26 +125,20 @@ pub struct DeviceAuthVerify {
 }]
 pub async fn device_auth_verify(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    params: Query<DeviceAuthVerify>,
+    _params: Query<DeviceAuthVerify>,
 ) -> Result<Response<Body>, HttpError> {
-    // If the user is authenticated, serve the console verification page.
-    if let Ok(opctx) = OpContext::for_external_api(&rqctx).await {
-        if opctx.authn.actor().is_some() {
-            return serve_console_index(rqctx.context()).await;
-        }
-    }
+    console_index_or_login_redirect(rqctx).await
+}
 
-    // Otherwise, redirect for authentication.
-    let params = params.into_inner();
-    let state_params = serde_urlencoded::to_string(serde_json::json!({
-        "user_code": params.user_code
-    }))
-    .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
-    let state = Some(format!("/device/verify?{}", state_params));
-    Ok(Response::builder()
-        .status(StatusCode::FOUND)
-        .header(http::header::LOCATION, get_login_url(state))
-        .body("".into())?)
+#[endpoint {
+    method = GET,
+    path = "/device/success",
+    unpublished = true,
+}]
+pub async fn device_auth_success(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+) -> Result<Response<Body>, HttpError> {
+    console_index_or_login_redirect(rqctx).await
 }
 
 /// Confirm an OAuth 2.0 Device Authorization Grant

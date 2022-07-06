@@ -38,6 +38,7 @@ use dropshot::ResultsPage;
 use dropshot::TypedBody;
 use dropshot::WhichPage;
 use ipnetwork::IpNetwork;
+use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::data_page_params_nameid_id;
 use omicron_common::api::external::http_pagination::data_page_params_nameid_name;
 use omicron_common::api::external::http_pagination::marker_for_name;
@@ -64,9 +65,7 @@ use omicron_common::api::external::RouterRouteUpdateParams;
 use omicron_common::api::external::Saga;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
-use omicron_common::{
-    api::external::http_pagination::data_page_params_for, bail_unless,
-};
+use omicron_common::bail_unless;
 use ref_cast::RefCast;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -79,142 +78,141 @@ type NexusApiDescription = ApiDescription<Arc<ServerContext>>;
 /// Returns a description of the external nexus API
 pub fn external_api() -> NexusApiDescription {
     fn register_endpoints(api: &mut NexusApiDescription) -> Result<(), String> {
-        api.register(policy_get)?;
-        api.register(policy_put)?;
+        api.register(policy_view)?;
+        api.register(policy_update)?;
 
-        api.register(silos_get)?;
-        api.register(silos_post)?;
-        api.register(silos_get_silo)?;
-        api.register(silos_delete_silo)?;
-        api.register(silos_get_identity_providers)?;
-        api.register(silos_get_silo_policy)?;
-        api.register(silos_put_silo_policy)?;
+        api.register(organization_list)?;
+        api.register(organization_create)?;
+        api.register(organization_view)?;
+        api.register(organization_delete)?;
+        api.register(organization_update)?;
+        api.register(organization_policy_view)?;
+        api.register(organization_policy_update)?;
 
-        api.register(silo_saml_idp_create)?;
-        api.register(silo_saml_idp_fetch)?;
+        api.register(project_list)?;
+        api.register(project_create)?;
+        api.register(project_view)?;
+        api.register(project_delete)?;
+        api.register(project_update)?;
+        api.register(project_policy_view)?;
+        api.register(project_policy_update)?;
 
-        api.register(organizations_get)?;
-        api.register(organizations_post)?;
-        api.register(organizations_get_organization)?;
-        api.register(organizations_delete_organization)?;
-        api.register(organizations_put_organization)?;
-        api.register(organization_get_policy)?;
-        api.register(organization_put_policy)?;
+        api.register(ip_pool_list)?;
+        api.register(ip_pool_create)?;
+        api.register(ip_pool_view)?;
+        api.register(ip_pool_delete)?;
+        api.register(ip_pool_update)?;
 
-        api.register(organization_projects_get)?;
-        api.register(organization_projects_post)?;
-        api.register(organization_projects_get_project)?;
-        api.register(organization_projects_delete_project)?;
-        api.register(organization_projects_put_project)?;
-        api.register(organization_projects_get_project_policy)?;
-        api.register(organization_projects_put_project_policy)?;
+        api.register(ip_pool_range_list)?;
+        api.register(ip_pool_range_add)?;
+        api.register(ip_pool_range_remove)?;
 
-        api.register(ip_pools_get)?;
-        api.register(ip_pools_post)?;
-        api.register(ip_pools_get_ip_pool)?;
-        api.register(ip_pools_delete_ip_pool)?;
-        api.register(ip_pools_put_ip_pool)?;
+        api.register(disk_list)?;
+        api.register(disk_create)?;
+        api.register(disk_view)?;
+        api.register(disk_delete)?;
 
-        api.register(ip_pool_ranges_get)?;
-        api.register(ip_pool_ranges_add)?;
-        api.register(ip_pool_ranges_delete)?;
-
-        api.register(project_disks_get)?;
-        api.register(project_disks_post)?;
-        api.register(project_disks_get_disk)?;
-        api.register(project_disks_delete_disk)?;
-
-        api.register(project_instances_get)?;
-        api.register(project_instances_post)?;
-        api.register(project_instances_get_instance)?;
-        api.register(project_instances_delete_instance)?;
-        api.register(project_instances_migrate_instance)?;
-        api.register(project_instances_instance_reboot)?;
-        api.register(project_instances_instance_start)?;
-        api.register(project_instances_instance_stop)?;
-        api.register(project_instances_instance_serial_get)?;
-
-        // Globally-scoped Images API
-        api.register(images_get)?;
-        api.register(images_post)?;
-        api.register(images_get_image)?;
-        api.register(images_delete_image)?;
+        api.register(instance_list)?;
+        api.register(instance_create)?;
+        api.register(instance_view)?;
+        api.register(instance_delete)?;
+        api.register(instance_migrate)?;
+        api.register(instance_reboot)?;
+        api.register(instance_start)?;
+        api.register(instance_stop)?;
+        api.register(instance_serial_console)?;
 
         // Project-scoped images API
-        api.register(project_images_get)?;
-        api.register(project_images_post)?;
-        api.register(project_images_get_image)?;
-        api.register(project_images_delete_image)?;
+        api.register(image_list)?;
+        api.register(image_create)?;
+        api.register(image_view)?;
+        api.register(image_delete)?;
 
-        api.register(instance_disks_get)?;
-        api.register(instance_disks_attach)?;
-        api.register(instance_disks_detach)?;
+        api.register(instance_disk_list)?;
+        api.register(instance_disk_attach)?;
+        api.register(instance_disk_detach)?;
 
-        api.register(project_snapshots_get)?;
-        api.register(project_snapshots_post)?;
-        api.register(project_snapshots_get_snapshot)?;
-        api.register(project_snapshots_delete_snapshot)?;
+        api.register(snapshot_list)?;
+        api.register(snapshot_create)?;
+        api.register(snapshot_view)?;
+        api.register(snapshot_delete)?;
 
-        api.register(project_vpcs_get)?;
-        api.register(project_vpcs_post)?;
-        api.register(project_vpcs_get_vpc)?;
-        api.register(project_vpcs_put_vpc)?;
-        api.register(project_vpcs_delete_vpc)?;
+        api.register(vpc_list)?;
+        api.register(vpc_create)?;
+        api.register(vpc_view)?;
+        api.register(vpc_update)?;
+        api.register(vpc_delete)?;
 
-        api.register(vpc_subnets_get)?;
-        api.register(vpc_subnets_get_subnet)?;
-        api.register(vpc_subnets_post)?;
-        api.register(vpc_subnets_delete_subnet)?;
-        api.register(vpc_subnets_put_subnet)?;
+        api.register(vpc_subnet_list)?;
+        api.register(vpc_subnet_view)?;
+        api.register(vpc_subnet_create)?;
+        api.register(vpc_subnet_delete)?;
+        api.register(vpc_subnet_update)?;
+        api.register(vpc_subnet_list_network_interfaces)?;
 
-        api.register(subnet_network_interfaces_get)?;
+        api.register(instance_network_interface_create)?;
+        api.register(instance_network_interface_list)?;
+        api.register(instance_network_interface_view)?;
+        api.register(instance_network_interface_update)?;
+        api.register(instance_network_interface_delete)?;
 
-        api.register(instance_network_interfaces_post)?;
-        api.register(instance_network_interfaces_get)?;
-        api.register(instance_network_interfaces_get_interface)?;
-        api.register(instance_network_interfaces_put_interface)?;
-        api.register(instance_network_interfaces_delete_interface)?;
+        api.register(vpc_router_list)?;
+        api.register(vpc_router_view)?;
+        api.register(vpc_router_create)?;
+        api.register(vpc_router_delete)?;
+        api.register(vpc_router_update)?;
 
-        api.register(vpc_routers_get)?;
-        api.register(vpc_routers_get_router)?;
-        api.register(vpc_routers_post)?;
-        api.register(vpc_routers_delete_router)?;
-        api.register(vpc_routers_put_router)?;
+        api.register(vpc_router_route_list)?;
+        api.register(vpc_router_route_view)?;
+        api.register(vpc_router_route_create)?;
+        api.register(vpc_router_route_delete)?;
+        api.register(vpc_router_route_update)?;
 
-        api.register(vpc_firewall_rules_get)?;
-        api.register(vpc_firewall_rules_put)?;
+        api.register(vpc_firewall_rules_view)?;
+        api.register(vpc_firewall_rules_update)?;
 
-        api.register(routers_routes_get)?;
-        api.register(routers_routes_get_route)?;
-        api.register(routers_routes_post)?;
-        api.register(routers_routes_delete_route)?;
-        api.register(routers_routes_put_route)?;
+        api.register(rack_list)?;
+        api.register(rack_view)?;
+        api.register(sled_list)?;
+        api.register(sled_view)?;
 
-        api.register(hardware_racks_get)?;
-        api.register(hardware_racks_get_rack)?;
-        api.register(hardware_sleds_get)?;
-        api.register(hardware_sleds_get_sled)?;
+        api.register(saga_list)?;
+        api.register(saga_view)?;
 
-        api.register(updates_refresh)?;
-
-        api.register(sagas_get)?;
-        api.register(sagas_get_saga)?;
-
-        api.register(silo_users_get)?;
-
-        api.register(builtin_users_get)?;
-        api.register(builtin_users_get_user)?;
+        api.register(system_user_list)?;
+        api.register(system_user_view)?;
 
         api.register(timeseries_schema_get)?;
 
-        api.register(roles_get)?;
-        api.register(roles_get_role)?;
+        api.register(role_list)?;
+        api.register(role_view)?;
 
-        api.register(sshkeys_get)?;
-        api.register(sshkeys_get_key)?;
-        api.register(sshkeys_post)?;
-        api.register(sshkeys_delete_key)?;
+        api.register(session_sshkey_list)?;
+        api.register(session_sshkey_view)?;
+        api.register(session_sshkey_create)?;
+        api.register(session_sshkey_delete)?;
 
+        // Fleet-wide API operations
+        api.register(silo_list)?;
+        api.register(silo_create)?;
+        api.register(silo_view)?;
+        api.register(silo_delete)?;
+        api.register(silo_identity_provider_list)?;
+        api.register(silo_policy_view)?;
+        api.register(silo_policy_update)?;
+
+        api.register(silo_identity_provider_create)?;
+        api.register(silo_identity_provider_view)?;
+
+        api.register(image_global_list)?;
+        api.register(image_global_create)?;
+        api.register(image_global_view)?;
+        api.register(image_global_delete)?;
+
+        api.register(updates_refresh)?;
+        api.register(user_list)?;
+
+        // Console API operations
         api.register(console_api::spoof_login)?;
         api.register(console_api::spoof_login_form)?;
         api.register(console_api::login_redirect)?;
@@ -241,6 +239,7 @@ pub fn external_api() -> NexusApiDescription {
 
         api.register(device_auth::device_auth_request)?;
         api.register(device_auth::device_auth_verify)?;
+        api.register(device_auth::device_auth_success)?;
         api.register(device_auth::device_auth_confirm)?;
         api.register(device_auth::device_access_token)?;
 
@@ -298,7 +297,7 @@ pub fn external_api() -> NexusApiDescription {
     path = "/policy",
     tags = ["policy"],
 }]
-async fn policy_get(
+async fn policy_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::FleetRole>>, HttpError> {
     let apictx = rqctx.context();
@@ -318,7 +317,7 @@ async fn policy_get(
     path = "/policy",
     tags = ["policy"],
 }]
-async fn policy_put(
+async fn policy_update(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     new_policy: TypedBody<shared::Policy<authz::FleetRole>>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::FleetRole>>, HttpError> {
@@ -343,7 +342,7 @@ async fn policy_put(
     path = "/silos",
     tags = ["silos"],
 }]
-async fn silos_get(
+async fn silo_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByNameOrId>,
 ) -> Result<HttpResponseOk<ResultsPage<Silo>>, HttpError> {
@@ -386,7 +385,7 @@ async fn silos_get(
     path = "/silos",
     tags = ["silos"],
 }]
-async fn silos_post(
+async fn silo_create(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     new_silo_params: TypedBody<params::SiloCreate>,
 ) -> Result<HttpResponseCreated<Silo>, HttpError> {
@@ -414,7 +413,7 @@ struct SiloPathParam {
     path = "/silos/{silo_name}",
     tags = ["silos"],
 }]
-async fn silos_get_silo(
+async fn silo_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<SiloPathParam>,
 ) -> Result<HttpResponseOk<Silo>, HttpError> {
@@ -436,7 +435,7 @@ async fn silos_get_silo(
     path = "/silos/{silo_name}",
     tags = ["silos"],
 }]
-async fn silos_delete_silo(
+async fn silo_delete(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<SiloPathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
@@ -458,7 +457,7 @@ async fn silos_delete_silo(
     path = "/silos/{silo_name}/policy",
     tags = ["silos"],
 }]
-async fn silos_get_silo_policy(
+async fn silo_policy_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<SiloPathParam>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::SiloRole>>, HttpError> {
@@ -481,7 +480,7 @@ async fn silos_get_silo_policy(
     path = "/silos/{silo_name}/policy",
     tags = ["silos"],
 }]
-async fn silos_put_silo_policy(
+async fn silo_policy_update(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<SiloPathParam>,
     new_policy: TypedBody<shared::Policy<authz::SiloRole>>,
@@ -512,7 +511,7 @@ async fn silos_put_silo_policy(
     path = "/silos/{silo_name}/identity_providers",
     tags = ["silos"],
 }]
-async fn silos_get_identity_providers(
+async fn silo_identity_provider_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<SiloPathParam>,
     query_params: Query<PaginatedByName>,
@@ -549,7 +548,7 @@ async fn silos_get_identity_providers(
     path = "/silos/{silo_name}/saml_identity_providers",
     tags = ["silos"],
 }]
-async fn silo_saml_idp_create(
+async fn silo_identity_provider_create(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<SiloPathParam>,
     new_provider: TypedBody<params::SamlIdentityProviderCreate>,
@@ -586,7 +585,7 @@ struct SiloSamlPathParam {
     path = "/silos/{silo_name}/saml_identity_providers/{provider_name}",
     tags = ["silos"],
 }]
-async fn silo_saml_idp_fetch(
+async fn silo_identity_provider_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<SiloSamlPathParam>,
 ) -> Result<HttpResponseOk<views::SamlIdentityProvider>, HttpError> {
@@ -610,13 +609,15 @@ async fn silo_saml_idp_fetch(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+// TODO: no DELETE for identity providers?
+
 /// List all organizations.
 #[endpoint {
     method = GET,
     path = "/organizations",
     tags = ["organizations"],
 }]
-async fn organizations_get(
+async fn organization_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByNameOrId>,
 ) -> Result<HttpResponseOk<ResultsPage<Organization>>, HttpError> {
@@ -659,7 +660,7 @@ async fn organizations_get(
     path = "/organizations",
     tags = ["organizations"],
 }]
-async fn organizations_post(
+async fn organization_create(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     new_organization: TypedBody<params::OrganizationCreate>,
 ) -> Result<HttpResponseCreated<Organization>, HttpError> {
@@ -688,7 +689,7 @@ struct OrganizationPathParam {
     path = "/organizations/{organization_name}",
     tags = ["organizations"],
 }]
-async fn organizations_get_organization(
+async fn organization_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<OrganizationPathParam>,
 ) -> Result<HttpResponseOk<Organization>, HttpError> {
@@ -711,7 +712,7 @@ async fn organizations_get_organization(
     path = "/organizations/{organization_name}",
     tags = ["organizations"],
 }]
-async fn organizations_delete_organization(
+async fn organization_delete(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<OrganizationPathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
@@ -738,7 +739,7 @@ async fn organizations_delete_organization(
     path = "/organizations/{organization_name}",
     tags = ["organizations"],
 }]
-async fn organizations_put_organization(
+async fn organization_update(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<OrganizationPathParam>,
     updated_organization: TypedBody<params::OrganizationUpdate>,
@@ -767,7 +768,7 @@ async fn organizations_put_organization(
     path = "/organizations/{organization_name}/policy",
     tags = ["organizations"],
 }]
-async fn organization_get_policy(
+async fn organization_policy_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<OrganizationPathParam>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::OrganizationRole>>, HttpError>
@@ -792,7 +793,7 @@ async fn organization_get_policy(
     path = "/organizations/{organization_name}/policy",
     tags = ["organizations"],
 }]
-async fn organization_put_policy(
+async fn organization_policy_update(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<OrganizationPathParam>,
     new_policy: TypedBody<shared::Policy<authz::OrganizationRole>>,
@@ -823,7 +824,7 @@ async fn organization_put_policy(
     path = "/organizations/{organization_name}/projects",
     tags = ["projects"],
 }]
-async fn organization_projects_get(
+async fn project_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByNameOrId>,
     path_params: Path<OrganizationPathParam>,
@@ -881,7 +882,7 @@ async fn organization_projects_get(
     path = "/organizations/{organization_name}/projects",
     tags = ["projects"],
 }]
-async fn organization_projects_post(
+async fn project_create(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<OrganizationPathParam>,
     new_project: TypedBody<params::ProjectCreate>,
@@ -919,7 +920,7 @@ struct ProjectPathParam {
     path = "/organizations/{organization_name}/projects/{project_name}",
     tags = ["projects"],
 }]
-async fn organization_projects_get_project(
+async fn project_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
 ) -> Result<HttpResponseOk<Project>, HttpError> {
@@ -944,7 +945,7 @@ async fn organization_projects_get_project(
     path = "/organizations/{organization_name}/projects/{project_name}",
     tags = ["projects"],
 }]
-async fn organization_projects_delete_project(
+async fn project_delete(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
@@ -972,7 +973,7 @@ async fn organization_projects_delete_project(
     path = "/organizations/{organization_name}/projects/{project_name}",
     tags = ["projects"],
 }]
-async fn organization_projects_put_project(
+async fn project_update(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
     updated_project: TypedBody<params::ProjectUpdate>,
@@ -1003,7 +1004,7 @@ async fn organization_projects_put_project(
     path = "/organizations/{organization_name}/projects/{project_name}/policy",
     tags = ["projects"],
 }]
-async fn organization_projects_get_project_policy(
+async fn project_policy_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::ProjectRole>>, HttpError> {
@@ -1029,7 +1030,7 @@ async fn organization_projects_get_project_policy(
     path = "/organizations/{organization_name}/projects/{project_name}/policy",
     tags = ["projects"],
 }]
-async fn organization_projects_put_project_policy(
+async fn project_policy_update(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
     new_policy: TypedBody<shared::Policy<authz::ProjectRole>>,
@@ -1072,7 +1073,7 @@ pub struct IpPoolPathParam {
     path = "/ip-pools",
     tags = ["ip-pools"],
 }]
-async fn ip_pools_get(
+async fn ip_pool_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByNameOrId>,
 ) -> Result<HttpResponseOk<ResultsPage<IpPool>>, HttpError> {
@@ -1113,7 +1114,7 @@ async fn ip_pools_get(
     path = "/ip-pools",
     tags = ["ip-pools"],
 }]
-async fn ip_pools_post(
+async fn ip_pool_create(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     pool_params: TypedBody<params::IpPoolCreate>,
 ) -> Result<HttpResponseCreated<views::IpPool>, HttpError> {
@@ -1134,7 +1135,7 @@ async fn ip_pools_post(
     path = "/ip-pools/{pool_name}",
     tags = ["ip-pools"],
 }]
-async fn ip_pools_get_ip_pool(
+async fn ip_pool_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<IpPoolPathParam>,
 ) -> Result<HttpResponseOk<views::IpPool>, HttpError> {
@@ -1156,7 +1157,7 @@ async fn ip_pools_get_ip_pool(
     path = "/ip-pools/{pool_name}",
     tags = ["ip-pools"],
 }]
-async fn ip_pools_delete_ip_pool(
+async fn ip_pool_delete(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<IpPoolPathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
@@ -1178,7 +1179,7 @@ async fn ip_pools_delete_ip_pool(
     path = "/ip-pools/{pool_name}",
     tags = ["ip-pools"],
 }]
-async fn ip_pools_put_ip_pool(
+async fn ip_pool_update(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<IpPoolPathParam>,
     updates: TypedBody<params::IpPoolUpdate>,
@@ -1206,7 +1207,7 @@ type IpPoolRangePaginationParams = PaginationParams<EmptyScanParams, IpNetwork>;
     path = "/ip-pools/{pool_name}/ranges",
     tags = ["ip-pools"],
 }]
-async fn ip_pool_ranges_get(
+async fn ip_pool_range_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<IpPoolPathParam>,
     query_params: Query<IpPoolRangePaginationParams>,
@@ -1250,7 +1251,7 @@ async fn ip_pool_ranges_get(
     path = "/ip-pools/{pool_name}/ranges/add",
     tags = ["ip-pools"],
 }]
-async fn ip_pool_ranges_add(
+async fn ip_pool_range_add(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<IpPoolPathParam>,
     range_params: TypedBody<shared::IpRange>,
@@ -1271,10 +1272,10 @@ async fn ip_pool_ranges_add(
 /// Remove a range from an existing IP Pool.
 #[endpoint {
     method = POST,
-    path = "/ip-pools/{pool_name}/ranges/delete",
+    path = "/ip-pools/{pool_name}/ranges/remove",
     tags = ["ip-pools"],
 }]
-async fn ip_pool_ranges_delete(
+async fn ip_pool_range_remove(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<IpPoolPathParam>,
     range_params: TypedBody<shared::IpRange>,
@@ -1300,7 +1301,7 @@ async fn ip_pool_ranges_delete(
     path = "/organizations/{organization_name}/projects/{project_name}/disks",
     tags = ["disks"]
 }]
-async fn project_disks_get(
+async fn disk_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByName>,
     path_params: Path<ProjectPathParam>,
@@ -1341,7 +1342,7 @@ async fn project_disks_get(
     path = "/organizations/{organization_name}/projects/{project_name}/disks",
     tags = ["disks"]
 }]
-async fn project_disks_post(
+async fn disk_create(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
     new_disk: TypedBody<params::DiskCreate>,
@@ -1381,7 +1382,7 @@ struct DiskPathParam {
     path = "/organizations/{organization_name}/projects/{project_name}/disks/{disk_name}",
     tags = ["disks"],
 }]
-async fn project_disks_get_disk(
+async fn disk_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<DiskPathParam>,
 ) -> Result<HttpResponseOk<Disk>, HttpError> {
@@ -1407,7 +1408,7 @@ async fn project_disks_get_disk(
     path = "/organizations/{organization_name}/projects/{project_name}/disks/{disk_name}",
     tags = ["disks"],
 }]
-async fn project_disks_delete_disk(
+async fn disk_delete(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<DiskPathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
@@ -1440,7 +1441,7 @@ async fn project_disks_delete_disk(
     path = "/organizations/{organization_name}/projects/{project_name}/instances",
     tags = ["instances"],
 }]
-async fn project_instances_get(
+async fn instance_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByName>,
     path_params: Path<ProjectPathParam>,
@@ -1487,7 +1488,7 @@ async fn project_instances_get(
      path = "/organizations/{organization_name}/projects/{project_name}/instances",
     tags = ["instances"],
 }]
-async fn project_instances_post(
+async fn instance_create(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
     new_instance: TypedBody<params::InstanceCreate>,
@@ -1527,7 +1528,7 @@ struct InstancePathParam {
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}",
     tags = ["instances"],
 }]
-async fn project_instances_get_instance(
+async fn instance_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstancePathParam>,
 ) -> Result<HttpResponseOk<Instance>, HttpError> {
@@ -1558,7 +1559,7 @@ async fn project_instances_get_instance(
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}",
     tags = ["instances"],
 }]
-async fn project_instances_delete_instance(
+async fn instance_delete(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstancePathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
@@ -1589,7 +1590,7 @@ async fn project_instances_delete_instance(
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/migrate",
     tags = ["instances"],
 }]
-async fn project_instances_migrate_instance(
+async fn instance_migrate(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstancePathParam>,
     migrate_params: TypedBody<params::InstanceMigrate>,
@@ -1623,7 +1624,7 @@ async fn project_instances_migrate_instance(
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/reboot",
     tags = ["instances"],
 }]
-async fn project_instances_instance_reboot(
+async fn instance_reboot(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstancePathParam>,
 ) -> Result<HttpResponseAccepted<Instance>, HttpError> {
@@ -1654,7 +1655,7 @@ async fn project_instances_instance_reboot(
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/start",
     tags = ["instances"],
 }]
-async fn project_instances_instance_start(
+async fn instance_start(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstancePathParam>,
 ) -> Result<HttpResponseAccepted<Instance>, HttpError> {
@@ -1686,7 +1687,7 @@ async fn project_instances_instance_start(
     tags = ["instances"],
 }]
 // Our naming convention kind of falls apart here.
-async fn project_instances_instance_stop(
+async fn instance_stop(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstancePathParam>,
 ) -> Result<HttpResponseAccepted<Instance>, HttpError> {
@@ -1714,10 +1715,10 @@ async fn project_instances_instance_stop(
 /// Get contents of an instance's serial console.
 #[endpoint {
     method = GET,
-    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/serial",
+    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/serial-console",
     tags = ["instances"],
 }]
-async fn project_instances_instance_serial_get(
+async fn instance_serial_console(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstancePathParam>,
     query_params: Query<params::InstanceSerialConsoleRequest>,
@@ -1751,7 +1752,7 @@ async fn project_instances_instance_serial_get(
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks",
     tags = ["instances"],
 }]
-async fn instance_disks_get(
+async fn instance_disk_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByName>,
     path_params: Path<InstancePathParam>,
@@ -1792,7 +1793,7 @@ async fn instance_disks_get(
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/attach",
     tags = ["instances"],
 }]
-async fn instance_disks_attach(
+async fn instance_disk_attach(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstancePathParam>,
     disk_to_attach: TypedBody<params::DiskIdentifier>,
@@ -1824,7 +1825,7 @@ async fn instance_disks_attach(
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/detach",
     tags = ["instances"],
 }]
-async fn instance_disks_detach(
+async fn instance_disk_detach(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstancePathParam>,
     disk_to_detach: TypedBody<params::DiskIdentifier>,
@@ -1862,7 +1863,7 @@ async fn instance_disks_detach(
     path = "/images",
     tags = ["images:global"],
 }]
-async fn images_get(
+async fn image_global_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByName>,
 ) -> Result<HttpResponseOk<ResultsPage<GlobalImage>>, HttpError> {
@@ -1899,7 +1900,7 @@ async fn images_get(
     path = "/images",
     tags = ["images:global"]
 }]
-async fn images_post(
+async fn image_global_create(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     new_image: TypedBody<params::GlobalImageCreate>,
 ) -> Result<HttpResponseCreated<GlobalImage>, HttpError> {
@@ -1928,7 +1929,7 @@ struct GlobalImagePathParam {
     path = "/images/{image_name}",
     tags = ["images:global"],
 }]
-async fn images_get_image(
+async fn image_global_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<GlobalImagePathParam>,
 ) -> Result<HttpResponseOk<GlobalImage>, HttpError> {
@@ -1954,7 +1955,7 @@ async fn images_get_image(
     path = "/images/{image_name}",
     tags = ["images:global"],
 }]
-async fn images_delete_image(
+async fn image_global_delete(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<GlobalImagePathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
@@ -1979,7 +1980,7 @@ async fn images_delete_image(
     path = "/organizations/{organization_name}/projects/{project_name}/images",
     tags = ["images"],
 }]
-async fn project_images_get(
+async fn image_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByName>,
     path_params: Path<ProjectPathParam>,
@@ -2021,7 +2022,7 @@ async fn project_images_get(
     path = "/organizations/{organization_name}/projects/{project_name}/images",
     tags = ["images"]
 }]
-async fn project_images_post(
+async fn image_create(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
     new_image: TypedBody<params::ImageCreate>,
@@ -2063,7 +2064,7 @@ struct ImagePathParam {
     path = "/organizations/{organization_name}/projects/{project_name}/images/{image_name}",
     tags = ["images"],
 }]
-async fn project_images_get_image(
+async fn image_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ImagePathParam>,
 ) -> Result<HttpResponseOk<Image>, HttpError> {
@@ -2098,7 +2099,7 @@ async fn project_images_get_image(
     path = "/organizations/{organization_name}/projects/{project_name}/images/{image_name}",
     tags = ["images"],
 }]
-async fn project_images_delete_image(
+async fn image_delete(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ImagePathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
@@ -2133,7 +2134,7 @@ async fn project_images_delete_image(
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces",
     tags = ["instances"],
 }]
-async fn instance_network_interfaces_get(
+async fn instance_network_interface_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByName>,
     path_params: Path<InstancePathParam>,
@@ -2175,7 +2176,7 @@ async fn instance_network_interfaces_get(
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces",
     tags = ["instances"],
 }]
-async fn instance_network_interfaces_post(
+async fn instance_network_interface_create(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstancePathParam>,
     interface_params: TypedBody<params::NetworkInterfaceCreate>,
@@ -2221,7 +2222,7 @@ pub struct NetworkInterfacePathParam {
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}",
     tags = ["instances"],
 }]
-async fn instance_network_interfaces_delete_interface(
+async fn instance_network_interface_delete(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<NetworkInterfacePathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
@@ -2254,7 +2255,7 @@ async fn instance_network_interfaces_delete_interface(
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}",
     tags = ["instances"],
 }]
-async fn instance_network_interfaces_get_interface(
+async fn instance_network_interface_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<NetworkInterfacePathParam>,
 ) -> Result<HttpResponseOk<NetworkInterface>, HttpError> {
@@ -2287,7 +2288,7 @@ async fn instance_network_interfaces_get_interface(
     path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}",
     tags = ["instances"],
 }]
-async fn instance_network_interfaces_put_interface(
+async fn instance_network_interface_update(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<NetworkInterfacePathParam>,
     updated_iface: TypedBody<params::NetworkInterfaceUpdate>,
@@ -2325,7 +2326,7 @@ async fn instance_network_interfaces_put_interface(
     path = "/organizations/{organization_name}/projects/{project_name}/snapshots",
     tags = ["snapshots"],
 }]
-async fn project_snapshots_get(
+async fn snapshot_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByName>,
     path_params: Path<ProjectPathParam>,
@@ -2365,7 +2366,7 @@ async fn project_snapshots_get(
     path = "/organizations/{organization_name}/projects/{project_name}/snapshots",
     tags = ["snapshots"],
 }]
-async fn project_snapshots_post(
+async fn snapshot_create(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
     new_snapshot: TypedBody<params::SnapshotCreate>,
@@ -2405,7 +2406,7 @@ struct SnapshotPathParam {
     path = "/organizations/{organization_name}/projects/{project_name}/snapshots/{snapshot_name}",
     tags = ["snapshots"],
 }]
-async fn project_snapshots_get_snapshot(
+async fn snapshot_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<SnapshotPathParam>,
 ) -> Result<HttpResponseOk<Snapshot>, HttpError> {
@@ -2436,7 +2437,7 @@ async fn project_snapshots_get_snapshot(
     path = "/organizations/{organization_name}/projects/{project_name}/snapshots/{snapshot_name}",
     tags = ["snapshots"],
 }]
-async fn project_snapshots_delete_snapshot(
+async fn snapshot_delete(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<SnapshotPathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
@@ -2469,7 +2470,7 @@ async fn project_snapshots_delete_snapshot(
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs",
     tags = ["vpcs"],
 }]
-async fn project_vpcs_get(
+async fn vpc_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByName>,
     path_params: Path<ProjectPathParam>,
@@ -2518,7 +2519,7 @@ struct VpcPathParam {
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}",
     tags = ["vpcs"],
 }]
-async fn project_vpcs_get_vpc(
+async fn vpc_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcPathParam>,
 ) -> Result<HttpResponseOk<Vpc>, HttpError> {
@@ -2544,7 +2545,7 @@ async fn project_vpcs_get_vpc(
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs",
     tags = ["vpcs"],
 }]
-async fn project_vpcs_post(
+async fn vpc_create(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ProjectPathParam>,
     new_vpc: TypedBody<params::VpcCreate>,
@@ -2576,7 +2577,7 @@ async fn project_vpcs_post(
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}",
     tags = ["vpcs"],
 }]
-async fn project_vpcs_put_vpc(
+async fn vpc_update(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcPathParam>,
     updated_vpc: TypedBody<params::VpcUpdate>,
@@ -2606,7 +2607,7 @@ async fn project_vpcs_put_vpc(
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}",
     tags = ["vpcs"],
 }]
-async fn project_vpcs_delete_vpc(
+async fn vpc_delete(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcPathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
@@ -2635,9 +2636,9 @@ async fn project_vpcs_delete_vpc(
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets",
-    tags = ["subnets"],
+    tags = ["vpcs"],
 }]
-async fn vpc_subnets_get(
+async fn vpc_subnet_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByName>,
     path_params: Path<VpcPathParam>,
@@ -2683,9 +2684,9 @@ struct VpcSubnetPathParam {
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}",
-    tags = ["subnets"],
+    tags = ["vpcs"],
 }]
-async fn vpc_subnets_get_subnet(
+async fn vpc_subnet_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcSubnetPathParam>,
 ) -> Result<HttpResponseOk<VpcSubnet>, HttpError> {
@@ -2712,9 +2713,9 @@ async fn vpc_subnets_get_subnet(
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets",
-    tags = ["subnets"],
+    tags = ["vpcs"],
 }]
-async fn vpc_subnets_post(
+async fn vpc_subnet_create(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcPathParam>,
     create_params: TypedBody<params::VpcSubnetCreate>,
@@ -2742,9 +2743,9 @@ async fn vpc_subnets_post(
 #[endpoint {
     method = DELETE,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}",
-    tags = ["subnets"],
+    tags = ["vpcs"],
 }]
-async fn vpc_subnets_delete_subnet(
+async fn vpc_subnet_delete(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcSubnetPathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
@@ -2771,9 +2772,9 @@ async fn vpc_subnets_delete_subnet(
 #[endpoint {
     method = PUT,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}",
-    tags = ["subnets"],
+    tags = ["vpcs"],
 }]
-async fn vpc_subnets_put_subnet(
+async fn vpc_subnet_update(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcSubnetPathParam>,
     subnet_params: TypedBody<params::VpcSubnetUpdate>,
@@ -2802,9 +2803,9 @@ async fn vpc_subnets_put_subnet(
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}/network-interfaces",
-    tags = ["subnets"],
+    tags = ["vpcs"],
 }]
-async fn subnet_network_interfaces_get(
+async fn vpc_subnet_list_network_interfaces(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByName>,
     path_params: Path<VpcSubnetPathParam>,
@@ -2840,13 +2841,14 @@ async fn subnet_network_interfaces_get(
 
 // VPC Firewalls
 
+// TODO Is the number of firewall rules bounded?
 /// List firewall rules for a VPC.
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/firewall/rules",
-    tags = ["firewall"],
+    tags = ["vpcs"],
 }]
-async fn vpc_firewall_rules_get(
+async fn vpc_firewall_rules_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcPathParam>,
 ) -> Result<HttpResponseOk<VpcFirewallRules>, HttpError> {
@@ -2877,9 +2879,9 @@ async fn vpc_firewall_rules_get(
 #[endpoint {
     method = PUT,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/firewall/rules",
-    tags = ["firewall"],
+    tags = ["vpcs"],
 }]
-async fn vpc_firewall_rules_put(
+async fn vpc_firewall_rules_update(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcPathParam>,
     router_params: TypedBody<VpcFirewallRuleUpdateParams>,
@@ -2913,9 +2915,9 @@ async fn vpc_firewall_rules_put(
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers",
-    tags = ["routers"],
+    tags = ["vpcs"],
 }]
-async fn vpc_routers_get(
+async fn vpc_router_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByName>,
     path_params: Path<VpcPathParam>,
@@ -2961,9 +2963,9 @@ struct VpcRouterPathParam {
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}",
-    tags = ["routers"],
+    tags = ["vpcs"],
 }]
-async fn vpc_routers_get_router(
+async fn vpc_router_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcRouterPathParam>,
 ) -> Result<HttpResponseOk<VpcRouter>, HttpError> {
@@ -2990,9 +2992,9 @@ async fn vpc_routers_get_router(
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers",
-    tags = ["routers"],
+    tags = ["vpcs"],
 }]
-async fn vpc_routers_post(
+async fn vpc_router_create(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcPathParam>,
     create_params: TypedBody<params::VpcRouterCreate>,
@@ -3021,9 +3023,9 @@ async fn vpc_routers_post(
 #[endpoint {
     method = DELETE,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}",
-    tags = ["routers"],
+    tags = ["vpcs"],
 }]
-async fn vpc_routers_delete_router(
+async fn vpc_router_delete(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcRouterPathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
@@ -3050,9 +3052,9 @@ async fn vpc_routers_delete_router(
 #[endpoint {
     method = PUT,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}",
-    tags = ["routers"],
+    tags = ["vpcs"],
 }]
-async fn vpc_routers_put_router(
+async fn vpc_router_update(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcRouterPathParam>,
     router_params: TypedBody<params::VpcRouterUpdate>,
@@ -3083,9 +3085,9 @@ async fn vpc_routers_put_router(
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes",
-    tags = ["routes"],
+    tags = ["vpcs"],
 }]
-async fn routers_routes_get(
+async fn vpc_router_route_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByName>,
     path_params: Path<VpcRouterPathParam>,
@@ -3133,9 +3135,9 @@ struct RouterRoutePathParam {
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}",
-    tags = ["routes"],
+    tags = ["vpcs"],
 }]
-async fn routers_routes_get_route(
+async fn vpc_router_route_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<RouterRoutePathParam>,
 ) -> Result<HttpResponseOk<RouterRoute>, HttpError> {
@@ -3163,9 +3165,9 @@ async fn routers_routes_get_route(
 #[endpoint {
     method = POST,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes",
-    tags = ["routes"],
+    tags = ["vpcs"],
 }]
-async fn routers_routes_post(
+async fn vpc_router_route_create(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<VpcRouterPathParam>,
     create_params: TypedBody<RouterRouteCreateParams>,
@@ -3195,9 +3197,9 @@ async fn routers_routes_post(
 #[endpoint {
     method = DELETE,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}",
-    tags = ["routes"],
+    tags = ["vpcs"],
 }]
-async fn routers_routes_delete_route(
+async fn vpc_router_route_delete(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<RouterRoutePathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
@@ -3225,9 +3227,9 @@ async fn routers_routes_delete_route(
 #[endpoint {
     method = PUT,
     path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}",
-    tags = ["routes"],
+    tags = ["vpcs"],
 }]
-async fn routers_routes_put_route(
+async fn vpc_router_route_update(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<RouterRoutePathParam>,
     router_params: TypedBody<RouterRouteUpdateParams>,
@@ -3259,9 +3261,9 @@ async fn routers_routes_put_route(
 #[endpoint {
     method = GET,
     path = "/hardware/racks",
-    tags = ["racks"],
+    tags = ["hardware"],
 }]
-async fn hardware_racks_get(
+async fn rack_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<Rack>>, HttpError> {
@@ -3296,9 +3298,9 @@ struct RackPathParam {
 #[endpoint {
     method = GET,
     path = "/hardware/racks/{rack_id}",
-    tags = ["racks"],
+    tags = ["hardware"],
 }]
-async fn hardware_racks_get_rack(
+async fn rack_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<RackPathParam>,
 ) -> Result<HttpResponseOk<Rack>, HttpError> {
@@ -3319,9 +3321,9 @@ async fn hardware_racks_get_rack(
 #[endpoint {
     method = GET,
     path = "/hardware/sleds",
-    tags = ["sleds"],
+    tags = ["hardware"],
 }]
-async fn hardware_sleds_get(
+async fn sled_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<Sled>>, HttpError> {
@@ -3356,9 +3358,9 @@ struct SledPathParam {
 #[endpoint {
     method = GET,
     path = "/hardware/sleds/{sled_id}",
-    tags = ["sleds"],
+    tags = ["hardware"],
 }]
-async fn hardware_sleds_get_sled(
+async fn sled_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<SledPathParam>,
 ) -> Result<HttpResponseOk<Sled>, HttpError> {
@@ -3402,7 +3404,7 @@ async fn updates_refresh(
     path = "/sagas",
     tags = ["sagas"],
 }]
-async fn sagas_get(
+async fn saga_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<Saga>>, HttpError> {
@@ -3435,7 +3437,7 @@ struct SagaPathParam {
     path = "/sagas/{saga_id}",
     tags = ["sagas"],
 }]
-async fn sagas_get_saga(
+async fn saga_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<SagaPathParam>,
 ) -> Result<HttpResponseOk<Saga>, HttpError> {
@@ -3458,7 +3460,7 @@ async fn sagas_get_saga(
     path = "/users",
     tags = ["silos"],
 }]
-async fn silo_users_get(
+async fn user_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<User>>, HttpError> {
@@ -3488,10 +3490,10 @@ async fn silo_users_get(
 /// List the built-in system users
 #[endpoint {
     method = GET,
-    path = "/users_builtin",
+    path = "/system/user",
     tags = ["system"],
 }]
-async fn builtin_users_get(
+async fn system_user_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByName>,
 ) -> Result<HttpResponseOk<ResultsPage<UserBuiltin>>, HttpError> {
@@ -3527,10 +3529,10 @@ struct UserPathParam {
 /// Fetch a specific built-in system user
 #[endpoint {
     method = GET,
-    path = "/users_builtin/{user_name}",
+    path = "/system/user/{user_name}",
     tags = ["system"],
 }]
-async fn builtin_users_get_user(
+async fn system_user_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<UserPathParam>,
 ) -> Result<HttpResponseOk<UserBuiltin>, HttpError> {
@@ -3584,7 +3586,7 @@ struct RolePage {
     path = "/roles",
     tags = ["roles"],
 }]
-async fn roles_get(
+async fn role_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginationParams<EmptyScanParams, RolePage>>,
 ) -> Result<HttpResponseOk<ResultsPage<Role>>, HttpError> {
@@ -3638,7 +3640,7 @@ struct RolePathParam {
     path = "/roles/{role_name}",
     tags = ["roles"],
 }]
-async fn roles_get_role(
+async fn role_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<RolePathParam>,
 ) -> Result<HttpResponseOk<Role>, HttpError> {
@@ -3660,9 +3662,9 @@ async fn roles_get_role(
 #[endpoint {
     method = GET,
     path = "/session/me/sshkeys",
-    tags = ["sshkeys"],
+    tags = ["session"],
 }]
-async fn sshkeys_get(
+async fn session_sshkey_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByName>,
 ) -> Result<HttpResponseOk<ResultsPage<SshKey>>, HttpError> {
@@ -3693,9 +3695,9 @@ async fn sshkeys_get(
 #[endpoint {
     method = POST,
     path = "/session/me/sshkeys",
-    tags = ["sshkeys"],
+    tags = ["session"],
 }]
-async fn sshkeys_post(
+async fn session_sshkey_create(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     new_key: TypedBody<params::SshKeyCreate>,
 ) -> Result<HttpResponseCreated<SshKey>, HttpError> {
@@ -3722,9 +3724,9 @@ struct SshKeyPathParams {
 #[endpoint {
     method = GET,
     path = "/session/me/sshkeys/{ssh_key_name}",
-    tags = ["sshkeys"],
+    tags = ["session"],
 }]
-async fn sshkeys_get_key(
+async fn session_sshkey_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<SshKeyPathParams>,
 ) -> Result<HttpResponseOk<SshKey>, HttpError> {
@@ -3746,9 +3748,9 @@ async fn sshkeys_get_key(
 #[endpoint {
     method = DELETE,
     path = "/session/me/sshkeys/{ssh_key_name}",
-    tags = ["sshkeys"],
+    tags = ["session"],
 }]
-async fn sshkeys_delete_key(
+async fn session_sshkey_delete(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<SshKeyPathParams>,
 ) -> Result<HttpResponseDeleted, HttpError> {

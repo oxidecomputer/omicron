@@ -775,6 +775,57 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
         ]
     );
 
+    // Create another Silo with a Silo administrator.  That user should not be
+    // able to see the users in the first Silo.
+
+    let silo =
+        create_silo(client, "silo2", true, shared::UserProvisionType::Fixed)
+            .await;
+    let new_silo_user_id =
+        "6922f0b2-9a92-659b-da6b-93ad4955a3a3".parse().unwrap();
+    let new_silo_user_name = String::from("some_silo_user");
+    nexus
+        .silo_user_create(
+            silo.identity.id,
+            new_silo_user_id,
+            new_silo_user_name.clone(),
+        )
+        .await
+        .unwrap();
+    grant_iam(
+        client,
+        "/silos/silo2",
+        SiloRole::Admin,
+        new_silo_user_id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    let silo2_users: dropshot::ResultsPage<views::User> =
+        NexusRequest::object_get(client, "/users")
+            .authn_as(AuthnMode::SiloUser(new_silo_user_id))
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
+    assert_eq!(
+        silo2_users.items,
+        vec![views::User {
+            id: new_silo_user_id,
+            display_name: new_silo_user_name,
+        }]
+    );
+
+    // The "test-privileged" user also shouldn't see the user in this other
+    // Silo.
+    let new_silo_users: Vec<views::User> =
+        NexusRequest::iter_collection_authn(client, "/users", "", Some(1))
+            .await
+            .expect("failed to list silo users (2)")
+            .all_items;
+    assert_eq!(silo_users, new_silo_users,);
+
     // TODO-coverage When we have a way to remove or invalidate Silo Users, we
     // should test that doing so causes them to stop appearing in the list.
 }

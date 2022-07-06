@@ -614,10 +614,10 @@
     "/hardware/racks": {
       "get": {
         "tags": [
-          "racks"
+          "hardware"
         ],
         "summary": "List racks in the system.",
-        "operationId": "hardware_racks_get",
+        "operationId": "rack_list",
         "parameters": [
           {
             "in": "query",
@@ -674,10 +674,10 @@
     "/hardware/racks/{rack_id}": {
       "get": {
         "tags": [
-          "racks"
+          "hardware"
         ],
         "summary": "Fetch information about a particular rack.",
-        "operationId": "hardware_racks_get_rack",
+        "operationId": "rack_view",
         "parameters": [
           {
             "in": "path",
@@ -714,10 +714,10 @@
     "/hardware/sleds": {
       "get": {
         "tags": [
-          "sleds"
+          "hardware"
         ],
         "summary": "List sleds in the system.",
-        "operationId": "hardware_sleds_get",
+        "operationId": "sled_list",
         "parameters": [
           {
             "in": "query",
@@ -774,10 +774,10 @@
     "/hardware/sleds/{sled_id}": {
       "get": {
         "tags": [
-          "sleds"
+          "hardware"
         ],
         "summary": "Fetch information about a sled in the system.",
-        "operationId": "hardware_sleds_get_sled",
+        "operationId": "sled_view",
         "parameters": [
           {
             "in": "path",
@@ -818,7 +818,7 @@
         ],
         "summary": "List global images.",
         "description": "Returns a list of all the global images. Global images are returned sorted by creation date, with the most recent images appearing first.",
-        "operationId": "images_get",
+        "operationId": "image_global_list",
         "parameters": [
           {
             "in": "query",
@@ -877,7 +877,7 @@
         ],
         "summary": "Create a global image.",
         "description": "Create a new global image. This image can then be used by any user as a base for instances.",
-        "operationId": "images_post",
+        "operationId": "image_global_create",
         "requestBody": {
           "content": {
             "application/json": {
@@ -915,7 +915,7 @@
         ],
         "summary": "Get a global image.",
         "description": "Returns the details of a specific global image.",
-        "operationId": "images_get_image",
+        "operationId": "image_global_view",
         "parameters": [
           {
             "in": "path",
@@ -952,7 +952,7 @@
         ],
         "summary": "Delete a global image.",
         "description": "Permanently delete a global image. This operation cannot be undone. Any instances using the global image will continue to run, however new instances can not be created with this image.",
-        "operationId": "images_delete_image",
+        "operationId": "image_global_delete",
         "parameters": [
           {
             "in": "path",
@@ -983,7 +983,7 @@
           "ip-pools"
         ],
         "summary": "List IP Pools.",
-        "operationId": "ip_pools_get",
+        "operationId": "ip_pool_list",
         "parameters": [
           {
             "in": "query",
@@ -1041,7 +1041,7 @@
           "ip-pools"
         ],
         "summary": "Create a new IP Pool.",
-        "operationId": "ip_pools_post",
+        "operationId": "ip_pool_create",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1078,7 +1078,7 @@
           "ip-pools"
         ],
         "summary": "Fetch a single IP Pool.",
-        "operationId": "ip_pools_get_ip_pool",
+        "operationId": "ip_pool_view",
         "parameters": [
           {
             "in": "path",
@@ -1114,7 +1114,7 @@
           "ip-pools"
         ],
         "summary": "Update an IP Pool.",
-        "operationId": "ip_pools_put_ip_pool",
+        "operationId": "ip_pool_update",
         "parameters": [
           {
             "in": "path",
@@ -1160,7 +1160,7 @@
           "ip-pools"
         ],
         "summary": "Delete an IP Pool.",
-        "operationId": "ip_pools_delete_ip_pool",
+        "operationId": "ip_pool_delete",
         "parameters": [
           {
             "in": "path",
@@ -1192,7 +1192,7 @@
         ],
         "summary": "List the ranges of IP addresses within an existing IP Pool.",
         "description": "Note that ranges are listed sorted by their first address.",
-        "operationId": "ip_pool_ranges_get",
+        "operationId": "ip_pool_range_list",
         "parameters": [
           {
             "in": "path",
@@ -1253,7 +1253,7 @@
           "ip-pools"
         ],
         "summary": "Add a new range to an existing IP Pool.",
-        "operationId": "ip_pool_ranges_add",
+        "operationId": "ip_pool_range_add",
         "parameters": [
           {
             "in": "path",
@@ -1295,13 +1295,13 @@
         }
       }
     },
-    "/ip-pools/{pool_name}/ranges/delete": {
+    "/ip-pools/{pool_name}/ranges/remove": {
       "post": {
         "tags": [
           "ip-pools"
         ],
         "summary": "Remove a range from an existing IP Pool.",
-        "operationId": "ip_pool_ranges_delete",
+        "operationId": "ip_pool_range_remove",
         "parameters": [
           {
             "in": "path",
@@ -1477,7 +1477,7 @@
           "organizations"
         ],
         "summary": "List all organizations.",
-        "operationId": "organizations_get",
+        "operationId": "organization_list",
         "parameters": [
           {
             "in": "query",
@@ -1535,7 +1535,7 @@
           "organizations"
         ],
         "summary": "Create a new organization.",
-        "operationId": "organizations_post",
+        "operationId": "organization_create",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1572,7 +1572,7 @@
           "organizations"
         ],
         "summary": "Fetch a specific organization",
-        "operationId": "organizations_get_organization",
+        "operationId": "organization_view",
         "parameters": [
           {
             "in": "path",
@@ -1609,7 +1609,7 @@
           "organizations"
         ],
         "summary": "Update a specific organization.",
-        "operationId": "organizations_put_organization",
+        "operationId": "organization_update",
         "parameters": [
           {
             "in": "path",
@@ -1656,7 +1656,7 @@
           "organizations"
         ],
         "summary": "Delete a specific organization.",
-        "operationId": "organizations_delete_organization",
+        "operationId": "organization_delete",
         "parameters": [
           {
             "in": "path",
@@ -1688,7 +1688,7 @@
           "organizations"
         ],
         "summary": "Fetch the IAM policy for this Organization",
-        "operationId": "organization_get_policy",
+        "operationId": "organization_policy_view",
         "parameters": [
           {
             "in": "path",
@@ -1725,7 +1725,7 @@
           "organizations"
         ],
         "summary": "Update the IAM policy for this Organization",
-        "operationId": "organization_put_policy",
+        "operationId": "organization_policy_update",
         "parameters": [
           {
             "in": "path",
@@ -1774,7 +1774,7 @@
           "projects"
         ],
         "summary": "List all projects.",
-        "operationId": "organization_projects_get",
+        "operationId": "project_list",
         "parameters": [
           {
             "in": "query",
@@ -1842,7 +1842,7 @@
           "projects"
         ],
         "summary": "Create a new project.",
-        "operationId": "organization_projects_post",
+        "operationId": "project_create",
         "parameters": [
           {
             "in": "path",
@@ -1891,7 +1891,7 @@
           "projects"
         ],
         "summary": "Fetch a specific project",
-        "operationId": "organization_projects_get_project",
+        "operationId": "project_view",
         "parameters": [
           {
             "in": "path",
@@ -1938,7 +1938,7 @@
           "projects"
         ],
         "summary": "Update a specific project.",
-        "operationId": "organization_projects_put_project",
+        "operationId": "project_update",
         "parameters": [
           {
             "in": "path",
@@ -1995,7 +1995,7 @@
           "projects"
         ],
         "summary": "Delete a specific project.",
-        "operationId": "organization_projects_delete_project",
+        "operationId": "project_delete",
         "parameters": [
           {
             "in": "path",
@@ -2037,7 +2037,7 @@
           "disks"
         ],
         "summary": "List disks in a project.",
-        "operationId": "project_disks_get",
+        "operationId": "disk_list",
         "parameters": [
           {
             "in": "query",
@@ -2115,7 +2115,7 @@
           "disks"
         ],
         "summary": "Create a disk in a project.",
-        "operationId": "project_disks_post",
+        "operationId": "disk_create",
         "parameters": [
           {
             "in": "path",
@@ -2174,7 +2174,7 @@
           "disks"
         ],
         "summary": "Fetch a single disk in a project.",
-        "operationId": "project_disks_get_disk",
+        "operationId": "disk_view",
         "parameters": [
           {
             "in": "path",
@@ -2228,7 +2228,7 @@
           "disks"
         ],
         "summary": "Delete a disk from a project.",
-        "operationId": "project_disks_delete_disk",
+        "operationId": "disk_delete",
         "parameters": [
           {
             "in": "path",
@@ -2278,7 +2278,7 @@
         ],
         "summary": "List images",
         "description": "List images in a project. The images are returned sorted by creation date, with the most recent images appearing first.",
-        "operationId": "project_images_get",
+        "operationId": "image_list",
         "parameters": [
           {
             "in": "query",
@@ -2357,7 +2357,7 @@
         ],
         "summary": "Create an image",
         "description": "Create a new image in a project.",
-        "operationId": "project_images_post",
+        "operationId": "image_create",
         "parameters": [
           {
             "in": "path",
@@ -2417,7 +2417,7 @@
         ],
         "summary": "Get an image",
         "description": "Get the details of a specific image in a project.",
-        "operationId": "project_images_get_image",
+        "operationId": "image_view",
         "parameters": [
           {
             "in": "path",
@@ -2472,7 +2472,7 @@
         ],
         "summary": "Delete an image",
         "description": "Permanently delete an image from a project. This operation cannot be undone. Any instances in the project using the image will continue to run, however new instances can not be created with this image.",
-        "operationId": "project_images_delete_image",
+        "operationId": "image_delete",
         "parameters": [
           {
             "in": "path",
@@ -2521,7 +2521,7 @@
           "instances"
         ],
         "summary": "List instances in a project.",
-        "operationId": "project_instances_get",
+        "operationId": "instance_list",
         "parameters": [
           {
             "in": "query",
@@ -2599,7 +2599,7 @@
           "instances"
         ],
         "summary": "Create an instance in a project.",
-        "operationId": "project_instances_post",
+        "operationId": "instance_create",
         "parameters": [
           {
             "in": "path",
@@ -2658,7 +2658,7 @@
           "instances"
         ],
         "summary": "Get an instance in a project.",
-        "operationId": "project_instances_get_instance",
+        "operationId": "instance_view",
         "parameters": [
           {
             "in": "path",
@@ -2712,7 +2712,7 @@
           "instances"
         ],
         "summary": "Delete an instance from a project.",
-        "operationId": "project_instances_delete_instance",
+        "operationId": "instance_delete",
         "parameters": [
           {
             "in": "path",
@@ -2761,7 +2761,7 @@
           "instances"
         ],
         "summary": "List disks attached to this instance.",
-        "operationId": "instance_disks_get",
+        "operationId": "instance_disk_list",
         "parameters": [
           {
             "in": "query",
@@ -2847,7 +2847,7 @@
         "tags": [
           "instances"
         ],
-        "operationId": "instance_disks_attach",
+        "operationId": "instance_disk_attach",
         "parameters": [
           {
             "in": "path",
@@ -2912,7 +2912,7 @@
         "tags": [
           "instances"
         ],
-        "operationId": "instance_disks_detach",
+        "operationId": "instance_disk_detach",
         "parameters": [
           {
             "in": "path",
@@ -2978,7 +2978,7 @@
           "instances"
         ],
         "summary": "Migrate an instance to a different propolis-server, possibly on a different sled.",
-        "operationId": "project_instances_migrate_instance",
+        "operationId": "instance_migrate",
         "parameters": [
           {
             "in": "path",
@@ -3044,7 +3044,7 @@
           "instances"
         ],
         "summary": "List network interfaces attached to this instance.",
-        "operationId": "instance_network_interfaces_get",
+        "operationId": "instance_network_interface_list",
         "parameters": [
           {
             "in": "query",
@@ -3129,7 +3129,7 @@
           "instances"
         ],
         "summary": "Create a network interface for an instance.",
-        "operationId": "instance_network_interfaces_post",
+        "operationId": "instance_network_interface_create",
         "parameters": [
           {
             "in": "path",
@@ -3195,7 +3195,7 @@
           "instances"
         ],
         "summary": "Get an interface attached to an instance.",
-        "operationId": "instance_network_interfaces_get_interface",
+        "operationId": "instance_network_interface_view",
         "parameters": [
           {
             "in": "path",
@@ -3258,7 +3258,7 @@
           "instances"
         ],
         "summary": "Update information about an instance's network interface",
-        "operationId": "instance_network_interfaces_put_interface",
+        "operationId": "instance_network_interface_update",
         "parameters": [
           {
             "in": "path",
@@ -3332,7 +3332,7 @@
         ],
         "summary": "Detach a network interface from an instance.",
         "description": "Note that the primary interface for an instance cannot be deleted if there are any secondary interfaces. A new primary interface must be designated first. The primary interface can be deleted if there are no secondary interfaces.",
-        "operationId": "instance_network_interfaces_delete_interface",
+        "operationId": "instance_network_interface_delete",
         "parameters": [
           {
             "in": "path",
@@ -3390,7 +3390,7 @@
           "instances"
         ],
         "summary": "Reboot an instance.",
-        "operationId": "project_instances_instance_reboot",
+        "operationId": "instance_reboot",
         "parameters": [
           {
             "in": "path",
@@ -3440,13 +3440,13 @@
         }
       }
     },
-    "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/serial": {
+    "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/serial-console": {
       "get": {
         "tags": [
           "instances"
         ],
         "summary": "Get contents of an instance's serial console.",
-        "operationId": "project_instances_instance_serial_get",
+        "operationId": "instance_serial_console",
         "parameters": [
           {
             "in": "path",
@@ -3538,7 +3538,7 @@
           "instances"
         ],
         "summary": "Boot an instance.",
-        "operationId": "project_instances_instance_start",
+        "operationId": "instance_start",
         "parameters": [
           {
             "in": "path",
@@ -3594,7 +3594,7 @@
           "instances"
         ],
         "summary": "Halt an instance.",
-        "operationId": "project_instances_instance_stop",
+        "operationId": "instance_stop",
         "parameters": [
           {
             "in": "path",
@@ -3650,7 +3650,7 @@
           "projects"
         ],
         "summary": "Fetch the IAM policy for this Project",
-        "operationId": "organization_projects_get_project_policy",
+        "operationId": "project_policy_view",
         "parameters": [
           {
             "in": "path",
@@ -3697,7 +3697,7 @@
           "projects"
         ],
         "summary": "Update the IAM policy for this Project",
-        "operationId": "organization_projects_put_project_policy",
+        "operationId": "project_policy_update",
         "parameters": [
           {
             "in": "path",
@@ -3756,7 +3756,7 @@
           "snapshots"
         ],
         "summary": "List snapshots in a project.",
-        "operationId": "project_snapshots_get",
+        "operationId": "snapshot_list",
         "parameters": [
           {
             "in": "query",
@@ -3834,7 +3834,7 @@
           "snapshots"
         ],
         "summary": "Create a snapshot of a disk.",
-        "operationId": "project_snapshots_post",
+        "operationId": "snapshot_create",
         "parameters": [
           {
             "in": "path",
@@ -3893,7 +3893,7 @@
           "snapshots"
         ],
         "summary": "Get a snapshot in a project.",
-        "operationId": "project_snapshots_get_snapshot",
+        "operationId": "snapshot_view",
         "parameters": [
           {
             "in": "path",
@@ -3947,7 +3947,7 @@
           "snapshots"
         ],
         "summary": "Delete a snapshot from a project.",
-        "operationId": "project_snapshots_delete_snapshot",
+        "operationId": "snapshot_delete",
         "parameters": [
           {
             "in": "path",
@@ -3996,7 +3996,7 @@
           "vpcs"
         ],
         "summary": "List VPCs in a project.",
-        "operationId": "project_vpcs_get",
+        "operationId": "vpc_list",
         "parameters": [
           {
             "in": "query",
@@ -4074,7 +4074,7 @@
           "vpcs"
         ],
         "summary": "Create a VPC in a project.",
-        "operationId": "project_vpcs_post",
+        "operationId": "vpc_create",
         "parameters": [
           {
             "in": "path",
@@ -4133,7 +4133,7 @@
           "vpcs"
         ],
         "summary": "Get a VPC in a project.",
-        "operationId": "project_vpcs_get_vpc",
+        "operationId": "vpc_view",
         "parameters": [
           {
             "in": "path",
@@ -4187,7 +4187,7 @@
           "vpcs"
         ],
         "summary": "Update a VPC.",
-        "operationId": "project_vpcs_put_vpc",
+        "operationId": "vpc_update",
         "parameters": [
           {
             "in": "path",
@@ -4251,7 +4251,7 @@
           "vpcs"
         ],
         "summary": "Delete a vpc from a project.",
-        "operationId": "project_vpcs_delete_vpc",
+        "operationId": "vpc_delete",
         "parameters": [
           {
             "in": "path",
@@ -4297,10 +4297,10 @@
     "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/firewall/rules": {
       "get": {
         "tags": [
-          "firewall"
+          "vpcs"
         ],
         "summary": "List firewall rules for a VPC.",
-        "operationId": "vpc_firewall_rules_get",
+        "operationId": "vpc_firewall_rules_view",
         "parameters": [
           {
             "in": "path",
@@ -4351,10 +4351,10 @@
       },
       "put": {
         "tags": [
-          "firewall"
+          "vpcs"
         ],
         "summary": "Replace the firewall rules for a VPC",
-        "operationId": "vpc_firewall_rules_put",
+        "operationId": "vpc_firewall_rules_update",
         "parameters": [
           {
             "in": "path",
@@ -4417,10 +4417,10 @@
     "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers": {
       "get": {
         "tags": [
-          "routers"
+          "vpcs"
         ],
         "summary": "List VPC Custom and System Routers",
-        "operationId": "vpc_routers_get",
+        "operationId": "vpc_router_list",
         "parameters": [
           {
             "in": "query",
@@ -4502,10 +4502,10 @@
       },
       "post": {
         "tags": [
-          "routers"
+          "vpcs"
         ],
         "summary": "Create a VPC Router",
-        "operationId": "vpc_routers_post",
+        "operationId": "vpc_router_create",
         "parameters": [
           {
             "in": "path",
@@ -4568,10 +4568,10 @@
     "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}": {
       "get": {
         "tags": [
-          "routers"
+          "vpcs"
         ],
         "summary": "Get a VPC Router",
-        "operationId": "vpc_routers_get_router",
+        "operationId": "vpc_router_view",
         "parameters": [
           {
             "in": "path",
@@ -4631,10 +4631,10 @@
       },
       "put": {
         "tags": [
-          "routers"
+          "vpcs"
         ],
         "summary": "Update a VPC Router",
-        "operationId": "vpc_routers_put_router",
+        "operationId": "vpc_router_update",
         "parameters": [
           {
             "in": "path",
@@ -4704,10 +4704,10 @@
       },
       "delete": {
         "tags": [
-          "routers"
+          "vpcs"
         ],
         "summary": "Delete a router from its VPC",
-        "operationId": "vpc_routers_delete_router",
+        "operationId": "vpc_router_delete",
         "parameters": [
           {
             "in": "path",
@@ -4762,10 +4762,10 @@
     "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes": {
       "get": {
         "tags": [
-          "routes"
+          "vpcs"
         ],
         "summary": "List a Router's routes",
-        "operationId": "routers_routes_get",
+        "operationId": "vpc_router_route_list",
         "parameters": [
           {
             "in": "query",
@@ -4856,10 +4856,10 @@
       },
       "post": {
         "tags": [
-          "routes"
+          "vpcs"
         ],
         "summary": "Create a VPC Router",
-        "operationId": "routers_routes_post",
+        "operationId": "vpc_router_route_create",
         "parameters": [
           {
             "in": "path",
@@ -4931,10 +4931,10 @@
     "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}": {
       "get": {
         "tags": [
-          "routes"
+          "vpcs"
         ],
         "summary": "Get a VPC Router route",
-        "operationId": "routers_routes_get_route",
+        "operationId": "vpc_router_route_view",
         "parameters": [
           {
             "in": "path",
@@ -5003,10 +5003,10 @@
       },
       "put": {
         "tags": [
-          "routes"
+          "vpcs"
         ],
         "summary": "Update a Router route",
-        "operationId": "routers_routes_put_route",
+        "operationId": "vpc_router_route_update",
         "parameters": [
           {
             "in": "path",
@@ -5085,10 +5085,10 @@
       },
       "delete": {
         "tags": [
-          "routes"
+          "vpcs"
         ],
         "summary": "Delete a route from its router",
-        "operationId": "routers_routes_delete_route",
+        "operationId": "vpc_router_route_delete",
         "parameters": [
           {
             "in": "path",
@@ -5152,10 +5152,10 @@
     "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets": {
       "get": {
         "tags": [
-          "subnets"
+          "vpcs"
         ],
         "summary": "List subnets in a VPC.",
-        "operationId": "vpc_subnets_get",
+        "operationId": "vpc_subnet_list",
         "parameters": [
           {
             "in": "query",
@@ -5237,10 +5237,10 @@
       },
       "post": {
         "tags": [
-          "subnets"
+          "vpcs"
         ],
         "summary": "Create a subnet in a VPC.",
-        "operationId": "vpc_subnets_post",
+        "operationId": "vpc_subnet_create",
         "parameters": [
           {
             "in": "path",
@@ -5303,10 +5303,10 @@
     "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}": {
       "get": {
         "tags": [
-          "subnets"
+          "vpcs"
         ],
         "summary": "Get subnet in a VPC.",
-        "operationId": "vpc_subnets_get_subnet",
+        "operationId": "vpc_subnet_view",
         "parameters": [
           {
             "in": "path",
@@ -5366,10 +5366,10 @@
       },
       "put": {
         "tags": [
-          "subnets"
+          "vpcs"
         ],
         "summary": "Update a VPC Subnet.",
-        "operationId": "vpc_subnets_put_subnet",
+        "operationId": "vpc_subnet_update",
         "parameters": [
           {
             "in": "path",
@@ -5439,10 +5439,10 @@
       },
       "delete": {
         "tags": [
-          "subnets"
+          "vpcs"
         ],
         "summary": "Delete a subnet from a VPC.",
-        "operationId": "vpc_subnets_delete_subnet",
+        "operationId": "vpc_subnet_delete",
         "parameters": [
           {
             "in": "path",
@@ -5497,10 +5497,10 @@
     "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}/network-interfaces": {
       "get": {
         "tags": [
-          "subnets"
+          "vpcs"
         ],
         "summary": "List network interfaces in a VPC subnet.",
-        "operationId": "subnet_network_interfaces_get",
+        "operationId": "vpc_subnet_list_network_interfaces",
         "parameters": [
           {
             "in": "query",
@@ -5596,7 +5596,7 @@
           "policy"
         ],
         "summary": "Fetch the top-level IAM policy",
-        "operationId": "policy_get",
+        "operationId": "policy_view",
         "responses": {
           "200": {
             "description": "successful operation",
@@ -5621,7 +5621,7 @@
           "policy"
         ],
         "summary": "Update the top-level IAM policy",
-        "operationId": "policy_put",
+        "operationId": "policy_update",
         "requestBody": {
           "content": {
             "application/json": {
@@ -5658,7 +5658,7 @@
           "roles"
         ],
         "summary": "List the built-in roles",
-        "operationId": "roles_get",
+        "operationId": "role_list",
         "parameters": [
           {
             "in": "query",
@@ -5710,7 +5710,7 @@
           "roles"
         ],
         "summary": "Fetch a specific built-in role",
-        "operationId": "roles_get_role",
+        "operationId": "role_view",
         "parameters": [
           {
             "in": "path",
@@ -5749,7 +5749,7 @@
           "sagas"
         ],
         "summary": "List all sagas (for debugging)",
-        "operationId": "sagas_get",
+        "operationId": "saga_list",
         "parameters": [
           {
             "in": "query",
@@ -5809,7 +5809,7 @@
           "sagas"
         ],
         "summary": "Fetch information about a single saga (for debugging)",
-        "operationId": "sagas_get_saga",
+        "operationId": "saga_view",
         "parameters": [
           {
             "in": "path",
@@ -5872,10 +5872,10 @@
     "/session/me/sshkeys": {
       "get": {
         "tags": [
-          "sshkeys"
+          "session"
         ],
         "summary": "List the current user's SSH public keys",
-        "operationId": "sshkeys_get",
+        "operationId": "session_sshkey_list",
         "parameters": [
           {
             "in": "query",
@@ -5930,10 +5930,10 @@
       },
       "post": {
         "tags": [
-          "sshkeys"
+          "session"
         ],
         "summary": "Create a new SSH public key for the current user",
-        "operationId": "sshkeys_post",
+        "operationId": "session_sshkey_create",
         "requestBody": {
           "content": {
             "application/json": {
@@ -5967,10 +5967,10 @@
     "/session/me/sshkeys/{ssh_key_name}": {
       "get": {
         "tags": [
-          "sshkeys"
+          "session"
         ],
         "summary": "Get (by name) an SSH public key belonging to the current user",
-        "operationId": "sshkeys_get_key",
+        "operationId": "session_sshkey_view",
         "parameters": [
           {
             "in": "path",
@@ -6003,10 +6003,10 @@
       },
       "delete": {
         "tags": [
-          "sshkeys"
+          "session"
         ],
         "summary": "Delete (by name) an SSH public key belonging to the current user",
-        "operationId": "sshkeys_delete_key",
+        "operationId": "session_sshkey_delete",
         "parameters": [
           {
             "in": "path",
@@ -6036,7 +6036,7 @@
         "tags": [
           "silos"
         ],
-        "operationId": "silos_get",
+        "operationId": "silo_list",
         "parameters": [
           {
             "in": "query",
@@ -6094,7 +6094,7 @@
           "silos"
         ],
         "summary": "Create a new silo.",
-        "operationId": "silos_post",
+        "operationId": "silo_create",
         "requestBody": {
           "content": {
             "application/json": {
@@ -6131,7 +6131,7 @@
           "silos"
         ],
         "summary": "Fetch a specific silo",
-        "operationId": "silos_get_silo",
+        "operationId": "silo_view",
         "parameters": [
           {
             "in": "path",
@@ -6168,7 +6168,7 @@
           "silos"
         ],
         "summary": "Delete a specific silo.",
-        "operationId": "silos_delete_silo",
+        "operationId": "silo_delete",
         "parameters": [
           {
             "in": "path",
@@ -6200,7 +6200,7 @@
           "silos"
         ],
         "summary": "List Silo identity providers",
-        "operationId": "silos_get_identity_providers",
+        "operationId": "silo_identity_provider_list",
         "parameters": [
           {
             "in": "path",
@@ -6270,7 +6270,7 @@
           "silos"
         ],
         "summary": "Fetch the IAM policy for this Silo",
-        "operationId": "silos_get_silo_policy",
+        "operationId": "silo_policy_view",
         "parameters": [
           {
             "in": "path",
@@ -6307,7 +6307,7 @@
           "silos"
         ],
         "summary": "Update the IAM policy for this Silo",
-        "operationId": "silos_put_silo_policy",
+        "operationId": "silo_policy_update",
         "parameters": [
           {
             "in": "path",
@@ -6356,7 +6356,7 @@
           "silos"
         ],
         "summary": "Create a new SAML identity provider for a silo.",
-        "operationId": "silo_saml_idp_create",
+        "operationId": "silo_identity_provider_create",
         "parameters": [
           {
             "in": "path",
@@ -6405,7 +6405,7 @@
           "silos"
         ],
         "summary": "GET a silo's SAML identity provider",
-        "operationId": "silo_saml_idp_fetch",
+        "operationId": "silo_identity_provider_view",
         "parameters": [
           {
             "in": "path",
@@ -6435,6 +6435,105 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SamlIdentityProvider"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/system/user": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "List the built-in system users",
+        "operationId": "system_user_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameSortMode"
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserBuiltinResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      }
+    },
+    "/system/user/{user_name}": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Fetch a specific built-in system user",
+        "operationId": "system_user_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_name",
+            "description": "The built-in user's unique name.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserBuiltin"
                 }
               }
             }
@@ -6526,7 +6625,7 @@
           "silos"
         ],
         "summary": "List users",
-        "operationId": "silo_users_get",
+        "operationId": "user_list",
         "parameters": [
           {
             "in": "query",
@@ -6578,105 +6677,6 @@
           }
         },
         "x-dropshot-pagination": true
-      }
-    },
-    "/users_builtin": {
-      "get": {
-        "tags": [
-          "system"
-        ],
-        "summary": "List the built-in system users",
-        "operationId": "builtin_users_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            },
-            "style": "form"
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            },
-            "style": "form"
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/NameSortMode"
-            },
-            "style": "form"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UserBuiltinResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-dropshot-pagination": true
-      }
-    },
-    "/users_builtin/{user_name}": {
-      "get": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Fetch a specific built-in system user",
-        "operationId": "builtin_users_get_user",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "user_name",
-            "description": "The built-in user's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UserBuiltin"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
       }
     }
   },
@@ -10987,6 +10987,13 @@
       }
     },
     {
+      "name": "hardware",
+      "description": "These operations pertain to hardware inventory and management. Racks are the unit of expansion of an Oxide deployment. Racks are in turn composed of sleds, switches, power supplies, and a cabled backplane.",
+      "externalDocs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    {
       "name": "hidden",
       "description": "TODO operations that will not ship to customers",
       "externalDocs": {
@@ -11057,13 +11064,6 @@
       }
     },
     {
-      "name": "racks",
-      "description": "These operations pertain to hardware inventory and management. Racks are the unit of expansion of an Oxide deployment. Racks are in turn composed of sleds, switches, power supplies, and a cabled backplane.",
-      "externalDocs": {
-        "url": "http://oxide.computer/docs/#xxx"
-      }
-    },
-    {
       "name": "roles",
       "description": "Roles are a component of Identity and Access Management (IAM) that allow a user or agent account access to additional permissions.",
       "externalDocs": {
@@ -11092,6 +11092,13 @@
       }
     },
     {
+      "name": "session",
+      "description": "Information pertaining to the current session.",
+      "externalDocs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    {
       "name": "silos",
       "description": "Silos represent a logical partition of users and resources.",
       "externalDocs": {
@@ -11099,22 +11106,8 @@
       }
     },
     {
-      "name": "sleds",
-      "description": "This tag should be moved into hardware",
-      "externalDocs": {
-        "url": "http://oxide.computer/docs/#xxx"
-      }
-    },
-    {
       "name": "snapshots",
       "description": "Snapshots of Virtual Disks at a particular point in time.",
-      "externalDocs": {
-        "url": "http://oxide.computer/docs/#xxx"
-      }
-    },
-    {
-      "name": "sshkeys",
-      "description": "Public SSH keys for an individual user",
       "externalDocs": {
         "url": "http://oxide.computer/docs/#xxx"
       }
