@@ -100,6 +100,7 @@ pub struct DeviceAccessToken {
     pub client_id: Uuid,
     pub device_code: String,
     pub silo_user_id: Uuid,
+    pub time_requested: DateTime<Utc>,
     pub time_created: DateTime<Utc>,
     pub time_expires: Option<DateTime<Utc>>,
 }
@@ -108,14 +109,18 @@ impl DeviceAccessToken {
     pub fn new(
         client_id: Uuid,
         device_code: String,
+        time_requested: DateTime<Utc>,
         silo_user_id: Uuid,
     ) -> Self {
+        let now = Utc::now();
+        assert!(time_requested < now);
         Self {
             token: generate_token(),
             client_id,
             device_code,
             silo_user_id,
-            time_created: Utc::now(),
+            time_requested,
+            time_created: now,
             time_expires: None,
         }
     }

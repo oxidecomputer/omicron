@@ -529,6 +529,7 @@ table! {
         client_id -> Uuid,
         device_code -> Text,
         silo_user_id -> Uuid,
+        time_requested -> Timestamptz,
         time_created -> Timestamptz,
         time_expires -> Nullable<Timestamptz>,
     }

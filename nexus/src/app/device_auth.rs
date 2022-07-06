@@ -103,6 +103,7 @@ impl super::Nexus {
         let token = DeviceAccessToken::new(
             db_request.client_id,
             db_request.device_code,
+            db_request.time_created,
             silo_user_id,
         );
 
