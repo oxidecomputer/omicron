@@ -4326,7 +4326,7 @@ impl DataStore {
         #[derive(Debug)]
         enum TokenGrantError {
             RequestNotFound,
-            ConcurrentRequests,
+            TooManyRequests,
         }
         type TxnError = TransactionError<TokenGrantError>;
 
@@ -4338,7 +4338,7 @@ impl DataStore {
                 }
                 1 => Ok(insert_token.get_result(conn)?),
                 _ => Err(TxnError::CustomError(
-                    TokenGrantError::ConcurrentRequests,
+                    TokenGrantError::TooManyRequests,
                 )),
             })
             .await
@@ -4351,10 +4351,8 @@ impl DataStore {
                         ),
                     }
                 }
-                TxnError::CustomError(TokenGrantError::ConcurrentRequests) => {
-                    Error::invalid_request(
-                        "token grant failed due to concurrent requests",
-                    )
+                TxnError::CustomError(TokenGrantError::TooManyRequests) => {
+                    Error::internal_error("unexpectedly found multiple device auth requests for the same user code")
                 }
                 TxnError::Pool(e) => {
                     public_error_from_diesel_pool(e, ErrorHandler::Server)
