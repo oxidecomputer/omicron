@@ -290,18 +290,11 @@ async fn verify_endpoint(
     // response.  Otherwise, the test might later succeed by coincidence.  We
     // might find a 404 because of something that actually doesn't exist rather
     // than something that's just hidden from unauthorized users.
-    let get_allowed = endpoint
-        .allowed_methods
-        .iter()
-        .find(|allowed| {
-            matches!(
-                allowed.method,
-                MethodAndBody::Get | MethodAndBody::GetUnimplemented
-            )
-        })
-        .map(|x| x.method.clone());
+    let get_allowed = endpoint.allowed_methods.iter().find(|allowed| {
+        matches!(allowed, AllowedMethod::Get | AllowedMethod::GetUnimplemented)
+    });
     let resource_before = match get_allowed {
-        Some(MethodAndBody::Get) => {
+        Some(AllowedMethod::Get) => {
             info!(log, "test: privileged GET");
             record_operation(WhichTest::PrivilegedGet(Some(
                 &http::StatusCode::OK,
@@ -316,7 +309,7 @@ async fn verify_endpoint(
                     .unwrap(),
             )
         }
-        Some(MethodAndBody::GetUnimplemented) => {
+        Some(AllowedMethod::GetUnimplemented) => {
             info!(log, "test: privileged GET (unimplemented)");
             let expected_status = http::StatusCode::INTERNAL_SERVER_ERROR;
             record_operation(WhichTest::PrivilegedGet(Some(&expected_status)));
@@ -350,43 +343,46 @@ async fn verify_endpoint(
         let allowed = endpoint
             .allowed_methods
             .iter()
-            .find(|allowed| method == *allowed.method.http_method());
+            .find(|allowed| method == *allowed.http_method());
 
-        let body = allowed.and_then(|a| a.method.body()).cloned();
-
-        info!(
-            log,
-            "processing endpoint {:?} allowed {:?} method {:?}",
-            endpoint,
-            allowed,
-            method
-        );
+        let body = allowed.and_then(|a| a.body()).cloned();
 
         // First, make an authenticated, unauthorized request.
         info!(log, "test: authenticated, unauthorized"; "method" => ?method, "body" => ?body);
 
         let expected_status = match allowed {
-            Some(allowed) => {
+            Some(_) => {
                 // Determine the expected status code for authenticated, unauthorized
                 // requests, based on the endpoint's visibility. If set to
                 // "IfAuthenticated", the endpoint is visible to any authenticated user.
-                match allowed.visibility {
+                match endpoint.unprivileged_access {
                     // can see and access, but only for GET
-                    Visibility::PublicNoPermissionRequired => match method {
+                    UnprivilegedAccess::ReadOnly => match method {
                         Method::GET => StatusCode::OK,
+
+                        _ => match endpoint.visibility {
+                            Visibility::Public => StatusCode::FORBIDDEN,
+                            Visibility::Protected => StatusCode::NOT_FOUND,
+                        },
+                    },
+
+                    // authenticated users always have full CRUD permissions
+                    UnprivilegedAccess::Full => match method {
+                        Method::GET => StatusCode::OK,
+                        Method::POST => StatusCode::CREATED,
+                        Method::PUT => StatusCode::OK,
+                        Method::DELETE => StatusCode::NO_CONTENT,
+
                         _ => panic!(
-                            "Visibility::PublicNoPermissionRequired for {}",
-                            method
+                            "UnprivilegedAccess::Full with method {}",
+                            method,
                         ),
                     },
 
-                    // can see, but not access
-                    Visibility::PublicPermissionRequired => {
-                        StatusCode::FORBIDDEN
-                    }
-
-                    // cannot see
-                    Visibility::Protected => StatusCode::NOT_FOUND,
+                    UnprivilegedAccess::None => match endpoint.visibility {
+                        Visibility::Public => StatusCode::FORBIDDEN,
+                        Visibility::Protected => StatusCode::NOT_FOUND,
+                    },
                 }
             }
 
@@ -509,11 +505,17 @@ async fn verify_endpoint(
     println!("  {}", endpoint.url);
 }
 
-/// Verifies the body of an HTTP response for status codes 401, 403, 404, or 405
+/// Verifies the body of an HTTP response for status codes 401, 403, 404, or
+/// 405. If the response is expected to be a 200 level, match and return early -
+/// do not attempt to parse the response body.
 fn verify_response(response: &TestResponse, expected_status: &StatusCode) {
-    // If processing a visible endpoint
-    if *expected_status == StatusCode::OK {
-        return;
+    match *expected_status {
+        StatusCode::OK | StatusCode::CREATED | StatusCode::NO_CONTENT => {
+            assert_eq!(response.status, *expected_status);
+            return;
+        }
+
+        _ => {}
     }
 
     let error: HttpErrorResponseBody = response.parsed_body().unwrap();

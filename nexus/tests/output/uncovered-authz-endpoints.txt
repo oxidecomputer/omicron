@@ -1,9 +1,13 @@
 API endpoints with no coverage in authz tests:
+sshkeys_delete_key                       (delete "/session/me/sshkeys/{ssh_key_name}")
 device_auth_verify                       (get    "/device/verify")
 login                                    (get    "/login/{silo_name}/{provider_name}")
+sshkeys_get                              (get    "/session/me/sshkeys")
+sshkeys_get_key                          (get    "/session/me/sshkeys/{ssh_key_name}")
 device_auth_request                      (post   "/device/auth")
 device_auth_confirm                      (post   "/device/confirm")
 device_access_token                      (post   "/device/token")
 spoof_login                              (post   "/login")
 consume_credentials                      (post   "/login/{silo_name}/{provider_name}")
 logout                                   (post   "/logout")
+sshkeys_post                             (post   "/session/me/sshkeys")
