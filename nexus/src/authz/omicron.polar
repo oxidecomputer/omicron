@@ -244,26 +244,23 @@ resource SiloUser {
 	    "create_child",
 	];
 
-	roles = ["admin", "viewer"];
-
 	relations = { parent_silo: Silo };
 	"list_children" if "viewer" on "parent_silo";
 	"read" if "viewer" on "parent_silo";
 	"modify" if "admin" on "parent_silo";
 	"create_child" if "admin" on "parent_silo";
-
-	"list_children" if "viewer";
-	"read" if "viewer";
-	"modify" if "admin";
-	"create_child" if "admin";
-
-    "viewer" if "admin";
 }
 has_relation(silo: Silo, "parent_silo", user: SiloUser)
 	if user.silo = silo;
 
-# authenticated actors can administrate themselves
-has_role(actor: AuthenticatedActor, "admin", silo_user: SiloUser)
+# authenticated actors have all permissions on themselves
+has_permission(actor: AuthenticatedActor, "list_children", silo_user: SiloUser)
+    if actor.equals_silo_user(silo_user);
+has_permission(actor: AuthenticatedActor, "modify", silo_user: SiloUser)
+    if actor.equals_silo_user(silo_user);
+has_permission(actor: AuthenticatedActor, "read", silo_user: SiloUser)
+    if actor.equals_silo_user(silo_user);
+has_permission(actor: AuthenticatedActor, "create_child", silo_user: SiloUser)
     if actor.equals_silo_user(silo_user);
 
 resource SshKey {

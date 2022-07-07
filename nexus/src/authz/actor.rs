@@ -91,8 +91,9 @@ impl oso::PolarClass for AuthenticatedActor {
                     )
                 })
             })
-            .add_method("equals_silo_user", |a: &AuthenticatedActor, u: SiloUser| {
-                a.actor_id == u.id()
-            })
+            .add_method(
+                "equals_silo_user",
+                |a: &AuthenticatedActor, u: SiloUser| a.actor_id == u.id(),
+            )
     }
 }
