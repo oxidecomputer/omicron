@@ -117,6 +117,10 @@ unique local addresses in the subnet of the first Sled Agent: `fd00:1122:3344:1:
 
 If you'd like to modify these values to suit your local network, you can modify
 them within the https://github.com/oxidecomputer/omicron/tree/main/smf[`smf/` subdirectory].
+Notably, Nexus is being served from IPv4 address, which may be configured to be
+external. By default, it uses a private IPv4 address and no Internet gateway, but may
+be configured to use a public-facing IP address with an Internet gateway that may
+be set as a default route for the Nexus zone.
 
 [options="header"]
 |===================================================================================================
@@ -132,7 +136,7 @@ them within the https://github.com/oxidecomputer/omicron/tree/main/smf[`smf/` su
 | Crucible Downstairs 3      | `[fd00:1122:3344:0101::8]:32345`
 | Internal DNS Service       | `[fd00:1122:3344:0001::1]:5353`
 | Nexus: External API        | `192.168.1.20:80`
-| Internet Gateway           | `192.168.1.1`
+| Internet Gateway           | None, but can be set in `smf/sled-agent/config.toml`
 |===================================================================================================
 
 Note that Sled Agent runs in the global zone and is the one responsible for bringing up all the other
