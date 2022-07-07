@@ -16,4 +16,5 @@ mod share_distribution;
 
 pub use error::TrustQuorumError;
 pub use rack_secret::RackSecret;
+pub use share_distribution::SerializableShareDistribution;
 pub use share_distribution::ShareDistribution;
