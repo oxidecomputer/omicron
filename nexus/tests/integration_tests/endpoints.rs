@@ -596,6 +596,13 @@ lazy_static! {
             ],
         },
         VerifyEndpoint {
+            url: "/by-id/organizations/{id}",
+            visibility: Visibility::Public,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
+        VerifyEndpoint {
             url: &*DEMO_ORG_POLICY_URL,
             visibility: Visibility::Protected,
             allowed_methods: vec![
@@ -628,6 +635,13 @@ lazy_static! {
                 AllowedMethod::Post(
                     serde_json::to_value(&*DEMO_PROJECT_CREATE).unwrap()
                 ),
+            ],
+        },
+        VerifyEndpoint {
+            url: "/by-id/projects/{id}",
+            visibility: Visibility::Public,
+            allowed_methods: vec![
+                AllowedMethod::Get,
             ],
         },
         VerifyEndpoint {
@@ -674,6 +688,14 @@ lazy_static! {
         },
 
         VerifyEndpoint {
+            url: "/by-id/vpcs/{id}",
+            visibility: Visibility::Public,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
+
+        VerifyEndpoint {
             url: &*DEMO_VPC_URL,
             visibility: Visibility::Protected,
             allowed_methods: vec![
@@ -714,6 +736,14 @@ lazy_static! {
                 AllowedMethod::Post(
                     serde_json::to_value(&*DEMO_VPC_SUBNET_CREATE).unwrap()
                 ),
+            ],
+        },
+
+        VerifyEndpoint {
+            url: "/by-id/vpc-subnets/{id}",
+            visibility: Visibility::Public,
+            allowed_methods: vec![
+                AllowedMethod::Get,
             ],
         },
 

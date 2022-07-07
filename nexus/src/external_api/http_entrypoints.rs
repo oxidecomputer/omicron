@@ -316,7 +316,6 @@ async fn policy_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-
 /// Path parameters for `/by-id/` endpoints
 #[derive(Deserialize, JsonSchema)]
 struct ByIdPathParams {
@@ -2232,7 +2231,6 @@ async fn image_view_by_id(
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
-
 
 /// Delete an image
 ///

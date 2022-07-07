@@ -7,6 +7,7 @@
 
 use super::endpoints::*;
 use crate::integration_tests::saml::SAML_IDP_DESCRIPTOR;
+use diesel::expression::AsExpression;
 use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use headers::authorization::Credentials;
@@ -21,6 +22,7 @@ use nexus_test_utils::http_testing::TestResponse;
 use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
+use omicron_common::api::external::IdentityMetadata;
 use omicron_nexus::authn::external::spoof;
 
 // This test hits a list Nexus API endpoints using both unauthenticated and
@@ -55,22 +57,29 @@ async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
     DiskTest::new(cptestctx).await;
     let client = &cptestctx.external_client;
     let log = &cptestctx.logctx.log;
+    let mut setup_results = std::collections::BTreeMap::new();
 
     // Create test data.
     info!(log, "setting up resource hierarchy");
     for request in &*SETUP_REQUESTS {
-        NexusRequest::objects_post(client, request.url, &request.body)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .unwrap();
+        let result =
+            NexusRequest::objects_post(client, request.url, &request.body)
+                .authn_as(AuthnMode::PrivilegedUser)
+                .execute()
+                .await
+                .unwrap();
+
+        setup_results.insert(request.url, result.clone());
+        request.id_routes.iter().for_each(|id_route| {
+            setup_results.insert(id_route, result.clone());
+        });
     }
 
     // Verify the hardcoded endpoints.
     info!(log, "verifying endpoints");
     print!("{}", VERIFY_HEADER);
     for endpoint in &*VERIFY_ENDPOINTS {
-        verify_endpoint(&log, client, endpoint).await;
+        verify_endpoint(&log, client, endpoint, &setup_results).await;
     }
 }
 
@@ -121,6 +130,8 @@ struct SetupReq {
     url: &'static str,
     /// body of the `POST` request
     body: serde_json::Value,
+    /// populates `id` params for later route lookups
+    id_routes: Vec<&'static str>,
 }
 
 lazy_static! {
@@ -155,66 +166,79 @@ lazy_static! {
         SetupReq {
             url: "/silos",
             body: serde_json::to_value(&*DEMO_SILO_CREATE).unwrap(),
+            id_routes: vec!["/by-id/silos/{id}"],
         },
         // Create an IP pool
         SetupReq {
             url: &*DEMO_IP_POOLS_URL,
             body: serde_json::to_value(&*DEMO_IP_POOL_CREATE).unwrap(),
+            id_routes: vec!["/by-id/ip-pools/{id}"],
         },
         // Create an IP Pool range
         SetupReq {
             url: &*DEMO_IP_POOL_RANGES_ADD_URL,
             body: serde_json::to_value(&*DEMO_IP_POOL_RANGE).unwrap(),
+            id_routes: vec![],
         },
         // Create an Organization
         SetupReq {
             url: "/organizations",
-            body: serde_json::to_value(&*DEMO_ORG_CREATE).unwrap()
+            body: serde_json::to_value(&*DEMO_ORG_CREATE).unwrap(),
+            id_routes: vec!["/by-id/organizations/{id}"],
         },
         // Create a Project in the Organization
         SetupReq {
             url: &*DEMO_ORG_PROJECTS_URL,
             body: serde_json::to_value(&*DEMO_PROJECT_CREATE).unwrap(),
+            id_routes: vec!["/by-id/projects/{id}"],
         },
         // Create a VPC in the Project
         SetupReq {
             url: &*DEMO_PROJECT_URL_VPCS,
             body: serde_json::to_value(&*DEMO_VPC_CREATE).unwrap(),
+            id_routes: vec!["/by-id/vpcs/{id}"],
         },
         // Create a VPC Subnet in the Vpc
         SetupReq {
             url: &*DEMO_VPC_URL_SUBNETS,
             body: serde_json::to_value(&*DEMO_VPC_SUBNET_CREATE).unwrap(),
+            id_routes: vec!["/by-id/vpc-subnets/{id}"],
         },
         // Create a VPC Router in the Vpc
         SetupReq {
             url: &*DEMO_VPC_URL_ROUTERS,
             body: serde_json::to_value(&*DEMO_VPC_ROUTER_CREATE).unwrap(),
+            id_routes: vec!["/by-id/vpc-routers/{id}"],
         },
         // Create a VPC Router in the Vpc
         SetupReq {
             url: &*DEMO_VPC_ROUTER_URL_ROUTES,
             body: serde_json::to_value(&*DEMO_ROUTER_ROUTE_CREATE).unwrap(),
+            id_routes: vec!["/by-id/vpc-router-routes/{id}"],
         },
         // Create a Disk in the Project
         SetupReq {
             url: &*DEMO_PROJECT_URL_DISKS,
             body: serde_json::to_value(&*DEMO_DISK_CREATE).unwrap(),
+            id_routes: vec!["/by-id/disks/{id}"],
         },
         // Create an Instance in the Project
         SetupReq {
             url: &*DEMO_PROJECT_URL_INSTANCES,
             body: serde_json::to_value(&*DEMO_INSTANCE_CREATE).unwrap(),
+            id_routes: vec!["/by-id/instances/{id}"],
         },
         // Create a GlobalImage
         SetupReq {
             url: "/images",
             body: serde_json::to_value(&*DEMO_GLOBAL_IMAGE_CREATE).unwrap(),
+            id_routes: vec!["/by-id/global-images/{id}"],
         },
         // Create a SAML identity provider
         SetupReq {
             url: &*SAML_IDENTITY_PROVIDERS_URL,
             body: serde_json::to_value(&*SAML_IDENTITY_PROVIDER).unwrap(),
+            id_routes: vec![],
         },
     ];
 }
@@ -273,6 +297,7 @@ async fn verify_endpoint(
     log: &slog::Logger,
     client: &ClientTestContext,
     endpoint: &VerifyEndpoint,
+    setup_results: &std::collections::BTreeMap<&str, TestResponse>,
 ) {
     let log = log.new(o!("url" => endpoint.url));
     info!(log, "test: begin endpoint");
@@ -286,6 +311,23 @@ async fn verify_endpoint(
     let unauthz_status = match endpoint.visibility {
         Visibility::Public => StatusCode::FORBIDDEN,
         Visibility::Protected => StatusCode::NOT_FOUND,
+    };
+
+    // For routes with an id param, find their matching id in the setup results.
+    let uri = if endpoint.url.contains("{id}") {
+        endpoint.url.replace(
+            "{id}",
+            &setup_results
+                .get(endpoint.url)
+                .unwrap()
+                .parsed_body::<IdentityMetadata>()
+                .unwrap()
+                .id
+                .to_string()
+                .as_str(),
+        )
+    } else {
+        endpoint.url.to_string()
     };
 
     // Make one GET request as an authorized user to make sure we get a "200 OK"
@@ -302,7 +344,7 @@ async fn verify_endpoint(
                 &http::StatusCode::OK,
             )));
             Some(
-                NexusRequest::object_get(client, endpoint.url)
+                NexusRequest::object_get(client, uri.as_str())
                     .authn_as(AuthnMode::PrivilegedUser)
                     .execute()
                     .await
@@ -319,7 +361,7 @@ async fn verify_endpoint(
                 client,
                 expected_status,
                 http::Method::GET,
-                endpoint.url,
+                uri.as_str(),
             )
             .authn_as(AuthnMode::PrivilegedUser)
             .execute()
@@ -356,7 +398,7 @@ async fn verify_endpoint(
             None => StatusCode::METHOD_NOT_ALLOWED,
         };
         let response = NexusRequest::new(
-            RequestBuilder::new(client, method.clone(), endpoint.url)
+            RequestBuilder::new(client, method.clone(), uri.as_str())
                 .body(body.as_ref())
                 .expect_status(Some(expected_status)),
         )
@@ -374,7 +416,7 @@ async fn verify_endpoint(
             None => StatusCode::METHOD_NOT_ALLOWED,
         };
         let response =
-            RequestBuilder::new(client, method.clone(), endpoint.url)
+            RequestBuilder::new(client, method.clone(), uri.as_str())
                 .body(body.as_ref())
                 .expect_status(Some(expected_status))
                 .execute()
@@ -402,7 +444,7 @@ async fn verify_endpoint(
         info!(log, "test: bogus creds: bad actor"; "method" => ?method);
         let bad_actor_authn_header = &spoof::SPOOF_HEADER_BAD_ACTOR;
         let response =
-            RequestBuilder::new(client, method.clone(), endpoint.url)
+            RequestBuilder::new(client, method.clone(), uri.as_str())
                 .body(body.as_ref())
                 .expect_status(Some(expected_status))
                 .header(
@@ -419,7 +461,7 @@ async fn verify_endpoint(
         info!(log, "test: bogus creds: bad cred syntax"; "method" => ?method);
         let bad_creds_authn_header = &spoof::SPOOF_HEADER_BAD_CREDS;
         let response =
-            RequestBuilder::new(client, method.clone(), endpoint.url)
+            RequestBuilder::new(client, method.clone(), uri.as_str())
                 .body(body.as_ref())
                 .expect_status(Some(expected_status))
                 .header(
@@ -450,7 +492,7 @@ async fn verify_endpoint(
     info!(log, "test: compare current resource content with earlier");
     if let Some(resource_before) = resource_before {
         let resource_after: serde_json::Value =
-            NexusRequest::object_get(client, endpoint.url)
+            NexusRequest::object_get(client, uri.as_str())
                 .authn_as(AuthnMode::PrivilegedUser)
                 .execute()
                 .await
