@@ -270,7 +270,7 @@ pub fn external_api() -> NexusApiDescription {
 // An exception to this are id lookup operations which have a different top-level route
 // but will still be grouped with the collection.  For example:
 //
-//  GET    /by-id/organizations/{org_name} (look up a organization in the collection by id)
+//  GET    /by-id/organizations/{id} (look up a organization in the collection by id)
 //
 // We pick a name for the function that implements a given API entrypoint
 // based on how we expect it to appear in the CLI subcommand hierarchy. For
