@@ -265,25 +265,26 @@ pub fn external_api() -> NexusApiDescription {
 //   DELETE /organizations/{org_name} (delete a organization in the collection)
 //   PUT    /organizations/{org_name} (update a organization in the collection)
 //
-// There's a naming convention for the functions that implement these API entry
-// points.  When operating on the collection itself, we use:
+// We pick a name for the function that implements a given API entrypoint
+// based on how we expect it to appear in the CLI subcommand hierarchy. For
+// example:
 //
-//    {collection_path}_{verb}
+//   GET    /organizations                    -> organization_list()
+//   POST   /organizations                    -> organization_create()
+//   GET    /organizations/{org_name}         -> organization_view()
+//   DELETE /organizations/{org_name}         -> organization_delete()
+//   PUT    /organizations/{org_name}         -> organization_update()
 //
-// For examples:
+// Note that the path typically uses the entity's plural form while the
+// function name uses its singular.
 //
-//    GET  /organizations                    -> organizations_get()
-//    POST /organizations                    -> organizations_post()
+// Operations beyond list, create, view, delete, and update should use a
+// descriptive noun or verb, again bearing in mind that this will be
+// transcribed into the CLI and SDKs:
 //
-// For operations on items within the collection, we use:
-//
-//    {collection_path}_{verb}_{object}
-//
-// For examples:
-//
-//    DELETE /organizations/{org_name}   -> organizations_delete_organization()
-//    GET    /organizations/{org_name}   -> organizations_get_organization()
-//    PUT    /organizations/{org_name}   -> organizations_put_organization()
+//   POST   -> instance_reboot
+//   POST   -> instance_stop
+//   GET    -> instance_serial_console
 //
 // Note that these function names end up in generated OpenAPI spec as the
 // operationId for each endpoint, and therefore represent a contract with
