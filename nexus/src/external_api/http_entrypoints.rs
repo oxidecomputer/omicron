@@ -2924,7 +2924,7 @@ async fn vpc_subnet_view(
 /// Get a VPC subnet by id.
 #[endpoint {
     method = GET,
-    path = "/by-id/subnets/{id}",
+    path = "/by-id/vpc-subnets/{id}",
     tags = ["vpcs"],
 }]
 async fn vpc_subnet_view_by_id(
@@ -3225,7 +3225,7 @@ async fn vpc_router_view(
 /// Get a VPC Router by id
 #[endpoint {
     method = GET,
-    path = "/by-id/router/{id}",
+    path = "/by-id/vpc-routers/{id}",
     tags = ["vpcs"],
 }]
 async fn vpc_router_view_by_id(
@@ -3420,7 +3420,7 @@ async fn vpc_router_route_view(
 /// Get a vpc router route by id
 #[endpoint {
     method = GET,
-    path = "/by-id/route/{id}",
+    path = "/by-id/vpc-router-routes/{id}",
     tags = ["vpcs"]
 }]
 async fn vpc_router_route_view_by_id(

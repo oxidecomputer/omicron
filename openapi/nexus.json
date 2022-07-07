@@ -283,84 +283,6 @@
         }
       }
     },
-    "/by-id/route/{id}": {
-      "get": {
-        "tags": [
-          "vpcs"
-        ],
-        "summary": "Get a vpc router route by id",
-        "operationId": "vpc_router_route_view_by_id",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "style": "simple"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RouterRoute"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/by-id/router/{id}": {
-      "get": {
-        "tags": [
-          "vpcs"
-        ],
-        "summary": "Get a VPC Router by id",
-        "operationId": "vpc_router_view_by_id",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "style": "simple"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/VpcRouter"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/by-id/snapshots/{id}": {
       "get": {
         "tags": [
@@ -400,7 +322,85 @@
         }
       }
     },
-    "/by-id/subnets/{id}": {
+    "/by-id/vpc-router-routes/{id}": {
+      "get": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "Get a vpc router route by id",
+        "operationId": "vpc_router_route_view_by_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouterRoute"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/by-id/vpc-routers/{id}": {
+      "get": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "Get a VPC Router by id",
+        "operationId": "vpc_router_view_by_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VpcRouter"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/by-id/vpc-subnets/{id}": {
       "get": {
         "tags": [
           "vpcs"
