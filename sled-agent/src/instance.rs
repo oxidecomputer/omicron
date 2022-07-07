@@ -770,6 +770,7 @@ mod test {
     use crate::params::ExternalIp;
     use crate::params::InstanceStateRequested;
     use chrono::Utc;
+    use macaddr::MacAddr6;
     use omicron_common::api::external::{
         ByteCount, Generation, InstanceCpuCount, InstanceState,
     };
@@ -845,7 +846,8 @@ mod test {
             "Test".to_string(),
             Etherstub("mylink".to_string()),
         );
-        let port_allocator = OptePortAllocator::new();
+        let mac = MacAddr6::from([0u8; 6]);
+        let port_allocator = OptePortAllocator::new(mac);
         let nexus_client = MockNexusClient::default();
 
         let inst = Instance::new(
