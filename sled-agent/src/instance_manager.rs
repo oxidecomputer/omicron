@@ -44,7 +44,7 @@ struct InstanceManagerInternal {
     /// A mapping from a Sled Agent "Instance ID" to ("Propolis ID", [Instance]).
     instances: Mutex<BTreeMap<Uuid, (Uuid, Instance)>>,
 
-    vnic_allocator: VnicAllocator,
+    vnic_allocator: VnicAllocator<Etherstub>,
     underlay_addr: Ipv6Addr,
     port_allocator: OptePortAllocator,
 }

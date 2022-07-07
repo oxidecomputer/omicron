@@ -18,7 +18,6 @@ OPERATION ID                             URL PATH
 device_access_token                      /device/token
 device_auth_confirm                      /device/confirm
 device_auth_request                      /device/auth
-device_auth_verify                       /device/verify
 logout                                   /logout
 session_me                               /session/me
 spoof_login                              /login

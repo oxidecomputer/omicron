@@ -9,7 +9,7 @@ use crate::illumos::dladm::{self, Dladm, PhysicalLink};
 use crate::illumos::zpool::ZpoolName;
 use dropshot::ConfigLogging;
 use serde::Deserialize;
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
@@ -26,6 +26,10 @@ pub struct Config {
     pub vlan: Option<VlanID>,
     /// Optional list of zpools to be used as "discovered disks".
     pub zpools: Option<Vec<ZpoolName>>,
+
+    /// Address of the Internet gateway, which is particularly
+    /// relevant for external-facing services (such as Nexus).
+    pub gateway_address: Option<Ipv4Addr>,
 
     /// The data link on which we infer the bootstrap address.
     ///
