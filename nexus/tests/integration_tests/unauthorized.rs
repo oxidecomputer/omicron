@@ -286,6 +286,13 @@ async fn verify_endpoint(
     // "401 Unauthorized" status code.
     let unauthn_status = StatusCode::UNAUTHORIZED;
 
+    // Determine the expected status code for authenticated, unauthorized
+    // requests, based on the endpoint's visibility.
+    let unauthz_status = match endpoint.visibility {
+        Visibility::Public => StatusCode::FORBIDDEN,
+        Visibility::Protected => StatusCode::NOT_FOUND,
+    };
+
     // Make one GET request as an authorized user to make sure we get a "200 OK"
     // response.  Otherwise, the test might later succeed by coincidence.  We
     // might find a 404 because of something that actually doesn't exist rather
@@ -348,59 +355,31 @@ async fn verify_endpoint(
         let body = allowed.and_then(|a| a.body()).cloned();
 
         // First, make an authenticated, unauthorized request.
-        info!(log, "test: authenticated, unauthorized"; "method" => ?method, "body" => ?body);
+        info!(log, "test: authenticated, unauthorized"; "method" => ?method);
 
-        let expected_status = match allowed {
-            Some(_) => {
-                // Determine the expected status code for authenticated, unauthorized
-                // requests, based on the endpoint's visibility and unprivileged
-                // access setting.
-                match endpoint.unprivileged_access {
-                    // authenticated users can only GET
-                    UnprivilegedAccess::ReadOnly => match method {
-                        Method::GET => StatusCode::OK,
-
-                        _ => match endpoint.visibility {
-                            Visibility::Public => StatusCode::FORBIDDEN,
-                            Visibility::Protected => StatusCode::NOT_FOUND,
-                        },
-                    },
-
-                    // authenticated users always have full CRUD permissions
-                    UnprivilegedAccess::Full => match method {
-                        Method::GET => StatusCode::OK,
-                        Method::POST => StatusCode::CREATED,
-                        Method::PUT => StatusCode::OK,
-                        Method::DELETE => StatusCode::NO_CONTENT,
-
-                        _ => panic!(
-                            "UnprivilegedAccess::Full with method {}",
-                            method,
-                        ),
-                    },
-
-                    // authenticated users have no permissions
-                    UnprivilegedAccess::None => match endpoint.visibility {
-                        Visibility::Public => StatusCode::FORBIDDEN,
-                        Visibility::Protected => StatusCode::NOT_FOUND,
-                    },
-                }
-            }
-
-            None => StatusCode::METHOD_NOT_ALLOWED,
-        };
-
-        let response = NexusRequest::new(
-            RequestBuilder::new(client, method.clone(), endpoint.url)
-                .body(body.as_ref())
-                .expect_status(Some(expected_status)),
-        )
-        .authn_as(AuthnMode::UnprivilegedUser)
-        .execute()
-        .await
-        .unwrap();
-        verify_response(&response, &expected_status);
-        record_operation(WhichTest::Unprivileged(&expected_status));
+        // Some authz policy states that authenticated users get implicit
+        // privileges for some resources. Do not test for those here, they
+        // should be covered in other resource specific tests.
+        if endpoint.unprivileged_access != UnprivilegedAccess::None {
+            // "This door is opened elsewhere."
+            print!("-");
+        } else {
+            let expected_status = match allowed {
+                Some(_) => unauthz_status,
+                None => StatusCode::METHOD_NOT_ALLOWED,
+            };
+            let response = NexusRequest::new(
+                RequestBuilder::new(client, method.clone(), endpoint.url)
+                    .body(body.as_ref())
+                    .expect_status(Some(expected_status)),
+            )
+            .authn_as(AuthnMode::UnprivilegedUser)
+            .execute()
+            .await
+            .unwrap();
+            verify_response(&response);
+            record_operation(WhichTest::Unprivileged(&expected_status));
+        }
 
         // Next, make an unauthenticated request.
         info!(log, "test: unauthenticated"; "method" => ?method);
@@ -415,7 +394,7 @@ async fn verify_endpoint(
                 .execute()
                 .await
                 .unwrap();
-        verify_response(&response, &expected_status);
+        verify_response(&response);
         record_operation(WhichTest::Unauthenticated(&expected_status));
 
         // Now try a few requests with bogus credentials.  We should get the
@@ -447,7 +426,7 @@ async fn verify_endpoint(
                 .execute()
                 .await
                 .unwrap();
-        verify_response(&response, &expected_status);
+        verify_response(&response);
         record_operation(WhichTest::UnknownUser(&expected_status));
 
         // Now try a syntactically invalid authn header.
@@ -464,7 +443,7 @@ async fn verify_endpoint(
                 .execute()
                 .await
                 .unwrap();
-        verify_response(&response, &expected_status);
+        verify_response(&response);
         record_operation(WhichTest::InvalidHeader(&expected_status));
 
         print!(" ");
@@ -506,19 +485,8 @@ async fn verify_endpoint(
     println!("  {}", endpoint.url);
 }
 
-/// Verifies the body of an HTTP response for status codes 401, 403, 404, or
-/// 405. If the response is expected to be a 200 level, match and return early -
-/// do not attempt to parse the response body.
-fn verify_response(response: &TestResponse, expected_status: &StatusCode) {
-    match *expected_status {
-        StatusCode::OK | StatusCode::CREATED | StatusCode::NO_CONTENT => {
-            assert_eq!(response.status, *expected_status);
-            return;
-        }
-
-        _ => {}
-    }
-
+/// Verifies the body of an HTTP response for status codes 401, 403, 404, or 405
+fn verify_response(response: &TestResponse) {
     let error: HttpErrorResponseBody = response.parsed_body().unwrap();
     match response.status {
         StatusCode::UNAUTHORIZED => {

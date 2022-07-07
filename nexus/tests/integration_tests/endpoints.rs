@@ -381,7 +381,7 @@ pub struct VerifyEndpoint {
     /// unauthorized users will get a 404.
     pub visibility: Visibility,
 
-    /// Specify level of unprivileged access
+    /// Specify level of unprivileged access an authenticated user has
     pub unprivileged_access: UnprivilegedAccess,
 
     /// Specifies what HTTP methods are supported for this HTTP resource

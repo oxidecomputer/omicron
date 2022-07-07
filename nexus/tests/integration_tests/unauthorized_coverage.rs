@@ -81,6 +81,8 @@ fn test_unauthorized_coverage() {
     );
     for v in &*VERIFY_ENDPOINTS {
         for m in &v.allowed_methods {
+            // Remove the method and path from the list of operations if there's
+            // a VerifyEndpoint for it.
             let method_string = m.http_method().to_string().to_uppercase();
             let found = spec_operations.iter().find(|(op, regex)| {
                 op.method.to_uppercase() == method_string
