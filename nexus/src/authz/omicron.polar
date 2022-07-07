@@ -254,13 +254,7 @@ has_relation(silo: Silo, "parent_silo", user: SiloUser)
 	if user.silo = silo;
 
 # authenticated actors have all permissions on themselves
-has_permission(actor: AuthenticatedActor, "list_children", silo_user: SiloUser)
-    if actor.equals_silo_user(silo_user);
-has_permission(actor: AuthenticatedActor, "modify", silo_user: SiloUser)
-    if actor.equals_silo_user(silo_user);
-has_permission(actor: AuthenticatedActor, "read", silo_user: SiloUser)
-    if actor.equals_silo_user(silo_user);
-has_permission(actor: AuthenticatedActor, "create_child", silo_user: SiloUser)
+has_permission(actor: AuthenticatedActor, _perm: String, silo_user: SiloUser)
     if actor.equals_silo_user(silo_user);
 
 resource SshKey {
