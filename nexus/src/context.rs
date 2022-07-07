@@ -89,7 +89,7 @@ impl ServerContext {
                     config::SchemeName::SessionCookie => {
                         Box::new(HttpAuthnSessionCookie)
                     }
-                    config::SchemeName::ClientToken => Box::new(HttpAuthnToken),
+                    config::SchemeName::AccessToken => Box::new(HttpAuthnToken),
                 }
             })
             .collect();
