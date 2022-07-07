@@ -162,7 +162,7 @@ the exact addresses that are available depends on the environment.
 
     oxide api /ip-pools/mypool/ranges/add --method POST --input - <<EOF
     {
-      "first": "172.20.15.226",
+      "first": "172.20.15.227",
       "last": "172.20.15.239"
     }
     EOF

@@ -188,8 +188,8 @@ async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
     // that the modification time has changed.
     let new_pool_name = "p1";
     let new_ip_pool_url = format!("{}/{}", ip_pools_url, new_pool_name);
-    let new_ip_pool_del_range_url =
-        format!("{}/ranges/delete", new_ip_pool_url);
+    let new_ip_pool_rem_range_url =
+        format!("{}/ranges/remove", new_ip_pool_url);
     let updates = IpPoolUpdate {
         identity: IdentityMetadataUpdateParams {
             name: Some(String::from(new_pool_name).parse().unwrap()),
@@ -249,7 +249,7 @@ async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
     // Delete the range, then verify we can delete the pool and everything looks
     // gravy.
     NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &new_ip_pool_del_range_url)
+        RequestBuilder::new(client, Method::POST, &new_ip_pool_rem_range_url)
             .body(Some(&range))
             .expect_status(Some(StatusCode::NO_CONTENT)),
     )
@@ -566,7 +566,7 @@ async fn test_ip_range_delete_with_allocated_external_ip_fails(
     let ip_pool_url = format!("{}/{}", ip_pools_url, pool_name);
     let ip_pool_ranges_url = format!("{}/ranges", ip_pool_url);
     let ip_pool_add_range_url = format!("{}/add", ip_pool_ranges_url);
-    let ip_pool_del_range_url = format!("{}/delete", ip_pool_ranges_url);
+    let ip_pool_rem_range_url = format!("{}/remove", ip_pool_ranges_url);
 
     // Add a pool and range.
     let params = IpPoolCreate {
@@ -618,7 +618,7 @@ async fn test_ip_range_delete_with_allocated_external_ip_fails(
     // We should not be able to delete the range, since there's an external IP
     // address in use out of it.
     let err: HttpErrorResponseBody = NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &ip_pool_del_range_url)
+        RequestBuilder::new(client, Method::POST, &ip_pool_rem_range_url)
             .body(Some(&range))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -663,7 +663,7 @@ async fn test_ip_range_delete_with_allocated_external_ip_fails(
 
     // Now verify that we _can_ delete the IP range.
     NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &ip_pool_del_range_url)
+        RequestBuilder::new(client, Method::POST, &ip_pool_rem_range_url)
             .body(Some(&range))
             .expect_status(Some(StatusCode::NO_CONTENT)),
     )
