@@ -34,7 +34,7 @@ jobs:
     - name: Update PATH
       run: echo "$PWD/out/cockroachdb/bin:$PWD/out/clickhouse" >> "$GITHUB_PATH"
     - name: Install Pre-Requisites
-      run: ./tools/install_prerequisites.sh -y
+      run: ./tools/install_builder_prerequisites.sh -y
     - name: Check build of deployed Omicron packages
       run: cargo run --bin omicron-package -- check
 
@@ -52,7 +52,7 @@ jobs:
     - name: Update PATH
       run: echo "$PWD/out/cockroachdb/bin:$PWD/out/clickhouse" >> "$GITHUB_PATH"
     - name: Install Pre-Requisites
-      run: ./tools/install_prerequisites.sh -y
+      run: ./tools/install_builder_prerequisites.sh -y
     - name: Run Clippy Lints
       #
       # Clippy's style nits are useful, but not worth keeping in CI.  This
@@ -75,7 +75,7 @@ jobs:
     - name: Update PATH
       run: echo "$PWD/out/cockroachdb/bin:$PWD/out/clickhouse" >> "$GITHUB_PATH"
     - name: Install Pre-Requisites
-      run: ./tools/install_prerequisites.sh -y
+      run: ./tools/install_builder_prerequisites.sh -y
     - name: Test build documentation
       run: cargo doc
 
@@ -117,7 +117,7 @@ jobs:
     - name: Update PATH
       run: echo "$PWD/out/cockroachdb/bin:$PWD/out/clickhouse" >> "$GITHUB_PATH"
     - name: Install Pre-Requisites
-      run: ./tools/install_prerequisites.sh -y
+      run: ./tools/install_builder_prerequisites.sh -y
     - name: Create temporary directory for test outputs
       run: mkdir -p $OMICRON_TMP
     - name: Build
