@@ -146,6 +146,12 @@ command line interface.  Note that the `jq` command is required. In addition, th
 
 2. Create an IP Pool, for providing external connectivity to the instance later.
 We need to create an IP Pool itself, and a range of IP addresses in that pool.
+**Important:** The addresses used here are appropriate for the Oxide lab
+environment, but not for an arbitrary environment. The actual IP range must
+currently be something that matches the physical network that the host is
+running in, at least if you'd like to be able to SSH into the guest. This is
+most often a private address range, like `10.0.0.0/8` or `192.168.0.0/16`, but
+the exact addresses that are available depends on the environment.
 
     oxide api /ip-pools --method POST --input - <<EOF
     {
@@ -156,8 +162,8 @@ We need to create an IP Pool itself, and a range of IP addresses in that pool.
 
     oxide api /ip-pools/mypool/ranges/add --method POST --input - <<EOF
     {
-      "first": "10.0.0.1",
-      "last": "10.0.0.255"
+      "first": "172.20.15.227",
+      "last": "172.20.15.239"
     }
     EOF
 

@@ -1,14 +1,16 @@
 API operations found with tag "disks"
 OPERATION ID                             URL PATH
-project_disks_delete_disk                /organizations/{organization_name}/projects/{project_name}/disks/{disk_name}
-project_disks_get                        /organizations/{organization_name}/projects/{project_name}/disks
-project_disks_get_disk                   /organizations/{organization_name}/projects/{project_name}/disks/{disk_name}
-project_disks_post                       /organizations/{organization_name}/projects/{project_name}/disks
+disk_create                              /organizations/{organization_name}/projects/{project_name}/disks
+disk_delete                              /organizations/{organization_name}/projects/{project_name}/disks/{disk_name}
+disk_list                                /organizations/{organization_name}/projects/{project_name}/disks
+disk_view                                /organizations/{organization_name}/projects/{project_name}/disks/{disk_name}
 
-API operations found with tag "firewall"
+API operations found with tag "hardware"
 OPERATION ID                             URL PATH
-vpc_firewall_rules_get                   /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/firewall/rules
-vpc_firewall_rules_put                   /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/firewall/rules
+rack_list                                /hardware/racks
+rack_view                                /hardware/racks/{rack_id}
+sled_list                                /hardware/sleds
+sled_view                                /hardware/sleds/{sled_id}
 
 API operations found with tag "hidden"
 OPERATION ID                             URL PATH
@@ -22,48 +24,48 @@ spoof_login                              /login
 
 API operations found with tag "images"
 OPERATION ID                             URL PATH
-project_images_delete_image              /organizations/{organization_name}/projects/{project_name}/images/{image_name}
-project_images_get                       /organizations/{organization_name}/projects/{project_name}/images
-project_images_get_image                 /organizations/{organization_name}/projects/{project_name}/images/{image_name}
-project_images_post                      /organizations/{organization_name}/projects/{project_name}/images
+image_create                             /organizations/{organization_name}/projects/{project_name}/images
+image_delete                             /organizations/{organization_name}/projects/{project_name}/images/{image_name}
+image_list                               /organizations/{organization_name}/projects/{project_name}/images
+image_view                               /organizations/{organization_name}/projects/{project_name}/images/{image_name}
 
 API operations found with tag "images:global"
 OPERATION ID                             URL PATH
-images_delete_image                      /images/{image_name}
-images_get                               /images
-images_get_image                         /images/{image_name}
-images_post                              /images
+image_global_create                      /images
+image_global_delete                      /images/{image_name}
+image_global_list                        /images
+image_global_view                        /images/{image_name}
 
 API operations found with tag "instances"
 OPERATION ID                             URL PATH
-instance_disks_attach                    /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/attach
-instance_disks_detach                    /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/detach
-instance_disks_get                       /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks
-instance_network_interfaces_delete_interface /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}
-instance_network_interfaces_get          /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces
-instance_network_interfaces_get_interface /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}
-instance_network_interfaces_post         /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces
-instance_network_interfaces_put_interface /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}
-project_instances_delete_instance        /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}
-project_instances_get                    /organizations/{organization_name}/projects/{project_name}/instances
-project_instances_get_instance           /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}
-project_instances_instance_reboot        /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/reboot
-project_instances_instance_serial_get    /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/serial
-project_instances_instance_start         /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/start
-project_instances_instance_stop          /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/stop
-project_instances_migrate_instance       /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/migrate
-project_instances_post                   /organizations/{organization_name}/projects/{project_name}/instances
+instance_create                          /organizations/{organization_name}/projects/{project_name}/instances
+instance_delete                          /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}
+instance_disk_attach                     /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/attach
+instance_disk_detach                     /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/detach
+instance_disk_list                       /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks
+instance_list                            /organizations/{organization_name}/projects/{project_name}/instances
+instance_migrate                         /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/migrate
+instance_network_interface_create        /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces
+instance_network_interface_delete        /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}
+instance_network_interface_list          /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces
+instance_network_interface_update        /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}
+instance_network_interface_view          /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}
+instance_reboot                          /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/reboot
+instance_serial_console                  /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/serial-console
+instance_start                           /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/start
+instance_stop                            /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/stop
+instance_view                            /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}
 
 API operations found with tag "ip-pools"
 OPERATION ID                             URL PATH
-ip_pool_ranges_add                       /ip-pools/{pool_name}/ranges/add
-ip_pool_ranges_delete                    /ip-pools/{pool_name}/ranges/delete
-ip_pool_ranges_get                       /ip-pools/{pool_name}/ranges
-ip_pools_delete_ip_pool                  /ip-pools/{pool_name}
-ip_pools_get                             /ip-pools
-ip_pools_get_ip_pool                     /ip-pools/{pool_name}
-ip_pools_post                            /ip-pools
-ip_pools_put_ip_pool                     /ip-pools/{pool_name}
+ip_pool_create                           /ip-pools
+ip_pool_delete                           /ip-pools/{pool_name}
+ip_pool_list                             /ip-pools
+ip_pool_range_add                        /ip-pools/{pool_name}/ranges/add
+ip_pool_range_list                       /ip-pools/{pool_name}/ranges
+ip_pool_range_remove                     /ip-pools/{pool_name}/ranges/remove
+ip_pool_update                           /ip-pools/{pool_name}
+ip_pool_view                             /ip-pools/{pool_name}
 
 API operations found with tag "login"
 OPERATION ID                             URL PATH
@@ -76,105 +78,70 @@ timeseries_schema_get                    /timeseries/schema
 
 API operations found with tag "organizations"
 OPERATION ID                             URL PATH
-organization_get_policy                  /organizations/{organization_name}/policy
-organization_put_policy                  /organizations/{organization_name}/policy
-organizations_delete_organization        /organizations/{organization_name}
-organizations_get                        /organizations
-organizations_get_organization           /organizations/{organization_name}
-organizations_post                       /organizations
-organizations_put_organization           /organizations/{organization_name}
+organization_create                      /organizations
+organization_delete                      /organizations/{organization_name}
+organization_list                        /organizations
+organization_policy_update               /organizations/{organization_name}/policy
+organization_policy_view                 /organizations/{organization_name}/policy
+organization_update                      /organizations/{organization_name}
+organization_view                        /organizations/{organization_name}
 
 API operations found with tag "policy"
 OPERATION ID                             URL PATH
-policy_get                               /policy
-policy_put                               /policy
+policy_update                            /policy
+policy_view                              /policy
 
 API operations found with tag "projects"
 OPERATION ID                             URL PATH
-organization_projects_delete_project     /organizations/{organization_name}/projects/{project_name}
-organization_projects_get                /organizations/{organization_name}/projects
-organization_projects_get_project        /organizations/{organization_name}/projects/{project_name}
-organization_projects_get_project_policy /organizations/{organization_name}/projects/{project_name}/policy
-organization_projects_post               /organizations/{organization_name}/projects
-organization_projects_put_project        /organizations/{organization_name}/projects/{project_name}
-organization_projects_put_project_policy /organizations/{organization_name}/projects/{project_name}/policy
-
-API operations found with tag "racks"
-OPERATION ID                             URL PATH
-hardware_racks_get                       /hardware/racks
-hardware_racks_get_rack                  /hardware/racks/{rack_id}
+project_create                           /organizations/{organization_name}/projects
+project_delete                           /organizations/{organization_name}/projects/{project_name}
+project_list                             /organizations/{organization_name}/projects
+project_policy_update                    /organizations/{organization_name}/projects/{project_name}/policy
+project_policy_view                      /organizations/{organization_name}/projects/{project_name}/policy
+project_update                           /organizations/{organization_name}/projects/{project_name}
+project_view                             /organizations/{organization_name}/projects/{project_name}
 
 API operations found with tag "roles"
 OPERATION ID                             URL PATH
-roles_get                                /roles
-roles_get_role                           /roles/{role_name}
-
-API operations found with tag "routers"
-OPERATION ID                             URL PATH
-vpc_routers_delete_router                /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}
-vpc_routers_get                          /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers
-vpc_routers_get_router                   /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}
-vpc_routers_post                         /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers
-vpc_routers_put_router                   /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}
-
-API operations found with tag "routes"
-OPERATION ID                             URL PATH
-routers_routes_delete_route              /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}
-routers_routes_get                       /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes
-routers_routes_get_route                 /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}
-routers_routes_post                      /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes
-routers_routes_put_route                 /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}
+role_list                                /roles
+role_view                                /roles/{role_name}
 
 API operations found with tag "sagas"
 OPERATION ID                             URL PATH
-sagas_get                                /sagas
-sagas_get_saga                           /sagas/{saga_id}
+saga_list                                /sagas
+saga_view                                /sagas/{saga_id}
+
+API operations found with tag "session"
+OPERATION ID                             URL PATH
+session_sshkey_create                    /session/me/sshkeys
+session_sshkey_delete                    /session/me/sshkeys/{ssh_key_name}
+session_sshkey_list                      /session/me/sshkeys
+session_sshkey_view                      /session/me/sshkeys/{ssh_key_name}
 
 API operations found with tag "silos"
 OPERATION ID                             URL PATH
-silo_saml_idp_create                     /silos/{silo_name}/saml_identity_providers
-silo_saml_idp_fetch                      /silos/{silo_name}/saml_identity_providers/{provider_name}
-silo_users_get                           /users
-silos_delete_silo                        /silos/{silo_name}
-silos_get                                /silos
-silos_get_identity_providers             /silos/{silo_name}/identity_providers
-silos_get_silo                           /silos/{silo_name}
-silos_get_silo_policy                    /silos/{silo_name}/policy
-silos_post                               /silos
-silos_put_silo_policy                    /silos/{silo_name}/policy
-
-API operations found with tag "sleds"
-OPERATION ID                             URL PATH
-hardware_sleds_get                       /hardware/sleds
-hardware_sleds_get_sled                  /hardware/sleds/{sled_id}
+silo_create                              /silos
+silo_delete                              /silos/{silo_name}
+silo_identity_provider_create            /silos/{silo_name}/saml_identity_providers
+silo_identity_provider_list              /silos/{silo_name}/identity_providers
+silo_identity_provider_view              /silos/{silo_name}/saml_identity_providers/{provider_name}
+silo_list                                /silos
+silo_policy_update                       /silos/{silo_name}/policy
+silo_policy_view                         /silos/{silo_name}/policy
+silo_view                                /silos/{silo_name}
+user_list                                /users
 
 API operations found with tag "snapshots"
 OPERATION ID                             URL PATH
-project_snapshots_delete_snapshot        /organizations/{organization_name}/projects/{project_name}/snapshots/{snapshot_name}
-project_snapshots_get                    /organizations/{organization_name}/projects/{project_name}/snapshots
-project_snapshots_get_snapshot           /organizations/{organization_name}/projects/{project_name}/snapshots/{snapshot_name}
-project_snapshots_post                   /organizations/{organization_name}/projects/{project_name}/snapshots
-
-API operations found with tag "sshkeys"
-OPERATION ID                             URL PATH
-sshkeys_delete_key                       /session/me/sshkeys/{ssh_key_name}
-sshkeys_get                              /session/me/sshkeys
-sshkeys_get_key                          /session/me/sshkeys/{ssh_key_name}
-sshkeys_post                             /session/me/sshkeys
-
-API operations found with tag "subnets"
-OPERATION ID                             URL PATH
-subnet_network_interfaces_get            /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}/network-interfaces
-vpc_subnets_delete_subnet                /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}
-vpc_subnets_get                          /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets
-vpc_subnets_get_subnet                   /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}
-vpc_subnets_post                         /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets
-vpc_subnets_put_subnet                   /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}
+snapshot_create                          /organizations/{organization_name}/projects/{project_name}/snapshots
+snapshot_delete                          /organizations/{organization_name}/projects/{project_name}/snapshots/{snapshot_name}
+snapshot_list                            /organizations/{organization_name}/projects/{project_name}/snapshots
+snapshot_view                            /organizations/{organization_name}/projects/{project_name}/snapshots/{snapshot_name}
 
 API operations found with tag "system"
 OPERATION ID                             URL PATH
-builtin_users_get                        /users_builtin
-builtin_users_get_user                   /users_builtin/{user_name}
+system_user_list                         /system/user
+system_user_view                         /system/user/{user_name}
 
 API operations found with tag "updates"
 OPERATION ID                             URL PATH
@@ -182,9 +149,27 @@ updates_refresh                          /updates/refresh
 
 API operations found with tag "vpcs"
 OPERATION ID                             URL PATH
-project_vpcs_delete_vpc                  /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}
-project_vpcs_get                         /organizations/{organization_name}/projects/{project_name}/vpcs
-project_vpcs_get_vpc                     /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}
-project_vpcs_post                        /organizations/{organization_name}/projects/{project_name}/vpcs
-project_vpcs_put_vpc                     /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}
+vpc_create                               /organizations/{organization_name}/projects/{project_name}/vpcs
+vpc_delete                               /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}
+vpc_firewall_rules_update                /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/firewall/rules
+vpc_firewall_rules_view                  /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/firewall/rules
+vpc_list                                 /organizations/{organization_name}/projects/{project_name}/vpcs
+vpc_router_create                        /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers
+vpc_router_delete                        /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}
+vpc_router_list                          /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers
+vpc_router_route_create                  /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes
+vpc_router_route_delete                  /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}
+vpc_router_route_list                    /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes
+vpc_router_route_update                  /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}
+vpc_router_route_view                    /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}
+vpc_router_update                        /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}
+vpc_router_view                          /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}
+vpc_subnet_create                        /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets
+vpc_subnet_delete                        /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}
+vpc_subnet_list                          /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets
+vpc_subnet_list_network_interfaces       /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}/network-interfaces
+vpc_subnet_update                        /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}
+vpc_subnet_view                          /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}
+vpc_update                               /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}
+vpc_view                                 /organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}
 
