@@ -269,7 +269,7 @@ Any of those might explain the result.  For example, maybe somebody copy/pasted 
 
 If none of those explains it, then you need one additional piece of information: the roles that Nexus found for the actor on this resource or any of its parents.  Unfortunately, these are recorded in a separate "trace" level log entry.  **Find this log entry.**  It's generally the one immediately preceding the "authorize result" log entry.  You can filter with `grep` the way you did to find the authz log entry: filter (e.g., with `grep` by request id, find the "authorize result" entry you're working with, then look at the previous "roles" log entry.  Here's an example:
 
-[source,text]
+[source,json]
 ----
 {
   "msg": "roles",
@@ -293,7 +293,7 @@ If none of those explains it, then you need one additional piece of information:
 
 In this example, we found _no_ roles for this user on the resource we were authorizing or any of its parents.  Here's what it would look like if we _did_ find roles:
 
-[source,text]
+[source,json]
 ----
 {
   "msg": "roles",
@@ -326,6 +326,8 @@ Now, the `omicron.polar` policy file that's checked into this repository is only
 .Example full Oso configuration file
 [%collapsible]
 ====
+
+....
 $ grep 'full Oso configuration' log | bunyan
 [2022-07-07T20:53:36.129111164Z]  INFO: ee3947d6-0adc-4e37-86ab-f49dcda0e886/ServerContext/12898 on ivanova: full Oso configuration
     config: #
@@ -1049,6 +1051,8 @@ $ grep 'full Oso configuration' log | bunyan
                     }
                     has_relation(fleet: Fleet, "parent_fleet", child: GlobalImage)
                         if child.fleet = fleet;
+
+....
 
 ====
 
