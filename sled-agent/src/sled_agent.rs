@@ -231,10 +231,7 @@ impl SledAgent {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[
             "/usr/sbin/routeadm",
-            // Needed to access Nexus's external interface.
-            "-e",
-            "ipv4-forwarding",
-            // Needed to access all other zones, which are on the underlay.
+            // Needed to access all zones, which are on the underlay.
             "-e",
             "ipv6-forwarding",
             "-u",
