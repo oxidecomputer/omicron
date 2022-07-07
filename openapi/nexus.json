@@ -15,8 +15,8 @@
         "tags": [
           "disks"
         ],
-        "summary": "Fetch a disk by id",
-        "operationId": "disk_get_by_id",
+        "summary": "Get a disk by id",
+        "operationId": "disk_view_by_id",
         "parameters": [
           {
             "in": "path",
@@ -54,8 +54,8 @@
         "tags": [
           "images:global"
         ],
-        "summary": "Fetch a global image by id",
-        "operationId": "global_image_get_by_id",
+        "summary": "Get a global image by id.",
+        "operationId": "image_global_view_by_id",
         "parameters": [
           {
             "in": "path",
@@ -94,7 +94,7 @@
           "images"
         ],
         "summary": "Fetch an image by id",
-        "operationId": "image_get_by_id",
+        "operationId": "image_view_by_id",
         "parameters": [
           {
             "in": "path",
@@ -132,8 +132,8 @@
         "tags": [
           "instances"
         ],
-        "summary": "Fetch an instance by id",
-        "operationId": "instance_get_by_id",
+        "summary": "Get an instance by id.",
+        "operationId": "instance_view_by_id",
         "parameters": [
           {
             "in": "path",
@@ -171,8 +171,8 @@
         "tags": [
           "instances"
         ],
-        "summary": "Fetch a network interface by id",
-        "operationId": "network_interface_get_by_id",
+        "summary": "Get an instance's network interface by id.",
+        "operationId": "instance_network_interface_view_by_id",
         "parameters": [
           {
             "in": "path",
@@ -210,8 +210,8 @@
         "tags": [
           "organizations"
         ],
-        "summary": "Fetch an organization by id",
-        "operationId": "organization_get_by_id",
+        "summary": "Get an organization by id",
+        "operationId": "organization_view_by_id",
         "parameters": [
           {
             "in": "path",
@@ -249,8 +249,8 @@
         "tags": [
           "projects"
         ],
-        "summary": "Fetch a project by id",
-        "operationId": "project_get_by_id",
+        "summary": "Get a project by id",
+        "operationId": "project_view_by_id",
         "parameters": [
           {
             "in": "path",
@@ -286,10 +286,10 @@
     "/by_id/route/{id}": {
       "get": {
         "tags": [
-          "routes"
+          "vpcs"
         ],
-        "summary": "Fetch a vpc router route by id",
-        "operationId": "route_get_by_id",
+        "summary": "Get a vpc router route by id",
+        "operationId": "vpc_router_route_view_by_id",
         "parameters": [
           {
             "in": "path",
@@ -325,10 +325,10 @@
     "/by_id/router/{id}": {
       "get": {
         "tags": [
-          "routers"
+          "vpcs"
         ],
-        "summary": "Fetch a vpc router by id",
-        "operationId": "router_get_by_id",
+        "summary": "Get a VPC Router by id",
+        "operationId": "vpc_router_view_by_id",
         "parameters": [
           {
             "in": "path",
@@ -366,8 +366,8 @@
         "tags": [
           "snapshots"
         ],
-        "summary": "Fetch a snapshot by id",
-        "operationId": "snapshot_get_by_id",
+        "summary": "Get a snapshot by id.",
+        "operationId": "snapshot_view_by_id",
         "parameters": [
           {
             "in": "path",
@@ -403,10 +403,10 @@
     "/by_id/subnets/{id}": {
       "get": {
         "tags": [
-          "subnets"
+          "vpcs"
         ],
-        "summary": "Fetch a vpc subnet by id",
-        "operationId": "subnet_get_by_id",
+        "summary": "Get a VPC subnet by id.",
+        "operationId": "vpc_subnet_view_by_id",
         "parameters": [
           {
             "in": "path",
@@ -444,8 +444,8 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "Fetch a vpc by id",
-        "operationId": "vpc_get_by_id",
+        "summary": "Get a VPC by id.",
+        "operationId": "vpc_view_by_id",
         "parameters": [
           {
             "in": "path",
@@ -2173,7 +2173,7 @@
         "tags": [
           "disks"
         ],
-        "summary": "Fetch a single disk in a project.",
+        "summary": "Get a single disk in a project.",
         "operationId": "disk_view",
         "parameters": [
           {

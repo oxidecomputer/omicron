@@ -2919,7 +2919,7 @@ async fn vpc_subnet_view(
 #[endpoint {
     method = GET,
     path = "/by_id/subnets/{id}",
-    tags = ["subnets"],
+    tags = ["vpcs"],
 }]
 async fn vpc_subnet_view_by_id(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -3220,7 +3220,7 @@ async fn vpc_router_view(
 #[endpoint {
     method = GET,
     path = "/by_id/router/{id}",
-    tags = ["routers"],
+    tags = ["vpcs"],
 }]
 async fn vpc_router_view_by_id(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -3415,7 +3415,7 @@ async fn vpc_router_route_view(
 #[endpoint {
     method = GET,
     path = "/by_id/route/{id}",
-    tags = ["routes"]
+    tags = ["vpcs"]
 }]
 async fn vpc_router_route_view_by_id(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
