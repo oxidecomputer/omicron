@@ -45,7 +45,7 @@ pub struct OptePortAllocator {
 }
 
 impl OptePortAllocator {
-    pub fn new(_gateway_mac: Option<MacAddr6>) -> Self {
+    pub fn new(_gateway_mac: MacAddr6) -> Self {
         Self { value: Arc::new(AtomicU64::new(0)) }
     }
 

@@ -39,6 +39,10 @@ pub struct Config {
     /// MAC address of the internet gateway above. This is used to provide
     /// external connectivity into guests, by allowing OPTE to forward traffic
     /// destined for the broader network to the gateway.
+    // This uses the `serde_with` crate's `serde_as` attribute, which tries
+    // each of the listed serialization types (starting with the default) until
+    // one succeeds. This supports deserialization from either an array of u8,
+    // or the display-string representation.
     #[serde_as(as = "PickFirst<(_, DisplayFromStr)>")]
     pub gateway_mac: MacAddr6,
 
