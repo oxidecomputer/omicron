@@ -353,10 +353,10 @@ async fn verify_endpoint(
         let expected_status = match allowed {
             Some(_) => {
                 // Determine the expected status code for authenticated, unauthorized
-                // requests, based on the endpoint's visibility. If set to
-                // "IfAuthenticated", the endpoint is visible to any authenticated user.
+                // requests, based on the endpoint's visibility and unprivileged
+                // access setting.
                 match endpoint.unprivileged_access {
-                    // can see and access, but only for GET
+                    // authenticated users can only GET
                     UnprivilegedAccess::ReadOnly => match method {
                         Method::GET => StatusCode::OK,
 
@@ -379,6 +379,7 @@ async fn verify_endpoint(
                         ),
                     },
 
+                    // authenticated users have no permissions
                     UnprivilegedAccess::None => match endpoint.visibility {
                         Visibility::Public => StatusCode::FORBIDDEN,
                         Visibility::Protected => StatusCode::NOT_FOUND,
