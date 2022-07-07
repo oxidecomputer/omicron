@@ -303,3 +303,39 @@ async fn test_session_me_for_unpriv(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
 }
 
+// Test that an authenticated, unprivileged user can access their own silo
+#[nexus_test]
+async fn test_silo_read_for_unpriv(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.apictx.nexus;
+
+    // Create a silo with an unprivileged user
+    let silo = create_silo(
+        &client,
+        "authz",
+        true,
+        shared::UserProvisionType::Fixed,
+    )
+    .await;
+
+    let new_silo_user_id = Uuid::new_v4();
+    nexus
+        .silo_user_create(
+            silo.identity.id,
+            new_silo_user_id,
+            "unpriv".into(),
+        )
+        .await
+        .unwrap();
+
+    let _silo: views::Silo = NexusRequest::object_get(
+        client,
+        &"/silos/authz",
+    )
+    .authn_as(AuthnMode::SiloUser(new_silo_user_id))
+    .execute()
+    .await
+    .expect("failed to make GET request")
+    .parsed_body()
+    .unwrap();
+}

@@ -397,7 +397,7 @@ pub struct VerifyEndpoint {
 }
 
 /// Describe what access authenticated unprivileged users have.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum UnprivilegedAccess {
     /// Users have full CRUD access to the endpoint
     Full,
