@@ -1,5 +1,4 @@
 API endpoints with no coverage in authz tests:
-device_auth_verify                       (get    "/device/verify")
 login                                    (get    "/login/{silo_name}/{provider_name}")
 device_auth_request                      (post   "/device/auth")
 device_auth_confirm                      (post   "/device/confirm")
