@@ -121,7 +121,7 @@ pub struct DeviceAuthVerify {
 #[endpoint {
     method = GET,
     path = "/device/verify",
-    tags = ["hidden"], // "token"
+    unpublished = true,
 }]
 pub async fn device_auth_verify(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
