@@ -162,14 +162,18 @@ has_relation(fleet: Fleet, "parent_fleet", silo: Silo)
 has_permission(actor: AuthenticatedActor, "read", silo: Silo)
 	# TODO-security TODO-coverage We should have a test that exercises this
 	# syntax.
-	if silo = actor.silo;
+	# TODO actor.silo is *not* a list, so `in` is incorrect here, but if you
+	# replace that with `=` it fails!
+	if silo in actor.silo;
 
 # Any authenticated user should be allowed to list the identity providers of
 # their silo.
 has_permission(actor: AuthenticatedActor, "list_identity_providers", silo: Silo)
 	# TODO-security TODO-coverage We should have a test that exercises this
 	# syntax.
-	if silo = actor.silo;
+	# TODO actor.silo is *not* a list, so `in` is incorrect here, but if you
+	# replace that with `=` it fails!
+	if silo in actor.silo;
 
 resource Organization {
 	permissions = [
@@ -240,14 +244,27 @@ resource SiloUser {
 	    "create_child",
 	];
 
+	roles = ["admin", "viewer"];
+
 	relations = { parent_silo: Silo };
 	"list_children" if "viewer" on "parent_silo";
 	"read" if "viewer" on "parent_silo";
 	"modify" if "admin" on "parent_silo";
 	"create_child" if "admin" on "parent_silo";
+
+	"list_children" if "viewer";
+	"read" if "viewer";
+	"modify" if "admin";
+	"create_child" if "admin";
+
+    "viewer" if "admin";
 }
 has_relation(silo: Silo, "parent_silo", user: SiloUser)
 	if user.silo = silo;
+
+# authenticated actors can administrate themselves
+has_role(actor: AuthenticatedActor, "admin", silo_user: SiloUser)
+    if actor.equals_silo_user(silo_user);
 
 resource SshKey {
 	permissions = [ "read", "modify" ];

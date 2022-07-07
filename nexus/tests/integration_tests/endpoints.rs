@@ -1227,7 +1227,6 @@ lazy_static! {
 
         /* SSH keys */
 
-        /* TODO fix authz policy
         VerifyEndpoint {
             url: &*DEMO_SSHKEYS_URL,
             visibility: Visibility::Protected,
@@ -1248,6 +1247,5 @@ lazy_static! {
                 AllowedMethod::Delete,
             ],
         },
-        */
     ];
 }
