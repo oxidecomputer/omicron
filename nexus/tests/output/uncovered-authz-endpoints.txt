@@ -1,6 +1,5 @@
 API endpoints with no coverage in authz tests:
 session_sshkey_delete                    (delete "/session/me/sshkeys/{ssh_key_name}")
-device_auth_verify                       (get    "/device/verify")
 login                                    (get    "/login/{silo_name}/{provider_name}")
 session_me                               (get    "/session/me")
 session_sshkey_list                      (get    "/session/me/sshkeys")
