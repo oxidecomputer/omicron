@@ -16,7 +16,7 @@ features = ["serde"]
 version = "1.0.39"
 
 [dependencies.quote]
-version = "1.0.19"
+version = "1.0.20"
 
 [dependencies.syn]
 version = "1.0.95"
