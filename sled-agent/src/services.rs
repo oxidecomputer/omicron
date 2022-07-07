@@ -390,9 +390,7 @@ impl ServiceManager {
                     if let IpAddr::V4(_public_addr4) = external_address.ip() {
                         // If requested, create a default route back through
                         // the internet gateway.
-                        if let Some(ref gateway) =
-                            self.config.gateway_address
-                        {
+                        if let Some(ref gateway) = self.config.gateway_address {
                             running_zone
                                 .add_default_route4(*gateway)
                                 .await
