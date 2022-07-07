@@ -158,10 +158,18 @@ async fn test_console_pages(cptestctx: &ControlPlaneTestContext) {
 
     let session_token = log_in_and_extract_token(&testctx).await;
 
-    // hit console page with session, should get back HTML response
-    let console_page =
-        RequestBuilder::new(&testctx, Method::GET, "/orgs/irrelevant-path")
-            .header(http::header::COOKIE, session_token)
+    // hit console pages with session, should get back HTML response
+    let console_paths = &[
+        "/",
+        "/orgs/irrelevant-path",
+        "/settings/irrelevant-path",
+        "/device/success",
+        "/device/verify",
+    ];
+
+    for path in console_paths {
+        let console_page = RequestBuilder::new(&testctx, Method::GET, path)
+            .header(http::header::COOKIE, session_token.clone())
             .expect_status(Some(StatusCode::OK))
             .expect_response_header(
                 http::header::CONTENT_TYPE,
@@ -171,7 +179,8 @@ async fn test_console_pages(cptestctx: &ControlPlaneTestContext) {
             .await
             .expect("failed to get console index");
 
-    assert_eq!(console_page.body, "<html></html>".as_bytes());
+        assert_eq!(console_page.body, "<html></html>".as_bytes());
+    }
 }
 
 #[nexus_test]

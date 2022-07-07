@@ -15,7 +15,7 @@ use crate::context::OpContext;
 use crate::db::model::DeviceAccessToken;
 use crate::ServerContext;
 use dropshot::{
-    endpoint, HttpError, HttpResponseOk, Query, RequestContext, TypedBody,
+    endpoint, HttpError, HttpResponseOk, RequestContext, TypedBody,
 };
 use http::{header, Response, StatusCode};
 use hyper::Body;
@@ -121,11 +121,10 @@ pub struct DeviceAuthVerify {
 #[endpoint {
     method = GET,
     path = "/device/verify",
-    tags = ["hidden"], // "token"
+    unpublished = true,
 }]
 pub async fn device_auth_verify(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    _params: Query<DeviceAuthVerify>,
 ) -> Result<Response<Body>, HttpError> {
     console_index_or_login_redirect(rqctx).await
 }

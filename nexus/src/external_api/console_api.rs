@@ -619,6 +619,17 @@ pub async fn console_settings_page(
     console_index_or_login_redirect(rqctx).await
 }
 
+#[endpoint {
+   method = GET,
+   path = "/",
+   unpublished = true,
+}]
+pub async fn console_root(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+) -> Result<Response<Body>, HttpError> {
+    console_index_or_login_redirect(rqctx).await
+}
+
 /// Make a new PathBuf with `.gz` on the end
 fn with_gz_ext(path: &PathBuf) -> PathBuf {
     let mut new_path = path.clone();
