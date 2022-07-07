@@ -1,0 +1,1134 @@
+:showtitle:
+:numbered:
+:toc: left
+
+= Omicron Authz Debugging Guide
+
+This guide is aimed at helping Omicron developers debug common public API authorization (authz) problems.  If you run into a problem that's not covered here, consider adding it!
+
+When debugging authz, you will want to be running with "trace"-level logging.  You can do this by setting `log.level = "trace"` in the Nexus configuration.  This is automatically set when running tests, so any failure caught by the test suite should include the log messages you need.
+
+NOTE: Only debug-level logging (and higher) are currently supported in release builds.  See #1365.  You can still do some of the debugging below but you may be missing some information.
+
+In all cases, we'll start with the "request completed" log entry.  This is an "info" level log message recorded by Nexus for every HTTP request.  Here's an example (formatted with the https://github.com/trentm/node-bunyan[`bunyan(1)`] command-line tool):
+
+[source,text]
+----
+[2022-07-07T20:54:08.687405857Z]  INFO: ee3947d6-0adc-4e37-86ab-f49dcda0e886/dropshot_external/12898 on ivanova: request completed (req_id=58bcb3a5-0381-4e41-8ee6-e34837c4becc, uri=/hardware/racks, method=GET, remote_addr=127.0.0.1:36233, local_addr=127.0.0.1:63725, error_message_external=Forbidden, error_message_internal=Forbidden, response_code=403)
+----
+
+Here's the raw (JSON-formatted) log message:
+
+[source,json]
+----
+{
+  "msg": "request completed",
+  "v": 0,
+  "name": "ee3947d6-0adc-4e37-86ab-f49dcda0e886",
+  "level": 30,
+  "time": "2022-07-07T20:54:08.687405857Z",
+  "hostname": "ivanova",
+  "pid": 12898,
+  "uri": "/hardware/racks",
+  "method": "GET",
+  "req_id": "58bcb3a5-0381-4e41-8ee6-e34837c4becc",
+  "remote_addr": "127.0.0.1:36233",
+  "local_addr": "127.0.0.1:63725",
+  "component": "dropshot_external",
+  "error_message_external": "Forbidden",
+  "error_message_internal": "Forbidden",
+  "response_code": "403"
+}
+----
+
+Does the log entry have the HTTP method and URL that you expect?  If not, you're looking at the wrong log entry or this is not an authz problem.
+
+Now, write down the request id (`req_id` field).  Then look at the response code and pick one:
+
+* <<request_failed_with_401, I got a 401 ("Unauthorized") error and want to know why>>
+* <<request_failed_with_403, I got a 403 ("Forbidden") error and want to know why>>
+* <<request_failed_with_404, I got a 404 ("Not Found") error and want to know why>>
+* <<request_succeeded, I got any 200-level response, but I expected it to fail an authz check.  Why didn't it?>>
+
+If none of these applies, this guide cannot help you.  If you still think you've got an authz problem, ask around, and when you figure it out, please update this guide!
+
+== Failure modes
+
+[#request_failed_with_401]
+=== Request unexpectedly failed with a 401 ("Unauthorized")
+
+Despite the name "Unauthorized", 401 reflects an _authentication_ problem.  This is relatively uncommon.  It usually means one of two things:
+
+* the user did not provide any authentication credentials that Nexus understood, or
+* the user provided invalid authentication credentials
+
+You may be able to distinguish these from the internal error message that appears in the request log entry.  Here's an example:
+
+[source,text]
+----
+[2022-07-07T20:54:01.30200455Z]  INFO: ee3947d6-0adc-4e37-86ab-f49dcda0e886/dropshot_external/12898 on ivanova: request completed (req_id=a42e8ba2-267f-48dc-9b2b-532ea83138e4, method=GET, remote_addr=127.0.0.1:36233, local_addr=127.0.0.1:63725, error_message_external="credentials missing or invalid", error_message_internal="Actor required", response_code=401)
+    uri: /organizations/demo-org/projects/demo-project/images
+----
+
+Some example messages (remember these are _internal_ messages):
+
+* `Actor required`: no credentials were provided and we ended up trying to do something that required authentication _other_ than an authz check.  (e.g., doing anything in a Silo, which requires knowing _which_ Silo before even doing any authz checks)
+* `authorization failed for unauthenticated request`: no credentials were provided and we ended up failing an authz check that required authentication
+* `bad credentials for actor`: _invalid_ credentials were specified for a known actor (there may be more details in the message)
+* `unknown actor`: credentials were specified for an unknown actor
+
+When Nexus decides that credentials weren't specified at all, one possible reason is that Nexus isn't configured to look for the kind of credential that's being used.  For example, if you're trying to use web console session tokens, then `"session_cookie"` needs to be in the list of authentication schemes in the Nexus config file (`authn.schemes_external`).  If you have trace-level debugging, then you can filter the log by your request id and see all the schemes that Nexus tried:
+
+[source,text]
+----
+[2022-07-07T20:54:10.61484323Z] TRACE: ee3947d6-0adc-4e37-86ab-f49dcda0e886/dropshot_external/12898 on ivanova: authn: trying SchemeName("spoof") (req_id=a6febc45-7f95-4d79-86d5-93f7c2be4109, method=GET, remote_addr=127.0.0.1:36233, local_addr=127.0.0.1:63725)
+    uri: /silos/default-silo/saml_identity_providers/demo-saml-provider
+[2022-07-07T20:54:10.615229923Z] TRACE: ee3947d6-0adc-4e37-86ab-f49dcda0e886/dropshot_external/12898 on ivanova: authn: trying SchemeName("session_cookie") (req_id=a6febc45-7f95-4d79-86d5-93f7c2be4109, method=GET, remote_addr=127.0.0.1:36233, local_addr=127.0.0.1:63725)
+    uri: /silos/default-silo/saml_identity_providers/demo-saml-provider
+[2022-07-07T20:54:10.615630513Z] TRACE: ee3947d6-0adc-4e37-86ab-f49dcda0e886/dropshot_external/12898 on ivanova: authn result: Ok(Context { kind: Unauthenticated, schemes_tried: [SchemeName("spoof"), SchemeName("session_cookie")] }) (req_id=a6febc45-7f95-4d79-86d5-93f7c2be4109, method=GET, remote_addr=127.0.0.1:36233, local_addr=127.0.0.1:63725)
+----
+
+If you don't see the scheme you expect, particularly in that last `"authn result"` message, then Nexus wasn't configured to look for it.  (Again, this assumes the final error indicates that no credentials were specified at all.  If you get a "bad credentials for actor" error, then Nexus probably _did_ find credentials and they were bogus.)
+
+
+[#request_failed_with_403]
+=== Request unexpectedly failed with a 403 ("Forbidden")
+
+You've found the log entry for a request that failed with a 403 ("Forbidden") error and you want to know why it failed.
+
+A 403 almost certainly means that the request failed an authz check _and_ that the user was allowed to know that the resource exists (i.e., they have "read" access to it), but not to do whatever they tried to do with it.
+
+To confirm this, <<find_authz_log_entries, find the authz log entries for the request>>.  The last authz log entry for your request should have `result` = `Err(Forbidden)`.  That confirms that an authz check failed for this request and that generated the final 403 response.  If you didn't expect this, see <<why_did_authz_check_fail>>.
+
+[#request_failed_with_404]
+=== Request unexpectedly failed with a 404 ("Not Found")
+
+You've found the log entry for a request that failed with a 404 ("Not Found") error and you want to know if it failed because of authz, and if so, why?
+
+A 404 usually means one of two things:
+
+* The resource requested was actually not found (in which case we never even got to doing an authz check)
+* The resource requested was found, then we did an authz check to see if the caller was allowed to access it, then that failed, _and_ we determined that the caller is not even allowed to know that the resource exists
+
+First, <<find_authz_log_entries, find the authz log entries for the request>>.  If there are any, and the last one has `result` `Err(ObjectNotFound { ... })`, then we probably _did_ find the resource but it failed the authz check.  Here's an example:
+
+[source,text]
+[2022-07-07T20:54:02.563634281Z] DEBUG: ee3947d6-0adc-4e37-86ab-f49dcda0e886/dropshot_external/12898 on ivanova: authorize result (req_id=16d8baa2-c695-49ae-82b6-15c62d0728ca, authenticated=true, method=POST, remote_addr=127.0.0.1:36233, local_addr=127.0.0.1:63725, action=ListChildren)
+    actor: Some(Actor::SiloUser { silo_user_id: 001de000-05e4-4000-8000-000000060001, silo_id: 001de000-5110-4000-8000-000000000000, .. })
+    --
+    uri: /organizations/demo-org/projects/demo-project/snapshots
+    --
+    result: Err(ObjectNotFound { type_name: Project, lookup_type: ByName("demo-project") })
+    --
+    resource: Project { parent: Organization { parent: Silo { parent: Fleet, key: 001de000-5110-4000-8000-000000000000, lookup_type: ById(001de000-5110-4000-8000-000000000000) }, key: 1d70c7a5-16f0-41e2-9b23-169964efc23e, lookup_type: ByName("demo-org") }, key: 1d842b9c-d47b-4931-9ce5-4ed8856f4232, lookup_type: ByName("demo-project") }
+----
+
+In this case, see <<why_did_authz_check_fail>>.
+
+If you don't have any authz log entries, or none of them has an error, then you're probably in the case where we really didn't find the resource.  Your log might have a bunch of entries like this:
+
+[source,text]
+----
+[2022-07-07T20:54:02.261323316Z] DEBUG: ee3947d6-0adc-4e37-86ab-f49dcda0e886/dropshot_external/12898 on ivanova: authorize result (req_id=16d8baa2-c695-49ae-82b6-15c62d0728ca, authenticated=true, method=POST, remote_addr=127.0.0.1:36233, local_addr=127.0.0.1:63725, result=Ok(()), resource=Database, action=Query)
+    actor: Some(Actor::SiloUser { silo_user_id: 001de000-05e4-4000-8000-000000060001, silo_id: 001de000-5110-4000-8000-000000000000, .. })
+    --
+    uri: /organizations/demo-org/projects/demo-project/snapshots
+----
+
+You should find that the `resource` field doesn't correspond to the API resource that was requested.  Here, the URI shows that the caller is trying to access a project's snapshots, but the "resource" in the log message is `Database`.  This is a low-level authz check that was done _during_ the request but not tied to the project.  These just mean that the caller had the (low-level) privilege to query the database.
+
+[#request_succeeded]
+=== Request succeeded unexpectedly
+
+You've found the log entry for a request that succeeded (i.e., a 200-level response), but you expected it to fail an authz check.
+
+First, <<find_authz_log_entries, find the authz log entries for the request>>.  Find the one whose `resource` field matches the authz check you expected to fail.  (This will usually be the last entry, but it could be an earlier one.)  If you can't find one, that means we never _did_ an authz check for that resource!  Find the code path where you expected it to do an authz check and look into why it's not doing one.
+
+[#find_authz_log_entries]
+== Find authz log entries for a request
+
+The authz subsystem logs a debug-level message for every authz check, regardless of success.  Look for a log entry with message `authorize result` having the request id that you noted previously.  In this example, our request id is `58bcb3a5-0381-4e41-8ee6-e34837c4becc`:
+
+[source,text]
+----
+$ grep 58bcb3a5-0381-4e41-8ee6-e34837c4becc log | grep '"authorize result"'
+[2022-07-07T20:54:08.66956611Z] DEBUG: ee3947d6-0adc-4e37-86ab-f49dcda0e886/dropshot_external/12898 on ivanova: authorize result (req_id=58bcb3a5-0381-4e41-8ee6-e34837c4becc, authenticated=true, uri=/hardware/racks, method=GET, remote_addr=127.0.0.1:36233, local_addr=127.0.0.1:63725, result=Ok(()), resource=Database, action=Query)
+    actor: Some(Actor::SiloUser { silo_user_id: 001de000-05e4-4000-8000-000000060001, silo_id: 001de000-5110-4000-8000-000000000000, .. })
+[2022-07-07T20:54:08.686313987Z] DEBUG: ee3947d6-0adc-4e37-86ab-f49dcda0e886/dropshot_external/12898 on ivanova: authorize result (req_id=58bcb3a5-0381-4e41-8ee6-e34837c4becc, authenticated=true, uri=/hardware/racks, method=GET, remote_addr=127.0.0.1:36233, local_addr=127.0.0.1:63725, result=Err(Forbidden), resource=Fleet, action=Read)
+    actor: Some(Actor::SiloUser { silo_user_id: 001de000-05e4-4000-8000-000000060001, silo_id: 001de000-5110-4000-8000-000000000000, .. })
+----
+
+In raw JSON, the log entries look like this:
+
+[source,json]
+----
+{
+  "msg": "authorize result",
+  "v": 0,
+  "name": "ee3947d6-0adc-4e37-86ab-f49dcda0e886",
+  "level": 20,
+  "time": "2022-07-07T20:54:08.66956611Z",
+  "hostname": "ivanova",
+  "pid": 12898,
+  "actor": "Some(Actor::SiloUser { silo_user_id: 001de000-05e4-4000-8000-000000060001, silo_id: 001de000-5110-4000-8000-000000000000, .. })",
+  "authenticated": true,
+  "uri": "/hardware/racks",
+  "method": "GET",
+  "req_id": "58bcb3a5-0381-4e41-8ee6-e34837c4becc",
+  "remote_addr": "127.0.0.1:36233",
+  "local_addr": "127.0.0.1:63725",
+  "component": "dropshot_external",
+  "result": "Ok(())",
+  "resource": "Database",
+  "action": "Query"
+}
+{
+  "msg": "authorize result",
+  "v": 0,
+  "name": "ee3947d6-0adc-4e37-86ab-f49dcda0e886",
+  "level": 20,
+  "time": "2022-07-07T20:54:08.686313987Z",
+  "hostname": "ivanova",
+  "pid": 12898,
+  "actor": "Some(Actor::SiloUser { silo_user_id: 001de000-05e4-4000-8000-000000060001, silo_id: 001de000-5110-4000-8000-000000000000, .. })",
+  "authenticated": true,
+  "uri": "/hardware/racks",
+  "method": "GET",
+  "req_id": "58bcb3a5-0381-4e41-8ee6-e34837c4becc",
+  "remote_addr": "127.0.0.1:36233",
+  "local_addr": "127.0.0.1:63725",
+  "component": "dropshot_external",
+  "result": "Err(Forbidden)",
+  "resource": "Fleet",
+  "action": "Read"
+}
+----
+
+These log entries include _almost_ everything the authz system knew and used to make an authz decision: the actor (including their silo id), the action, and the resource.  Note the "resource" here is what the system _resolved_ it to.  Project "Foo" can mean different things at different times (e.g., as projects get renamed), but this log entry will contain the immutable id of the actual Project that the request resolved to.  The log entry also includes the authz `result`, which is either `Ok(())` (success) or an `Err` (that almost always causes the request to immediately fail with that error).
+
+If you find no authz log entries at all for your request, you might check if you see any for any _other_ requests, or if you see any other `debug` or `trace` level log entries.  If not, are you sure you're not filtering out debug-level log messages?
+
+Once you have this log entry, go back to whatever section above you came from to figure out what to look for.
+
+[#why_did_authz_check_fail]
+== Why did my authz check fail (or succeed)?
+
+If you're here, you should already have an authz log entry that shows an explicit failure (or success).  (If not, start at the top, or maybe skip to <<find_authz_log_entries>>.)
+
+=== First look at the authz log entry
+
+Here's an example entry in raw JSON form:
+
+[source,json]
+----
+{
+  "msg": "authorize result",
+  "v": 0,
+  "name": "ee3947d6-0adc-4e37-86ab-f49dcda0e886",
+  "level": 20,
+  "time": "2022-07-07T20:54:02.563634281Z",
+  "hostname": "ivanova",
+  "pid": 12898,
+  "actor": "Some(Actor::SiloUser { silo_user_id: 001de000-05e4-4000-8000-000000060001, silo_id: 001de000-5110-4000-8000-000000000000, .. })",
+  "authenticated": true,
+  "uri": "/organizations/demo-org/projects/demo-project/snapshots",
+  "method": "POST",
+  "req_id": "16d8baa2-c695-49ae-82b6-15c62d0728ca",
+  "remote_addr": "127.0.0.1:36233",
+  "local_addr": "127.0.0.1:63725",
+  "component": "dropshot_external",
+  "result": "Err(ObjectNotFound { type_name: Project, lookup_type: ByName(\"demo-project\") })",
+  "resource": "Project { parent: Organization { parent: Silo { parent: Fleet, key: 001de000-5110-4000-8000-000000000000, lookup_type: ById(001de000-5110-4000-8000-000000000000) }, key: 1d70c7a5-16f0-41e2-9b23-169964efc23e, lookup_type: ByName(\"demo-org\") }, key: 1d842b9c-d47b-4931-9ce5-4ed8856f4232, lookup_type: ByName(\"demo-project\") }",
+  "action": "ListChildren"
+}
+----
+
+There's a ton of useful information here:
+
+* the `actor` field shows us the user's unique `silo_user_id` as well as the `silo_id` of the Silo that they're in
+* the `action` tells us the action that we tried to authorize
+* the `resource` tells us exactly what we were operating on.  In this case, it's:
+** project 1d842b9c-d47b-4931-9ce5-4ed8856f4232, which we looked up by name "demo-project" inside...
+** ... organization 1d70c7a5-16f0-41e2-9b23-169964efc23e, which we looked up by name "demo-org" inside ...
+** ... silo 001de000-5110-4000-8000-000000000000 [which we would have gotten from the user's silo_id], which is inside ...
+** ... the sole Fleet, fleet 001de000-5110-4000-8000-000000000000
+
+In other words, we resolved "/organizations/demo-org/projects/demo-project/snapshots" to the specific Project 1d842b9c-d47b-4931-9ce5-4ed8856f4232.  It's critical to use the log entry for this information because if you just go by the name ("demo-project"), that can change over time or in different contexts (e.g., a different Organization or Silo).  The log entry shows you _exactly_ what Nexus used when checking _this_ request.
+
+**Questions to answer:**
+
+* Is this the resource you expected?
+** Is it the _type_ of resource you expected?
+** Is it the _actual_ resource you expected (that is, with the right id)?  Was it renamed?  Is it in a different parent collection (or Silo) than you expected?
+* Is this the action you expected?
+* Is this the actor you expected?  Are they in the Silo you expected?
+
+Any of those might explain the result.  For example, maybe somebody copy/pasted the `Modify` action where it should have been `Read`, and that might cause an erroneous authz failure for someone who's able to read the resource but not modify it.
+
+=== See what roles were assigned
+
+If none of those explains it, then you need one additional piece of information: the roles that Nexus found for the actor on this resource or any of its parents.  Unfortunately, these are recorded in a separate "trace" level log entry.  **Find this log entry.**  It's generally the one immediately preceding the "authorize result" log entry.  You can filter with `grep` the way you did to find the authz log entry: filter (e.g., with `grep` by request id, find the "authorize result" entry you're working with, then look at the previous "roles" log entry.  Here's an example:
+
+[source,text]
+----
+{
+  "msg": "roles",
+  "v": 0,
+  "name": "ee3947d6-0adc-4e37-86ab-f49dcda0e886",
+  "level": 20,
+  "time": "2022-07-07T20:54:02.262545123Z",
+  "hostname": "ivanova",
+  "pid": 12898,
+  "actor": "001de000-05e4-4000-8000-000000060001",
+  "authenticated": true,
+  "uri": "/organizations/demo-org/projects/demo-project/snapshots",
+  "method": "POST",
+  "req_id": "16d8baa2-c695-49ae-82b6-15c62d0728ca",
+  "remote_addr": "127.0.0.1:36233",
+  "local_addr": "127.0.0.1:63725",
+  "component": "dropshot_external",
+  "roles": "RoleSet { roles: {} }"
+}
+----
+
+In this example, we found _no_ roles for this user on the resource we were authorizing or any of its parents.  Here's what it would look like if we _did_ find roles:
+
+[source,text]
+----
+{
+  "msg": "roles",
+  "v": 0,
+  "name": "ee3947d6-0adc-4e37-86ab-f49dcda0e886",
+  "level": 20,
+  "time": "2022-07-07T20:54:10.350435886Z",
+  "hostname": "ivanova",
+  "pid": 12898,
+  "actor": "001de000-05e4-4000-8000-000000004007",
+  "authenticated": true,
+  "uri": "/images/alpine-edge",
+  "method": "GET",
+  "req_id": "c37ebae6-2252-4cd1-a9d5-73462522d56a",
+  "remote_addr": "127.0.0.1:36233",
+  "local_addr": "127.0.0.1:63725",
+  "component": "dropshot_external",
+  "roles": "RoleSet { roles: {(Fleet, 001de000-1334-4000-8000-000000000000, \"admin\")} }"
+}
+----
+
+In this example, the user was found to have the "admin" role on Fleet "001de000-1334-4000-8000-000000000000".
+
+=== Evaluate the policy
+
+Recall that the final authz check is deterministic for a given actor, action, resource, and set of roles.  At this point we have everything!  It's only a matter of evaluating the Oso policy file according to these inputs.
+
+Now, the `omicron.polar` policy file that's checked into this repository is only the base file.  At startup, a lot of snippets are generated and appended to the file before loading it into Oso.  If you get this far, it's worthwhile to extract the final generated file and work with that.  Fortunately, Nexus logs this on startup with the message `"full Oso configuration"`.
+
+.Example full Oso configuration file
+[%collapsible]
+====
+$ grep 'full Oso configuration' log | bunyan
+[2022-07-07T20:53:36.129111164Z]  INFO: ee3947d6-0adc-4e37-86ab-f49dcda0e886/ServerContext/12898 on ivanova: full Oso configuration
+    config: #
+    # Oso configuration for Omicron
+    # This file is augmented by generated snippets.
+    #
+
+    #
+    # ACTOR TYPES AND BASIC RULES
+    #
+
+    # `AnyActor` includes both authenticated and unauthenticated users.
+    actor AnyActor {}
+
+    # An `AuthenticatedActor` has an identity in the system.  All of our operations
+    # today require that an actor be authenticated.
+    actor AuthenticatedActor {}
+
+    # For any resource, `actor` can perform action `action` on it if they're
+    # authenticated and their role(s) give them the corresponding permission on that
+    # resource.
+    allow(actor: AnyActor, action: Action, resource) if
+        actor.authenticated and
+        has_permission(actor.authn_actor.unwrap(), action.to_perm(), resource);
+
+    # Define role relationships
+    has_role(actor: AuthenticatedActor, role: String, resource: Resource)
+        if resource.has_role(actor, role);
+
+    #
+    # ROLES AND PERMISSIONS IN THE FLEET/SILO/ORGANIZATION/PROJECT HIERARCHY
+    #
+    # We define the following permissions for most resources in the system:
+    #
+    # - "create_child": required to create child resources (of any type)
+    #
+    # - "list_children": required to list child resources (of all types) of a
+    #   resource
+    #
+    # - "modify": required to modify or delete a resource
+    #
+    # - "read": required to read a resource
+    #
+    # We define the following predefined roles for only a few high-level resources:
+    # the Fleet (see below), Silo, Organization, and Project.  The specific roles
+    # are oriented around intended use-cases:
+    #
+    # - "admin": has all permissions on the resource
+    #
+    # - "collaborator": has "read", "list_children", and "create_child", plus
+    #   the "admin" role for child resources.  The idea is that if you're an
+    #   Organization Collaborator, you have full control over the Projects within
+    #   the Organization, but you cannot modify or delete the Organization itself.
+    #
+    # - "viewer": has "read" and "list_children" on a resource
+    #
+    # Below the Project level, permissions are granted via roles at the Project
+    # level.  For example, for someone to be able to create, modify, or delete any
+    # Instances, they must be granted project.collaborator, which means they can
+    # create, modify, or delete _all_ resources in the Project.
+    #
+    # The complete set of predefined roles:
+    #
+    # - fleet.admin           (superuser for the whole system)
+    # - fleet.collaborator    (can manage Silos)
+    # - fleet.viewer          (can read most resources in the system)
+    # - silo.admin            (superuser for the silo)
+    # - silo.collaborator     (can create and own Organizations)
+    # - silo.viewer           (can read most resources within the Silo)
+    # - organization.admin    (complete control over an organization)
+    # - organization.collaborator (can manage Projects)
+    # - organization.viewer   (can read most resources within the Organization)
+    # - project.admin         (complete control over a Project)
+    # - project.collaborator  (can manage all resources within the Project)
+    # - project.viewer        (can read most resources within the Project)
+    #
+    # Outside the Silo/Organization/Project hierarchy, we (currently) treat most
+    # resources as nested under Fleet or else a synthetic resource (see below).  We
+    # do not yet support role assignments on anything other than Fleet, Silo,
+    # Organization, or Project.
+    #
+
+    # "Fleet" is a global singleton representing the whole system.  The name comes
+    # from the idea described in RFD 24, but it's not quite right.  This probably
+    # should be more like "Region" or "AvailabilityZone".  The precise boundaries
+    # have not yet been figured out.
+    resource Fleet {
+        permissions = [
+            "list_children",
+            "modify",
+            "read",
+            "create_child",
+        ];
+
+        roles = [
+            # Roles that can be attached by users
+            "admin",
+            "collaborator",
+            "viewer",
+
+            # Internal-only roles
+            "external-authenticator"
+        ];
+
+        # Roles implied by other roles on this resource
+        "viewer" if "collaborator";
+        "collaborator" if "admin";
+
+        # Permissions granted directly by roles on this resource
+        "list_children" if "viewer";
+        "read" if "viewer";
+        "create_child" if "collaborator";
+        "modify" if "admin";
+    }
+
+    resource Silo {
+        permissions = [
+            "list_children",
+            "modify",
+            "read",
+            "create_child",
+            "list_identity_providers",
+        ];
+        roles = [ "admin", "collaborator", "viewer" ];
+
+        # Roles implied by other roles on this resource
+        "viewer" if "collaborator";
+        "collaborator" if "admin";
+
+        # Permissions granted directly by roles on this resource
+        "list_children" if "viewer";
+        "read" if "viewer";
+
+        "create_child" if "collaborator";
+        "modify" if "admin";
+
+        # Roles implied by roles on this resource's parent (Fleet)
+        relations = { parent_fleet: Fleet };
+        "admin" if "collaborator" on "parent_fleet";
+        "viewer" if "viewer" on "parent_fleet";
+
+        # external authenticator has to create silo users
+        "list_children" if "external-authenticator" on "parent_fleet";
+        "create_child" if "external-authenticator" on "parent_fleet";
+    }
+
+    has_relation(fleet: Fleet, "parent_fleet", silo: Silo)
+        if silo.fleet = fleet;
+
+    # As a special case, all authenticated users can read their own Silo.  That's
+    # not quite the same as having the "viewer" role.  For example, they cannot list
+    # Organizations in the Silo.
+    #
+    # One reason this is necessary is because if an unprivileged user tries to
+    # create an Organization using "POST /organizations", they should get back a 403
+    # (which implies they're able to see /organizations, which is essentially seeing
+    # the Silo itself) rather than a 404.  This behavior isn't a hard constraint
+    # (i.e., you could reasonably get a 404 for an API you're not allowed to call).
+    # Nor is the implementation (i.e., we could special-case this endpoint somehow).
+    # But granting this permission is the simplest way to keep this endpoint's
+    # behavior consistent with the rest of the API.
+    #
+    # It's unclear what else would break if users couldn't see their own Silo.
+    has_permission(actor: AuthenticatedActor, "read", silo: Silo)
+        # TODO-security TODO-coverage We should have a test that exercises this
+        # syntax.
+        if silo in actor.silo;
+
+    # Any authenticated user should be allowed to list the identity providers of
+    # their silo.
+    has_permission(actor: AuthenticatedActor, "list_identity_providers", silo: Silo)
+        # TODO-security TODO-coverage We should have a test that exercises this
+        # syntax.
+        if silo in actor.silo;
+
+    resource Organization {
+        permissions = [
+            "list_children",
+            "modify",
+            "read",
+            "create_child",
+        ];
+        roles = [ "admin", "collaborator", "viewer" ];
+
+        # Roles implied by other roles on this resource
+        "viewer" if "collaborator";
+        "collaborator" if "admin";
+
+        # Permissions granted directly by roles on this resource
+        "list_children" if "viewer";
+        "read" if "viewer";
+        "create_child" if "collaborator";
+        "modify" if "admin";
+
+        # Roles implied by roles on this resource's parent (Silo)
+        relations = { parent_silo: Silo };
+        "admin" if "collaborator" on "parent_silo";
+        "viewer" if "viewer" on "parent_silo";
+    }
+    has_relation(silo: Silo, "parent_silo", organization: Organization)
+        if organization.silo = silo;
+
+    resource Project {
+        permissions = [
+            "list_children",
+            "modify",
+            "read",
+            "create_child",
+        ];
+        roles = [ "admin", "collaborator", "viewer" ];
+
+        # Roles implied by other roles on this resource
+        "viewer" if "collaborator";
+        "collaborator" if "admin";
+
+        # Permissions granted directly by roles on this resource
+        "list_children" if "viewer";
+        "read" if "viewer";
+        "create_child" if "collaborator";
+        "modify" if "admin";
+
+        # Roles implied by roles on this resource's parent (Organization)
+        relations = { parent_organization: Organization };
+        "admin" if "collaborator" on "parent_organization";
+        "viewer" if "viewer" on "parent_organization";
+    }
+    has_relation(organization: Organization, "parent_organization", project: Project)
+        if project.organization = organization;
+
+    #
+    # GENERAL RESOURCES OUTSIDE THE SILO/ORGANIZATION/PROJECT HIERARCHY
+    #
+    # Many resources use snippets of Polar generated by the `authz_resource!` Rust
+    # macro.  Some resources require custom Polar code.  Those appear here.
+    #
+
+    resource SiloUser {
+        permissions = [
+            "list_children",
+            "modify",
+            "read",
+            "create_child",
+        ];
+
+        relations = { parent_silo: Silo };
+        "list_children" if "viewer" on "parent_silo";
+        "read" if "viewer" on "parent_silo";
+        "modify" if "admin" on "parent_silo";
+        "create_child" if "admin" on "parent_silo";
+    }
+    has_relation(silo: Silo, "parent_silo", user: SiloUser)
+        if user.silo = silo;
+
+    resource SshKey {
+        permissions = [ "read", "modify" ];
+        relations = { silo_user: SiloUser };
+
+        "read" if "read" on "silo_user";
+        "modify" if "modify" on "silo_user";
+    }
+    has_relation(user: SiloUser, "silo_user", ssh_key: SshKey)
+        if ssh_key.silo_user = user;
+
+    resource IdentityProvider {
+        permissions = [
+            "read",
+            "modify",
+            "create_child",
+            "list_children",
+        ];
+        relations = { parent_silo: Silo };
+
+        "read" if "viewer" on "parent_silo";
+        "list_children" if "viewer" on "parent_silo";
+
+        # Only silo admins can create silo identity providers
+        "modify" if "admin" on "parent_silo";
+        "create_child" if "admin" on "parent_silo";
+    }
+    has_relation(silo: Silo, "parent_silo", identity_provider: IdentityProvider)
+        if identity_provider.silo = silo;
+
+    resource SamlIdentityProvider {
+        permissions = [
+            "read",
+            "modify",
+            "create_child",
+            "list_children",
+        ];
+        relations = { parent_silo: Silo };
+
+        # Only silo admins have permissions for specific identity provider details
+        "read" if "admin" on "parent_silo";
+        "list_children" if "admin" on "parent_silo";
+
+        "modify" if "admin" on "parent_silo";
+        "create_child" if "admin" on "parent_silo";
+    }
+    has_relation(silo: Silo, "parent_silo", saml_identity_provider: SamlIdentityProvider)
+        if saml_identity_provider.silo = silo;
+
+    #
+    # SYNTHETIC RESOURCES OUTSIDE THE SILO HIERARCHY
+    #
+    # The resources here do not correspond to anything that appears explicitly in
+    # the API or is stored in the database.  These are used either at the top level
+    # of the API path (e.g., "/images") or as an implementation detail of the system
+    # (in the case of console sessions and "Database").  The policies are
+    # either statically-defined in this file or driven by role assignments on the
+    # Fleet.  None of these resources defines their own roles.
+    #
+
+    # Describes the policy for accessing "/ip-pools" in the API
+    resource IpPoolList {
+        permissions = [
+            "list_children",
+            "modify",
+            "create_child",
+        ];
+
+        # Fleet Administrators can create or modify the IP Pools list.
+        relations = { parent_fleet: Fleet };
+        "modify" if "admin" on "parent_fleet";
+        "create_child" if "admin" on "parent_fleet";
+
+        # Fleet Viewers can list IP Pools
+        "list_children" if "viewer" on "parent_fleet";
+    }
+    has_relation(fleet: Fleet, "parent_fleet", ip_pool_list: IpPoolList)
+        if ip_pool_list.fleet = fleet;
+
+    # Describes the policy for accessing "/images" (in the API)
+    resource GlobalImageList {
+        permissions = [
+            "list_children",
+            "modify",
+            "create_child",
+        ];
+
+        # Fleet Administrators can create or modify the global images list.
+        relations = { parent_fleet: Fleet };
+        "modify" if "admin" on "parent_fleet";
+        "create_child" if "admin" on "parent_fleet";
+
+        # Fleet Viewers can list global images.
+        "list_children" if "viewer" on "parent_fleet";
+    }
+    has_relation(fleet: Fleet, "parent_fleet", global_image_list: GlobalImageList)
+        if global_image_list.fleet = fleet;
+
+    # Describes the policy for creating and managing web console sessions.
+    resource ConsoleSessionList {
+        permissions = [ "create_child" ];
+        relations = { parent_fleet: Fleet };
+        "create_child" if "external-authenticator" on "parent_fleet";
+    }
+    has_relation(fleet: Fleet, "parent_fleet", collection: ConsoleSessionList)
+        if collection.fleet = fleet;
+
+    # These rules grants the external authenticator role the permissions it needs to
+    # read silo users and modify their sessions.  This is necessary for login to
+    # work.
+    has_permission(actor: AuthenticatedActor, "read", silo: Silo)
+        if has_role(actor, "external-authenticator", silo.fleet);
+    has_permission(actor: AuthenticatedActor, "read", user: SiloUser)
+        if has_role(actor, "external-authenticator", user.silo.fleet);
+    has_permission(actor: AuthenticatedActor, "read", session: ConsoleSession)
+        if has_role(actor, "external-authenticator", session.fleet);
+    has_permission(actor: AuthenticatedActor, "modify", session: ConsoleSession)
+        if has_role(actor, "external-authenticator", session.fleet);
+
+    has_permission(actor: AuthenticatedActor, "read", identity_provider: IdentityProvider)
+        if has_role(actor, "external-authenticator", identity_provider.silo.fleet);
+    has_permission(actor: AuthenticatedActor, "list_identity_providers", identity_provider: IdentityProvider)
+        if has_role(actor, "external-authenticator", identity_provider.silo.fleet);
+
+    has_permission(actor: AuthenticatedActor, "read", saml_identity_provider: SamlIdentityProvider)
+        if has_role(actor, "external-authenticator", saml_identity_provider.silo.fleet);
+    has_permission(actor: AuthenticatedActor, "list_identity_providers", saml_identity_provider: SamlIdentityProvider)
+        if has_role(actor, "external-authenticator", saml_identity_provider.silo.fleet);
+
+
+    # Describes the policy for who can access the internal database.
+    resource Database {
+        permissions = [
+            # "query" is required to perform any query against the database,
+            # whether a read or write query.  This is checked when an operation
+            # checks out a database connection from the connection pool.
+            #
+            # Any authenticated user gets this permission.  There's generally
+            # some other authz check involved in the database query.  For
+            # example, if you're querying the database to "read" a "Project", we
+            # should also be checking that.  So why do we do this at all?  It's
+            # a belt-and-suspenders measure so that if we somehow introduced an
+            # unauthenticated code path that hits the database, it cannot be
+            # used to DoS the database because we won't allow the operation to
+            # make the query.  (As long as the code path _is_ authenticated, we
+            # can use throttling mechanisms to prevent DoS.)
+            "query",
+
+            # "modify" is required to populate database data that's delivered
+            # with the system.  It should also be required for schema changes,
+            # when we support those.  This is separate from "query" so that we
+            # cannot accidentally invoke these code paths from API calls and
+            # other general functions.
+            "modify"
+        ];
+    }
+
+    # All authenticated users have the "query" permission on the database.
+    has_permission(_actor: AuthenticatedActor, "query", _resource: Database);
+
+    # The "db-init" user is the only one with the "init" role.
+    has_permission(actor: AuthenticatedActor, "modify", _resource: Database)
+        if actor = USER_DB_INIT;
+
+
+
+
+                    resource Disk {
+                        permissions = [
+                            "list_children",
+                            "modify",
+                            "read",
+                            "create_child",
+                        ];
+
+                        relations = { containing_project: Project };
+                        "list_children" if "viewer" on "containing_project";
+                        "read" if "viewer" on "containing_project";
+                        "modify" if "collaborator" on "containing_project";
+                        "create_child" if "collaborator" on "containing_project";
+                    }
+
+                    has_relation(parent: Project, "containing_project", child: Disk)
+                            if child.project = parent;
+
+
+                    resource Instance {
+                        permissions = [
+                            "list_children",
+                            "modify",
+                            "read",
+                            "create_child",
+                        ];
+
+                        relations = { containing_project: Project };
+                        "list_children" if "viewer" on "containing_project";
+                        "read" if "viewer" on "containing_project";
+                        "modify" if "collaborator" on "containing_project";
+                        "create_child" if "collaborator" on "containing_project";
+                    }
+
+                    has_relation(parent: Project, "containing_project", child: Instance)
+                            if child.project = parent;
+
+
+                    resource IpPool {
+                        permissions = [
+                            "list_children",
+                            "modify",
+                            "read",
+                            "create_child",
+                        ];
+
+                        relations = { parent_fleet: Fleet };
+                        "list_children" if "viewer" on "parent_fleet";
+                        "read" if "viewer" on "parent_fleet";
+                        "modify" if "admin" on "parent_fleet";
+                        "create_child" if "admin" on "parent_fleet";
+                    }
+                    has_relation(fleet: Fleet, "parent_fleet", child: IpPool)
+                        if child.fleet = fleet;
+
+
+                    resource NetworkInterface {
+                        permissions = [
+                            "list_children",
+                            "modify",
+                            "read",
+                            "create_child",
+                        ];
+
+                        relations = {
+                            containing_project: Project,
+                            parent: Instance
+                        };
+                        "list_children" if "viewer" on "containing_project";
+                        "read" if "viewer" on "containing_project";
+                        "modify" if "collaborator" on "containing_project";
+                        "create_child" if "collaborator" on "containing_project";
+                    }
+
+                    has_relation(project: Project, "containing_project", child: NetworkInterface)
+                        if has_relation(project, "containing_project", child.instance);
+
+                    has_relation(parent: Instance, "parent", child: NetworkInterface)
+                        if child.instance = parent;
+
+
+                    resource Vpc {
+                        permissions = [
+                            "list_children",
+                            "modify",
+                            "read",
+                            "create_child",
+                        ];
+
+                        relations = { containing_project: Project };
+                        "list_children" if "viewer" on "containing_project";
+                        "read" if "viewer" on "containing_project";
+                        "modify" if "collaborator" on "containing_project";
+                        "create_child" if "collaborator" on "containing_project";
+                    }
+
+                    has_relation(parent: Project, "containing_project", child: Vpc)
+                            if child.project = parent;
+
+
+                    resource VpcRouter {
+                        permissions = [
+                            "list_children",
+                            "modify",
+                            "read",
+                            "create_child",
+                        ];
+
+                        relations = {
+                            containing_project: Project,
+                            parent: Vpc
+                        };
+                        "list_children" if "viewer" on "containing_project";
+                        "read" if "viewer" on "containing_project";
+                        "modify" if "collaborator" on "containing_project";
+                        "create_child" if "collaborator" on "containing_project";
+                    }
+
+                    has_relation(project: Project, "containing_project", child: VpcRouter)
+                        if has_relation(project, "containing_project", child.vpc);
+
+                    has_relation(parent: Vpc, "parent", child: VpcRouter)
+                        if child.vpc = parent;
+
+
+                    resource RouterRoute {
+                        permissions = [
+                            "list_children",
+                            "modify",
+                            "read",
+                            "create_child",
+                        ];
+
+                        relations = {
+                            containing_project: Project,
+                            parent: VpcRouter
+                        };
+                        "list_children" if "viewer" on "containing_project";
+                        "read" if "viewer" on "containing_project";
+                        "modify" if "collaborator" on "containing_project";
+                        "create_child" if "collaborator" on "containing_project";
+                    }
+
+                    has_relation(project: Project, "containing_project", child: RouterRoute)
+                        if has_relation(project, "containing_project", child.vpc_router);
+
+                    has_relation(parent: VpcRouter, "parent", child: RouterRoute)
+                        if child.vpc_router = parent;
+
+
+                    resource VpcSubnet {
+                        permissions = [
+                            "list_children",
+                            "modify",
+                            "read",
+                            "create_child",
+                        ];
+
+                        relations = {
+                            containing_project: Project,
+                            parent: Vpc
+                        };
+                        "list_children" if "viewer" on "containing_project";
+                        "read" if "viewer" on "containing_project";
+                        "modify" if "collaborator" on "containing_project";
+                        "create_child" if "collaborator" on "containing_project";
+                    }
+
+                    has_relation(project: Project, "containing_project", child: VpcSubnet)
+                        if has_relation(project, "containing_project", child.vpc);
+
+                    has_relation(parent: Vpc, "parent", child: VpcSubnet)
+                        if child.vpc = parent;
+
+
+                    resource ConsoleSession {
+                        permissions = [
+                            "list_children",
+                            "modify",
+                            "read",
+                            "create_child",
+                        ];
+
+                        relations = { parent_fleet: Fleet };
+                        "list_children" if "viewer" on "parent_fleet";
+                        "read" if "viewer" on "parent_fleet";
+                        "modify" if "admin" on "parent_fleet";
+                        "create_child" if "admin" on "parent_fleet";
+                    }
+                    has_relation(fleet: Fleet, "parent_fleet", child: ConsoleSession)
+                        if child.fleet = fleet;
+
+
+                    resource Rack {
+                        permissions = [
+                            "list_children",
+                            "modify",
+                            "read",
+                            "create_child",
+                        ];
+
+                        relations = { parent_fleet: Fleet };
+                        "list_children" if "viewer" on "parent_fleet";
+                        "read" if "viewer" on "parent_fleet";
+                        "modify" if "admin" on "parent_fleet";
+                        "create_child" if "admin" on "parent_fleet";
+                    }
+                    has_relation(fleet: Fleet, "parent_fleet", child: Rack)
+                        if child.fleet = fleet;
+
+
+                    resource RoleBuiltin {
+                        permissions = [
+                            "list_children",
+                            "modify",
+                            "read",
+                            "create_child",
+                        ];
+
+                        relations = { parent_fleet: Fleet };
+                        "list_children" if "viewer" on "parent_fleet";
+                        "read" if "viewer" on "parent_fleet";
+                        "modify" if "admin" on "parent_fleet";
+                        "create_child" if "admin" on "parent_fleet";
+                    }
+                    has_relation(fleet: Fleet, "parent_fleet", child: RoleBuiltin)
+                        if child.fleet = fleet;
+
+
+
+
+
+
+
+                    resource Sled {
+                        permissions = [
+                            "list_children",
+                            "modify",
+                            "read",
+                            "create_child",
+                        ];
+
+                        relations = { parent_fleet: Fleet };
+                        "list_children" if "viewer" on "parent_fleet";
+                        "read" if "viewer" on "parent_fleet";
+                        "modify" if "admin" on "parent_fleet";
+                        "create_child" if "admin" on "parent_fleet";
+                    }
+                    has_relation(fleet: Fleet, "parent_fleet", child: Sled)
+                        if child.fleet = fleet;
+
+
+                    resource UpdateAvailableArtifact {
+                        permissions = [
+                            "list_children",
+                            "modify",
+                            "read",
+                            "create_child",
+                        ];
+
+                        relations = { parent_fleet: Fleet };
+                        "list_children" if "viewer" on "parent_fleet";
+                        "read" if "viewer" on "parent_fleet";
+                        "modify" if "admin" on "parent_fleet";
+                        "create_child" if "admin" on "parent_fleet";
+                    }
+                    has_relation(fleet: Fleet, "parent_fleet", child: UpdateAvailableArtifact)
+                        if child.fleet = fleet;
+
+
+                    resource UserBuiltin {
+                        permissions = [
+                            "list_children",
+                            "modify",
+                            "read",
+                            "create_child",
+                        ];
+
+                        relations = { parent_fleet: Fleet };
+                        "list_children" if "viewer" on "parent_fleet";
+                        "read" if "viewer" on "parent_fleet";
+                        "modify" if "admin" on "parent_fleet";
+                        "create_child" if "admin" on "parent_fleet";
+                    }
+                    has_relation(fleet: Fleet, "parent_fleet", child: UserBuiltin)
+                        if child.fleet = fleet;
+
+
+                    resource GlobalImage {
+                        permissions = [
+                            "list_children",
+                            "modify",
+                            "read",
+                            "create_child",
+                        ];
+
+                        relations = { parent_fleet: Fleet };
+                        "list_children" if "viewer" on "parent_fleet";
+                        "read" if "viewer" on "parent_fleet";
+                        "modify" if "admin" on "parent_fleet";
+                        "create_child" if "admin" on "parent_fleet";
+                    }
+                    has_relation(fleet: Fleet, "parent_fleet", child: GlobalImage)
+                        if child.fleet = fleet;
+
+====
+
+Unfortunately, there's no shortcut here.  If you expected authz to succeed, then there must be a rule in the file that _grants_ permission.  Say you're trying to "Modify" an "Instance" and that works because you have the "admin" role on the parent Project.  This combination of rules grants that (the snippets below are copied from the full Oso config, but the comments are added here):
+
+[source,text]
+----
+# Top-level "allow" rule
+allow(actor: AnyActor, action: Action, resource) if
+    actor.authenticated and
+    has_permission(actor.authn_actor.unwrap(), action.to_perm(), resource);
+
+...
+
+# Top-level rule to determine if a user has a role on a resource.  This calls back into
+# Rust via the `has_role` function.  This winds up looking directly in the list of roles
+# that we looked at in the log message above.
+has_role(actor: AuthenticatedActor, role: String, resource: Resource)
+    if resource.has_role(actor, role);
+
+...
+
+resource Project {
+    permissions = [ "list_children", "modify", "read", "create_child" ];
+    roles = [ "admin", "collaborator", "viewer" ];
+
+    # Roles implied by other roles on this resource
+    "viewer" if "collaborator";
+    "collaborator" if "admin";
+
+    ...
+}
+
+
+resource Instance {
+    permissions = [ "list_children", "modify", "read", "create_child" ];
+
+    relations = { containing_project: Project };
+    "list_children" if "viewer" on "containing_project";
+    "read" if "viewer" on "containing_project";
+    "modify" if "collaborator" on "containing_project";
+    "create_child" if "collaborator" on "containing_project";
+}
+
+# Tells Oso how to know if a Project and Instance are related
+# `child.project` is an accessor that we define in Rust code.
+has_relation(parent: Project, "containing_project", child: Instance)
+        if child.project = parent;
+----
+
+In other words:
+
+* The top-level rule says that you're allowed to do an `action` if you're authenticated _and_ you have the corresponding permission (`action.to_perm()`) on the resource.  In our example, you can take action `modify` if you have permission `modify` on the Instance.
+* The `resource Instance` block says, among other things, that you have permission `modify` if you have role `collaborator` on any Project related to this Instance as a "containing_project" (i.e., if the Project is its parent).
+* The `resource Project` block says, among other things, that you have the "collaborator" role on a Project if you have the "admin" role on the Project.
+* The `has_role` rule says that you have the role if the corresponding Rust function says so.
+
+This is just an example showing why somebody with the "admin" role on a Project is allowed to take action "Modify" on an Instance in that Project.  Now, if you're debugging an authz failure, you need to figure out what path like the above would _grant_ permission.  Most likely, some step is missing.
+
+If you're debugging an authz success that you expected to fail, then there must be a path here that you didn't expect.
+
+==== Check this one common failure mode
+
+If you're adding a new type of authz resource, you probably had to create a new `authz_resource!` block in `nexus/src/authz/api_resources.rs`.  **Don't forget to update the `make_omicron_oso()` function to register your new class!**  The failure mode here is terrible: the authz checks appear to just not work.  It's not clear why Oso doesn't consider this a fatal error.
+
+== Background
+
+For background, please read xref:../nexus/src/authz/mod.rs[the authz subsystem documentation].  There's useful background there about actors, actions, resources, and how authz actually works.  This section is a really rough summary.
+
+In Nexus, authz checks generally boil down to: is this **actor** (the currently-authenticated user) allowed to perform this **action** on this **resource**?  The authz decision is made by a library called https://docs.osohq.com/index.html[Oso] based on a single Nexus-wide xref:../nexus/src/authz/omicron.polar[**policy** file] written in Oso's domain specific language called https://docs.osohq.com/reference/polar.html[Polar].
+
+An authz check starts when Nexus code at-large invokes `OpContext::authorize()`.  Here's roughly how it works:
+
+* The arguments to the function define the **action** and **resource** parts of the check.  The `OpContext` provides the **actor** part.
+* Many of our policy rules are written in terms of **roles**.  Early in the `authorize()` function, we fetch the roles that the actor has been assigned for the given resource.
+* Many of our policy rules are written in terms of privileges or roles that the actor has on some other resource.  For example, you can read an Instance if you have the "viewer" role on the parent Project.  So we also fetch the roles that the actor has been assigned for any parent resources.  This process is recursive.
+
+To summarize: we start with the actor, action, and resource.  The policy is hardcoded into Nexus (via the Polar file).  Once we fetch the roles, we have everything we need to make an authz decision **and the process is deterministic given these inputs.**
+
+// - issues to file
+//   - request audit log entries should include list of authz checks, including resource and roles
+//   - request audit log entries should include list of authn schemes tried
+//   - why doesn't Oso barf when you fail to register a class
