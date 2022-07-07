@@ -162,14 +162,14 @@ has_relation(fleet: Fleet, "parent_fleet", silo: Silo)
 has_permission(actor: AuthenticatedActor, "read", silo: Silo)
 	# TODO-security TODO-coverage We should have a test that exercises this
 	# syntax.
-	if silo in actor.silo;
+	if silo = actor.silo;
 
 # Any authenticated user should be allowed to list the identity providers of
 # their silo.
 has_permission(actor: AuthenticatedActor, "list_identity_providers", silo: Silo)
 	# TODO-security TODO-coverage We should have a test that exercises this
 	# syntax.
-	if silo in actor.silo;
+	if silo = actor.silo;
 
 resource Organization {
 	permissions = [
