@@ -263,7 +263,7 @@ impl ServiceManager {
             }
 
             // TODO: Remove once Nexus traffic is transmitted over OPTE.
-            let physical_vnic = match service.service_type {
+            let physical_nic = match service.service_type {
                 ServiceType::Nexus { .. } => {
                     let vnic = self
                         .physical_link_vnic_allocator
@@ -286,8 +286,8 @@ impl ServiceManager {
                 &[],
                 // opte_ports=
                 vec![],
-                // physical_vnic=
-                physical_vnic,
+                // physical_nic=
+                physical_nic,
             )
             .await?;
 
@@ -387,23 +387,20 @@ impl ServiceManager {
                         )
                         .await?;
 
-                    match external_address.ip() {
-                        IpAddr::V4(_public_addr4) => {
-                            // If requested, create a default route back through
-                            // the internet gateway.
-                            if let Some(ref gateway) =
-                                self.config.gateway_address
-                            {
-                                running_zone
-                                    .add_default_route4(*gateway)
-                                    .await
-                                    .map_err(|err| Error::ZoneCommand {
-                                        intent: "Adding Route".to_string(),
-                                        err,
-                                    })?;
-                            }
+                    if let IpAddr::V4(_public_addr4) = external_address.ip() {
+                        // If requested, create a default route back through
+                        // the internet gateway.
+                        if let Some(ref gateway) =
+                            self.config.gateway_address
+                        {
+                            running_zone
+                                .add_default_route4(*gateway)
+                                .await
+                                .map_err(|err| Error::ZoneCommand {
+                                    intent: "Adding Route".to_string(),
+                                    err,
+                                })?;
                         }
-                        _ => (),
                     }
 
                     // Nexus takes a separate config file for parameters which

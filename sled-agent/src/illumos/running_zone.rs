@@ -190,9 +190,9 @@ impl RunningZone {
     ) -> Result<IpNetwork, EnsureAddressError> {
         info!(self.inner.log, "Adding address: {:?}", addrtype);
         let addrobj = AddrObject::new(
-                self.inner.physical_vnic
+                self.inner.physical_nic
                     .as_ref()
-                    .expect("Cannot allocate external address on zone without physical VNIC")
+                    .expect("Cannot allocate external address on zone without physical NIC")
                     .name(),
                 name
             )
@@ -296,7 +296,7 @@ impl RunningZone {
                 //
                 // Re-initialize guest_vnic state by inspecting the zone.
                 opte_ports: vec![],
-                physical_vnic: None,
+                physical_nic: None,
             },
         })
     }
@@ -350,9 +350,9 @@ pub struct InstalledZone {
     // OPTE devices for the guest network interfaces
     opte_ports: Vec<OptePort>,
 
-    // Physical VNIC possibly provisioned to the zone.
+    // Physical NIC possibly provisioned to the zone.
     // TODO: Remove once Nexus traffic is transmitted over OPTE.
-    physical_vnic: Option<Vnic>,
+    physical_nic: Option<Vnic>,
 }
 
 impl InstalledZone {
@@ -386,7 +386,7 @@ impl InstalledZone {
         datasets: &[zone::Dataset],
         devices: &[zone::Device],
         opte_ports: Vec<OptePort>,
-        physical_vnic: Option<Vnic>,
+        physical_nic: Option<Vnic>,
     ) -> Result<InstalledZone, InstallZoneError> {
         let control_vnic = vnic_allocator.new_control(None).map_err(|err| {
             InstallZoneError::CreateVnic {
@@ -399,17 +399,11 @@ impl InstalledZone {
         let zone_image_path =
             PathBuf::from(&format!("/opt/oxide/{}.tar.gz", service_name));
 
-        let phys_iter = if let Some(ref vnic) = physical_vnic {
-            vec![vnic.name().to_string()].into_iter()
-        } else {
-            vec![].into_iter()
-        };
-
         let net_device_names: Vec<String> = opte_ports
             .iter()
             .map(|port| port.vnic().name().to_string())
             .chain(std::iter::once(control_vnic.name().to_string()))
-            .chain(phys_iter)
+            .chain(physical_nic.as_ref().map(|vnic| vnic.name().to_string()))
             .collect();
 
         Zones::install_omicron_zone(
@@ -431,7 +425,7 @@ impl InstalledZone {
             name: zone_name,
             control_vnic,
             opte_ports,
-            physical_vnic,
+            physical_nic,
         })
     }
 }

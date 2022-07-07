@@ -535,7 +535,7 @@ impl Instance {
                 zone::Device { name: "/dev/viona".to_string() },
             ],
             opte_ports,
-            // physical_vnic=
+            // physical_nic=
             None,
         )
         .await?;
