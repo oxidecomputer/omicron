@@ -274,9 +274,10 @@ fn do_install_prereqs(config: &Config) -> Result<()> {
 
     // run install_prereqs on each server
     let builder = &config.servers[&config.builder.server];
-    let all_servers = config.servers.iter().map(|(_name, server)| {
-        (server, &config.deployment.staging_dir)
-    });
+    let all_servers = config
+        .servers
+        .iter()
+        .map(|(_name, server)| (server, &config.deployment.staging_dir));
 
     // -y: assume yes instead of prompting
     // -p: skip check that deps end up in $PATH
