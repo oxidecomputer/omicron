@@ -1116,7 +1116,7 @@ If you're debugging an authz success that you expected to fail, then there must 
 
 ==== Check this one common failure mode
 
-If you're adding a new type of authz resource, you probably had to create a new `authz_resource!` block in `nexus/src/authz/api_resources.rs`.  **Don't forget to update the `make_omicron_oso()` function to register your new class!**  The failure mode here is terrible: the authz checks appear to just not work.  It's not clear why Oso doesn't consider this a fatal error.
+If you're adding a new type of authz resource, you probably had to create a new `authz_resource!` block in `nexus/src/authz/api_resources.rs`.  **Don't forget to update the `make_omicron_oso()` function to register your new class!**  The failure mode here is terrible: the authz checks appear to just not work.  It's not clear why Oso doesn't consider this a fatal error.  See https://github.com/oxidecomputer/omicron/issues/1378[issue#1378].
 
 == Background
 
@@ -1131,8 +1131,3 @@ An authz check starts when Nexus code at-large invokes `OpContext::authorize()`.
 * Many of our policy rules are written in terms of privileges or roles that the actor has on some other resource.  For example, you can read an Instance if you have the "viewer" role on the parent Project.  So we also fetch the roles that the actor has been assigned for any parent resources.  This process is recursive.
 
 To summarize: we start with the actor, action, and resource.  The policy is hardcoded into Nexus (via the Polar file).  Once we fetch the roles, we have everything we need to make an authz decision **and the process is deterministic given these inputs.**
-
-// - issues to file
-//   - request audit log entries should include list of authz checks, including resource and roles
-//   - request audit log entries should include list of authn schemes tried
-//   - why doesn't Oso barf when you fail to register a class
