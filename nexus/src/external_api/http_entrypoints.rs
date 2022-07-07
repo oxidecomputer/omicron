@@ -265,6 +265,11 @@ pub fn external_api() -> NexusApiDescription {
 //   DELETE /organizations/{org_name} (delete a organization in the collection)
 //   PUT    /organizations/{org_name} (update a organization in the collection)
 //
+// An exception to this are id lookup operations which have a different top-level route
+// but will still be grouped with the collection.  For example:
+//
+//  GET    /by-id/organizations/{org_name} (look up a organization in the collection by id)
+//
 // We pick a name for the function that implements a given API entrypoint
 // based on how we expect it to appear in the CLI subcommand hierarchy. For
 // example:
@@ -312,7 +317,7 @@ async fn policy_view(
 }
 
 
-/// Path parameters for `/by_id/` endpoints
+/// Path parameters for `/by-id/` endpoints
 #[derive(Deserialize, JsonSchema)]
 struct ByIdPathParams {
     id: Uuid,
@@ -716,7 +721,7 @@ async fn organization_view(
 /// Get an organization by id
 #[endpoint {
     method = GET,
-    path = "/by_id/organizations/{id}",
+    path = "/by-id/organizations/{id}",
     tags = ["organizations"],
 }]
 async fn organization_view_by_id(
@@ -971,7 +976,7 @@ async fn project_view(
 /// Get a project by id
 #[endpoint {
     method = GET,
-    path = "/by_id/projects/{id}",
+    path = "/by-id/projects/{id}",
     tags = ["projects"],
 }]
 async fn project_view_by_id(
@@ -1456,7 +1461,7 @@ async fn disk_view(
 /// Get a disk by id
 #[endpoint {
     method = GET,
-    path = "/by_id/disks/{id}",
+    path = "/by-id/disks/{id}",
     tags = ["disks"],
 }]
 async fn disk_view_by_id(
@@ -1629,7 +1634,7 @@ async fn instance_view(
 /// Get an instance by id.
 #[endpoint {
     method = GET,
-    path = "/by_id/instances/{id}",
+    path = "/by-id/instances/{id}",
     tags = ["instances"],
 }]
 async fn instance_view_by_id(
@@ -2043,7 +2048,7 @@ async fn image_global_view(
 /// Get a global image by id.
 #[endpoint {
     method = GET,
-    path = "/by_id/global-images/{id}",
+    path = "/by-id/global-images/{id}",
     tags = ["images:global"],
 }]
 async fn image_global_view_by_id(
@@ -2209,7 +2214,7 @@ async fn image_view(
 /// Fetch an image by id
 #[endpoint {
     method = GET,
-    path = "/by_id/images/{id}",
+    path = "/by-id/images/{id}",
     tags = ["images"],
 }]
 async fn image_view_by_id(
@@ -2425,7 +2430,7 @@ async fn instance_network_interface_view(
 /// Get an instance's network interface by id.
 #[endpoint {
     method = GET,
-    path = "/by_id/network-interfaces/{id}",
+    path = "/by-id/network-interfaces/{id}",
     tags = ["instances"],
 }]
 async fn instance_network_interface_view_by_id(
@@ -2597,7 +2602,7 @@ async fn snapshot_view(
 /// Get a snapshot by id.
 #[endpoint {
     method = GET,
-    path = "/by_id/snapshots/{id}",
+    path = "/by-id/snapshots/{id}",
     tags = ["snapshots"],
 }]
 async fn snapshot_view_by_id(
@@ -2727,7 +2732,7 @@ async fn vpc_view(
 /// Get a VPC by id.
 #[endpoint {
     method = GET,
-    path = "/by_id/vpcs/{id}",
+    path = "/by-id/vpcs/{id}",
     tags = ["vpcs"],
 }]
 async fn vpc_view_by_id(
@@ -2919,7 +2924,7 @@ async fn vpc_subnet_view(
 /// Get a VPC subnet by id.
 #[endpoint {
     method = GET,
-    path = "/by_id/subnets/{id}",
+    path = "/by-id/subnets/{id}",
     tags = ["vpcs"],
 }]
 async fn vpc_subnet_view_by_id(
@@ -3220,7 +3225,7 @@ async fn vpc_router_view(
 /// Get a VPC Router by id
 #[endpoint {
     method = GET,
-    path = "/by_id/router/{id}",
+    path = "/by-id/router/{id}",
     tags = ["vpcs"],
 }]
 async fn vpc_router_view_by_id(
@@ -3415,7 +3420,7 @@ async fn vpc_router_route_view(
 /// Get a vpc router route by id
 #[endpoint {
     method = GET,
-    path = "/by_id/route/{id}",
+    path = "/by-id/route/{id}",
     tags = ["vpcs"]
 }]
 async fn vpc_router_route_view_by_id(
