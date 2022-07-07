@@ -5,13 +5,14 @@
 //! Utilities to manage running zones.
 
 use crate::illumos::addrobj::AddrObject;
+use crate::illumos::dladm::Etherstub;
 use crate::illumos::svc::wait_for_service;
 use crate::illumos::vnic::{Vnic, VnicAllocator};
 use crate::illumos::zone::{AddressRequest, ZONE_PREFIX};
 use crate::opte::OptePort;
 use ipnetwork::IpNetwork;
 use slog::Logger;
-use std::net::Ipv6Addr;
+use std::net::{Ipv4Addr, Ipv6Addr};
 use std::path::PathBuf;
 
 #[cfg(test)]
@@ -153,7 +154,6 @@ impl RunningZone {
         &self,
         addrtype: AddressRequest,
     ) -> Result<IpNetwork, EnsureAddressError> {
-        info!(self.inner.log, "Adding address: {:?}", addrtype);
         let name = match addrtype {
             AddressRequest::Dhcp => "omicron",
             AddressRequest::Static(net) => match net.ip() {
@@ -161,7 +161,41 @@ impl RunningZone {
                 std::net::IpAddr::V6(_) => "omicron6",
             },
         };
+        self.ensure_address_with_name(addrtype, name).await
+    }
+
+    pub async fn ensure_address_with_name(
+        &self,
+        addrtype: AddressRequest,
+        name: &str,
+    ) -> Result<IpNetwork, EnsureAddressError> {
+        info!(self.inner.log, "Adding address: {:?}", addrtype);
         let addrobj = AddrObject::new(self.inner.control_vnic.name(), name)
+            .map_err(|err| EnsureAddressError::AddrObject {
+                request: addrtype,
+                zone: self.inner.name.clone(),
+                err,
+            })?;
+        let network =
+            Zones::ensure_address(Some(&self.inner.name), &addrobj, addrtype)?;
+        Ok(network)
+    }
+
+    // TODO: Remove once Nexus uses OPTE - external addresses should generally
+    // be served via OPTE.
+    pub async fn ensure_external_address_with_name(
+        &self,
+        addrtype: AddressRequest,
+        name: &str,
+    ) -> Result<IpNetwork, EnsureAddressError> {
+        info!(self.inner.log, "Adding address: {:?}", addrtype);
+        let addrobj = AddrObject::new(
+                self.inner.physical_nic
+                    .as_ref()
+                    .expect("Cannot allocate external address on zone without physical NIC")
+                    .name(),
+                name
+            )
             .map_err(|err| EnsureAddressError::AddrObject {
                 request: addrtype,
                 zone: self.inner.name.clone(),
@@ -182,6 +216,19 @@ impl RunningZone {
             "-inet6",
             "default",
             "-inet6",
+            &gateway.to_string(),
+        ])?;
+        Ok(())
+    }
+
+    pub async fn add_default_route4(
+        &self,
+        gateway: Ipv4Addr,
+    ) -> Result<(), RunCommandError> {
+        self.run_cmd(&[
+            "/usr/sbin/route",
+            "add",
+            "default",
             &gateway.to_string(),
         ])?;
         Ok(())
@@ -249,6 +296,7 @@ impl RunningZone {
                 //
                 // Re-initialize guest_vnic state by inspecting the zone.
                 opte_ports: vec![],
+                physical_nic: None,
             },
         })
     }
@@ -301,6 +349,10 @@ pub struct InstalledZone {
 
     // OPTE devices for the guest network interfaces
     opte_ports: Vec<OptePort>,
+
+    // Physical NIC possibly provisioned to the zone.
+    // TODO: Remove once Nexus traffic is transmitted over OPTE.
+    physical_nic: Option<Vnic>,
 }
 
 impl InstalledZone {
@@ -325,14 +377,16 @@ impl InstalledZone {
         zone_name
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn install(
         log: &Logger,
-        vnic_allocator: &VnicAllocator,
+        vnic_allocator: &VnicAllocator<Etherstub>,
         service_name: &str,
         unique_name: Option<&str>,
         datasets: &[zone::Dataset],
         devices: &[zone::Device],
         opte_ports: Vec<OptePort>,
+        physical_nic: Option<Vnic>,
     ) -> Result<InstalledZone, InstallZoneError> {
         let control_vnic = vnic_allocator.new_control(None).map_err(|err| {
             InstallZoneError::CreateVnic {
@@ -349,6 +403,7 @@ impl InstalledZone {
             .iter()
             .map(|port| port.vnic().name().to_string())
             .chain(std::iter::once(control_vnic.name().to_string()))
+            .chain(physical_nic.as_ref().map(|vnic| vnic.name().to_string()))
             .collect();
 
         Zones::install_omicron_zone(
@@ -370,6 +425,7 @@ impl InstalledZone {
             name: zone_name,
             control_vnic,
             opte_ports,
+            physical_nic,
         })
     }
 }

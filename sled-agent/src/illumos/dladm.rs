@@ -124,7 +124,7 @@ pub struct Dladm {}
 #[cfg_attr(test, mockall::automock, allow(dead_code))]
 impl Dladm {
     /// Creates an etherstub, or returns one which already exists.
-    pub fn create_etherstub() -> Result<Etherstub, ExecutionError> {
+    pub fn ensure_etherstub() -> Result<Etherstub, ExecutionError> {
         if let Ok(stub) = Self::get_etherstub() {
             return Ok(stub);
         }
@@ -147,7 +147,7 @@ impl Dladm {
     ///
     /// This VNIC is not tracked like [`crate::illumos::vnic::Vnic`], because
     /// it is expected to exist for the lifetime of the sled.
-    pub fn create_etherstub_vnic(
+    pub fn ensure_etherstub_vnic(
         source: &Etherstub,
     ) -> Result<EtherstubVnic, CreateVnicError> {
         if let Ok(vnic) = Self::get_etherstub_vnic() {

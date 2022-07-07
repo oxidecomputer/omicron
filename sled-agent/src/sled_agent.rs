@@ -132,8 +132,8 @@ impl SledAgent {
         info!(&log, "created sled agent");
 
         let etherstub =
-            Dladm::create_etherstub().map_err(|e| Error::Etherstub(e))?;
-        let etherstub_vnic = Dladm::create_etherstub_vnic(&etherstub)
+            Dladm::ensure_etherstub().map_err(|e| Error::Etherstub(e))?;
+        let etherstub_vnic = Dladm::ensure_etherstub_vnic(&etherstub)
             .map_err(|e| Error::EtherstubVnic(e))?;
 
         // Before we start creating zones, we need to ensure that the
@@ -231,6 +231,7 @@ impl SledAgent {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[
             "/usr/sbin/routeadm",
+            // Needed to access all zones, which are on the underlay.
             "-e",
             "ipv6-forwarding",
             "-u",
@@ -261,12 +262,18 @@ impl SledAgent {
             etherstub.clone(),
             *sled_address.ip(),
         );
+
+        let svc_config = services::Config {
+            gateway_address: config.gateway_address,
+            ..Default::default()
+        };
         let services = ServiceManager::new(
             parent_log.clone(),
             etherstub.clone(),
             etherstub_vnic.clone(),
             *sled_address.ip(),
-            services::Config::default(),
+            svc_config,
+            config.get_link()?,
             rack_id,
         )
         .await?;

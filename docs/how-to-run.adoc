@@ -113,7 +113,14 @@ we'll assign addresses as per RFD 63 as well as incorporating DNS based
 service discovery.
 
 For the purposes of local development today, we specify some hardcoded IPv6
-unique local addresses in the subnet of the first Sled Agent: `fd00:1122:3344:1::/64`:
+unique local addresses in the subnet of the first Sled Agent: `fd00:1122:3344:1::/64`.
+
+If you'd like to modify these values to suit your local network, you can modify
+them within the https://github.com/oxidecomputer/omicron/tree/main/smf[`smf/` subdirectory].
+Notably, Nexus is being served from IPv4 address, which may be configured to be
+external. By default, it uses a private IPv4 address and no Internet gateway, but may
+be configured to use a public-facing IP address with an Internet gateway that may
+be set as a default route for the Nexus zone.
 
 [options="header"]
 |===================================================================================================
@@ -121,7 +128,6 @@ unique local addresses in the subnet of the first Sled Agent: `fd00:1122:3344:1:
 | Sled Agent: Bootstrap      | Derived from MAC address of physical data link.
 | Sled Agent: Dropshot API   | `[fd00:1122:3344:0101::1]:12345`
 | Cockroach DB               | `[fd00:1122:3344:0101::2]:32221`
-| Nexus: External API        | `[fd00:1122:3344:0101::3]:12220`
 | Nexus: Internal API        | `[fd00:1122:3344:0101::3]:12221`
 | Oximeter                   | `[fd00:1122:3344:0101::4]:12223`
 | Clickhouse                 | `[fd00:1122:3344:0101::5]:8123`
@@ -129,6 +135,8 @@ unique local addresses in the subnet of the first Sled Agent: `fd00:1122:3344:1:
 | Crucible Downstairs 2      | `[fd00:1122:3344:0101::7]:32345`
 | Crucible Downstairs 3      | `[fd00:1122:3344:0101::8]:32345`
 | Internal DNS Service       | `[fd00:1122:3344:0001::1]:5353`
+| Nexus: External API        | `192.168.1.20:80`
+| Internet Gateway           | None, but can be set in `smf/sled-agent/config.toml`
 |===================================================================================================
 
 Note that Sled Agent runs in the global zone and is the one responsible for bringing up all the other

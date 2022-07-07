@@ -62,8 +62,8 @@ impl SimulatedSp {
 
             // Ensure we have the global zone IP address we need for the SP.
             let etherstub =
-                Dladm::create_etherstub().map_err(SpError::CreateEtherstub)?;
-            let etherstub_vnic = Dladm::create_etherstub_vnic(&etherstub)
+                Dladm::ensure_etherstub().map_err(SpError::CreateEtherstub)?;
+            let etherstub_vnic = Dladm::ensure_etherstub_vnic(&etherstub)
                 .map_err(SpError::CreateEtherstubVnic)?;
             Zones::ensure_has_global_zone_v6_address(
                 etherstub_vnic,
