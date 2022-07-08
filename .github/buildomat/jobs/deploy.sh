@@ -69,6 +69,17 @@ cd /opt/oxide/work
 
 ptime -m tar xvzf /input/package/work/package.tar.gz
 ptime -m pfexec ./tools/create_virtual_hardware.sh
+
+#
+# XXX Right now, the Nexus external API is available on a specific IPv4 address
+# on a canned subnet.  We need to create an address in the global zone such
+# that we can, in the test below, reach Nexus.
+#
+# This must be kept in sync with the IP in "smf/sled-agent/config-rss.toml" and
+# the prefix length which apparently defaults (in the Rust code) to /24.
+#
+ipadm create-addr -T static -a 192.168.1.199/24 igb0/sidehatch
+
 #
 # This OMICRON_NO_UNINSTALL hack here is so that there is no implicit uninstall
 # before the install.  This doesn't work right now because, above, we made
@@ -87,4 +98,4 @@ for _i in {1..30}; do
 done
 
 # TODO: write tests and run the resulting test bin here
-curl --fail-with-body -i http://[fd00:1122:3344:0101::3]:12220/spoof_login
+curl --fail-with-body -i http://192.168.1.20/spoof_login
