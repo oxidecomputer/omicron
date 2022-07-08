@@ -60,6 +60,34 @@ your hardware. Much of this configuration will be automated in the future
 automatically be detected on discovered disks), but for now it remains
 hard-coded.
 
+=== Getting into your guests
+
+Omicron currently implements a bit of a hack to allow external connectivity into
+guest instances. This overrides the default behavior of the Oxide Packet
+Transformation Engine (OPTE, the kernel module which provides the private
+virtual networking to guests). To make this work, OPTE needs to know about the
+local networking configuration, in this case the MAC address of the local
+internet gateway. To be able to get into your instances, you _must_ specify this
+in the `gateway_mac` field of the config file `smf/sled-agent/config-rss.toml`.
+
+The value there is correct for the lab environment, so if you're running there,
+no changes are needed. If you're running elsewhere, you find the value with:
+
+[source,text]
+----
+$ netstat -rn | grep default
+default              192.168.1.1          UG       10     431926 igb0
+$ arp -an | grep -w 192.168.1.1
+igb0   192.168.1.1          255.255.255.255          74:ac:b9:a4:dc:02
+----
+
+That MAC address in the far right column should be provided in place of the
+current value. Note that it can be specified as a string or an array of hex
+values. If you have multiple gateways, e.g., different gateways for different
+data links, you must choose the value for the physical link over which
+`create_virtual_hardware.sh` will create the underlay VNICs. That is, this must
+be a value in the same L2 segment as OPTE.
+
 [source,text]
 ----
 $ cargo run --release --bin omicron-package -- package
