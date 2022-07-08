@@ -78,7 +78,7 @@ ptime -m pfexec ./tools/create_virtual_hardware.sh
 # This must be kept in sync with the IP in "smf/sled-agent/config-rss.toml" and
 # the prefix length which apparently defaults (in the Rust code) to /24.
 #
-ipadm create-addr -T static -a 192.168.1.199/24 igb0/sidehatch
+pfexec ipadm create-addr -T static -a 192.168.1.199/24 igb0/sidehatch
 
 #
 # This OMICRON_NO_UNINSTALL hack here is so that there is no implicit uninstall
