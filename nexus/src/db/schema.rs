@@ -539,10 +539,10 @@ table! {
 }
 
 table! {
-    device_auth_request (client_id, device_code) {
+    device_auth_request (user_code) {
+        user_code -> Text,
         client_id -> Uuid,
         device_code -> Text,
-        user_code -> Text,
         time_created -> Timestamptz,
         time_expires -> Timestamptz,
     }
@@ -554,7 +554,9 @@ table! {
         client_id -> Uuid,
         device_code -> Text,
         silo_user_id -> Uuid,
+        time_requested -> Timestamptz,
         time_created -> Timestamptz,
+        time_expires -> Nullable<Timestamptz>,
     }
 }
 

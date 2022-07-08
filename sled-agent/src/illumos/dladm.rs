@@ -78,6 +78,17 @@ pub struct DeleteVnicError {
     err: ExecutionError,
 }
 
+/// Errors returned from [`Dladm::set_linkprop`].
+#[derive(thiserror::Error, Debug)]
+#[error("Failed to set link property \"{prop_name}\" to \"{prop_value}\" on vnic {link_name}: {err}")]
+pub struct SetLinkpropError {
+    link_name: String,
+    prop_name: String,
+    prop_value: String,
+    #[source]
+    err: ExecutionError,
+}
+
 /// The name of a physical datalink.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct PhysicalLink(pub String);
@@ -113,7 +124,7 @@ pub struct Dladm {}
 #[cfg_attr(test, mockall::automock, allow(dead_code))]
 impl Dladm {
     /// Creates an etherstub, or returns one which already exists.
-    pub fn create_etherstub() -> Result<Etherstub, ExecutionError> {
+    pub fn ensure_etherstub() -> Result<Etherstub, ExecutionError> {
         if let Ok(stub) = Self::get_etherstub() {
             return Ok(stub);
         }
@@ -136,7 +147,7 @@ impl Dladm {
     ///
     /// This VNIC is not tracked like [`crate::illumos::vnic::Vnic`], because
     /// it is expected to exist for the lifetime of the sled.
-    pub fn create_etherstub_vnic(
+    pub fn ensure_etherstub_vnic(
         source: &Etherstub,
     ) -> Result<EtherstubVnic, CreateVnicError> {
         if let Ok(vnic) = Self::get_etherstub_vnic() {
@@ -269,6 +280,25 @@ impl Dladm {
         let cmd = command.args(&[DLADM, "delete-vnic", name]);
         execute(cmd)
             .map_err(|err| DeleteVnicError { name: name.to_string(), err })?;
+        Ok(())
+    }
+
+    /// Set a link property on a VNIC
+    pub fn set_linkprop(
+        vnic: &str,
+        prop_name: &str,
+        prop_value: &str,
+    ) -> Result<(), SetLinkpropError> {
+        let mut command = std::process::Command::new(PFEXEC);
+        let prop = format!("{}={}", prop_name, prop_value);
+        let cmd =
+            command.args(&[DLADM, "set-linkprop", "-t", "-p", &prop, vnic]);
+        execute(cmd).map_err(|err| SetLinkpropError {
+            link_name: vnic.to_string(),
+            prop_name: prop_name.to_string(),
+            prop_value: prop_value.to_string(),
+            err,
+        })?;
         Ok(())
     }
 }

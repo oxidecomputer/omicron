@@ -46,6 +46,7 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<Oso, anyhow::Error> {
         IpPoolList::get_polar_class(),
         GlobalImageList::get_polar_class(),
         ConsoleSessionList::get_polar_class(),
+        DeviceAuthRequestList::get_polar_class(),
     ];
     for c in classes {
         info!(log, "registering Oso class"; "class" => &c.name);
@@ -66,6 +67,8 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<Oso, anyhow::Error> {
         VpcSubnet::init(),
         // Fleet-level resources
         ConsoleSession::init(),
+        DeviceAuthRequest::init(),
+        DeviceAccessToken::init(),
         Rack::init(),
         RoleBuiltin::init(),
         SshKey::init(),

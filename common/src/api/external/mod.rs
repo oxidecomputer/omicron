@@ -519,6 +519,8 @@ pub enum ResourceType {
     SamlIdentityProvider,
     SshKey,
     ConsoleSession,
+    DeviceAuthRequest,
+    DeviceAccessToken,
     GlobalImage,
     Organization,
     Project,

@@ -5,6 +5,7 @@
 //! API for controlling a single instance.
 
 use crate::common::instance::{Action as InstanceAction, InstanceStates};
+use crate::illumos::dladm::Etherstub;
 use crate::illumos::running_zone::{
     InstalledZone, RunCommandError, RunningZone,
 };
@@ -204,7 +205,7 @@ struct InstanceInner {
     propolis_ip: IpAddr,
 
     // NIC-related properties
-    vnic_allocator: VnicAllocator,
+    vnic_allocator: VnicAllocator<Etherstub>,
 
     // OPTE port related properties
     underlay_addr: Ipv6Addr,
@@ -400,7 +401,7 @@ mockall::mock! {
         pub fn new(
             log: Logger,
             id: Uuid,
-            vnic_allocator: VnicAllocator,
+            vnic_allocator: VnicAllocator<Etherstub>,
             underlay_addr: Ipv6Addr,
             port_allocator: OptePortAllocator,
             initial: InstanceHardware,
@@ -446,7 +447,7 @@ impl Instance {
     pub fn new(
         log: Logger,
         id: Uuid,
-        vnic_allocator: VnicAllocator,
+        vnic_allocator: VnicAllocator<Etherstub>,
         underlay_addr: Ipv6Addr,
         port_allocator: OptePortAllocator,
         initial: InstanceHardware,
@@ -534,6 +535,8 @@ impl Instance {
                 zone::Device { name: "/dev/viona".to_string() },
             ],
             opte_ports,
+            // physical_nic=
+            None,
         )
         .await?;
 
@@ -767,6 +770,7 @@ mod test {
     use crate::params::ExternalIp;
     use crate::params::InstanceStateRequested;
     use chrono::Utc;
+    use macaddr::MacAddr6;
     use omicron_common::api::external::{
         ByteCount, Generation, InstanceCpuCount, InstanceState,
     };
@@ -842,7 +846,8 @@ mod test {
             "Test".to_string(),
             Etherstub("mylink".to_string()),
         );
-        let port_allocator = OptePortAllocator::new();
+        let mac = MacAddr6::from([0u8; 6]);
+        let port_allocator = OptePortAllocator::new(mac);
         let nexus_client = MockNexusClient::default();
 
         let inst = Instance::new(
