@@ -22,6 +22,7 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InstanceState;
+use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::UpdateResult;
@@ -485,7 +486,9 @@ impl super::Nexus {
         // that they may be injected into the new image via cloud-init.
         // TODO-security: this should be replaced with a lookup based on
         // on `SiloUser` role assignments once those are in place.
-        let actor = opctx.authn.actor_required()?;
+        let actor = opctx.authn.actor_required().internal_context(
+            "loading current user's ssh keys for new Instance",
+        )?;
         let (.., authz_user) = LookupPath::new(opctx, &self.db_datastore)
             .silo_user_id(actor.actor_id())
             .lookup_for(authz::Action::ListChildren)

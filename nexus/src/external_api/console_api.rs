@@ -31,6 +31,7 @@ use http::{header, Response, StatusCode};
 use hyper::Body;
 use lazy_static::lazy_static;
 use mime_guess;
+use omicron_common::api::external::InternalContext;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_urlencoded;
@@ -558,7 +559,10 @@ pub async fn session_me(
         // authed as _somebody_. We could restrict this to session auth only,
         // but it's not clear what the advantage would be.
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let &actor = opctx.authn.actor_required()?;
+        let &actor = opctx
+            .authn
+            .actor_required()
+            .internal_context("loading current user")?;
         Ok(HttpResponseOk(actor.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

@@ -20,6 +20,7 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use db_macros::lookup_resource;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use omicron_common::api::external::Error;
+use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::{LookupResult, LookupType, ResourceType};
 use uuid::Uuid;
 
@@ -193,7 +194,12 @@ impl<'a> LookupPath<'a> {
         'a: 'c,
         'b: 'c,
     {
-        let key = match self.opctx.authn.silo_required() {
+        let key = match self
+            .opctx
+            .authn
+            .silo_required()
+            .internal_context("looking up Organization by name")
+        {
             Ok(authz_silo) => {
                 let root = Root { lookup_root: self };
                 let silo_key = SiloKey::PrimaryKey(root, authz_silo.id());
