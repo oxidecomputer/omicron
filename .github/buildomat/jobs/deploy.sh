@@ -97,5 +97,50 @@ for _i in {1..30}; do
 	grep "Finished setting up services" "$(svcs -L sled-agent)" && break
 done
 
-# TODO: write tests and run the resulting test bin here
-curl --fail-with-body -i http://192.168.1.20/spoof_login
+set +o xtrace
+
+start=$SECONDS
+while :; do
+	if (( $SECONDS - $start > 60 )); then
+		printf 'FAILURE: NEXUS DID NOT BECOME AVAILABLE\n' >&2
+		break
+	fi
+
+	#
+	# XXX This is an extremely basic test, which should be replaced with
+	# something more complete.
+	#
+	if curl --fail-with-body -i http://192.168.1.20/spoof_login; then
+		printf 'ok; nexus became available!\n'
+		exit 0
+	fi
+
+	sleep 1
+done
+
+#
+# Try to collect some debugging information:
+#
+set +o errexit
+set -o xtrace
+zoneadm list -civ
+dladm show-phys -m
+dladm show-link
+dladm show-vnic
+ipadm
+netstat -rncva
+netstat -anu
+arp -an
+zfs list
+zpool list
+ptree -z global
+svcs -xv
+for z in $(zoneadm list -n); do
+	banner "${z/oxz_/}"
+	svcs -xv -z $z
+	ptree -z $z
+	zlogin $z ipadm
+	zlogin $z netstat -rncva
+	zlogin $z netstat -anu
+	zlogin $z arp -an
+done
