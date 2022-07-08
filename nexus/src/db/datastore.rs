@@ -3917,6 +3917,8 @@ impl DataStore {
 
         info!(opctx.log, "deleted {} silo users for silo {}", updated_rows, id);
 
+        // TODO-correctness delete all silo groups XXX
+
         // delete all silo identity providers
         use db::schema::identity_provider::dsl as idp_dsl;
 
@@ -4543,6 +4545,30 @@ impl DataStore {
                     silo_user_id,
                     e,
                 ))
+            })?;
+        Ok(())
+    }
+
+    pub async fn silo_group_delete(
+        &self,
+        opctx: &OpContext,
+        authz_silo_group: &authz::SiloGroup,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Delete, authz_silo_group).await?;
+
+        use db::schema::silo_group::dsl;
+        diesel::update(dsl::silo_group)
+            .filter(dsl::id.eq(authz_silo_group.id()))
+            .filter(dsl::time_deleted.is_null())
+            .set(dsl::time_deleted.eq(Utc::now()))
+            .check_if_exists::<SiloGroup>(authz_silo_group.id())
+            .execute_and_check(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_silo_group),
+                )
             })?;
         Ok(())
     }

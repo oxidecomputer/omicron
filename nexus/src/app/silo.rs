@@ -4,6 +4,9 @@
 
 //! Silos, Users, and SSH Keys.
 
+use std::sync::Arc;
+
+use crate::app::sagas;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::{Asset, Resource};
@@ -29,50 +32,30 @@ impl super::Nexus {
     // Silos
 
     pub async fn silo_create(
-        &self,
+        self: &Arc<Self>,
         opctx: &OpContext,
         new_silo_params: params::SiloCreate,
     ) -> CreateResult<db::model::Silo> {
-        // XXX not transactional or saga
+        let saga_params = Arc::new(sagas::silo_create::Params {
+            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+            create_params: new_silo_params.clone(),
+        });
 
-        let silo = self
-            .db_datastore
-            .silo_create(opctx, db::model::Silo::new(new_silo_params.clone()))
+        let saga_outputs = self
+            .execute_saga(
+                Arc::clone(&sagas::silo_create::SAGA_TEMPLATE),
+                sagas::silo_create::SAGA_NAME,
+                saga_params,
+            )
             .await?;
 
-        // If specified, create an group with admin role on this newly created
-        // silo.
-        if let Some(admin_group_name) = new_silo_params.admin_group_name {
-            let silo_group = self.db_datastore.silo_group_create(
-                opctx,
-                db::model::SiloGroup::new(
-                    Uuid::new_v4(),
-                    IdentityMetadataCreateParams {
-                        name: admin_group_name.parse().map_err(|_|
-                            Error::invalid_request(&format!(
-                                "could not parse admin group name {} during silo_create",
-                                admin_group_name,
-                            ))
-                        )?,
-                        description: "".into(),
-                    },
-                    silo.id(),
-                )
-            ).await?;
+        let silo_created = saga_outputs
+            .lookup_output::<db::model::Silo>("created_silo")
+            .map_err(|e| Error::InternalError {
+                internal_message: e.to_string(),
+            })?;
 
-            // Grant silo admin role for members of the admin group.
-            let policy = shared::Policy {
-                role_assignments: vec![shared::RoleAssignment {
-                    identity_type: shared::IdentityType::SiloGroup,
-                    identity_id: silo_group.id(),
-                    role_name: authz::SiloRole::Admin,
-                }],
-            };
-
-            self.silo_update_policy(opctx, silo.name(), &policy).await?;
-        }
-
-        Ok(silo)
+        Ok(silo_created)
     }
 
     pub async fn silos_list_by_name(
@@ -111,6 +94,19 @@ impl super::Nexus {
         let (.., authz_silo, db_silo) =
             LookupPath::new(opctx, &self.db_datastore)
                 .silo_name(name)
+                .fetch_for(authz::Action::Delete)
+                .await?;
+        self.db_datastore.silo_delete(opctx, &authz_silo, &db_silo).await
+    }
+
+    pub async fn silo_delete_by_id(
+        &self,
+        opctx: &OpContext,
+        id: Uuid,
+    ) -> DeleteResult {
+        let (.., authz_silo, db_silo) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .silo_id(id)
                 .fetch_for(authz::Action::Delete)
                 .await?;
         self.db_datastore.silo_delete(opctx, &authz_silo, &db_silo).await

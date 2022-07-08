@@ -5,10 +5,13 @@
 use crate::db::schema::{silo_group, silo_group_membership};
 use db_macros::Resource;
 use omicron_common::api::external::IdentityMetadataCreateParams;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Describes a silo group within the database.
-#[derive(Resource, Queryable, Insertable, Debug, Selectable)]
+#[derive(
+    Resource, Queryable, Insertable, Debug, Selectable, Serialize, Deserialize,
+)]
 #[diesel(table_name = silo_group)]
 pub struct SiloGroup {
     #[diesel(embed)]
@@ -28,7 +31,7 @@ impl SiloGroup {
 }
 
 /// Describe which silo users belong to which silo groups
-#[derive(Queryable, Insertable, Debug, Selectable)]
+#[derive(Queryable, Insertable, Debug, Selectable, Serialize, Deserialize)]
 #[diesel(table_name = silo_group_membership)]
 pub struct SiloGroupMembership {
     pub silo_group_id: Uuid,
