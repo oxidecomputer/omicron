@@ -72,8 +72,6 @@ async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
     for endpoint in &*VERIFY_ENDPOINTS {
         verify_endpoint(&log, client, endpoint).await;
     }
-
-    panic!("dap: induced failure");
 }
 
 const VERIFY_HEADER: &str = r#"
