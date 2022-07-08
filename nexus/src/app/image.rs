@@ -76,11 +76,10 @@ impl super::Nexus {
         opctx: &OpContext,
         image_id: &Uuid,
     ) -> LookupResult<db::model::Image> {
-        let (.., db_image) = LookupPath::new(opctx, &self.db_datastore)
-            .image_id(*image_id)
-            .fetch()
-            .await?;
-        Ok(db_image)
+        let lookup_type = LookupType::ById(*image_id);
+        let not_found_error = lookup_type.into_not_found(ResourceType::Image);
+        let unimp = Unimpl::ProtectedLookup(not_found_error);
+        Err(self.unimplemented_todo(opctx, unimp).await)
     }
 
     pub async fn project_delete_image(

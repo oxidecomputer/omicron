@@ -61,15 +61,29 @@ async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
     // Create test data.
     info!(log, "setting up resource hierarchy");
     for request in &*SETUP_REQUESTS {
-        let result =
-            NexusRequest::objects_post(client, request.url, &request.body)
-                .authn_as(AuthnMode::PrivilegedUser)
-                .execute()
-                .await
-                .unwrap();
+        let (url, result, id_routes) = match request {
+            SetupReq::Get { url, id_routes } => (
+                url,
+                NexusRequest::object_get(client, url)
+                    .authn_as(AuthnMode::PrivilegedUser)
+                    .execute()
+                    .await
+                    .unwrap(),
+                id_routes,
+            ),
+            SetupReq::Post { url, body, id_routes } => (
+                url,
+                NexusRequest::objects_post(client, url, body)
+                    .authn_as(AuthnMode::PrivilegedUser)
+                    .execute()
+                    .await
+                    .unwrap(),
+                id_routes,
+            ),
+        };
 
-        setup_results.insert(request.url, result.clone());
-        request.id_routes.iter().for_each(|id_route| {
+        setup_results.insert(url, result.clone());
+        id_routes.iter().for_each(|id_route| {
             setup_results.insert(id_route, result.clone());
         });
     }
@@ -78,7 +92,8 @@ async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
     info!(log, "verifying endpoints");
     print!("{}", VERIFY_HEADER);
     for endpoint in &*VERIFY_ENDPOINTS {
-        verify_endpoint(&log, client, endpoint, &setup_results).await;
+        let setup_response = setup_results.get(&endpoint.url);
+        verify_endpoint(&log, client, endpoint, setup_response).await;
     }
 }
 
@@ -122,15 +137,20 @@ G GET  PUT  POST DEL  TRCE G  URL
 /// Describes a request made during the setup phase to create a resource that
 /// we'll use later in the verification phase
 ///
-/// The setup phase takes a list of `SetupReq` structs and issues `POST`
-/// requests to each one's `url` with the specific `body`.
-struct SetupReq {
-    /// url to send the `POST` to
-    url: &'static str,
-    /// body of the `POST` request
-    body: serde_json::Value,
-    /// populates `id` params for later route lookups
-    id_routes: Vec<&'static str>,
+/// The setup phase takes a list of `SetupReq` enums and issues a `GET` or `POST`
+/// request to each one's `url`. The `id_routes` field is a list of URLs that result
+/// the result of the request to replace `id` parameters if present.
+
+enum SetupReq {
+    Get {
+        url: &'static str,
+        id_routes: Vec<&'static str>,
+    },
+    Post {
+        url: &'static str,
+        body: serde_json::Value,
+        id_routes: Vec<&'static str>,
+    },
 }
 
 lazy_static! {
@@ -162,79 +182,84 @@ lazy_static! {
     /// List of requests to execute at setup time
     static ref SETUP_REQUESTS: Vec<SetupReq> = vec![
         // Create a separate Silo (not used for anything else)
-        SetupReq {
+        SetupReq::Post {
             url: "/silos",
             body: serde_json::to_value(&*DEMO_SILO_CREATE).unwrap(),
             id_routes: vec!["/by-id/silos/{id}"],
         },
         // Create an IP pool
-        SetupReq {
+        SetupReq::Post {
             url: &*DEMO_IP_POOLS_URL,
             body: serde_json::to_value(&*DEMO_IP_POOL_CREATE).unwrap(),
             id_routes: vec!["/by-id/ip-pools/{id}"],
         },
         // Create an IP Pool range
-        SetupReq {
+        SetupReq::Post {
             url: &*DEMO_IP_POOL_RANGES_ADD_URL,
             body: serde_json::to_value(&*DEMO_IP_POOL_RANGE).unwrap(),
             id_routes: vec![],
         },
         // Create an Organization
-        SetupReq {
+        SetupReq::Post {
             url: "/organizations",
             body: serde_json::to_value(&*DEMO_ORG_CREATE).unwrap(),
             id_routes: vec!["/by-id/organizations/{id}"],
         },
         // Create a Project in the Organization
-        SetupReq {
+        SetupReq::Post {
             url: &*DEMO_ORG_PROJECTS_URL,
             body: serde_json::to_value(&*DEMO_PROJECT_CREATE).unwrap(),
             id_routes: vec!["/by-id/projects/{id}"],
         },
         // Create a VPC in the Project
-        SetupReq {
+        SetupReq::Post {
             url: &*DEMO_PROJECT_URL_VPCS,
             body: serde_json::to_value(&*DEMO_VPC_CREATE).unwrap(),
             id_routes: vec!["/by-id/vpcs/{id}"],
         },
         // Create a VPC Subnet in the Vpc
-        SetupReq {
+        SetupReq::Post {
             url: &*DEMO_VPC_URL_SUBNETS,
             body: serde_json::to_value(&*DEMO_VPC_SUBNET_CREATE).unwrap(),
             id_routes: vec!["/by-id/vpc-subnets/{id}"],
         },
         // Create a VPC Router in the Vpc
-        SetupReq {
+        SetupReq::Post {
             url: &*DEMO_VPC_URL_ROUTERS,
             body: serde_json::to_value(&*DEMO_VPC_ROUTER_CREATE).unwrap(),
             id_routes: vec!["/by-id/vpc-routers/{id}"],
         },
         // Create a VPC Router in the Vpc
-        SetupReq {
+        SetupReq::Post {
             url: &*DEMO_VPC_ROUTER_URL_ROUTES,
             body: serde_json::to_value(&*DEMO_ROUTER_ROUTE_CREATE).unwrap(),
             id_routes: vec!["/by-id/vpc-router-routes/{id}"],
         },
         // Create a Disk in the Project
-        SetupReq {
+        SetupReq::Post {
             url: &*DEMO_PROJECT_URL_DISKS,
             body: serde_json::to_value(&*DEMO_DISK_CREATE).unwrap(),
             id_routes: vec!["/by-id/disks/{id}"],
         },
         // Create an Instance in the Project
-        SetupReq {
+        SetupReq::Post {
             url: &*DEMO_PROJECT_URL_INSTANCES,
             body: serde_json::to_value(&*DEMO_INSTANCE_CREATE).unwrap(),
             id_routes: vec!["/by-id/instances/{id}"],
         },
+        // Lookup the previously created NIC
+        SetupReq::Get {
+            url: &*DEMO_INSTANCE_NIC_URL,
+            id_routes: vec!["/by-id/network-interfaces/{id}"],
+        },
         // Create a GlobalImage
-        SetupReq {
+        SetupReq::Post {
             url: "/images",
             body: serde_json::to_value(&*DEMO_GLOBAL_IMAGE_CREATE).unwrap(),
             id_routes: vec!["/by-id/global-images/{id}"],
         },
         // Create a SAML identity provider
-        SetupReq {
+        SetupReq::Post {
             url: &*SAML_IDENTITY_PROVIDERS_URL,
             body: serde_json::to_value(&*SAML_IDENTITY_PROVIDER).unwrap(),
             id_routes: vec![],
@@ -296,7 +321,7 @@ async fn verify_endpoint(
     log: &slog::Logger,
     client: &ClientTestContext,
     endpoint: &VerifyEndpoint,
-    setup_results: &std::collections::BTreeMap<&str, TestResponse>,
+    setup_response: Option<&TestResponse>,
 ) {
     let log = log.new(o!("url" => endpoint.url));
     info!(log, "test: begin endpoint");
@@ -312,19 +337,22 @@ async fn verify_endpoint(
         Visibility::Protected => StatusCode::NOT_FOUND,
     };
 
-    // For routes with an id param, find their matching id in the setup results.
+    // For routes with an id param, replace the id param with the setup response if present.
     let uri = if endpoint.url.contains("{id}") {
-        endpoint.url.replace(
-            "{id}",
-            &setup_results
-                .get(endpoint.url)
-                .unwrap()
-                .parsed_body::<IdentityMetadata>()
-                .unwrap()
-                .id
-                .to_string()
-                .as_str(),
-        )
+        match setup_response {
+            Some(response) => endpoint.url.replace(
+                "{id}",
+                response
+                    .parsed_body::<IdentityMetadata>()
+                    .unwrap()
+                    .id
+                    .to_string()
+                    .as_str(),
+            ),
+            None => endpoint
+                .url
+                .replace("{id}", "00000000-0000-0000-0000-000000000000"),
+        }
     } else {
         endpoint.url.to_string()
     };

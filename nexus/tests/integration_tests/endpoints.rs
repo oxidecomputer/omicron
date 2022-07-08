@@ -582,7 +582,7 @@ lazy_static! {
 
         VerifyEndpoint {
             url: "/by-id/organizations/{id}",
-            visibility: Visibility::Public,
+            visibility: Visibility::Protected,
             allowed_methods: vec![
                 AllowedMethod::Get,
             ],
@@ -643,7 +643,7 @@ lazy_static! {
 
         VerifyEndpoint {
             url: "/by-id/projects/{id}",
-            visibility: Visibility::Public,
+            visibility: Visibility::Protected,
             allowed_methods: vec![
                 AllowedMethod::Get,
             ],
@@ -695,7 +695,7 @@ lazy_static! {
 
         VerifyEndpoint {
             url: "/by-id/vpcs/{id}",
-            visibility: Visibility::Public,
+            visibility: Visibility::Protected,
             allowed_methods: vec![
                 AllowedMethod::Get,
             ],
@@ -747,7 +747,7 @@ lazy_static! {
 
         VerifyEndpoint {
             url: "/by-id/vpc-subnets/{id}",
-            visibility: Visibility::Public,
+            visibility: Visibility::Protected,
             allowed_methods: vec![
                 AllowedMethod::Get,
             ],
@@ -793,7 +793,7 @@ lazy_static! {
 
         VerifyEndpoint {
             url: "/by-id/vpc-routers/{id}",
-            visibility: Visibility::Public,
+            visibility: Visibility::Protected,
             allowed_methods: vec![
                 AllowedMethod::Get,
             ],
@@ -831,7 +831,7 @@ lazy_static! {
 
         VerifyEndpoint {
             url: "/by-id/vpc-router-routes/{id}",
-            visibility: Visibility::Public,
+            visibility: Visibility::Protected,
             allowed_methods: vec![
                 AllowedMethod::Get,
             ],
@@ -874,7 +874,7 @@ lazy_static! {
 
         VerifyEndpoint {
             url: "/by-id/disks/{id}",
-            visibility: Visibility::Public,
+            visibility: Visibility::Protected,
             allowed_methods: vec![
                 AllowedMethod::Get,
             ],
@@ -934,9 +934,9 @@ lazy_static! {
 
         VerifyEndpoint {
             url: "/by-id/images/{id}",
-            visibility: Visibility::Public,
+            visibility: Visibility::Protected,
             allowed_methods: vec![
-                AllowedMethod::Get,
+                AllowedMethod::GetUnimplemented,
             ],
         },
 
@@ -964,9 +964,9 @@ lazy_static! {
 
         VerifyEndpoint {
             url: "/by-id/snapshots/{id}",
-            visibility: Visibility::Public,
+            visibility: Visibility::Protected,
             allowed_methods: vec![
-                AllowedMethod::Get,
+                AllowedMethod::GetUnimplemented,
             ],
         },
 
@@ -993,7 +993,7 @@ lazy_static! {
 
         VerifyEndpoint {
             url: "/by-id/instances/{id}",
-            visibility: Visibility::Public,
+            visibility: Visibility::Protected,
             allowed_methods: vec![
                 AllowedMethod::Get,
             ],
@@ -1062,7 +1062,7 @@ lazy_static! {
 
         VerifyEndpoint {
             url: "/by-id/network-interfaces/{id}",
-            visibility: Visibility::Public,
+            visibility: Visibility::Protected,
             allowed_methods: vec![
                 AllowedMethod::Get,
             ],
@@ -1177,7 +1177,7 @@ lazy_static! {
 
         VerifyEndpoint {
             url: "/by-id/global-images/{id}",
-            visibility: Visibility::Public,
+            visibility: Visibility::Protected,
             allowed_methods: vec![
                 AllowedMethod::Get,
             ],
