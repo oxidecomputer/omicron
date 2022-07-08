@@ -68,3 +68,12 @@ addresses = [ "fd00:1122:3344:0101::4" ]
 gz_addresses = []
 [request.service.service_type]
 type = "oximeter"
+
+[[request.service]]
+id = "a0fe5ebc-9261-6f77-acc1-972481755789"
+name = "dendrite"
+addresses = [ "fd00:1122:3344:0101::9" ]
+gz_addresses = []
+[request.service.service_type]
+type = "dendrite"
+asic = "tofino_stub"

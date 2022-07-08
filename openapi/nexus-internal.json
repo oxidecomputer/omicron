@@ -1741,7 +1741,8 @@
         "enum": [
           "internal_d_n_s",
           "nexus",
-          "oximeter"
+          "oximeter",
+          "dendrite"
         ]
       },
       "ServicePutRequest": {

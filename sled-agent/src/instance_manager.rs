@@ -13,6 +13,7 @@ use crate::params::{
     InstanceSerialConsoleData,
 };
 use crate::serial::ByteOffset;
+use macaddr::MacAddr6;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use slog::Logger;
 use std::collections::BTreeMap;
@@ -61,6 +62,7 @@ impl InstanceManager {
         nexus_client: Arc<NexusClient>,
         etherstub: Etherstub,
         underlay_addr: Ipv6Addr,
+        gateway_mac: MacAddr6,
     ) -> InstanceManager {
         InstanceManager {
             inner: Arc::new(InstanceManagerInternal {
@@ -69,7 +71,7 @@ impl InstanceManager {
                 instances: Mutex::new(BTreeMap::new()),
                 vnic_allocator: VnicAllocator::new("Instance", etherstub),
                 underlay_addr,
-                port_allocator: OptePortAllocator::new(),
+                port_allocator: OptePortAllocator::new(gateway_mac),
             }),
         }
     }
@@ -227,6 +229,7 @@ mod test {
     use crate::params::ExternalIp;
     use crate::params::InstanceStateRequested;
     use chrono::Utc;
+    use macaddr::MacAddr6;
     use omicron_common::api::external::{
         ByteCount, Generation, InstanceCpuCount, InstanceState,
     };
@@ -296,6 +299,7 @@ mod test {
             std::net::Ipv6Addr::new(
                 0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
             ),
+            MacAddr6::from([0u8; 6]),
         );
 
         // Verify that no instances exist.
@@ -378,6 +382,7 @@ mod test {
             std::net::Ipv6Addr::new(
                 0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
             ),
+            MacAddr6::from([0u8; 6]),
         );
 
         let ticket = Arc::new(std::sync::Mutex::new(None));
