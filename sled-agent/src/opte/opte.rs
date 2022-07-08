@@ -66,12 +66,14 @@ pub enum Error {
 
 #[derive(Debug, Clone)]
 pub struct OptePortAllocator {
+    gateway_mac: MacAddr,
     value: Arc<AtomicU64>,
 }
 
 impl OptePortAllocator {
-    pub fn new() -> Self {
-        Self { value: Arc::new(AtomicU64::new(0)) }
+    pub fn new(gateway_mac: MacAddr6) -> Self {
+        let gateway_mac = MacAddr::from(gateway_mac.into_array());
+        Self { gateway_mac, value: Arc::new(AtomicU64::new(0)) }
     }
 
     fn next(&self) -> String {
@@ -133,7 +135,11 @@ impl OptePortAllocator {
                     }
                 };
                 let ports = ip.first_port..=ip.last_port;
-                Some(SNatCfg { public_ip, ports })
+                Some(SNatCfg {
+                    public_ip,
+                    ports,
+                    phys_gw_mac: self.gateway_mac,
+                })
             }
             None => None,
         };
