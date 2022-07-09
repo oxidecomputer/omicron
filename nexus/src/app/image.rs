@@ -101,18 +101,14 @@ impl super::Nexus {
                     message: format!("block_size is invalid: {}", e),
                 })?;
 
-                let volume_construction_request = sled_agent_client::types::VolumeConstructionRequest::Volume {
-                    id: Uuid::new_v4(),
-                    block_size: db_block_size.to_bytes().into(),
-                    sub_volumes: vec![
-                        sled_agent_client::types::VolumeConstructionRequest::Url {
-                            id: Uuid::new_v4(),
-                            block_size: db_block_size.to_bytes().into(),
-                            url: url.clone(),
-                        }
-                    ],
-                    read_only_parent: None,
-                };
+                let global_image_id = Uuid::new_v4();
+
+                let volume_construction_request =
+                    sled_agent_client::types::VolumeConstructionRequest::Url {
+                        id: global_image_id,
+                        block_size: db_block_size.to_bytes().into(),
+                        url: url.clone(),
+                    };
 
                 let volume_data =
                     serde_json::to_string(&volume_construction_request)?;
@@ -198,7 +194,7 @@ impl super::Nexus {
 
                 db::model::GlobalImage {
                     identity: db::model::GlobalImageIdentity::new(
-                        Uuid::new_v4(),
+                        global_image_id,
                         params.identity.clone(),
                     ),
                     volume_id: volume.id(),
@@ -225,18 +221,15 @@ impl super::Nexus {
                 let db_block_size = db::model::BlockSize::Traditional;
                 let block_size: u64 = db_block_size.to_bytes() as u64;
 
-                let volume_construction_request = sled_agent_client::types::VolumeConstructionRequest::Volume {
-                    id: Uuid::new_v4(),
-                    block_size,
-                    sub_volumes: vec![
-                        sled_agent_client::types::VolumeConstructionRequest::File {
-                            id: Uuid::new_v4(),
-                            block_size,
-                            path: "/opt/oxide/propolis-server/blob/alpine.iso".into(),
-                        }
-                    ],
-                    read_only_parent: None,
-                };
+                let global_image_id = Uuid::new_v4();
+
+                let volume_construction_request =
+                    sled_agent_client::types::VolumeConstructionRequest::File {
+                        id: global_image_id,
+                        block_size,
+                        path: "/opt/oxide/propolis-server/blob/alpine.iso"
+                            .into(),
+                    };
 
                 let volume_data =
                     serde_json::to_string(&volume_construction_request)?;
@@ -259,7 +252,7 @@ impl super::Nexus {
 
                 db::model::GlobalImage {
                     identity: db::model::GlobalImageIdentity::new(
-                        Uuid::new_v4(),
+                        global_image_id,
                         params.identity.clone(),
                     ),
                     volume_id: volume.id(),

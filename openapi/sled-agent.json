@@ -400,6 +400,14 @@
           }
         ]
       },
+      "DendriteAsic": {
+        "type": "string",
+        "enum": [
+          "tofino_asic",
+          "tofino_stub",
+          "softnpu"
+        ]
+      },
       "DiskEnsureBody": {
         "description": "Sent from to a sled agent to establish the runtime state of a Disk",
         "type": "object",
@@ -1201,6 +1209,24 @@
               }
             },
             "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "asic": {
+                "$ref": "#/components/schemas/DendriteAsic"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "dendrite"
+                ]
+              }
+            },
+            "required": [
+              "asic",
               "type"
             ]
           }

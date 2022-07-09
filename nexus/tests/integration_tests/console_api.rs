@@ -10,16 +10,19 @@ use std::env::current_dir;
 use nexus_test_utils::http_testing::{
     AuthnMode, NexusRequest, RequestBuilder, TestResponse,
 };
+use nexus_test_utils::resource_helpers::grant_iam;
 use nexus_test_utils::{
     load_test_config, test_setup_with_config, ControlPlaneTestContext,
 };
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_nexus::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
-use omicron_nexus::db::identity::Asset;
+use omicron_nexus::authz::SiloRole;
+use omicron_nexus::db::fixed_data::silo::DEFAULT_SILO;
+use omicron_nexus::db::identity::{Asset, Resource};
 use omicron_nexus::external_api::console_api::SpoofLoginBody;
 use omicron_nexus::external_api::params::OrganizationCreate;
-use omicron_nexus::external_api::views;
+use omicron_nexus::external_api::{shared, views};
 
 #[nexus_test]
 async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
@@ -61,6 +64,29 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
         .await
         .expect("failed to 302 on unauthed console page request");
 
+    // Our test uses the "unprivileged" user to make sure login/logout works
+    // without other privileges.  However, they _do_ need the privilege to
+    // create Organizations because we'll be testing that as a smoke test.
+    // We'll remove that privilege afterwards.
+    let silo_url = format!("/silos/{}", DEFAULT_SILO.identity().name);
+    let policy_url = format!("{}/policy", silo_url);
+    let initial_policy: shared::Policy<SiloRole> =
+        NexusRequest::object_get(testctx, &policy_url)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .expect("failed to fetch Silo policy")
+            .parsed_body()
+            .expect("failed to parse Silo policy");
+    grant_iam(
+        testctx,
+        &silo_url,
+        SiloRole::Collaborator,
+        USER_TEST_UNPRIVILEGED.id(),
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
     // now make same requests with cookie
     RequestBuilder::new(&testctx, Method::POST, "/organizations")
         .header(header::COOKIE, &session_token)
@@ -77,6 +103,12 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
         .execute()
         .await
         .expect("failed to get console page with session cookie");
+
+    NexusRequest::object_put(testctx, &policy_url, Some(&initial_policy))
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to restore Silo policy");
 
     // logout with an actual session should delete the session in the db
     RequestBuilder::new(&testctx, Method::POST, "/logout")
@@ -126,10 +158,18 @@ async fn test_console_pages(cptestctx: &ControlPlaneTestContext) {
 
     let session_token = log_in_and_extract_token(&testctx).await;
 
-    // hit console page with session, should get back HTML response
-    let console_page =
-        RequestBuilder::new(&testctx, Method::GET, "/orgs/irrelevant-path")
-            .header(http::header::COOKIE, session_token)
+    // hit console pages with session, should get back HTML response
+    let console_paths = &[
+        "/",
+        "/orgs/irrelevant-path",
+        "/settings/irrelevant-path",
+        "/device/success",
+        "/device/verify",
+    ];
+
+    for path in console_paths {
+        let console_page = RequestBuilder::new(&testctx, Method::GET, path)
+            .header(http::header::COOKIE, session_token.clone())
             .expect_status(Some(StatusCode::OK))
             .expect_response_header(
                 http::header::CONTENT_TYPE,
@@ -139,7 +179,8 @@ async fn test_console_pages(cptestctx: &ControlPlaneTestContext) {
             .await
             .expect("failed to get console index");
 
-    assert_eq!(console_page.body, "<html></html>".as_bytes());
+        assert_eq!(console_page.body, "<html></html>".as_bytes());
+    }
 }
 
 #[nexus_test]
@@ -189,11 +230,72 @@ async fn test_assets(cptestctx: &ControlPlaneTestContext) {
 
     // existing file is returned
     let resp = RequestBuilder::new(&testctx, Method::GET, "/assets/hello.txt")
+        .expect_status(Some(StatusCode::OK))
         .execute()
         .await
         .expect("failed to get existing file");
 
     assert_eq!(resp.body, "hello there".as_bytes());
+    // make sure we're not including the gzip header on non-gzipped files
+    assert_eq!(resp.headers.get(http::header::CONTENT_ENCODING), None);
+
+    // file in a directory is returned
+    let resp = RequestBuilder::new(
+        &testctx,
+        Method::GET,
+        "/assets/a_directory/another_file.txt",
+    )
+    .expect_status(Some(StatusCode::OK))
+    .execute()
+    .await
+    .expect("failed to get existing file");
+
+    assert_eq!(resp.body, "some words".as_bytes());
+    // make sure we're not including the gzip header on non-gzipped files
+    assert_eq!(resp.headers.get(http::header::CONTENT_ENCODING), None);
+
+    // file with only gzipped version 404s if request doesn't have accept-encoding: gzip
+    let _ = RequestBuilder::new(&testctx, Method::GET, "/assets/gzip-only.txt")
+        .expect_status(Some(StatusCode::NOT_FOUND))
+        .execute()
+        .await
+        .expect("failed to 404 on gzip file without accept-encoding: gzip");
+
+    // file with only gzipped version is returned if request accepts gzip
+    let resp =
+        RequestBuilder::new(&testctx, Method::GET, "/assets/gzip-only.txt")
+            .header(http::header::ACCEPT_ENCODING, "gzip")
+            .expect_status(Some(StatusCode::OK))
+            .expect_response_header(http::header::CONTENT_ENCODING, "gzip")
+            .execute()
+            .await
+            .expect("failed to get existing file");
+
+    assert_eq!(resp.body, "nothing but gzip".as_bytes());
+
+    // file with both gzip and not returns gzipped if request accepts gzip
+    let resp =
+        RequestBuilder::new(&testctx, Method::GET, "/assets/gzip-and-not.txt")
+            .header(http::header::ACCEPT_ENCODING, "gzip")
+            .expect_status(Some(StatusCode::OK))
+            .expect_response_header(http::header::CONTENT_ENCODING, "gzip")
+            .execute()
+            .await
+            .expect("failed to get existing file");
+
+    assert_eq!(resp.body, "pretend this is gzipped beep boop".as_bytes());
+
+    // returns non-gzipped if request doesn't accept gzip
+    let resp =
+        RequestBuilder::new(&testctx, Method::GET, "/assets/gzip-and-not.txt")
+            .expect_status(Some(StatusCode::OK))
+            .execute()
+            .await
+            .expect("failed to get existing file");
+
+    assert_eq!(resp.body, "not gzipped but I know a guy".as_bytes());
+    // make sure we're not including the gzip header on non-gzipped files
+    assert_eq!(resp.headers.get(http::header::CONTENT_ENCODING), None);
 }
 
 #[tokio::test]
@@ -285,7 +387,7 @@ fn get_header_value(resp: TestResponse, header_name: HeaderName) -> String {
 
 async fn log_in_and_extract_token(testctx: &ClientTestContext) -> String {
     let login = RequestBuilder::new(&testctx, Method::POST, "/login")
-        .body(Some(&SpoofLoginBody { username: "privileged".to_string() }))
+        .body(Some(&SpoofLoginBody { username: "unprivileged".to_string() }))
         .expect_status(Some(StatusCode::OK))
         .execute()
         .await

@@ -150,7 +150,7 @@ fi
 # installs the `xde` driver and some kernel bits required to work with that
 # driver.
 if [[ "${HOST_OS}" == "SunOS" ]]; then
-    pfexec ./tools/install_opte.sh
+    ./tools/install_opte.sh
 fi
 
 # Validate the PATH:

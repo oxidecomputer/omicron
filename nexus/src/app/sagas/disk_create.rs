@@ -292,6 +292,8 @@ async fn sdc_regions_ensure(
     sagactx: ActionContext<SagaDiskCreate>,
 ) -> Result<String, ActionError> {
     let log = sagactx.user_data().log();
+    let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
+
     let datasets_and_regions = sagactx
         .lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
             "datasets_and_regions",
@@ -417,7 +419,7 @@ async fn sdc_regions_ensure(
     let mut rng = StdRng::from_entropy();
     let volume_construction_request =
         sled_agent_client::types::VolumeConstructionRequest::Volume {
-            id: Uuid::new_v4(),
+            id: disk_id,
             block_size,
             sub_volumes: vec![
                 sled_agent_client::types::VolumeConstructionRequest::Region {
@@ -425,7 +427,7 @@ async fn sdc_regions_ensure(
                     // gen of 0 is here, these regions were just allocated.
                     gen: 0,
                     opts: sled_agent_client::types::CrucibleOpts {
-                        id: Uuid::new_v4(),
+                        id: disk_id,
                         target: datasets_and_regions
                             .iter()
                             .map(|(dataset, region)| {

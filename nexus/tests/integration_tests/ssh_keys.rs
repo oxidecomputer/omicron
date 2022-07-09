@@ -62,6 +62,32 @@ async fn test_ssh_keys(cptestctx: &ControlPlaneTestContext) {
         assert_eq!(new_key.public_key, *public_key);
     }
 
+    // Verify what happens if we try to create one with a conflicting name.
+    let error: dropshot::HttpErrorResponseBody =
+        NexusRequest::expect_failure_with_body(
+            client,
+            http::StatusCode::BAD_REQUEST,
+            http::Method::POST,
+            "/session/me/sshkeys",
+            &SshKeyCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "key1".parse().unwrap(),
+                    description: String::from("a fourth public key"),
+                },
+                public_key: String::from("ssh-test DDDDDDDD"),
+            },
+        )
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect(
+            "unexpected failure trying to create ssh key with conflicting name",
+        )
+        .parsed_body()
+        .unwrap();
+    assert_eq!(error.error_code, Some(String::from("ObjectAlreadyExists")));
+    assert_eq!(error.message, "already exists: ssh-key \"key1\"");
+
     // Ensure we can GET one of the keys we just posted.
     let key1: SshKey = NexusRequest::object_get(
         client,

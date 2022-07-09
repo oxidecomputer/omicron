@@ -105,10 +105,10 @@ zone = true
 [external_package.propolis-server.source]
 type = "prebuilt"
 repo = "propolis"
-commit = "cb57337ba2f0b12286cfd70ecb1ea59f4ade4223"
+commit = "a9399a8007f9876e31ce152848e6ecc2a9e14283"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/propolis/image/<commit>/propolis-server.sha256.txt
-sha256 = "2640bd29e78e0ba69b2c97ec1ca9bb2c1cd82691eb7ccdd69efce2ac558b2b1d"
+sha256 = "b74011304f5f9d679d763fef6749478fcc4f82d252131ec527cf4c62e2bff0b7"
 
 [external_package.maghemite]
 service_name = "mg-ddm"
@@ -124,3 +124,20 @@ commit = "2be097ddd1d3fd8e7f56bc0a4bfd696253b11454"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
 sha256 = "94218915ec6fed75dcc81d736bd5e9ef62c9eb651a67a943b297d94d6b390941"
+
+[external_package.dendrite]
+service_name = "dendrite"
+zone = true
+[external_package.dendrite.source]
+# To manually override the package source:
+#
+# 1. Build the zone image manually
+#   1a. cd <dendrite tree>
+#   1b. cargo build --features=<tofino_stub|tofino_asic|softnpu>
+#   1c. cargo xtask dist -o
+# 2. Copy the output zone image from dendrite/out to omicron/out
+# 3. Use type = "manual" instead of the "prebuilt"
+type = "prebuilt"
+repo = "dendrite"
+commit = "e752af977c167fa64625231a74bedcbfa5457008"
+sha256 = "ddb7c271f4d4b68332adc69b32f90e728f07b1395e01cffd7e71230c2c648c63"
