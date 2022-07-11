@@ -240,6 +240,12 @@ where
             ServiceKind::Oximeter => {
                 ("oximeter".to_string(), SledAgentTypes::ServiceType::Oximeter)
             }
+            ServiceKind::Dendrite => (
+                "dendrite".to_string(),
+                SledAgentTypes::ServiceType::Dendrite {
+                    asic: SledAgentTypes::DendriteAsic::TofinoStub,
+                },
+            ),
         }
     }
 
