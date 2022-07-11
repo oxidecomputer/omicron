@@ -6,7 +6,7 @@
 
 use crate::illumos::dladm::Etherstub;
 use crate::illumos::vnic::VnicAllocator;
-use crate::nexus::NexusClient;
+use crate::nexus::LazyNexusClient;
 use crate::opte::OptePortAllocator;
 use crate::params::{
     InstanceHardware, InstanceMigrateParams, InstanceRuntimeStateRequested,
@@ -37,7 +37,7 @@ pub enum Error {
 
 struct InstanceManagerInternal {
     log: Logger,
-    nexus_client: Arc<NexusClient>,
+    lazy_nexus_client: LazyNexusClient,
 
     // TODO: If we held an object representing an enum of "Created OR Running"
     // instance, we could avoid the methods within "instance.rs" that panic
@@ -59,7 +59,7 @@ impl InstanceManager {
     /// Initializes a new [`InstanceManager`] object.
     pub fn new(
         log: Logger,
-        nexus_client: Arc<NexusClient>,
+        lazy_nexus_client: LazyNexusClient,
         etherstub: Etherstub,
         underlay_addr: Ipv6Addr,
         gateway_mac: MacAddr6,
@@ -67,7 +67,7 @@ impl InstanceManager {
         InstanceManager {
             inner: Arc::new(InstanceManagerInternal {
                 log: log.new(o!("component" => "InstanceManager")),
-                nexus_client,
+                lazy_nexus_client,
                 instances: Mutex::new(BTreeMap::new()),
                 vnic_allocator: VnicAllocator::new("Instance", etherstub),
                 underlay_addr,
@@ -126,7 +126,7 @@ impl InstanceManager {
                         self.inner.underlay_addr,
                         self.inner.port_allocator.clone(),
                         initial_hardware,
-                        self.inner.nexus_client.clone(),
+                        self.inner.lazy_nexus_client.clone(),
                     )?;
                     let instance_clone = instance.clone();
                     let old_instance = instances
@@ -225,7 +225,7 @@ mod test {
     use crate::illumos::dladm::Etherstub;
     use crate::illumos::{dladm::MockDladm, zone::MockZones};
     use crate::instance::MockInstance;
-    use crate::mocks::MockNexusClient;
+    use crate::nexus::LazyNexusClient;
     use crate::params::ExternalIp;
     use crate::params::InstanceStateRequested;
     use chrono::Utc;
@@ -281,7 +281,9 @@ mod test {
     #[serial_test::serial]
     async fn ensure_instance() {
         let log = logger();
-        let nexus_client = Arc::new(MockNexusClient::default());
+        let lazy_nexus_client =
+            LazyNexusClient::new(log.clone(), std::net::Ipv6Addr::LOCALHOST)
+                .unwrap();
 
         // Creation of the instance manager incurs some "global" system
         // checks: cleanup of existing zones + vnics.
@@ -294,7 +296,7 @@ mod test {
 
         let im = InstanceManager::new(
             log,
-            nexus_client,
+            lazy_nexus_client,
             Etherstub("mylink".to_string()),
             std::net::Ipv6Addr::new(
                 0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
@@ -365,7 +367,9 @@ mod test {
     #[serial_test::serial]
     async fn ensure_instance_repeatedly() {
         let log = logger();
-        let nexus_client = Arc::new(MockNexusClient::default());
+        let lazy_nexus_client =
+            LazyNexusClient::new(log.clone(), std::net::Ipv6Addr::LOCALHOST)
+                .unwrap();
 
         // Instance Manager creation.
 
@@ -377,7 +381,7 @@ mod test {
 
         let im = InstanceManager::new(
             log,
-            nexus_client,
+            lazy_nexus_client,
             Etherstub("mylink".to_string()),
             std::net::Ipv6Addr::new(
                 0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
