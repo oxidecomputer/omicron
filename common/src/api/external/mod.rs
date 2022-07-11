@@ -210,7 +210,9 @@ impl JsonSchema for Name {
     ) -> schemars::schema::Schema {
         schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
-                title: Some("A contextually unique name".to_string()),
+                title: Some(
+                    "A name unique within the parent collection".to_string(),
+                ),
                 description: Some(
                     "Names must begin with a lower case ASCII letter, be \
                      composed exclusively of lowercase ASCII, uppercase \
