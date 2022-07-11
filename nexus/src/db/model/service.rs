@@ -9,7 +9,7 @@ use crate::db::schema::service;
 use db_macros::Asset;
 use internal_dns_client::names::{ServiceName, AAAA, SRV};
 use omicron_common::address::{
-    DNS_SERVER_PORT, NEXUS_INTERNAL_PORT, OXIMETER_PORT,
+    DENDRITE_PORT, DNS_SERVER_PORT, NEXUS_INTERNAL_PORT, OXIMETER_PORT,
 };
 use std::net::{Ipv6Addr, SocketAddrV6};
 use uuid::Uuid;
@@ -50,6 +50,7 @@ impl Service {
             ServiceKind::InternalDNS => SRV::Service(ServiceName::InternalDNS),
             ServiceKind::Nexus => SRV::Service(ServiceName::Nexus),
             ServiceKind::Oximeter => SRV::Service(ServiceName::Oximeter),
+            ServiceKind::Dendrite => SRV::Service(ServiceName::Dendrite),
         }
     }
 
@@ -58,6 +59,7 @@ impl Service {
             ServiceKind::InternalDNS => DNS_SERVER_PORT,
             ServiceKind::Nexus => NEXUS_INTERNAL_PORT,
             ServiceKind::Oximeter => OXIMETER_PORT,
+            ServiceKind::Dendrite => DENDRITE_PORT,
         };
         SocketAddrV6::new(Ipv6Addr::from(self.ip), port, 0, 0)
     }
