@@ -6,6 +6,7 @@
 
 use crate::common::vlan::VlanID;
 use crate::illumos::vnic::VnicKind;
+use crate::illumos::zone::IPADM;
 use crate::illumos::{execute, ExecutionError, PFEXEC};
 use omicron_common::api::external::MacAddr;
 use serde::{Deserialize, Serialize};
@@ -78,6 +79,17 @@ pub struct DeleteVnicError {
     err: ExecutionError,
 }
 
+/// Errors returned from [`Dladm::set_linkprop`].
+#[derive(thiserror::Error, Debug)]
+#[error("Failed to set link property \"{prop_name}\" to \"{prop_value}\" on vnic {link_name}: {err}")]
+pub struct SetLinkpropError {
+    link_name: String,
+    prop_name: String,
+    prop_value: String,
+    #[source]
+    err: ExecutionError,
+}
+
 /// The name of a physical datalink.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct PhysicalLink(pub String);
@@ -113,7 +125,7 @@ pub struct Dladm {}
 #[cfg_attr(test, mockall::automock, allow(dead_code))]
 impl Dladm {
     /// Creates an etherstub, or returns one which already exists.
-    pub fn create_etherstub() -> Result<Etherstub, ExecutionError> {
+    pub fn ensure_etherstub() -> Result<Etherstub, ExecutionError> {
         if let Ok(stub) = Self::get_etherstub() {
             return Ok(stub);
         }
@@ -136,7 +148,7 @@ impl Dladm {
     ///
     /// This VNIC is not tracked like [`crate::illumos::vnic::Vnic`], because
     /// it is expected to exist for the lifetime of the sled.
-    pub fn create_etherstub_vnic(
+    pub fn ensure_etherstub_vnic(
         source: &Etherstub,
     ) -> Result<EtherstubVnic, CreateVnicError> {
         if let Ok(vnic) = Self::get_etherstub_vnic() {
@@ -151,6 +163,50 @@ impl Dladm {
         let cmd = command.args(&[DLADM, "show-vnic", ETHERSTUB_VNIC_NAME]);
         execute(cmd)?;
         Ok(EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()))
+    }
+
+    // Return the name of the IP interface over the etherstub VNIC, if it
+    // exists.
+    fn get_etherstub_vnic_interface() -> Result<String, ExecutionError> {
+        let mut cmd = std::process::Command::new(PFEXEC);
+        let cmd = cmd.args(&[
+            IPADM,
+            "show-if",
+            "-p",
+            "-o",
+            "IFNAME",
+            ETHERSTUB_VNIC_NAME,
+        ]);
+        execute(cmd)?;
+        Ok(ETHERSTUB_VNIC_NAME.to_string())
+    }
+
+    /// Delete the VNIC over the inter-zone comms etherstub.
+    pub(crate) fn delete_etherstub_vnic() -> Result<(), ExecutionError> {
+        // It's not clear why, but this requires deleting the _interface_ that's
+        // over the VNIC first. Other VNICs don't require this for some reason.
+        if Self::get_etherstub_vnic_interface().is_ok() {
+            let mut cmd = std::process::Command::new(PFEXEC);
+            let cmd = cmd.args(&[IPADM, "delete-if", ETHERSTUB_VNIC_NAME]);
+            execute(cmd)?;
+        }
+
+        if Self::get_etherstub_vnic().is_ok() {
+            let mut cmd = std::process::Command::new(PFEXEC);
+            let cmd = cmd.args(&[DLADM, "delete-vnic", ETHERSTUB_VNIC_NAME]);
+            execute(cmd)?;
+        }
+        Ok(())
+    }
+
+    /// Delete the inter-zone comms etherstub.
+    pub(crate) fn delete_etherstub() -> Result<(), ExecutionError> {
+        if Self::get_etherstub().is_ok() {
+            let mut cmd = std::process::Command::new(PFEXEC);
+            let cmd = cmd.args(&[DLADM, "delete-etherstub", ETHERSTUB_NAME]);
+            execute(cmd)?;
+        }
+        Ok(())
     }
 
     /// Returns the name of the first observed physical data link.
@@ -269,6 +325,25 @@ impl Dladm {
         let cmd = command.args(&[DLADM, "delete-vnic", name]);
         execute(cmd)
             .map_err(|err| DeleteVnicError { name: name.to_string(), err })?;
+        Ok(())
+    }
+
+    /// Set a link property on a VNIC
+    pub fn set_linkprop(
+        vnic: &str,
+        prop_name: &str,
+        prop_value: &str,
+    ) -> Result<(), SetLinkpropError> {
+        let mut command = std::process::Command::new(PFEXEC);
+        let prop = format!("{}={}", prop_name, prop_value);
+        let cmd =
+            command.args(&[DLADM, "set-linkprop", "-t", "-p", &prop, vnic]);
+        execute(cmd).map_err(|err| SetLinkpropError {
+            link_name: vnic.to_string(),
+            prop_name: prop_name.to_string(),
+            prop_value: prop_value.to_string(),
+            err,
+        })?;
         Ok(())
     }
 }

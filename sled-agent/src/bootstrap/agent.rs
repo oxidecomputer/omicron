@@ -149,7 +149,7 @@ impl Agent {
                 err,
             })?;
 
-        let etherstub = Dladm::create_etherstub().map_err(|e| {
+        let etherstub = Dladm::ensure_etherstub().map_err(|e| {
             BootstrapError::SledError(format!(
                 "Can't access etherstub device: {}",
                 e
@@ -157,7 +157,7 @@ impl Agent {
         })?;
 
         let etherstub_vnic =
-            Dladm::create_etherstub_vnic(&etherstub).map_err(|e| {
+            Dladm::ensure_etherstub_vnic(&etherstub).map_err(|e| {
                 BootstrapError::SledError(format!(
                     "Can't access etherstub VNIC device: {}",
                     e

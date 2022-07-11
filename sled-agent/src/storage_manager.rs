@@ -461,7 +461,7 @@ impl DatasetInfo {
 // Ensures that a zone backing a particular dataset is running.
 async fn ensure_running_zone(
     log: &Logger,
-    vnic_allocator: &VnicAllocator,
+    vnic_allocator: &VnicAllocator<Etherstub>,
     dataset_info: &DatasetInfo,
     dataset_name: &DatasetName,
     do_format: bool,
@@ -493,6 +493,7 @@ async fn ensure_running_zone(
                 &[zone::Dataset { name: dataset_name.full() }],
                 &[],
                 vec![],
+                None,
             )
             .await?;
 
@@ -545,7 +546,7 @@ struct StorageWorker {
     pools: Arc<Mutex<HashMap<ZpoolName, Pool>>>,
     new_pools_rx: mpsc::Receiver<ZpoolName>,
     new_filesystems_rx: mpsc::Receiver<NewFilesystemRequest>,
-    vnic_allocator: VnicAllocator,
+    vnic_allocator: VnicAllocator<Etherstub>,
     underlay_address: Ipv6Addr,
 }
 
