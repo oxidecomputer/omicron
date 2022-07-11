@@ -4044,3 +4044,15 @@ async fn session_sshkey_delete(
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
+
+#[cfg(test)]
+mod test {
+    use super::external_api;
+
+    #[test]
+    fn test_nexus_tag_policy() {
+        // This will fail if any of the endpoints don't match the policy in
+        // ./tag-config.json
+        let _ = external_api();
+    }
+}
