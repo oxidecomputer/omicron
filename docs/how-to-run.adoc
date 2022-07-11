@@ -25,6 +25,18 @@ Any additional prerequisite software may be installed with the following script:
 $ ./tools/install_prerequisites.sh
 ----
 
+This script expects that you are both attempting to compile code and execute
+it on the same machine. If you'd like to have a different machine for a "builder"
+and a "runner", you can use the two more fine-grained scripts:
+
+[source,text]
+----
+# To be invoked on the machine building Omicron
+$ ./tools/install_builder_prerequisites.sh
+# To be invoked on the machine running Omicron
+$ ./tools/install_runner_prerequisites.sh
+----
+
 === Make (or unmake) me a Gimlet!
 
 The sled agent expects to manage a real Gimlet. However, until those are built,
