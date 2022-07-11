@@ -46,12 +46,12 @@ impl LazyNexusClient {
         })
     }
 
+    pub async fn get_ip(&self) -> Result<Ipv6Addr, ResolveError> {
+        self.inner.resolver.lookup_ipv6(SRV::Service(ServiceName::Nexus)).await
+    }
+
     pub async fn get(&self) -> Result<NexusClient, ResolveError> {
-        let address = self
-            .inner
-            .resolver
-            .lookup_ipv6(SRV::Service(ServiceName::Nexus))
-            .await?;
+        let address = self.get_ip().await?;
 
         Ok(NexusClient::new(
             &format!("http://[{}]:{}", address, NEXUS_INTERNAL_PORT),
