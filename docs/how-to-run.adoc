@@ -66,7 +66,7 @@ Transformation Engine (OPTE, the kernel module which provides the private
 virtual networking to guests). To make this work, OPTE needs to know about the
 local networking configuration, in this case the MAC address of the local
 internet gateway. To be able to get into your instances, you _must_ specify this
-in the `gateway_mac` field of the config file `smf/sled-agent/config-rss.toml`.
+in the `gateway_mac` field of the config file `smf/sled-agent/config.toml`.
 
 The value there is correct for the lab environment, so if you're running there,
 no changes are needed. If you're running elsewhere, you find the value with:
