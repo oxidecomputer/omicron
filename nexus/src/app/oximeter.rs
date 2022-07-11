@@ -251,7 +251,7 @@ impl super::Nexus {
             .map_err(|e| {
                 Error::internal_error(&format!(
                     "Cannot access timeseries DB: {}",
-                    e.to_string()
+                    e
                 ))
             })?
             .select_timeseries_with(
