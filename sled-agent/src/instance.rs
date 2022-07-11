@@ -13,7 +13,7 @@ use crate::illumos::svc::wait_for_service;
 use crate::illumos::vnic::VnicAllocator;
 use crate::illumos::zone::{AddressRequest, PROPOLIS_ZONE_PREFIX};
 use crate::instance_manager::InstanceTicket;
-use crate::nexus::NexusClient;
+use crate::nexus::LazyNexusClient;
 use crate::opte::OptePort;
 use crate::opte::OptePortAllocator;
 use crate::params::ExternalIp;
@@ -86,6 +86,9 @@ pub enum Error {
 
     #[error("Serial console buffer: {0}")]
     Serial(#[from] crate::serial::Error),
+
+    #[error("Error resolving DNS name: {0}")]
+    ResolveError(#[from] internal_dns_client::multiclient::ResolveError),
 }
 
 // Issues read-only, idempotent HTTP requests at propolis until it responds with
@@ -225,7 +228,7 @@ struct InstanceInner {
     serial_tty_task: Option<SerialConsoleBuffer>,
 
     // Connection to Nexus
-    nexus_client: Arc<NexusClient>,
+    lazy_nexus_client: LazyNexusClient,
 }
 
 impl InstanceInner {
@@ -254,7 +257,9 @@ impl InstanceInner {
         );
 
         // Notify Nexus of the state change.
-        self.nexus_client
+        self.lazy_nexus_client
+            .get()
+            .await?
             .cpapi_instances_put(
                 self.id(),
                 &nexus_client::types::InstanceRuntimeState::from(
@@ -405,7 +410,7 @@ mockall::mock! {
             underlay_addr: Ipv6Addr,
             port_allocator: OptePortAllocator,
             initial: InstanceHardware,
-            nexus_client: Arc<NexusClient>,
+            lazy_nexus_client: LazyNexusClient,
         ) -> Result<Self, Error>;
         pub async fn start(
             &self,
@@ -442,7 +447,7 @@ impl Instance {
     /// * `port_allocator`: A unique (to the sled) ID generator to
     /// refer to an OPTE port for the guest network interfaces.
     /// * `initial`: State of the instance at initialization time.
-    /// * `nexus_client`: Connection to Nexus, used for sending notifications.
+    /// * `lazy_nexus_client`: Connection to Nexus, used for sending notifications.
     // TODO: This arg list is getting a little long; can we clean this up?
     pub fn new(
         log: Logger,
@@ -451,7 +456,7 @@ impl Instance {
         underlay_addr: Ipv6Addr,
         port_allocator: OptePortAllocator,
         initial: InstanceHardware,
-        nexus_client: Arc<NexusClient>,
+        lazy_nexus_client: LazyNexusClient,
     ) -> Result<Self, Error> {
         info!(log, "Instance::new w/initial HW: {:?}", initial);
         let instance = InstanceInner {
@@ -480,7 +485,7 @@ impl Instance {
             cloud_init_bytes: initial.cloud_init_bytes,
             state: InstanceStates::new(initial.runtime),
             running_state: None,
-            nexus_client,
+            lazy_nexus_client,
             serial_tty_task: None,
         };
 
@@ -765,7 +770,7 @@ impl Instance {
 mod test {
     use super::*;
     use crate::illumos::dladm::Etherstub;
-    use crate::mocks::MockNexusClient;
+    use crate::nexus::LazyNexusClient;
     use crate::opte::OptePortAllocator;
     use crate::params::ExternalIp;
     use crate::params::InstanceStateRequested;
@@ -848,7 +853,9 @@ mod test {
         );
         let mac = MacAddr6::from([0u8; 6]);
         let port_allocator = OptePortAllocator::new(mac);
-        let nexus_client = MockNexusClient::default();
+        let lazy_nexus_client =
+            LazyNexusClient::new(log.clone(), std::net::Ipv6Addr::LOCALHOST)
+                .unwrap();
 
         let inst = Instance::new(
             log.clone(),
@@ -859,7 +866,7 @@ mod test {
             ),
             port_allocator,
             new_initial_instance(),
-            Arc::new(nexus_client),
+            lazy_nexus_client,
         )
         .unwrap();
 
