@@ -1778,7 +1778,7 @@
           "disks"
         ],
         "summary": "Fetch metrics for a disk.",
-        "operationId": "project_disks_get_metrics",
+        "operationId": "disk_metrics_list",
         "parameters": [
           {
             "in": "path",

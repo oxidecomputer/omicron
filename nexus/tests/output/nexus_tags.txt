@@ -2,8 +2,8 @@ API operations found with tag "disks"
 OPERATION ID                             URL PATH
 disk_create                              /organizations/{organization_name}/projects/{project_name}/disks
 disk_delete                              /organizations/{organization_name}/projects/{project_name}/disks/{disk_name}
-disk_get_metrics                         /organizations/{organization_name}/projects/{project_name}/disks/{disk_name}/metrics/{metric_name}
 disk_list                                /organizations/{organization_name}/projects/{project_name}/disks
+disk_metrics_list                        /organizations/{organization_name}/projects/{project_name}/disks/{disk_name}/metrics/{metric_name}
 disk_view                                /organizations/{organization_name}/projects/{project_name}/disks/{disk_name}
 
 API operations found with tag "hardware"
