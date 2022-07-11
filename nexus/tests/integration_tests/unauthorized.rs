@@ -138,8 +138,10 @@ G GET  PUT  POST DEL  TRCE G  URL
 /// we'll use later in the verification phase
 ///
 /// The setup phase takes a list of `SetupReq` enums and issues a `GET` or `POST`
-/// request to each one's `url`. The `id_routes` field is a list of URLs that result
-/// the result of the request to replace `id` parameters if present.
+/// request to each one's `url`. `id_results` is a list of URLs that are associated
+/// to the results of the setup request with any `{id}` params in the URL replaced with
+/// the result's URL. This is used to later verify ID endpoints without first having to
+/// know the ID.
 
 enum SetupReq {
     Get {
