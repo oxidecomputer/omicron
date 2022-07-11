@@ -32,7 +32,9 @@ fi
 echo "Using $PHYSICAL_LINK as physical link"
 
 function success {
+    set +x
     echo -e "\e[1;36m$1\e[0m"
+    set -x
 }
 
 # Create the ZFS zpools required for the sled agent, backed by file-based vdevs.
@@ -61,12 +63,7 @@ function ensure_zpools {
 # Arguments:
 #   $1: The name of the VNIC to look for
 function get_vnic_name_if_exists {
-    NAME="$(dladm show-vnic -p -o LINK "$1")"
-    if [[ "$?" -eq 0 ]]; then
-        echo "$NAME"
-    else
-        echo ""
-    fi
+    dladm show-vnic -p -o LINK "$1" 2> /dev/null || echo ""
 }
 
 # Create VNICs to represent the Chelsio physical links

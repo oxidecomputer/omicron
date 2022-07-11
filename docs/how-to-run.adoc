@@ -37,8 +37,7 @@ $ ./tools/install_builder_prerequisites.sh
 $ ./tools/install_runner_prerequisites.sh
 ----
 
-
-=== Make me a Gimlet!
+=== Make (or unmake) me a Gimlet!
 
 The sled agent expects to manage a real Gimlet. However, until those are built,
 developers generally make do with something else, usually a commodity machine.
@@ -48,13 +47,11 @@ file-based ZFS vdevs and ZFS zpools on top of those, and a couple of VNICs. The
 vdevs model the actual U.2s that will be in a Gimlet, and the VNICs model the
 two Chelsio NIC ports.
 
-You can clean up these resources with `./tools/destroy_virtual_hardware.sh`. Be
-aware that this is a best effort script. If the sled agent or other Omicron
-zones are still running, the zpools cannot be deleted. The script will warn you
-about the things it cannot remove, so you can do so yourself. Also note that all
-the networking bits are temporary, so a reboot should always clear them.
-
-Both scripts must be run as root, e.g, `pfexec ./tools/create_virtual_hardware.sh`.
+You can clean up these resources with `./tools/destroy_virtual_hardware.sh`.
+This script requires Omicron be uninstalled, e.g., with `pfexec
+./target/release/omicron-package uninstall`, and a warning will be printed if
+that is not the case. The script will then remove the file-based vdevs and the
+VNICs created by `create_virtual_hardware.sh`.
 
 == Deploying Omicron
 
