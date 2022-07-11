@@ -28,7 +28,6 @@ use omicron_common::api::{
 use slog::Logger;
 use std::net::SocketAddrV6;
 use std::process::Command;
-use std::sync::Arc;
 use uuid::Uuid;
 
 #[cfg(not(test))]

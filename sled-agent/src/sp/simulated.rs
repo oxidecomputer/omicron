@@ -5,7 +5,6 @@
 //! Implementation of a simulated SP / RoT.
 
 use super::SpError;
-use crate::config::Config as SledConfig;
 use crate::illumos::dladm::Dladm;
 use crate::zone::Zones;
 use slog::Logger;

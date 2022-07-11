@@ -13,7 +13,7 @@ use serde::Deserialize;
 use serde_with::serde_as;
 use serde_with::DisplayFromStr;
 use serde_with::PickFirst;
-use std::net::{Ipv4Addr, SocketAddr};
+use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
 
 /// Configuration for a sled agent
