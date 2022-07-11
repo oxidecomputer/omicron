@@ -5,6 +5,7 @@
 #: target = "lab-netdev"
 #: output_rules = [
 #:	"/var/svc/log/system-illumos-sled-agent:default.log",
+#:	"/zone/oxz_nexus/root/var/svc/log/system-illumos-nexus:default.log",
 #: ]
 #: skip_clone = true
 #:
