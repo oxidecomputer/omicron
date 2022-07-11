@@ -45,10 +45,11 @@ pub struct UpdatesConfig {
     pub default_base_url: String,
 }
 
-/// Configuration for the timeseries database.
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+/// Optional configuration for the timeseries database.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct TimeseriesDbConfig {
-    pub address: SocketAddr,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub address: Option<SocketAddr>,
 }
 
 // A deserializable type that does no validation on the tunable parameters.
@@ -132,7 +133,7 @@ pub struct PackageConfig {
     /// Authentication-related configuration
     pub authn: AuthnConfig,
     /// Timeseries database configuration.
-    // TODO: Should this be removed? Nexus needs to initialize it.
+    #[serde(default)]
     pub timeseries_db: TimeseriesDbConfig,
     /// Updates-related configuration. Updates APIs return 400 Bad Request when this is
     /// unconfigured.
@@ -179,7 +180,7 @@ impl Config {
 pub enum SchemeName {
     Spoof,
     SessionCookie,
-    ClientToken,
+    AccessToken,
 }
 
 impl std::str::FromStr for SchemeName {
@@ -189,7 +190,7 @@ impl std::str::FromStr for SchemeName {
         match s {
             "spoof" => Ok(SchemeName::Spoof),
             "session_cookie" => Ok(SchemeName::SessionCookie),
-            "client_token" => Ok(SchemeName::ClientToken),
+            "access_token" => Ok(SchemeName::AccessToken),
             _ => Err(anyhow!("unsupported authn scheme: {:?}", s)),
         }
     }
@@ -200,7 +201,7 @@ impl std::fmt::Display for SchemeName {
         f.write_str(match self {
             SchemeName::Spoof => "spoof",
             SchemeName::SessionCookie => "session_cookie",
-            SchemeName::ClientToken => "client_token",
+            SchemeName::AccessToken => "access_token",
         })
     }
 }
@@ -384,7 +385,7 @@ mod test {
                         path: "/nonexistent/path".to_string()
                     },
                     timeseries_db: TimeseriesDbConfig {
-                        address: "[::1]:8123".parse().unwrap()
+                        address: Some("[::1]:8123".parse().unwrap())
                     },
                     updates: Some(UpdatesConfig {
                         trusted_root: PathBuf::from("/path/to/root.json"),

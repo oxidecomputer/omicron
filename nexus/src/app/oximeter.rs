@@ -11,6 +11,11 @@ use crate::db::identity::Asset;
 use crate::external_api::params::ResourceMetrics;
 use crate::external_api::params::ResourceMetricsPagination;
 use crate::internal_api::params::OximeterInfo;
+use internal_dns_client::{
+    multiclient::{ResolveError, Resolver},
+    names::{ServiceName, SRV},
+};
+use omicron_common::address::CLICKHOUSE_PORT;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
@@ -23,11 +28,53 @@ use oximeter_db::Measurement;
 use oximeter_db::TimeseriesSchema;
 use oximeter_db::TimeseriesSchemaPaginationParams;
 use oximeter_producer::register;
+use slog::Logger;
 use std::convert::TryInto;
 use std::net::SocketAddr;
 use std::num::NonZeroU32;
 use std::time::Duration;
 use uuid::Uuid;
+
+/// A client which knows how to connect to Clickhouse, but does so
+/// only when a request is actually made.
+///
+/// This allows callers to set up the mechanism of connection (by address
+/// or DNS) separately from actually making that connection. This
+/// is particularly useful in situations where configurations are parsed
+/// prior to Clickhouse existing.
+pub struct LazyTimeseriesClient {
+    log: Logger,
+    source: ClientSource,
+}
+
+enum ClientSource {
+    FromDns { resolver: Resolver },
+    FromIp { address: SocketAddr },
+}
+
+impl LazyTimeseriesClient {
+    pub fn new_from_dns(log: Logger, resolver: Resolver) -> Self {
+        Self { log, source: ClientSource::FromDns { resolver } }
+    }
+
+    pub fn new_from_address(log: Logger, address: SocketAddr) -> Self {
+        Self { log, source: ClientSource::FromIp { address } }
+    }
+
+    pub async fn get(&self) -> Result<oximeter_db::Client, ResolveError> {
+        let address = match &self.source {
+            ClientSource::FromIp { address } => *address,
+            ClientSource::FromDns { resolver } => SocketAddr::new(
+                resolver
+                    .lookup_ip(SRV::Service(ServiceName::Clickhouse))
+                    .await?,
+                CLICKHOUSE_PORT,
+            ),
+        };
+
+        Ok(oximeter_db::Client::new(address, &self.log))
+    }
+}
 
 impl super::Nexus {
     /// Insert a new record of an Oximeter collector server.
@@ -164,6 +211,9 @@ impl super::Nexus {
     ) -> Result<dropshot::ResultsPage<TimeseriesSchema>, Error> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         self.timeseries_client
+            .get()
+            .await
+            .map_err(|e| Error::internal_error(&e.to_string()))?
             .timeseries_schema_list(&pag_params.page, limit)
             .await
             .map_err(map_oximeter_err)
@@ -196,6 +246,14 @@ impl super::Nexus {
 
         let timeseries_list = self
             .timeseries_client
+            .get()
+            .await
+            .map_err(|e| {
+                Error::internal_error(&format!(
+                    "Cannot access timeseries DB: {}",
+                    e.to_string()
+                ))
+            })?
             .select_timeseries_with(
                 timeseries_name,
                 criteria,

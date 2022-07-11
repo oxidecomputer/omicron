@@ -287,6 +287,10 @@
             "format": "uint32",
             "minimum": 0
           },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "key": {
             "nullable": true,
             "type": "string"
@@ -318,6 +322,7 @@
           }
         },
         "required": [
+          "id",
           "lossy",
           "target"
         ]
@@ -401,6 +406,14 @@
               "type"
             ]
           }
+        ]
+      },
+      "DendriteAsic": {
+        "type": "string",
+        "enum": [
+          "tofino_asic",
+          "tofino_stub",
+          "softnpu"
         ]
       },
       "DiskEnsureBody": {
@@ -1206,6 +1219,24 @@
             "required": [
               "type"
             ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "asic": {
+                "$ref": "#/components/schemas/DendriteAsic"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "dendrite"
+                ]
+              }
+            },
+            "required": [
+              "asic",
+              "type"
+            ]
           }
         ]
       },
@@ -1259,6 +1290,10 @@
                 "format": "uint64",
                 "minimum": 0
               },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
               "read_only_parent": {
                 "nullable": true,
                 "allOf": [
@@ -1282,6 +1317,7 @@
             },
             "required": [
               "block_size",
+              "id",
               "sub_volumes",
               "type"
             ]
@@ -1293,6 +1329,10 @@
                 "type": "integer",
                 "format": "uint64",
                 "minimum": 0
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
               },
               "type": {
                 "type": "string",
@@ -1306,6 +1346,7 @@
             },
             "required": [
               "block_size",
+              "id",
               "type",
               "url"
             ]
@@ -1348,6 +1389,10 @@
                 "format": "uint64",
                 "minimum": 0
               },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
               "path": {
                 "type": "string"
               },
@@ -1360,6 +1405,7 @@
             },
             "required": [
               "block_size",
+              "id",
               "path",
               "type"
             ]
