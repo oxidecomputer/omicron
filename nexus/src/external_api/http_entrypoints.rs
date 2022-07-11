@@ -1465,18 +1465,15 @@ async fn disk_metrics_list(
         let opctx = OpContext::for_external_api(&rqctx).await?;
 
         // this ensures the user is authorized on Action::Read for this disk
-        nexus
+        let disk = nexus
             .disk_fetch(&opctx, organization_name, project_name, disk_name)
             .await?;
-
-        // FIXME fill this in with the code that gets the upstairs UUID from the disk UUID
-        let upstairs_uuid = uuid::uuid!("4fe353bf-c3a6-421f-a51d-c833091637fa");
 
         Ok(HttpResponseOk(
             nexus
                 .select_timeseries(
                     &format!("crucible_upstairs:{}", metric_name),
-                    &[&format!("upstairs_uuid=={}", upstairs_uuid)],
+                    &[&format!("upstairs_uuid=={}", disk.volume_id)],
                     Duration::from_secs(10),
                     query,
                     limit,
