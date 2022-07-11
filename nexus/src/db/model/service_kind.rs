@@ -20,6 +20,7 @@ impl_enum_type!(
     InternalDNS => b"internal_dns"
     Nexus => b"nexus"
     Oximeter => b"oximeter"
+    Dendrite => b"dendrite"
 );
 
 impl From<internal_api::params::ServiceKind> for ServiceKind {
@@ -31,6 +32,9 @@ impl From<internal_api::params::ServiceKind> for ServiceKind {
             internal_api::params::ServiceKind::Nexus => ServiceKind::Nexus,
             internal_api::params::ServiceKind::Oximeter => {
                 ServiceKind::Oximeter
+            }
+            internal_api::params::ServiceKind::Dendrite => {
+                ServiceKind::Dendrite
             }
         }
     }

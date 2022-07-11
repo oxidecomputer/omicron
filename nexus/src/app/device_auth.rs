@@ -29,8 +29,8 @@
 //!    automatic case, it may supply the `user_code` as a query parameter.
 //! 5. The user logs in using their configured IdP, then enters or verifies
 //!    the `user_code`.
-//! 6. On successful login, the server is notified and responds to the
-//!    poll started in step 3 with a freshly granted access token.
+//! 6. On successful login, the server responds to the poll started
+//!    in step 3 with a freshly granted access token.
 //!
 //! Note that in this flow, there are actually two distinct sets of
 //! connections made to the server: by the client itself, and by the
@@ -45,44 +45,94 @@
 //! but that may change in the future.
 
 use crate::authn::{Actor, Reason};
+use crate::authz;
 use crate::context::OpContext;
+use crate::db::lookup::LookupPath;
 use crate::db::model::{DeviceAccessToken, DeviceAuthRequest};
 use crate::external_api::device_auth::DeviceAccessTokenResponse;
-use omicron_common::api::external::CreateResult;
+
+use omicron_common::api::external::{CreateResult, Error};
+
+use chrono::Utc;
 use uuid::Uuid;
 
 impl super::Nexus {
     /// Start a device authorization grant flow.
     /// Corresponds to steps 1 & 2 in the flow description above.
-    pub async fn device_auth_request(
+    pub async fn device_auth_request_create(
         &self,
         opctx: &OpContext,
         client_id: Uuid,
     ) -> CreateResult<DeviceAuthRequest> {
+        // TODO-correctness: the `user_code` generated for a new request
+        // is used as a primary key, but may potentially collide with an
+        // existing outstanding request. So we should retry some (small)
+        // number of times if inserting the new request fails.
         let auth_request = DeviceAuthRequest::new(client_id);
-        self.db_datastore.device_auth_start(opctx, auth_request).await
+        self.db_datastore.device_auth_request_create(opctx, auth_request).await
     }
 
-    /// Verify a device authorization grant.
+    /// Verify a device authorization grant, and delete the authorization
+    /// request so that at most one token will be granted per request.
+    /// Invoked in response to a request from the browser, not the client.
     /// Corresponds to step 5 in the flow description above.
-    pub async fn device_auth_verify(
+    pub async fn device_auth_request_verify(
         &self,
         opctx: &OpContext,
         user_code: String,
         silo_user_id: Uuid,
     ) -> CreateResult<DeviceAccessToken> {
-        let auth_request =
-            self.db_datastore.device_auth_get_request(opctx, user_code).await?;
-        let client_id = auth_request.client_id;
-        let device_code = auth_request.device_code;
-        let token =
-            DeviceAccessToken::new(client_id, device_code, silo_user_id);
-        self.db_datastore.device_auth_grant(opctx, token).await
+        let (.., authz_request, db_request) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .device_auth_request(&user_code)
+                .fetch()
+                .await?;
+
+        let (.., authz_user) = LookupPath::new(opctx, &self.datastore())
+            .silo_user_id(silo_user_id)
+            .lookup_for(authz::Action::CreateChild)
+            .await?;
+        assert_eq!(authz_user.id(), silo_user_id);
+
+        // Create an access token record.
+        let token = DeviceAccessToken::new(
+            db_request.client_id,
+            db_request.device_code,
+            db_request.time_created,
+            silo_user_id,
+        );
+
+        if db_request.time_expires < Utc::now() {
+            // Store the expired token anyway so that the client
+            // can get a proper "denied" message on its next poll.
+            let token = token.expires(db_request.time_expires);
+            self.db_datastore
+                .device_access_token_create(
+                    opctx,
+                    &authz_request,
+                    &authz_user,
+                    token,
+                )
+                .await?;
+            Err(Error::InvalidRequest {
+                message: "device authorization request expired".to_string(),
+            })
+        } else {
+            // TODO-security: set an expiration time for the valid token.
+            self.db_datastore
+                .device_access_token_create(
+                    opctx,
+                    &authz_request,
+                    &authz_user,
+                    token,
+                )
+                .await
+        }
     }
 
     /// Look up a possibly-not-yet-granted device access token.
     /// Corresponds to steps 3 & 6 in the flow description above.
-    pub async fn device_access_token_lookup(
+    pub async fn device_access_token_fetch(
         &self,
         opctx: &OpContext,
         client_id: Uuid,
@@ -91,7 +141,7 @@ impl super::Nexus {
         use DeviceAccessTokenResponse::*;
         match self
             .db_datastore
-            .device_auth_get_token(opctx, client_id, device_code)
+            .device_access_token_fetch(opctx, client_id, device_code)
             .await
         {
             Ok(token) => Ok(Granted(token)),
@@ -107,12 +157,30 @@ impl super::Nexus {
         opctx: &OpContext,
         token: String,
     ) -> Result<Actor, Reason> {
-        match self.db_datastore.device_access_token_actor(opctx, token).await {
-            Ok(actor) => Ok(actor),
-            // TODO: better error handling
-            Err(_) => Err(Reason::UnknownActor {
-                actor: String::from("from bearer token"),
-            }),
-        }
+        let (.., db_access_token) = LookupPath::new(opctx, &self.db_datastore)
+            .device_access_token(&token)
+            .fetch()
+            .await
+            .map_err(|e| match e {
+                Error::ObjectNotFound { .. } => Reason::UnknownActor {
+                    actor: "from device access token".to_string(),
+                },
+                e => Reason::UnknownError { source: e },
+            })?;
+
+        let silo_user_id = db_access_token.silo_user_id;
+        let (.., db_silo_user) = LookupPath::new(opctx, &self.db_datastore)
+            .silo_user_id(silo_user_id)
+            .fetch()
+            .await
+            .map_err(|e| match e {
+                Error::ObjectNotFound { .. } => {
+                    Reason::UnknownActor { actor: silo_user_id.to_string() }
+                }
+                e => Reason::UnknownError { source: e },
+            })?;
+        let silo_id = db_silo_user.silo_id;
+
+        Ok(Actor::SiloUser { silo_user_id, silo_id })
     }
 }

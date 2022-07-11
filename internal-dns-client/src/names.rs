@@ -17,6 +17,7 @@ pub enum ServiceName {
     InternalDNS,
     Nexus,
     Oximeter,
+    Dendrite,
 }
 
 impl fmt::Display for ServiceName {
@@ -27,6 +28,7 @@ impl fmt::Display for ServiceName {
             ServiceName::InternalDNS => write!(f, "internalDNS"),
             ServiceName::Nexus => write!(f, "nexus"),
             ServiceName::Oximeter => write!(f, "oximeter"),
+            ServiceName::Dendrite => write!(f, "dendrite"),
         }
     }
 }
@@ -121,6 +123,10 @@ mod test {
         assert_eq!(
             SRV::Service(ServiceName::Oximeter).to_string(),
             "_oximeter._tcp.control-plane.oxide.internal",
+        );
+        assert_eq!(
+            SRV::Service(ServiceName::Dendrite).to_string(),
+            "_dendrite._tcp.control-plane.oxide.internal",
         );
     }
 

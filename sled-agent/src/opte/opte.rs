@@ -22,8 +22,11 @@ use opte::oxide_vpc::api::RouterTarget;
 use opte::oxide_vpc::api::SNatCfg;
 use opte_ioctl::OpteHdl;
 use slog::Logger;
+use std::fs;
 use std::net::IpAddr;
+use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
+use std::path::Path;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -53,16 +56,24 @@ pub enum Error {
         driver which are compatible."
     )]
     IncompatibleKernel,
+
+    #[error(transparent)]
+    BadAddrObj(#[from] crate::illumos::addrobj::ParseError),
+
+    #[error(transparent)]
+    SetLinkpropError(#[from] crate::illumos::dladm::SetLinkpropError),
 }
 
 #[derive(Debug, Clone)]
 pub struct OptePortAllocator {
+    gateway_mac: MacAddr,
     value: Arc<AtomicU64>,
 }
 
 impl OptePortAllocator {
-    pub fn new() -> Self {
-        Self { value: Arc::new(AtomicU64::new(0)) }
+    pub fn new(gateway_mac: MacAddr6) -> Self {
+        let gateway_mac = MacAddr::from(gateway_mac.into_array());
+        Self { gateway_mac, value: Arc::new(AtomicU64::new(0)) }
     }
 
     fn next(&self) -> String {
@@ -123,17 +134,12 @@ impl OptePortAllocator {
                         ).into());
                     }
                 };
-                // OPTE's `SnatCfg` accepts a `std::ops::Range`, but the first/last
-                // port representation in the database and Nexus is inclusive of the
-                // last port. At the moment, that means we need to add 1 to the
-                // last port in the request data. However, if last port is
-                // `u16::MAX`, that would overflow and panic. We'll use saturating
-                // add for now, and live with missing the last port.
-                //
-                // TODO-correctness: Support the last port, see
-                // https://github.com/oxidecomputer/omicron/issues/1292
-                let ports = ip.first_port..ip.last_port.saturating_add(1);
-                Some(SNatCfg { public_ip, ports })
+                let ports = ip.first_port..=ip.last_port;
+                Some(SNatCfg {
+                    public_ip,
+                    ports,
+                    phys_gw_mac: self.gateway_mac,
+                })
             }
             None => None,
         };
@@ -208,6 +214,43 @@ impl OptePortAllocator {
             // `VNIC_PREFIX_GUEST`, so this call must return Some(_).
             Some(Vnic::wrap_existing(vnic_name).unwrap())
         };
+
+        // TODO-remove
+        //
+        // This is part of the workaround to get external connectivity into
+        // instances, without setting up all of boundary services. Rather than
+        // encap/decap the guest traffic, OPTE just performs 1-1 NAT between the
+        // private IP address of the guest and the external address provided by
+        // the control plane. This call here allows the underlay nic, `net0` to
+        // advertise as having the guest's MAC address.
+        Dladm::set_linkprop(
+            underlay::find_chelsio_links()?[0].0.as_str(),
+            "secondary-macs",
+            &mac.to_string().to_lowercase(),
+        )?;
+
+        // TODO-remove
+        //
+        // This is another part of the workaround, allowing reply traffic from
+        // the guest back out. Normally, OPTE would drop such traffic at the
+        // router layer, as it has no route for that external IP address. This
+        // allows such traffic through.
+        //
+        // Note that this exact rule will eventually be included, since it's one
+        // of the default routing rules in the VPC System Router. However, that
+        // will likely be communicated in a different way, or could be modified,
+        // and this specific call should be removed in favor of sending the
+        // routing rules the control plane provides.
+        //
+        // This rule sends all traffic that has no better match to the gateway.
+        let prefix = Ipv4PrefixLen::new(0).unwrap();
+        let dest = Ipv4Cidr::new(Ipv4Addr::UNSPECIFIED.into(), prefix);
+        let target = RouterTarget::InternetGateway;
+        hdl.add_router_entry_ip4(&AddRouterEntryIpv4Req {
+            port_name: name.clone(),
+            dest,
+            target,
+        })?;
 
         Ok(OptePort {
             name,
@@ -338,9 +381,21 @@ pub fn delete_all_xde_devices(log: &Logger) -> Result<(), Error> {
 /// The xde driver needs information about the physical devices out which it can
 /// send traffic from the guests.
 pub fn initialize_xde_driver(log: &Logger) -> Result<(), Error> {
-    if !std::path::Path::new("/kernel/drv/xde.conf").exists() {
+    const XDE_CONF: &str = "/kernel/drv/xde.conf";
+    let xde_conf = Path::new(XDE_CONF);
+    if !xde_conf.exists() {
         return Err(Error::NoXdeConf);
     }
+
+    // TODO-remove
+    //
+    // An additional part of the workaround to connect into instances. This is
+    // required to tell OPTE to actually act as a 1-1 NAT when an instance is
+    // provided with an external IP address, rather than do its normal job of
+    // encapsulating the traffic onto the underlay (such as for delivery to
+    // boundary services).
+    use_external_ip_workaround(&log, &xde_conf);
+
     let underlay_nics = underlay::find_nics()?;
     info!(log, "using '{:?}' as data links for xde driver", underlay_nics);
     if underlay_nics.len() < 2 {
@@ -382,4 +437,37 @@ pub fn initialize_xde_driver(log: &Logger) -> Result<(), Error> {
         )) => Ok(()),
         Err(e) => Err(e.into()),
     }
+}
+
+fn use_external_ip_workaround(log: &Logger, xde_conf: &Path) {
+    const NEEDLE: &str = "ext_ip_hack = 0;";
+    const NEW_NEEDLE: &str = "ext_ip_hack = 1;";
+
+    // NOTE: This only works in the real sled agent, which is run as root. The
+    // file is not world-readable.
+    let contents = fs::read_to_string(xde_conf)
+        .expect("Failed to read xde configuration file");
+    let new = contents.replace(NEEDLE, NEW_NEEDLE);
+    if contents == new {
+        info!(
+            log,
+            "xde driver configuration file appears to already use external IP workaround";
+            "conf_file" => ?xde_conf,
+        );
+    } else {
+        info!(
+            log,
+            "updating xde driver configuration file for external IP workaround";
+            "conf_file" => ?xde_conf,
+        );
+        fs::write(xde_conf, &new)
+            .expect("Failed to modify xde configuration file");
+    }
+
+    // Ensure the driver picks up the updated configuration file, if it's been
+    // loaded previously without the workaround.
+    std::process::Command::new(crate::illumos::PFEXEC)
+        .args(&["update_drv", "xde"])
+        .output()
+        .expect("Failed to reload xde driver configuration file");
 }

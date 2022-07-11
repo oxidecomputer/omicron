@@ -179,7 +179,7 @@ impl Config {
 pub enum SchemeName {
     Spoof,
     SessionCookie,
-    ClientToken,
+    AccessToken,
 }
 
 impl std::str::FromStr for SchemeName {
@@ -189,7 +189,7 @@ impl std::str::FromStr for SchemeName {
         match s {
             "spoof" => Ok(SchemeName::Spoof),
             "session_cookie" => Ok(SchemeName::SessionCookie),
-            "client_token" => Ok(SchemeName::ClientToken),
+            "access_token" => Ok(SchemeName::AccessToken),
             _ => Err(anyhow!("unsupported authn scheme: {:?}", s)),
         }
     }
@@ -200,7 +200,7 @@ impl std::fmt::Display for SchemeName {
         f.write_str(match self {
             SchemeName::Spoof => "spoof",
             SchemeName::SessionCookie => "session_cookie",
-            SchemeName::ClientToken => "client_token",
+            SchemeName::AccessToken => "access_token",
         })
     }
 }
