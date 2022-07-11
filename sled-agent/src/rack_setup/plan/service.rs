@@ -19,7 +19,7 @@ use sled_agent_client::{
 };
 use slog::Logger;
 use std::collections::HashMap;
-use std::net::{Ipv6Addr, SocketAddrV6};
+use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 use uuid::Uuid;
@@ -193,11 +193,9 @@ impl Plan {
                             0,
                             0,
                         ),
-                        external_address: SocketAddrV6::new(
-                            address,
+                        external_address: SocketAddr::new(
+                            config.nexus_external_address,
                             NEXUS_EXTERNAL_PORT,
-                            0,
-                            0,
                         ),
                     },
                 })

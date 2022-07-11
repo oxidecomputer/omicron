@@ -416,6 +416,9 @@ impl ServiceInner {
                         NexusTypes::ServiceKind::InternalDNS
                     }
                     ServiceType::Oximeter => NexusTypes::ServiceKind::Oximeter,
+                    ServiceType::Dendrite { .. } => {
+                        NexusTypes::ServiceKind::Dendrite
+                    }
                 };
 
                 services.push(NexusTypes::ServicePutRequest {
