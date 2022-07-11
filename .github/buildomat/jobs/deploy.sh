@@ -124,24 +124,26 @@ done
 #
 set +o errexit
 set -o xtrace
+banner evidence
 zoneadm list -civ
-dladm show-phys -m
-dladm show-link
-dladm show-vnic
-ipadm
-netstat -rncva
-netstat -anu
-arp -an
-zfs list
-zpool list
-ptree -z global
-svcs -xv
+pfexec dladm show-phys -m
+pfexec dladm show-link
+pfexec dladm show-vnic
+pfexec ipadm
+pfexec netstat -rncva
+pfexec netstat -anu
+pfexec arp -an
+pfexec zfs list
+pfexec zpool list
+pfexec fmdump -eVp
+pfexec ptree -z global
+pfexec svcs -xv
 for z in $(zoneadm list -n); do
 	banner "${z/oxz_/}"
-	svcs -xv -z $z
-	ptree -z $z
-	zlogin $z ipadm
-	zlogin $z netstat -rncva
-	zlogin $z netstat -anu
-	zlogin $z arp -an
+	pfexec svcs -xv -z $z
+	pfexec ptree -z $z
+	pfexec zlogin $z ipadm
+	pfexec zlogin $z netstat -rncva
+	pfexec zlogin $z netstat -anu
+	pfexec zlogin $z arp -an
 done
