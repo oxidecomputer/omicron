@@ -22,6 +22,7 @@ trap on_exit ERR
 # Parse command line options:
 #
 # -y  Assume "yes" intead of showing confirmation prompts.
+# -p  Skip checking paths
 ASSUME_YES="false"
 SKIP_PATH_CHECK="false"
 while getopts yp flag

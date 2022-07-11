@@ -22,11 +22,13 @@ trap on_exit ERR
 # Parse command line options:
 #
 # -y  Assume "yes" intead of showing confirmation prompts.
+# -p  Skip checking paths (currently unused)
 ASSUME_YES="false"
 while getopts yp flag
 do
   case "${flag}" in
     y) ASSUME_YES="true" ;;
+    p) continue ;;
   esac
 done
 
