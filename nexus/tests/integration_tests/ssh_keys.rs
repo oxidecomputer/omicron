@@ -11,6 +11,9 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_nexus::external_api::params::SshKeyCreate;
 use omicron_nexus::external_api::views::SshKey;
 
+// Note: we use UnprivilegedUser in this test because unlike most tests, all the
+// endpoints here _can_ be accessed by that user and we want to explicitly
+// verify that behavior.
 #[nexus_test]
 async fn test_ssh_keys(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
@@ -28,7 +31,7 @@ async fn test_ssh_keys(cptestctx: &ControlPlaneTestContext) {
         Method::GET,
         "/session/me/sshkeys/nonexistent",
     )
-    .authn_as(AuthnMode::PrivilegedUser)
+    .authn_as(AuthnMode::UnprivilegedUser)
     .execute()
     .await
     .expect("failed to make GET request");
@@ -51,7 +54,7 @@ async fn test_ssh_keys(cptestctx: &ControlPlaneTestContext) {
                 public_key: public_key.to_string(),
             },
         )
-        .authn_as(AuthnMode::PrivilegedUser)
+        .authn_as(AuthnMode::UnprivilegedUser)
         .execute()
         .await
         .expect("failed to make POST request")
@@ -77,7 +80,7 @@ async fn test_ssh_keys(cptestctx: &ControlPlaneTestContext) {
                 public_key: String::from("ssh-test DDDDDDDD"),
             },
         )
-        .authn_as(AuthnMode::PrivilegedUser)
+        .authn_as(AuthnMode::UnprivilegedUser)
         .execute()
         .await
         .expect(
@@ -93,7 +96,7 @@ async fn test_ssh_keys(cptestctx: &ControlPlaneTestContext) {
         client,
         &format!("/session/me/sshkeys/{}", new_keys[0].0),
     )
-    .authn_as(AuthnMode::PrivilegedUser)
+    .authn_as(AuthnMode::UnprivilegedUser)
     .execute()
     .await
     .expect("failed to make GET request")
@@ -129,7 +132,7 @@ async fn test_ssh_keys(cptestctx: &ControlPlaneTestContext) {
         client,
         &format!("/session/me/sshkeys/{}", deleted_key_name),
     )
-    .authn_as(AuthnMode::PrivilegedUser)
+    .authn_as(AuthnMode::UnprivilegedUser)
     .execute()
     .await
     .expect("failed to DELETE key");
@@ -141,7 +144,7 @@ async fn test_ssh_keys(cptestctx: &ControlPlaneTestContext) {
         Method::GET,
         &format!("/session/me/sshkeys/{}", deleted_key_name),
     )
-    .authn_as(AuthnMode::PrivilegedUser)
+    .authn_as(AuthnMode::UnprivilegedUser)
     .execute()
     .await
     .expect("failed to make GET request");
