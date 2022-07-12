@@ -4,18 +4,29 @@
 
 //! Manager for all OPTE ports on a Helios system
 
-use super::BoundaryServices;
-use super::Error;
-use super::Gateway;
-use super::Port;
-use super::Vni;
+use crate::illumos::dladm::Dladm;
 use crate::illumos::dladm::PhysicalLink;
+use crate::illumos::dladm::VnicSource;
+use crate::opte::BoundaryServices;
+use crate::opte::Error;
+use crate::opte::Gateway;
+use crate::opte::Port;
+use crate::opte::Vni;
 use crate::params::ExternalIp;
 use crate::params::NetworkInterface;
 use ipnetwork::IpNetwork;
 use macaddr::MacAddr6;
+use opte::api::IpCidr;
+use opte::api::Ipv4Cidr;
+use opte::api::Ipv4PrefixLen;
+use opte::api::MacAddr;
+use opte::oxide_vpc::api::AddRouterEntryIpv4Req;
+use opte::oxide_vpc::api::RouterTarget;
+use opte::oxide_vpc::api::SNatCfg;
+use opte_ioctl::OpteHdl;
 use slog::debug;
 use slog::info;
+use slog::warn;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::net::IpAddr;
@@ -24,30 +35,13 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::MutexGuard;
 use uuid::Uuid;
-
-cfg_if::cfg_if! {
-    if #[cfg(target_os = "illumos")] {
-        use crate::illumos::dladm::Dladm;
-        use crate::illumos::dladm::VnicSource;
-        use std::sync::MutexGuard;
-        use opte::api::IpCidr;
-        use opte::api::Ipv4Cidr;
-        use opte::api::Ipv4PrefixLen;
-        use opte::api::MacAddr;
-        use opte::oxide_vpc::api::AddRouterEntryIpv4Req;
-        use opte::oxide_vpc::api::RouterTarget;
-        use opte::oxide_vpc::api::SNatCfg;
-        use opte_ioctl::OpteHdl;
-        use slog::warn;
-    }
-}
 
 // Prefix used to identify xde data links.
 const XDE_LINK_PREFIX: &str = "opte";
 
 #[derive(Debug)]
-#[cfg_attr(not(target_os = "illumos"), allow(dead_code))]
 struct PortManagerInner {
     log: Logger,
 
@@ -56,11 +50,15 @@ struct PortManagerInner {
 
     // TODO-remove: This is part of the external IP address workaround
     //
+    // See https://github.com/oxidecomputer/omicron/issues/1335
+    //
     // We only need to know this while we're setting the secondary MACs of the
     // link to support OPTE's proxy ARP for the guest's IP.
     data_link: PhysicalLink,
 
     // TODO-remove: This is part of the external IP address workaround.
+    //
+    // See https://github.com/oxidecomputer/omicron/issues/1335
     //
     // We only need this while OPTE needs to forward traffic to the local
     // gateway. This will be replaced by boundary services.
@@ -89,13 +87,14 @@ impl PortManagerInner {
 
     // TODO-remove
     //
+    // See https://github.com/oxidecomputer/omicron/issues/1335
+    //
     // This is part of the workaround to get external connectivity into
     // instances, without setting up all of boundary services. Rather than
     // encap/decap the guest traffic, OPTE just performs 1-1 NAT between the
     // private IP address of the guest and the external address provided by
     // the control plane. This call here allows the underlay nic, `net0` to
     // advertise as having the guest's MAC address.
-    #[cfg(target_os = "illumos")]
     fn update_secondary_macs(
         &self,
         ports: &mut MutexGuard<'_, BTreeMap<Uuid, Vec<Port>>>,
@@ -174,7 +173,6 @@ impl PortManager {
     }
 
     /// Create an OPTE port for the given guest instance.
-    #[cfg(target_os = "illumos")]
     pub fn create_port(
         &self,
         instance_id: Uuid,
@@ -381,6 +379,8 @@ impl PortManager {
 
         // TODO-remove
         //
+        // See https://github.com/oxidecomputer/omicron/issues/1336
+        //
         // This is another part of the workaround, allowing reply traffic from
         // the guest back out. Normally, OPTE would drop such traffic at the
         // router layer, as it has no route for that external IP address. This
@@ -398,79 +398,10 @@ impl PortManager {
             Ipv4Cidr::new(std::net::Ipv4Addr::UNSPECIFIED.into(), prefix);
         let target = RouterTarget::InternetGateway;
         hdl.add_router_entry_ip4(&AddRouterEntryIpv4Req {
-            port_name: port_name.clone(),
+            port_name,
             dest,
             target,
         })?;
-
-        info!(
-            self.inner.log,
-            "Created OPTE port for guest";
-            "port" => ?&port,
-        );
-        Ok(port)
-    }
-
-    #[cfg(not(target_os = "illumos"))]
-    pub fn create_port(
-        &self,
-        instance_id: Uuid,
-        nic: &NetworkInterface,
-        external_ip: Option<ExternalIp>,
-    ) -> Result<Port, Error> {
-        // TODO-completess: Remove IPv4 restrictions once OPTE supports virtual
-        // IPv6 networks.
-        let _ = match nic.ip {
-            IpAddr::V4(ip) => Ok(ip),
-            IpAddr::V6(_) => Err(Error::InvalidArgument(String::from(
-                "IPv6 is not yet supported for guest interfaces",
-            ))),
-        }?;
-
-        // Argument checking and conversions into OPTE data types.
-        let subnet = IpNetwork::from(nic.subnet);
-        let mac = *nic.mac;
-        let vni = Vni::new(nic.vni).unwrap();
-        let gateway = match subnet {
-            IpNetwork::V4(_) => Gateway::from_subnet(&subnet),
-            IpNetwork::V6(_) => {
-                return Err(Error::InvalidArgument(String::from(
-                    "IPv6 is not yet supported for guest interfaces",
-                )));
-            }
-        };
-        let _ = match gateway.ip {
-            IpAddr::V4(ip) => Ok(ip),
-            IpAddr::V6(_) => Err(Error::InvalidArgument(String::from(
-                "IPv6 is not yet supported for guest interfaces",
-            ))),
-        }?;
-        let boundary_services = BoundaryServices::default();
-        let port_name = self.inner.next_port_name();
-        let vnic = format!("v{}", port_name);
-        let port = {
-            let mut ports = self.inner.ports.lock().unwrap();
-            let ticket = PortTicket::new(instance_id, self.inner.clone());
-            let port = Port::new(
-                ticket,
-                port_name.clone(),
-                nic.ip,
-                subnet,
-                mac,
-                nic.slot,
-                vni,
-                self.inner.underlay_ip,
-                external_ip,
-                gateway,
-                boundary_services,
-                vnic,
-            );
-            ports
-                .entry(instance_id)
-                .or_insert_with(Vec::new)
-                .push(port.clone());
-            port
-        };
 
         info!(
             self.inner.log,
@@ -506,7 +437,7 @@ impl PortTicket {
         Self { id, manager: Some(manager) }
     }
 
-    pub fn release(&mut self) {
+    pub fn release(&mut self) -> Result<(), Error> {
         if let Some(manager) = self.manager.take() {
             let mut ports = manager.ports.lock().unwrap();
             let n_ports = ports.remove(&self.id).map(|p| p.len()).unwrap_or(0);
@@ -516,7 +447,6 @@ impl PortTicket {
                 "instance_id" => ?self.id,
                 "n_ports" => n_ports,
             );
-            #[cfg(target_os = "illumos")]
             if let Err(e) = manager.update_secondary_macs(&mut ports) {
                 warn!(
                     manager.log,
@@ -525,13 +455,19 @@ impl PortTicket {
                     "instance_id" => ?self.id,
                     "err" => ?e,
                 );
+                return Err(e);
+            } else {
+                return Ok(());
             }
         }
+        Ok(())
     }
 }
 
 impl Drop for PortTicket {
     fn drop(&mut self) {
-        self.release();
+        // We're ignoring the value since (1) it's already logged and (2) we
+        // can't do anything with it anyway.
+        let _ = self.release();
     }
 }

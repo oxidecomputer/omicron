@@ -504,6 +504,11 @@ impl Instance {
             )?;
             opte_ports.push(port);
         }
+        // We only acquire and store the first port ticket in the zone.
+        //
+        // The Ports are stored in the manager as a list for each instance. The
+        // tickets point to that entire list, so calling `PortTicket::release`
+        // on any one ticket actually releases every port for the instance.
         let port_ticket = opte_ports.first().map(|port| port.ticket());
 
         // Create a zone for the propolis instance, using the previously
@@ -669,7 +674,7 @@ impl Instance {
 
         // And remove the OPTE ports from the port manager
         if let Some(ticket) = running_state.port_ticket.as_mut() {
-            ticket.release();
+            ticket.release()?;
         }
 
         Ok(())

@@ -292,6 +292,9 @@ impl RunningZone {
                 log: log.new(o!("zone" => zone_name.to_string())),
                 name: zone_name.to_string(),
                 control_vnic,
+                // TODO(https://github.com/oxidecomputer/omicron/issues/725)
+                //
+                // Re-initialize guest_vnic state by inspecting the zone.
                 opte_ports: vec![],
                 physical_nic: None,
             },
