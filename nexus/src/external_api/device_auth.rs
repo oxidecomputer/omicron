@@ -19,6 +19,7 @@ use dropshot::{
 };
 use http::{header, Response, StatusCode};
 use hyper::Body;
+use omicron_common::api::external::InternalContext;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -160,7 +161,9 @@ pub async fn device_auth_confirm(
     let params = params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let &actor = opctx.authn.actor_required()?;
+        let &actor = opctx.authn.actor_required().internal_context(
+            "creating new device auth session for current user",
+        )?;
         let _token = nexus
             .device_auth_request_verify(
                 &opctx,

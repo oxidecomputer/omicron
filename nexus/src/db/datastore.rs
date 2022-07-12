@@ -780,7 +780,10 @@ impl DataStore {
         opctx: &OpContext,
         organization: &params::OrganizationCreate,
     ) -> CreateResult<Organization> {
-        let authz_silo = opctx.authn.silo_required()?;
+        let authz_silo = opctx
+            .authn
+            .silo_required()
+            .internal_context("creating an Organization")?;
         opctx.authorize(authz::Action::CreateChild, &authz_silo).await?;
 
         use db::schema::organization::dsl;
@@ -870,7 +873,10 @@ impl DataStore {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<Organization> {
-        let authz_silo = opctx.authn.silo_required()?;
+        let authz_silo = opctx
+            .authn
+            .silo_required()
+            .internal_context("listing Organizations")?;
         opctx.authorize(authz::Action::ListChildren, &authz_silo).await?;
 
         use db::schema::organization::dsl;
@@ -888,7 +894,10 @@ impl DataStore {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<Organization> {
-        let authz_silo = opctx.authn.silo_required()?;
+        let authz_silo = opctx
+            .authn
+            .silo_required()
+            .internal_context("listing Organizations")?;
         opctx.authorize(authz::Action::ListChildren, &authz_silo).await?;
 
         use db::schema::organization::dsl;
@@ -3381,7 +3390,10 @@ impl DataStore {
         // complicated and more work at runtime work than what we're doing here.
         // The tradeoff is that we're effectively encoding policy here, but it
         // seems worth it in this case.
-        let actor = opctx.authn.actor_required()?;
+        let actor = opctx
+            .authn
+            .actor_required()
+            .internal_context("deleting current user's session")?;
 
         // This check shouldn't be required in that there should be no overlap
         // between silo user ids and other types of identity ids.  But it's easy

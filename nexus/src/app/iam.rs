@@ -13,6 +13,7 @@ use crate::external_api::shared;
 use anyhow::Context;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::UpdateResult;
@@ -62,7 +63,10 @@ impl super::Nexus {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::SiloUser> {
-        let authz_silo = opctx.authn.silo_required()?;
+        let authz_silo = opctx
+            .authn
+            .silo_required()
+            .internal_context("listing current silo's users")?;
         self.db_datastore
             .silo_users_list_by_id(opctx, &authz_silo, pagparams)
             .await

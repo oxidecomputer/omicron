@@ -337,7 +337,11 @@ fn generate_misc_helpers(config: &Config) -> TokenStream {
             ) -> Result<(), Error> {
                 let log = &opctx.log;
 
-                let actor_silo_id = match opctx.authn.silo_or_builtin() {
+                let actor_silo_id = match opctx
+                    .authn
+                    .silo_or_builtin()
+                    .internal_context("siloed resource check")
+                {
                     Ok(Some(silo)) => silo.id(),
                     Ok(None) => {
                         trace!(
