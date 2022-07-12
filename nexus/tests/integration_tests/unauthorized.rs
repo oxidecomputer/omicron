@@ -345,7 +345,8 @@ async fn verify_endpoint(
         Visibility::Protected => StatusCode::NOT_FOUND,
     };
 
-    // For routes with an id param, replace the id param with the setup response if present.
+    // For routes with an id param, replace the id param with the setup response
+    // if present.
     let uri = if endpoint.url.contains("{id}") {
         match setup_response {
             Some(response) => endpoint.url.replace(
@@ -442,7 +443,7 @@ async fn verify_endpoint(
                 None => StatusCode::METHOD_NOT_ALLOWED,
             };
             let response = NexusRequest::new(
-                RequestBuilder::new(client, method.clone(), endpoint.url)
+                RequestBuilder::new(client, method.clone(), &uri)
                     .body(body.as_ref())
                     .expect_status(Some(expected_status)),
             )
