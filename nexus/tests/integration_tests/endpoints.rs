@@ -199,7 +199,7 @@ lazy_static! {
     pub static ref DEMO_INSTANCE_NICS_URL: String =
         format!("{}/network-interfaces", *DEMO_INSTANCE_URL);
     pub static ref DEMO_INSTANCE_SERIAL_URL: String =
-        format!("{}/serial", *DEMO_INSTANCE_URL);
+        format!("{}/serial-console", *DEMO_INSTANCE_URL);
     pub static ref DEMO_INSTANCE_CREATE: params::InstanceCreate =
         params::InstanceCreate {
             identity: IdentityMetadataCreateParams {
@@ -299,7 +299,7 @@ lazy_static! {
     ).unwrap());
     pub static ref DEMO_IP_POOL_RANGES_URL: String = format!("{}/ranges", *DEMO_IP_POOL_URL);
     pub static ref DEMO_IP_POOL_RANGES_ADD_URL: String = format!("{}/add", *DEMO_IP_POOL_RANGES_URL);
-    pub static ref DEMO_IP_POOL_RANGES_DEL_URL: String = format!("{}/delete", *DEMO_IP_POOL_RANGES_URL);
+    pub static ref DEMO_IP_POOL_RANGES_DEL_URL: String = format!("{}/remove", *DEMO_IP_POOL_RANGES_URL);
 
     // Snapshots
     pub static ref DEMO_SNAPSHOT_NAME: Name = "demo-snapshot".parse().unwrap();
@@ -456,7 +456,7 @@ impl AllowedMethod {
 
 lazy_static! {
     pub static ref URL_USERS_DB_INIT: String =
-        format!("/users_builtin/{}", authn::USER_DB_INIT.name);
+        format!("/system/user/{}", authn::USER_DB_INIT.name);
 
     /// List of endpoints to be verified
     pub static ref VERIFY_ENDPOINTS: Vec<VerifyEndpoint> = vec![
@@ -579,6 +579,15 @@ lazy_static! {
                 )
             ],
         },
+
+        VerifyEndpoint {
+            url: "/by-id/organizations/{id}",
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
+
         VerifyEndpoint {
             url: &*DEMO_ORG_URL,
             visibility: Visibility::Protected,
@@ -595,6 +604,7 @@ lazy_static! {
                 ),
             ],
         },
+
         VerifyEndpoint {
             url: &*DEMO_ORG_POLICY_URL,
             visibility: Visibility::Protected,
@@ -630,6 +640,15 @@ lazy_static! {
                 ),
             ],
         },
+
+        VerifyEndpoint {
+            url: "/by-id/projects/{id}",
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
+
         VerifyEndpoint {
             url: &*DEMO_PROJECT_URL,
             visibility: Visibility::Protected,
@@ -646,6 +665,7 @@ lazy_static! {
                 ),
             ],
         },
+
         VerifyEndpoint {
             url: &*DEMO_PROJECT_POLICY_URL,
             visibility: Visibility::Protected,
@@ -670,6 +690,14 @@ lazy_static! {
                 AllowedMethod::Post(
                     serde_json::to_value(&*DEMO_VPC_CREATE).unwrap()
                 ),
+            ],
+        },
+
+        VerifyEndpoint {
+            url: "/by-id/vpcs/{id}",
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Get,
             ],
         },
 
@@ -718,6 +746,14 @@ lazy_static! {
         },
 
         VerifyEndpoint {
+            url: "/by-id/vpc-subnets/{id}",
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
+
+        VerifyEndpoint {
             url: &*DEMO_VPC_SUBNET_URL,
             visibility: Visibility::Protected,
             allowed_methods: vec![
@@ -756,6 +792,14 @@ lazy_static! {
         },
 
         VerifyEndpoint {
+            url: "/by-id/vpc-routers/{id}",
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
+
+        VerifyEndpoint {
             url: &*DEMO_VPC_ROUTER_URL,
             visibility: Visibility::Protected,
             allowed_methods: vec![
@@ -782,6 +826,14 @@ lazy_static! {
                 AllowedMethod::Post(
                     serde_json::to_value(&*DEMO_ROUTER_ROUTE_CREATE).unwrap()
                 ),
+            ],
+        },
+
+        VerifyEndpoint {
+            url: "/by-id/vpc-router-routes/{id}",
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Get,
             ],
         },
 
@@ -817,6 +869,14 @@ lazy_static! {
                 AllowedMethod::Post(
                     serde_json::to_value(&*DEMO_DISK_CREATE).unwrap()
                 ),
+            ],
+        },
+
+        VerifyEndpoint {
+            url: "/by-id/disks/{id}",
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Get,
             ],
         },
 
@@ -873,6 +933,14 @@ lazy_static! {
         },
 
         VerifyEndpoint {
+            url: "/by-id/images/{id}",
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::GetUnimplemented,
+            ],
+        },
+
+        VerifyEndpoint {
             url: &*DEMO_PROJECT_IMAGE_URL,
             visibility: Visibility::Protected,
             allowed_methods: vec![
@@ -893,6 +961,15 @@ lazy_static! {
                 )
             ]
         },
+
+        VerifyEndpoint {
+            url: "/by-id/snapshots/{id}",
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::GetUnimplemented,
+            ],
+        },
+
         VerifyEndpoint {
             url: &*DEMO_SNAPSHOT_URL,
             visibility: Visibility::Protected,
@@ -911,6 +988,14 @@ lazy_static! {
                 AllowedMethod::Post(
                     serde_json::to_value(&*DEMO_INSTANCE_CREATE).unwrap()
                 ),
+            ],
+        },
+
+        VerifyEndpoint {
+            url: "/by-id/instances/{id}",
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Get,
             ],
         },
 
@@ -974,6 +1059,15 @@ lazy_static! {
                 ),
             ],
         },
+
+        VerifyEndpoint {
+            url: "/by-id/network-interfaces/{id}",
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
+
         VerifyEndpoint {
             url: &*DEMO_INSTANCE_NIC_URL,
             visibility: Visibility::Protected,
@@ -1000,7 +1094,7 @@ lazy_static! {
         },
 
         VerifyEndpoint {
-            url: "/users_builtin",
+            url: "/system/user",
             visibility: Visibility::Public,
             allowed_methods: vec![AllowedMethod::Get],
         },
@@ -1078,6 +1172,14 @@ lazy_static! {
                 AllowedMethod::Post(
                     serde_json::to_value(&*DEMO_GLOBAL_IMAGE_CREATE).unwrap()
                 ),
+            ],
+        },
+
+        VerifyEndpoint {
+            url: "/by-id/global-images/{id}",
+            visibility: Visibility::Protected,
+            allowed_methods: vec![
+                AllowedMethod::Get,
             ],
         },
 

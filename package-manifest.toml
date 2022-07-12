@@ -91,10 +91,10 @@ zone = true
 # 3. Use type = "manual" instead of the "prebuilt"
 type = "prebuilt"
 repo = "crucible"
-commit = "8314eeddd228ec0d76cefa40c4a41d3e2611ac18"
+commit = "fed3e8ca7762130ee146fc516a4ef6eed2b91629"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible.sha256.txt
-sha256 = "73ee7befea2d7709fe3baa358abc11faf6922d315a33b26e752363c5abcff91c"
+sha256 = "050c94ff6f21bfcbaa2594f0f11922027822d8617e1a465484f92745d4b0fc12"
 
 # Refer to
 #   https://github.com/oxidecomputer/propolis/blob/master/package/README.md
@@ -105,10 +105,10 @@ zone = true
 [external_package.propolis-server.source]
 type = "prebuilt"
 repo = "propolis"
-commit = "d2b8184d11d5d5f56424fe0bee13ca03d576604e"
+commit = "23a38f4a1df4afcba3905f94ebbf312d0d187c7d"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/propolis/image/<commit>/propolis-server.sha256.txt
-sha256 = "b192fbaaee850e63adaf9f7fe5ff2054a9de338d70198b1d1670285057a047be"
+sha256 = "9c1f23c8db27c6fe114ae05358f76d88a8be803e622ad8d09a6c654692c2ffb8"
 
 [external_package.maghemite]
 service_name = "mg-ddm"
@@ -124,3 +124,20 @@ commit = "2be097ddd1d3fd8e7f56bc0a4bfd696253b11454"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
 sha256 = "94218915ec6fed75dcc81d736bd5e9ef62c9eb651a67a943b297d94d6b390941"
+
+[external_package.dendrite]
+service_name = "dendrite"
+zone = true
+[external_package.dendrite.source]
+# To manually override the package source:
+#
+# 1. Build the zone image manually
+#   1a. cd <dendrite tree>
+#   1b. cargo build --features=<tofino_stub|tofino_asic|softnpu>
+#   1c. cargo xtask dist -o
+# 2. Copy the output zone image from dendrite/out to omicron/out
+# 3. Use type = "manual" instead of the "prebuilt"
+type = "prebuilt"
+repo = "dendrite"
+commit = "e752af977c167fa64625231a74bedcbfa5457008"
+sha256 = "ddb7c271f4d4b68332adc69b32f90e728f07b1395e01cffd7e71230c2c648c63"

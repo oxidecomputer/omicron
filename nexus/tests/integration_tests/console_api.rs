@@ -158,10 +158,18 @@ async fn test_console_pages(cptestctx: &ControlPlaneTestContext) {
 
     let session_token = log_in_and_extract_token(&testctx).await;
 
-    // hit console page with session, should get back HTML response
-    let console_page =
-        RequestBuilder::new(&testctx, Method::GET, "/orgs/irrelevant-path")
-            .header(http::header::COOKIE, session_token)
+    // hit console pages with session, should get back HTML response
+    let console_paths = &[
+        "/",
+        "/orgs/irrelevant-path",
+        "/settings/irrelevant-path",
+        "/device/success",
+        "/device/verify",
+    ];
+
+    for path in console_paths {
+        let console_page = RequestBuilder::new(&testctx, Method::GET, path)
+            .header(http::header::COOKIE, session_token.clone())
             .expect_status(Some(StatusCode::OK))
             .expect_response_header(
                 http::header::CONTENT_TYPE,
@@ -171,7 +179,8 @@ async fn test_console_pages(cptestctx: &ControlPlaneTestContext) {
             .await
             .expect("failed to get console index");
 
-    assert_eq!(console_page.body, "<html></html>".as_bytes());
+        assert_eq!(console_page.body, "<html></html>".as_bytes());
+    }
 }
 
 #[nexus_test]
@@ -221,11 +230,72 @@ async fn test_assets(cptestctx: &ControlPlaneTestContext) {
 
     // existing file is returned
     let resp = RequestBuilder::new(&testctx, Method::GET, "/assets/hello.txt")
+        .expect_status(Some(StatusCode::OK))
         .execute()
         .await
         .expect("failed to get existing file");
 
     assert_eq!(resp.body, "hello there".as_bytes());
+    // make sure we're not including the gzip header on non-gzipped files
+    assert_eq!(resp.headers.get(http::header::CONTENT_ENCODING), None);
+
+    // file in a directory is returned
+    let resp = RequestBuilder::new(
+        &testctx,
+        Method::GET,
+        "/assets/a_directory/another_file.txt",
+    )
+    .expect_status(Some(StatusCode::OK))
+    .execute()
+    .await
+    .expect("failed to get existing file");
+
+    assert_eq!(resp.body, "some words".as_bytes());
+    // make sure we're not including the gzip header on non-gzipped files
+    assert_eq!(resp.headers.get(http::header::CONTENT_ENCODING), None);
+
+    // file with only gzipped version 404s if request doesn't have accept-encoding: gzip
+    let _ = RequestBuilder::new(&testctx, Method::GET, "/assets/gzip-only.txt")
+        .expect_status(Some(StatusCode::NOT_FOUND))
+        .execute()
+        .await
+        .expect("failed to 404 on gzip file without accept-encoding: gzip");
+
+    // file with only gzipped version is returned if request accepts gzip
+    let resp =
+        RequestBuilder::new(&testctx, Method::GET, "/assets/gzip-only.txt")
+            .header(http::header::ACCEPT_ENCODING, "gzip")
+            .expect_status(Some(StatusCode::OK))
+            .expect_response_header(http::header::CONTENT_ENCODING, "gzip")
+            .execute()
+            .await
+            .expect("failed to get existing file");
+
+    assert_eq!(resp.body, "nothing but gzip".as_bytes());
+
+    // file with both gzip and not returns gzipped if request accepts gzip
+    let resp =
+        RequestBuilder::new(&testctx, Method::GET, "/assets/gzip-and-not.txt")
+            .header(http::header::ACCEPT_ENCODING, "gzip")
+            .expect_status(Some(StatusCode::OK))
+            .expect_response_header(http::header::CONTENT_ENCODING, "gzip")
+            .execute()
+            .await
+            .expect("failed to get existing file");
+
+    assert_eq!(resp.body, "pretend this is gzipped beep boop".as_bytes());
+
+    // returns non-gzipped if request doesn't accept gzip
+    let resp =
+        RequestBuilder::new(&testctx, Method::GET, "/assets/gzip-and-not.txt")
+            .expect_status(Some(StatusCode::OK))
+            .execute()
+            .await
+            .expect("failed to get existing file");
+
+    assert_eq!(resp.body, "not gzipped but I know a guy".as_bytes());
+    // make sure we're not including the gzip header on non-gzipped files
+    assert_eq!(resp.headers.get(http::header::CONTENT_ENCODING), None);
 }
 
 #[tokio::test]

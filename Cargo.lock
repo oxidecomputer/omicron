@@ -75,15 +75,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ansi_term"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d52a9bb7ec0cf484c551830a7ce27bd20d67eac647e1befb56b0be4ee39a55d2"
-dependencies = [
- "winapi",
-]
-
-[[package]]
 name = "anyhow"
 version = "1.0.57"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -532,13 +523,9 @@ version = "2.34.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a0610544180c38b88101fecf2dd634b174a62eef6946f84dfc6a7127512b381c"
 dependencies = [
- "ansi_term",
- "atty",
  "bitflags",
- "strsim 0.8.0",
  "textwrap 0.11.0",
  "unicode-width",
- "vec_map",
 ]
 
 [[package]]
@@ -553,7 +540,7 @@ dependencies = [
  "clap_lex",
  "indexmap",
  "once_cell",
- "strsim 0.10.0",
+ "strsim",
  "termcolor",
  "textwrap 0.15.0",
 ]
@@ -823,7 +810,7 @@ dependencies = [
 [[package]]
 name = "crucible"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=8314eeddd228ec0d76cefa40c4a41d3e2611ac18#8314eeddd228ec0d76cefa40c4a41d3e2611ac18"
+source = "git+https://github.com/oxidecomputer/crucible?rev=fed3e8ca7762130ee146fc516a4ef6eed2b91629#fed3e8ca7762130ee146fc516a4ef6eed2b91629"
 dependencies = [
  "aes-gcm-siv",
  "anyhow",
@@ -845,7 +832,6 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "structopt",
  "tokio",
  "tokio-rustls",
  "tokio-util",
@@ -859,7 +845,7 @@ dependencies = [
 [[package]]
 name = "crucible-agent-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=8314eeddd228ec0d76cefa40c4a41d3e2611ac18#8314eeddd228ec0d76cefa40c4a41d3e2611ac18"
+source = "git+https://github.com/oxidecomputer/crucible?rev=fed3e8ca7762130ee146fc516a4ef6eed2b91629#fed3e8ca7762130ee146fc516a4ef6eed2b91629"
 dependencies = [
  "anyhow",
  "chrono",
@@ -874,7 +860,7 @@ dependencies = [
 [[package]]
 name = "crucible-common"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=8314eeddd228ec0d76cefa40c4a41d3e2611ac18#8314eeddd228ec0d76cefa40c4a41d3e2611ac18"
+source = "git+https://github.com/oxidecomputer/crucible?rev=fed3e8ca7762130ee146fc516a4ef6eed2b91629#fed3e8ca7762130ee146fc516a4ef6eed2b91629"
 dependencies = [
  "anyhow",
  "rusqlite",
@@ -892,7 +878,7 @@ dependencies = [
 [[package]]
 name = "crucible-protocol"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=8314eeddd228ec0d76cefa40c4a41d3e2611ac18#8314eeddd228ec0d76cefa40c4a41d3e2611ac18"
+source = "git+https://github.com/oxidecomputer/crucible?rev=fed3e8ca7762130ee146fc516a4ef6eed2b91629#fed3e8ca7762130ee146fc516a4ef6eed2b91629"
 dependencies = [
  "anyhow",
  "bincode",
@@ -1041,7 +1027,7 @@ dependencies = [
  "ident_case",
  "proc-macro2",
  "quote",
- "strsim 0.10.0",
+ "strsim",
  "syn",
 ]
 
@@ -1055,7 +1041,7 @@ dependencies = [
  "ident_case",
  "proc-macro2",
  "quote",
- "strsim 0.10.0",
+ "strsim",
  "syn",
 ]
 
@@ -2265,7 +2251,7 @@ dependencies = [
 [[package]]
 name = "illumos-ddi-dki"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=5764c07#5764c0732a26c6d0e096ce1b8e871b44d8dc79e7"
+source = "git+https://github.com/oxidecomputer/opte?rev=92a3ae21ffd9405a6897b5136410e2b11ee74005#92a3ae21ffd9405a6897b5136410e2b11ee74005"
 dependencies = [
  "illumos-sys-hdrs",
 ]
@@ -2273,7 +2259,7 @@ dependencies = [
 [[package]]
 name = "illumos-sys-hdrs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=5764c07#5764c0732a26c6d0e096ce1b8e871b44d8dc79e7"
+source = "git+https://github.com/oxidecomputer/opte?rev=92a3ae21ffd9405a6897b5136410e2b11ee74005#92a3ae21ffd9405a6897b5136410e2b11ee74005"
 
 [[package]]
 name = "impl-trait-for-tuples"
@@ -3151,6 +3137,9 @@ dependencies = [
  "ring",
  "serde",
  "serde_derive",
+ "slog",
+ "slog-async",
+ "slog-term",
  "smf",
  "tar",
  "tempfile",
@@ -3202,6 +3191,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "serde_with",
  "serial_test",
  "sled-agent-client",
  "slog",
@@ -3364,7 +3354,7 @@ dependencies = [
 [[package]]
 name = "opte"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=5764c07#5764c0732a26c6d0e096ce1b8e871b44d8dc79e7"
+source = "git+https://github.com/oxidecomputer/opte?rev=92a3ae21ffd9405a6897b5136410e2b11ee74005#92a3ae21ffd9405a6897b5136410e2b11ee74005"
 dependencies = [
  "anymap",
  "cfg-if 0.1.10",
@@ -3381,7 +3371,7 @@ dependencies = [
 [[package]]
 name = "opte-ioctl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=5764c07#5764c0732a26c6d0e096ce1b8e871b44d8dc79e7"
+source = "git+https://github.com/oxidecomputer/opte?rev=92a3ae21ffd9405a6897b5136410e2b11ee74005#92a3ae21ffd9405a6897b5136410e2b11ee74005"
 dependencies = [
  "libc",
  "libnet",
@@ -4062,9 +4052,9 @@ checksum = "dbf0c48bc1d91375ae5c3cd81e3722dff1abcf81a30960240640d223f59fe0e5"
 
 [[package]]
 name = "proc-macro2"
-version = "1.0.39"
+version = "1.0.40"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c54b25569025b7fc9651de43004ae593a75ad88543b17178aa5e1b9c4f15f56f"
+checksum = "dd96a1e8ed2596c337f8eae5f24924ec83f5ad5ab21ea8e455d3566c69fbcaf7"
 dependencies = [
  "unicode-ident",
 ]
@@ -4137,7 +4127,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=d2b8184d11d5d5f56424fe0bee13ca03d576604e#d2b8184d11d5d5f56424fe0bee13ca03d576604e"
+source = "git+https://github.com/oxidecomputer/propolis?rev=23a38f4a1df4afcba3905f94ebbf312d0d187c7d#23a38f4a1df4afcba3905f94ebbf312d0d187c7d"
 dependencies = [
  "crucible",
  "reqwest",
@@ -4146,7 +4136,6 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "structopt",
  "thiserror",
  "uuid",
 ]
@@ -4169,9 +4158,9 @@ dependencies = [
 
 [[package]]
 name = "quote"
-version = "1.0.19"
+version = "1.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f53dc8cf16a769a6f677e09e7ff2cd4be1ea0f48754aac39520536962011de0d"
+checksum = "3bcdf212e9776fbcb2d23ab029360416bb1706b1aea2d1a5ba002727cbcab804"
 dependencies = [
  "proc-macro2",
 ]
@@ -5456,12 +5445,6 @@ dependencies = [
 
 [[package]]
 name = "strsim"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ea5119cdb4c55b55d432abb513a0429384878c15dde60cc77b1c99de1a95a6a"
-
-[[package]]
-name = "strsim"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "73473c0e59e6d5812c5dfe2a064a6444949f089e20eec9a2e5506596494e4623"
@@ -5484,30 +5467,6 @@ version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bafede0d0a2f21910f36d47b1558caae3076ed80f6f3ad0fc85a91e6ba7e5938"
 dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "structopt"
-version = "0.3.26"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c6b5c64445ba8094a6ab0c3cd2ad323e07171012d9c98b0b15651daf1787a10"
-dependencies = [
- "clap 2.34.0",
- "lazy_static",
- "structopt-derive",
-]
-
-[[package]]
-name = "structopt-derive"
-version = "0.4.18"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dcb5ae327f9cc13b68763b5749770cb9e048a99bd9dfdfa58d0cf05d5f64afe0"
-dependencies = [
- "heck 0.3.3",
- "proc-macro-error",
  "proc-macro2",
  "quote",
  "syn",
@@ -6366,12 +6325,6 @@ name = "vcpkg"
 version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
-
-[[package]]
-name = "vec_map"
-version = "0.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1bddf1187be692e79c5ffeab891132dfb0f236ed36a43c7ed39f1165ee20191"
 
 [[package]]
 name = "version_check"

@@ -9,9 +9,10 @@ use crate::illumos::vnic::VnicKind;
 use crate::illumos::zfs::{
     Mountpoint, ZONE_ZFS_DATASET, ZONE_ZFS_DATASET_MOUNTPOINT,
 };
+use crate::illumos::zone::IPADM;
 use crate::illumos::{execute, PFEXEC};
 use crate::instance_manager::InstanceManager;
-use crate::nexus::NexusClient;
+use crate::nexus::LazyNexusClient;
 use crate::params::{
     DatasetKind, DiskStateRequested, InstanceHardware, InstanceMigrateParams,
     InstanceRuntimeStateRequested, InstanceSerialConsoleData,
@@ -26,7 +27,7 @@ use omicron_common::api::{
 };
 use slog::Logger;
 use std::net::SocketAddrV6;
-use std::sync::Arc;
+use std::process::Command;
 use uuid::Uuid;
 
 #[cfg(not(test))]
@@ -57,6 +58,12 @@ pub enum Error {
     #[error("Failed to delete VNIC on boot: {0}")]
     DeleteVnic(#[from] crate::illumos::dladm::DeleteVnicError),
 
+    #[error("Failed to remove Omicron address: {0}")]
+    DeleteAddress(#[from] crate::illumos::ExecutionError),
+
+    #[error("Failed to operate on underlay device: {0}")]
+    Underlay(#[from] crate::common::underlay::Error),
+
     #[error(transparent)]
     Services(#[from] crate::services::Error),
 
@@ -80,6 +87,9 @@ pub enum Error {
 
     #[error("Error managing guest networking: {0}")]
     Opte(#[from] crate::opte::Error),
+
+    #[error("Error resolving DNS name: {0}")]
+    ResolveError(#[from] internal_dns_client::multiclient::ResolveError),
 }
 
 impl From<Error> for omicron_common::api::external::Error {
@@ -103,7 +113,7 @@ pub struct SledAgent {
     // Component of Sled Agent responsible for managing Propolis instances.
     instances: InstanceManager,
 
-    nexus_client: Arc<NexusClient>,
+    lazy_nexus_client: LazyNexusClient,
 
     // Other Oxide-controlled services running on this Sled.
     services: ServiceManager,
@@ -114,11 +124,11 @@ impl SledAgent {
     pub async fn new(
         config: &Config,
         log: Logger,
-        nexus_client: Arc<NexusClient>,
+        lazy_nexus_client: LazyNexusClient,
         sled_address: SocketAddrV6,
         rack_id: Uuid,
     ) -> Result<SledAgent, Error> {
-        let id = &config.id;
+        let id = config.id;
 
         // Pass the "parent_log" to all subcomponents that want to set their own
         // "component" value.
@@ -132,8 +142,8 @@ impl SledAgent {
         info!(&log, "created sled agent");
 
         let etherstub =
-            Dladm::create_etherstub().map_err(|e| Error::Etherstub(e))?;
-        let etherstub_vnic = Dladm::create_etherstub_vnic(&etherstub)
+            Dladm::ensure_etherstub().map_err(|e| Error::Etherstub(e))?;
+        let etherstub_vnic = Dladm::ensure_etherstub_vnic(&etherstub)
             .map_err(|e| Error::EtherstubVnic(e))?;
 
         // Before we start creating zones, we need to ensure that the
@@ -197,24 +207,7 @@ impl SledAgent {
         // Note that we don't currently delete the VNICs in any particular
         // order. That should be OK, since we're definitely deleting the guest
         // VNICs before the xde devices, which is the main constraint.
-        let vnics = Dladm::get_vnics()?;
-        stream::iter(vnics)
-            .zip(stream::iter(std::iter::repeat(log.clone())))
-            .map(Ok::<_, crate::illumos::dladm::DeleteVnicError>)
-            .try_for_each_concurrent(None, |(vnic, log)| async {
-                tokio::task::spawn_blocking(move || {
-                    warn!(
-                      log,
-                      "Deleting existing VNIC";
-                        "vnic_name" => &vnic,
-                        "vnic_kind" => ?VnicKind::from_name(&vnic).unwrap(),
-                    );
-                    Dladm::delete_vnic(&vnic)
-                })
-                .await
-                .unwrap()
-            })
-            .await?;
+        delete_omicron_vnics(&log).await?;
 
         // Also delete any extant xde devices. These should also eventually be
         // recovered / tracked, to avoid interruption of any guests that are
@@ -231,6 +224,7 @@ impl SledAgent {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[
             "/usr/sbin/routeadm",
+            // Needed to access all zones, which are on the underlay.
             "-e",
             "ipv6-forwarding",
             "-u",
@@ -239,8 +233,8 @@ impl SledAgent {
 
         let storage = StorageManager::new(
             &parent_log,
-            *id,
-            nexus_client.clone(),
+            id,
+            lazy_nexus_client.clone(),
             etherstub.clone(),
             *sled_address.ip(),
         )
@@ -257,27 +251,28 @@ impl SledAgent {
         }
         let instances = InstanceManager::new(
             parent_log.clone(),
-            nexus_client.clone(),
+            lazy_nexus_client.clone(),
             etherstub.clone(),
             *sled_address.ip(),
+            config.gateway_mac,
         );
+
+        let svc_config = services::Config {
+            gateway_address: config.gateway_address,
+            ..Default::default()
+        };
         let services = ServiceManager::new(
             parent_log.clone(),
             etherstub.clone(),
             etherstub_vnic.clone(),
             *sled_address.ip(),
-            services::Config::default(),
+            svc_config,
+            config.get_link()?,
             rack_id,
         )
         .await?;
 
-        Ok(SledAgent {
-            id: config.id,
-            storage,
-            instances,
-            nexus_client,
-            services,
-        })
+        Ok(SledAgent { id, storage, instances, lazy_nexus_client, services })
     }
 
     pub fn id(&self) -> Uuid {
@@ -341,8 +336,8 @@ impl SledAgent {
         &self,
         artifact: UpdateArtifact,
     ) -> Result<(), Error> {
-        crate::updates::download_artifact(artifact, self.nexus_client.as_ref())
-            .await?;
+        let nexus_client = self.lazy_nexus_client.get().await?;
+        crate::updates::download_artifact(artifact, &nexus_client).await?;
         Ok(())
     }
 
@@ -361,4 +356,90 @@ impl SledAgent {
             .await
             .map_err(Error::from)
     }
+}
+
+// Delete all underlay addresses created directly over the etherstub VNIC used
+// for inter-zone communications.
+fn delete_etherstub_addresses(log: &Logger) -> Result<(), Error> {
+    let prefix = format!("{}/", crate::illumos::dladm::ETHERSTUB_VNIC_NAME);
+    delete_addresses_matching_prefixes(log, &[prefix])
+}
+
+fn delete_underlay_addresses(log: &Logger) -> Result<(), Error> {
+    use crate::illumos::dladm::VnicSource;
+    let prefixes = crate::common::underlay::find_chelsio_links()?
+        .into_iter()
+        .map(|link| format!("{}/", link.name()))
+        .collect::<Vec<_>>();
+    delete_addresses_matching_prefixes(log, &prefixes)
+}
+
+fn delete_addresses_matching_prefixes(
+    log: &Logger,
+    prefixes: &[String],
+) -> Result<(), Error> {
+    use std::io::BufRead;
+    let mut cmd = Command::new(PFEXEC);
+    let cmd = cmd.args(&[IPADM, "show-addr", "-p", "-o", "ADDROBJ"]);
+    let output = execute(cmd)?;
+    for addrobj in output.stdout.lines().flatten() {
+        warn!(
+            log,
+            "Deleting existing Omicron IP address";
+            "addrobj" => addrobj.as_str(),
+        );
+        if prefixes.iter().any(|prefix| addrobj.starts_with(prefix)) {
+            let mut cmd = Command::new(PFEXEC);
+            let cmd = cmd.args(&[IPADM, "delete-addr", addrobj.as_str()]);
+            execute(cmd)?;
+        }
+    }
+    Ok(())
+}
+
+// Delete all VNICs that can be managed by the control plane.
+//
+// These are currently those that match the prefix `ox` or `vopte`.
+async fn delete_omicron_vnics(log: &Logger) -> Result<(), Error> {
+    let vnics = Dladm::get_vnics()?;
+    stream::iter(vnics)
+        .zip(stream::iter(std::iter::repeat(log.clone())))
+        .map(Ok::<_, crate::illumos::dladm::DeleteVnicError>)
+        .try_for_each_concurrent(None, |(vnic, log)| async {
+            tokio::task::spawn_blocking(move || {
+                warn!(
+                  log,
+                  "Deleting existing VNIC";
+                    "vnic_name" => &vnic,
+                    "vnic_kind" => ?VnicKind::from_name(&vnic).unwrap(),
+                );
+                Dladm::delete_vnic(&vnic)
+            })
+            .await
+            .unwrap()
+        })
+        .await?;
+    Ok(())
+}
+
+// Delete the etherstub and underlay VNIC used for interzone communication
+fn delete_etherstub(log: &Logger) -> Result<(), Error> {
+    use crate::illumos::dladm::ETHERSTUB_NAME;
+    use crate::illumos::dladm::ETHERSTUB_VNIC_NAME;
+    warn!(log, "Deleting Omicron underlay VNIC"; "vnic_name" => ETHERSTUB_VNIC_NAME);
+    Dladm::delete_etherstub_vnic()?;
+    warn!(log, "Deleting Omicron etherstub"; "stub_name" => ETHERSTUB_NAME);
+    Dladm::delete_etherstub()?;
+    Ok(())
+}
+
+/// Delete all networking resources installed by the sled agent, in the global
+/// zone.
+pub async fn cleanup_networking_resources(log: &Logger) -> Result<(), Error> {
+    delete_etherstub_addresses(log)?;
+    delete_underlay_addresses(log)?;
+    delete_omicron_vnics(log).await?;
+    delete_etherstub(log)?;
+    crate::opte::delete_all_xde_devices(log)?;
+    Ok(())
 }

@@ -251,6 +251,28 @@ impl<'a> LookupPath<'a> {
         Disk { key: DiskKey::PrimaryKey(Root { lookup_root: self }, id) }
     }
 
+    /// Select a resource of type Image, identified by its id
+    pub fn image_id(self, id: Uuid) -> Image<'a> {
+        Image { key: ImageKey::PrimaryKey(Root { lookup_root: self }, id) }
+    }
+
+    /// Select a resource of type Snapshot, identified by its id
+    pub fn snapshot_id(self, id: Uuid) -> Snapshot<'a> {
+        Snapshot {
+            key: SnapshotKey::PrimaryKey(Root { lookup_root: self }, id),
+        }
+    }
+
+    /// Select a resource of type NetworkInterface, identified by its id
+    pub fn network_interface_id(self, id: Uuid) -> NetworkInterface<'a> {
+        NetworkInterface {
+            key: NetworkInterfaceKey::PrimaryKey(
+                Root { lookup_root: self },
+                id,
+            ),
+        }
+    }
+
     /// Select a resource of type Vpc, identified by its id
     pub fn vpc_id(self, id: Uuid) -> Vpc<'a> {
         Vpc { key: VpcKey::PrimaryKey(Root { lookup_root: self }, id) }
@@ -290,6 +312,40 @@ impl<'a> LookupPath<'a> {
     {
         ConsoleSession {
             key: ConsoleSessionKey::PrimaryKey(
+                Root { lookup_root: self },
+                token.to_string(),
+            ),
+        }
+    }
+
+    /// Select a resource of type DeviceAuthRequest, identified by its `user_code`
+    pub fn device_auth_request<'b, 'c>(
+        self,
+        user_code: &'b str,
+    ) -> DeviceAuthRequest<'c>
+    where
+        'a: 'c,
+        'b: 'c,
+    {
+        DeviceAuthRequest {
+            key: DeviceAuthRequestKey::PrimaryKey(
+                Root { lookup_root: self },
+                user_code.to_string(),
+            ),
+        }
+    }
+
+    /// Select a resource of type DeviceAccessToken, identified by its `token`
+    pub fn device_access_token<'b, 'c>(
+        self,
+        token: &'b str,
+    ) -> DeviceAccessToken<'c>
+    where
+        'a: 'c,
+        'b: 'c,
+    {
+        DeviceAccessToken {
+            key: DeviceAccessTokenKey::PrimaryKey(
                 Root { lookup_root: self },
                 token.to_string(),
             ),
@@ -506,6 +562,24 @@ lookup_resource! {
 }
 
 lookup_resource! {
+    name = "Image",
+    ancestors = [ "Silo", "Organization", "Project" ],
+    children = [],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "Snapshot",
+    ancestors = [ "Silo", "Organization", "Project" ],
+    children = [],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
     name = "Instance",
     ancestors = [ "Silo", "Organization", "Project" ],
     children = [ "NetworkInterface" ],
@@ -563,6 +637,28 @@ lookup_resource! {
 
 lookup_resource! {
     name = "ConsoleSession",
+    ancestors = [],
+    children = [],
+    lookup_by_name = false,
+    soft_deletes = false,
+    primary_key_columns = [
+        { column_name = "token", rust_type = String },
+    ]
+}
+
+lookup_resource! {
+    name = "DeviceAuthRequest",
+    ancestors = [],
+    children = [],
+    lookup_by_name = false,
+    soft_deletes = false,
+    primary_key_columns = [
+        { column_name = "user_code", rust_type = String },
+    ]
+}
+
+lookup_resource! {
+    name = "DeviceAccessToken",
     ancestors = [],
     children = [],
     lookup_by_name = false,

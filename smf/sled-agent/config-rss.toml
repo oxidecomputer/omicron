@@ -56,7 +56,8 @@ gz_addresses = []
 [request.service.service_type]
 type = "nexus"
 internal_address = "[fd00:1122:3344:0101::3]:12221"
-external_address = "[fd00:1122:3344:0101::3]:12220"
+# NOTE: In the lab, use "172.20.15.226"
+external_address = "192.168.1.20:80"
 
 # TODO(https://github.com/oxidecomputer/omicron/issues/732): Nexus
 # should allocate Oximeter services.
@@ -67,3 +68,12 @@ addresses = [ "fd00:1122:3344:0101::4" ]
 gz_addresses = []
 [request.service.service_type]
 type = "oximeter"
+
+[[request.service]]
+id = "a0fe5ebc-9261-6f77-acc1-972481755789"
+name = "dendrite"
+addresses = [ "fd00:1122:3344:0101::9" ]
+gz_addresses = []
+[request.service.service_type]
+type = "dendrite"
+asic = "tofino_stub"

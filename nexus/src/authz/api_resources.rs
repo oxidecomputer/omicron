@@ -239,6 +239,8 @@ impl db::model::DatabaseString for FleetRole {
     }
 }
 
+// TODO: refactor synthetic resources below
+
 /// ConsoleSessionList is a synthetic resource used for modeling who has access
 /// to create sessions.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -421,6 +423,60 @@ impl AuthorizedResource for IpPoolList {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DeviceAuthRequestList;
+/// Singleton representing the [`DeviceAuthRequestList`] itself for authz purposes
+pub const DEVICE_AUTH_REQUEST_LIST: DeviceAuthRequestList =
+    DeviceAuthRequestList;
+
+impl oso::PolarClass for DeviceAuthRequestList {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder()
+            .with_equality_check()
+            .add_attribute_getter("fleet", |_| FLEET)
+    }
+}
+
+impl AuthorizedResource for DeviceAuthRequestList {
+    fn load_roles<'a, 'b, 'c, 'd, 'e, 'f>(
+        &'a self,
+        opctx: &'b OpContext,
+        datastore: &'c DataStore,
+        authn: &'d authn::Context,
+        roleset: &'e mut RoleSet,
+    ) -> futures::future::BoxFuture<'f, Result<(), Error>>
+    where
+        'a: 'f,
+        'b: 'f,
+        'c: 'f,
+        'd: 'f,
+        'e: 'f,
+    {
+        // There are no roles on the DeviceAuthRequestList, only permissions. But we
+        // still need to load the Fleet-related roles to verify that the actor has the
+        // "admin" role on the Fleet.
+        load_roles_for_resource(
+            opctx,
+            datastore,
+            authn,
+            ResourceType::Fleet,
+            *FLEET_ID,
+            roleset,
+        )
+        .boxed()
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+}
+
 // Main resource hierarchy: Organizations, Projects, and their resources
 
 authz_resource! {
@@ -545,6 +601,22 @@ authz_resource! {
 }
 
 authz_resource! {
+    name = "Image",
+    parent = "Project",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = InProject,
+}
+
+authz_resource! {
+    name = "Snapshot",
+    parent = "Project",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = InProject,
+}
+
+authz_resource! {
     name = "Instance",
     parent = "Project",
     primary_key = Uuid,
@@ -598,6 +670,22 @@ authz_resource! {
     name = "ConsoleSession",
     parent = "Fleet",
     primary_key = String,
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}
+
+authz_resource! {
+    name = "DeviceAuthRequest",
+    parent = "Fleet",
+    primary_key = String, // user_code
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}
+
+authz_resource! {
+    name = "DeviceAccessToken",
+    parent = "Fleet",
+    primary_key = String, // token
     roles_allowed = false,
     polar_snippet = FleetChild,
 }

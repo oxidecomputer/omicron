@@ -106,6 +106,7 @@ pub enum ServiceKind {
     InternalDNS,
     Nexus,
     Oximeter,
+    Dendrite,
 }
 
 impl fmt::Display for ServiceKind {
@@ -115,6 +116,7 @@ impl fmt::Display for ServiceKind {
             InternalDNS => "internal_dns",
             Nexus => "nexus",
             Oximeter => "oximeter",
+            Dendrite => "dendrite",
         };
         write!(f, "{}", s)
     }
@@ -129,6 +131,7 @@ impl FromStr for ServiceKind {
             "nexus" => Ok(Nexus),
             "oximeter" => Ok(Oximeter),
             "internal_dns" => Ok(InternalDNS),
+            "dendrite" => Ok(Dendrite),
             _ => Err(Self::Err::InternalError {
                 internal_message: format!("Unknown service kind: {}", s),
             }),

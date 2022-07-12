@@ -25,7 +25,7 @@ use super::error::diesel_pool_result_optional;
 use super::identity::{Asset, Resource};
 use super::pool::DbConnection;
 use super::Pool;
-use crate::authn::{self, Actor};
+use crate::authn;
 use crate::authz::{self, ApiResource};
 use crate::context::OpContext;
 use crate::db::collection_attach::{AttachError, DatastoreAttachTarget};
@@ -4311,12 +4311,18 @@ impl DataStore {
 
     /// Start a device authorization grant flow by recording the request
     /// and initial response parameters.
-    // TODO-security: authz
-    pub async fn device_auth_start(
+    pub async fn device_auth_request_create(
         &self,
         opctx: &OpContext,
         auth_request: DeviceAuthRequest,
     ) -> CreateResult<DeviceAuthRequest> {
+        opctx
+            .authorize(
+                authz::Action::CreateChild,
+                &authz::DEVICE_AUTH_REQUEST_LIST,
+            )
+            .await?;
+
         use db::schema::device_auth_request::dsl;
         diesel::insert_into(dsl::device_auth_request)
             .values(auth_request)
@@ -4326,45 +4332,74 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    /// Look up a device authorization request by `user_code`.
-    // TODO-security: authz
-    pub async fn device_auth_get_request(
+    /// Remove the device authorization request and create a new device
+    /// access token record. The token may already be expired if the flow
+    /// was not completed in time.
+    pub async fn device_access_token_create(
         &self,
         opctx: &OpContext,
-        user_code: String,
-    ) -> LookupResult<DeviceAuthRequest> {
-        use db::schema::device_auth_request::dsl;
-        dsl::device_auth_request
-            .filter(dsl::user_code.eq(user_code))
-            .filter(dsl::time_expires.gt(Utc::now()))
-            .select(DeviceAuthRequest::as_select())
-            .get_result_async(self.pool_authorized(opctx).await?)
+        authz_request: &authz::DeviceAuthRequest,
+        authz_user: &authz::SiloUser,
+        access_token: DeviceAccessToken,
+    ) -> CreateResult<DeviceAccessToken> {
+        assert_eq!(authz_user.id(), access_token.silo_user_id);
+        opctx.authorize(authz::Action::Delete, authz_request).await?;
+        opctx.authorize(authz::Action::CreateChild, authz_user).await?;
+
+        use db::schema::device_auth_request::dsl as request_dsl;
+        let delete_request = diesel::delete(request_dsl::device_auth_request)
+            .filter(request_dsl::user_code.eq(authz_request.id()));
+
+        use db::schema::device_access_token::dsl as token_dsl;
+        let insert_token = diesel::insert_into(token_dsl::device_access_token)
+            .values(access_token)
+            .returning(DeviceAccessToken::as_returning());
+
+        #[derive(Debug)]
+        enum TokenGrantError {
+            RequestNotFound,
+            TooManyRequests,
+        }
+        type TxnError = TransactionError<TokenGrantError>;
+
+        self.pool_authorized(opctx)
+            .await?
+            .transaction(move |conn| match delete_request.execute(conn)? {
+                0 => {
+                    Err(TxnError::CustomError(TokenGrantError::RequestNotFound))
+                }
+                1 => Ok(insert_token.get_result(conn)?),
+                _ => Err(TxnError::CustomError(
+                    TokenGrantError::TooManyRequests,
+                )),
+            })
             .await
-            .map_err(|e| {
-                // TODO-correctness: better error (not found)
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            .map_err(|e| match e {
+                TxnError::CustomError(TokenGrantError::RequestNotFound) => {
+                    Error::ObjectNotFound {
+                        type_name: ResourceType::DeviceAuthRequest,
+                        lookup_type: LookupType::ByCompositeId(
+                            authz_request.id(),
+                        ),
+                    }
+                }
+                TxnError::CustomError(TokenGrantError::TooManyRequests) => {
+                    Error::internal_error("unexpectedly found multiple device auth requests for the same user code")
+                }
+                TxnError::Pool(e) => {
+                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                }
             })
     }
 
-    /// Grant a device authorization token.
-    // TODO-security: authz
-    pub async fn device_auth_grant(
-        &self,
-        opctx: &OpContext,
-        access_token: DeviceAccessToken,
-    ) -> CreateResult<DeviceAccessToken> {
-        use db::schema::device_access_token::dsl;
-        diesel::insert_into(dsl::device_access_token)
-            .values(access_token)
-            .returning(DeviceAccessToken::as_returning())
-            .get_result_async(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
-    }
-
-    /// Look up a granted device authorization token.
-    // TODO-security: authz
-    pub async fn device_auth_get_token(
+    /// Look up a granted device access token.
+    /// Note: since this lookup is not by a primary key or name,
+    /// (though it does use a unique index), it does not fit the
+    /// usual lookup machinery pattern. It therefore does include
+    /// any authz checks. However, the device code is a single-use
+    /// high-entropy random token, and so should not be guessable
+    /// by an attacker.
+    pub async fn device_access_token_fetch(
         &self,
         opctx: &OpContext,
         client_id: Uuid,
@@ -4378,43 +4413,16 @@ impl DataStore {
             .get_result_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                // TODO-correctness: better error (not found)
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::DeviceAccessToken,
+                        LookupType::ByCompositeId(
+                            "client_id, device_code".to_string(),
+                        ),
+                    ),
+                )
             })
-    }
-
-    /// Look up the actor (a Silo user) for whom a token was granted.
-    // TODO-security: authz
-    pub async fn device_access_token_actor(
-        &self,
-        opctx: &OpContext,
-        token: String,
-    ) -> LookupResult<Actor> {
-        use db::schema::device_access_token::dsl;
-        use db::schema::silo_user::dsl as silo_user_dsl;
-
-        let pool = self.pool_authorized(opctx).await?;
-        let token = dsl::device_access_token
-            .filter(dsl::token.eq(token))
-            .select(DeviceAccessToken::as_select())
-            .get_result_async(pool)
-            .await
-            .map_err(|e| {
-                // TODO-correctness: better error (not found)
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
-            })?;
-        let silo_user_id = token.silo_user_id;
-        let silo_id = silo_user_dsl::silo_user
-            .filter(silo_user_dsl::id.eq(silo_user_id))
-            .select(SiloUser::as_select())
-            .get_result_async(pool)
-            .await
-            .map_err(|e| {
-                // TODO-correctness: better error (not found)
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
-            })?
-            .silo_id;
-        Ok(Actor::SiloUser { silo_user_id, silo_id })
     }
 
     // Test interfaces

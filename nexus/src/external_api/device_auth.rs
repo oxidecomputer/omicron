@@ -15,7 +15,7 @@ use crate::context::OpContext;
 use crate::db::model::DeviceAccessToken;
 use crate::ServerContext;
 use dropshot::{
-    endpoint, HttpError, HttpResponseOk, Query, RequestContext, TypedBody,
+    endpoint, HttpError, HttpResponseOk, RequestContext, TypedBody,
 };
 use http::{header, Response, StatusCode};
 use hyper::Body;
@@ -96,7 +96,8 @@ pub async fn device_auth_request(
             },
         };
 
-        let model = nexus.device_auth_request(&opctx, params.client_id).await?;
+        let model =
+            nexus.device_auth_request_create(&opctx, params.client_id).await?;
         build_oauth_response(
             StatusCode::OK,
             &DeviceAuthResponse::from_model(model, host),
@@ -122,11 +123,10 @@ pub struct DeviceAuthVerify {
 #[endpoint {
     method = GET,
     path = "/device/verify",
-    tags = ["hidden"], // "token"
+    unpublished = true,
 }]
 pub async fn device_auth_verify(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    _params: Query<DeviceAuthVerify>,
 ) -> Result<Response<Body>, HttpError> {
     console_index_or_login_redirect(rqctx).await
 }
@@ -165,7 +165,11 @@ pub async fn device_auth_confirm(
             "creating new device auth session for current user",
         )?;
         let _token = nexus
-            .device_auth_verify(&opctx, params.user_code, actor.actor_id())
+            .device_auth_request_verify(
+                &opctx,
+                params.user_code,
+                actor.actor_id(),
+            )
             .await?;
         Ok(HttpResponseOk(()))
     };
@@ -218,7 +222,7 @@ pub async fn device_access_token(
         let opctx = nexus.opctx_external_authn();
         use DeviceAccessTokenResponse::*;
         match nexus
-            .device_access_token_lookup(
+            .device_access_token_fetch(
                 &opctx,
                 params.client_id,
                 params.device_code,

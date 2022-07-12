@@ -85,6 +85,7 @@ impl<'a> RequestBuilder<'a> {
             expected_status: None,
             allowed_headers: Some(vec![
                 http::header::CACHE_CONTROL,
+                http::header::CONTENT_ENCODING,
                 http::header::CONTENT_LENGTH,
                 http::header::CONTENT_TYPE,
                 http::header::DATE,
@@ -426,7 +427,7 @@ where
 }
 
 /// Represents a response from an HTTP server
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TestResponse {
     pub status: http::StatusCode,
     pub headers: http::HeaderMap,

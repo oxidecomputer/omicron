@@ -214,6 +214,18 @@ impl super::Nexus {
         Ok(db_disk)
     }
 
+    pub async fn disk_fetch_by_id(
+        &self,
+        opctx: &OpContext,
+        disk_id: &Uuid,
+    ) -> LookupResult<db::model::Disk> {
+        let (.., db_disk) = LookupPath::new(opctx, &self.db_datastore)
+            .disk_id(*disk_id)
+            .fetch()
+            .await?;
+        Ok(db_disk)
+    }
+
     /// Modifies the runtime state of the Disk as requested.  This generally
     /// means attaching or detaching the disk.
     // TODO(https://github.com/oxidecomputer/omicron/issues/811):
@@ -380,6 +392,18 @@ impl super::Nexus {
         snapshot_name: &Name,
     ) -> LookupResult<db::model::Snapshot> {
         let lookup_type = LookupType::ByName(snapshot_name.to_string());
+        let not_found_error =
+            lookup_type.into_not_found(ResourceType::Snapshot);
+        let unimp = Unimpl::ProtectedLookup(not_found_error);
+        Err(self.unimplemented_todo(opctx, unimp).await)
+    }
+
+    pub async fn snapshot_fetch_by_id(
+        &self,
+        opctx: &OpContext,
+        snapshot_id: &Uuid,
+    ) -> LookupResult<db::model::Snapshot> {
+        let lookup_type = LookupType::ById(*snapshot_id);
         let not_found_error =
             lookup_type.into_not_found(ResourceType::Snapshot);
         let unimp = Unimpl::ProtectedLookup(not_found_error);

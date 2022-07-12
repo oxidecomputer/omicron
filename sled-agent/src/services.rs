@@ -5,7 +5,8 @@
 //! Support for miscellaneous services managed by the sled.
 
 use crate::bootstrap::ddm_admin_client::{DdmAdminClient, DdmError};
-use crate::illumos::dladm::{Etherstub, EtherstubVnic};
+use crate::common::underlay;
+use crate::illumos::dladm::{Etherstub, EtherstubVnic, PhysicalLink};
 use crate::illumos::running_zone::{InstalledZone, RunningZone};
 use crate::illumos::vnic::VnicAllocator;
 use crate::illumos::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
@@ -24,7 +25,7 @@ use omicron_common::postgres_config::PostgresConfigWithUrl;
 use slog::Logger;
 use std::collections::HashSet;
 use std::iter::FromIterator;
-use std::net::{IpAddr, Ipv6Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use tokio::io::AsyncWriteExt;
@@ -70,6 +71,12 @@ pub enum Error {
     #[error("Error contacting ddmd: {0}")]
     DdmError(#[from] DdmError),
 
+    #[error("Failed to access underlay device: {0}")]
+    Underlay(#[from] underlay::Error),
+
+    #[error("Failed to create Vnic for Nexus: {0}")]
+    NexusVnicCreation(crate::illumos::dladm::CreateVnicError),
+
     #[error("Failed to add GZ addresses: {message}: {err}")]
     GzAddress {
         message: String,
@@ -98,13 +105,14 @@ pub fn default_services_config_path() -> PathBuf {
 }
 
 /// Configuration parameters which modify the [`ServiceManager`]'s behavior.
-///
-/// These are typically used to make testing easier; production usage
-/// should generally prefer to use the defaults.
 pub struct Config {
+    /// An optional internet gateway address for external services.
+    pub gateway_address: Option<Ipv4Addr>,
+
     /// The path for the ServiceManager to store information about
     /// all running services.
     pub all_svcs_config_path: PathBuf,
+
     /// A function which returns the path the directory holding the
     /// service's configuration file.
     pub get_svc_config_dir: Box<dyn Fn(&str, &str) -> PathBuf + Send + Sync>,
@@ -113,6 +121,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            gateway_address: None,
             all_svcs_config_path: default_services_config_path(),
             get_svc_config_dir: Box::new(|zone_name: &str, svc_name: &str| {
                 PathBuf::from(ZONE_ZFS_DATASET_MOUNTPOINT)
@@ -129,7 +138,8 @@ pub struct ServiceManager {
     log: Logger,
     config: Config,
     zones: Mutex<Vec<RunningZone>>,
-    vnic_allocator: VnicAllocator,
+    vnic_allocator: VnicAllocator<Etherstub>,
+    physical_link_vnic_allocator: VnicAllocator<PhysicalLink>,
     underlay_vnic: EtherstubVnic,
     underlay_address: Ipv6Addr,
     rack_id: Uuid,
@@ -154,6 +164,7 @@ impl ServiceManager {
         underlay_vnic: EtherstubVnic,
         underlay_address: Ipv6Addr,
         config: Config,
+        physical_link: PhysicalLink,
         rack_id: Uuid,
     ) -> Result<Self, Error> {
         debug!(log, "Creating new ServiceManager");
@@ -163,6 +174,13 @@ impl ServiceManager {
             config,
             zones: Mutex::new(vec![]),
             vnic_allocator: VnicAllocator::new("Service", etherstub),
+            physical_link_vnic_allocator: VnicAllocator::new(
+                "Public",
+                // NOTE: Right now, we only use a connection to one of the Chelsio
+                // links. Longer-term, when we we use OPTE, we'll be able to use both
+                // connections.
+                physical_link,
+            ),
             underlay_vnic,
             underlay_address,
             rack_id,
@@ -244,6 +262,18 @@ impl ServiceManager {
                 info!(self.log, "Service {} does not yet exist", service.name);
             }
 
+            // TODO: Remove once Nexus traffic is transmitted over OPTE.
+            let physical_nic = match service.service_type {
+                ServiceType::Nexus { .. } => {
+                    let vnic = self
+                        .physical_link_vnic_allocator
+                        .new_control(None)
+                        .map_err(|e| Error::NexusVnicCreation(e))?;
+                    Some(vnic)
+                }
+                _ => None,
+            };
+
             let installed_zone = InstalledZone::install(
                 &self.log,
                 &self.vnic_allocator,
@@ -254,8 +284,10 @@ impl ServiceManager {
                 &[],
                 // devices=
                 &[],
-                // vnics=
+                // opte_ports=
                 vec![],
+                // physical_nic=
+                physical_nic,
             )
             .await?;
 
@@ -305,7 +337,7 @@ impl ServiceManager {
                 //
                 // This is currently being used for the DNS service.
                 //
-                // TODO: consider limitng the number of GZ addresses which
+                // TODO: consider limiting the number of GZ addresses which
                 // can be supplied - now that we're actively using it, we
                 // aren't really handling the "many GZ addresses" case, and it
                 // doesn't seem necessary now.
@@ -344,13 +376,38 @@ impl ServiceManager {
                 ServiceType::Nexus { internal_address, external_address } => {
                     info!(self.log, "Setting up Nexus service");
 
+                    // The address of Nexus' external interface is a special
+                    // case; it may be an IPv4 address.
+                    let addr_request =
+                        AddressRequest::new_static(external_address.ip(), None);
+                    running_zone
+                        .ensure_external_address_with_name(
+                            addr_request,
+                            "public",
+                        )
+                        .await?;
+
+                    if let IpAddr::V4(_public_addr4) = external_address.ip() {
+                        // If requested, create a default route back through
+                        // the internet gateway.
+                        if let Some(ref gateway) = self.config.gateway_address {
+                            running_zone
+                                .add_default_route4(*gateway)
+                                .await
+                                .map_err(|err| Error::ZoneCommand {
+                                    intent: "Adding Route".to_string(),
+                                    err,
+                                })?;
+                        }
+                    }
+
                     // Nexus takes a separate config file for parameters which
                     // cannot be known at packaging time.
                     let deployment_config = NexusDeploymentConfig {
                         id: service.id,
                         rack_id: self.rack_id,
                         dropshot_external: ConfigDropshot {
-                            bind_address: SocketAddr::V6(external_address),
+                            bind_address: external_address,
                             request_body_max_bytes: 1048576,
                             ..Default::default()
                         },
@@ -507,6 +564,36 @@ impl ServiceManager {
                             err,
                         })?;
                 }
+                ServiceType::Dendrite { asic } => {
+                    info!(self.log, "Setting up dendrite service");
+                    running_zone
+                        .run_cmd(&[
+                            crate::illumos::zone::SVCCFG,
+                            "-s",
+                            &smf_name,
+                            "setprop",
+                            &format!("config/asic={}", asic),
+                        ])
+                        .map_err(|err| Error::ZoneCommand {
+                            intent: "set dendrite asic type".to_string(),
+                            err,
+                        })?;
+
+                    running_zone
+                        .run_cmd(&[
+                            crate::illumos::zone::SVCCFG,
+                            "-s",
+                            &default_smf_name,
+                            "refresh",
+                        ])
+                        .map_err(|err| Error::ZoneCommand {
+                            intent: format!(
+                                "Refresh SMF manifest {}",
+                                default_smf_name
+                            ),
+                            err,
+                        })?;
+                }
             }
 
             debug!(self.log, "enabling service");
@@ -606,7 +693,7 @@ mod test {
         svc,
         zone::MockZones,
     };
-    use std::net::{Ipv6Addr, SocketAddrV6};
+    use std::net::Ipv6Addr;
     use std::os::unix::process::ExitStatusExt;
     use uuid::Uuid;
 
@@ -635,12 +722,20 @@ mod test {
             assert_eq!(name, EXPECTED_ZONE_NAME);
             Ok(())
         });
+
+        // Ensure the address exists
+        let ensure_address_ctx = MockZones::ensure_address_context();
+        ensure_address_ctx.expect().return_once(|_, _, _| {
+            Ok(ipnetwork::IpNetwork::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 64)
+                .unwrap())
+        });
+
         // Wait for the networking service.
         let wait_ctx = svc::wait_for_service_context();
         wait_ctx.expect().return_once(|_, _| Ok(()));
         // Import the manifest, enable the service
         let execute_ctx = crate::illumos::execute_context();
-        execute_ctx.expect().times(3).returning(|_| {
+        execute_ctx.expect().times(..).returning(|_| {
             Ok(std::process::Output {
                 status: std::process::ExitStatus::from_raw(0),
                 stdout: vec![],
@@ -652,6 +747,7 @@ mod test {
             Box::new(create_vnic_ctx),
             Box::new(install_ctx),
             Box::new(boot_ctx),
+            Box::new(ensure_address_ctx),
             Box::new(wait_ctx),
             Box::new(execute_ctx),
         ]
@@ -665,22 +761,9 @@ mod test {
             services: vec![ServiceRequest {
                 id,
                 name: SVC_NAME.to_string(),
-                addresses: vec![],
+                addresses: vec![Ipv6Addr::LOCALHOST],
                 gz_addresses: vec![],
-                service_type: ServiceType::Nexus {
-                    internal_address: SocketAddrV6::new(
-                        Ipv6Addr::LOCALHOST,
-                        0,
-                        0,
-                        0,
-                    ),
-                    external_address: SocketAddrV6::new(
-                        Ipv6Addr::LOCALHOST,
-                        0,
-                        0,
-                        0,
-                    ),
-                },
+                service_type: ServiceType::Oximeter,
             }],
         })
         .await
@@ -694,22 +777,9 @@ mod test {
             services: vec![ServiceRequest {
                 id,
                 name: SVC_NAME.to_string(),
-                addresses: vec![],
+                addresses: vec![Ipv6Addr::LOCALHOST],
                 gz_addresses: vec![],
-                service_type: ServiceType::Nexus {
-                    internal_address: SocketAddrV6::new(
-                        Ipv6Addr::LOCALHOST,
-                        0,
-                        0,
-                        0,
-                    ),
-                    external_address: SocketAddrV6::new(
-                        Ipv6Addr::LOCALHOST,
-                        0,
-                        0,
-                        0,
-                    ),
-                },
+                service_type: ServiceType::Oximeter,
             }],
         })
         .await
@@ -759,6 +829,7 @@ mod test {
                         svc_config_dir.clone()
                     },
                 ),
+                ..Default::default()
             }
         }
     }
@@ -777,6 +848,7 @@ mod test {
             EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
             Ipv6Addr::LOCALHOST,
             test_config.make_config(),
+            PhysicalLink("link".to_string()),
             Uuid::new_v4(),
         )
         .await
@@ -804,6 +876,7 @@ mod test {
             EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
             Ipv6Addr::LOCALHOST,
             test_config.make_config(),
+            PhysicalLink("link".to_string()),
             Uuid::new_v4(),
         )
         .await
@@ -833,6 +906,7 @@ mod test {
             EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
             Ipv6Addr::LOCALHOST,
             test_config.make_config(),
+            PhysicalLink("link".to_string()),
             Uuid::new_v4(),
         )
         .await
@@ -851,6 +925,7 @@ mod test {
             EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
             Ipv6Addr::LOCALHOST,
             test_config.make_config(),
+            PhysicalLink("link".to_string()),
             Uuid::new_v4(),
         )
         .await
@@ -876,6 +951,7 @@ mod test {
             EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
             Ipv6Addr::LOCALHOST,
             test_config.make_config(),
+            PhysicalLink("link".to_string()),
             Uuid::new_v4(),
         )
         .await
@@ -896,6 +972,7 @@ mod test {
             EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
             Ipv6Addr::LOCALHOST,
             config,
+            PhysicalLink("link".to_string()),
             Uuid::new_v4(),
         )
         .await
