@@ -160,8 +160,8 @@ struct RunningState {
     client: Arc<PropolisClient>,
     // Object representing membership in the "instance manager".
     instance_ticket: InstanceTicket,
-    // Object representing the instance's OPTE ports in the port manager
-    port_ticket: Option<PortTicket>,
+    // Objects representing the instance's OPTE ports in the port manager
+    port_tickets: Option<Vec<PortTicket>>,
     // Handle to task monitoring for Propolis state changes.
     monitor_task: Option<JoinHandle<()>>,
     // Handle to the zone.
@@ -194,7 +194,7 @@ impl Drop for RunningState {
 struct PropolisSetup {
     client: Arc<PropolisClient>,
     running_zone: RunningZone,
-    port_ticket: Option<PortTicket>,
+    port_tickets: Option<Vec<PortTicket>>,
 }
 
 struct InstanceInner {
@@ -301,7 +301,7 @@ impl InstanceInner {
         setup: PropolisSetup,
         migrate: Option<InstanceMigrateParams>,
     ) -> Result<(), Error> {
-        let PropolisSetup { client, running_zone, port_ticket } = setup;
+        let PropolisSetup { client, running_zone, port_tickets } = setup;
 
         let nics = running_zone
             .opte_ports()
@@ -359,7 +359,7 @@ impl InstanceInner {
         self.running_state = Some(RunningState {
             client,
             instance_ticket,
-            port_ticket,
+            port_tickets,
             monitor_task,
             _running_zone: running_zone,
         });
@@ -499,6 +499,7 @@ impl Instance {
     ) -> Result<PropolisSetup, Error> {
         // Create OPTE ports for the instance
         let mut opte_ports = Vec::with_capacity(inner.requested_nics.len());
+        let mut port_tickets = Vec::with_capacity(inner.requested_nics.len());
         for nic in inner.requested_nics.iter() {
             let external_ip =
                 if nic.primary { Some(inner.external_ip) } else { None };
@@ -507,14 +508,9 @@ impl Instance {
                 nic,
                 external_ip,
             )?;
+            port_tickets.push(port.ticket());
             opte_ports.push(port);
         }
-        // We only acquire and store the first port ticket in the zone.
-        //
-        // The Ports are stored in the manager as a list for each instance. The
-        // tickets point to that entire list, so calling `PortTicket::release`
-        // on any one ticket actually releases every port for the instance.
-        let port_ticket = opte_ports.first().map(|port| port.ticket());
 
         // Create a zone for the propolis instance, using the previously
         // configured VNICs.
@@ -644,7 +640,11 @@ impl Instance {
         // don't need to worry about initialization races.
         wait_for_http_server(&inner.log, &client).await?;
 
-        Ok(PropolisSetup { client, running_zone, port_ticket })
+        Ok(PropolisSetup {
+            client,
+            running_zone,
+            port_tickets: Some(port_tickets),
+        })
     }
 
     /// Begins the execution of the instance's service (Propolis).
@@ -678,8 +678,10 @@ impl Instance {
         running_state.instance_ticket.terminate();
 
         // And remove the OPTE ports from the port manager
-        if let Some(ticket) = running_state.port_ticket.as_mut() {
-            ticket.release()?;
+        if let Some(tickets) = running_state.port_tickets.as_mut() {
+            for ticket in tickets.iter_mut() {
+                ticket.release()?;
+            }
         }
 
         Ok(())

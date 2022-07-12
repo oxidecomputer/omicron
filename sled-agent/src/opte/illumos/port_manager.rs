@@ -67,13 +67,8 @@ struct PortManagerInner {
     // IP address of the hosting sled on the underlay.
     underlay_ip: Ipv6Addr,
 
-    // Map of instance ID to list of ports.
-    //
-    // NOTE: By storing all ports in a vector, the ticket mechanism makes the
-    // first dropped port cause the whole vector to be dropped. The remaining
-    // ports' drop impls will still call remove on this map, but there will no
-    // longer be a value with that key.
-    ports: Mutex<BTreeMap<Uuid, Vec<Port>>>,
+    // Map of all ports, keyed on the instance Uuid and the port name.
+    ports: Mutex<BTreeMap<(Uuid, String), Port>>,
 }
 
 impl PortManagerInner {
@@ -97,11 +92,10 @@ impl PortManagerInner {
     // advertise as having the guest's MAC address.
     fn update_secondary_macs(
         &self,
-        ports: &mut MutexGuard<'_, BTreeMap<Uuid, Vec<Port>>>,
+        ports: &mut MutexGuard<'_, BTreeMap<(Uuid, String), Port>>,
     ) -> Result<(), Error> {
         let secondary_macs = ports
             .values()
-            .flatten()
             .filter_map(|port| {
                 // Only advertise Ports with an external address (primary
                 // interface for an instance).
@@ -321,7 +315,11 @@ impl PortManager {
 
         let port = {
             let mut ports = self.inner.ports.lock().unwrap();
-            let ticket = PortTicket::new(instance_id, self.inner.clone());
+            let ticket = PortTicket::new(
+                instance_id,
+                port_name.clone(),
+                self.inner.clone(),
+            );
             let port = Port::new(
                 ticket,
                 port_name.clone(),
@@ -336,10 +334,14 @@ impl PortManager {
                 boundary_services,
                 vnic,
             );
-            ports
-                .entry(instance_id)
-                .or_insert_with(Vec::new)
-                .push(port.clone());
+            let old =
+                ports.insert((instance_id, port_name.clone()), port.clone());
+            assert!(
+                old.is_none(),
+                "Duplicate OPTE port detected: instance_id = {}, port_name = {}",
+                instance_id,
+                &port_name,
+            );
             self.inner.update_secondary_macs(&mut ports)?;
             port
         };
@@ -415,6 +417,7 @@ impl PortManager {
 #[derive(Clone)]
 pub struct PortTicket {
     id: Uuid,
+    port_name: String,
     manager: Option<Arc<PortManagerInner>>,
 }
 
@@ -433,19 +436,23 @@ impl std::fmt::Debug for PortTicket {
 }
 
 impl PortTicket {
-    fn new(id: Uuid, manager: Arc<PortManagerInner>) -> Self {
-        Self { id, manager: Some(manager) }
+    fn new(
+        id: Uuid,
+        port_name: String,
+        manager: Arc<PortManagerInner>,
+    ) -> Self {
+        Self { id, port_name, manager: Some(manager) }
     }
 
     pub fn release(&mut self) -> Result<(), Error> {
         if let Some(manager) = self.manager.take() {
             let mut ports = manager.ports.lock().unwrap();
-            let n_ports = ports.remove(&self.id).map(|p| p.len()).unwrap_or(0);
+            ports.remove(&(self.id, self.port_name.clone()));
             debug!(
                 manager.log,
-                "Removing OPTE ports from manager";
+                "Removing OPTE port from manager";
                 "instance_id" => ?self.id,
-                "n_ports" => n_ports,
+                "port_name" => &self.port_name,
             );
             if let Err(e) = manager.update_secondary_macs(&mut ports) {
                 warn!(
