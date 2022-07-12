@@ -2251,7 +2251,7 @@ dependencies = [
 [[package]]
 name = "illumos-ddi-dki"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=6bc29a925cf328863e4f371bc4bec7a512269314#6bc29a925cf328863e4f371bc4bec7a512269314"
+source = "git+https://github.com/oxidecomputer/opte?rev=92a3ae21ffd9405a6897b5136410e2b11ee74005#92a3ae21ffd9405a6897b5136410e2b11ee74005"
 dependencies = [
  "illumos-sys-hdrs",
 ]
@@ -2259,7 +2259,7 @@ dependencies = [
 [[package]]
 name = "illumos-sys-hdrs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=6bc29a925cf328863e4f371bc4bec7a512269314#6bc29a925cf328863e4f371bc4bec7a512269314"
+source = "git+https://github.com/oxidecomputer/opte?rev=92a3ae21ffd9405a6897b5136410e2b11ee74005#92a3ae21ffd9405a6897b5136410e2b11ee74005"
 
 [[package]]
 name = "impl-trait-for-tuples"
@@ -3137,6 +3137,9 @@ dependencies = [
  "ring",
  "serde",
  "serde_derive",
+ "slog",
+ "slog-async",
+ "slog-term",
  "smf",
  "tar",
  "tempfile",
@@ -3188,6 +3191,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "serde_with",
  "serial_test",
  "sled-agent-client",
  "slog",
@@ -3350,7 +3354,7 @@ dependencies = [
 [[package]]
 name = "opte"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=6bc29a925cf328863e4f371bc4bec7a512269314#6bc29a925cf328863e4f371bc4bec7a512269314"
+source = "git+https://github.com/oxidecomputer/opte?rev=92a3ae21ffd9405a6897b5136410e2b11ee74005#92a3ae21ffd9405a6897b5136410e2b11ee74005"
 dependencies = [
  "anymap",
  "cfg-if 0.1.10",
@@ -3367,7 +3371,7 @@ dependencies = [
 [[package]]
 name = "opte-ioctl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=6bc29a925cf328863e4f371bc4bec7a512269314#6bc29a925cf328863e4f371bc4bec7a512269314"
+source = "git+https://github.com/oxidecomputer/opte?rev=92a3ae21ffd9405a6897b5136410e2b11ee74005#92a3ae21ffd9405a6897b5136410e2b11ee74005"
 dependencies = [
  "libc",
  "libnet",

@@ -33,6 +33,7 @@ reqwest = { version = "0.11.8", default-features = false, features = ["rustls-tl
 schemars = { version = "0.8.10", features = [ "chrono", "uuid1" ] }
 serde = { version = "1.0", features = [ "derive" ] }
 serde_json = "1.0"
+serde_with = "1.14.0"
 sled-agent-client = { path = "../sled-agent-client" }
 slog = { version = "2.5", features = [ "max_level_trace", "release_max_level_debug" ] }
 slog-dtrace = "0.2"
@@ -54,8 +55,8 @@ vsss-rs = { version = "2.0.0-pre2", default-features = false, features = ["std"]
 zone = "0.1"
 
 [target.'cfg(target_os = "illumos")'.dependencies]
-opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "6bc29a925cf328863e4f371bc4bec7a512269314" }
-opte = { git = "https://github.com/oxidecomputer/opte", rev = "6bc29a925cf328863e4f371bc4bec7a512269314", features = [ "api", "std" ] }
+opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "92a3ae21ffd9405a6897b5136410e2b11ee74005" }
+opte = { git = "https://github.com/oxidecomputer/opte", rev = "92a3ae21ffd9405a6897b5136410e2b11ee74005", features = [ "api", "std" ] }
 
 [dev-dependencies]
 expectorate = "1.0.5"

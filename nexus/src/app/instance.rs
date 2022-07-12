@@ -179,6 +179,18 @@ impl super::Nexus {
         Ok(db_instance)
     }
 
+    pub async fn instance_fetch_by_id(
+        &self,
+        opctx: &OpContext,
+        instance_id: &Uuid,
+    ) -> LookupResult<db::model::Instance> {
+        let (.., db_instance) = LookupPath::new(opctx, &self.db_datastore)
+            .instance_id(*instance_id)
+            .fetch()
+            .await?;
+        Ok(db_instance)
+    }
+
     // This operation may only occur on stopped instances, which implies that
     // the attached disks do not have any running "upstairs" process running
     // within the sled.
@@ -771,6 +783,18 @@ impl super::Nexus {
             .project_name(project_name)
             .instance_name(instance_name)
             .network_interface_name(interface_name)
+            .fetch()
+            .await?;
+        Ok(db_interface)
+    }
+
+    pub async fn network_interface_fetch_by_id(
+        &self,
+        opctx: &OpContext,
+        interface_id: &Uuid,
+    ) -> LookupResult<db::model::NetworkInterface> {
+        let (.., db_interface) = LookupPath::new(opctx, &self.db_datastore)
+            .network_interface_id(*interface_id)
             .fetch()
             .await?;
         Ok(db_interface)

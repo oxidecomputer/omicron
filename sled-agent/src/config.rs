@@ -8,12 +8,17 @@ use crate::common::vlan::VlanID;
 use crate::illumos::dladm::{self, Dladm, PhysicalLink};
 use crate::illumos::zpool::ZpoolName;
 use dropshot::ConfigLogging;
+use macaddr::MacAddr6;
 use serde::Deserialize;
+use serde_with::serde_as;
+use serde_with::DisplayFromStr;
+use serde_with::PickFirst;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 /// Configuration for a sled agent
+#[serde_as]
 #[derive(Clone, Debug, Deserialize)]
 pub struct Config {
     /// Unique id for the sled
@@ -27,9 +32,19 @@ pub struct Config {
     /// Optional list of zpools to be used as "discovered disks".
     pub zpools: Option<Vec<ZpoolName>>,
 
-    /// Address of the Internet gateway, which is particularly
+    /// IP address of the Internet gateway, which is particularly
     /// relevant for external-facing services (such as Nexus).
     pub gateway_address: Option<Ipv4Addr>,
+
+    /// MAC address of the internet gateway above. This is used to provide
+    /// external connectivity into guests, by allowing OPTE to forward traffic
+    /// destined for the broader network to the gateway.
+    // This uses the `serde_with` crate's `serde_as` attribute, which tries
+    // each of the listed serialization types (starting with the default) until
+    // one succeeds. This supports deserialization from either an array of u8,
+    // or the display-string representation.
+    #[serde_as(as = "PickFirst<(_, DisplayFromStr)>")]
+    pub gateway_mac: MacAddr6,
 
     /// The data link on which we infer the bootstrap address.
     ///
