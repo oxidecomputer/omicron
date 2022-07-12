@@ -2251,7 +2251,7 @@ dependencies = [
 [[package]]
 name = "illumos-ddi-dki"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=6bc29a925cf328863e4f371bc4bec7a512269314#6bc29a925cf328863e4f371bc4bec7a512269314"
+source = "git+https://github.com/oxidecomputer/opte?rev=92a3ae21ffd9405a6897b5136410e2b11ee74005#92a3ae21ffd9405a6897b5136410e2b11ee74005"
 dependencies = [
  "illumos-sys-hdrs",
 ]
@@ -2259,7 +2259,7 @@ dependencies = [
 [[package]]
 name = "illumos-sys-hdrs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=6bc29a925cf328863e4f371bc4bec7a512269314#6bc29a925cf328863e4f371bc4bec7a512269314"
+source = "git+https://github.com/oxidecomputer/opte?rev=92a3ae21ffd9405a6897b5136410e2b11ee74005#92a3ae21ffd9405a6897b5136410e2b11ee74005"
 
 [[package]]
 name = "impl-trait-for-tuples"
@@ -3137,6 +3137,9 @@ dependencies = [
  "ring",
  "serde",
  "serde_derive",
+ "slog",
+ "slog-async",
+ "slog-term",
  "smf",
  "tar",
  "tempfile",
@@ -3188,6 +3191,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "serde_with",
  "serial_test",
  "sled-agent-client",
  "slog",
@@ -3350,7 +3354,7 @@ dependencies = [
 [[package]]
 name = "opte"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=6bc29a925cf328863e4f371bc4bec7a512269314#6bc29a925cf328863e4f371bc4bec7a512269314"
+source = "git+https://github.com/oxidecomputer/opte?rev=92a3ae21ffd9405a6897b5136410e2b11ee74005#92a3ae21ffd9405a6897b5136410e2b11ee74005"
 dependencies = [
  "anymap",
  "cfg-if 0.1.10",
@@ -3367,7 +3371,7 @@ dependencies = [
 [[package]]
 name = "opte-ioctl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=6bc29a925cf328863e4f371bc4bec7a512269314#6bc29a925cf328863e4f371bc4bec7a512269314"
+source = "git+https://github.com/oxidecomputer/opte?rev=92a3ae21ffd9405a6897b5136410e2b11ee74005#92a3ae21ffd9405a6897b5136410e2b11ee74005"
 dependencies = [
  "libc",
  "libnet",
@@ -4048,9 +4052,9 @@ checksum = "dbf0c48bc1d91375ae5c3cd81e3722dff1abcf81a30960240640d223f59fe0e5"
 
 [[package]]
 name = "proc-macro2"
-version = "1.0.39"
+version = "1.0.40"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c54b25569025b7fc9651de43004ae593a75ad88543b17178aa5e1b9c4f15f56f"
+checksum = "dd96a1e8ed2596c337f8eae5f24924ec83f5ad5ab21ea8e455d3566c69fbcaf7"
 dependencies = [
  "unicode-ident",
 ]
@@ -4154,9 +4158,9 @@ dependencies = [
 
 [[package]]
 name = "quote"
-version = "1.0.19"
+version = "1.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f53dc8cf16a769a6f677e09e7ff2cd4be1ea0f48754aac39520536962011de0d"
+checksum = "3bcdf212e9776fbcb2d23ab029360416bb1706b1aea2d1a5ba002727cbcab804"
 dependencies = [
  "proc-macro2",
 ]

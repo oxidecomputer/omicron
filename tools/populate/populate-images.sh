@@ -1,8 +1,12 @@
 #!/bin/bash
-# Populate an Oxide lab host running Omicron with images from server catacomb.
+# Populate an Oxide host running Omicron with images from server catacomb.
+#
+# Note that the default tunnel IP of `fd00:...` will only be available _after_
+# launching the control plane with `omicron-package install`, since Omicron
+# creates that address.
 
 set -eu
-CATACOMB_TUNNEL="[fd00:1122:3344:101::1]:54321"
+CATACOMB_TUNNEL="${CATACOMB_TUNNEL:-"[fd00:1122:3344:101::1]:54321"}"
 res=0
 echo "Populating debian"
 oxide api /images --method POST --input - <<EOF
