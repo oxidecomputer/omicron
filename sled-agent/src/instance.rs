@@ -25,8 +25,8 @@ use crate::params::{
 use crate::serial::{ByteOffset, SerialConsoleBuffer};
 use anyhow::anyhow;
 use futures::lock::{Mutex, MutexGuard};
-use omicron_common::address::PROPOLIS_PORT;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
+use omicron_common::address::PROPOLIS_PORT;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::backoff;
 use propolis_client::api::DiskRequest;
@@ -550,7 +550,6 @@ impl Instance {
             format!("{}:{}", smf_service_name, instance_name);
         let server_addr = SocketAddr::new(inner.propolis_ip, PROPOLIS_PORT);
 
-
         // We intentionally do not import the service - it is placed under
         // `/var/svc/manifest`, and should automatically be imported by
         // configd.
@@ -618,8 +617,7 @@ impl Instance {
             "setprop",
             &format!(
                 "config/metric_addr=[{}]:{}",
-                metric_addr,
-                NEXUS_INTERNAL_PORT
+                metric_addr, NEXUS_INTERNAL_PORT
             ),
         ])?;
 
