@@ -162,7 +162,8 @@ impl PortManager {
                 boundary_services,
                 vnic,
             );
-            let old = ports.insert((instance_id, port_name), port.clone());
+            let old =
+                ports.insert((instance_id, port_name.clone()), port.clone());
             assert!(
                 old.is_none(),
                 "Duplicate OPTE port detected: instance_id = {}, port_name = {}",
