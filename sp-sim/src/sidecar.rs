@@ -13,8 +13,9 @@ use crate::SimulatedSp;
 use anyhow::Result;
 use async_trait::async_trait;
 use futures::future;
+use gateway_messages::SerializedSize;
+use gateway_messages::SpMessage;
 use gateway_messages::sp_impl::SpHandler;
-use gateway_messages::sp_impl::SpServer;
 use gateway_messages::BulkIgnitionState;
 use gateway_messages::DiscoverResponse;
 use gateway_messages::IgnitionCommand;
@@ -222,7 +223,7 @@ impl Inner {
     }
 
     async fn run(mut self) -> Result<()> {
-        let mut server = SpServer::default();
+        let mut out_buf = [0; SpMessage::MAX_SIZE];
         let mut responsiveness = Responsiveness::Responsive;
         loop {
             select! {
@@ -230,7 +231,7 @@ impl Inner {
                     if let Some((resp, addr)) = server::handle_request(
                         &mut self.handler,
                         recv0,
-                        &mut server,
+                        &mut out_buf,
                         responsiveness,
                         SpPort::One,
                     ).await? {
@@ -242,7 +243,7 @@ impl Inner {
                     if let Some((resp, addr)) = server::handle_request(
                         &mut self.handler,
                         recv1,
-                        &mut server,
+                        &mut out_buf,
                         responsiveness,
                         SpPort::Two,
                     ).await? {

@@ -275,7 +275,11 @@ impl RecvHandler {
                 msg
             }
             Err(err) => {
-                error!(&self.log, "discarding malformed message ({})", err);
+                error!(
+                    &self.log, "discarding malformed message";
+                    "err" => %err,
+                    "raw" => ?buf,
+                );
                 return;
             }
         };

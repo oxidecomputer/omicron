@@ -54,7 +54,7 @@ switch1 = ["switch", 1]
 
 [switch.port.1]
 data_link_addr = "[::]:33201"
-multicast_addr = "[ff15:0:1de::1]:33310"
+multicast_addr = "[ff15:0:1de::1]:11111"
 [switch.port.1.location]
 switch0 = ["sled", 0]
 switch1 = ["sled", 0]
