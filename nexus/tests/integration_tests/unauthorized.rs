@@ -267,9 +267,10 @@ lazy_static! {
             id_routes: vec![],
         },
         // Create a SSH key
-        SetupReq {
+        SetupReq::Post {
             url: &*DEMO_SSHKEYS_URL,
             body: serde_json::to_value(&*DEMO_SSHKEY_CREATE).unwrap(),
+            id_routes: vec![],
         },
     ];
 }
