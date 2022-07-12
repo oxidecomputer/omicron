@@ -1114,9 +1114,9 @@ This is just an example showing why somebody with the "admin" role on a Project 
 
 If you're debugging an authz success that you expected to fail, then there must be a path here that you didn't expect.
 
-==== Check this one common failure mode
+=== Check this one common failure mode
 
-If you're adding a new type of authz resource, you probably had to create a new `authz_resource!` block in `nexus/src/authz/api_resources.rs`.  **Don't forget to update the `make_omicron_oso()` function to register your new class!**  The failure mode here is terrible: the authz checks appear to just not work.  It's not clear why Oso doesn't consider this a fatal error.  See https://github.com/oxidecomputer/omicron/issues/1378[issue#1378].
+If you're adding a new type of authz resource, you probably had to create a new `authz_resource!` block in `nexus/src/authz/api_resources.rs`.  **Don't forget to update the `make_omicron_oso()` function to register your new class!**  The failure mode here is terrible: the authz checks appear to just not work.  See https://github.com/oxidecomputer/omicron/issues/1378[issue#1378].
 
 == Background
 
