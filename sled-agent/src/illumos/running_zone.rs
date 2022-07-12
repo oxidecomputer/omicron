@@ -9,7 +9,7 @@ use crate::illumos::dladm::Etherstub;
 use crate::illumos::svc::wait_for_service;
 use crate::illumos::vnic::{Vnic, VnicAllocator};
 use crate::illumos::zone::{AddressRequest, ZONE_PREFIX};
-use crate::opte::OptePort;
+use crate::opte::Port;
 use ipnetwork::IpNetwork;
 use slog::Logger;
 use std::net::{Ipv4Addr, Ipv6Addr};
@@ -301,7 +301,8 @@ impl RunningZone {
         })
     }
 
-    pub fn get_opte_ports(&self) -> &Vec<OptePort> {
+    /// Return references to the OPTE ports for this zone.
+    pub fn opte_ports(&self) -> &[Port] {
         &self.inner.opte_ports
     }
 }
@@ -348,7 +349,7 @@ pub struct InstalledZone {
     control_vnic: Vnic,
 
     // OPTE devices for the guest network interfaces
-    opte_ports: Vec<OptePort>,
+    opte_ports: Vec<Port>,
 
     // Physical NIC possibly provisioned to the zone.
     // TODO: Remove once Nexus traffic is transmitted over OPTE.
@@ -385,7 +386,7 @@ impl InstalledZone {
         unique_name: Option<&str>,
         datasets: &[zone::Dataset],
         devices: &[zone::Device],
-        opte_ports: Vec<OptePort>,
+        opte_ports: Vec<Port>,
         physical_nic: Option<Vnic>,
     ) -> Result<InstalledZone, InstallZoneError> {
         let control_vnic = vnic_allocator.new_control(None).map_err(|err| {
@@ -401,7 +402,7 @@ impl InstalledZone {
 
         let net_device_names: Vec<String> = opte_ports
             .iter()
-            .map(|port| port.vnic().name().to_string())
+            .map(|port| port.vnic_name().to_string())
             .chain(std::iter::once(control_vnic.name().to_string()))
             .chain(physical_nic.as_ref().map(|vnic| vnic.name().to_string()))
             .collect();
