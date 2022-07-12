@@ -25,9 +25,9 @@ pub struct Snapshot {
     #[diesel(embed)]
     identity: SnapshotIdentity,
 
-    project_id: Uuid,
-    disk_id: Uuid,
-    volume_id: Uuid,
+    pub project_id: Uuid,
+    pub disk_id: Uuid,
+    pub volume_id: Uuid,
 
     #[diesel(column_name = size_bytes)]
     pub size: ByteCount,

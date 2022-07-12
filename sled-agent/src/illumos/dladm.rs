@@ -90,6 +90,18 @@ pub struct SetLinkpropError {
     err: ExecutionError,
 }
 
+/// Errors returned from [`Dladm::reset_linkprop`].
+#[derive(thiserror::Error, Debug)]
+#[error(
+    "Failed to reset link property \"{prop_name}\" on vnic {link_name}: {err}"
+)]
+pub struct ResetLinkpropError {
+    link_name: String,
+    prop_name: String,
+    #[source]
+    err: ExecutionError,
+}
+
 /// The name of a physical datalink.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct PhysicalLink(pub String);
@@ -342,6 +354,28 @@ impl Dladm {
             link_name: vnic.to_string(),
             prop_name: prop_name.to_string(),
             prop_value: prop_value.to_string(),
+            err,
+        })?;
+        Ok(())
+    }
+
+    /// Reset a link property on a VNIC
+    pub fn reset_linkprop(
+        vnic: &str,
+        prop_name: &str,
+    ) -> Result<(), ResetLinkpropError> {
+        let mut command = std::process::Command::new(PFEXEC);
+        let cmd = command.args(&[
+            DLADM,
+            "reset-linkprop",
+            "-t",
+            "-p",
+            prop_name,
+            vnic,
+        ]);
+        execute(cmd).map_err(|err| ResetLinkpropError {
+            link_name: vnic.to_string(),
+            prop_name: prop_name.to_string(),
             err,
         })?;
         Ok(())
