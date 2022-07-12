@@ -26,6 +26,7 @@ use crate::serial::{ByteOffset, SerialConsoleBuffer};
 use anyhow::anyhow;
 use futures::lock::{Mutex, MutexGuard};
 use omicron_common::address::PROPOLIS_PORT;
+use omicron_common::address::NEXUS_INTERNAL_PORT;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::backoff;
 use propolis_client::api::DiskRequest;
@@ -33,7 +34,6 @@ use propolis_client::Client as PropolisClient;
 use slog::Logger;
 use std::net::IpAddr;
 use std::net::SocketAddr;
-use std::str::FromStr;
 use std::sync::Arc;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
@@ -550,9 +550,6 @@ impl Instance {
             format!("{}:{}", smf_service_name, instance_name);
         let server_addr = SocketAddr::new(inner.propolis_ip, PROPOLIS_PORT);
 
-        // TODO: replace with DNS or proper nexus endpoint
-        let ma = IpAddr::from_str("fd00:1122:3344:101::3").unwrap();
-        let metric_addr = SocketAddr::new(ma, 12221);
 
         // We intentionally do not import the service - it is placed under
         // `/var/svc/manifest`, and should automatically be imported by
@@ -607,13 +604,23 @@ impl Instance {
             &format!("config/server_addr={}", server_addr),
         ])?;
 
-        info!(inner.log, "Setting metric address property"; "address" => &metric_addr);
+        let metric_addr = inner.lazy_nexus_client.get_ip().await.unwrap();
+        info!(
+            inner.log,
+            "Setting metric address property address [{}]:{}",
+            metric_addr,
+            NEXUS_INTERNAL_PORT,
+        );
         running_zone.run_cmd(&[
             crate::illumos::zone::SVCCFG,
             "-s",
             &smf_instance_name,
             "setprop",
-            &format!("config/metric_addr={}", metric_addr),
+            &format!(
+                "config/metric_addr=[{}]:{}",
+                metric_addr,
+                NEXUS_INTERNAL_PORT
+            ),
         ])?;
 
         info!(inner.log, "Refreshing instance");
