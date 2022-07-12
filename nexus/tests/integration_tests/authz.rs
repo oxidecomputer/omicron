@@ -270,33 +270,6 @@ async fn test_global_image_read_for_unpriv(
             .expect("failed to make GET request")
             .parsed_body()
             .unwrap();
-
-    // - cannot create a global image - should get 403
-    NexusRequest::new(
-        RequestBuilder::new(client, http::Method::POST, &"/images")
-            .body(Some(&image_create_params))
-            .expect_status(Some(http::StatusCode::FORBIDDEN)),
-    )
-    .authn_as(AuthnMode::SiloUser(new_silo_user_id))
-    .execute()
-    .await
-    .expect("POST request should have failed");
-
-    // - cannot delete a global image - also should get a 404 because the
-    //   unprivileged user cannot see this resource when they're trying to
-    //   delete it
-    NexusRequest::new(
-        RequestBuilder::new(
-            client,
-            http::Method::DELETE,
-            &"/images/alpine-edge",
-        )
-        .expect_status(Some(http::StatusCode::NOT_FOUND)),
-    )
-    .authn_as(AuthnMode::SiloUser(new_silo_user_id))
-    .execute()
-    .await
-    .expect("DELETE request should have failed");
 }
 
 // Test that an authenticated, unprivileged user can list their silo's users
