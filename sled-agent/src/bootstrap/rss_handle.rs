@@ -6,6 +6,7 @@
 
 use super::client as bootstrap_agent_client;
 use super::params::SledAgentRequest;
+use super::trust_quorum::ShareDistribution;
 use crate::rack_setup::config::SetupServiceConfig;
 use crate::rack_setup::service::Service;
 use crate::sp::SpHandle;
@@ -67,6 +68,7 @@ async fn initialize_sled_agent(
     log: &Logger,
     bootstrap_addr: SocketAddrV6,
     request: &SledAgentRequest,
+    trust_quorum_share: Option<ShareDistribution>,
     sp: &Option<SpHandle>,
 ) -> Result<(), bootstrap_agent_client::Error> {
     let client = bootstrap_agent_client::Client::new(
@@ -74,22 +76,24 @@ async fn initialize_sled_agent(
         sp,
         // TODO-cleanup: Creating a bootstrap client requires the list of trust
         // quorum members (as clients should always know the set of possible
-        // servers they can connect to), but `request.trust_quorum_share` is
+        // servers they can connect to), but `trust_quorum_share` is
         // optional for now because we don't yet require trust quorum in all
         // sled-agent deployments. We use `.map_or(&[], ...)` here to pass an
         // empty set of trust quorum members if we're in such a
         // trust-quorum-free deployment. This would cause any sprockets
         // connections to fail with unknown peers, but in a trust-quorum-free
         // deployment we don't actually wrap connections in sprockets.
-        request
-            .trust_quorum_share
+        trust_quorum_share
             .as_ref()
             .map_or(&[], |share| share.member_device_id_certs.as_slice()),
         log.new(o!("BootstrapAgentClient" => bootstrap_addr.to_string())),
     );
 
     let sled_agent_initialize = || async {
-        client.start_sled(request).await.map_err(BackoffError::transient)?;
+        client
+            .start_sled(request, trust_quorum_share.clone())
+            .await
+            .map_err(BackoffError::transient)?;
 
         Ok::<(), BackoffError<bootstrap_agent_client::Error>>(())
     };
@@ -121,7 +125,7 @@ fn rss_channel(
 }
 
 type InnerInitRequest = (
-    Vec<(SocketAddrV6, SledAgentRequest)>,
+    Vec<(SocketAddrV6, SledAgentRequest, Option<ShareDistribution>)>,
     oneshot::Sender<Result<(), String>>,
 );
 
@@ -141,7 +145,11 @@ impl BootstrapAgentHandle {
     /// that failed to initialize).
     pub(crate) async fn initialize_sleds(
         self,
-        requests: Vec<(SocketAddrV6, SledAgentRequest)>,
+        requests: Vec<(
+            SocketAddrV6,
+            SledAgentRequest,
+            Option<ShareDistribution>,
+        )>,
     ) -> Result<(), String> {
         let (tx, rx) = oneshot::channel();
 
@@ -181,21 +189,27 @@ impl BootstrapAgentHandleReceiver {
         // of the initialization requests, allowing them to run concurrently.
         let mut futs = requests
             .into_iter()
-            .map(|(bootstrap_addr, request)| async move {
+            .map(|(bootstrap_addr, request, trust_quorum_share)| async move {
                 info!(
                     log, "Received initialization request from RSS";
                     "request" => ?request,
                     "target_sled" => %bootstrap_addr,
                 );
 
-                initialize_sled_agent(log, bootstrap_addr, &request, sp)
-                    .await
-                    .map_err(|err| {
-                        format!(
-                            "Failed to initialize sled agent at {}: {}",
-                            bootstrap_addr, err
-                        )
-                    })?;
+                initialize_sled_agent(
+                    log,
+                    bootstrap_addr,
+                    &request,
+                    trust_quorum_share,
+                    sp,
+                )
+                .await
+                .map_err(|err| {
+                    format!(
+                        "Failed to initialize sled agent at {}: {}",
+                        bootstrap_addr, err
+                    )
+                })?;
 
                 info!(
                     log, "Initialized sled agent";

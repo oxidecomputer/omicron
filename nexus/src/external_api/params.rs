@@ -599,7 +599,7 @@ impl JsonSchema for BlockSize {
     }
 
     fn json_schema(
-        _gen: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::Schema::Object(schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
@@ -607,9 +607,7 @@ impl JsonSchema for BlockSize {
                 title: Some("disk block size in bytes".to_string()),
                 ..Default::default()
             })),
-            instance_type: Some(schemars::schema::SingleOrVec::Single(
-                Box::new(schemars::schema::InstanceType::Integer),
-            )),
+            instance_type: Some(schemars::schema::InstanceType::Integer.into()),
             enum_values: Some(vec![
                 serde_json::json!(512),
                 serde_json::json!(2048),

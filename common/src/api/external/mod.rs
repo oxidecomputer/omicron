@@ -200,19 +200,19 @@ where
     }
 }
 
-/// Custom JsonSchema implementation to encode the constraints on Name
-// TODO: 1. make this part of schemars w/ rename and maxlen annotations
-// TODO: 2. integrate the regex with `try_from`
+/// Custom JsonSchema implementation to encode the constraints on Name.
 impl JsonSchema for Name {
     fn schema_name() -> String {
         "Name".to_string()
     }
     fn json_schema(
-        _gen: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
-        schemars::schema::Schema::Object(schemars::schema::SchemaObject {
+        schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
-                title: Some("A name used in the API".to_string()),
+                title: Some(
+                    "A name unique within the parent collection".to_string(),
+                ),
                 description: Some(
                     "Names must begin with a lower case ASCII letter, be \
                      composed exclusively of lowercase ASCII, uppercase \
@@ -221,16 +221,15 @@ impl JsonSchema for Name {
                 ),
                 ..Default::default()
             })),
-            instance_type: Some(schemars::schema::SingleOrVec::Single(
-                Box::new(schemars::schema::InstanceType::String),
-            )),
+            instance_type: Some(schemars::schema::InstanceType::String.into()),
             string: Some(Box::new(schemars::schema::StringValidation {
                 max_length: Some(63),
                 min_length: None,
                 pattern: Some("[a-z](|[a-zA-Z0-9-]*[a-zA-Z0-9])".to_string()),
             })),
             ..Default::default()
-        })
+        }
+        .into()
     }
 }
 
@@ -286,14 +285,13 @@ impl RoleName {
     }
 }
 
-/// Custom JsonSchema implementation to encode the constraints on Name
-// TODO see TODOs on Name above
+/// Custom JsonSchema implementation to encode the constraints on RoleName
 impl JsonSchema for RoleName {
     fn schema_name() -> String {
         "RoleName".to_string()
     }
     fn json_schema(
-        _gen: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::Schema::Object(schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
@@ -969,34 +967,46 @@ impl JsonSchema for Ipv4Net {
     fn json_schema(
         _: &mut schemars::gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
-        schemars::schema::Schema::Object(
-            schemars::schema::SchemaObject {
-                metadata: Some(Box::new(schemars::schema::Metadata {
-                    title: Some("An IPv4 subnet".to_string()),
-                    description: Some("An IPv4 subnet, including prefix and subnet mask".to_string()),
-                    examples: vec!["192.168.1.0/24".into()],
-                    ..Default::default()
-                })),
-                instance_type: Some(schemars::schema::SingleOrVec::Single(Box::new(schemars::schema::InstanceType::String))),
-                string: Some(Box::new(schemars::schema::StringValidation {
-                    // Fully-specified IPv4 address. Up to 15 chars for address, plus slash and up to 2 subnet digits.
-                    max_length: Some(18),
-                    min_length: None,
-                    // Addresses must be from an RFC 1918 private address space
-                    pattern: Some(
-                        concat!(
-                            // 10.x.x.x/8
-                            r#"(^(10\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9]\.){2}(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])/(1[0-9]|2[0-8]|[8-9]))$)|"#,
-                            // 172.16.x.x/12
-                            r#"(^(172\.16\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])/(1[2-9]|2[0-8]))$)|"#,
-                            // 192.168.x.x/16
-                            r#"(^(192\.168\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])/(1[6-9]|2[0-8]))$)"#,
-                        ).to_string(),
-                    ),
-                })),
+        schemars::schema::SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                title: Some("An IPv4 subnet".to_string()),
+                description: Some(
+                    "An IPv4 subnet, including prefix and subnet mask"
+                        .to_string(),
+                ),
+                examples: vec!["192.168.1.0/24".into()],
                 ..Default::default()
-            }
-        )
+            })),
+            instance_type: Some(schemars::schema::InstanceType::String.into()),
+            string: Some(Box::new(schemars::schema::StringValidation {
+                // Addresses must be from an RFC 1918 private address space
+                pattern: Some(
+                    concat!(
+                        r#"(^"#,
+                        // 10.x.x.x/8
+                        r#"(10\."#,
+                        r#"(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9]\.){2}"#,
+                        r#"(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])"#,
+                        r#"/(1[0-9]|2[0-8]|[8-9]))$)|"#,
+                        // 172.16.x.x/12
+                        r#"(^(172\.16\."#,
+                        r#"(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])\."#,
+                        r#"(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])"#,
+                        r#"/(1[2-9]|2[0-8]))$)|"#,
+                        // 192.168.x.x/16
+                        r#"(^(192\.168\."#,
+                        r#"(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])\."#,
+                        r#"(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])"#,
+                        r#"/(1[6-9]|2[0-8]))"#,
+                        r#"$)"#,
+                    )
+                    .to_string(),
+                ),
+                ..Default::default()
+            })),
+            ..Default::default()
+        }
+        .into()
     }
 }
 
@@ -1063,30 +1073,34 @@ impl JsonSchema for Ipv6Net {
     fn json_schema(
         _: &mut schemars::gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
-        schemars::schema::Schema::Object(
-            schemars::schema::SchemaObject {
-                metadata: Some(Box::new(schemars::schema::Metadata {
-                    title: Some("An IPv6 subnet".to_string()),
-                    description: Some("An IPv6 subnet, including prefix and subnet mask".to_string()),
-                    examples: vec!["fd12:3456::/64".into()],
-                    ..Default::default()
-                })),
-                instance_type: Some(schemars::schema::SingleOrVec::Single(Box::new(schemars::schema::InstanceType::String))),
-                string: Some(Box::new(schemars::schema::StringValidation {
-                    // Fully-specified IPv6 address. 4 hex chars per segment, 8 segments, 7
-                    // ":"-separators, slash and up to 3 subnet digits
-                    max_length: Some(43),
-                    min_length: None,
-                    pattern: Some(
-                        // Conforming to unique local addressing scheme, `fd00::/8`.
-                        concat!(
-                            r#"^(fd|FD)[0-9a-fA-F]{2}:((([0-9a-fA-F]{1,4}\:){6}[0-9a-fA-F]{1,4})|(([0-9a-fA-F]{1,4}:){1,6}:))/(6[4-9]|[7-9][0-9]|1[0-1][0-9]|12[0-6])$"#,
-                        ).to_string(),
-                    ),
-                })),
+        schemars::schema::SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                title: Some("An IPv6 subnet".to_string()),
+                description: Some(
+                    "An IPv6 subnet, including prefix and subnet mask"
+                        .to_string(),
+                ),
+                examples: vec!["fd12:3456::/64".into()],
                 ..Default::default()
-            }
-        )
+            })),
+            instance_type: Some(schemars::schema::InstanceType::String.into()),
+            string: Some(Box::new(schemars::schema::StringValidation {
+                pattern: Some(
+                    // Conforming to unique local addressing scheme,
+                    // `fd00::/8`.
+                    concat!(
+                        r#"^([fF][dD])[0-9a-fA-F]{2}:("#,
+                        r#"(([0-9a-fA-F]{1,4}:){6}[0-9a-fA-F]{1,4})"#,
+                        r#"|(([0-9a-fA-F]{1,4}:){1,6}:))"#,
+                        r#"/(6[4-9]|[7-9][0-9]|1[0-1][0-9]|12[0-6])$"#,
+                    )
+                    .to_string(),
+                ),
+                ..Default::default()
+            })),
+            ..Default::default()
+        }
+        .into()
     }
 }
 
@@ -1231,19 +1245,13 @@ impl JsonSchema for IpNet {
         gen: &mut schemars::gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::SchemaObject {
-            metadata: Some(
-                schemars::schema::Metadata { ..Default::default() }.into(),
-            ),
-            subschemas: Some(
-                schemars::schema::SubschemaValidation {
-                    one_of: Some(vec![
-                        label_schema("v4", gen.subschema_for::<Ipv4Net>()),
-                        label_schema("v6", gen.subschema_for::<Ipv6Net>()),
-                    ]),
-                    ..Default::default()
-                }
-                .into(),
-            ),
+            subschemas: Some(Box::new(schemars::schema::SubschemaValidation {
+                one_of: Some(vec![
+                    label_schema("v4", gen.subschema_for::<Ipv4Net>()),
+                    label_schema("v6", gen.subschema_for::<Ipv6Net>()),
+                ]),
+                ..Default::default()
+            })),
             ..Default::default()
         }
         .into()
@@ -1630,7 +1638,7 @@ pub struct L4PortRange {
 impl FromStr for L4PortRange {
     type Err = String;
     fn from_str(range: &str) -> Result<Self, Self::Err> {
-        const INVALID_PORT_NUMBER_MSG: &'static str = "invalid port number";
+        const INVALID_PORT_NUMBER_MSG: &str = "invalid port number";
 
         match range.split_once('-') {
             None => {
@@ -1681,7 +1689,7 @@ impl JsonSchema for L4PortRange {
     fn json_schema(
         _: &mut schemars::gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
-        schemars::schema::Schema::Object(schemars::schema::SchemaObject {
+        schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
                 title: Some("A range of IP ports".to_string()),
                 description: Some(
@@ -1692,9 +1700,9 @@ impl JsonSchema for L4PortRange {
                 examples: vec!["22".into(), "6667-7000".into()],
                 ..Default::default()
             })),
-            instance_type: Some(schemars::schema::SingleOrVec::Single(
-                Box::new(schemars::schema::InstanceType::String),
-            )),
+            instance_type: Some(
+                schemars::schema::InstanceType::String.into()
+            ),
             string: Some(Box::new(schemars::schema::StringValidation {
                 max_length: Some(11),  // 5 digits for each port and the dash
                 min_length: Some(1),
@@ -1703,7 +1711,7 @@ impl JsonSchema for L4PortRange {
                 ),
             })),
             ..Default::default()
-        })
+        }.into()
     }
 }
 
@@ -1720,7 +1728,7 @@ impl FromStr for MacAddr {
     type Err = macaddr::ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        s.parse().map(|addr| MacAddr(addr))
+        s.parse().map(MacAddr)
     }
 }
 
@@ -1753,7 +1761,7 @@ impl JsonSchema for MacAddr {
     fn json_schema(
         _: &mut schemars::gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
-        schemars::schema::Schema::Object(schemars::schema::SchemaObject {
+        schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
                 title: Some("A MAC address".to_string()),
                 description: Some(
@@ -1763,9 +1771,7 @@ impl JsonSchema for MacAddr {
                 examples: vec!["ff:ff:ff:ff:ff:ff".into()],
                 ..Default::default()
             })),
-            instance_type: Some(schemars::schema::SingleOrVec::Single(
-                Box::new(schemars::schema::InstanceType::String),
-            )),
+            instance_type: Some(schemars::schema::InstanceType::String.into()),
             string: Some(Box::new(schemars::schema::StringValidation {
                 max_length: Some(17), // 12 hex characters and 5 ":"-separators
                 min_length: Some(17),
@@ -1774,7 +1780,8 @@ impl JsonSchema for MacAddr {
                 ),
             })),
             ..Default::default()
-        })
+        }
+        .into()
     }
 }
 

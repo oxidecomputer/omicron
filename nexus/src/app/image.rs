@@ -71,6 +71,17 @@ impl super::Nexus {
         Err(self.unimplemented_todo(opctx, unimp).await)
     }
 
+    pub async fn project_image_fetch_by_id(
+        &self,
+        opctx: &OpContext,
+        image_id: &Uuid,
+    ) -> LookupResult<db::model::Image> {
+        let lookup_type = LookupType::ById(*image_id);
+        let not_found_error = lookup_type.into_not_found(ResourceType::Image);
+        let unimp = Unimpl::ProtectedLookup(not_found_error);
+        Err(self.unimplemented_todo(opctx, unimp).await)
+    }
+
     pub async fn project_delete_image(
         self: &Arc<Self>,
         opctx: &OpContext,
@@ -291,6 +302,18 @@ impl super::Nexus {
             .fetch()
             .await?;
         Ok(db_disk)
+    }
+
+    pub async fn global_image_fetch_by_id(
+        &self,
+        opctx: &OpContext,
+        global_image_id: &Uuid,
+    ) -> LookupResult<db::model::GlobalImage> {
+        let (.., db_global_image) = LookupPath::new(opctx, &self.db_datastore)
+            .global_image_id(*global_image_id)
+            .fetch()
+            .await?;
+        Ok(db_global_image)
     }
 
     pub async fn global_image_delete(
