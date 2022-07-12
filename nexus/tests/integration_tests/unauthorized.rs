@@ -266,6 +266,12 @@ lazy_static! {
             body: serde_json::to_value(&*SAML_IDENTITY_PROVIDER).unwrap(),
             id_routes: vec![],
         },
+        // Create a SSH key
+        SetupReq::Post {
+            url: &*DEMO_SSHKEYS_URL,
+            body: serde_json::to_value(&*DEMO_SSHKEY_CREATE).unwrap(),
+            id_routes: vec![],
+        },
     ];
 }
 
@@ -339,7 +345,8 @@ async fn verify_endpoint(
         Visibility::Protected => StatusCode::NOT_FOUND,
     };
 
-    // For routes with an id param, replace the id param with the setup response if present.
+    // For routes with an id param, replace the id param with the setup response
+    // if present.
     let uri = if endpoint.url.contains("{id}") {
         match setup_response {
             Some(response) => endpoint.url.replace(
@@ -422,21 +429,31 @@ async fn verify_endpoint(
 
         // First, make an authenticated, unauthorized request.
         info!(log, "test: authenticated, unauthorized"; "method" => ?method);
-        let expected_status = match allowed {
-            Some(_) => unauthz_status,
-            None => StatusCode::METHOD_NOT_ALLOWED,
-        };
-        let response = NexusRequest::new(
-            RequestBuilder::new(client, method.clone(), uri.as_str())
-                .body(body.as_ref())
-                .expect_status(Some(expected_status)),
-        )
-        .authn_as(AuthnMode::UnprivilegedUser)
-        .execute()
-        .await
-        .unwrap();
-        verify_response(&response);
-        record_operation(WhichTest::Unprivileged(&expected_status));
+
+        // Some authz policy states that authenticated users get implicit
+        // privileges for some resources.  Do not test for those here.  They
+        // should be covered in other resource specific tests.  We're only
+        // checking the behavior of cases that get denied in this test.
+        if endpoint.unprivileged_access != UnprivilegedAccess::None {
+            // "This door is opened elsewhere."
+            print!("-");
+        } else {
+            let expected_status = match allowed {
+                Some(_) => unauthz_status,
+                None => StatusCode::METHOD_NOT_ALLOWED,
+            };
+            let response = NexusRequest::new(
+                RequestBuilder::new(client, method.clone(), &uri)
+                    .body(body.as_ref())
+                    .expect_status(Some(expected_status)),
+            )
+            .authn_as(AuthnMode::UnprivilegedUser)
+            .execute()
+            .await
+            .unwrap();
+            verify_response(&response);
+            record_operation(WhichTest::Unprivileged(&expected_status));
+        }
 
         // Next, make an unauthenticated request.
         info!(log, "test: unauthenticated"; "method" => ?method);
