@@ -1724,6 +1724,12 @@ impl JsonSchema for L4PortRange {
 )]
 pub struct MacAddr(pub macaddr::MacAddr6);
 
+impl From<macaddr::MacAddr6> for MacAddr {
+    fn from(mac: macaddr::MacAddr6) -> Self {
+        Self(mac)
+    }
+}
+
 impl FromStr for MacAddr {
     type Err = macaddr::ParseError;
 
