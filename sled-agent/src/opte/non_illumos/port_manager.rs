@@ -185,7 +185,7 @@ impl PortManager {
 #[derive(Clone)]
 pub struct PortTicket {
     id: Uuid,
-    name: String,
+    port_name: String,
     manager: Option<Arc<PortManagerInner>>,
 }
 
