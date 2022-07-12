@@ -4,10 +4,10 @@
 
 //! A single port on the OPTE virtual switch.
 
-use super::port_manager::PortTicket;
-use super::BoundaryServices;
-use super::Gateway;
-use super::Vni;
+use crate::opte::BoundaryServices;
+use crate::opte::Gateway;
+use crate::opte::PortTicket;
+use crate::opte::Vni;
 use crate::params::ExternalIp;
 use ipnetwork::IpNetwork;
 use macaddr::MacAddr6;

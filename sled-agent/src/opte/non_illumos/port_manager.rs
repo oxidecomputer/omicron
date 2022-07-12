@@ -4,12 +4,12 @@
 
 //! Manager for all OPTE ports on a Helios system
 
-use super::BoundaryServices;
-use super::Error;
-use super::Gateway;
-use super::Port;
-use super::Vni;
 use crate::illumos::dladm::PhysicalLink;
+use crate::opte::BoundaryServices;
+use crate::opte::Error;
+use crate::opte::Gateway;
+use crate::opte::Port;
+use crate::opte::Vni;
 use crate::params::ExternalIp;
 use crate::params::NetworkInterface;
 use ipnetwork::IpNetwork;
@@ -151,7 +151,7 @@ impl PortManager {
             let ticket = PortTicket::new(instance_id, self.inner.clone());
             let port = Port::new(
                 ticket,
-                port_name.clone(),
+                port_name,
                 nic.ip,
                 subnet,
                 mac,
