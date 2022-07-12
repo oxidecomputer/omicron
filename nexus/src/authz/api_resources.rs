@@ -601,6 +601,22 @@ authz_resource! {
 }
 
 authz_resource! {
+    name = "Image",
+    parent = "Project",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = InProject,
+}
+
+authz_resource! {
+    name = "Snapshot",
+    parent = "Project",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = InProject,
+}
+
+authz_resource! {
     name = "Instance",
     parent = "Project",
     primary_key = Uuid,

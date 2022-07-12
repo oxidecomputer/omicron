@@ -427,7 +427,7 @@ where
 }
 
 /// Represents a response from an HTTP server
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TestResponse {
     pub status: http::StatusCode,
     pub headers: http::HeaderMap,

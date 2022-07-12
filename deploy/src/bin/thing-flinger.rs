@@ -274,27 +274,27 @@ fn do_install_prereqs(config: &Config) -> Result<()> {
 
     // run install_prereqs on each server
     let builder = &config.servers[&config.builder.server];
-    let build_server = (builder, &config.builder.omicron_path);
-    let all_servers = std::iter::once(build_server).chain(
-        config.servers.iter().filter_map(|(name, server)| {
-            // skip running prereq installing on a deployment target if it is
-            // also the builder, because we're already running it on the builder
-            if *name == config.builder.server {
-                None
-            } else {
-                Some((server, &config.deployment.staging_dir))
-            }
-        }),
+    let all_servers = config
+        .servers
+        .iter()
+        .map(|(_name, server)| (server, &config.deployment.staging_dir));
+
+    // -y: assume yes instead of prompting
+    // -p: skip check that deps end up in $PATH
+    let cmd = format!(
+        "cd {} && mkdir -p out && pfexec ./tools/install_builder_prerequisites.sh -y -p",
+        config.builder.omicron_path.display()
     );
+    println!("install builder prerequisites on {}", builder.addr);
+    ssh_exec(builder, &cmd, false)?;
 
     for (server, root_path) in all_servers {
         // -y: assume yes instead of prompting
-        // -p: skip check that deps end up in $PATH
         let cmd = format!(
-            "cd {} && mkdir -p out && pfexec ./tools/install_prerequisites.sh -y -p",
+            "cd {} && mkdir -p out && pfexec ./tools/install_runner_prerequisites.sh -y",
             root_path.display()
         );
-        println!("install prerequisites on {}", server.addr);
+        println!("install runner prerequisites on {}", server.addr);
         ssh_exec(server, &cmd, false)?;
     }
 

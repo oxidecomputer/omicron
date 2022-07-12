@@ -20,7 +20,7 @@ WORKDIR /usr/src/omicron
 # sudo and path thing are only needed to get prereqs script to run
 ENV PATH=/usr/src/omicron/out/cockroachdb/bin:/usr/src/omicron/out/clickhouse:${PATH} 
 RUN apt-get update && apt-get install -y sudo --no-install-recommends && rm -rf /var/lib/apt/lists/*
-RUN tools/install_prerequisites.sh -y
+RUN tools/install_builder_prerequisites.sh -y
 
 RUN cargo build --release
 
@@ -35,6 +35,7 @@ RUN apt-get update && apt-get install -y \
 	libpq5 \
 	libssl1.1 \
 	libsqlite3-0 \
+	xmlsec1 libxmlsec1-dev libxmlsec1-openssl \
 	--no-install-recommends \
 	&& rm -rf /var/lib/apt/lists/*
 
