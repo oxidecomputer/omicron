@@ -245,6 +245,28 @@ impl<'a> LookupPath<'a> {
         Disk { key: DiskKey::PrimaryKey(Root { lookup_root: self }, id) }
     }
 
+    /// Select a resource of type Image, identified by its id
+    pub fn image_id(self, id: Uuid) -> Image<'a> {
+        Image { key: ImageKey::PrimaryKey(Root { lookup_root: self }, id) }
+    }
+
+    /// Select a resource of type Snapshot, identified by its id
+    pub fn snapshot_id(self, id: Uuid) -> Snapshot<'a> {
+        Snapshot {
+            key: SnapshotKey::PrimaryKey(Root { lookup_root: self }, id),
+        }
+    }
+
+    /// Select a resource of type NetworkInterface, identified by its id
+    pub fn network_interface_id(self, id: Uuid) -> NetworkInterface<'a> {
+        NetworkInterface {
+            key: NetworkInterfaceKey::PrimaryKey(
+                Root { lookup_root: self },
+                id,
+            ),
+        }
+    }
+
     /// Select a resource of type Vpc, identified by its id
     pub fn vpc_id(self, id: Uuid) -> Vpc<'a> {
         Vpc { key: VpcKey::PrimaryKey(Root { lookup_root: self }, id) }
@@ -526,6 +548,24 @@ lookup_resource! {
 
 lookup_resource! {
     name = "Disk",
+    ancestors = [ "Silo", "Organization", "Project" ],
+    children = [],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "Image",
+    ancestors = [ "Silo", "Organization", "Project" ],
+    children = [],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "Snapshot",
     ancestors = [ "Silo", "Organization", "Project" ],
     children = [],
     lookup_by_name = true,
