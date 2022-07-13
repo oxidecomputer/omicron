@@ -389,6 +389,8 @@ has_permission(actor: AuthenticatedActor, "modify", session: ConsoleSession)
 
 has_permission(actor: AuthenticatedActor, "read", device_auth: DeviceAuthRequest)
 	if has_role(actor, "external-authenticator", device_auth.fleet);
+has_permission(actor: AuthenticatedActor, "modify", device_auth: DeviceAuthRequest)
+	if has_role(actor, "external-authenticator", device_auth.fleet);
 has_permission(actor: AuthenticatedActor, "read", device_token: DeviceAccessToken)
 	if has_role(actor, "external-authenticator", device_token.fleet);
 

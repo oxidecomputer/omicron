@@ -4343,7 +4343,6 @@ impl DataStore {
         access_token: DeviceAccessToken,
     ) -> CreateResult<DeviceAccessToken> {
         assert_eq!(authz_user.id(), access_token.silo_user_id);
-        opctx.authorize(authz::Action::Delete, authz_request).await?;
         opctx.authorize(authz::Action::CreateChild, authz_user).await?;
 
         use db::schema::device_auth_request::dsl as request_dsl;

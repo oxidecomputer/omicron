@@ -82,8 +82,9 @@ impl super::Nexus {
         user_code: String,
         silo_user_id: Uuid,
     ) -> CreateResult<DeviceAccessToken> {
+        let authn_opctx = self.opctx_external_authn();
         let (.., authz_request, db_request) =
-            LookupPath::new(opctx, &self.db_datastore)
+            LookupPath::new(&authn_opctx, &self.db_datastore)
                 .device_auth_request(&user_code)
                 .fetch()
                 .await?;
@@ -108,7 +109,7 @@ impl super::Nexus {
             let token = token.expires(db_request.time_expires);
             self.db_datastore
                 .device_access_token_create(
-                    opctx,
+                    &opctx,
                     &authz_request,
                     &authz_user,
                     token,
@@ -121,7 +122,7 @@ impl super::Nexus {
             // TODO-security: set an expiration time for the valid token.
             self.db_datastore
                 .device_access_token_create(
-                    opctx,
+                    &opctx,
                     &authz_request,
                     &authz_user,
                     token,
