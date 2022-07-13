@@ -62,12 +62,12 @@ EOF
 echo "Populating debian-nocloud"
 oxide api /images --method POST --input - <<EOF
 {
-  "name": "debiannc",
-  "description": "debian-nc",
+  "name": "debian-nocloud",
+  "description": "debian nocloud",
   "block_size": 512,
   "distribution": {
-    "name": "debiannc",
-    "version": "11"
+    "name": "debian-nocloud",
+    "version": "nocloud 11"
   },
   "source": {
       "type": "url",
@@ -79,12 +79,12 @@ EOF
 echo "Populating ubuntu-iso"
 oxide api /images --method POST --input - <<EOF
 {
-  "name": "ubuntuiso",
-  "description": "ubuntu-iso",
+  "name": "ubuntu-nocloud-iso",
+  "description": "ubuntu nocloud iso",
   "block_size": 512,
   "distribution": {
-    "name": "ubuntuiso",
-    "version": "22.04"
+    "name": "ubuntu-iso",
+    "version": "iso 22.04"
   },
   "source": {
       "type": "url",
