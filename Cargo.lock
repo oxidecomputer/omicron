@@ -1080,7 +1080,7 @@ dependencies = [
  "heck 0.4.0",
  "proc-macro2",
  "quote",
- "rustfmt-wrapper",
+ "rustfmt-wrapper 0.2.0",
  "serde",
  "serde_tokenstream",
  "syn",
@@ -4099,7 +4099,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "regex",
- "rustfmt-wrapper",
+ "rustfmt-wrapper 0.1.0",
  "schemars",
  "serde",
  "serde_json",
@@ -4550,6 +4550,19 @@ checksum = "7733577fb5b13c8b256232e7ca84aa424f915efae6ec980082d60a03f99da3f8"
 dependencies = [
  "tempfile",
  "thiserror",
+ "toolchain_find",
+]
+
+[[package]]
+name = "rustfmt-wrapper"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ed729e3bee08ec2befd593c27e90ca9fdd25efdc83c94c3b82eaef16e4f7406e"
+dependencies = [
+ "serde",
+ "tempfile",
+ "thiserror",
+ "toml",
  "toolchain_find",
 ]
 
@@ -6093,7 +6106,7 @@ version = "1.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
 dependencies = [
- "cfg-if 0.1.10",
+ "cfg-if 1.0.0",
  "rand 0.8.5",
  "static_assertions",
 ]
@@ -6124,7 +6137,7 @@ dependencies = [
  "log",
  "proc-macro2",
  "quote",
- "rustfmt-wrapper",
+ "rustfmt-wrapper 0.1.0",
  "schemars",
  "serde_json",
  "syn",
