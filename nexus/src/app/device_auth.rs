@@ -82,9 +82,8 @@ impl super::Nexus {
         user_code: String,
         silo_user_id: Uuid,
     ) -> CreateResult<DeviceAccessToken> {
-        let authn_opctx = self.opctx_external_authn();
         let (.., authz_request, db_request) =
-            LookupPath::new(&authn_opctx, &self.db_datastore)
+            LookupPath::new(opctx, &self.db_datastore)
                 .device_auth_request(&user_code)
                 .fetch()
                 .await?;
