@@ -302,14 +302,6 @@
           "lossy": {
             "type": "boolean"
           },
-          "metric_collect": {
-            "nullable": true,
-            "type": "string"
-          },
-          "metric_register": {
-            "nullable": true,
-            "type": "string"
-          },
           "root_cert_pem": {
             "nullable": true,
             "type": "string"

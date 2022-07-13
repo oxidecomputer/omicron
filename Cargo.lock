@@ -810,7 +810,7 @@ dependencies = [
 [[package]]
 name = "crucible"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=fed3e8ca7762130ee146fc516a4ef6eed2b91629#fed3e8ca7762130ee146fc516a4ef6eed2b91629"
+source = "git+https://github.com/oxidecomputer/crucible?rev=2add0de8489f1d4de901bfe98fc28b0a6efcc3ea#2add0de8489f1d4de901bfe98fc28b0a6efcc3ea"
 dependencies = [
  "aes-gcm-siv",
  "anyhow",
@@ -845,7 +845,7 @@ dependencies = [
 [[package]]
 name = "crucible-agent-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=fed3e8ca7762130ee146fc516a4ef6eed2b91629#fed3e8ca7762130ee146fc516a4ef6eed2b91629"
+source = "git+https://github.com/oxidecomputer/crucible?rev=2add0de8489f1d4de901bfe98fc28b0a6efcc3ea#2add0de8489f1d4de901bfe98fc28b0a6efcc3ea"
 dependencies = [
  "anyhow",
  "chrono",
@@ -860,7 +860,7 @@ dependencies = [
 [[package]]
 name = "crucible-common"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=fed3e8ca7762130ee146fc516a4ef6eed2b91629#fed3e8ca7762130ee146fc516a4ef6eed2b91629"
+source = "git+https://github.com/oxidecomputer/crucible?rev=2add0de8489f1d4de901bfe98fc28b0a6efcc3ea#2add0de8489f1d4de901bfe98fc28b0a6efcc3ea"
 dependencies = [
  "anyhow",
  "rusqlite",
@@ -878,7 +878,7 @@ dependencies = [
 [[package]]
 name = "crucible-protocol"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=fed3e8ca7762130ee146fc516a4ef6eed2b91629#fed3e8ca7762130ee146fc516a4ef6eed2b91629"
+source = "git+https://github.com/oxidecomputer/crucible?rev=2add0de8489f1d4de901bfe98fc28b0a6efcc3ea#2add0de8489f1d4de901bfe98fc28b0a6efcc3ea"
 dependencies = [
  "anyhow",
  "bincode",
@@ -4127,7 +4127,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=23a38f4a1df4afcba3905f94ebbf312d0d187c7d#23a38f4a1df4afcba3905f94ebbf312d0d187c7d"
+source = "git+https://github.com/oxidecomputer/propolis?rev=a9399a8007f9876e31ce152848e6ecc2a9e14283"
 dependencies = [
  "crucible",
  "reqwest",
