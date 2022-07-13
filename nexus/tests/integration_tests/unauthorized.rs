@@ -430,14 +430,18 @@ async fn verify_endpoint(
         // First, make an authenticated, unauthorized request.
         info!(log, "test: authenticated, unauthorized"; "method" => ?method);
 
-        // Some authz policy states that authenticated users get implicit
-        // privileges for some resources.  Do not test for those here.  They
-        // should be covered in other resource specific tests.  We're only
-        // checking the behavior of cases that get denied in this test.
-        if endpoint.unprivileged_access != UnprivilegedAccess::None {
-            // "This door is opened elsewhere."
-            print!("-");
-        } else {
+        // This test only verifies the behavior of endpoints that a user
+        // *doesn't* have access to.  Look at what kind of access is expected,
+        // plus what we're trying to do, and decide whether to test it.
+        let do_test_unprivileged = match (endpoint.unprivileged_access, &method)
+        {
+            (UnprivilegedAccess::Full, _) => false,
+            (UnprivilegedAccess::ReadOnly, &Method::GET) => false,
+            (UnprivilegedAccess::ReadOnly, _) => true,
+            (UnprivilegedAccess::None, _) => true,
+        };
+
+        if do_test_unprivileged {
             let expected_status = match allowed {
                 Some(_) => unauthz_status,
                 None => StatusCode::METHOD_NOT_ALLOWED,
@@ -453,6 +457,9 @@ async fn verify_endpoint(
             .unwrap();
             verify_response(&response);
             record_operation(WhichTest::Unprivileged(&expected_status));
+        } else {
+            // "This door is opened elsewhere."
+            print!("-");
         }
 
         // Next, make an unauthenticated request.

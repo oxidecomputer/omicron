@@ -21,79 +21,6 @@ use httptest::{matchers::*, responders::*, Expectation, ServerBuilder};
 
 use uuid::Uuid;
 
-// Test that an authenticated, unprivileged user has full CRUD access to their SSH keys
-#[nexus_test]
-async fn test_ssh_key_crud_for_unpriv(cptestctx: &ControlPlaneTestContext) {
-    let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
-
-    // Create a silo with an unprivileged user
-    let silo =
-        create_silo(&client, "authz", true, shared::UserProvisionType::Fixed)
-            .await;
-
-    let new_silo_user_id = Uuid::new_v4();
-    nexus
-        .silo_user_create(silo.identity.id, new_silo_user_id, "unpriv".into())
-        .await
-        .unwrap();
-
-    let name = "akey";
-    let description = "authz test";
-    let public_key = "AAAAAAAAAAAAAAA";
-
-    // Create a key
-    let _new_key: views::SshKey = NexusRequest::objects_post(
-        client,
-        "/session/me/sshkeys",
-        &params::SshKeyCreate {
-            identity: IdentityMetadataCreateParams {
-                name: name.parse().unwrap(),
-                description: description.to_string(),
-            },
-            public_key: public_key.to_string(),
-        },
-    )
-    .authn_as(AuthnMode::SiloUser(new_silo_user_id))
-    .execute()
-    .await
-    .expect("failed to make POST request")
-    .parsed_body()
-    .unwrap();
-
-    // Fetch that key
-    let _fetched_key: views::SshKey = NexusRequest::object_get(
-        client,
-        &format!("/session/me/sshkeys/{}", name),
-    )
-    .authn_as(AuthnMode::SiloUser(new_silo_user_id))
-    .execute()
-    .await
-    .expect("failed to make GET request")
-    .parsed_body()
-    .unwrap();
-
-    // List keys
-    let _keys: ResultsPage<views::SshKey> =
-        NexusRequest::object_get(client, &"/session/me/sshkeys")
-            .authn_as(AuthnMode::SiloUser(new_silo_user_id))
-            .execute()
-            .await
-            .expect("failed to make GET request")
-            .parsed_body()
-            .unwrap();
-
-    // Delete the key
-    NexusRequest::object_delete(
-        client,
-        &format!("/session/me/sshkeys/{}", name),
-    )
-    .authn_as(AuthnMode::SiloUser(new_silo_user_id))
-    .execute()
-    .await
-    .expect("failed to DELETE key");
-}
-
 // Test that a user cannot read other user's SSH keys
 #[nexus_test]
 async fn test_cannot_read_others_ssh_keys(cptestctx: &ControlPlaneTestContext) {
@@ -270,33 +197,6 @@ async fn test_global_image_read_for_unpriv(
             .expect("failed to make GET request")
             .parsed_body()
             .unwrap();
-
-    // - cannot create a global image - should get 403
-    NexusRequest::new(
-        RequestBuilder::new(client, http::Method::POST, &"/images")
-            .body(Some(&image_create_params))
-            .expect_status(Some(http::StatusCode::FORBIDDEN)),
-    )
-    .authn_as(AuthnMode::SiloUser(new_silo_user_id))
-    .execute()
-    .await
-    .expect("POST request should have failed");
-
-    // - cannot delete a global image - also should get a 404 because the
-    //   unprivileged user cannot see this resource when they're trying to
-    //   delete it
-    NexusRequest::new(
-        RequestBuilder::new(
-            client,
-            http::Method::DELETE,
-            &"/images/alpine-edge",
-        )
-        .expect_status(Some(http::StatusCode::NOT_FOUND)),
-    )
-    .authn_as(AuthnMode::SiloUser(new_silo_user_id))
-    .execute()
-    .await
-    .expect("DELETE request should have failed");
 }
 
 // Test that an authenticated, unprivileged user can list their silo's users
