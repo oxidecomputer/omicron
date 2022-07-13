@@ -21,17 +21,18 @@ impl Context {
 pub fn api() -> dropshot::ApiDescription<Arc<Context>> {
     let mut api = dropshot::ApiDescription::new();
 
-    api.register(dns_records_get).expect("register dns_records_get");
-    api.register(dns_records_set).expect("register dns_records_set");
+    api.register(dns_records_list).expect("register dns_records_get");
+    api.register(dns_records_create).expect("register dns_records_set");
     api.register(dns_records_delete).expect("register dns_records_delete");
     api
 }
 
+// TODO: Should this be paginated? Seems like we might have a lot of records at some point
 #[endpoint(
     method = GET,
-    path = "/get-records",
+    path = "/records",
 )]
-async fn dns_records_get(
+async fn dns_records_list(
     rqctx: Arc<dropshot::RequestContext<Arc<Context>>>,
 ) -> Result<dropshot::HttpResponseOk<Vec<DnsKV>>, dropshot::HttpError> {
     let apictx = rqctx.context();
@@ -43,31 +44,31 @@ async fn dns_records_get(
 }
 
 #[endpoint(
-    method = PUT,
-    path = "/set-records",
+    method = POST,
+    path = "/records",
 )]
-async fn dns_records_set(
+async fn dns_records_create(
     rqctx: Arc<dropshot::RequestContext<Arc<Context>>>,
     rq: dropshot::TypedBody<Vec<DnsKV>>,
-) -> Result<dropshot::HttpResponseOk<()>, dropshot::HttpError> {
+) -> Result<dropshot::HttpResponseUpdatedNoContent, dropshot::HttpError> {
     let apictx = rqctx.context();
     apictx.client.set_records(rq.into_inner()).await.map_err(|e| {
         dropshot::HttpError::for_internal_error(format!("uh oh: {:?}", e))
     })?;
-    Ok(dropshot::HttpResponseOk(()))
+    Ok(dropshot::HttpResponseUpdatedNoContent())
 }
 
 #[endpoint(
-    method = PUT,
-    path = "/delete-records",
+    method = DELETE,
+    path = "/records",
 )]
 async fn dns_records_delete(
     rqctx: Arc<dropshot::RequestContext<Arc<Context>>>,
     rq: dropshot::TypedBody<Vec<DnsRecordKey>>,
-) -> Result<dropshot::HttpResponseOk<()>, dropshot::HttpError> {
+) -> Result<dropshot::HttpResponseDeleted, dropshot::HttpError> {
     let apictx = rqctx.context();
     apictx.client.delete_records(rq.into_inner()).await.map_err(|e| {
         dropshot::HttpError::for_internal_error(format!("uh oh: {:?}", e))
     })?;
-    Ok(dropshot::HttpResponseOk(()))
+    Ok(dropshot::HttpResponseDeleted())
 }

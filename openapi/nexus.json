@@ -527,19 +527,8 @@
           "required": true
         },
         "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "title": "Null",
-                  "type": "string",
-                  "enum": [
-                    null
-                  ]
-                }
-              }
-            }
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -6163,7 +6152,7 @@
         }
       }
     },
-    "/silos/{silo_name}/identity_providers": {
+    "/silos/{silo_name}/identity-providers": {
       "get": {
         "tags": [
           "silos"
@@ -6319,7 +6308,7 @@
         }
       }
     },
-    "/silos/{silo_name}/saml_identity_providers": {
+    "/silos/{silo_name}/saml-identity-providers": {
       "post": {
         "tags": [
           "silos"
@@ -6368,7 +6357,7 @@
         }
       }
     },
-    "/silos/{silo_name}/saml_identity_providers/{provider_name}": {
+    "/silos/{silo_name}/saml-identity-providers/{provider_name}": {
       "get": {
         "tags": [
           "silos"

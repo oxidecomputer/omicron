@@ -97,7 +97,7 @@ fn test_unauthorized_coverage() {
                 spec_operations.remove(&op);
             } else {
                 unexpected_endpoints
-                    .push_str(&format!("{:6} {:?}", method_string, v.url));
+                    .push_str(&format!("{:6} {:?}\n", method_string, v.url));
             }
         }
     }
