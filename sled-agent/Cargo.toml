@@ -55,8 +55,8 @@ vsss-rs = { version = "2.0.0-pre2", default-features = false, features = ["std"]
 zone = "0.1"
 
 [target.'cfg(target_os = "illumos")'.dependencies]
-opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "92a3ae21ffd9405a6897b5136410e2b11ee74005" }
-opte = { git = "https://github.com/oxidecomputer/opte", rev = "92a3ae21ffd9405a6897b5136410e2b11ee74005", features = [ "api", "std" ] }
+opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "eb9e0c687e3c072dbc7d4782475f4ba5a6f50258" }
+opte = { git = "https://github.com/oxidecomputer/opte", rev = "eb9e0c687e3c072dbc7d4782475f4ba5a6f50258", features = [ "api", "std" ] }
 
 [dev-dependencies]
 expectorate = "1.0.5"
