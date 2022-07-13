@@ -169,6 +169,10 @@ impl TryFrom<String> for Name {
             return Err(String::from("name cannot end with \"-\""));
         }
 
+        if Uuid::parse_str(&value).is_ok() {
+            return Err(String::from("name cannot be a UUID to avoid ambiguity with ids"));
+        }
+
         Ok(Name(value))
     }
 }
@@ -1976,6 +1980,10 @@ mod test {
                 "name contains invalid character: \"\u{00e9}\" (allowed \
                  characters are lowercase ASCII, digits, and \"-\")",
             ),
+            (
+                "a7e55044-10b1-426f-9247-bb680e5fe0c8",
+                "name cannot be a UUID to avoid ambiguity with ids"
+            )
         ];
 
         for (input, expected_message) in error_cases {
@@ -1985,7 +1993,7 @@ mod test {
 
         // Success cases
         let valid_names: Vec<&str> =
-            vec!["abc", "abc-123", "a123", &long_name[0..63]];
+            vec!["abc", "abc-123", "a123", "ok-a7e55044-10b1-426f-9247-bb680e5fe0c8", &long_name[0..63]];
 
         for name in valid_names {
             eprintln!("check name \"{}\" (should be valid)", name);
