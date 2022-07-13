@@ -95,33 +95,28 @@ jobs:
     - name: Report cargo version
       run: cargo --version
     - name: Remove unnecessary software
+      if: ${{ startsWith(matrix.os, 'ubuntu') }}
       run: |
-        echo "Disk space:"
-        df -h
-
-        if [ -d "/usr/share/dotnet" ]; then
-          echo "Removing dotnet"
-          sudo rm -rf /usr/share/dotnet
-        fi
-        if [ -d "/usr/local/lib/android" ]; then
-          echo "Removing android"
-          sudo rm -rf /usr/local/lib/android
-        fi
-        if [ -d "/usr/local/.ghcup" ]; then
-          echo "Removing haskell"
-          sudo rm -rf /usr/local/.ghcup
-        fi
-        if [ -d "/opt/hostedtoolcache/CodeQL" ]; then
-          echo "Removing CodeQL"
-          sudo rm -rf /opt/hostedtoolcache/CodeQL
-        fi
-        if [ -d "/usr/share/swift" ]; then
-          echo "Removing swift"
-          sudo rm -rf /usr/share/swift
-        fi
-
-        echo "Disk space:"
-        df -h
+        set -x
+        df -h /
+        sudo systemctl stop docker
+        sudo rm -rf /etc/skel/.rustup
+        sudo rm -rf /home/linuxbrew/.linuxbrew
+        sudo rm -rf /opt/az
+        sudo rm -rf /opt/hostedtoolcache
+        sudo rm -rf /opt/microsoft
+        sudo rm -rf /usr/lib/google-cloud-sdk
+        sudo rm -rf /usr/lib/jvm
+        sudo rm -rf /usr/local/.ghcup
+        sudo rm -rf /usr/local/graalvm
+        sudo rm -rf /usr/local/lib/android
+        sudo rm -rf /usr/local/lib/node_modules
+        sudo rm -rf /usr/local/share/chromium
+        sudo rm -rf /usr/local/share/powershell
+        sudo rm -rf /usr/share/dotnet
+        sudo rm -rf /usr/share/swift
+        sudo rm -rf /var/lib/docker
+        df -h /
     - name: Update PATH
       run: echo "$PWD/out/cockroachdb/bin:$PWD/out/clickhouse" >> "$GITHUB_PATH"
     - name: Install Pre-Requisites
