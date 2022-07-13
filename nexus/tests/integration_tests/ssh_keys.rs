@@ -108,15 +108,17 @@ async fn test_ssh_keys(cptestctx: &ControlPlaneTestContext) {
 
     // Ensure we can GET the list of keys we just posted.
     // TODO-coverage: pagination
-    let keys: Vec<SshKey> = NexusRequest::iter_collection_authn(
+    let keys: Vec<SshKey> = NexusRequest::object_get(
         client,
-        "/session/me/sshkeys",
-        "sort_by=name_ascending",
-        Some(new_keys.len()),
+        "/session/me/sshkeys?sort_by=name_ascending",
     )
+    .authn_as(AuthnMode::UnprivilegedUser)
+    .execute()
     .await
-    .expect("failed to list keys")
-    .all_items;
+    .expect("fetching ssh keys")
+    .parsed_body::<dropshot::ResultsPage<SshKey>>()
+    .expect("parsing list of ssh keys")
+    .items;
     assert_eq!(keys.len(), new_keys.len());
     for (key, (name, description, public_key)) in
         keys.iter().zip(new_keys.iter())
