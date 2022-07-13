@@ -1296,7 +1296,7 @@ checksum = "1435fa1053d8b2fbbe9be7e97eca7f33d37b28409959813daefc1446a14247f1"
 [[package]]
 name = "dropshot"
 version = "0.7.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#e75844e8ef514521ec60d30d6a1aeb5365b5bab5"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#38395fc200a9330728757cd0d26f12373a279fbc"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -1335,7 +1335,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.7.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#e75844e8ef514521ec60d30d6a1aeb5365b5bab5"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#38395fc200a9330728757cd0d26f12373a279fbc"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4841,9 +4841,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.81"
+version = "1.0.82"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b7ce2b32a1aed03c558dc61a5cd328f15aff2dbc17daad8fb8af04d2100e15c"
+checksum = "82c2c1fdcd807d1098552c5b9a36e425e42e9fbd7c6a37a8425f390f781f7fa7"
 dependencies = [
  "itoa 1.0.2",
  "ryu",
@@ -6093,7 +6093,7 @@ version = "1.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
 dependencies = [
- "cfg-if 1.0.0",
+ "cfg-if 0.1.10",
  "rand 0.8.5",
  "static_assertions",
 ]
