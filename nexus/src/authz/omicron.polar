@@ -387,10 +387,14 @@ has_permission(actor: AuthenticatedActor, "read", session: ConsoleSession)
 has_permission(actor: AuthenticatedActor, "modify", session: ConsoleSession)
 	if has_role(actor, "external-authenticator", session.fleet);
 
-has_permission(actor: AuthenticatedActor, "read", device_auth: DeviceAuthRequest)
-	if has_role(actor, "external-authenticator", device_auth.fleet);
-has_permission(actor: AuthenticatedActor, "modify", device_auth: DeviceAuthRequest)
-	if has_role(actor, "external-authenticator", device_auth.fleet);
+# All authenticated users can read and delete device authn requests because
+# by necessity these operations happen before we've figured out what user (or
+# even Silo) the device auth is associated with.  Any user can claim a device
+# auth request with the right user code (that's how it works) -- it's the user
+# code and associated logic that prevents unauthorized access here.
+has_permission(_actor: AuthenticatedActor, "read", _device_auth: DeviceAuthRequest);
+has_permission(_actor: AuthenticatedActor, "modify", _device_auth: DeviceAuthRequest);
+
 has_permission(actor: AuthenticatedActor, "read", device_token: DeviceAccessToken)
 	if has_role(actor, "external-authenticator", device_token.fleet);
 

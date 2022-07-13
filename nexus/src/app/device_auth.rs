@@ -109,7 +109,7 @@ impl super::Nexus {
             let token = token.expires(db_request.time_expires);
             self.db_datastore
                 .device_access_token_create(
-                    &opctx,
+                    opctx,
                     &authz_request,
                     &authz_user,
                     token,
@@ -122,7 +122,7 @@ impl super::Nexus {
             // TODO-security: set an expiration time for the valid token.
             self.db_datastore
                 .device_access_token_create(
-                    &opctx,
+                    opctx,
                     &authz_request,
                     &authz_user,
                     token,
