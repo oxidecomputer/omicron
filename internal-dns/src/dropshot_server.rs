@@ -21,13 +21,12 @@ impl Context {
 pub fn api() -> dropshot::ApiDescription<Arc<Context>> {
     let mut api = dropshot::ApiDescription::new();
 
-    api.register(dns_records_list).expect("register dns_records_get");
-    api.register(dns_records_create).expect("register dns_records_set");
+    api.register(dns_records_list).expect("register dns_records_list");
+    api.register(dns_records_create).expect("register dns_records_create");
     api.register(dns_records_delete).expect("register dns_records_delete");
     api
 }
 
-// TODO: Should this be paginated? Seems like we might have a lot of records at some point
 #[endpoint(
     method = GET,
     path = "/records",
