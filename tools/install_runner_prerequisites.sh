@@ -87,6 +87,20 @@ if [[ "${HOST_OS}" == "SunOS" ]]; then
   fi
 
   pkg list -v "${packages[@]}"
+elif [[ "${HOST_OS}" == "Linux" ]]; then
+  packages=(
+    'ca-certificates'
+    'libpq5'
+    'libsqlite3-0'
+    'libssl1.1'
+    'libxmlsec1-openssl'
+  )
+  sudo apt-get update
+  if [[ "${ASSUME_YES}" == "true" ]]; then
+    sudo apt-get install -y ${packages[@]}
+  else
+    confirm "Install (or update) [${packages[*]}]?" && sudo apt-get install ${packages[@]}
+  fi
 else
   echo "Unsupported OS: ${HOST_OS}"
   exit -1
