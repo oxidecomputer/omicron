@@ -975,6 +975,7 @@ lazy_static! {
         VerifyEndpoint {
             url: &*DEMO_DISK_METRICS_URL,
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get,
             ],
