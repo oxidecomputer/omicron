@@ -286,7 +286,7 @@ async fn test_session_me_for_unpriv(cptestctx: &ControlPlaneTestContext) {
         .await
         .unwrap();
 
-    let _session_user: views::SessionUser =
+    let _session_user: views::User =
         NexusRequest::object_get(client, &"/session/me")
             .authn_as(AuthnMode::SiloUser(new_silo_user_id))
             .execute()
