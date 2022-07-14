@@ -260,7 +260,7 @@ async fn test_list_silo_idps_for_unpriv(cptestctx: &ControlPlaneTestContext) {
         .unwrap();
 
     let _users: ResultsPage<views::IdentityProvider> =
-        NexusRequest::object_get(client, &"/silos/authz/identity_providers")
+        NexusRequest::object_get(client, &"/silos/authz/identity-providers")
             .authn_as(AuthnMode::SiloUser(new_silo_user_id))
             .execute()
             .await

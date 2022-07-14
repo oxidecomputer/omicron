@@ -129,9 +129,9 @@ API operations found with tag "silos"
 OPERATION ID                             URL PATH
 silo_create                              /silos
 silo_delete                              /silos/{silo_name}
-silo_identity_provider_create            /silos/{silo_name}/saml_identity_providers
-silo_identity_provider_list              /silos/{silo_name}/identity_providers
-silo_identity_provider_view              /silos/{silo_name}/saml_identity_providers/{provider_name}
+silo_identity_provider_create            /silos/{silo_name}/saml-identity-providers
+silo_identity_provider_list              /silos/{silo_name}/identity-providers
+silo_identity_provider_view              /silos/{silo_name}/saml-identity-providers/{provider_name}
 silo_list                                /silos
 silo_policy_update                       /silos/{silo_name}/policy
 silo_policy_view                         /silos/{silo_name}/policy
