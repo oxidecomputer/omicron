@@ -223,7 +223,7 @@ impl JsonSchema for Name {
                     "Names must begin with a lower case ASCII letter, be \
                      composed exclusively of lowercase ASCII, uppercase \
                      ASCII, numbers, and '-', and may not end with a '-'.\
-                     Names also cannot be a UUID though they may contain a UUID."
+                     Names cannot be a UUID though they may contain a UUID."
                         .to_string(),
                 ),
                 ..Default::default()
@@ -232,7 +232,16 @@ impl JsonSchema for Name {
             string: Some(Box::new(schemars::schema::StringValidation {
                 max_length: Some(63),
                 min_length: None,
-                pattern: Some("^[a-z](|[a-zA-Z0-9-]*[a-zA-Z0-9])$".to_string()),
+                pattern: Some(
+                    concat!(
+                        r#"^"#,
+                        // Cannot match a UUID
+                        r#"(?!\b[0-9a-f]{8}\b-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-\b[0-9a-f]{12}\b$)"#,
+                        r#"^[a-z][a-z0-9\-]*[a-zA-Z0-9]"#,
+                        r#"$"#,
+                    )
+                    .to_string(),
+                )
             })),
             ..Default::default()
         }
