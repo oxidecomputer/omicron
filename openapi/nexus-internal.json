@@ -228,7 +228,7 @@
         }
       }
     },
-    "/racks/{rack_id}/initialization_complete": {
+    "/racks/{rack_id}/initialization-complete": {
       "put": {
         "summary": "Report that the Rack Setup Service initialization is complete",
         "description": "See RFD 278 for more details.",
@@ -272,7 +272,7 @@
         }
       }
     },
-    "/sled_agents/{sled_id}": {
+    "/sled-agents/{sled_id}": {
       "post": {
         "summary": "Report that the sled agent for the specified sled has come online.",
         "operationId": "cpapi_sled_agents_post",
@@ -311,7 +311,7 @@
         }
       }
     },
-    "/sled_agents/{sled_id}/zpools/{zpool_id}": {
+    "/sled-agents/{sled_id}/zpools/{zpool_id}": {
       "put": {
         "summary": "Report that a pool for a specified sled has come online.",
         "operationId": "zpool_put",

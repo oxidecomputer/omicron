@@ -15,7 +15,8 @@ use crate::context::OpContext;
 use crate::db::model::DeviceAccessToken;
 use crate::ServerContext;
 use dropshot::{
-    endpoint, HttpError, HttpResponseOk, RequestContext, TypedBody,
+    endpoint, HttpError, HttpResponseUpdatedNoContent, RequestContext,
+    TypedBody,
 };
 use http::{header, Response, StatusCode};
 use hyper::Body;
@@ -155,7 +156,7 @@ pub async fn device_auth_success(
 pub async fn device_auth_confirm(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     params: TypedBody<DeviceAuthVerify>,
-) -> Result<HttpResponseOk<()>, HttpError> {
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let params = params.into_inner();
@@ -171,7 +172,7 @@ pub async fn device_auth_confirm(
                 actor.actor_id(),
             )
             .await?;
-        Ok(HttpResponseOk(()))
+        Ok(HttpResponseUpdatedNoContent())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

@@ -69,7 +69,7 @@ struct SledAgentPathParam {
 // 3. This call is idempotent (mod "time_modified").
 #[endpoint {
      method = POST,
-     path = "/sled_agents/{sled_id}",
+     path = "/sled-agents/{sled_id}",
  }]
 async fn cpapi_sled_agents_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -99,7 +99,7 @@ struct RackPathParam {
 /// See RFD 278 for more details.
 #[endpoint {
      method = PUT,
-     path = "/racks/{rack_id}/initialization_complete",
+     path = "/racks/{rack_id}/initialization-complete",
  }]
 async fn rack_initialization_complete(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -127,7 +127,7 @@ struct ZpoolPathParam {
 /// Report that a pool for a specified sled has come online.
 #[endpoint {
      method = PUT,
-     path = "/sled_agents/{sled_id}/zpools/{zpool_id}",
+     path = "/sled-agents/{sled_id}/zpools/{zpool_id}",
  }]
 async fn zpool_put(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,

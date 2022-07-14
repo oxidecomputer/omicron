@@ -354,7 +354,7 @@
         }
       }
     },
-    "/sp/{type}/{slot}/component/{component}/power_off": {
+    "/sp/{type}/{slot}/component/{component}/power-off": {
       "post": {
         "summary": "Power off an SP component",
         "description": "Components whose power state cannot be changed will always return an error.",
@@ -404,7 +404,7 @@
         }
       }
     },
-    "/sp/{type}/{slot}/component/{component}/power_on": {
+    "/sp/{type}/{slot}/component/{component}/power-on": {
       "post": {
         "summary": "Power on an SP component",
         "description": "Components whose power state cannot be changed will always return an error.",
@@ -454,7 +454,7 @@
         }
       }
     },
-    "/sp/{type}/{slot}/component/{component}/serial_console/attach": {
+    "/sp/{type}/{slot}/component/{component}/serial-console/attach": {
       "get": {
         "summary": "Upgrade into a websocket connection attached to the given SP component's",
         "description": "serial console.",
@@ -503,7 +503,7 @@
         }
       }
     },
-    "/sp/{type}/{slot}/component/{component}/serial_console/detach": {
+    "/sp/{type}/{slot}/component/{component}/serial-console/detach": {
       "post": {
         "summary": "Detach the websocket connection attached to the given SP component's serial",
         "description": "console, if such a connection exists.",
@@ -620,7 +620,7 @@
         }
       }
     },
-    "/sp/{type}/{slot}/power_off": {
+    "/sp/{type}/{slot}/power-off": {
       "post": {
         "summary": "Power off an SP via Ignition",
         "operationId": "ignition_power_off",
@@ -659,7 +659,7 @@
         }
       }
     },
-    "/sp/{type}/{slot}/power_on": {
+    "/sp/{type}/{slot}/power-on": {
       "post": {
         "summary": "Power on an SP via Ignition",
         "operationId": "ignition_power_on",
