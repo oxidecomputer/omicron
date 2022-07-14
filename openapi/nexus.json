@@ -5813,7 +5813,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SessionUser"
+                  "$ref": "#/components/schemas/User"
                 }
               }
             }
@@ -9468,19 +9468,6 @@
           "slo_url",
           "sp_client_id",
           "technical_contact_email"
-        ]
-      },
-      "SessionUser": {
-        "description": "Client view of currently authed user.",
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "id"
         ]
       },
       "Silo": {
