@@ -1372,6 +1372,81 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_select_timeseries_with_limit() {
+        let (_, _, samples) = setup_select_test();
+        let mut db = ClickHouseInstance::new(0)
+            .await
+            .expect("Failed to start ClickHouse");
+        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
+        let log = Logger::root(slog::Discard, o!());
+        let client = Client::new(address, &log);
+        client
+            .init_db()
+            .await
+            .expect("Failed to initialize timeseries database");
+        client
+            .insert_samples(&samples)
+            .await
+            .expect("Failed to insert samples");
+        let timeseries_name = "service:request_latency";
+
+        // First, query without a limit. We should see all the results.
+        let all_measurements = &client
+            .select_timeseries_with(timeseries_name, &[], None, None, None)
+            .await
+            .expect("Failed to select timeseries")[0]
+            .measurements;
+
+        // Check some constraints on the number of measurements - we
+        // can change these, but these assumptions make the test simpler.
+        //
+        // For now, assume we can cleanly cut the number of measurements in
+        // half.
+        assert!(all_measurements.len() >= 2);
+        assert!(all_measurements.len() % 2 == 0);
+
+        // Next, let's set a limit to half the results and query again.
+        let limit =
+            NonZeroU32::new(u32::try_from(all_measurements.len() / 2).unwrap())
+                .unwrap();
+        let timeseries = &client
+            .select_timeseries_with(
+                timeseries_name,
+                &[],
+                None,
+                None,
+                Some(limit),
+            )
+            .await
+            .expect("Failed to select timeseries")[0];
+        assert_eq!(timeseries.measurements.len() as u32, limit.get());
+
+        let get_last = |timeseries: &Timeseries| {
+            timeseries
+                .measurements
+                .iter()
+                .map(|m| m.timestamp())
+                .reduce(|latest, ts| if latest >= ts { latest } else { ts })
+                .unwrap()
+        };
+
+        // Get the other half of the results.
+        let timeseries = &client
+            .select_timeseries_with(
+                timeseries_name,
+                &[],
+                Some(query::Timestamp::Exclusive(get_last(timeseries))),
+                None,
+                Some(limit),
+            )
+            .await
+            .expect("Failed to select timeseries")[0];
+        assert_eq!(timeseries.measurements.len() as u32, limit.get());
+
+        db.cleanup().await.expect("Failed to cleanup database");
+    }
+
+    #[tokio::test]
     async fn test_get_schema_no_new_values() {
         let (mut db, client, _) = setup_filter_testcase().await;
         let schema = &client.schema.lock().unwrap().clone();
