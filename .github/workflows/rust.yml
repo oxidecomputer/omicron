@@ -107,9 +107,17 @@ jobs:
           echo "Removing android"
           sudo rm -rf /usr/local/lib/android
         fi
-        if [ -d "/opt/ghc" ]; then
+        if [ -d "/usr/local/.ghcup" ]; then
           echo "Removing haskell"
-          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/.ghcup
+        fi
+        if [ -d "/opt/hostedtoolcache/CodeQL" ]; then
+          echo "Removing CodeQL"
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+        fi
+        if [ -d "/usr/share/swift" ]; then
+          echo "Removing swift"
+          sudo rm -rf /usr/share/swift
         fi
 
         echo "Disk space:"

@@ -16,7 +16,7 @@ base64 = "0.13.0"
 bb8 = "0.8.0"
 clap = { version = "3.2", features = ["derive"] }
 cookie = "0.16"
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "fed3e8ca7762130ee146fc516a4ef6eed2b91629" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "2add0de8489f1d4de901bfe98fc28b0a6efcc3ea" }
 diesel = { version = "2.0.0-rc.0", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 diesel-dtrace = { git = "https://github.com/oxidecomputer/diesel-dtrace" }
 fatfs = "0.3.5"
@@ -105,7 +105,7 @@ git = "https://github.com/oxidecomputer/steno"
 branch = "main"
 
 [dependencies.tokio]
-version = "1.18"
+version = "1.20"
 features = [ "full" ]
 
 [dependencies.tokio-postgres]
@@ -124,7 +124,7 @@ nexus-test-utils-macros = { path = "test-utils-macros" }
 nexus-test-utils = { path = "test-utils" }
 omicron-test-utils = { path = "../test-utils" }
 openapiv3 = "1.0"
-regex = "1.5.6"
+regex = "1.6.0"
 subprocess = "0.2.9"
 term = "0.7"
 httptest = "0.15.4"

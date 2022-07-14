@@ -57,6 +57,7 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Instance;
+use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::NetworkInterface;
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteCreateParams;
@@ -4012,7 +4013,10 @@ async fn session_sshkey_list(
     let query = query_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let &actor = opctx.authn.actor_required()?;
+        let &actor = opctx
+            .authn
+            .actor_required()
+            .internal_context("listing current user's ssh keys")?;
         let page_params =
             data_page_params_for(&rqctx, &query)?.map_name(Name::ref_cast);
         let ssh_keys = nexus
@@ -4044,7 +4048,10 @@ async fn session_sshkey_create(
     let nexus = &apictx.nexus;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let &actor = opctx.authn.actor_required()?;
+        let &actor = opctx
+            .authn
+            .actor_required()
+            .internal_context("creating ssh key for current user")?;
         let ssh_key = nexus
             .ssh_key_create(&opctx, actor.actor_id(), new_key.into_inner())
             .await?;
@@ -4075,7 +4082,10 @@ async fn session_sshkey_view(
     let ssh_key_name = &path.ssh_key_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let &actor = opctx.authn.actor_required()?;
+        let &actor = opctx
+            .authn
+            .actor_required()
+            .internal_context("fetching one of current user's ssh keys")?;
         let ssh_key =
             nexus.ssh_key_fetch(&opctx, actor.actor_id(), ssh_key_name).await?;
         Ok(HttpResponseOk(ssh_key.into()))
@@ -4099,7 +4109,10 @@ async fn session_sshkey_delete(
     let ssh_key_name = &path.ssh_key_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let &actor = opctx.authn.actor_required()?;
+        let &actor = opctx
+            .authn
+            .actor_required()
+            .internal_context("deleting one of current user's ssh keys")?;
         nexus.ssh_key_delete(&opctx, actor.actor_id(), ssh_key_name).await?;
         Ok(HttpResponseDeleted())
     };

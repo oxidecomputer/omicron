@@ -4,6 +4,7 @@
 //! the way it is.
 
 mod authn_http;
+mod authz;
 mod basic;
 mod commands;
 mod console_api;
