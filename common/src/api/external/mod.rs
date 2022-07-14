@@ -171,7 +171,7 @@ impl TryFrom<String> for Name {
 
         if Uuid::parse_str(&value).is_ok() {
             return Err(String::from(
-                "name cannot be a UUID to avoid ambiguity with ids",
+                "name cannot be a UUID to avoid ambiguity with IDs",
             ));
         }
 
