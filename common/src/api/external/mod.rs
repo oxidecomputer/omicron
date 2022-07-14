@@ -222,7 +222,8 @@ impl JsonSchema for Name {
                 description: Some(
                     "Names must begin with a lower case ASCII letter, be \
                      composed exclusively of lowercase ASCII, uppercase \
-                     ASCII, numbers, and '-', and may not end with a '-'."
+                     ASCII, numbers, and '-', and may not end with a '-'.\
+                     Names also cannot be a UUID though they may contain a UUID."
                         .to_string(),
                 ),
                 ..Default::default()
