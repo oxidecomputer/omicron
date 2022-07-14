@@ -204,6 +204,8 @@ async fn test_oximeter_reregistration() {
     )
     .await
     .expect("Failed to restart metric producer server");
+    nexus_test_utils::register_test_producer(&context.producer)
+        .expect("Failed to register producer");
 
     // Run the verification in a loop using wait_for_condition, waiting until there is more data,
     // or failing the test otherwise.

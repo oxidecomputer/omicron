@@ -4,9 +4,11 @@
 
 //! Tests basic disk support in the API
 
+use chrono::Utc;
 use crucible_agent_client::types::State as RegionState;
 use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
+use dropshot::ResultsPage;
 use http::method::Method;
 use http::StatusCode;
 use nexus_test_utils::http_testing::AuthnMode;
@@ -15,9 +17,11 @@ use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::identity_eq;
 use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::create_instance;
+use nexus_test_utils::resource_helpers::create_instance_with;
 use nexus_test_utils::resource_helpers::create_ip_pool;
 use nexus_test_utils::resource_helpers::create_organization;
 use nexus_test_utils::resource_helpers::create_project;
+use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
@@ -29,6 +33,8 @@ use omicron_common::api::external::Instance;
 use omicron_common::api::external::Name;
 use omicron_nexus::TestInterfaces as _;
 use omicron_nexus::{external_api::params, Nexus};
+use oximeter::types::Datum;
+use oximeter::types::Measurement;
 use sled_agent_client::TestInterfaces as _;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -820,6 +826,78 @@ async fn test_disk_reject_total_size_not_divisible_by_min_disk_size(
             ByteCount::from(params::MIN_DISK_SIZE_BYTES)
         )
     );
+}
+
+#[nexus_test]
+async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    DiskTest::new(&cptestctx).await;
+    create_org_and_project(client).await;
+    let disks_url = get_disks_url();
+
+    // Create a disk.
+    let _new_disk = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: DISK_NAME.parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
+        size: ByteCount::from_gibibytes_u32(1),
+    };
+    let _disk = create_disk(&client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
+    let disk_url = format!("{}/{}", disks_url, DISK_NAME);
+
+    // Whenever we grab this URL, get the last few seconds of metrics.
+    let metric_url = |metric_type: &str| {
+        format!(
+            "{disk_url}/metrics/{metric_type}?start_time={:?}&end_time={:?}",
+            Utc::now() - chrono::Duration::seconds(5),
+            Utc::now(),
+        )
+    };
+
+    // Try accessing metrics before we attach the disk to an instance.
+    //
+    // Observe that no metrics exist yet; no "upstairs" should have been
+    // instantiated on a sled.
+    let measurements: ResultsPage<Measurement> =
+        objects_list_page_authz(client, &metric_url("read")).await;
+    assert!(measurements.items.is_empty());
+
+    // Create an instance, attach the disk to it.
+    let _instance = create_instance_with(
+        &client,
+        ORG_NAME,
+        PROJECT_NAME,
+        INSTANCE_NAME,
+        &params::InstanceNetworkInterfaceAttachment::Default,
+        vec![params::InstanceDiskAttachment::Attach(
+            params::InstanceDiskAttach { name: DISK_NAME.parse().unwrap() },
+        )],
+    )
+    .await;
+
+    // TODO: test that get as unprivileged fails?
+    // TODO: make the intervals smaller to avoid sleeping?
+    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+
+    let metrics =
+        ["activated", "read", "write", "read_bytes", "write_bytes", "flush"];
+
+    for metric in &metrics {
+        let measurements: ResultsPage<Measurement> =
+            objects_list_page_authz(client, &metric_url(metric)).await;
+        assert!(!measurements.items.is_empty());
+        for item in &measurements.items {
+            let cumulative = match item.datum() {
+                Datum::CumulativeI64(c) => c,
+                _ => panic!("Unexpected datum type {:?}", item.datum()),
+            };
+            assert!(cumulative.start_time() <= item.timestamp());
+        }
+    }
 }
 
 async fn disk_get(client: &ClientTestContext, disk_url: &str) -> Disk {

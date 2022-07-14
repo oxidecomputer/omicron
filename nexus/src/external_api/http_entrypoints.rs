@@ -1557,18 +1557,18 @@ async fn disk_metrics_list(
         let disk = nexus
             .disk_fetch(&opctx, organization_name, project_name, disk_name)
             .await?;
+        let upstairs_uuid = disk.id();
+        let result = nexus
+            .select_timeseries(
+                &format!("crucible_upstairs:{}", metric_name),
+                &[&format!("upstairs_uuid=={}", upstairs_uuid)],
+                Duration::from_secs(10),
+                query,
+                limit,
+            )
+            .await?;
 
-        Ok(HttpResponseOk(
-            nexus
-                .select_timeseries(
-                    &format!("crucible_upstairs:{}", metric_name),
-                    &[&format!("upstairs_uuid=={}", disk.volume_id)],
-                    Duration::from_secs(10),
-                    query,
-                    limit,
-                )
-                .await?,
-        ))
+        Ok(HttpResponseOk(result))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

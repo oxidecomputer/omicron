@@ -159,6 +159,7 @@ pub async fn test_setup_with_config(
     )
     .await
     .unwrap();
+    register_test_producer(&producer).unwrap();
 
     ControlPlaneTestContext {
         server,
@@ -253,6 +254,10 @@ impl oximeter::Producer for IntegrationProducer {
     }
 }
 
+/// Creates and starts a producer server.
+///
+/// Actual producers can be registered with the [`register_producer`]
+/// helper function.
 pub async fn start_producer_server(
     nexus_address: SocketAddr,
     id: Uuid,
@@ -281,9 +286,22 @@ pub async fn start_producer_server(
     };
     let server =
         ProducerServer::start(&config).await.map_err(|e| e.to_string())?;
+    Ok(server)
+}
 
+/// Registers an arbitrary producer with the test server.
+pub fn register_producer(
+    server: &ProducerServer,
+    producer: impl oximeter::Producer,
+) -> Result<(), String> {
+    server.registry().register_producer(producer).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Registers a sample-generating test-specific producer.
+pub fn register_test_producer(server: &ProducerServer) -> Result<(), String> {
     // Create and register an actual metric producer.
-    let producer = IntegrationProducer {
+    let test_producer = IntegrationProducer {
         target: IntegrationTarget {
             name: "integration-test-target".to_string(),
         },
@@ -292,8 +310,7 @@ pub async fn start_producer_server(
             datum: 0,
         },
     };
-    server.registry().register_producer(producer).map_err(|e| e.to_string())?;
-    Ok(server)
+    register_producer(server, test_producer)
 }
 
 /// Returns whether the two identity metadata objects are identical.

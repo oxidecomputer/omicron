@@ -13,7 +13,7 @@ use ipnetwork::Ipv4Network;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
-use nexus_test_utils::resource_helpers::create_instance_with_nics;
+use nexus_test_utils::resource_helpers::create_instance_with;
 use nexus_test_utils::resource_helpers::create_ip_pool;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::{create_organization, create_project};
@@ -137,12 +137,14 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
         NUM_INITIAL_RESERVED_IP_ADDRESSES + n_final_reserved_addresses;
     let subnet_size = subnet.size() as usize - n_reserved_addresses;
     for i in 0..subnet_size {
-        create_instance_with_nics(
+        create_instance_with(
             client,
             organization_name,
             project_name,
             &format!("i{}", i),
             &nic,
+            // Disks=
+            vec![],
         )
         .await;
     }

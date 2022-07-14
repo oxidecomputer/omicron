@@ -14,6 +14,11 @@ cfg-if = "1.0"
 chrono = { version = "0.4", features = [ "serde" ] }
 clap = { version = "3.2", features = ["derive"] }
 # Only used by the simulated sled agent.
+# TODO: This is probably overkill. We'd like to only depend on
+# the "crucible-agent-client", but the VolumeConstructionRequest object
+# does not exist there.
+crucible = { git = "https://github.com/oxidecomputer/crucible", rev = "fed3e8ca7762130ee146fc516a4ef6eed2b91629" }
+# Only used by the simulated sled agent.
 crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "fed3e8ca7762130ee146fc516a4ef6eed2b91629" }
 ddm-admin-client = { path = "../ddm-admin-client" }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
@@ -24,6 +29,8 @@ libc = "0.2.126"
 macaddr = { version = "1.0.1", features = [ "serde_std" ] }
 nexus-client = { path = "../nexus-client" }
 omicron-common = { path = "../common" }
+oximeter = { version = "0.1.0", path = "../oximeter/oximeter" }
+oximeter-producer = { version = "0.1.0", path = "../oximeter/producer" }
 p256 = "0.9.0"
 percent-encoding = "2.1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor" }
