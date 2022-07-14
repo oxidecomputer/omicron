@@ -236,7 +236,7 @@ impl JsonSchema for Name {
                     concat!(
                         r#"^"#,
                         // Cannot match a UUID
-                        r#"(?!\b[0-9a-f]{8}\b-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-\b[0-9a-f]{12}\b$)"#,
+                        r#"(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)"#,
                         r#"^[a-z][a-z0-9\-]*[a-zA-Z0-9]"#,
                         r#"$"#,
                     )
