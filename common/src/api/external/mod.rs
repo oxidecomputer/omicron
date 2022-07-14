@@ -231,7 +231,7 @@ impl JsonSchema for Name {
             string: Some(Box::new(schemars::schema::StringValidation {
                 max_length: Some(63),
                 min_length: None,
-                pattern: Some("[a-z](|[a-zA-Z0-9-]*[a-zA-Z0-9])".to_string()),
+                pattern: Some("^[a-z](|[a-zA-Z0-9-]*[a-zA-Z0-9])$".to_string()),
             })),
             ..Default::default()
         }

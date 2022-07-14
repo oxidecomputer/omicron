@@ -27,7 +27,7 @@ pub async fn aaaa_crud() -> Result<(), anyhow::Error> {
     let resolver = &test_ctx.resolver;
 
     // records should initially be empty
-    let records = client.dns_records_get().await?;
+    let records = client.dns_records_list().await?;
     assert!(records.is_empty());
 
     // add an aaaa record
@@ -35,14 +35,14 @@ pub async fn aaaa_crud() -> Result<(), anyhow::Error> {
     let addr = Ipv6Addr::new(0xfd, 0, 0, 0, 0, 0, 0, 0x1);
     let aaaa = DnsRecord::Aaaa(addr);
     client
-        .dns_records_set(&vec![DnsKv {
+        .dns_records_create(&vec![DnsKv {
             key: name.clone(),
             records: vec![aaaa.clone()],
         }])
         .await?;
 
     // read back the aaaa record
-    let records = client.dns_records_get().await?;
+    let records = client.dns_records_list().await?;
     assert_eq!(1, records.len());
     assert_eq!(records[0].key.name, name.name);
 
@@ -73,7 +73,7 @@ pub async fn srv_crud() -> Result<(), anyhow::Error> {
     let resolver = &test_ctx.resolver;
 
     // records should initially be empty
-    let records = client.dns_records_get().await?;
+    let records = client.dns_records_list().await?;
     assert!(records.is_empty());
 
     // add a srv record
@@ -82,14 +82,14 @@ pub async fn srv_crud() -> Result<(), anyhow::Error> {
         Srv { prio: 47, weight: 74, port: 99, target: "outpost47".into() };
     let rec = DnsRecord::Srv(srv.clone());
     client
-        .dns_records_set(&vec![DnsKv {
+        .dns_records_create(&vec![DnsKv {
             key: name.clone(),
             records: vec![rec.clone()],
         }])
         .await?;
 
     // read back the srv record
-    let records = client.dns_records_get().await?;
+    let records = client.dns_records_list().await?;
     assert_eq!(1, records.len());
     assert_eq!(records[0].key.name, name.name);
 
@@ -127,7 +127,7 @@ pub async fn multi_record_crud() -> Result<(), anyhow::Error> {
     let resolver = &test_ctx.resolver;
 
     // records should initially be empty
-    let records = client.dns_records_get().await?;
+    let records = client.dns_records_list().await?;
     assert!(records.is_empty());
 
     // Add multiple AAAA records
@@ -137,14 +137,14 @@ pub async fn multi_record_crud() -> Result<(), anyhow::Error> {
     let aaaa1 = DnsRecord::Aaaa(addr1);
     let aaaa2 = DnsRecord::Aaaa(addr2);
     client
-        .dns_records_set(&vec![DnsKv {
+        .dns_records_create(&vec![DnsKv {
             key: name.clone(),
             records: vec![aaaa1, aaaa2],
         }])
         .await?;
 
     // read back the aaaa records
-    let records = client.dns_records_get().await?;
+    let records = client.dns_records_list().await?;
     assert_eq!(1, records.len());
     assert_eq!(records[0].key.name, name.name);
 
@@ -214,17 +214,17 @@ pub async fn empty_record() -> Result<(), anyhow::Error> {
     let resolver = &test_ctx.resolver;
 
     // records should initially be empty
-    let records = client.dns_records_get().await?;
+    let records = client.dns_records_list().await?;
     assert!(records.is_empty());
 
     // Add an empty DNS record
     let name = DnsRecordKey { name: "devron.oxide.internal".into() };
     client
-        .dns_records_set(&vec![DnsKv { key: name.clone(), records: vec![] }])
+        .dns_records_create(&vec![DnsKv { key: name.clone(), records: vec![] }])
         .await?;
 
     // read back the aaaa record
-    let records = client.dns_records_get().await?;
+    let records = client.dns_records_list().await?;
     assert_eq!(1, records.len());
     assert_eq!(records[0].key.name, name.name);
     assert_eq!(0, records[0].records.len());

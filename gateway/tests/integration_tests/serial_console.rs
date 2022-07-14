@@ -77,7 +77,7 @@ async fn serial_console_communication() {
     // connect to the MGS websocket for this gimlet
     let url = {
         let mut parts = client
-            .url("/sp/sled/0/component/sp3/serial_console/attach")
+            .url("/sp/sled/0/component/sp3/serial-console/attach")
             .into_parts();
         parts.scheme = Some(Scheme::try_from("ws").unwrap());
         Uri::from_parts(parts).unwrap()
@@ -123,7 +123,7 @@ async fn serial_console_detach() {
     // connect to the MGS websocket for this gimlet
     let attach_url = {
         let mut parts = client
-            .url("/sp/sled/0/component/sp3/serial_console/attach")
+            .url("/sp/sled/0/component/sp3/serial-console/attach")
             .into_parts();
         parts.scheme = Some(Scheme::try_from("ws").unwrap());
         Uri::from_parts(parts).unwrap()
@@ -163,7 +163,7 @@ async fn serial_console_detach() {
     // hit the detach endpoint, which should disconnect `ws`
     let detach_url = format!(
         "{}",
-        client.url("/sp/sled/0/component/sp3/serial_console/detach")
+        client.url("/sp/sled/0/component/sp3/serial-console/detach")
     );
     client
         .make_request_no_body(Method::POST, &detach_url, StatusCode::NO_CONTENT)

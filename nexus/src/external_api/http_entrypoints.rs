@@ -522,7 +522,7 @@ async fn silo_policy_update(
 /// List Silo identity providers
 #[endpoint {
     method = GET,
-    path = "/silos/{silo_name}/identity_providers",
+    path = "/silos/{silo_name}/identity-providers",
     tags = ["silos"],
 }]
 async fn silo_identity_provider_list(
@@ -559,7 +559,7 @@ async fn silo_identity_provider_list(
 /// Create a new SAML identity provider for a silo.
 #[endpoint {
     method = POST,
-    path = "/silos/{silo_name}/saml_identity_providers",
+    path = "/silos/{silo_name}/saml-identity-providers",
     tags = ["silos"],
 }]
 async fn silo_identity_provider_create(
@@ -596,7 +596,7 @@ struct SiloSamlPathParam {
 /// GET a silo's SAML identity provider
 #[endpoint {
     method = GET,
-    path = "/silos/{silo_name}/saml_identity_providers/{provider_name}",
+    path = "/silos/{silo_name}/saml-identity-providers/{provider_name}",
     tags = ["silos"],
 }]
 async fn silo_identity_provider_view(

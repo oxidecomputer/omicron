@@ -76,12 +76,12 @@ async fn main() -> Result<()> {
 
     match opt.subcommand {
         SubCommand::ListRecords => {
-            let records = client.dns_records_get().await?;
+            let records = client.dns_records_list().await?;
             println!("{:#?}", records);
         }
         SubCommand::AddAAAA(cmd) => {
             client
-                .dns_records_set(&vec![DnsKv {
+                .dns_records_create(&vec![DnsKv {
                     key: DnsRecordKey { name: cmd.name },
                     records: vec![DnsRecord::Aaaa(cmd.addr)],
                 }])
@@ -89,7 +89,7 @@ async fn main() -> Result<()> {
         }
         SubCommand::AddSRV(cmd) => {
             client
-                .dns_records_set(&vec![DnsKv {
+                .dns_records_create(&vec![DnsKv {
                     key: DnsRecordKey { name: cmd.name },
                     records: vec![DnsRecord::Srv(Srv {
                         prio: cmd.prio,

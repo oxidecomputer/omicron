@@ -17,4 +17,4 @@ serde_tokenstream = "0.1"
 syn = { version = "1.0", features = [ "full", "derive", "extra-traits" ] }
 
 [dev-dependencies]
-rustfmt-wrapper = "0.1"
+rustfmt-wrapper = "0.2"

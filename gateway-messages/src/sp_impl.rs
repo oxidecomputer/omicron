@@ -25,6 +25,7 @@ use hubpack::SerializedSize;
 use std::net::SocketAddrV6;
 
 #[cfg(not(feature = "std"))]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct SocketAddrV6 {
     pub ip: smoltcp::wire::Ipv6Address,
     pub port: u16,

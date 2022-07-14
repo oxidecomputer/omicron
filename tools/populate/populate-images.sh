@@ -20,24 +20,7 @@ oxide api /images --method POST --input - <<EOF
   },
   "source": {
       "type": "url",
-      "url": "http://${CATACOMB_TUNNEL}/media/debian/debian-11-nocloud-amd64-20220503-998.raw"
-  }
-}
-EOF
-
-echo "Populating focal"
-oxide api /images --method POST --input - <<EOF
-{
-  "name": "focal",
-  "description": "focal",
-  "block_size": 512,
-  "distribution": {
-    "name": "focal",
-    "version": "1"
-  },
-  "source": {
-      "type": "url",
-      "url": "http://${CATACOMB_TUNNEL}/media/cloud/focal-server-cloudimg-amd64.raw"
+      "url": "http://${CATACOMB_TUNNEL}/media/cloud/debian-11-genericcloud-amd64.raw"
   }
 }
 EOF
@@ -46,11 +29,62 @@ echo "Populating ubuntu"
 oxide api /images --method POST --input - <<EOF
 {
   "name": "ubuntu",
-  "description": "ubuntu",
+  "description": "Ubuntu",
   "block_size": 512,
   "distribution": {
     "name": "ubuntu",
     "version": "22.04"
+  },
+  "source": {
+      "type": "url",
+      "url": "http://${CATACOMB_TUNNEL}/media/cloud/focal-server-cloudimg-amd64.raw"
+  }
+}
+EOF
+
+echo "Populating fedora"
+oxide api /images --method POST --input - <<EOF
+{
+  "name": "fedora",
+  "description": "fedora",
+  "block_size": 512,
+  "distribution": {
+    "name": "fedora",
+    "version": "35-1.2"
+  },
+  "source": {
+      "type": "url",
+      "url": "http://${CATACOMB_TUNNEL}/media/cloud/Fedora-Cloud-Base-35-1.2.x86_64.raw"
+  }
+}
+EOF
+
+echo "Populating debian-nocloud"
+oxide api /images --method POST --input - <<EOF
+{
+  "name": "debian-nocloud",
+  "description": "debian nocloud",
+  "block_size": 512,
+  "distribution": {
+    "name": "debian-nocloud",
+    "version": "nocloud 11"
+  },
+  "source": {
+      "type": "url",
+      "url": "http://${CATACOMB_TUNNEL}/media/debian/debian-11-nocloud-amd64-20220503-998.raw"
+  }
+}
+EOF
+
+echo "Populating ubuntu-iso"
+oxide api /images --method POST --input - <<EOF
+{
+  "name": "ubuntu-nocloud-iso",
+  "description": "ubuntu nocloud iso",
+  "block_size": 512,
+  "distribution": {
+    "name": "ubuntu-iso",
+    "version": "iso 22.04"
   },
   "source": {
       "type": "url",
