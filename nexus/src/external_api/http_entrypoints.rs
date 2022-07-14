@@ -73,7 +73,6 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use std::sync::Arc;
-use std::time::Duration;
 use uuid::Uuid;
 
 type NexusApiDescription = ApiDescription<Arc<ServerContext>>;
@@ -1554,7 +1553,7 @@ async fn disk_metrics_list(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
 
-        // this ensures the user is authorized on Action::Read for this disk
+        // This ensures the user is authorized on Action::Read for this disk
         let disk = nexus
             .disk_fetch(&opctx, organization_name, project_name, disk_name)
             .await?;
@@ -1563,7 +1562,6 @@ async fn disk_metrics_list(
             .select_timeseries(
                 &format!("crucible_upstairs:{}", metric_name),
                 &[&format!("upstairs_uuid=={}", upstairs_uuid)],
-                Duration::from_secs(10),
                 query,
                 limit,
             )

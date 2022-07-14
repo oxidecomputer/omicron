@@ -66,6 +66,7 @@ impl Client {
         criteria: &[&str],
         start_time: Option<query::Timestamp>,
         end_time: Option<query::Timestamp>,
+        limit: Option<NonZeroU32>,
     ) -> Result<Vec<Timeseries>, Error> {
         // Querying uses up to three queries to the database:
         //  1. Retrieve the schema
@@ -84,9 +85,16 @@ impl Client {
             // If the timeseries doesn't exist, just return an empty Vec.
             None => return Ok(Vec::new()),
         };
-        let mut query_builder = query::SelectQueryBuilder::new(&schema)
+        let query_builder = query::SelectQueryBuilder::new(&schema)
             .start_time(start_time)
             .end_time(end_time);
+
+        let mut query_builder = if let Some(limit) = limit {
+            query_builder.limit(limit)
+        } else {
+            query_builder
+        };
+
         for criterion in criteria.iter() {
             query_builder = query_builder.filter_raw(criterion)?;
         }
@@ -834,6 +842,7 @@ mod tests {
                 &criteria.iter().map(|x| x.as_str()).collect::<Vec<_>>(),
                 None,
                 None,
+                None,
             )
             .await
             .unwrap();
@@ -998,6 +1007,7 @@ mod tests {
                 &["id==0"],
                 None,
                 None,
+                None,
             )
             .await
             .expect("Failed to select test samples");
@@ -1086,6 +1096,7 @@ mod tests {
                 criteria,
                 start_time,
                 end_time,
+                None,
             )
             .await
             .expect("Failed to select timeseries");
@@ -1341,6 +1352,7 @@ mod tests {
                 timeseries_name,
                 &[],
                 Some(query::Timestamp::Exclusive(start_time)),
+                None,
                 None,
             )
             .await

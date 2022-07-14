@@ -219,11 +219,21 @@ impl super::Nexus {
             .map_err(map_oximeter_err)
     }
 
+    /// Returns a results from the timeseries DB based on the provided query
+    /// parameters.
+    ///
+    /// * `timeseries_name`: The "target:metric" name identifying the metric to
+    /// be queried.
+    /// * `criteria`: Any additional parameters to help narrow down the query
+    /// selection further.
+    /// * `query_params`: Pagination parameter, identifying which page of
+    /// results to return.
+    /// * `limit`: The maximum number of results to return in a paginated
+    /// request.
     pub async fn select_timeseries(
         &self,
         timeseries_name: &str,
         criteria: &[&str],
-        interval: Duration,
         query_params: ResourceMetricsPagination,
         limit: NonZeroU32,
     ) -> Result<dropshot::ResultsPage<Measurement>, Error> {
@@ -237,12 +247,10 @@ impl super::Nexus {
             dropshot::WhichPage::Next(query) => query,
         };
         let start_time = query.start_time;
-        if start_time >= query.end_time {
+        let end_time = query.end_time;
+        if start_time >= end_time {
             return Ok(no_results());
         }
-        let max_timeframe = chrono::Duration::from_std(interval * limit.get())
-            .map_err(|e| Error::internal_error(&e.to_string()))?;
-        let end_time = query.end_time.min(start_time + max_timeframe);
 
         let timeseries_list = self
             .timeseries_client
@@ -259,6 +267,7 @@ impl super::Nexus {
                 criteria,
                 Some(Timestamp::Inclusive(start_time)),
                 Some(Timestamp::Exclusive(end_time)),
+                Some(limit),
             )
             .await
             .map_err(map_oximeter_err)?;
@@ -272,26 +281,48 @@ impl super::Nexus {
             )));
         }
 
-        Ok(if let Some(timeseries) = timeseries_list.into_iter().next() {
-            let next_start_time = end_time;
+        // If we received no data, exit early.
+        let timeseries =
+            if let Some(timeseries) = timeseries_list.into_iter().next() {
+                timeseries
+            } else {
+                return Ok(no_results());
+            };
 
-            dropshot::ResultsPage {
-                next_page: if next_start_time >= query.end_time {
-                    None
-                } else {
-                    Some(base64::encode_config(
-                        serde_json::to_string(&ResourceMetrics {
-                            start_time: next_start_time,
-                            end_time: query.end_time,
-                        })?,
-                        base64::URL_SAFE,
-                    ))
-                },
-                items: timeseries.measurements,
-            }
-        } else {
-            no_results()
-        })
+        // Otherwise, set up the next page to-be-queried before returning data.
+        //
+        // This is only relevant if we hit the limit of measurements when
+        // querying.
+        let next_page =
+            if timeseries.measurements.len() >= limit.get() as usize {
+                // The "next start time" is the latest value we saw from the query.
+                let next_start_time = timeseries
+                    .measurements
+                    .iter()
+                    .map(|m| m.timestamp())
+                    .reduce(|latest, timestamp| {
+                        if latest >= timestamp {
+                            latest
+                        } else {
+                            timestamp
+                        }
+                    })
+                    // Unwrap safety: This case shouldn't be possible to hit; we
+                    // only enter this conditional when we're at the (nonzero)
+                    // pagination limit of measurements.
+                    .expect("Expected measurements");
+                Some(base64::encode_config(
+                    serde_json::to_string(&ResourceMetrics {
+                        start_time: next_start_time,
+                        end_time: query.end_time,
+                    })?,
+                    base64::URL_SAFE,
+                ))
+            } else {
+                None
+            };
+
+        Ok(dropshot::ResultsPage { next_page, items: timeseries.measurements })
     }
 
     // Internal helper to build an Oximeter client from its ID and address (common data between
