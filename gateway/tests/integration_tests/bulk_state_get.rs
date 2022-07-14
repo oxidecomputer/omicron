@@ -74,7 +74,7 @@ async fn bulk_sp_get_one_sp_powered_off() {
     assert!(expected.iter().all(|sp| sp.details.is_enabled()));
 
     // power off sled 0 (guaranteed to exist via the assertion above)
-    let url = format!("{}", client.url("/sp/sled/0/power_off"));
+    let url = format!("{}", client.url("/sp/sled/0/power-off"));
     client
         .make_request_no_body(Method::POST, &url, StatusCode::NO_CONTENT)
         .await

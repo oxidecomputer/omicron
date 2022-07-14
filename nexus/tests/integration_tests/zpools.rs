@@ -20,7 +20,7 @@ async fn test_zpool_put_success(cptestctx: &ControlPlaneTestContext) {
 
     let zpool_id = Uuid::new_v4();
     let zpool_put_url =
-        format!("/sled_agents/{}/zpools/{}", SLED_AGENT_UUID, zpool_id);
+        format!("/sled-agents/{}/zpools/{}", SLED_AGENT_UUID, zpool_id);
 
     let request = ZpoolPutRequest { size: ByteCount::from_gibibytes_u32(1) };
     client
