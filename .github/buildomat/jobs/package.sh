@@ -5,7 +5,7 @@
 #: target = "helios-latest"
 #: rust_toolchain = "nightly-2022-04-27"
 #: output_rules = [
-#:	"/work/package.tar.gz",
+#:	"=/work/package.tar.gz",
 #: ]
 #:
 
