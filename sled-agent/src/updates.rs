@@ -5,11 +5,12 @@
 //! Management of per-sled updates
 
 use crate::nexus::NexusClient;
-use futures::TryStreamExt;
+use futures::{TryFutureExt, TryStreamExt};
 use omicron_common::api::internal::nexus::{
     UpdateArtifact, UpdateArtifactKind,
 };
 use std::path::PathBuf;
+use tokio::io::AsyncWriteExt;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -56,27 +57,31 @@ pub async fn download_artifact(
                 .await
                 .map_err(Error::Response)?;
 
-            // TODO it would be better to stream this into the file rather than
-            // accumulating it in memory.
-            let contents = response
-                .into_inner_stream()
-                .try_fold(Vec::new(), |mut acc, x| async move {
-                    acc.extend(x);
-                    Ok(acc)
-                })
+            let mut file =
+                tokio::fs::File::create(&tmp_path).await.map_err(|err| {
+                    Error::Io {
+                        message: format!(
+                            "create {}",
+                            tmp_path.to_string_lossy()
+                        ),
+                        err,
+                    }
+                })?;
+            let mut stream = response.into_inner_stream();
+            while let Some(chunk) = stream
+                .try_next()
                 .await
-                .map_err(|e| Error::Response(e.into()))?;
+                .map_err(|e| Error::Response(e.into()))?
+            {
+                file.write_all(&chunk)
+                    .map_err(|err| Error::Io {
+                        message: "write_all".to_string(),
+                        err,
+                    })
+                    .await?;
+            }
 
-            tokio::fs::write(&tmp_path, contents).await.map_err(|err| {
-                Error::Io {
-                    message: format!(
-                        "Downloading artifact to temporary path: {tmp_path:?}"
-                    ),
-                    err,
-                }
-            })?;
-
-            // Write the file to its final path.
+            // Move the file to its final path.
             let destination = directory.join(artifact.name);
             tokio::fs::rename(&tmp_path, &destination).await.map_err(
                 |err| Error::Io {
