@@ -32,7 +32,7 @@ pub struct InstanceExternalIp {
 impl From<InstanceExternalIp> for sled_agent_client::types::ExternalIp {
     fn from(eip: InstanceExternalIp) -> Self {
         Self {
-            ip: eip.ip.ip().to_string(),
+            ip: eip.ip.ip(),
             first_port: eip.first_port.0,
             last_port: eip.last_port.0,
         }

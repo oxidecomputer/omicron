@@ -49,26 +49,28 @@ fn main() -> Result<()> {
         })?
     };
 
-    let content = progenitor::Generator::new()
-        .with_inner_type(quote!(slog::Logger))
-        .with_pre_hook(quote! {
-            |log: &slog::Logger, request: &reqwest::Request| {
-                slog::debug!(log, "client request";
-                    "method" => %request.method(),
-                    "uri" => %request.url(),
-                    "body" => ?&request.body(),
-                );
-            }
-        })
-        .with_post_hook(quote! {
-            |log: &slog::Logger, result: &Result<_, _>| {
-                slog::debug!(log, "client response"; "result" => ?result);
-            }
-        })
-        .generate_text(&spec)
-        .with_context(|| {
-            format!("failed to generate progenitor client from {local_path}")
-        })?;
+    let content = progenitor::Generator::new(
+        progenitor::GenerationSettings::new()
+            .with_inner_type(quote!(slog::Logger))
+            .with_pre_hook(quote! {
+                |log: &slog::Logger, request: &reqwest::Request| {
+                    slog::debug!(log, "client request";
+                        "method" => %request.method(),
+                        "uri" => %request.url(),
+                        "body" => ?&request.body(),
+                    );
+                }
+            })
+            .with_post_hook(quote! {
+                |log: &slog::Logger, result: &Result<_, _>| {
+                    slog::debug!(log, "client response"; "result" => ?result);
+                }
+            }),
+    )
+    .generate_text(&spec)
+    .with_context(|| {
+        format!("failed to generate progenitor client from {local_path}")
+    })?;
 
     let out_file =
         Path::new(&env::var("OUT_DIR").expect("OUT_DIR env var not set"))
