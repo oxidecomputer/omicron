@@ -1994,7 +1994,7 @@ mod test {
             ),
             (
                 "a7e55044-10b1-426f-9247-bb680e5fe0c8",
-                "name cannot be a UUID to avoid ambiguity with ids",
+                "name cannot be a UUID to avoid ambiguity with IDs",
             ),
         ];
 
