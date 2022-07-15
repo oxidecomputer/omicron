@@ -1,6 +1,6 @@
 #!/bin/bash
 #:
-#: name = "helios / build-and-test"
+#: name = "build-and-test (helios)"
 #: variety = "basic"
 #: target = "helios-latest"
 #: rust_toolchain = "nightly-2022-04-27"
@@ -29,7 +29,7 @@ mkdir $TEST_TMPDIR
 export PATH="$PATH:$PWD/out/cockroachdb/bin:$PWD/out/clickhouse"
 
 banner prerequisites
-ptime -m bash ./tools/install_prerequisites.sh -y
+ptime -m bash ./tools/install_builder_prerequisites.sh -y
 
 #
 # We build with:
@@ -50,12 +50,6 @@ export RUSTFLAGS="-D warnings"
 export RUSTDOCFLAGS="-D warnings"
 export TMPDIR=$TEST_TMPDIR
 ptime -m cargo +'nightly-2022-04-27' build --locked --all-targets --verbose
-
-#
-# Check that building individual packages as when deploying Omicron succeeds
-#
-banner deploy-check
-ptime -m cargo run --bin omicron-package -- check
 
 #
 # NOTE: We're using using the same RUSTFLAGS and RUSTDOCFLAGS as above to avoid
