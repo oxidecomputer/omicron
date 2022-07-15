@@ -476,10 +476,10 @@ async fn test_projects_list(cptestctx: &ControlPlaneTestContext) {
     for _ in 0..projects_total {
         // We'll use uuids for the names to make sure that works, and that we
         // can paginate through by _name_ even though the names happen to be
-        // uuids.  Names have to start with a letter, though, so we've got to
-        // make sure our uuid has one.
+        // uuids.  Names have to start with a letter and can't exactly match
+        // a uuid though, so we'll use a prefix.
         let mut name = Uuid::new_v4().to_string();
-        name.replace_range(0..1, "a");
+        name.insert_str(0, "project-");
         let project = create_project(&client, org_name, &name).await;
         projects_created.push(project.identity);
     }
