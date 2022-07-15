@@ -924,7 +924,7 @@ async fn test_post_saml_response(cptestctx: &ControlPlaneTestContext) {
     .await
     .expect("expected success");
 
-    let _session_user: views::SessionUser = NexusRequest::new(
+    let _session_user: views::User = NexusRequest::new(
         RequestBuilder::new(client, Method::GET, "/session/me")
             .header(
                 http::header::COOKIE,

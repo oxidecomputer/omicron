@@ -2314,7 +2314,7 @@ impl DataStore {
                 };
                 sled_client_types::NetworkInterface {
                     name: sled_client_types::Name::from(&nic.name.0),
-                    ip: nic.ip.ip().to_string(),
+                    ip: nic.ip.ip(),
                     mac: sled_client_types::MacAddr::from(nic.mac.0),
                     subnet: sled_client_types::IpNet::from(ip_subnet),
                     vni: sled_client_types::Vni::from(nic.vni.0),

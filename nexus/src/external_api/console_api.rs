@@ -552,18 +552,21 @@ pub async fn login_redirect(
 }]
 pub async fn session_me(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-) -> Result<HttpResponseOk<views::SessionUser>, HttpError> {
+) -> Result<HttpResponseOk<views::User>, HttpError> {
     let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
     let handler = async {
-        // TODO: we don't care about authentication method, as long as they are
-        // authed as _somebody_. We could restrict this to session auth only,
-        // but it's not clear what the advantage would be.
+        // We don't care about authentication method, as long as they are authed
+        // as _somebody_. We could restrict this to session auth only, but it's
+        // not clear what the advantage would be.
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let &actor = opctx
             .authn
             .actor_required()
             .internal_context("loading current user")?;
-        Ok(HttpResponseOk(actor.into()))
+        let user =
+            nexus.silo_user_fetch_by_id(&opctx, &actor.actor_id()).await?;
+        Ok(HttpResponseOk(user.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

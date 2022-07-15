@@ -4,7 +4,6 @@
 
 //! Views are response bodies, most of which are public lenses onto DB models.
 
-use crate::authn;
 use crate::db::identity::{Asset, Resource};
 use crate::db::model;
 use crate::external_api::shared::{self, IpRange};
@@ -451,20 +450,6 @@ pub struct UserBuiltin {
 impl From<model::UserBuiltin> for UserBuiltin {
     fn from(user: model::UserBuiltin) -> Self {
         Self { identity: user.identity() }
-    }
-}
-
-/// Client view of currently authed user.
-// TODO: this may end up merged with User once more details about the user are
-// stored in the auth context. Right now there is only the ID.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
-pub struct SessionUser {
-    pub id: Uuid,
-}
-
-impl From<authn::Actor> for SessionUser {
-    fn from(actor: authn::Actor) -> Self {
-        Self { id: actor.actor_id() }
     }
 }
 
