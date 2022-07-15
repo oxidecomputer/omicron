@@ -12,6 +12,7 @@ use dropshot::ResultsPage;
 use http::method::Method;
 use http::StatusCode;
 use nexus_test_utils::http_testing::AuthnMode;
+use nexus_test_utils::http_testing::Collection;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::identity_eq;
@@ -828,29 +829,33 @@ async fn test_disk_reject_total_size_not_divisible_by_min_disk_size(
     );
 }
 
+async fn create_instance_with_disk(client: &ClientTestContext) {
+    create_instance_with(
+        &client,
+        ORG_NAME,
+        PROJECT_NAME,
+        INSTANCE_NAME,
+        &params::InstanceNetworkInterfaceAttachment::Default,
+        vec![params::InstanceDiskAttachment::Attach(
+            params::InstanceDiskAttach { name: DISK_NAME.parse().unwrap() },
+        )],
+    )
+    .await;
+}
+
+const ALL_METRICS: [&'static str; 6] =
+    ["activated", "read", "write", "read_bytes", "write_bytes", "flush"];
+
 #[nexus_test]
 async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
     create_org_and_project(client).await;
-    let disks_url = get_disks_url();
-
-    // Create a disk.
-    let _new_disk = params::DiskCreate {
-        identity: IdentityMetadataCreateParams {
-            name: DISK_NAME.parse().unwrap(),
-            description: String::from("sells rainsticks"),
-        },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
-        },
-        size: ByteCount::from_gibibytes_u32(1),
-    };
-    let _disk = create_disk(&client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
-    let disk_url = format!("{}/{}", disks_url, DISK_NAME);
+    create_disk(&client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
 
     // Whenever we grab this URL, get the last few seconds of metrics.
     let metric_url = |metric_type: &str| {
+        let disk_url = format!("{}/{}", get_disks_url(), DISK_NAME);
         format!(
             "{disk_url}/metrics/{metric_type}?start_time={:?}&end_time={:?}",
             Utc::now() - chrono::Duration::seconds(5),
@@ -867,26 +872,14 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
     assert!(measurements.items.is_empty());
 
     // Create an instance, attach the disk to it.
-    let _instance = create_instance_with(
-        &client,
-        ORG_NAME,
-        PROJECT_NAME,
-        INSTANCE_NAME,
-        &params::InstanceNetworkInterfaceAttachment::Default,
-        vec![params::InstanceDiskAttachment::Attach(
-            params::InstanceDiskAttach { name: DISK_NAME.parse().unwrap() },
-        )],
-    )
-    .await;
+    create_instance_with_disk(client).await;
 
-    // TODO: test that get as unprivileged fails?
-    // TODO: make the intervals smaller to avoid sleeping?
-    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+    // NOTE: This is a little gnarly, but we sleep long enough to allow some
+    // metrics to be populated. Noted that this relies on the producer server
+    // within the simulated disk using an interval smaller than a second.
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
-    let metrics =
-        ["activated", "read", "write", "read_bytes", "write_bytes", "flush"];
-
-    for metric in &metrics {
+    for metric in &ALL_METRICS {
         let measurements: ResultsPage<Measurement> =
             objects_list_page_authz(client, &metric_url(metric)).await;
         assert!(!measurements.items.is_empty());
@@ -896,6 +889,62 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
                 _ => panic!("Unexpected datum type {:?}", item.datum()),
             };
             assert!(cumulative.start_time() <= item.timestamp());
+        }
+    }
+}
+
+#[nexus_test]
+async fn test_disk_metrics_paginated(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    DiskTest::new(&cptestctx).await;
+    create_org_and_project(client).await;
+    create_disk(&client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
+    create_instance_with_disk(client).await;
+
+    // NOTE: This is a little gnarly, but we sleep long enough to allow some
+    // metrics to be populated. Noted that this relies on the producer server
+    // within the simulated disk using an interval smaller than a second.
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+    for metric in &ALL_METRICS {
+        let collection_url =
+            format!("{}/{DISK_NAME}/metrics/{metric}", get_disks_url(),);
+        let initial_params = format!(
+            "start_time={:?}&end_time={:?}",
+            Utc::now() - chrono::Duration::seconds(5),
+            Utc::now(),
+        );
+        let measurements_paginated: Collection<Measurement> =
+            NexusRequest::iter_collection_authn(
+                client,
+                &collection_url,
+                &initial_params,
+                Some(10),
+            )
+            .await
+            .expect("failed to iterate over metrics");
+        assert!(!measurements_paginated.all_items.is_empty());
+
+        let mut last_timestamp = None;
+        let mut last_value = None;
+        for item in &measurements_paginated.all_items {
+            let cumulative = match item.datum() {
+                Datum::CumulativeI64(c) => c,
+                _ => panic!("Unexpected datum type {:?}", item.datum()),
+            };
+            assert!(cumulative.start_time() <= item.timestamp());
+
+            // Validate that the timestamps increase.
+            if let Some(last_ts) = last_timestamp {
+                assert!(last_ts < item.timestamp());
+            }
+            // Validate that the values increase.
+            if let Some(last_value) = last_value {
+                assert!(last_value < cumulative.value());
+            }
+
+            last_timestamp = Some(item.timestamp());
+            last_value = Some(cumulative.value());
         }
     }
 }

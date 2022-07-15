@@ -168,7 +168,7 @@ impl SimDisk {
             id,
             address: producer_address,
             base_route: "/collect".to_string(),
-            interval: Duration::from_secs(1),
+            interval: Duration::from_millis(200),
         };
         let config = oximeter_producer::Config {
             server_info,

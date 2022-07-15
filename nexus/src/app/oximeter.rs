@@ -242,13 +242,19 @@ impl super::Nexus {
             dropshot::ResultsPage { next_page: None, items: Vec::new() }
         }
 
-        let query = match query_params.page {
-            dropshot::WhichPage::First(query) => query,
-            dropshot::WhichPage::Next(query) => query,
+        let (start_time, end_time, query) = match query_params.page {
+            dropshot::WhichPage::First(query) => (
+                Timestamp::Inclusive(query.start_time),
+                Timestamp::Exclusive(query.end_time),
+                query,
+            ),
+            dropshot::WhichPage::Next(query) => (
+                Timestamp::Exclusive(query.start_time),
+                Timestamp::Exclusive(query.end_time),
+                query,
+            ),
         };
-        let start_time = query.start_time;
-        let end_time = query.end_time;
-        if start_time >= end_time {
+        if query.start_time >= query.end_time {
             return Ok(no_results());
         }
 
@@ -265,8 +271,8 @@ impl super::Nexus {
             .select_timeseries_with(
                 timeseries_name,
                 criteria,
-                Some(Timestamp::Inclusive(start_time)),
-                Some(Timestamp::Exclusive(end_time)),
+                Some(start_time),
+                Some(end_time),
                 Some(limit),
             )
             .await
@@ -282,47 +288,28 @@ impl super::Nexus {
         }
 
         // If we received no data, exit early.
-        let timeseries =
+        let mut timeseries =
             if let Some(timeseries) = timeseries_list.into_iter().next() {
                 timeseries
             } else {
                 return Ok(no_results());
             };
 
-        // Otherwise, set up the next page to-be-queried before returning data.
-        //
-        // This is only relevant if we hit the limit of measurements when
-        // querying.
-        let next_page =
-            if timeseries.measurements.len() >= limit.get() as usize {
-                // The "next start time" is the latest value we saw from the query.
-                let next_start_time = timeseries
-                    .measurements
-                    .iter()
-                    .map(|m| m.timestamp())
-                    .reduce(|latest, timestamp| {
-                        if latest >= timestamp {
-                            latest
-                        } else {
-                            timestamp
-                        }
-                    })
-                    // Unwrap safety: This case shouldn't be possible to hit; we
-                    // only enter this conditional when we're at the (nonzero)
-                    // pagination limit of measurements.
-                    .expect("Expected measurements");
-                Some(base64::encode_config(
-                    serde_json::to_string(&ResourceMetrics {
-                        start_time: next_start_time,
-                        end_time: query.end_time,
-                    })?,
-                    base64::URL_SAFE,
-                ))
-            } else {
-                None
-            };
+        // Otherwise, sort the output result, and prepare the next page
+        // to-be-queried.
+        timeseries.measurements.sort_by_key(|m| m.timestamp());
 
-        Ok(dropshot::ResultsPage { next_page, items: timeseries.measurements })
+        Ok(dropshot::ResultsPage::new(
+            timeseries.measurements,
+            &query,
+            |last_measurement: &Measurement, query: &ResourceMetrics| {
+                ResourceMetrics {
+                    start_time: last_measurement.timestamp(),
+                    end_time: query.end_time,
+                }
+            },
+        )
+        .unwrap())
     }
 
     // Internal helper to build an Oximeter client from its ID and address (common data between
