@@ -5,14 +5,14 @@
 //! [`DataStore`] methods on [`InstanceExternalIp`]s.
 
 use super::DataStore;
-use crate::db::model::IncompleteInstanceExternalIp;
-use crate::db::queries::external_ip::NextExternalIp;
-use crate::db::update_and_check::UpdateAndCheck;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
+use crate::db::model::IncompleteInstanceExternalIp;
 use crate::db::model::InstanceExternalIp;
+use crate::db::queries::external_ip::NextExternalIp;
+use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;

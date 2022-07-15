@@ -18,10 +18,10 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use uuid::Uuid;
-use omicron_common::api::external::LookupResult;
 
 impl DataStore {
     /// Start a device authorization grant flow by recording the request

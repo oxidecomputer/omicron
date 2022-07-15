@@ -16,10 +16,10 @@ use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::ResourceType;
-use omicron_common::api::external::CreateResult;
 use uuid::Uuid;
 
 impl DataStore {

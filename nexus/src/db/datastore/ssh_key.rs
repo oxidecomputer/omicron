@@ -14,6 +14,7 @@ use crate::db::identity::Resource;
 use crate::db::model::Name;
 use crate::db::model::SshKey;
 use crate::db::pagination::paginated;
+use crate::db::update_and_check::UpdateAndCheck;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
@@ -22,7 +23,6 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::ResourceType;
-use crate::db::update_and_check::UpdateAndCheck;
 
 impl DataStore {
     pub async fn ssh_keys_list(
