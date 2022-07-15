@@ -12,6 +12,7 @@ use super::params::{
 };
 use dropshot::endpoint;
 use dropshot::ApiDescription;
+use dropshot::FreeformBody;
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
@@ -299,7 +300,7 @@ async fn cpapi_metrics_collect(
 async fn cpapi_artifact_download(
     request_context: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<UpdateArtifact>,
-) -> Result<Response<Body>, HttpError> {
+) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
     let context = request_context.context();
     let nexus = &context.nexus;
     let opctx = OpContext::for_internal_api(&request_context).await;
@@ -307,5 +308,5 @@ async fn cpapi_artifact_download(
     let body =
         nexus.download_artifact(&opctx, path_params.into_inner()).await?;
 
-    Ok(Response::builder().status(StatusCode::OK).body(body.into())?)
+    Ok(HttpResponseOk(Body::from(body).into()))
 }

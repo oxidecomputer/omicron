@@ -5,6 +5,7 @@
 //! Management of per-sled updates
 
 use crate::nexus::NexusClient;
+use futures::TryStreamExt;
 use omicron_common::api::internal::nexus::{
     UpdateArtifact, UpdateArtifactKind,
 };
@@ -19,11 +20,8 @@ pub enum Error {
         err: std::io::Error,
     },
 
-    #[error("Failed to contact nexus: {0}")]
-    Nexus(anyhow::Error),
-
-    #[error("Failed to read response from Nexus: {0}")]
-    Response(reqwest::Error),
+    #[error("Failed request to Nexus: {0}")]
+    Response(nexus_client::Error<nexus_client::types::Error>),
 }
 
 pub async fn download_artifact(
@@ -48,24 +46,27 @@ pub async fn download_artifact(
 
             // Fetch the artifact and write to the file in its entirety,
             // replacing it if it exists.
-            // TODO: Would love to stream this instead.
-            // ALSO TODO: This is, for the moment, using the endpoint directly
-            // instead of using the client method to work around issues in
-            // dropshot/progenitor for getting raw response bodies.
+
             let response = nexus
-                .client()
-                .get(format!(
-                    "{}/artifacts/{}/{}/{}",
-                    nexus.baseurl(),
-                    artifact.kind,
-                    artifact.name,
-                    artifact.version
-                ))
-                .send()
+                .cpapi_artifact_download(
+                    nexus_client::types::UpdateArtifactKind::Zone,
+                    &artifact.name,
+                    artifact.version,
+                )
                 .await
                 .map_err(Error::Response)?;
-            let contents =
-                response.bytes().await.map_err(|e| Error::Response(e))?;
+
+            // TODO it would be better to stream this into the file rather than
+            // accumulating it in memory.
+            let contents = response
+                .into_inner_stream()
+                .try_fold(Vec::new(), |mut acc, x| async move {
+                    acc.extend(x);
+                    Ok(acc)
+                })
+                .await
+                .map_err(|e| Error::Response(e.into()))?;
+
             tokio::fs::write(&tmp_path, contents).await.map_err(|err| {
                 Error::Io {
                     message: format!(
@@ -94,13 +95,13 @@ pub async fn download_artifact(
 mod test {
     use super::*;
     use crate::mocks::MockNexusClient;
-    use http::{Response, StatusCode};
+    use bytes::Bytes;
+    use http::StatusCode;
+    use progenitor::progenitor_client::{ByteStream, ResponseValue};
+    use reqwest::{header::HeaderMap, Result};
 
     #[tokio::test]
     #[serial_test::serial]
-    // TODO this is hard to mock out when not using the generated client
-    // methods :( but the logic is covered in the updates integration test
-    #[ignore]
     async fn test_write_artifact_to_filesystem() {
         // The (completely fabricated) artifact we'd like to download.
         let expected_name = "test_artifact";
@@ -122,11 +123,16 @@ mod test {
                 assert_eq!(name, "test_artifact");
                 assert_eq!(version, 3);
                 assert_eq!(kind.to_string(), "zone");
-                let response = Response::builder()
-                    .status(StatusCode::OK)
-                    .body(expected_contents)
-                    .unwrap();
-                Ok(response.into())
+                let response = ByteStream::new(Box::pin(
+                    futures::stream::once(futures::future::ready(Result::Ok(
+                        Bytes::from(expected_contents),
+                    ))),
+                ));
+                Ok(ResponseValue::new(
+                    response,
+                    StatusCode::OK,
+                    HeaderMap::default(),
+                ))
             },
         );
 

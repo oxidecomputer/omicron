@@ -4068,7 +4068,7 @@ dependencies = [
 [[package]]
 name = "progenitor"
 version = "0.1.2-dev"
-source = "git+https://github.com/oxidecomputer/progenitor#6ca5670819c88267b657be2f44a15e4f5f22b727"
+source = "git+https://github.com/oxidecomputer/progenitor#5a72e1b8e7c1ac729519447fe424d0179fe42c07"
 dependencies = [
  "anyhow",
  "clap 3.2.12",
@@ -4083,7 +4083,7 @@ dependencies = [
 [[package]]
 name = "progenitor-client"
 version = "0.1.2-dev"
-source = "git+https://github.com/oxidecomputer/progenitor#6ca5670819c88267b657be2f44a15e4f5f22b727"
+source = "git+https://github.com/oxidecomputer/progenitor#5a72e1b8e7c1ac729519447fe424d0179fe42c07"
 dependencies = [
  "bytes",
  "futures-core",
@@ -4097,7 +4097,7 @@ dependencies = [
 [[package]]
 name = "progenitor-impl"
 version = "0.1.2-dev"
-source = "git+https://github.com/oxidecomputer/progenitor#6ca5670819c88267b657be2f44a15e4f5f22b727"
+source = "git+https://github.com/oxidecomputer/progenitor#5a72e1b8e7c1ac729519447fe424d0179fe42c07"
 dependencies = [
  "getopts",
  "heck 0.4.0",
@@ -4119,7 +4119,7 @@ dependencies = [
 [[package]]
 name = "progenitor-macro"
 version = "0.1.2-dev"
-source = "git+https://github.com/oxidecomputer/progenitor#6ca5670819c88267b657be2f44a15e4f5f22b727"
+source = "git+https://github.com/oxidecomputer/progenitor#5a72e1b8e7c1ac729519447fe424d0179fe42c07"
 dependencies = [
  "openapiv3",
  "proc-macro2",
@@ -4134,7 +4134,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=a9399a8007f9876e31ce152848e6ecc2a9e14283#a9399a8007f9876e31ce152848e6ecc2a9e14283"
+source = "git+https://github.com/oxidecomputer/propolis?rev=a9399a8007f9876e31ce152848e6ecc2a9e14283"
 dependencies = [
  "crucible",
  "reqwest",
