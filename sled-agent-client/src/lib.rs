@@ -209,21 +209,19 @@ impl From<omicron_common::api::external::Vni> for types::Vni {
 impl From<omicron_common::api::external::MacAddr> for types::MacAddr {
     fn from(s: omicron_common::api::external::MacAddr) -> Self {
         Self::try_from(s.0.to_string())
-            .unwrap_or_else(|e| panic!("{}: {}", s.0.to_string(), e))
+            .unwrap_or_else(|e| panic!("{}: {}", s.0, e))
     }
 }
 
 impl From<omicron_common::api::external::Ipv4Net> for types::Ipv4Net {
     fn from(n: omicron_common::api::external::Ipv4Net) -> Self {
-        Self::try_from(n.to_string())
-            .unwrap_or_else(|e| panic!("{}: {}", n.to_string(), e))
+        Self::try_from(n.to_string()).unwrap_or_else(|e| panic!("{}: {}", n, e))
     }
 }
 
 impl From<omicron_common::api::external::Ipv6Net> for types::Ipv6Net {
     fn from(n: omicron_common::api::external::Ipv6Net) -> Self {
-        Self::try_from(n.to_string())
-            .unwrap_or_else(|e| panic!("{}: {}", n.to_string(), e))
+        Self::try_from(n.to_string()).unwrap_or_else(|e| panic!("{}: {}", n, e))
     }
 }
 
