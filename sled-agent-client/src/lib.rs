@@ -213,7 +213,7 @@ impl From<omicron_common::api::external::MacAddr> for types::MacAddr {
 
 impl From<omicron_common::api::external::Ipv4Net> for types::Ipv4Net {
     fn from(n: omicron_common::api::external::Ipv4Net) -> Self {
-        Self::try_from(n.to_string()).unwrap()
+        Self::try_from(n.to_string()).expect(&n.to_string())
     }
 }
 
