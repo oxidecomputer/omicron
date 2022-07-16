@@ -10,6 +10,7 @@ use omicron_common::api::internal::nexus::{
     UpdateArtifact, UpdateArtifactKind,
 };
 use std::path::PathBuf;
+use tempfile::NamedTempFile;
 use tokio::io::AsyncWriteExt;
 
 #[derive(thiserror::Error, Debug)]
@@ -39,11 +40,16 @@ pub async fn download_artifact(
                 }
             })?;
 
-            // We download the file to a location named "<artifact-name>-<version>".
-            // We then rename it to "<artifact-name>" after it has successfully
-            // downloaded, to signify that it is ready for usage.
-            let tmp_path = directory
-                .join(format!("{}-{}", artifact.name, artifact.version));
+            // We download the file to a temporary file. We then rename it to
+            // "<artifact-name>" after it has successfully downloaded, to
+            // signify that it is ready for usage.
+            let (file, temp_path) = NamedTempFile::new_in(&directory)
+                .map_err(|err| Error::Io {
+                    message: "create temp file".to_string(),
+                    err,
+                })?
+                .into_parts();
+            let mut file = tokio::fs::File::from_std(file);
 
             // Fetch the artifact and write to the file in its entirety,
             // replacing it if it exists.
@@ -57,16 +63,6 @@ pub async fn download_artifact(
                 .await
                 .map_err(Error::Response)?;
 
-            let mut file =
-                tokio::fs::File::create(&tmp_path).await.map_err(|err| {
-                    Error::Io {
-                        message: format!(
-                            "create {}",
-                            tmp_path.to_string_lossy()
-                        ),
-                        err,
-                    }
-                })?;
             let mut stream = response.into_inner_stream();
             while let Some(chunk) = stream
                 .try_next()
@@ -80,17 +76,19 @@ pub async fn download_artifact(
                     })
                     .await?;
             }
+            file.sync_all().await.map_err(|err| Error::Io {
+                message: "sync temp file".to_string(),
+                err,
+            })?;
+            drop(file);
 
             // Move the file to its final path.
             let destination = directory.join(artifact.name);
-            tokio::fs::rename(&tmp_path, &destination).await.map_err(
-                |err| Error::Io {
-                    message: format!(
-                        "Renaming {tmp_path:?} to {destination:?}"
-                    ),
-                    err,
-                },
-            )?;
+            temp_path.persist(&destination).map_err(|err| Error::Io {
+                message: format!("renaming {:?} to {destination:?}", err.path),
+                err: err.error,
+            })?;
+
             Ok(())
         }
     }
