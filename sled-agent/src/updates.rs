@@ -76,8 +76,8 @@ pub async fn download_artifact(
                     })
                     .await?;
             }
-            file.sync_all().await.map_err(|err| Error::Io {
-                message: "sync temp file".to_string(),
+            file.flush().await.map_err(|err| Error::Io {
+                message: "flush temp file".to_string(),
                 err,
             })?;
             drop(file);
