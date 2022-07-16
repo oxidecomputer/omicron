@@ -10,12 +10,11 @@ use nexus_client::types::{
     InstanceRuntimeState, SledAgentStartupInfo, UpdateArtifactKind,
     ZpoolPutRequest, ZpoolPutResponse,
 };
-use reqwest::Response;
 use slog::Logger;
 use uuid::Uuid;
 
 type Result<T> = std::result::Result<
-    T,
+    progenitor::progenitor_client::ResponseValue<T>,
     progenitor::progenitor_client::Error<nexus_client::types::Error>,
 >;
 
@@ -44,7 +43,7 @@ mock! {
             kind: UpdateArtifactKind,
             name: &str,
             version: i64,
-        ) -> Result<Response>;
+        ) -> Result<progenitor::progenitor_client::ByteStream>;
         pub async fn zpool_put(
             &self,
             sled_id: &Uuid,
