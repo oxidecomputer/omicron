@@ -169,6 +169,12 @@ impl TryFrom<String> for Name {
             return Err(String::from("name cannot end with \"-\""));
         }
 
+        if Uuid::parse_str(&value).is_ok() {
+            return Err(String::from(
+                "name cannot be a UUID to avoid ambiguity with IDs",
+            ));
+        }
+
         Ok(Name(value))
     }
 }
@@ -216,7 +222,8 @@ impl JsonSchema for Name {
                 description: Some(
                     "Names must begin with a lower case ASCII letter, be \
                      composed exclusively of lowercase ASCII, uppercase \
-                     ASCII, numbers, and '-', and may not end with a '-'."
+                     ASCII, numbers, and '-', and may not end with a '-'. \
+                     Names cannot be a UUID though they may contain a UUID."
                         .to_string(),
                 ),
                 ..Default::default()
@@ -225,7 +232,16 @@ impl JsonSchema for Name {
             string: Some(Box::new(schemars::schema::StringValidation {
                 max_length: Some(63),
                 min_length: None,
-                pattern: Some("^[a-z](|[a-zA-Z0-9-]*[a-zA-Z0-9])$".to_string()),
+                pattern: Some(
+                    concat!(
+                        r#"^"#,
+                        // Cannot match a UUID
+                        r#"(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)"#,
+                        r#"^[a-z][a-z0-9-]*[a-zA-Z0-9]"#,
+                        r#"$"#,
+                    )
+                    .to_string(),
+                )
             })),
             ..Default::default()
         }
@@ -1983,6 +1999,10 @@ mod test {
                 "name contains invalid character: \"\u{00e9}\" (allowed \
                  characters are lowercase ASCII, digits, and \"-\")",
             ),
+            (
+                "a7e55044-10b1-426f-9247-bb680e5fe0c8",
+                "name cannot be a UUID to avoid ambiguity with IDs",
+            ),
         ];
 
         for (input, expected_message) in error_cases {
@@ -1991,8 +2011,14 @@ mod test {
         }
 
         // Success cases
-        let valid_names: Vec<&str> =
-            vec!["abc", "abc-123", "a123", &long_name[0..63]];
+        let valid_names: Vec<&str> = vec![
+            "abc",
+            "abc-123",
+            "a123",
+            "ok-a7e55044-10b1-426f-9247-bb680e5fe0c8",
+            "a7e55044-10b1-426f-9247-bb680e5fe0c8-ok",
+            &long_name[0..63],
+        ];
 
         for name in valid_names {
             eprintln!("check name \"{}\" (should be valid)", name);

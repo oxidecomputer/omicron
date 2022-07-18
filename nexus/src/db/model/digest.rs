@@ -9,7 +9,6 @@ use diesel::serialize::{self, ToSql};
 use diesel::sql_types;
 use omicron_common::api::external;
 use parse_display::Display;
-use ref_cast::RefCast;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -24,7 +23,6 @@ use serde::{Deserialize, Serialize};
     PartialEq,
     Ord,
     PartialOrd,
-    RefCast,
     JsonSchema,
     Serialize,
     Deserialize,

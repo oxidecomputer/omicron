@@ -1827,7 +1827,7 @@ dependencies = [
  "once_cell",
  "ringbuffer",
  "serde",
- "serde_with",
+ "serde_with 2.0.0",
  "slog",
  "thiserror",
  "tokio",
@@ -2949,7 +2949,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "serde_urlencoded",
- "serde_with",
+ "serde_with 2.0.0",
  "slog",
  "smf",
  "steno",
@@ -2984,7 +2984,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
- "serde_with",
+ "serde_with 1.14.0",
  "slog",
  "smf",
  "steno",
@@ -3108,7 +3108,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_urlencoded",
- "serde_with",
+ "serde_with 2.0.0",
  "sled-agent-client",
  "slog",
  "slog-dtrace",
@@ -3200,7 +3200,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "serde_with",
+ "serde_with 2.0.0",
  "serial_test",
  "sled-agent-client",
  "slog",
@@ -4071,7 +4071,7 @@ dependencies = [
 [[package]]
 name = "progenitor"
 version = "0.1.2-dev"
-source = "git+https://github.com/oxidecomputer/progenitor#6ca5670819c88267b657be2f44a15e4f5f22b727"
+source = "git+https://github.com/oxidecomputer/progenitor#a149b409231456dcb995a45a13dd755256a5baa9"
 dependencies = [
  "anyhow",
  "clap 3.2.12",
@@ -4086,7 +4086,7 @@ dependencies = [
 [[package]]
 name = "progenitor-client"
 version = "0.1.2-dev"
-source = "git+https://github.com/oxidecomputer/progenitor#6ca5670819c88267b657be2f44a15e4f5f22b727"
+source = "git+https://github.com/oxidecomputer/progenitor#a149b409231456dcb995a45a13dd755256a5baa9"
 dependencies = [
  "bytes",
  "futures-core",
@@ -4100,7 +4100,7 @@ dependencies = [
 [[package]]
 name = "progenitor-impl"
 version = "0.1.2-dev"
-source = "git+https://github.com/oxidecomputer/progenitor#6ca5670819c88267b657be2f44a15e4f5f22b727"
+source = "git+https://github.com/oxidecomputer/progenitor#a149b409231456dcb995a45a13dd755256a5baa9"
 dependencies = [
  "getopts",
  "heck 0.4.0",
@@ -4122,7 +4122,7 @@ dependencies = [
 [[package]]
 name = "progenitor-macro"
 version = "0.1.2-dev"
-source = "git+https://github.com/oxidecomputer/progenitor#6ca5670819c88267b657be2f44a15e4f5f22b727"
+source = "git+https://github.com/oxidecomputer/progenitor#a149b409231456dcb995a45a13dd755256a5baa9"
 dependencies = [
  "openapiv3",
  "proc-macro2",
@@ -4137,7 +4137,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=a9399a8007f9876e31ce152848e6ecc2a9e14283#a9399a8007f9876e31ce152848e6ecc2a9e14283"
+source = "git+https://github.com/oxidecomputer/propolis?rev=a9399a8007f9876e31ce152848e6ecc2a9e14283"
 dependencies = [
  "crucible",
  "reqwest",
@@ -4356,18 +4356,18 @@ dependencies = [
 
 [[package]]
 name = "ref-cast"
-version = "1.0.7"
+version = "1.0.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "685d58625b6c2b83e4cc88a27c4bf65adb7b6b16dbdc413e515c9405b47432ab"
+checksum = "776c8940430cf563f66a93f9111d1cd39306dc6c68149ecc6b934742a44a828a"
 dependencies = [
  "ref-cast-impl",
 ]
 
 [[package]]
 name = "ref-cast-impl"
-version = "1.0.7"
+version = "1.0.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a043824e29c94169374ac5183ac0ed43f5724dc4556b19568007486bd840fa1f"
+checksum = "5f26c4704460286103bff62ea1fb78d137febc86aaf76952e6c5a2249af01f54"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4921,7 +4921,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "678b5a069e50bf00ecd22d0cd8ddf7c236f68581b03db652061ed5eb13a312ff"
 dependencies = [
  "serde",
- "serde_with_macros",
+ "serde_with_macros 1.5.2",
+]
+
+[[package]]
+name = "serde_with"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "89df7a26519371a3cce44fbb914c2819c84d9b897890987fa3ab096491cc0ea8"
+dependencies = [
+ "base64",
+ "chrono",
+ "hex",
+ "indexmap",
+ "serde",
+ "serde_json",
+ "serde_with_macros 2.0.0",
+ "time 0.3.9",
 ]
 
 [[package]]
@@ -4931,6 +4947,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e182d6ec6f05393cc0e5ed1bf81ad6db3a8feedf8ee515ecdd369809bcce8082"
 dependencies = [
  "darling 0.13.4",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "serde_with_macros"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "de337f322382fcdfbb21a014f7c224ee041a23785651db67b9827403178f698f"
+dependencies = [
+ "darling 0.14.1",
  "proc-macro2",
  "quote",
  "syn",
@@ -5727,6 +5755,7 @@ dependencies = [
  "itoa 1.0.2",
  "libc",
  "num_threads",
+ "serde",
  "time-macros",
 ]
 
@@ -6117,7 +6146,7 @@ version = "1.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
 dependencies = [
- "cfg-if 0.1.10",
+ "cfg-if 1.0.0",
  "rand 0.8.5",
  "static_assertions",
 ]
