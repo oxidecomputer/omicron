@@ -4,24 +4,18 @@
 
 //! Silo related authentication types and functions
 
-use crate::authz;
-use crate::context::OpContext;
-use crate::db::lookup::LookupPath;
-use crate::db::{model, DataStore};
-use omicron_common::api::external::LookupResult;
-
 use anyhow::{anyhow, Result};
+use dropshot::HttpError;
 use samael::metadata::ContactPerson;
 use samael::metadata::ContactType;
-use samael::metadata::EntityDescriptor;
 use samael::metadata::NameIdFormat;
 use samael::metadata::HTTP_REDIRECT_BINDING;
 use samael::schema::Response as SAMLResponse;
 use samael::service_provider::ServiceProvider;
 use samael::service_provider::ServiceProviderBuilder;
-
-use dropshot::HttpError;
 use serde::{Deserialize, Serialize};
+
+pub use samael::metadata::EntityDescriptor;
 
 #[derive(Deserialize)]
 pub struct SamlIdentityProvider {
@@ -35,86 +29,8 @@ pub struct SamlIdentityProvider {
     pub private_key: Option<String>,
 }
 
-impl TryFrom<model::SamlIdentityProvider> for SamlIdentityProvider {
-    type Error = anyhow::Error;
-    fn try_from(
-        model: model::SamlIdentityProvider,
-    ) -> Result<Self, Self::Error> {
-        let provider = SamlIdentityProvider {
-            idp_metadata_document_string: model.idp_metadata_document_string,
-            idp_entity_id: model.idp_entity_id,
-            sp_client_id: model.sp_client_id,
-            acs_url: model.acs_url,
-            slo_url: model.slo_url,
-            technical_contact_email: model.technical_contact_email,
-            public_cert: model.public_cert,
-            private_key: model.private_key,
-        };
-
-        // check that the idp metadata document string parses into an EntityDescriptor
-        let _idp_metadata: EntityDescriptor =
-            provider.idp_metadata_document_string.parse()?;
-
-        // check that there is a valid sign in url
-        let _sign_in_url = provider.sign_in_url(None)?;
-
-        Ok(provider)
-    }
-}
-
 pub enum IdentityProviderType {
     Saml(SamlIdentityProvider),
-}
-
-impl IdentityProviderType {
-    /// First, look up the provider type, then look in for the specific
-    /// provider details.
-    pub async fn lookup(
-        datastore: &DataStore,
-        opctx: &OpContext,
-        silo_name: &model::Name,
-        provider_name: &model::Name,
-    ) -> LookupResult<(authz::Silo, model::Silo, Self)> {
-        let (authz_silo, db_silo) = LookupPath::new(opctx, datastore)
-            .silo_name(silo_name)
-            .fetch()
-            .await?;
-
-        let (.., identity_provider) = LookupPath::new(opctx, datastore)
-            .silo_name(silo_name)
-            .identity_provider_name(provider_name)
-            .fetch()
-            .await?;
-
-        match identity_provider.provider_type {
-            model::IdentityProviderType::Saml => {
-                let (.., saml_identity_provider) =
-                    LookupPath::new(opctx, datastore)
-                        .silo_name(silo_name)
-                        .saml_identity_provider_name(provider_name)
-                        .fetch()
-                        .await?;
-
-                let saml_identity_provider = IdentityProviderType::Saml(
-                    saml_identity_provider.try_into()
-                        .map_err(|e: anyhow::Error|
-                            // If an error is encountered converting from the
-                            // model to the authn type here, this is a server
-                            // error: it was validated before it went into the
-                            // DB.
-                            omicron_common::api::external::Error::internal_error(
-                                &format!(
-                                    "saml_identity_provider.try_into() failed! {}",
-                                    &e.to_string()
-                                )
-                            )
-                        )?
-                    );
-
-                Ok((authz_silo, db_silo, saml_identity_provider))
-            }
-        }
-    }
 }
 
 impl SamlIdentityProvider {

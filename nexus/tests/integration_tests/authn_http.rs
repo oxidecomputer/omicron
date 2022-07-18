@@ -24,7 +24,7 @@ use omicron_nexus::authn::external::spoof::HttpAuthnSpoof;
 use omicron_nexus::authn::external::spoof::SPOOF_SCHEME_NAME;
 use omicron_nexus::authn::external::HttpAuthnScheme;
 use omicron_nexus::authn::external::SiloUserSilo;
-use omicron_nexus::db::fixed_data::silo::SILO_ID;
+use omicron_nexus::authn::SILO_ID;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;

@@ -9,8 +9,8 @@ use super::HttpAuthnScheme;
 use super::Reason;
 use super::SchemeResult;
 use super::SiloUserSilo;
-use crate::authn;
-use crate::authn::Actor;
+use crate::Actor;
+use crate::SchemeName;
 use anyhow::anyhow;
 use anyhow::Context;
 use async_trait::async_trait;
@@ -42,7 +42,7 @@ use uuid::Uuid;
 // they say they are.  That's true of any bearer token, but this one is
 // particularly dangerous because the tokens are long-lived and not secret.
 
-pub const SPOOF_SCHEME_NAME: authn::SchemeName = authn::SchemeName("spoof");
+pub const SPOOF_SCHEME_NAME: SchemeName = SchemeName("spoof");
 
 /// Magic value to produce a "no such actor" error
 const SPOOF_RESERVED_BAD_ACTOR: &str = "Jack-Donaghy";
@@ -79,7 +79,7 @@ impl<T> HttpAuthnScheme<T> for HttpAuthnSpoof
 where
     T: SiloUserSilo + Send + Sync + 'static,
 {
-    fn name(&self) -> authn::SchemeName {
+    fn name(&self) -> SchemeName {
         SPOOF_SCHEME_NAME
     }
 

@@ -37,6 +37,7 @@
 use super::api_resources::ApiResource;
 use crate::authn;
 use crate::context::OpContext;
+use crate::db::model::IdentityType;
 use crate::db::DataStore;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ResourceType;
@@ -146,7 +147,7 @@ pub async fn load_roles_for_resource(
         let roles = datastore
             .role_asgn_list_for(
                 opctx,
-                actor.actor_type(),
+                IdentityType::from(actor),
                 actor.actor_id(),
                 resource_type,
                 resource_id,

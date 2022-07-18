@@ -8,6 +8,7 @@ use super::datastore::DataStore;
 use super::identity::Asset;
 use super::identity::Resource;
 use super::model;
+use crate::authz::AuthnContextExt;
 use crate::{
     authz,
     context::OpContext,

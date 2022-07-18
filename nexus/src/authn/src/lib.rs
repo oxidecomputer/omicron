@@ -24,24 +24,26 @@
 //! privileges it has.  These submodules might provide different mechanisms for
 //! authentication, but they'd all produce the same [`Context`] struct.
 
+#[macro_use]
+extern crate newtype_derive;
+#[macro_use]
+extern crate slog;
+
 pub mod external;
+pub mod fixed_data;
 pub mod saga;
 pub mod silos;
 
-pub use crate::db::fixed_data::silo_user::USER_TEST_PRIVILEGED;
-pub use crate::db::fixed_data::silo_user::USER_TEST_UNPRIVILEGED;
-pub use crate::db::fixed_data::user_builtin::USER_DB_INIT;
-pub use crate::db::fixed_data::user_builtin::USER_EXTERNAL_AUTHN;
-pub use crate::db::fixed_data::user_builtin::USER_INTERNAL_API;
-pub use crate::db::fixed_data::user_builtin::USER_INTERNAL_READ;
-pub use crate::db::fixed_data::user_builtin::USER_SAGA_RECOVERY;
-pub use crate::db::fixed_data::user_builtin::USER_SERVICE_BALANCER;
-use crate::db::model::ConsoleSession;
+pub use self::fixed_data::silo::SILO_ID;
+pub use self::fixed_data::silo_user::USER_TEST_PRIVILEGED_ID;
+pub use self::fixed_data::silo_user::USER_TEST_UNPRIVILEGED_ID;
+pub use self::fixed_data::user_builtin::USER_DB_INIT_ID;
+pub use self::fixed_data::user_builtin::USER_EXTERNAL_AUTHN_ID;
+pub use self::fixed_data::user_builtin::USER_INTERNAL_API_ID;
+pub use self::fixed_data::user_builtin::USER_INTERNAL_READ_ID;
+pub use self::fixed_data::user_builtin::USER_SAGA_RECOVERY_ID;
+pub use self::fixed_data::user_builtin::USER_SERVICE_BALANCER_ID;
 
-use crate::authz;
-use crate::db;
-use crate::db::identity::Asset;
-use omicron_common::api::external::LookupType;
 use serde::Deserialize;
 use serde::Serialize;
 use uuid::Uuid;
@@ -86,52 +88,6 @@ impl Context {
         }
     }
 
-    /// Returns the current actor's Silo if they have one or an appropriate
-    /// error otherwise
-    ///
-    /// This is intended for code paths that always expect a Silo to be present.
-    /// Built-in users have no Silo, and this function will return an
-    /// InternalError if the currently-authenticated user is built-in.  If you
-    /// want to handle that case differently, see
-    /// [`Context::silo_or_builtin()`].
-    pub fn silo_required(
-        &self,
-    ) -> Result<authz::Silo, omicron_common::api::external::Error> {
-        self.silo_or_builtin().and_then(|maybe_silo| {
-            maybe_silo.ok_or_else(|| {
-                omicron_common::api::external::Error::internal_error(
-                    "needed Silo for a built-in user, but \
-                        built-in users have no Silo",
-                )
-            })
-        })
-    }
-
-    /// Determine whether the currently authenticated actor has a Silo or is a
-    /// built-in user
-    ///
-    /// This function allows callers to distinguish these three cases:
-    ///
-    /// * there's an authenticated user with an associated Silo (most common)
-    /// * there's an authenticated built-in user who has no associated Silo
-    /// * there's no authenticated user (returned as an error)
-    ///
-    /// Built-in users have no Silo, and so they usually can't do anything that
-    /// might use a Silo.  You usually want to use [`Context::silo_required()`]
-    /// if you don't expect to be looking at a built-in user.
-    pub fn silo_or_builtin(
-        &self,
-    ) -> Result<Option<authz::Silo>, omicron_common::api::external::Error> {
-        self.actor_required().map(|actor| match actor {
-            Actor::SiloUser { silo_id, .. } => Some(authz::Silo::new(
-                authz::FLEET,
-                *silo_id,
-                LookupType::ById(*silo_id),
-            )),
-            Actor::UserBuiltin { .. } => None,
-        })
-    }
-
     /// Returns the list of schemes tried, in order
     ///
     /// This should generally *not* be exposed to clients.
@@ -146,34 +102,34 @@ impl Context {
 
     /// Returns an authenticated context for handling internal API contexts
     pub fn internal_api() -> Context {
-        Context::context_for_builtin_user(USER_INTERNAL_API.id)
+        Context::context_for_builtin_user(*USER_INTERNAL_API_ID)
     }
 
     /// Returns an authenticated context for saga recovery
     pub fn internal_saga_recovery() -> Context {
-        Context::context_for_builtin_user(USER_SAGA_RECOVERY.id)
+        Context::context_for_builtin_user(*USER_SAGA_RECOVERY_ID)
     }
 
     /// Returns an authenticated context for use by internal resource allocation
     pub fn internal_read() -> Context {
-        Context::context_for_builtin_user(USER_INTERNAL_READ.id)
+        Context::context_for_builtin_user(*USER_INTERNAL_READ_ID)
     }
 
     /// Returns an authenticated context for use for authenticating external
     /// requests
     pub fn external_authn() -> Context {
-        Context::context_for_builtin_user(USER_EXTERNAL_AUTHN.id)
+        Context::context_for_builtin_user(*USER_EXTERNAL_AUTHN_ID)
     }
 
     /// Returns an authenticated context for Nexus-startup database
     /// initialization
     pub fn internal_db_init() -> Context {
-        Context::context_for_builtin_user(USER_DB_INIT.id)
+        Context::context_for_builtin_user(*USER_DB_INIT_ID)
     }
 
     /// Returns an authenticated context for Nexus-driven service balancing.
     pub fn internal_service_balancer() -> Context {
-        Context::context_for_builtin_user(USER_SERVICE_BALANCER.id)
+        Context::context_for_builtin_user(*USER_SERVICE_BALANCER_ID)
     }
 
     fn context_for_builtin_user(user_builtin_id: Uuid) -> Context {
@@ -192,8 +148,8 @@ impl Context {
         Context {
             kind: Kind::Authenticated(Details {
                 actor: Actor::SiloUser {
-                    silo_user_id: USER_TEST_PRIVILEGED.id(),
-                    silo_id: USER_TEST_PRIVILEGED.silo_id,
+                    silo_user_id: *USER_TEST_PRIVILEGED_ID,
+                    silo_id: *SILO_ID,
                 },
             }),
             schemes_tried: Vec::new(),
@@ -202,16 +158,12 @@ impl Context {
 
     /// Returns an authenticated context for the special unprivileged user
     /// (for testing only)
-    #[cfg(test)]
     pub fn unprivileged_test_user() -> Context {
-        Self::test_silo_user(
-            USER_TEST_UNPRIVILEGED.silo_id,
-            USER_TEST_UNPRIVILEGED.id(),
-        )
+        Self::test_silo_user(*SILO_ID, *USER_TEST_UNPRIVILEGED_ID)
     }
 
-    /// Returns an authenticated context for a given silo user
-    #[cfg(test)]
+    /// Returns an authenticated context for a given silo user (for testing
+    /// only)
     pub fn test_silo_user(silo_id: Uuid, silo_user_id: Uuid) -> Context {
         Context {
             kind: Kind::Authenticated(Details {
@@ -225,15 +177,14 @@ impl Context {
 #[cfg(test)]
 mod test {
     use super::Context;
-    use super::USER_DB_INIT;
-    use super::USER_INTERNAL_API;
-    use super::USER_INTERNAL_READ;
-    use super::USER_SAGA_RECOVERY;
-    use super::USER_SERVICE_BALANCER;
-    use super::USER_TEST_PRIVILEGED;
-    use super::USER_TEST_UNPRIVILEGED;
-    use crate::db::fixed_data::user_builtin::USER_EXTERNAL_AUTHN;
-    use crate::db::identity::Asset;
+    use super::USER_DB_INIT_ID;
+    use super::USER_EXTERNAL_AUTHN_ID;
+    use super::USER_INTERNAL_API_ID;
+    use super::USER_INTERNAL_READ_ID;
+    use super::USER_SAGA_RECOVERY_ID;
+    use super::USER_SERVICE_BALANCER_ID;
+    use super::USER_TEST_PRIVILEGED_ID;
+    use super::USER_TEST_UNPRIVILEGED_ID;
 
     #[test]
     fn test_internal_users() {
@@ -246,35 +197,35 @@ mod test {
         // The privileges are (or will be) verified in authz tests.
         let authn = Context::privileged_test_user();
         let actor = authn.actor().unwrap();
-        assert_eq!(actor.actor_id(), USER_TEST_PRIVILEGED.id());
+        assert_eq!(actor.actor_id(), *USER_TEST_PRIVILEGED_ID);
 
         let authn = Context::unprivileged_test_user();
         let actor = authn.actor().unwrap();
-        assert_eq!(actor.actor_id(), USER_TEST_UNPRIVILEGED.id());
+        assert_eq!(actor.actor_id(), *USER_TEST_UNPRIVILEGED_ID);
 
         let authn = Context::internal_read();
         let actor = authn.actor().unwrap();
-        assert_eq!(actor.actor_id(), USER_INTERNAL_READ.id);
+        assert_eq!(actor.actor_id(), *USER_INTERNAL_READ_ID);
 
         let authn = Context::external_authn();
         let actor = authn.actor().unwrap();
-        assert_eq!(actor.actor_id(), USER_EXTERNAL_AUTHN.id);
+        assert_eq!(actor.actor_id(), *USER_EXTERNAL_AUTHN_ID);
 
         let authn = Context::internal_db_init();
         let actor = authn.actor().unwrap();
-        assert_eq!(actor.actor_id(), USER_DB_INIT.id);
+        assert_eq!(actor.actor_id(), *USER_DB_INIT_ID);
 
         let authn = Context::internal_service_balancer();
         let actor = authn.actor().unwrap();
-        assert_eq!(actor.actor_id(), USER_SERVICE_BALANCER.id);
+        assert_eq!(actor.actor_id(), *USER_SERVICE_BALANCER_ID);
 
         let authn = Context::internal_saga_recovery();
         let actor = authn.actor().unwrap();
-        assert_eq!(actor.actor_id(), USER_SAGA_RECOVERY.id);
+        assert_eq!(actor.actor_id(), *USER_SAGA_RECOVERY_ID);
 
         let authn = Context::internal_api();
         let actor = authn.actor().unwrap();
-        assert_eq!(actor.actor_id(), USER_INTERNAL_API.id);
+        assert_eq!(actor.actor_id(), *USER_INTERNAL_API_ID);
     }
 }
 
@@ -306,13 +257,6 @@ pub enum Actor {
 }
 
 impl Actor {
-    pub fn actor_type(&self) -> db::model::IdentityType {
-        match self {
-            Actor::UserBuiltin { .. } => db::model::IdentityType::UserBuiltin,
-            Actor::SiloUser { .. } => db::model::IdentityType::SiloUser,
-        }
-    }
-
     pub fn actor_id(&self) -> Uuid {
         match self {
             Actor::UserBuiltin { user_builtin_id, .. } => *user_builtin_id,
@@ -349,13 +293,6 @@ impl std::fmt::Debug for Actor {
                 .finish_non_exhaustive(),
         }
     }
-}
-
-/// A console session with the silo id of the authenticated user
-#[derive(Clone, Debug)]
-pub struct ConsoleSessionWithSiloId {
-    pub console_session: ConsoleSession,
-    pub silo_id: Uuid,
 }
 
 /// Label for a particular authentication scheme (used in log messages and

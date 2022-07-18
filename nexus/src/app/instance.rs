@@ -86,7 +86,7 @@ impl super::Nexus {
         }
 
         let saga_params = Arc::new(sagas::instance_create::Params {
-            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+            serialized_authn: authn::saga::Serialized::for_ctx(&opctx.authn),
             organization_name: organization_name.clone().into(),
             project_name: project_name.clone().into(),
             project_id: authz_project.id(),
@@ -241,7 +241,7 @@ impl super::Nexus {
 
         // Kick off the migration saga
         let saga_params = Arc::new(sagas::instance_migrate::Params {
-            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+            serialized_authn: authn::saga::Serialized::for_ctx(&opctx.authn),
             instance_id: authz_instance.id(),
             migrate_params: params,
         });

@@ -9,8 +9,9 @@ use super::config;
 use super::db;
 use super::Nexus;
 use crate::authn::external::session_cookie::{Session, SessionStore};
-use crate::authn::ConsoleSessionWithSiloId;
 use crate::authz::AuthorizedResource;
+use crate::db::model::ConsoleSessionWithSiloId;
+use crate::db::model::IdentityType;
 use crate::db::DataStore;
 use crate::saga_interface::SagaContext;
 use async_trait::async_trait;
@@ -315,7 +316,7 @@ impl OpContext {
 
         let log = if let Some(actor) = authn.actor() {
             let actor_id = actor.actor_id();
-            let actor_type = actor.actor_type();
+            let actor_type = IdentityType::from(actor);
             metadata
                 .insert(String::from("authenticated"), String::from("true"));
             metadata.insert(
@@ -541,7 +542,7 @@ mod test {
 }
 
 #[async_trait]
-impl authn::external::SiloUserSilo for Arc<ServerContext> {
+impl authn::external::SiloUserSilo for ServerContext {
     async fn silo_user_silo(
         &self,
         silo_user_id: Uuid,
@@ -552,7 +553,7 @@ impl authn::external::SiloUserSilo for Arc<ServerContext> {
 }
 
 #[async_trait]
-impl authn::external::token::TokenContext for Arc<ServerContext> {
+impl authn::external::token::TokenContext for ServerContext {
     async fn token_actor(
         &self,
         token: String,
@@ -563,7 +564,7 @@ impl authn::external::token::TokenContext for Arc<ServerContext> {
 }
 
 #[async_trait]
-impl SessionStore for Arc<ServerContext> {
+impl SessionStore for ServerContext {
     type SessionModel = ConsoleSessionWithSiloId;
 
     async fn session_fetch(&self, token: String) -> Option<Self::SessionModel> {

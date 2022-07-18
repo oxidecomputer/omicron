@@ -27,3 +27,10 @@ impl ConsoleSession {
         self.token.clone()
     }
 }
+
+/// A console session with the silo id of the authenticated user
+#[derive(Clone, Debug)]
+pub struct ConsoleSessionWithSiloId {
+    pub console_session: ConsoleSession,
+    pub silo_id: Uuid,
+}

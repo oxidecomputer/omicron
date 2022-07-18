@@ -9,7 +9,8 @@ use super::HttpAuthnScheme;
 use super::Reason;
 use super::SchemeResult;
 use super::SiloUserSilo;
-use crate::authn;
+use crate::Actor;
+use crate::SchemeName;
 use async_trait::async_trait;
 use headers::authorization::{Authorization, Bearer};
 use headers::HeaderMapExt;
@@ -32,7 +33,7 @@ use headers::HeaderMapExt;
 // _authentication_ information.  Similarly, the "Unauthorized" HTTP response
 // code usually describes an _authentication_ error.)
 
-pub const TOKEN_SCHEME_NAME: authn::SchemeName = authn::SchemeName("token");
+pub const TOKEN_SCHEME_NAME: SchemeName = SchemeName("token");
 
 /// Prefix used on the bearer token to identify this scheme
 // RFC 6750 expects bearer tokens to be opaque base64-encoded data.  In our
@@ -49,7 +50,7 @@ impl<T> HttpAuthnScheme<T> for HttpAuthnToken
 where
     T: SiloUserSilo + TokenContext + Send + Sync + 'static,
 {
-    fn name(&self) -> authn::SchemeName {
+    fn name(&self) -> SchemeName {
         TOKEN_SCHEME_NAME
     }
 
@@ -91,7 +92,17 @@ fn parse_token(
 /// A context that can look up a Silo user and client ID from a token.
 #[async_trait]
 pub trait TokenContext {
-    async fn token_actor(&self, token: String) -> Result<authn::Actor, Reason>;
+    async fn token_actor(&self, token: String) -> Result<Actor, Reason>;
+}
+
+#[async_trait]
+impl<T> TokenContext for std::sync::Arc<T>
+where
+    T: TokenContext + Send + Sync,
+{
+    async fn token_actor(&self, token: String) -> Result<Actor, Reason> {
+        TokenContext::token_actor(&**self, token).await
+    }
 }
 
 #[cfg(test)]

@@ -5,6 +5,7 @@
 //! Built-ins and roles
 
 use crate::authz;
+use crate::authz::AuthnContextExt;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::lookup::LookupPath;

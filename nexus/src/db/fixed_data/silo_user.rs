@@ -4,6 +4,7 @@
 //! Built-in Silo Users
 
 use super::role_builtin;
+use crate::authn;
 use crate::db;
 use crate::db::identity::Asset;
 use lazy_static::lazy_static;
@@ -16,9 +17,8 @@ lazy_static! {
     // not automatically at Nexus startup.
     pub static ref USER_TEST_PRIVILEGED: db::model::SiloUser =
         db::model::SiloUser::new(
-            *db::fixed_data::silo::SILO_ID,
-            // "4007" looks a bit like "root".
-            "001de000-05e4-4000-8000-000000004007".parse().unwrap(),
+            *authn::SILO_ID,
+            *authn::USER_TEST_PRIVILEGED_ID,
             "privileged".into(),
         );
 
@@ -42,9 +42,8 @@ lazy_static! {
     // not automatically at Nexus startup.
     pub static ref USER_TEST_UNPRIVILEGED: db::model::SiloUser =
         db::model::SiloUser::new(
-            *db::fixed_data::silo::SILO_ID,
-            // 60001 is the decimal uid for "nobody" on Helios.
-            "001de000-05e4-4000-8000-000000060001".parse().unwrap(),
+            *authn::SILO_ID,
+            *authn::USER_TEST_UNPRIVILEGED_ID,
             "unprivileged".into(),
         );
 }

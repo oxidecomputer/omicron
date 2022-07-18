@@ -8,10 +8,11 @@
 //! external API, but in order to avoid CORS issues for now, we are serving
 //! these routes directly from the external API.
 use super::views;
-use crate::authn::{
-    silos::IdentityProviderType, USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED,
-};
+use crate::authn::silos::IdentityProviderType;
 use crate::context::OpContext;
+use crate::db::fixed_data::silo_user::USER_TEST_PRIVILEGED;
+use crate::db::fixed_data::silo_user::USER_TEST_UNPRIVILEGED;
+use crate::db::model::IdentityProviderLookup;
 use crate::ServerContext;
 use crate::{
     authn::external::{

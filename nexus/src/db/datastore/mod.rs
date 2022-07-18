@@ -220,9 +220,9 @@ pub async fn datastore_test(
 mod test {
     use super::*;
     use crate::authn;
+    use crate::authn::SILO_ID;
     use crate::authz;
     use crate::db::explain::ExplainableAsync;
-    use crate::db::fixed_data::silo::SILO_ID;
     use crate::db::identity::Asset;
     use crate::db::identity::Resource;
     use crate::db::lookup::LookupPath;

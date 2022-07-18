@@ -76,7 +76,7 @@ impl oso::PolarClass for AuthenticatedActor {
             .with_equality_check()
             .add_constant(
                 AuthenticatedActor {
-                    actor_id: authn::USER_DB_INIT.id,
+                    actor_id: *authn::USER_DB_INIT_ID,
                     silo_id: None,
                     roles: RoleSet::new(),
                 },

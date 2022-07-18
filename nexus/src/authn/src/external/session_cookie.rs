@@ -6,8 +6,7 @@
 
 use super::cookies::parse_cookies;
 use super::{HttpAuthnScheme, Reason, SchemeResult};
-use crate::authn;
-use crate::authn::{Actor, Details};
+use crate::{Actor, Details, SchemeName};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
@@ -49,10 +48,40 @@ pub trait SessionStore {
     fn session_absolute_timeout(&self) -> Duration;
 }
 
+#[async_trait]
+impl<T> SessionStore for std::sync::Arc<T>
+where
+    T: SessionStore + Send + Sync,
+{
+    type SessionModel = T::SessionModel;
+
+    async fn session_fetch(&self, token: String) -> Option<Self::SessionModel> {
+        SessionStore::session_fetch(&**self, token).await
+    }
+
+    async fn session_update_last_used(
+        &self,
+        token: String,
+    ) -> Option<Self::SessionModel> {
+        SessionStore::session_update_last_used(&**self, token).await
+    }
+
+    async fn session_expire(&self, token: String) -> Option<()> {
+        SessionStore::session_expire(&**self, token).await
+    }
+
+    fn session_idle_timeout(&self) -> Duration {
+        SessionStore::session_idle_timeout(&**self)
+    }
+
+    fn session_absolute_timeout(&self) -> Duration {
+        SessionStore::session_absolute_timeout(&**self)
+    }
+}
+
 // generic cookie name is recommended by OWASP
 pub const SESSION_COOKIE_COOKIE_NAME: &str = "session";
-pub const SESSION_COOKIE_SCHEME_NAME: authn::SchemeName =
-    authn::SchemeName("session_cookie");
+pub const SESSION_COOKIE_SCHEME_NAME: SchemeName = SchemeName("session_cookie");
 
 /// Generate session cookie header
 pub fn session_cookie_header_value(token: &str, max_age: Duration) -> String {
@@ -83,7 +112,7 @@ where
     T: Send + Sync + 'static + SessionStore,
     T::SessionModel: Send + Sync + 'static + Session,
 {
-    fn name(&self) -> authn::SchemeName {
+    fn name(&self) -> SchemeName {
         SESSION_COOKIE_SCHEME_NAME
     }
 

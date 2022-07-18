@@ -15,13 +15,11 @@ authz-macros = { path = "src/authz/authz-macros" }
 base64 = "0.13.0"
 bb8 = "0.8.0"
 clap = { version = "3.2", features = ["derive"] }
-cookie = "0.16"
 crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "2add0de8489f1d4de901bfe98fc28b0a6efcc3ea" }
 diesel = { version = "2.0.0-rc.0", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 diesel-dtrace = { git = "https://github.com/oxidecomputer/diesel-dtrace" }
 fatfs = "0.3.5"
 futures = "0.3.21"
-headers = "0.3.7"
 hex = "0.4.3"
 http = "0.2.7"
 hyper = "0.14"
@@ -48,7 +46,6 @@ rand = "0.8.5"
 ref-cast = "1.0"
 reqwest = { version = "0.11.8", features = [ "json" ] }
 ring = "0.16"
-samael = { git = "https://github.com/njaremko/samael", features = ["xmlsec"], branch = "master" }
 serde_json = "1.0"
 serde_urlencoded = "0.7.1"
 serde_with = "2.0.0"
@@ -59,6 +56,8 @@ thiserror = "1.0"
 toml = "0.5.9"
 tough = { version = "0.12", features = [ "http" ] }
 usdt = "0.3.1"
+
+nexus-authn = { path = "src/authn" }
 
 [dependencies.api_identity]
 path = "../api_identity"
@@ -119,6 +118,7 @@ features = [ "serde", "v4" ]
 [dev-dependencies]
 criterion = { version = "0.3", features = [ "async_tokio" ] }
 expectorate = "1.0.5"
+headers = "0.3.7"
 itertools = "0.10.3"
 nexus-test-utils-macros = { path = "test-utils-macros" }
 nexus-test-utils = { path = "test-utils" }

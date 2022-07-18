@@ -7,6 +7,7 @@ use omicron_common::api::external::{IdentityMetadataCreateParams, Name};
 use omicron_nexus::authn::silos::{AuthenticatedSubject, IdentityProviderType};
 use omicron_nexus::context::OpContext;
 use omicron_nexus::db::lookup::LookupPath;
+use omicron_nexus::db::model::IdentityProviderLookup;
 use omicron_nexus::external_api::views::{
     self, IdentityProvider, Organization, SamlIdentityProvider, Silo,
 };
@@ -28,8 +29,9 @@ use omicron_nexus::authz::{self, SiloRole};
 use uuid::Uuid;
 
 use httptest::{matchers::*, responders::*, Expectation, Server};
-use omicron_nexus::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
-use omicron_nexus::db::fixed_data::silo::SILO_ID;
+use omicron_nexus::authn::SILO_ID;
+use omicron_nexus::db::fixed_data::silo_user::USER_TEST_PRIVILEGED;
+use omicron_nexus::db::fixed_data::silo_user::USER_TEST_UNPRIVILEGED;
 use omicron_nexus::db::identity::Asset;
 
 #[nexus_test]

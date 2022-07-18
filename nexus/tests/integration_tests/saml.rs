@@ -7,6 +7,7 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_nexus::authn::silos::{
     IdentityProviderType, SamlIdentityProvider, SamlLoginPost,
 };
+use omicron_nexus::db::model::IdentityProviderLookup;
 use omicron_nexus::external_api::console_api;
 use omicron_nexus::external_api::views::{self, Silo};
 use omicron_nexus::external_api::{params, shared};

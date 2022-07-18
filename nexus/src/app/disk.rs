@@ -162,7 +162,7 @@ impl super::Nexus {
         }
 
         let saga_params = Arc::new(sagas::disk_create::Params {
-            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+            serialized_authn: authn::saga::Serialized::for_ctx(&opctx.authn),
             project_id: authz_project.id(),
             create_params: params.clone(),
         });

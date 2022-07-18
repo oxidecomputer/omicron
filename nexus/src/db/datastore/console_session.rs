@@ -5,12 +5,12 @@
 //! [`DataStore`] methods related to [`ConsoleSession`]s.
 
 use super::DataStore;
-use crate::authn;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::lookup::LookupPath;
 use crate::db::model::ConsoleSession;
+use crate::db::model::ConsoleSessionWithSiloId;
 use crate::db::model::IdentityType;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
@@ -61,7 +61,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_session: &authz::ConsoleSession,
-    ) -> UpdateResult<authn::ConsoleSessionWithSiloId> {
+    ) -> UpdateResult<ConsoleSessionWithSiloId> {
         opctx.authorize(authz::Action::Modify, authz_session).await?;
 
         use db::schema::console_session::dsl;
@@ -89,7 +89,7 @@ impl DataStore {
                 ))
             })?;
 
-        Ok(authn::ConsoleSessionWithSiloId {
+        Ok(ConsoleSessionWithSiloId {
             console_session,
             silo_id: db_silo_user.silo_id,
         })
@@ -123,7 +123,7 @@ impl DataStore {
         // to check, and if we add another type of Actor, we'll be forced here
         // to consider if they should be able to have console sessions and log
         // out of them.
-        let silo_user_id = match actor.actor_type() {
+        let silo_user_id = match IdentityType::from(actor) {
             IdentityType::SiloUser => actor.actor_id(),
             IdentityType::UserBuiltin => {
                 return Err(Error::invalid_request("not a Silo user"))

@@ -4,9 +4,12 @@
 
 //! Authentication for requests to the external HTTP API
 
-use crate::authn;
+use crate::Context;
+use crate::Error;
+use crate::Kind;
+use crate::Reason;
+use crate::SchemeName;
 use async_trait::async_trait;
-use authn::Reason;
 use uuid::Uuid;
 
 pub mod cookies;
@@ -38,7 +41,7 @@ where
     pub async fn authn_request(
         &self,
         rqctx: &dropshot::RequestContext<T>,
-    ) -> Result<authn::Context, authn::Error> {
+    ) -> Result<Context, Error> {
         let log = &rqctx.log;
         let request = &rqctx.request.lock().await;
         let ctx = rqctx.context();
@@ -53,7 +56,7 @@ where
         ctx: &T,
         log: &slog::Logger,
         request: &http::Request<hyper::Body>,
-    ) -> Result<authn::Context, authn::Error> {
+    ) -> Result<Context, Error> {
         // For debuggability, keep track of the schemes that we've tried.
         let mut schemes_tried = Vec::with_capacity(self.allowed_schemes.len());
         for scheme_impl in &self.allowed_schemes {
@@ -67,11 +70,11 @@ where
                 // NOT that they simply didn't try), should we try the others
                 // instead of returning the failure here?
                 SchemeResult::Failed(reason) => {
-                    return Err(authn::Error { reason, schemes_tried })
+                    return Err(Error { reason, schemes_tried })
                 }
                 SchemeResult::Authenticated(details) => {
-                    return Ok(authn::Context {
-                        kind: authn::Kind::Authenticated(details),
+                    return Ok(Context {
+                        kind: Kind::Authenticated(details),
                         schemes_tried,
                     })
                 }
@@ -79,7 +82,7 @@ where
             }
         }
 
-        Ok(authn::Context { kind: authn::Kind::Unauthenticated, schemes_tried })
+        Ok(Context { kind: Kind::Unauthenticated, schemes_tried })
     }
 }
 
@@ -90,7 +93,7 @@ where
     T: Send + Sync + 'static,
 {
     /// Returns the (unique) name for this scheme (for observability)
-    fn name(&self) -> authn::SchemeName;
+    fn name(&self) -> SchemeName;
 
     /// Locate credentials in the HTTP request and attempt to verify them
     async fn authn(
@@ -119,9 +122,21 @@ pub trait SiloUserSilo {
     async fn silo_user_silo(&self, silo_user_id: Uuid) -> Result<Uuid, Reason>;
 }
 
+#[async_trait]
+impl<T> SiloUserSilo for std::sync::Arc<T>
+where
+    T: SiloUserSilo + Send + Sync,
+{
+    async fn silo_user_silo(&self, silo_user_id: Uuid) -> Result<Uuid, Reason> {
+        SiloUserSilo::silo_user_silo(&**self, silo_user_id).await
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::Actor;
+    use crate::Details;
     use anyhow::anyhow;
     use std::sync::atomic::AtomicU8;
     use std::sync::atomic::Ordering;
@@ -131,7 +146,7 @@ mod test {
     #[derive(Debug)]
     struct GruntScheme {
         /// unique name for this grunt
-        name: authn::SchemeName,
+        name: SchemeName,
 
         /// Specifies what to do with the next authn request that we get
         ///
@@ -142,7 +157,7 @@ mod test {
         nattempts: Arc<AtomicU8>,
 
         /// actor to use when authenticated
-        actor: authn::Actor,
+        actor: Actor,
     }
 
     // Values of the "next" bool
@@ -152,7 +167,7 @@ mod test {
 
     #[async_trait]
     impl HttpAuthnScheme<()> for GruntScheme {
-        fn name(&self) -> authn::SchemeName {
+        fn name(&self) -> SchemeName {
             self.name
         }
 
@@ -165,9 +180,9 @@ mod test {
             self.nattempts.fetch_add(1, Ordering::SeqCst);
             match self.next.load(Ordering::SeqCst) {
                 SKIP => SchemeResult::NotRequested,
-                OK => SchemeResult::Authenticated(authn::Details {
-                    actor: self.actor,
-                }),
+                OK => {
+                    SchemeResult::Authenticated(Details { actor: self.actor })
+                }
                 FAIL => SchemeResult::Failed(Reason::BadCredentials {
                     actor: self.actor,
                     source: anyhow!("grunt error"),
@@ -194,8 +209,8 @@ mod test {
         let flag1 = Arc::new(AtomicU8::new(SKIP));
         let count1 = Arc::new(AtomicU8::new(0));
         let mut expected_count1 = 0;
-        let name1 = authn::SchemeName("grunt1");
-        let actor1 = authn::Actor::UserBuiltin {
+        let name1 = SchemeName("grunt1");
+        let actor1 = Actor::UserBuiltin {
             user_builtin_id: "1c91bab2-4841-669f-cc32-de80da5bbf39"
                 .parse()
                 .unwrap(),
@@ -210,8 +225,8 @@ mod test {
         let flag2 = Arc::new(AtomicU8::new(SKIP));
         let count2 = Arc::new(AtomicU8::new(0));
         let mut expected_count2 = 0;
-        let name2 = authn::SchemeName("grunt2");
-        let actor2 = authn::Actor::UserBuiltin {
+        let name2 = SchemeName("grunt2");
+        let actor2 = Actor::UserBuiltin {
             user_builtin_id: "799684af-533a-cb66-b5ac-ab55a791d5ef"
                 .parse()
                 .unwrap(),

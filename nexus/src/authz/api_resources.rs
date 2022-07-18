@@ -726,6 +726,54 @@ impl ApiResourceWithRolesType for Silo {
     type AllowedRoles = SiloRole;
 }
 
+pub trait AuthnContextExt {
+    /// Returns the current actor's Silo if they have one or an appropriate
+    /// error otherwise
+    ///
+    /// This is intended for code paths that always expect a Silo to be present.
+    /// Built-in users have no Silo, and this function will return an
+    /// InternalError if the currently-authenticated user is built-in.  If you
+    /// want to handle that case differently, see
+    /// [`AuthnContextExt::silo_or_builtin()`].
+    fn silo_required(&self) -> Result<Silo, Error>;
+
+    /// Determine whether the currently authenticated actor has a Silo or is a
+    /// built-in user
+    ///
+    /// This function allows callers to distinguish these three cases:
+    ///
+    /// * there's an authenticated user with an associated Silo (most common)
+    /// * there's an authenticated built-in user who has no associated Silo
+    /// * there's no authenticated user (returned as an error)
+    ///
+    /// Built-in users have no Silo, and so they usually can't do anything that
+    /// might use a Silo.  You usually want to use [`Context::silo_required()`]
+    /// if you don't expect to be looking at a built-in user.
+    fn silo_or_builtin(&self) -> Result<Option<Silo>, Error>;
+}
+
+impl AuthnContextExt for authn::Context {
+    fn silo_required(&self) -> Result<Silo, Error> {
+        self.silo_or_builtin().and_then(|maybe_silo| {
+            maybe_silo.ok_or_else(|| {
+                Error::internal_error(
+                    "needed Silo for a built-in user, but \
+                        built-in users have no Silo",
+                )
+            })
+        })
+    }
+
+    fn silo_or_builtin(&self) -> Result<Option<Silo>, Error> {
+        self.actor_required().map(|actor| match actor {
+            authn::Actor::SiloUser { silo_id, .. } => {
+                Some(Silo::new(FLEET, *silo_id, LookupType::ById(*silo_id)))
+            }
+            authn::Actor::UserBuiltin { .. } => None,
+        })
+    }
+}
+
 #[derive(
     Clone,
     Copy,

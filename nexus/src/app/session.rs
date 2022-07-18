@@ -4,7 +4,6 @@
 
 //! Console session management.
 
-use crate::authn;
 use crate::authn::Reason;
 use crate::authz;
 use crate::context::OpContext;
@@ -89,7 +88,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         token: String,
-    ) -> LookupResult<authn::ConsoleSessionWithSiloId> {
+    ) -> LookupResult<db::model::ConsoleSessionWithSiloId> {
         let (.., db_console_session) =
             LookupPath::new(opctx, &self.db_datastore)
                 .console_session_token(&token)
@@ -101,7 +100,7 @@ impl super::Nexus {
             .fetch()
             .await?;
 
-        Ok(authn::ConsoleSessionWithSiloId {
+        Ok(db::model::ConsoleSessionWithSiloId {
             console_session: db_console_session,
             silo_id: db_silo_user.silo_id,
         })
@@ -112,7 +111,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         token: &str,
-    ) -> UpdateResult<authn::ConsoleSessionWithSiloId> {
+    ) -> UpdateResult<db::model::ConsoleSessionWithSiloId> {
         let authz_session = authz::ConsoleSession::new(
             authz::FLEET,
             token.to_string(),

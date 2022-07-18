@@ -2744,6 +2744,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-authn"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "base64",
+ "chrono",
+ "cookie",
+ "dropshot",
+ "headers",
+ "http",
+ "hyper",
+ "lazy_static",
+ "newtype_derive",
+ "omicron-common 0.1.0",
+ "openssl",
+ "openssl-probe",
+ "openssl-sys",
+ "samael",
+ "serde",
+ "serde_urlencoded",
+ "slog",
+ "thiserror",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "nexus-client"
 version = "0.1.0"
 dependencies = [
@@ -3056,7 +3084,6 @@ dependencies = [
  "bb8",
  "chrono",
  "clap 3.2.12",
- "cookie",
  "criterion",
  "crucible-agent-client",
  "db-macros",
@@ -3079,6 +3106,7 @@ dependencies = [
  "macaddr",
  "mime_guess",
  "newtype_derive",
+ "nexus-authn",
  "nexus-test-utils",
  "nexus-test-utils-macros",
  "num-integer",
@@ -3103,7 +3131,6 @@ dependencies = [
  "regex",
  "reqwest",
  "ring",
- "samael",
  "schemars",
  "serde",
  "serde_json",

@@ -5,7 +5,6 @@
 //! [`DataStore`] methods related to [`SiloUser`]s.
 
 use super::DataStore;
-use crate::authn;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
@@ -128,11 +127,11 @@ impl DataStore {
         let builtin_users = [
             // Note: "db_init" is also a builtin user, but that one by necessity
             // is created with the database.
-            &*authn::USER_SERVICE_BALANCER,
-            &*authn::USER_INTERNAL_API,
-            &*authn::USER_INTERNAL_READ,
-            &*authn::USER_EXTERNAL_AUTHN,
-            &*authn::USER_SAGA_RECOVERY,
+            &*db::fixed_data::user_builtin::USER_SERVICE_BALANCER,
+            &*db::fixed_data::user_builtin::USER_INTERNAL_API,
+            &*db::fixed_data::user_builtin::USER_INTERNAL_READ,
+            &*db::fixed_data::user_builtin::USER_EXTERNAL_AUTHN,
+            &*db::fixed_data::user_builtin::USER_SAGA_RECOVERY,
         ]
         .iter()
         .map(|u| {
@@ -172,8 +171,10 @@ impl DataStore {
 
         opctx.authorize(authz::Action::Modify, &authz::DATABASE).await?;
 
-        let users =
-            [&*authn::USER_TEST_PRIVILEGED, &*authn::USER_TEST_UNPRIVILEGED];
+        let users = [
+            &*db::fixed_data::silo_user::USER_TEST_PRIVILEGED,
+            &*db::fixed_data::silo_user::USER_TEST_UNPRIVILEGED,
+        ];
 
         debug!(opctx.log, "attempting to create silo users");
         let count = diesel::insert_into(dsl::silo_user)

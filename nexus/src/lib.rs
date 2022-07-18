@@ -14,7 +14,6 @@
 #![allow(clippy::style)]
 
 pub mod app; // Public for documentation examples
-pub mod authn; // Public only for testing
 pub mod authz; // Public for documentation examples
 mod cidata;
 pub mod config; // Public for testing
@@ -26,6 +25,10 @@ pub mod internal_api; // Public for testing
 mod populate;
 mod saga_interface;
 pub mod updates; // public for testing
+
+// Conceptually nexus-authn is our module, but it's built as a separate crate as
+// a concession to compile times.
+pub use nexus_authn as authn; // Public only for testing
 
 pub use app::test_interfaces::TestInterfaces;
 pub use app::Nexus;

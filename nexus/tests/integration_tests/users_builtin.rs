@@ -5,7 +5,7 @@ use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
-use omicron_nexus::authn;
+use omicron_nexus::db::fixed_data::user_builtin;
 use omicron_nexus::external_api::views::UserBuiltin;
 use std::collections::BTreeMap;
 
@@ -25,19 +25,28 @@ async fn test_users_builtin(cptestctx: &ControlPlaneTestContext) {
         .map(|u| (u.identity.name.to_string(), u))
         .collect::<BTreeMap<String, UserBuiltin>>();
 
-    let u = users.remove(&authn::USER_DB_INIT.name.to_string()).unwrap();
-    assert_eq!(u.identity.id, authn::USER_DB_INIT.id);
-    let u =
-        users.remove(&authn::USER_SERVICE_BALANCER.name.to_string()).unwrap();
-    assert_eq!(u.identity.id, authn::USER_SERVICE_BALANCER.id);
-    let u = users.remove(&authn::USER_INTERNAL_API.name.to_string()).unwrap();
-    assert_eq!(u.identity.id, authn::USER_INTERNAL_API.id);
-    let u = users.remove(&authn::USER_INTERNAL_READ.name.to_string()).unwrap();
-    assert_eq!(u.identity.id, authn::USER_INTERNAL_READ.id);
-    let u = users.remove(&authn::USER_EXTERNAL_AUTHN.name.to_string()).unwrap();
-    assert_eq!(u.identity.id, authn::USER_EXTERNAL_AUTHN.id);
-    let u = users.remove(&authn::USER_SAGA_RECOVERY.name.to_string()).unwrap();
-    assert_eq!(u.identity.id, authn::USER_SAGA_RECOVERY.id);
+    let u = users.remove(&user_builtin::USER_DB_INIT.name.to_string()).unwrap();
+    assert_eq!(u.identity.id, user_builtin::USER_DB_INIT.id);
+    let u = users
+        .remove(&user_builtin::USER_SERVICE_BALANCER.name.to_string())
+        .unwrap();
+    assert_eq!(u.identity.id, user_builtin::USER_SERVICE_BALANCER.id);
+    let u = users
+        .remove(&user_builtin::USER_INTERNAL_API.name.to_string())
+        .unwrap();
+    assert_eq!(u.identity.id, user_builtin::USER_INTERNAL_API.id);
+    let u = users
+        .remove(&user_builtin::USER_INTERNAL_READ.name.to_string())
+        .unwrap();
+    assert_eq!(u.identity.id, user_builtin::USER_INTERNAL_READ.id);
+    let u = users
+        .remove(&user_builtin::USER_EXTERNAL_AUTHN.name.to_string())
+        .unwrap();
+    assert_eq!(u.identity.id, user_builtin::USER_EXTERNAL_AUTHN.id);
+    let u = users
+        .remove(&user_builtin::USER_SAGA_RECOVERY.name.to_string())
+        .unwrap();
+    assert_eq!(u.identity.id, user_builtin::USER_SAGA_RECOVERY.id);
     assert!(users.is_empty(), "found unexpected built-in users");
 
     // TODO-coverage add test for fetching individual users, including invalid

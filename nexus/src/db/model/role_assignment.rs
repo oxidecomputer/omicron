@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::impl_enum_type;
+use crate::authn::Actor;
 use crate::db::schema::role_assignment;
 use crate::external_api::shared;
 use serde::{Deserialize, Serialize};
@@ -35,6 +36,15 @@ impl From<shared::IdentityType> for IdentityType {
     fn from(other: shared::IdentityType) -> Self {
         match other {
             shared::IdentityType::SiloUser => IdentityType::SiloUser,
+        }
+    }
+}
+
+impl From<&'_ Actor> for IdentityType {
+    fn from(actor: &'_ Actor) -> Self {
+        match actor {
+            Actor::UserBuiltin { .. } => IdentityType::UserBuiltin,
+            Actor::SiloUser { .. } => IdentityType::SiloUser,
         }
     }
 }

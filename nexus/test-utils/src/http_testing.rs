@@ -11,7 +11,6 @@ use dropshot::test_util::ClientTestContext;
 use dropshot::ResultsPage;
 use headers::authorization::Credentials;
 use omicron_nexus::authn::external::spoof;
-use omicron_nexus::db::identity::Asset;
 use serde_urlencoded;
 use std::convert::TryInto;
 use std::fmt::Debug;
@@ -485,9 +484,8 @@ impl<'a> NexusRequest<'a> {
 
         match mode {
             AuthnMode::UnprivilegedUser => {
-                let header_value = spoof::make_header_value(
-                    authn::USER_TEST_UNPRIVILEGED.id(),
-                );
+                let header_value =
+                    spoof::make_header_value(*authn::USER_TEST_UNPRIVILEGED_ID);
                 self.request_builder = self.request_builder.header(
                     &http::header::AUTHORIZATION,
                     header_value.0.encode(),
@@ -495,7 +493,7 @@ impl<'a> NexusRequest<'a> {
             }
             AuthnMode::PrivilegedUser => {
                 let header_value =
-                    spoof::make_header_value(authn::USER_TEST_PRIVILEGED.id());
+                    spoof::make_header_value(*authn::USER_TEST_PRIVILEGED_ID);
                 self.request_builder = self.request_builder.header(
                     &http::header::AUTHORIZATION,
                     header_value.0.encode(),

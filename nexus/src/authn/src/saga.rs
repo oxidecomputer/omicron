@@ -7,8 +7,8 @@
 // id.  We should think through that a little more.  Should we instead preload a
 // bunch of roles and then serialize that, for example?
 
-use crate::authn;
-use crate::context::OpContext;
+use crate::Context;
+use crate::Kind;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -17,15 +17,15 @@ use serde::Serialize;
 // structures, but this one has a particularly large blast radius.)
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Serialized {
-    kind: authn::Kind,
+    kind: Kind,
 }
 
 impl Serialized {
-    pub fn for_opctx(opctx: &OpContext) -> Serialized {
-        Serialized { kind: opctx.authn.kind.clone() }
+    pub fn for_ctx(ctx: &Context) -> Serialized {
+        Serialized { kind: ctx.kind.clone() }
     }
 
-    pub fn to_authn(&self) -> authn::Context {
-        authn::Context { kind: self.kind.clone(), schemes_tried: vec![] }
+    pub fn to_authn(&self) -> Context {
+        Context { kind: self.kind.clone(), schemes_tried: vec![] }
     }
 }
