@@ -30,4 +30,4 @@ uuid = { version = "1.1.0", features = [ "serde", "v4" ] }
 [build-dependencies]
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
 omicron-test-utils = { path = "../../test-utils" }
-tokio = { version = "1.18" }
+tokio = { version = "1.20" }

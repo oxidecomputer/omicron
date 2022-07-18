@@ -184,25 +184,19 @@ impl JsonSchema for IpRange {
         gen: &mut schemars::gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::SchemaObject {
-            metadata: Some(
-                schemars::schema::Metadata { ..Default::default() }.into(),
-            ),
-            subschemas: Some(
-                schemars::schema::SubschemaValidation {
-                    one_of: Some(vec![
-                        omicron_common::api::external::label_schema(
-                            "v4",
-                            gen.subschema_for::<Ipv4Range>(),
-                        ),
-                        omicron_common::api::external::label_schema(
-                            "v6",
-                            gen.subschema_for::<Ipv6Range>(),
-                        ),
-                    ]),
-                    ..Default::default()
-                }
-                .into(),
-            ),
+            subschemas: Some(Box::new(schemars::schema::SubschemaValidation {
+                one_of: Some(vec![
+                    omicron_common::api::external::label_schema(
+                        "v4",
+                        gen.subschema_for::<Ipv4Range>(),
+                    ),
+                    omicron_common::api::external::label_schema(
+                        "v6",
+                        gen.subschema_for::<Ipv6Range>(),
+                    ),
+                ]),
+                ..Default::default()
+            })),
             ..Default::default()
         }
         .into()

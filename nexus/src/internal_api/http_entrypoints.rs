@@ -12,13 +12,13 @@ use super::params::{
 };
 use dropshot::endpoint;
 use dropshot::ApiDescription;
+use dropshot::FreeformBody;
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
-use http::{Response, StatusCode};
 use hyper::Body;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
@@ -69,7 +69,7 @@ struct SledAgentPathParam {
 // 3. This call is idempotent (mod "time_modified").
 #[endpoint {
      method = POST,
-     path = "/sled_agents/{sled_id}",
+     path = "/sled-agents/{sled_id}",
  }]
 async fn cpapi_sled_agents_post(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -99,7 +99,7 @@ struct RackPathParam {
 /// See RFD 278 for more details.
 #[endpoint {
      method = PUT,
-     path = "/racks/{rack_id}/initialization_complete",
+     path = "/racks/{rack_id}/initialization-complete",
  }]
 async fn rack_initialization_complete(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -127,7 +127,7 @@ struct ZpoolPathParam {
 /// Report that a pool for a specified sled has come online.
 #[endpoint {
      method = PUT,
-     path = "/sled_agents/{sled_id}/zpools/{zpool_id}",
+     path = "/sled-agents/{sled_id}/zpools/{zpool_id}",
  }]
 async fn zpool_put(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -299,7 +299,7 @@ async fn cpapi_metrics_collect(
 async fn cpapi_artifact_download(
     request_context: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<UpdateArtifact>,
-) -> Result<Response<Body>, HttpError> {
+) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
     let context = request_context.context();
     let nexus = &context.nexus;
     let opctx = OpContext::for_internal_api(&request_context).await;
@@ -307,5 +307,5 @@ async fn cpapi_artifact_download(
     let body =
         nexus.download_artifact(&opctx, path_params.into_inner()).await?;
 
-    Ok(Response::builder().status(StatusCode::OK).body(body.into())?)
+    Ok(HttpResponseOk(Body::from(body).into()))
 }

@@ -20,6 +20,7 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use db_macros::lookup_resource;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use omicron_common::api::external::Error;
+use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::{LookupResult, LookupType, ResourceType};
 use uuid::Uuid;
 
@@ -193,7 +194,12 @@ impl<'a> LookupPath<'a> {
         'a: 'c,
         'b: 'c,
     {
-        let key = match self.opctx.authn.silo_required() {
+        let key = match self
+            .opctx
+            .authn
+            .silo_required()
+            .internal_context("looking up Organization by name")
+        {
             Ok(authz_silo) => {
                 let root = Root { lookup_root: self };
                 let silo_key = SiloKey::PrimaryKey(root, authz_silo.id());
@@ -243,6 +249,28 @@ impl<'a> LookupPath<'a> {
     /// Select a resource of type Disk, identified by its id
     pub fn disk_id(self, id: Uuid) -> Disk<'a> {
         Disk { key: DiskKey::PrimaryKey(Root { lookup_root: self }, id) }
+    }
+
+    /// Select a resource of type Image, identified by its id
+    pub fn image_id(self, id: Uuid) -> Image<'a> {
+        Image { key: ImageKey::PrimaryKey(Root { lookup_root: self }, id) }
+    }
+
+    /// Select a resource of type Snapshot, identified by its id
+    pub fn snapshot_id(self, id: Uuid) -> Snapshot<'a> {
+        Snapshot {
+            key: SnapshotKey::PrimaryKey(Root { lookup_root: self }, id),
+        }
+    }
+
+    /// Select a resource of type NetworkInterface, identified by its id
+    pub fn network_interface_id(self, id: Uuid) -> NetworkInterface<'a> {
+        NetworkInterface {
+            key: NetworkInterfaceKey::PrimaryKey(
+                Root { lookup_root: self },
+                id,
+            ),
+        }
     }
 
     /// Select a resource of type Vpc, identified by its id
@@ -542,6 +570,24 @@ lookup_resource! {
 
 lookup_resource! {
     name = "Disk",
+    ancestors = [ "Silo", "Organization", "Project" ],
+    children = [],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "Image",
+    ancestors = [ "Silo", "Organization", "Project" ],
+    children = [],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "Snapshot",
     ancestors = [ "Silo", "Organization", "Project" ],
     children = [],
     lookup_by_name = true,

@@ -6,6 +6,7 @@
 
 use crate::common::vlan::VlanID;
 use crate::illumos::vnic::VnicKind;
+use crate::illumos::zone::IPADM;
 use crate::illumos::{execute, ExecutionError, PFEXEC};
 use omicron_common::api::external::MacAddr;
 use serde::{Deserialize, Serialize};
@@ -89,6 +90,18 @@ pub struct SetLinkpropError {
     err: ExecutionError,
 }
 
+/// Errors returned from [`Dladm::reset_linkprop`].
+#[derive(thiserror::Error, Debug)]
+#[error(
+    "Failed to reset link property \"{prop_name}\" on vnic {link_name}: {err}"
+)]
+pub struct ResetLinkpropError {
+    link_name: String,
+    prop_name: String,
+    #[source]
+    err: ExecutionError,
+}
+
 /// The name of a physical datalink.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct PhysicalLink(pub String);
@@ -162,6 +175,50 @@ impl Dladm {
         let cmd = command.args(&[DLADM, "show-vnic", ETHERSTUB_VNIC_NAME]);
         execute(cmd)?;
         Ok(EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()))
+    }
+
+    // Return the name of the IP interface over the etherstub VNIC, if it
+    // exists.
+    fn get_etherstub_vnic_interface() -> Result<String, ExecutionError> {
+        let mut cmd = std::process::Command::new(PFEXEC);
+        let cmd = cmd.args(&[
+            IPADM,
+            "show-if",
+            "-p",
+            "-o",
+            "IFNAME",
+            ETHERSTUB_VNIC_NAME,
+        ]);
+        execute(cmd)?;
+        Ok(ETHERSTUB_VNIC_NAME.to_string())
+    }
+
+    /// Delete the VNIC over the inter-zone comms etherstub.
+    pub(crate) fn delete_etherstub_vnic() -> Result<(), ExecutionError> {
+        // It's not clear why, but this requires deleting the _interface_ that's
+        // over the VNIC first. Other VNICs don't require this for some reason.
+        if Self::get_etherstub_vnic_interface().is_ok() {
+            let mut cmd = std::process::Command::new(PFEXEC);
+            let cmd = cmd.args(&[IPADM, "delete-if", ETHERSTUB_VNIC_NAME]);
+            execute(cmd)?;
+        }
+
+        if Self::get_etherstub_vnic().is_ok() {
+            let mut cmd = std::process::Command::new(PFEXEC);
+            let cmd = cmd.args(&[DLADM, "delete-vnic", ETHERSTUB_VNIC_NAME]);
+            execute(cmd)?;
+        }
+        Ok(())
+    }
+
+    /// Delete the inter-zone comms etherstub.
+    pub(crate) fn delete_etherstub() -> Result<(), ExecutionError> {
+        if Self::get_etherstub().is_ok() {
+            let mut cmd = std::process::Command::new(PFEXEC);
+            let cmd = cmd.args(&[DLADM, "delete-etherstub", ETHERSTUB_NAME]);
+            execute(cmd)?;
+        }
+        Ok(())
     }
 
     /// Returns the name of the first observed physical data link.
@@ -297,6 +354,28 @@ impl Dladm {
             link_name: vnic.to_string(),
             prop_name: prop_name.to_string(),
             prop_value: prop_value.to_string(),
+            err,
+        })?;
+        Ok(())
+    }
+
+    /// Reset a link property on a VNIC
+    pub fn reset_linkprop(
+        vnic: &str,
+        prop_name: &str,
+    ) -> Result<(), ResetLinkpropError> {
+        let mut command = std::process::Command::new(PFEXEC);
+        let cmd = command.args(&[
+            DLADM,
+            "reset-linkprop",
+            "-t",
+            "-p",
+            prop_name,
+            vnic,
+        ]);
+        execute(cmd).map_err(|err| ResetLinkpropError {
+            link_name: vnic.to_string(),
+            prop_name: prop_name.to_string(),
             err,
         })?;
         Ok(())

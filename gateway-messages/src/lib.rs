@@ -294,7 +294,9 @@ mod bulk_ignition_state_serde {
     }
 }
 
-#[derive(Debug, Clone, Copy, SerializedSize, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, SerializedSize, Serialize, Deserialize, PartialEq,
+)]
 pub enum IgnitionCommand {
     PowerOn,
     PowerOff,

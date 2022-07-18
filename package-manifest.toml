@@ -91,10 +91,10 @@ zone = true
 # 3. Use type = "manual" instead of the "prebuilt"
 type = "prebuilt"
 repo = "crucible"
-commit = "fed3e8ca7762130ee146fc516a4ef6eed2b91629"
+commit = "2add0de8489f1d4de901bfe98fc28b0a6efcc3ea"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible.sha256.txt
-sha256 = "050c94ff6f21bfcbaa2594f0f11922027822d8617e1a465484f92745d4b0fc12"
+sha256 = "9940df1b070d4eb2305ad0b38380131b4a54cfc23b56e12ea1cbf9946b773fe9"
 
 # Refer to
 #   https://github.com/oxidecomputer/propolis/blob/master/package/README.md
@@ -105,10 +105,10 @@ zone = true
 [external_package.propolis-server.source]
 type = "prebuilt"
 repo = "propolis"
-commit = "23a38f4a1df4afcba3905f94ebbf312d0d187c7d"
+commit = "13e23ff1ea51fc2b98f9e99099a46a40f805834e"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/propolis/image/<commit>/propolis-server.sha256.txt
-sha256 = "9c1f23c8db27c6fe114ae05358f76d88a8be803e622ad8d09a6c654692c2ffb8"
+sha256 = "866165e42cc8f969d0f5c758cc3d9971f27fa1f111091e0f2a33ea46b7f0af93"
 
 [external_package.maghemite]
 service_name = "mg-ddm"

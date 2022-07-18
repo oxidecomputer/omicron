@@ -136,7 +136,7 @@ impl Updater {
         stream::iter(&self.clients)
             .map(Ok::<_, DnsError>)
             .try_for_each_concurrent(None, |client| async move {
-                client.dns_records_set(body).await?;
+                client.dns_records_create(body).await?;
                 Ok(())
             })
             .await?;

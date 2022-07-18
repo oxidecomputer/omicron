@@ -98,9 +98,9 @@ impl JsonSchema for TimeseriesName {
     }
 
     fn json_schema(
-        _gen: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
-        schemars::schema::Schema::Object(schemars::schema::SchemaObject {
+        schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
                 title: Some("The name of a timeseries".to_string()),
                 description: Some(
@@ -112,15 +112,14 @@ impl JsonSchema for TimeseriesName {
                 ),
                 ..Default::default()
             })),
-            instance_type: Some(schemars::schema::SingleOrVec::Single(
-                Box::new(schemars::schema::InstanceType::String),
-            )),
+            instance_type: Some(schemars::schema::InstanceType::String.into()),
             string: Some(Box::new(schemars::schema::StringValidation {
                 pattern: Some(TIMESERIES_NAME_REGEX.to_string()),
                 ..Default::default()
             })),
             ..Default::default()
-        })
+        }
+        .into()
     }
 }
 

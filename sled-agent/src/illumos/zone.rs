@@ -16,7 +16,7 @@ use crate::illumos::{execute, PFEXEC};
 use omicron_common::address::SLED_PREFIX;
 
 const DLADM: &str = "/usr/sbin/dladm";
-const IPADM: &str = "/usr/sbin/ipadm";
+pub const IPADM: &str = "/usr/sbin/ipadm";
 pub const SVCADM: &str = "/usr/sbin/svcadm";
 pub const SVCCFG: &str = "/usr/sbin/svccfg";
 pub const ZLOGIN: &str = "/usr/sbin/zlogin";

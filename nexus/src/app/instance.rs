@@ -22,6 +22,7 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InstanceState;
+use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::UpdateResult;
@@ -174,6 +175,18 @@ impl super::Nexus {
             .organization_name(organization_name)
             .project_name(project_name)
             .instance_name(instance_name)
+            .fetch()
+            .await?;
+        Ok(db_instance)
+    }
+
+    pub async fn instance_fetch_by_id(
+        &self,
+        opctx: &OpContext,
+        instance_id: &Uuid,
+    ) -> LookupResult<db::model::Instance> {
+        let (.., db_instance) = LookupPath::new(opctx, &self.db_datastore)
+            .instance_id(*instance_id)
             .fetch()
             .await?;
         Ok(db_instance)
@@ -485,7 +498,9 @@ impl super::Nexus {
         // that they may be injected into the new image via cloud-init.
         // TODO-security: this should be replaced with a lookup based on
         // on `SiloUser` role assignments once those are in place.
-        let actor = opctx.authn.actor_required()?;
+        let actor = opctx.authn.actor_required().internal_context(
+            "loading current user's ssh keys for new Instance",
+        )?;
         let (.., authz_user) = LookupPath::new(opctx, &self.db_datastore)
             .silo_user_id(actor.actor_id())
             .lookup_for(authz::Action::ListChildren)
@@ -771,6 +786,18 @@ impl super::Nexus {
             .project_name(project_name)
             .instance_name(instance_name)
             .network_interface_name(interface_name)
+            .fetch()
+            .await?;
+        Ok(db_interface)
+    }
+
+    pub async fn network_interface_fetch_by_id(
+        &self,
+        opctx: &OpContext,
+        interface_id: &Uuid,
+    ) -> LookupResult<db::model::NetworkInterface> {
+        let (.., db_interface) = LookupPath::new(opctx, &self.db_datastore)
+            .network_interface_id(*interface_id)
             .fetch()
             .await?;
         Ok(db_interface)

@@ -6,7 +6,7 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
-anyhow = "1.0.57"
+anyhow = "1.0.58"
 async-trait = "0.1.53"
 bincode = "1.3.3"
 bytes = "1.1"
@@ -14,7 +14,7 @@ cfg-if = "1.0"
 chrono = { version = "0.4", features = [ "serde" ] }
 clap = { version = "3.2", features = ["derive"] }
 # Only used by the simulated sled agent.
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "fed3e8ca7762130ee146fc516a4ef6eed2b91629" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "2add0de8489f1d4de901bfe98fc28b0a6efcc3ea" }
 ddm-admin-client = { path = "../ddm-admin-client" }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
 futures = "0.3.21"
@@ -27,13 +27,13 @@ omicron-common = { path = "../common" }
 p256 = "0.9.0"
 percent-encoding = "2.1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "23a38f4a1df4afcba3905f94ebbf312d0d187c7d" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "a9399a8007f9876e31ce152848e6ecc2a9e14283" }
 rand = { version = "0.8.5", features = ["getrandom"] }
 reqwest = { version = "0.11.8", default-features = false, features = ["rustls-tls", "stream"] }
 schemars = { version = "0.8.10", features = [ "chrono", "uuid1" ] }
 serde = { version = "1.0", features = [ "derive" ] }
 serde_json = "1.0"
-serde_with = "1.14.0"
+serde_with = "2.0.0"
 sled-agent-client = { path = "../sled-agent-client" }
 slog = { version = "2.5", features = [ "max_level_trace", "release_max_level_debug" ] }
 slog-dtrace = "0.2"
@@ -46,8 +46,8 @@ socket2 = { version = "0.4", features = [ "all" ] }
 tar = "0.4"
 tempfile = "3.3"
 thiserror = "1.0"
-tokio = { version = "1.18", features = [ "full" ] }
-tokio-tungstenite = "0.17.1"
+tokio = { version = "1.20", features = [ "full" ] }
+tokio-tungstenite = "0.17.2"
 tokio-util = { version = "0.7", features = ["codec"] }
 toml = "0.5.9"
 uuid = { version = "1.1.0", features = [ "serde", "v4" ] }
@@ -55,8 +55,8 @@ vsss-rs = { version = "2.0.0-pre2", default-features = false, features = ["std"]
 zone = "0.1"
 
 [target.'cfg(target_os = "illumos")'.dependencies]
-opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "92a3ae21ffd9405a6897b5136410e2b11ee74005" }
-opte = { git = "https://github.com/oxidecomputer/opte", rev = "92a3ae21ffd9405a6897b5136410e2b11ee74005", features = [ "api", "std" ] }
+opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "eb9e0c687e3c072dbc7d4782475f4ba5a6f50258" }
+opte = { git = "https://github.com/oxidecomputer/opte", rev = "eb9e0c687e3c072dbc7d4782475f4ba5a6f50258", features = [ "api", "std" ] }
 
 [dev-dependencies]
 expectorate = "1.0.5"
@@ -65,7 +65,7 @@ mockall = "0.11"
 omicron-test-utils = { path = "../test-utils" }
 openapi-lint = { git = "https://github.com/oxidecomputer/openapi-lint", branch = "main" }
 openapiv3 = "1.0"
-serial_test = "0.7"
+serial_test = "0.8"
 subprocess = "0.2.9"
 slog-async = "2.6"
 slog-term = "2.9"
