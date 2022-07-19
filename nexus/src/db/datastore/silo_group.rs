@@ -54,6 +54,7 @@ impl DataStore {
         dsl::silo_group
             .filter(dsl::silo_id.eq(authz_silo.id()))
             .filter(dsl::external_id.eq(external_id))
+            .filter(dsl::time_deleted.is_null())
             .select(db::model::SiloGroup::as_select())
             .first_async(self.pool_authorized(opctx).await?)
             .await

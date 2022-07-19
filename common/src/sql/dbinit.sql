@@ -290,14 +290,10 @@ CREATE TABLE omicron.public.silo_group (
 );
 
 CREATE UNIQUE INDEX ON omicron.public.silo_group (
-    external_id,
-    silo_id
+    silo_id,
+    external_id
 ) WHERE
     time_deleted IS NULL;
-
-CREATE INDEX ON omicron.public.silo_group (
-   silo_id
-);
 
 /*
  * Silo group membership
@@ -305,16 +301,14 @@ CREATE INDEX ON omicron.public.silo_group (
 
 CREATE TABLE omicron.public.silo_group_membership (
     silo_group_id UUID NOT NULL,
-    silo_user_id UUID NOT NULL
-);
+    silo_user_id UUID NOT NULL,
 
-CREATE UNIQUE INDEX ON omicron.public.silo_group_membership (
-    silo_group_id,
-    silo_user_id
+    PRIMARY KEY (silo_group_id, silo_user_id)
 );
 
 CREATE INDEX ON omicron.public.silo_group_membership (
-    silo_user_id
+    silo_user_id,
+    silo_group_id
 );
 
 /*
