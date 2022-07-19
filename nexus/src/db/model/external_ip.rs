@@ -18,7 +18,6 @@ use diesel::Selectable;
 use ipnetwork::IpNetwork;
 use omicron_common::api::external::Error;
 use std::convert::TryFrom;
-use std::ops::Deref;
 use uuid::Uuid;
 
 impl_enum_type!(
@@ -202,47 +201,5 @@ impl TryFrom<InstanceExternalIp> for views::ExternalIp {
     fn try_from(ip: InstanceExternalIp) -> Result<Self, Self::Error> {
         let kind = ip.kind.try_into()?;
         Ok(views::ExternalIp { kind, ip: ip.ip.ip() })
-    }
-}
-
-#[derive(Debug, Clone, Selectable, Queryable, Insertable)]
-#[diesel(table_name = instance_external_ip)]
-pub struct InstanceSourceNatIp {
-    #[diesel(embed)]
-    inner: InstanceExternalIp,
-}
-
-impl Deref for InstanceSourceNatIp {
-    type Target = InstanceExternalIp;
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
-#[derive(Debug, Clone, Selectable, Queryable, Insertable)]
-#[diesel(table_name = instance_external_ip)]
-pub struct EphemeralIp {
-    #[diesel(embed)]
-    inner: InstanceExternalIp,
-}
-
-impl Deref for EphemeralIp {
-    type Target = InstanceExternalIp;
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
-#[derive(Debug, Clone, Selectable, Queryable, Insertable)]
-#[diesel(table_name = instance_external_ip)]
-pub struct FloatingIp {
-    #[diesel(embed)]
-    inner: InstanceExternalIp,
-}
-
-impl Deref for FloatingIp {
-    type Target = InstanceExternalIp;
-    fn deref(&self) -> &Self::Target {
-        &self.inner
     }
 }
