@@ -64,9 +64,15 @@ resolver = "2"
 [profile.dev]
 panic = "abort"
 
+# `bindgen` is used by `samael`'s build script; building it with optimizations
+# makes that build script run ~5x faster, more than offsetting the additional
+# build time added to `bindgen` itself.
 [profile.dev.package.bindgen]
 opt-level = 3
 
+# `lalrpop` is used by `polar-core`'s build script; building it with
+# optimizations makes that build script run ~20x faster, more than offsetting
+# the additional build time added to `lalrpop` itself.
 [profile.dev.package.lalrpop]
 opt-level = 3
 
