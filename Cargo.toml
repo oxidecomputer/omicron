@@ -64,6 +64,12 @@ resolver = "2"
 [profile.dev]
 panic = "abort"
 
+[profile.dev.package.bindgen]
+opt-level = 3
+
+[profile.dev.package.lalrpop]
+opt-level = 3
+
 [profile.release]
 panic = "abort"
 
