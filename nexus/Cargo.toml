@@ -11,7 +11,6 @@ path = "../rpaths"
 anyhow = "1.0"
 async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "ab1f49e0b3f95557aa96bf593282199fafeef4bd" }
 async-trait = "0.1.56"
-authz-macros = { path = "src/authz/authz-macros" }
 base64 = "0.13.0"
 bb8 = "0.8.0"
 clap = { version = "3.2", features = ["derive"] }
@@ -25,7 +24,6 @@ headers = "0.3.7"
 hex = "0.4.3"
 http = "0.2.7"
 hyper = "0.14"
-db-macros = { path = "src/db/db-macros" }
 internal-dns-client = { path = "../internal-dns-client" }
 ipnetwork = "0.18"
 lazy_static = "1.4.0"
@@ -59,6 +57,9 @@ thiserror = "1.0"
 toml = "0.5.9"
 tough = { version = "0.12", features = [ "http" ] }
 usdt = "0.3.1"
+
+authz-macros = { path = "authz-macros" }
+db-macros = { path = "db-macros" }
 
 [dependencies.api_identity]
 path = "../api_identity"
