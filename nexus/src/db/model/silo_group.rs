@@ -3,14 +3,13 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::db::schema::{silo_group, silo_group_membership};
-use db_macros::Resource;
-use omicron_common::api::external::IdentityMetadataCreateParams;
+use db_macros::Asset;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Describes a silo group within the database.
 #[derive(
-    Resource, Queryable, Insertable, Debug, Selectable, Serialize, Deserialize,
+    Asset, Queryable, Insertable, Debug, Selectable, Serialize, Deserialize,
 )]
 #[diesel(table_name = silo_group)]
 pub struct SiloGroup {
@@ -18,15 +17,22 @@ pub struct SiloGroup {
     identity: SiloGroupIdentity,
 
     pub silo_id: Uuid,
+
+    /// The identity provider's name for this group.
+    pub external_id: String,
 }
 
 impl SiloGroup {
     pub fn new(
         id: Uuid,
-        identity: IdentityMetadataCreateParams,
         silo_id: Uuid,
+        external_id: String,
     ) -> Self {
-        Self { identity: SiloGroupIdentity::new(id, identity), silo_id }
+        Self {
+            identity: SiloGroupIdentity::new(id),
+            silo_id,
+            external_id,
+        }
     }
 }
 

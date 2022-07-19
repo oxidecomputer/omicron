@@ -21,7 +21,9 @@ use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
+use omicron_common::api::external::LookupResult;
 use uuid::Uuid;
+use async_bb8_diesel::OptionalExtension;
 
 impl DataStore {
     pub async fn silo_group_create(
@@ -36,6 +38,26 @@ impl DataStore {
             .returning(SiloGroup::as_returning())
             .get_result_async(self.pool_authorized(opctx).await?)
             .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    pub async fn silo_group_optional_lookup(
+        &self,
+        opctx: &OpContext,
+        authz_silo: &authz::Silo,
+        external_id: String,
+    ) -> LookupResult<Option<db::model::SiloGroup>> {
+        opctx.authorize(authz::Action::ListChildren, authz_silo).await?;
+
+        use db::schema::silo_group::dsl;
+
+        dsl::silo_group
+            .filter(dsl::silo_id.eq(authz_silo.id()))
+            .filter(dsl::external_id.eq(external_id))
+            .select(db::model::SiloGroup::as_select())
+            .first_async(self.pool_authorized(opctx).await?)
+            .await
+            .optional()
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 

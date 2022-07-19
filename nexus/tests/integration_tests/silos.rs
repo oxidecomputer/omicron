@@ -31,7 +31,6 @@ use httptest::{matchers::*, responders::*, Expectation, Server};
 use omicron_nexus::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
 use omicron_nexus::db::fixed_data::silo::SILO_ID;
 use omicron_nexus::db::identity::Asset;
-use omicron_nexus::db::identity::Resource;
 
 #[nexus_test]
 async fn test_silos(cptestctx: &ControlPlaneTestContext) {
@@ -235,15 +234,23 @@ async fn test_silo_admin_group(cptestctx: &ControlPlaneTestContext) {
 
     let authn_opctx = nexus.opctx_external_authn();
 
-    let name: Name = "administrator".parse().unwrap();
-
-    let (.., _db_silo_group) =
+    let (authz_silo, ..) =
         LookupPath::new(&authn_opctx, &nexus.datastore())
             .silo_name(&silo.identity.name.into())
-            .silo_group_name(&name.into())
             .fetch()
             .await
             .unwrap();
+
+    assert!(
+        nexus.datastore().silo_group_optional_lookup(
+            &authn_opctx,
+            &authz_silo,
+            "administrator".into(),
+        )
+        .await
+        .unwrap()
+        .is_some()
+    );
 }
 
 // Test listing providers
@@ -942,7 +949,7 @@ async fn test_silo_groups_jit(cptestctx: &ControlPlaneTestContext) {
             .await
             .unwrap();
 
-        group_names.push(db_group.name().to_string());
+        group_names.push(db_group.external_id);
     }
 
     assert!(group_names.contains(&"a-group".to_string()));
@@ -1008,50 +1015,6 @@ async fn test_silo_groups_fixed(cptestctx: &ControlPlaneTestContext) {
         .unwrap();
 
     assert_eq!(group_memberships.len(), 0);
-}
-
-#[nexus_test]
-async fn test_silo_groups_bad_group_name(cptestctx: &ControlPlaneTestContext) {
-    let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx.nexus;
-
-    let silo =
-        create_silo(&client, "test-silo", true, shared::UserProvisionType::Jit)
-            .await;
-
-    // Create a user in advance
-    let silo_user_id = Uuid::new_v4();
-    nexus
-        .silo_user_create(
-            silo.identity.id,
-            silo_user_id,
-            "external@id.com".into(),
-        )
-        .await
-        .unwrap();
-
-    let authn_opctx = nexus.opctx_external_authn();
-
-    let (authz_silo, db_silo) =
-        LookupPath::new(&authn_opctx, &nexus.datastore())
-            .silo_name(&silo.identity.name.into())
-            .fetch()
-            .await
-            .unwrap();
-
-    // Do not accept group names that are not parseable as Name
-    nexus
-        .silo_user_from_authenticated_subject(
-            &authn_opctx,
-            &authz_silo,
-            &db_silo,
-            &AuthenticatedSubject {
-                external_id: "external@id.com".into(),
-                groups: vec!["a_group".into()],
-            },
-        )
-        .await
-        .expect_err("unexpected success");
 }
 
 #[nexus_test]
@@ -1122,7 +1085,7 @@ async fn test_silo_groups_remove_from_one_group(
             .await
             .unwrap();
 
-        group_names.push(db_group.name().to_string());
+        group_names.push(db_group.external_id);
     }
 
     assert!(group_names.contains(&"a-group".to_string()));
@@ -1164,7 +1127,7 @@ async fn test_silo_groups_remove_from_one_group(
             .await
             .unwrap();
 
-        group_names.push(db_group.name().to_string());
+        group_names.push(db_group.external_id);
     }
 
     assert!(group_names.contains(&"b-group".to_string()));
@@ -1238,7 +1201,7 @@ async fn test_silo_groups_remove_from_both_groups(
             .await
             .unwrap();
 
-        group_names.push(db_group.name().to_string());
+        group_names.push(db_group.external_id);
     }
 
     assert!(group_names.contains(&"a-group".to_string()));
@@ -1280,7 +1243,7 @@ async fn test_silo_groups_remove_from_both_groups(
             .await
             .unwrap();
 
-        group_names.push(db_group.name().to_string());
+        group_names.push(db_group.external_id);
     }
 
     assert!(group_names.contains(&"c-group".to_string()));

@@ -207,13 +207,12 @@ table! {
 table! {
     silo_group (id) {
         id -> Uuid,
-        name -> Text,
-        description -> Text,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
 
         silo_id -> Uuid,
+        external_id -> Text,
     }
 }
 

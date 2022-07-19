@@ -281,17 +281,16 @@ CREATE UNIQUE INDEX ON omicron.public.silo_user (
 
 CREATE TABLE omicron.public.silo_group (
     id UUID PRIMARY KEY,
-    name STRING(128) NOT NULL,
-    description STRING(512) NOT NULL,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
 
-    silo_id UUID NOT NULL
+    silo_id UUID NOT NULL,
+    external_id TEXT NOT NULL
 );
 
 CREATE UNIQUE INDEX ON omicron.public.silo_group (
-    name,
+    external_id,
     silo_id
 ) WHERE
     time_deleted IS NULL;

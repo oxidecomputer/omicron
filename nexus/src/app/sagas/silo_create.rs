@@ -4,15 +4,13 @@
 
 use super::saga_generate_uuid;
 use crate::context::OpContext;
-use crate::db::identity::Resource;
+use crate::db::identity::{Asset, Resource};
 use crate::db::lookup::LookupPath;
 use crate::external_api::params;
 use crate::external_api::shared;
 use crate::saga_interface::SagaContext;
 use crate::{authn, authz, db};
 use lazy_static::lazy_static;
-use omicron_common::api::external::Error;
-use omicron_common::api::external::IdentityMetadataCreateParams;
 use serde::Deserialize;
 use serde::Serialize;
 use std::sync::Arc;
@@ -136,18 +134,8 @@ async fn saga_create_silo_admin_group(
             &opctx,
             db::model::SiloGroup::new(
                 silo_admin_group_id,
-                IdentityMetadataCreateParams {
-                    name: admin_group_name.parse().map_err(|_|
-                        ActionError::action_failed(
-                            Error::invalid_request(&format!(
-                                "could not parse admin group name {} during silo_create",
-                                admin_group_name,
-                            ))
-                        )
-                    )?,
-                    description: "".into(),
-                },
                 silo.id(),
+                admin_group_name.clone(),
             )
         )
         .await

@@ -17,12 +17,10 @@ use crate::external_api::params;
 use crate::external_api::shared;
 use crate::{authn, authz};
 use anyhow::Context;
-use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::UpdateResult;
@@ -221,17 +219,13 @@ impl super::Nexus {
         };
 
         for group in &authenticated_subject.groups {
-            let group_name: external::Name = group.parse().map_err(|_| {
-                Error::invalid_request("Group names from an IDP must be valid")
-            })?;
-
             // Lookup (or create, depending on the provision type) a silo group
             let silo_group = match db_silo.user_provision_type {
                 db::model::UserProvisionType::Fixed => {
-                    self.silo_group_optional_lookup(
+                    self.db_datastore.silo_group_optional_lookup(
                         opctx,
                         &authz_silo,
-                        &group_name.clone().into(),
+                        group.clone(),
                     )
                     .await?
                 }
@@ -241,7 +235,7 @@ impl super::Nexus {
                         .silo_group_lookup_or_create_by_name(
                             opctx,
                             &authz_silo,
-                            &group_name.clone().into(),
+                            &group,
                         )
                         .await?;
 
@@ -278,7 +272,7 @@ impl super::Nexus {
 
             if !authenticated_subject
                 .groups
-                .contains(&silo_group.name().to_string())
+                .contains(&silo_group.external_id)
             {
                 self.datastore()
                     .silo_group_membership_delete(
@@ -296,28 +290,14 @@ impl super::Nexus {
 
     // Silo groups
 
-    pub async fn silo_group_optional_lookup(
-        &self,
-        opctx: &OpContext,
-        authz_silo: &authz::Silo,
-        silo_group_name: &Name,
-    ) -> LookupResult<Option<db::model::SiloGroup>> {
-        Ok(LookupPath::new(opctx, &self.datastore())
-            .silo_id(authz_silo.id())
-            .silo_group_name(&silo_group_name.clone())
-            .optional_fetch()
-            .await?
-            .map(|(.., db_silo_group)| db_silo_group))
-    }
-
     pub async fn silo_group_lookup_or_create_by_name(
         &self,
         opctx: &OpContext,
         authz_silo: &authz::Silo,
-        silo_group_name: &Name,
+        external_id: &String,
     ) -> LookupResult<db::model::SiloGroup> {
-        match self
-            .silo_group_optional_lookup(opctx, authz_silo, &silo_group_name)
+        match self.db_datastore
+            .silo_group_optional_lookup(opctx, authz_silo, external_id.clone())
             .await?
         {
             Some(silo_group) => Ok(silo_group),
@@ -328,11 +308,8 @@ impl super::Nexus {
                         opctx,
                         db::model::SiloGroup::new(
                             Uuid::new_v4(),
-                            IdentityMetadataCreateParams {
-                                name: silo_group_name.clone().into(),
-                                description: "".into(),
-                            },
                             authz_silo.id(),
+                            external_id.clone(),
                         ),
                     )
                     .await
