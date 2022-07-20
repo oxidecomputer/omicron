@@ -12,7 +12,6 @@ use crate::db::pool::DbConnection;
 use crate::db::queries::next_item::DefaultShiftGenerator;
 use crate::db::queries::next_item::NextItem;
 use crate::db::schema::network_interface::dsl;
-use crate::defaults::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use chrono::DateTime;
 use chrono::Utc;
 use diesel::pg::Pg;
@@ -26,6 +25,7 @@ use diesel::QueryResult;
 use diesel::RunQueryDsl;
 use ipnetwork::IpNetwork;
 use ipnetwork::Ipv4Network;
+use nexus_defaults::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use omicron_common::api::external;
 use std::net::IpAddr;
 use uuid::Uuid;
@@ -1615,10 +1615,10 @@ mod tests {
         fn available_ipv4_addresses(&self) -> [usize; 2] {
             [
                 self.subnets[0].ipv4_block.size() as usize
-                    - crate::defaults::NUM_INITIAL_RESERVED_IP_ADDRESSES
+                    - nexus_defaults::NUM_INITIAL_RESERVED_IP_ADDRESSES
                     - 1,
                 self.subnets[1].ipv4_block.size() as usize
-                    - crate::defaults::NUM_INITIAL_RESERVED_IP_ADDRESSES
+                    - nexus_defaults::NUM_INITIAL_RESERVED_IP_ADDRESSES
                     - 1,
             ]
         }
@@ -1778,7 +1778,7 @@ mod tests {
         let addresses = context.net1.subnets[0]
             .ipv4_block
             .iter()
-            .skip(crate::defaults::NUM_INITIAL_RESERVED_IP_ADDRESSES);
+            .skip(nexus_defaults::NUM_INITIAL_RESERVED_IP_ADDRESSES);
 
         for (i, expected_address) in addresses.take(2).enumerate() {
             let instance =

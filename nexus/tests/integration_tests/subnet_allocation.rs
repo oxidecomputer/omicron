@@ -10,6 +10,7 @@ use dropshot::HttpErrorResponseBody;
 use http::method::Method;
 use http::StatusCode;
 use ipnetwork::Ipv4Network;
+use nexus_defaults::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
@@ -23,7 +24,6 @@ use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, InstanceCpuCount, Ipv4Net,
     NetworkInterface,
 };
-use omicron_nexus::defaults::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use omicron_nexus::external_api::params;
 use std::net::Ipv4Addr;
 

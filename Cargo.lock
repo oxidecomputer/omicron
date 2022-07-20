@@ -2773,6 +2773,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-defaults"
+version = "0.1.0"
+dependencies = [
+ "ipnetwork",
+ "lazy_static",
+ "omicron-common 0.1.0",
+ "rand 0.8.5",
+ "serde_json",
+]
+
+[[package]]
 name = "nexus-test-utils"
 version = "0.1.0"
 dependencies = [
@@ -3096,6 +3107,7 @@ dependencies = [
  "macaddr",
  "mime_guess",
  "newtype_derive",
+ "nexus-defaults",
  "nexus-test-utils",
  "nexus-test-utils-macros",
  "nexus-types",

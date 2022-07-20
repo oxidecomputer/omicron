@@ -84,15 +84,17 @@ impl TryFrom<UnvalidatedTunables> for Tunables {
 
 impl Tunables {
     fn validate_ipv4_prefix(prefix: u8) -> Result<(), InvalidTunable> {
-        let absolute_max: u8 = 32_u8.checked_sub(
-            // Always need space for the reserved Oxide addresses, including the
-            // broadcast address at the end of the subnet.
-            ((crate::defaults::NUM_INITIAL_RESERVED_IP_ADDRESSES + 1) as f32)
+        let absolute_max: u8 = 32_u8
+            .checked_sub(
+                // Always need space for the reserved Oxide addresses, including the
+                // broadcast address at the end of the subnet.
+                ((nexus_defaults::NUM_INITIAL_RESERVED_IP_ADDRESSES + 1) as f32)
                 .log2() // Subnet size to bit prefix.
                 .ceil() // Round up to a whole number of bits.
-                as u8
-            ).expect("Invalid absolute maximum IPv4 subnet prefix");
-        if prefix >= crate::defaults::MIN_VPC_IPV4_SUBNET_PREFIX
+                as u8,
+            )
+            .expect("Invalid absolute maximum IPv4 subnet prefix");
+        if prefix >= nexus_defaults::MIN_VPC_IPV4_SUBNET_PREFIX
             && prefix <= absolute_max
         {
             Ok(())
