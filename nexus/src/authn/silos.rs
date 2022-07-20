@@ -403,7 +403,15 @@ impl SamlIdentityProvider {
                                     {
                                         // Read comma separated group names
                                         for group in value.split(',') {
-                                            groups.push(group.to_string());
+                                            // Trim whitespace
+                                            let group = group.trim().to_string();
+
+                                            // Skip empty groups
+                                            if group.len() == 0 {
+                                                continue;
+                                            }
+
+                                            groups.push(group);
                                         }
                                     }
                                 }
