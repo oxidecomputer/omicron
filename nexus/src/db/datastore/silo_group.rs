@@ -13,7 +13,6 @@ use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
 use crate::db::model::SiloGroup;
 use crate::db::model::SiloGroupMembership;
-use crate::db::update_and_check::UpdateAndCheck;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
@@ -133,36 +132,51 @@ impl DataStore {
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Delete, authz_silo_group).await?;
 
-        // Delete silo group memberships
+        #[derive(Debug, thiserror::Error)]
+        enum SiloDeleteError {
+            #[error("group {0} still has memberships")]
+            GroupStillHasMemberships(Uuid),
+        }
+        type TxnError = TransactionError<SiloDeleteError>;
 
-        use db::schema::silo_group_membership;
-        diesel::delete(silo_group_membership::dsl::silo_group_membership)
-            .filter(silo_group_membership::dsl::silo_group_id.eq(authz_silo_group.id()))
-            .execute_async(self.pool_authorized(opctx).await?)
+        let group_id = authz_silo_group.id();
+
+        self.pool_authorized(opctx).await?
+            .transaction(move |conn| {
+                use db::schema::silo_group_membership;
+
+                // Don't delete groups that still have memberships
+                let group_memberships =
+                    silo_group_membership::dsl::silo_group_membership
+                        .filter(silo_group_membership::dsl::silo_group_id.eq(group_id))
+                        .select(SiloGroupMembership::as_returning())
+                        .load(conn)?;
+
+                if !group_memberships.is_empty() {
+                    return Err(TxnError::CustomError(
+                        SiloDeleteError::GroupStillHasMemberships(group_id)
+                    ));
+                }
+
+                // Delete silo group
+                use db::schema::silo_group::dsl;
+                diesel::update(dsl::silo_group)
+                    .filter(dsl::id.eq(group_id))
+                    .filter(dsl::time_deleted.is_null())
+                    .set(dsl::time_deleted.eq(Utc::now()))
+                    .execute(conn)?;
+
+                Ok(())
+            })
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByResource(authz_silo_group),
-                )
-            })?;
+            .map_err(|e| match e {
+                TxnError::CustomError(
+                    SiloDeleteError::GroupStillHasMemberships(id),
+                ) => Error::invalid_request(&format!("group {0} still has memberships", id)),
 
-        // Delete silo group
-
-        use db::schema::silo_group::dsl;
-        diesel::update(dsl::silo_group)
-            .filter(dsl::id.eq(authz_silo_group.id()))
-            .filter(dsl::time_deleted.is_null())
-            .set(dsl::time_deleted.eq(Utc::now()))
-            .check_if_exists::<SiloGroup>(authz_silo_group.id())
-            .execute_and_check(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByResource(authz_silo_group),
-                )
-            })?;
-        Ok(())
+                _ => {
+                    Error::internal_error(&format!("Transaction error: {}", e))
+                }
+            })
     }
 }
