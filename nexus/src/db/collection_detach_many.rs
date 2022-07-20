@@ -16,7 +16,6 @@ use super::cte_utils::{
     QueryFromClause, QuerySqlType,
 };
 use super::pool::DbConnection;
-use crate::db::collection_attach::DatastoreAttachTarget;
 use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager, PoolError};
 use diesel::associations::HasTable;
 use diesel::expression::{AsExpression, Expression};
@@ -27,6 +26,7 @@ use diesel::query_builder::*;
 use diesel::query_dsl::methods as query_methods;
 use diesel::query_source::Table;
 use diesel::sql_types::{Nullable, SingleValue};
+use nexus_db_model::DatastoreAttachTarget;
 use std::fmt::Debug;
 
 /// Trait to be implemented by structs representing a detachable collection.
@@ -494,8 +494,8 @@ where
 
 #[cfg(test)]
 mod test {
-    use super::{DatastoreDetachManyTarget, DetachManyError};
-    use crate::db::collection_attach::DatastoreAttachTarget;
+    use super::*;
+    use crate::db::collection_attach::DatastoreAttachTargetExt;
     use crate::db::{
         self, error::TransactionError, identity::Resource as IdentityResource,
     };

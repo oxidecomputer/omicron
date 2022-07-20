@@ -389,7 +389,7 @@ fn generate_misc_helpers(config: &Config) -> TokenStream {
         /// Build the `authz` object for this resource
         fn make_authz(
             authz_parent: &authz::#parent_resource_name,
-            db_row: &model::#resource_name,
+            db_row: &nexus_db_model::#resource_name,
             lookup_type: LookupType,
         ) -> authz::#resource_name {
             authz::#resource_name::new(
@@ -533,7 +533,7 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
         /// This is equivalent to `fetch_for(authz::Action::Read)`.
         pub async fn fetch(
             &self,
-        ) -> LookupResult<(#(authz::#path_types,)* model::#resource_name)> {
+        ) -> LookupResult<(#(authz::#path_types,)* nexus_db_model::#resource_name)> {
             self.fetch_for(authz::Action::Read).await
         }
 
@@ -549,7 +549,7 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
         pub async fn fetch_for(
             &self,
             action: authz::Action,
-        ) -> LookupResult<(#(authz::#path_types,)* model::#resource_name)> {
+        ) -> LookupResult<(#(authz::#path_types,)* nexus_db_model::#resource_name)> {
             let lookup = self.lookup_root();
             let opctx = &lookup.opctx;
             let datastore = &lookup.datastore;
@@ -712,7 +712,7 @@ fn generate_database_functions(config: &Config) -> TokenStream {
                 #parent_lookup_arg_formal
                 name: &Name,
                 action: authz::Action,
-            ) -> LookupResult<(authz::#resource_name, model::#resource_name)> {
+            ) -> LookupResult<(authz::#resource_name, nexus_db_model::#resource_name)> {
                 let (#resource_authz_name, db_row) =
                     Self::lookup_by_name_no_authz(
                         opctx,
@@ -738,7 +738,7 @@ fn generate_database_functions(config: &Config) -> TokenStream {
                 #parent_lookup_arg_formal
                 name: &Name,
             ) -> LookupResult<
-                (authz::#resource_name, model::#resource_name)
+                (authz::#resource_name, nexus_db_model::#resource_name)
             > {
                 use db::schema::#resource_as_snake::dsl;
 
@@ -746,7 +746,7 @@ fn generate_database_functions(config: &Config) -> TokenStream {
                     #soft_delete_filter
                     .filter(dsl::name.eq(name.clone()))
                     #lookup_filter
-                    .select(model::#resource_name::as_select())
+                    .select(nexus_db_model::#resource_name::as_select())
                     .get_result_async(
                         datastore.pool_authorized(opctx).await?
                     )
@@ -804,7 +804,7 @@ fn generate_database_functions(config: &Config) -> TokenStream {
             datastore: &DataStore,
             #(#pkey_names: &#pkey_types,)*
             action: authz::Action,
-        ) -> LookupResult<(#(authz::#path_types,)* model::#resource_name)> {
+        ) -> LookupResult<(#(authz::#path_types,)* nexus_db_model::#resource_name)> {
             let (#(#path_authz_names,)* db_row) =
                 Self::lookup_by_id_no_authz(
                     opctx,
@@ -826,13 +826,13 @@ fn generate_database_functions(config: &Config) -> TokenStream {
             opctx: &OpContext,
             datastore: &DataStore,
             #(#pkey_names: &#pkey_types,)*
-        ) -> LookupResult<(#(authz::#path_types,)* model::#resource_name)> {
+        ) -> LookupResult<(#(authz::#path_types,)* nexus_db_model::#resource_name)> {
             use db::schema::#resource_as_snake::dsl;
 
             let db_row = dsl::#resource_as_snake
                 #soft_delete_filter
                 #(.filter(dsl::#pkey_column_names.eq(#pkey_names.clone())))*
-                .select(model::#resource_name::as_select())
+                .select(nexus_db_model::#resource_name::as_select())
                 .get_result_async(datastore.pool_authorized(opctx).await?)
                 .await
                 .map_err(|e| {

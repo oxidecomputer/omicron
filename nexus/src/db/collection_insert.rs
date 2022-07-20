@@ -21,76 +21,15 @@ use diesel::query_builder::*;
 use diesel::query_dsl::methods as query_methods;
 use diesel::query_source::Table;
 use diesel::sql_types::SingleValue;
+use nexus_db_model::DatastoreCollection;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 
-/// Trait to be implemented by any structs representing a collection.
-/// For example, since Organizations have a one-to-many relationship with
-/// Projects, the Organization datatype should implement this trait.
-/// ```
-/// # use diesel::prelude::*;
-/// # use omicron_nexus::db::collection_insert::DatastoreCollection;
-/// # use omicron_nexus::db::model::Generation;
-/// #
-/// # table! {
-/// #     test_schema.organization (id) {
-/// #         id -> Uuid,
-/// #         time_deleted -> Nullable<Timestamptz>,
-/// #         rcgen -> Int8,
-/// #     }
-/// # }
-/// #
-/// # table! {
-/// #     test_schema.project (id) {
-/// #         id -> Uuid,
-/// #         time_deleted -> Nullable<Timestamptz>,
-/// #         organization_id -> Uuid,
-/// #     }
-/// # }
-///
-/// #[derive(Queryable, Insertable, Debug, Selectable)]
-/// #[diesel(table_name = project)]
-/// struct Project {
-///     pub id: uuid::Uuid,
-///     pub time_deleted: Option<chrono::DateTime<chrono::Utc>>,
-///     pub organization_id: uuid::Uuid,
-/// }
-///
-/// #[derive(Queryable, Insertable, Debug, Selectable)]
-/// #[diesel(table_name = organization)]
-/// struct Organization {
-///     pub id: uuid::Uuid,
-///     pub time_deleted: Option<chrono::DateTime<chrono::Utc>>,
-///     pub rcgen: Generation,
-/// }
-///
-/// impl DatastoreCollection<Project> for Organization {
-///     // Type of Organization::identity::id and Project::organization_id
-///     type CollectionId = uuid::Uuid;
-///
-///     type GenerationNumberColumn = organization::dsl::rcgen;
-///     type CollectionTimeDeletedColumn = organization::dsl::time_deleted;
-///
-///     type CollectionIdColumn = project::dsl::organization_id;
-/// }
-/// ```
-pub trait DatastoreCollection<ResourceType> {
-    /// The Rust type of the collection id (typically Uuid for us)
-    type CollectionId: Copy + Debug;
-
-    /// The column in the CollectionTable that acts as a generation number.
-    /// This is the "child-resource-generation-number" in RFD 192.
-    type GenerationNumberColumn: Column + Default;
-
-    /// The time deleted column in the CollectionTable
-    // We enforce that this column comes from the same table as
-    // GenerationNumberColumn when defining insert_resource() below.
-    type CollectionTimeDeletedColumn: Column + Default;
-
-    /// The column in the ResourceTable that acts as a foreign key into
-    /// the CollectionTable
-    type CollectionIdColumn: Column;
-
+/// Extension trait adding behavior to types that implement
+/// `nexus_db_model::DatastoreCollection`.
+pub trait DatastoreCollectionExt<ResourceType>:
+    DatastoreCollection<ResourceType>
+{
     /// Create a statement for inserting a resource into the given collection.
     ///
     /// The ISR type is the same type as the second generic argument to
@@ -175,6 +114,8 @@ pub trait DatastoreCollection<ResourceType> {
         }
     }
 }
+
+impl<T, R> DatastoreCollectionExt<R> for T where T: DatastoreCollection<R> {}
 
 /// Utility type to make trait bounds below easier to read.
 type CollectionId<ResourceType, C> =
@@ -504,7 +445,7 @@ where
 
 #[cfg(test)]
 mod test {
-    use super::{AsyncInsertError, DatastoreCollection, SyncInsertError};
+    use super::*;
     use crate::db::{
         self, error::TransactionError, identity::Resource as IdentityResource,
     };

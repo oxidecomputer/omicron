@@ -8,7 +8,7 @@ use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
-use crate::db::collection_insert::DatastoreCollection;
+use crate::db::collection_insert::DatastoreCollectionExt;
 use crate::db::collection_insert::SyncInsertError;
 use crate::db::error::public_error_from_diesel_create;
 use crate::db::error::public_error_from_diesel_lookup;
@@ -115,7 +115,7 @@ impl DataStore {
                 // Otherwise, insert services and set rack.initialized = true.
                 for svc in services {
                     let sled_id = svc.sled_id;
-                    <Sled as DatastoreCollection<Service>>::insert_resource(
+                    <Sled as DatastoreCollectionExt<Service>>::insert_resource(
                         sled_id,
                         diesel::insert_into(service_dsl::service)
                             .values(svc.clone())

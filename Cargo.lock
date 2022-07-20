@@ -2773,6 +2773,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-db-model"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "db-macros",
+ "diesel",
+ "hex",
+ "ipnetwork",
+ "macaddr",
+ "newtype_derive",
+ "nexus-defaults",
+ "nexus-types",
+ "omicron-common 0.1.0",
+ "parse-display",
+ "rand 0.8.5",
+ "ref-cast",
+ "schemars",
+ "serde",
+ "serde_json",
+ "sled-agent-client",
+ "steno",
+ "uuid",
+]
+
+[[package]]
 name = "nexus-defaults"
 version = "0.1.0"
 dependencies = [
@@ -3107,6 +3133,7 @@ dependencies = [
  "macaddr",
  "mime_guess",
  "newtype_derive",
+ "nexus-db-model",
  "nexus-defaults",
  "nexus-test-utils",
  "nexus-test-utils-macros",
