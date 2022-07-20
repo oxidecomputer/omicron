@@ -134,13 +134,38 @@ impl DataStore {
         // exposed via an external API right now but someone could still put us
         // into some hurt by assigning loads of roles to someone and having that
         // person attempt to access anything.
-        dsl::role_assignment
-            .filter(dsl::identity_type.eq(identity_type))
-            .filter(dsl::identity_id.eq(identity_id))
-            .filter(dsl::resource_type.eq(resource_type.to_string()))
-            .filter(dsl::resource_id.eq(resource_id))
-            .select(RoleAssignment::as_select())
-            .load_async::<RoleAssignment>(self.pool_authorized(opctx).await?)
+
+        self.pool_authorized(opctx).await?
+            .transaction(move |conn| {
+                let mut role_assignments = dsl::role_assignment
+                    .filter(dsl::identity_type.eq(identity_type.clone()))
+                    .filter(dsl::identity_id.eq(identity_id))
+                    .filter(dsl::resource_type.eq(resource_type.to_string()))
+                    .filter(dsl::resource_id.eq(resource_id))
+                    .select(RoleAssignment::as_select())
+                    .load::<RoleAssignment>(conn)?;
+
+                // Return the roles that a silo user has from their group memberships
+                if identity_type == IdentityType::SiloUser {
+                    use db::schema::silo_group_membership;
+
+                    let mut group_role_assignments = dsl::role_assignment
+                        .filter(dsl::identity_type.eq(IdentityType::SiloGroup))
+                        .filter(dsl::identity_id.eq_any(
+                            silo_group_membership::dsl::silo_group_membership
+                                .filter(silo_group_membership::dsl::silo_user_id.eq(identity_id))
+                                .select(silo_group_membership::dsl::silo_group_id)
+                        ))
+                        .filter(dsl::resource_type.eq(resource_type.to_string()))
+                        .filter(dsl::resource_id.eq(resource_id))
+                        .select(RoleAssignment::as_select())
+                        .load::<RoleAssignment>(conn)?;
+
+                    role_assignments.append(&mut group_role_assignments);
+                }
+
+                Ok(role_assignments)
+            })
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }

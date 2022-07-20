@@ -234,7 +234,7 @@ async fn test_silo_admin_group(cptestctx: &ControlPlaneTestContext) {
 
     let authn_opctx = nexus.opctx_external_authn();
 
-    let (authz_silo, ..) =
+    let (authz_silo, db_silo) =
         LookupPath::new(&authn_opctx, &nexus.datastore())
             .silo_name(&silo.identity.name.into())
             .fetch()
@@ -251,6 +251,51 @@ async fn test_silo_admin_group(cptestctx: &ControlPlaneTestContext) {
         .unwrap()
         .is_some()
     );
+
+    // Test that a user is granted privileges from their group membership
+    let admin_group_user = nexus
+        .silo_user_from_authenticated_subject(
+            &authn_opctx,
+            &authz_silo,
+            &db_silo,
+            &AuthenticatedSubject {
+                external_id: "adminuser@company.com".into(),
+                groups: vec!["administrator".into()],
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+    let group_memberships = nexus
+        .datastore()
+        .silo_group_membership_for_user(
+            &authn_opctx,
+            &authz_silo,
+            admin_group_user.id(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(group_memberships.len(), 1);
+
+    // Create an organization
+    let _org = NexusRequest::objects_post(
+        client,
+        "/organizations",
+        &params::OrganizationCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "myorg".parse().unwrap(),
+                description: "some org".into(),
+            },
+        },
+    )
+    .authn_as(AuthnMode::SiloUser(admin_group_user.id()))
+    .execute()
+    .await
+    .expect("failed to create Organization")
+    .parsed_body::<views::Organization>()
+    .expect("failed to parse as Organization");
 }
 
 // Test listing providers

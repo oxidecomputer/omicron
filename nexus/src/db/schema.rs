@@ -224,6 +224,7 @@ table! {
 }
 
 allow_tables_to_appear_in_same_query!(silo_group, silo_group_membership);
+allow_tables_to_appear_in_same_query!(role_assignment, silo_group_membership);
 
 table! {
     identity_provider (silo_id, id) {
