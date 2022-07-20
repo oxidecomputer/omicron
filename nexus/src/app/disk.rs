@@ -4,7 +4,6 @@
 
 //! Disks and snapshots
 
-use super::Unimpl;
 use crate::app::sagas;
 use crate::authn;
 use crate::authz;
@@ -20,8 +19,6 @@ use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
-use omicron_common::api::external::LookupType;
-use omicron_common::api::external::ResourceType;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use sled_agent_client::Client as SledAgentClient;
 use std::sync::Arc;
@@ -82,13 +79,64 @@ impl super::Nexus {
                     });
                 }
             }
-            params::DiskSource::Snapshot { snapshot_id: _ } => {
-                // Until we implement snapshots, do not allow disks to be
-                // created from a snapshot.
-                return Err(Error::InvalidValue {
-                    label: String::from("snapshot"),
-                    message: String::from("snapshots are not yet supported"),
-                });
+            params::DiskSource::Snapshot { snapshot_id } => {
+                let (.., db_snapshot) =
+                    LookupPath::new(opctx, &self.db_datastore)
+                        .snapshot_id(*snapshot_id)
+                        .fetch()
+                        .await?;
+
+                // Reject disks where the block size doesn't evenly divide the
+                // total size
+                if (params.size.to_bytes()
+                    % db_snapshot.block_size.to_bytes() as u64)
+                    != 0
+                {
+                    return Err(Error::InvalidValue {
+                        label: String::from("size and block_size"),
+                        message: String::from(
+                            "total size must be a multiple of snapshot's block size",
+                        ),
+                    });
+                }
+
+                // If the size of the snapshot is greater than the size of the
+                // disk, return an error.
+                if db_snapshot.size.to_bytes() > params.size.to_bytes() {
+                    return Err(Error::invalid_request(
+                        &format!(
+                            "disk size {} must be greater than or equal to snapshot size {}",
+                            params.size.to_bytes(),
+                            db_snapshot.size.to_bytes(),
+                        ),
+                    ));
+                }
+
+                // Reject disks where the size isn't at least
+                // MIN_DISK_SIZE_BYTES
+                if params.size.to_bytes() < params::MIN_DISK_SIZE_BYTES as u64 {
+                    return Err(Error::InvalidValue {
+                        label: String::from("size"),
+                        message: format!(
+                            "total size must be at least {}",
+                            ByteCount::from(params::MIN_DISK_SIZE_BYTES)
+                        ),
+                    });
+                }
+
+                // Reject disks where the MIN_DISK_SIZE_BYTES doesn't evenly divide
+                // the size
+                if (params.size.to_bytes() % params::MIN_DISK_SIZE_BYTES as u64)
+                    != 0
+                {
+                    return Err(Error::InvalidValue {
+                        label: String::from("size"),
+                        message: format!(
+                            "total size must be a multiple of {}",
+                            ByteCount::from(params::MIN_DISK_SIZE_BYTES)
+                        ),
+                    });
+                }
             }
             params::DiskSource::Image { image_id: _ } => {
                 // Until we implement project images, do not allow disks to be
@@ -359,14 +407,43 @@ impl super::Nexus {
         opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
-        _params: &params::SnapshotCreate,
+        params: &params::SnapshotCreate,
     ) -> CreateResult<db::model::Snapshot> {
-        let _ = LookupPath::new(opctx, &self.db_datastore)
+        let (authz_silo, authz_org) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .organization_name(organization_name)
+                .lookup_for(authz::Action::ListChildren)
+                .await?;
+
+        let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
             .organization_name(organization_name)
             .project_name(project_name)
             .lookup_for(authz::Action::ListChildren)
             .await?;
-        Err(self.unimplemented_todo(opctx, Unimpl::Public).await)
+
+        let saga_params = Arc::new(sagas::snapshot_create::Params {
+            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+            silo_id: authz_silo.id(),
+            organization_id: authz_org.id(),
+            project_id: authz_project.id(),
+            create_params: params.clone(),
+        });
+
+        let saga_outputs = self
+            .execute_saga(
+                Arc::clone(&sagas::snapshot_create::SAGA_TEMPLATE),
+                sagas::snapshot_create::SAGA_NAME,
+                saga_params,
+            )
+            .await?;
+
+        let snapshot_created = saga_outputs
+            .lookup_output::<db::model::Snapshot>("finalized_snapshot")
+            .map_err(|e| Error::InternalError {
+                internal_message: e.to_string(),
+            })?;
+
+        Ok(snapshot_created)
     }
 
     pub async fn project_list_snapshots(
@@ -374,28 +451,34 @@ impl super::Nexus {
         opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
-        _pagparams: &DataPageParams<'_, Name>,
+        pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<db::model::Snapshot> {
-        let _ = LookupPath::new(opctx, &self.db_datastore)
+        let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
             .organization_name(organization_name)
             .project_name(project_name)
             .lookup_for(authz::Action::ListChildren)
             .await?;
-        Err(self.unimplemented_todo(opctx, Unimpl::Public).await)
+
+        self.db_datastore
+            .project_list_snapshots(opctx, &authz_project, pagparams)
+            .await
     }
 
     pub async fn snapshot_fetch(
         &self,
         opctx: &OpContext,
-        _organization_name: &Name,
-        _project_name: &Name,
+        organization_name: &Name,
+        project_name: &Name,
         snapshot_name: &Name,
     ) -> LookupResult<db::model::Snapshot> {
-        let lookup_type = LookupType::ByName(snapshot_name.to_string());
-        let not_found_error =
-            lookup_type.into_not_found(ResourceType::Snapshot);
-        let unimp = Unimpl::ProtectedLookup(not_found_error);
-        Err(self.unimplemented_todo(opctx, unimp).await)
+        let (.., db_snapshot) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .snapshot_name(snapshot_name)
+            .fetch()
+            .await?;
+
+        Ok(db_snapshot)
     }
 
     pub async fn snapshot_fetch_by_id(
@@ -403,24 +486,41 @@ impl super::Nexus {
         opctx: &OpContext,
         snapshot_id: &Uuid,
     ) -> LookupResult<db::model::Snapshot> {
-        let lookup_type = LookupType::ById(*snapshot_id);
-        let not_found_error =
-            lookup_type.into_not_found(ResourceType::Snapshot);
-        let unimp = Unimpl::ProtectedLookup(not_found_error);
-        Err(self.unimplemented_todo(opctx, unimp).await)
+        let (.., db_snapshot) = LookupPath::new(opctx, &self.db_datastore)
+            .snapshot_id(*snapshot_id)
+            .fetch()
+            .await?;
+
+        Ok(db_snapshot)
     }
 
     pub async fn project_delete_snapshot(
         self: &Arc<Self>,
         opctx: &OpContext,
-        _organization_name: &Name,
-        _project_name: &Name,
+        organization_name: &Name,
+        project_name: &Name,
         snapshot_name: &Name,
     ) -> DeleteResult {
-        let lookup_type = LookupType::ByName(snapshot_name.to_string());
-        let not_found_error =
-            lookup_type.into_not_found(ResourceType::Snapshot);
-        let unimp = Unimpl::ProtectedLookup(not_found_error);
-        Err(self.unimplemented_todo(opctx, unimp).await)
+        // TODO-correctness
+        // This also requires solving how to clean up the associated resources
+        // (on-disk snapshots, running read-only downstairs) because disks
+        // *could* still be using them (if the snapshot has not yet been turned
+        // into a regular crucible volume). It will involve some sort of
+        // reference counting for volumes, and probably means this needs to
+        // instead be a saga.
+
+        let (.., authz_snapshot, db_snapshot) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .organization_name(organization_name)
+                .project_name(project_name)
+                .snapshot_name(snapshot_name)
+                .fetch()
+                .await?;
+
+        self.db_datastore
+            .project_delete_snapshot(opctx, &authz_snapshot, &db_snapshot)
+            .await?;
+
+        Ok(())
     }
 }

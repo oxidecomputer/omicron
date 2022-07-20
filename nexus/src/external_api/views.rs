@@ -237,6 +237,15 @@ pub struct Image {
 
 // SNAPSHOTS
 
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SnapshotState {
+    Creating,
+    Ready,
+    Faulted,
+    Destroyed,
+}
+
 /// Client view of a Snapshot
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Snapshot {
@@ -245,6 +254,9 @@ pub struct Snapshot {
 
     pub project_id: Uuid,
     pub disk_id: Uuid,
+
+    pub state: SnapshotState,
+
     pub size: ByteCount,
 }
 

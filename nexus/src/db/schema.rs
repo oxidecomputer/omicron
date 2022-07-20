@@ -76,6 +76,10 @@ table! {
         project_id -> Uuid,
         disk_id -> Uuid,
         volume_id -> Uuid,
+
+        gen -> Int8,
+        state -> crate::db::model::SnapshotStateEnum,
+        block_size -> crate::db::model::BlockSizeEnum,
         size_bytes -> Int8,
     }
 }

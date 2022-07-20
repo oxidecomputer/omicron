@@ -3170,6 +3170,7 @@ dependencies = [
  "cfg-if 1.0.0",
  "chrono",
  "clap 3.2.12",
+ "crucible",
  "crucible-agent-client",
  "ddm-admin-client",
  "dropshot",

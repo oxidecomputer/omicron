@@ -133,13 +133,15 @@ async fn sdc_create_disk_record(
                 ))
             })?
         }
-        params::DiskSource::Snapshot { snapshot_id: _ } => {
-            // Until we implement snapshots, do not allow disks to be
-            // created from a snapshot.
-            return Err(ActionError::action_failed(Error::InvalidValue {
-                label: String::from("snapshot"),
-                message: String::from("snapshots are not yet supported"),
-            }));
+        params::DiskSource::Snapshot { snapshot_id } => {
+            let (.., db_snapshot) =
+                LookupPath::new(&opctx, &osagactx.datastore())
+                    .snapshot_id(*snapshot_id)
+                    .fetch()
+                    .await
+                    .map_err(ActionError::action_failed)?;
+
+            db_snapshot.block_size
         }
         params::DiskSource::Image { image_id: _ } => {
             // Until we implement project images, do not allow disks to be
@@ -356,13 +358,44 @@ async fn sdc_regions_ensure(
         Box<sled_agent_client::types::VolumeConstructionRequest>,
     > = match &params.create_params.disk_source {
         params::DiskSource::Blank { block_size: _ } => None,
-        params::DiskSource::Snapshot { snapshot_id: _ } => {
-            // Until we implement snapshots, do not allow disks to be
-            // created from a snapshot.
-            return Err(ActionError::action_failed(Error::InvalidValue {
-                label: String::from("snapshot"),
-                message: String::from("snapshots are not yet supported"),
-            }));
+        params::DiskSource::Snapshot { snapshot_id } => {
+            warn!(log, "grabbing snapshot {}", snapshot_id);
+
+            let (.., db_snapshot) =
+                LookupPath::new(&opctx, &osagactx.datastore())
+                    .snapshot_id(*snapshot_id)
+                    .fetch()
+                    .await
+                    .map_err(ActionError::action_failed)?;
+
+            debug!(
+                log,
+                "grabbing snapshot {} volume {}",
+                db_snapshot.id(),
+                db_snapshot.volume_id,
+            );
+
+            let volume = osagactx
+                .datastore()
+                .volume_get(db_snapshot.volume_id)
+                .await
+                .map_err(ActionError::action_failed)?;
+
+            debug!(
+                log,
+                "grabbed volume {}, with data {}",
+                volume.id(),
+                volume.data()
+            );
+
+            Some(Box::new(serde_json::from_str(volume.data()).map_err(
+                |e| {
+                    ActionError::action_failed(Error::internal_error(&format!(
+                        "failed to deserialize volume data: {}",
+                        e,
+                    )))
+                },
+            )?))
         }
         params::DiskSource::Image { image_id: _ } => {
             // Until we implement project images, do not allow disks to be

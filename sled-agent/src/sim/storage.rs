@@ -9,7 +9,11 @@
 //! through Nexus' external API.
 
 use crate::nexus::NexusClient;
-use crucible_agent_client::types::{CreateRegion, Region, RegionId, State};
+use anyhow::{bail, Result};
+use chrono::prelude::*;
+use crucible_agent_client::types::{
+    CreateRegion, Region, RegionId, RunningSnapshot, Snapshot, State,
+};
 use futures::lock::Mutex;
 use nexus_client::types::{
     ByteCount, DatasetKind, DatasetPutRequest, ZpoolPutRequest,
@@ -25,12 +29,21 @@ type CreateCallback = Box<dyn Fn(&CreateRegion) -> State + Send + 'static>;
 
 struct CrucibleDataInner {
     regions: HashMap<Uuid, Region>,
+    snapshots: HashMap<Uuid, Vec<Snapshot>>,
+    running_snapshots: HashMap<Uuid, HashMap<String, RunningSnapshot>>,
     on_create: Option<CreateCallback>,
+    next_port: u16,
 }
 
 impl CrucibleDataInner {
-    fn new() -> Self {
-        Self { regions: HashMap::new(), on_create: None }
+    fn new(crucible_port: u16) -> Self {
+        Self {
+            regions: HashMap::new(),
+            snapshots: HashMap::new(),
+            running_snapshots: HashMap::new(),
+            on_create: None,
+            next_port: crucible_port,
+        }
     }
 
     fn set_create_callback(&mut self, callback: CreateCallback) {
@@ -56,7 +69,7 @@ impl CrucibleDataInner {
             extent_size: params.extent_size,
             extent_count: params.extent_count,
             // NOTE: This is a lie - no server is running.
-            port_number: 0,
+            port_number: self.next_port,
             state,
             encrypted: false,
             cert_pem: None,
@@ -70,6 +83,7 @@ impl CrucibleDataInner {
                 "Region already exists, but with a different ID"
             );
         }
+        self.next_port += 1;
         region
     }
 
@@ -89,6 +103,104 @@ impl CrucibleDataInner {
         region.state = State::Destroyed;
         Some(region.clone())
     }
+
+    fn create_snapshot(
+        &mut self,
+        id: Uuid,
+        snapshot_id: Uuid,
+    ) -> Result<Snapshot> {
+        let vec = self.snapshots.entry(id).or_insert_with(|| Vec::new());
+
+        if vec.iter().any(|x| x.name == snapshot_id.to_string()) {
+            bail!("region {} snapshot {} exists already", id, snapshot_id);
+        }
+
+        let snap =
+            Snapshot { name: snapshot_id.to_string(), created: Utc::now() };
+
+        vec.push(snap.clone());
+
+        Ok(snap)
+    }
+
+    fn snapshots_for_region(&self, id: &RegionId) -> Vec<Snapshot> {
+        let id = Uuid::from_str(&id.0).unwrap();
+        match self.snapshots.get(&id) {
+            Some(vec) => vec.clone(),
+            None => vec![],
+        }
+    }
+
+    fn running_snapshots_for_id(
+        &self,
+        id: &RegionId,
+    ) -> HashMap<String, RunningSnapshot> {
+        let id = Uuid::from_str(&id.0).unwrap();
+        match self.running_snapshots.get(&id) {
+            Some(map) => map.clone(),
+            None => HashMap::new(),
+        }
+    }
+
+    fn delete_snapshot(&mut self, id: &RegionId, name: &str) -> Result<()> {
+        if !self.running_snapshots_for_id(id).is_empty() {
+            bail!("downstairs running for region {} snapshot {}", id.0, name,);
+        }
+
+        let id = Uuid::from_str(&id.0).unwrap();
+        if let Some(vec) = self.snapshots.get_mut(&id) {
+            vec.retain(|x| x.name != name);
+        }
+
+        Ok(())
+    }
+
+    fn create_running_snapshot(
+        &mut self,
+        id: &RegionId,
+        name: &str,
+    ) -> Result<RunningSnapshot> {
+        let id = Uuid::from_str(&id.0).unwrap();
+
+        let map =
+            self.running_snapshots.entry(id).or_insert_with(|| HashMap::new());
+
+        if map.contains_key(&name.to_string()) {
+            bail!("already running region {} snapshot {}", id, name);
+        }
+
+        let running_snapshot = RunningSnapshot {
+            id: RegionId(Uuid::new_v4().to_string()),
+            name: name.to_string(),
+            port_number: self.next_port,
+            state: State::Requested,
+        };
+
+        map.insert(name.to_string(), running_snapshot.clone());
+
+        self.next_port += 1;
+
+        Ok(running_snapshot)
+    }
+
+    fn delete_running_snapshot(
+        &mut self,
+        id: &RegionId,
+        name: &str,
+    ) -> Result<()> {
+        let id = Uuid::from_str(&id.0).unwrap();
+
+        let map =
+            self.running_snapshots.entry(id).or_insert_with(|| HashMap::new());
+
+        if !map.contains_key(&name.to_string()) {
+            bail!("no running region {} snapshot {}", id, name);
+        }
+
+        map.remove(&name.to_string());
+
+        Ok(())
+    }
 }
 
 /// Represents a running Crucible Agent. Contains regions.
@@ -97,8 +209,8 @@ pub struct CrucibleData {
 }
 
 impl CrucibleData {
-    fn new() -> Self {
-        Self { inner: Mutex::new(CrucibleDataInner::new()) }
+    fn new(crucible_port: u16) -> Self {
+        Self { inner: Mutex::new(CrucibleDataInner::new(crucible_port)) }
     }
 
     pub async fn set_create_callback(&self, callback: CreateCallback) {
@@ -129,6 +241,49 @@ impl CrucibleData {
             .expect("region does not exist")
             .state = state;
     }
+
+    pub async fn create_snapshot(
+        &self,
+        id: Uuid,
+        snapshot_id: Uuid,
+    ) -> Result<Snapshot> {
+        self.inner.lock().await.create_snapshot(id, snapshot_id)
+    }
+
+    pub async fn snapshots_for_region(&self, id: &RegionId) -> Vec<Snapshot> {
+        self.inner.lock().await.snapshots_for_region(id)
+    }
+
+    pub async fn running_snapshots_for_id(
+        &self,
+        id: &RegionId,
+    ) -> HashMap<String, RunningSnapshot> {
+        self.inner.lock().await.running_snapshots_for_id(id)
+    }
+
+    pub async fn delete_snapshot(
+        &self,
+        id: &RegionId,
+        name: &str,
+    ) -> Result<()> {
+        self.inner.lock().await.delete_snapshot(id, name)
+    }
+
+    pub async fn create_running_snapshot(
+        &self,
+        id: &RegionId,
+        name: &str,
+    ) -> Result<RunningSnapshot> {
+        self.inner.lock().await.create_running_snapshot(id, name)
+    }
+
+    pub async fn delete_running_snapshot(
+        &self,
+        id: &RegionId,
+        name: &str,
+    ) -> Result<()> {
+        self.inner.lock().await.delete_running_snapshot(id, name)
+    }
 }
 
 /// A simulated Crucible Dataset.
@@ -140,8 +295,11 @@ pub struct CrucibleServer {
 }
 
 impl CrucibleServer {
-    fn new(log: &Logger, crucible_ip: IpAddr) -> Self {
-        let data = Arc::new(CrucibleData::new());
+    fn new(log: &Logger, crucible_ip: IpAddr, crucible_port: u16) -> Self {
+        // SocketAddr::new with port set to 0 will grab any open port to host
+        // the emulated crucible agent, but set the fake downstairs listen ports
+        // to start at `crucible_port`.
+        let data = Arc::new(CrucibleData::new(crucible_port));
         let config = dropshot::ConfigDropshot {
             bind_address: SocketAddr::new(crucible_ip, 0),
             ..Default::default()
@@ -164,6 +322,10 @@ impl CrucibleServer {
     fn address(&self) -> SocketAddr {
         self.server.local_addr()
     }
+
+    pub fn data(&self) -> Arc<CrucibleData> {
+        self.data.clone()
+    }
 }
 
 struct Zpool {
@@ -180,11 +342,44 @@ impl Zpool {
         log: &Logger,
         id: Uuid,
         crucible_ip: IpAddr,
+        crucible_port: u16,
     ) -> &CrucibleServer {
-        self.datasets.insert(id, CrucibleServer::new(log, crucible_ip));
+        self.datasets
+            .insert(id, CrucibleServer::new(log, crucible_ip, crucible_port));
         self.datasets
             .get(&id)
             .expect("Failed to get the dataset we just inserted")
+    }
+
+    pub async fn get_dataset_for_region(
+        &self,
+        region_id: Uuid,
+    ) -> Option<Arc<CrucibleData>> {
+        for dataset in self.datasets.values() {
+            for region in &dataset.data().list().await {
+                let id = Uuid::from_str(&region.id.0).unwrap();
+                if id == region_id {
+                    return Some(dataset.data());
+                }
+            }
+        }
+
+        None
+    }
+
+    pub async fn get_dataset_for_port(
+        &self,
+        port: u16,
+    ) -> Option<Arc<CrucibleData>> {
+        for dataset in self.datasets.values() {
+            for region in &dataset.data().list().await {
+                if port == region.port_number {
+                    return Some(dataset.data());
+                }
+            }
+        }
+
+        None
     }
 }
 
@@ -195,6 +390,7 @@ pub struct Storage {
     log: Logger,
     zpools: HashMap<Uuid, Zpool>,
     crucible_ip: IpAddr,
+    next_crucible_port: u16,
 }
 
 impl Storage {
@@ -204,7 +400,14 @@ impl Storage {
         crucible_ip: IpAddr,
         log: Logger,
     ) -> Self {
-        Self { sled_id, nexus_client, log, zpools: HashMap::new(), crucible_ip }
+        Self {
+            sled_id,
+            nexus_client,
+            log,
+            zpools: HashMap::new(),
+            crucible_ip,
+            next_crucible_port: 100,
+        }
     }
 
     /// Adds a Zpool to the sled's simulated storage and notifies Nexus.
@@ -227,7 +430,14 @@ impl Storage {
             .zpools
             .get_mut(&zpool_id)
             .expect("Zpool does not exist")
-            .insert_dataset(&self.log, dataset_id, self.crucible_ip);
+            .insert_dataset(
+                &self.log,
+                dataset_id,
+                self.crucible_ip,
+                self.next_crucible_port,
+            );
+
+        self.next_crucible_port += 100;
 
         // Notify Nexus
         let request = DatasetPutRequest {
@@ -253,5 +463,32 @@ impl Storage {
             .expect("Dataset does not exist")
             .data
             .clone()
+    }
+
+    pub async fn get_dataset_for_region(
+        &self,
+        region_id: Uuid,
+    ) -> Option<Arc<CrucibleData>> {
+        for zpool in self.zpools.values() {
+            if let Some(dataset) = zpool.get_dataset_for_region(region_id).await
+            {
+                return Some(dataset);
+            }
+        }
+
+        None
+    }
+
+    pub async fn get_dataset_for_port(
+        &self,
+        port: u16,
+    ) -> Option<Arc<CrucibleData>> {
+        for zpool in self.zpools.values() {
+            if let Some(dataset) = zpool.get_dataset_for_port(port).await {
+                return Some(dataset);
+            }
+        }
+
+        None
     }
 }

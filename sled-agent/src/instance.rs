@@ -89,6 +89,9 @@ pub enum Error {
 
     #[error("Error resolving DNS name: {0}")]
     ResolveError(#[from] internal_dns_client::multiclient::ResolveError),
+
+    #[error("Instance {0} not running!")]
+    InstanceNotRunning(Uuid),
 }
 
 // Issues read-only, idempotent HTTP requests at propolis until it responds with
@@ -430,6 +433,11 @@ mockall::mock! {
             byte_offset: ByteOffset,
             max_bytes: Option<usize>,
         ) -> Result<InstanceSerialConsoleData, Error>;
+        pub async fn issue_snapshot_request(
+            &self,
+            disk_id: Uuid,
+            snapshot_name: Uuid,
+        ) -> Result<(), Error>;
     }
     impl Clone for Instance {
         fn clone(&self) -> Self;
@@ -783,6 +791,25 @@ impl Instance {
             })
         } else {
             Err(crate::serial::Error::Existential.into())
+        }
+    }
+
+    pub async fn issue_snapshot_request(
+        &self,
+        disk_id: Uuid,
+        snapshot_id: Uuid,
+    ) -> Result<(), Error> {
+        let inner = self.inner.lock().await;
+
+        if let Some(running_state) = &inner.running_state {
+            running_state
+                .client
+                .instance_issue_crucible_snapshot_request(disk_id, snapshot_id)
+                .await?;
+
+            Ok(())
+        } else {
+            Err(Error::InstanceNotRunning(inner.properties.id))
         }
     }
 }
