@@ -286,19 +286,6 @@ impl NextExternalIp {
         out.push_sql(") LEFT OUTER JOIN ");
         INSTANCE_EXTERNAL_IP_FROM_CLAUSE.walk_ast(out.reborrow())?;
 
-        // This is for SNAT IPs. For floating or ephemeral, we don't want to
-        // consider the port in the JOIN, just the address (_any_ port chunk
-        // means we can't use that address for the floating/ephemeral IP).
-        // Something like:
-        //
-        // ON (ip, time_deleted IS NULL) = (candidate_ip, TRUE)
-        //
-        // We'll also need to change how we generate the port sequence subquery.
-        // It should always be 0, basically, but not sure the best way to do
-        // that. SELECT 0? That should work:
-        //
-        // SELECT 0 as candidate_first_port, 65535 as candidate_last_port
-
         // The JOIN conditions depend on the IP type. For automatic SNAT IP
         // addresses, we need to consider existing records with their port
         // ranges. That's because we want to allow providing two different

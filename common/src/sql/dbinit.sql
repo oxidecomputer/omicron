@@ -1046,8 +1046,6 @@ CREATE TYPE omicron.public.ip_kind AS ENUM (
 
 /*
  * External IP addresses used for guest instances
- *
- * This includes information about
  */
 CREATE TABLE omicron.public.instance_external_ip (
     /* Identity metadata */

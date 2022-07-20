@@ -55,7 +55,7 @@ pub(crate) const MAX_DISKS_PER_INSTANCE: u32 = 8;
 pub(crate) const MAX_NICS_PER_INSTANCE: u32 = 8;
 
 // TODO-completness: Support multiple Ephemeral IPs
-pub(crate) const MAX_EPHEMERAL_IPS_PER_INSTANCE: u32 = 1;
+pub(crate) const MAX_EPHEMERAL_IPS_PER_INSTANCE: usize = 1;
 
 /// Manages an Oxide fleet -- the heart of the control plane
 pub struct Nexus {

@@ -38,8 +38,7 @@ zpools = [
 # this with whatever value they wish to provide inbound connectivity to guests
 # in their local network, using the current workaround methods in OPTE. See
 # how-to-run.adoc for details on how to determine the value for your network.
-# gateway_mac = "00:0d:b9:54:fe:e4"
-gateway_mac = "74:ac:b9:a2:cd:f1"
+gateway_mac = "00:0d:b9:54:fe:e4"
 
 [log]
 level = "info"

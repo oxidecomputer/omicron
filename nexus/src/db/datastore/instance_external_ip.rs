@@ -116,10 +116,9 @@ impl DataStore {
     /// Delete all external IP addresses associated with the provided instance
     /// ID.
     ///
-    /// To support idempotency, such as in saga operations, this method returns
-    /// the number of records deleted, rather than the usual `DeleteResult`.
-    /// Callers should check this to verify their expectations about how many
-    /// records _should_ have been deleted.
+    /// This method returns the number of records deleted, rather than the usual
+    /// `DeleteResult`. That's mostly useful for tests, but could be important
+    /// if callers have some invariants they'd like to check.
     // TODO-correctness: This can't be used for Floating IPs, we'll need a
     // _detatch_ method for that.
     pub async fn deallocate_instance_external_ip_by_instance_id(
