@@ -13,6 +13,7 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::Resource;
 use crate::db::lookup::LookupPath;
+use crate::db::model::IpKind;
 use crate::db::model::Name;
 use crate::db::queries::network_interface;
 use crate::external_api::params;
@@ -216,12 +217,14 @@ impl super::Nexus {
         self.db_datastore
             .project_delete_instance(opctx, &authz_instance)
             .await?;
+        // Ignore the count of addresses deleted
         self.db_datastore
             .deallocate_instance_external_ip_by_instance_id(
                 opctx,
                 authz_instance.id(),
             )
-            .await
+            .await?;
+        Ok(())
     }
 
     pub async fn project_instance_migrate(
@@ -488,11 +491,40 @@ impl super::Nexus {
             .derive_guest_network_interface_info(&opctx, &authz_instance)
             .await?;
 
-        let external_ip = self
+        // Collect the external IPs for the instance.
+        // TODO-correctness: Handle Floating IPs, see
+        //  https://github.com/oxidecomputer/omicron/issues/1334
+        let (snat_ip, external_ips): (Vec<_>, Vec<_>) = self
             .db_datastore
-            .instance_lookup_external_ip(&opctx, authz_instance.id())
-            .await
-            .map(ExternalIp::from)?;
+            .instance_lookup_external_ips(&opctx, authz_instance.id())
+            .await?
+            .into_iter()
+            .partition(|ip| ip.kind == IpKind::SNat);
+
+        // Sanity checks on the number and kind of each IP address.
+        if external_ips.len() > crate::app::MAX_EPHEMERAL_IPS_PER_INSTANCE {
+            return Err(Error::internal_error(
+                format!(
+                    "Expected the number of external IPs to be limited to \
+                {}, but found {}",
+                    crate::app::MAX_EPHEMERAL_IPS_PER_INSTANCE,
+                    external_ips.len(),
+                )
+                .as_str(),
+            ));
+        }
+        if snat_ip.len() != 1 {
+            return Err(Error::internal_error(
+                "Expected exactly one SNAT IP address for an instance",
+            ));
+        }
+
+        // For now, we take the Ephemeral IP, if it exists, or the SNAT IP if not.
+        // TODO-correctness: Handle multiple IP addresses, see
+        //  https://github.com/oxidecomputer/omicron/issues/1467
+        let external_ip = ExternalIp::from(
+            external_ips.into_iter().chain(snat_ip).next().unwrap(),
+        );
 
         // Gather the SSH public keys of the actor make the request so
         // that they may be injected into the new image via cloud-init.

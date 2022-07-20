@@ -6,7 +6,6 @@ use super::impl_enum_type;
 use crate::external_api::params;
 use omicron_common::api::external;
 use serde::{Deserialize, Serialize};
-use std::io::Write;
 
 impl_enum_type!(
     #[derive(SqlType, Debug, QueryId)]

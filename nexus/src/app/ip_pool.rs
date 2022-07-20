@@ -106,11 +106,14 @@ impl super::Nexus {
         pool_name: &Name,
         range: &IpRange,
     ) -> UpdateResult<db::model::IpPoolRange> {
-        let (.., authz_pool) = LookupPath::new(opctx, &self.db_datastore)
-            .ip_pool_name(pool_name)
-            .lookup_for(authz::Action::Modify)
-            .await?;
-        self.db_datastore.ip_pool_add_range(opctx, &authz_pool, range).await
+        let (.., authz_pool, db_pool) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .ip_pool_name(pool_name)
+                .fetch_for(authz::Action::Modify)
+                .await?;
+        self.db_datastore
+            .ip_pool_add_range(opctx, &authz_pool, &db_pool, range)
+            .await
     }
 
     pub async fn ip_pool_delete_range(

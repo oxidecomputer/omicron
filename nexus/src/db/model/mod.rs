@@ -198,6 +198,7 @@ macro_rules! impl_enum_type {
                 &'a self,
                 out: &mut ::diesel::serialize::Output<'a, '_, ::diesel::pg::Pg>,
             ) -> ::diesel::serialize::Result {
+                use ::std::io::Write;
                 match self {
                     $(
                     $model_type::$enum_item => {
