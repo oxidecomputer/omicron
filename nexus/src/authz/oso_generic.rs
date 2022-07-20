@@ -19,6 +19,7 @@ use futures::FutureExt;
 use omicron_common::api::external::Error;
 use oso::Oso;
 use oso::PolarClass;
+use std::collections::BTreeSet;
 use std::fmt;
 
 /// Base Polar configuration describing control plane authorization rules
@@ -32,10 +33,16 @@ pub(super) struct Init {
     pub polar_class: oso::Class,
 }
 
+pub struct OsoInit {
+    pub oso: Oso,
+    pub class_names: BTreeSet<String>,
+}
+
 /// Returns an Oso handle suitable for authorizing using Omicron's authorization
 /// rules
-pub fn make_omicron_oso(log: &slog::Logger) -> Result<Oso, anyhow::Error> {
+pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
     let mut oso = Oso::new();
+    let mut class_names = BTreeSet::new();
     let classes = [
         // Hand-written classes
         Action::get_polar_class(),
@@ -50,6 +57,8 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<Oso, anyhow::Error> {
     ];
     for c in classes {
         info!(log, "registering Oso class"; "class" => &c.name);
+        let new_element = class_names.insert(c.name.clone());
+        assert!(new_element, "Oso class was already registered: {:?}", c.name);
         oso.register_class(c).context("registering class")?;
     }
 
@@ -89,12 +98,18 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<Oso, anyhow::Error> {
 
     for init in generated_inits {
         info!(log, "registering Oso class"; "class" => &init.polar_class.name);
+        let new_element = class_names.insert(init.polar_class.name.clone());
+        assert!(
+            new_element,
+            "Oso class was already registered: {:?}",
+            init.polar_class.name
+        );
         oso.register_class(init.polar_class).context("registering class")?;
     }
 
     info!(log, "full Oso configuration"; "config" => &polar_config);
     oso.load_str(&polar_config).context("loading Polar (Oso) config")?;
-    Ok(oso)
+    Ok(OsoInit { oso, class_names })
 }
 
 /// Describes an action being authorized
