@@ -181,6 +181,7 @@ impl super::Nexus {
     ) -> LookupResult<Option<db::model::SiloUser>> {
         // XXX create user permission?
         opctx.authorize(authz::Action::CreateChild, authz_silo).await?;
+        opctx.authorize(authz::Action::ListChildren, authz_silo).await?;
 
         let existing_silo_user = self
             .datastore()
@@ -218,8 +219,13 @@ impl super::Nexus {
             }
         };
 
+        // Gather a list of groups that the user is part of based on what the
+        // IdP sent us. Also, if the silo user provision type is Jit, create
+        // silo groups if new groups from the IdP are seen.
+
+        let mut silo_user_group_ids: Vec<Uuid> = Vec::with_capacity(authenticated_subject.groups.len());
+
         for group in &authenticated_subject.groups {
-            // Lookup (or create, depending on the provision type) a silo group
             let silo_group = match db_silo.user_provision_type {
                 db::model::UserProvisionType::Fixed => {
                     self.db_datastore.silo_group_optional_lookup(
@@ -243,47 +249,25 @@ impl super::Nexus {
                 }
             };
 
-            // and the new user to the group
             if let Some(silo_group) = silo_group {
-                self.db_datastore
-                    .silo_group_membership_create(
-                        opctx,
-                        &authz_silo,
-                        db::model::SiloGroupMembership {
-                            silo_group_id: silo_group.id(),
-                            silo_user_id: silo_user.id(),
-                        },
-                    )
+                // We're going to (potentially) modify group membership, so
+                // do an authz check here.
+                let (_authz_silo_group, ..) = LookupPath::new(opctx, &self.db_datastore)
+                    .silo_group_id(silo_group.id())
+                    .fetch_for(authz::Action::Modify)
                     .await?;
+
+                silo_user_group_ids.push(silo_group.id());
             }
         }
 
-        // Remove user from groups if they no longer have membership
-        let group_memberships = self
-            .db_datastore
-            .silo_group_membership_for_user(opctx, &authz_silo, silo_user.id())
-            .await?;
+        // Update the user's group memberships
 
-        for group_membership in group_memberships {
-            let (.., silo_group) = LookupPath::new(opctx, &self.datastore())
-                .silo_group_id(group_membership.silo_group_id)
-                .fetch()
-                .await?;
-
-            if !authenticated_subject
-                .groups
-                .contains(&silo_group.external_id)
-            {
-                self.datastore()
-                    .silo_group_membership_delete(
-                        opctx,
-                        &authz_silo,
-                        silo_user.id(),
-                        silo_group.id(),
-                    )
-                    .await?;
-            }
-        }
+        self.db_datastore.silo_group_membership_replace_for_user(
+            opctx,
+            silo_user.id(),
+            silo_user_group_ids,
+        ).await?;
 
         Ok(Some(silo_user))
     }

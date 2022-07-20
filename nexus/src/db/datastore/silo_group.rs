@@ -10,7 +10,7 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
-use crate::db::lookup::LookupPath;
+use crate::db::error::TransactionError;
 use crate::db::model::SiloGroup;
 use crate::db::model::SiloGroupMembership;
 use crate::db::update_and_check::UpdateAndCheck;
@@ -19,11 +19,12 @@ use chrono::Utc;
 use diesel::prelude::*;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
-use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::UpdateResult;
+use omicron_common::api::external::Error;
 use uuid::Uuid;
-use async_bb8_diesel::OptionalExtension;
+use async_bb8_diesel::{AsyncConnection, OptionalExtension, PoolError};
 
 impl DataStore {
     pub async fn silo_group_create(
@@ -62,44 +63,6 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    pub async fn silo_group_membership_create(
-        &self,
-        opctx: &OpContext,
-        authz_silo: &authz::Silo,
-        silo_group_membership: SiloGroupMembership,
-    ) -> CreateResult<SiloGroupMembership> {
-        opctx.authorize(authz::Action::ListChildren, authz_silo).await?;
-
-        let existing_group_memberships = self
-            .silo_group_membership_for_user(
-                opctx,
-                authz_silo,
-                silo_group_membership.silo_user_id,
-            )
-            .await?;
-
-        if existing_group_memberships
-            .into_iter()
-            .map(|x| x.silo_group_id)
-            .any(|x| x == silo_group_membership.silo_group_id)
-        {
-            return Ok(silo_group_membership);
-        }
-
-        let (_authz_silo_group, ..) = LookupPath::new(opctx, &self)
-            .silo_group_id(silo_group_membership.silo_group_id)
-            .fetch_for(authz::Action::Modify)
-            .await?;
-
-        use db::schema::silo_group_membership::dsl;
-        diesel::insert_into(dsl::silo_group_membership)
-            .values(silo_group_membership)
-            .returning(SiloGroupMembership::as_returning())
-            .get_result_async(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
-    }
-
     pub async fn silo_group_membership_for_user(
         &self,
         opctx: &OpContext,
@@ -133,35 +96,50 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    pub async fn silo_group_membership_delete(
+    /// Update a silo user's group membership:
+    ///
+    /// - add the user to groups they are supposed to be a member of, and
+    /// - remove the user from groups if they no longer have membership
+    ///
+    /// Do this as one transaction that deletes all current memberships for a
+    /// user, then adds back the ones they are in. This avoids the scenario
+    /// where a crash half way through causes the resulting group memberships to
+    /// be incorrect.
+    pub async fn silo_group_membership_replace_for_user(
         &self,
         opctx: &OpContext,
-        authz_silo: &authz::Silo,
         silo_user_id: Uuid,
-        silo_group_id: Uuid,
-    ) -> DeleteResult {
-        opctx.authorize(authz::Action::ListChildren, authz_silo).await?;
+        silo_group_ids: Vec<Uuid>,
+    ) -> UpdateResult<()> {
+        self.pool_authorized(opctx)
+            .await?
+            .transaction(move |conn| {
+                use db::schema::silo_group_membership::dsl;
 
-        let (_authz_silo_group, ..) = LookupPath::new(opctx, &self)
-            .silo_group_id(silo_group_id)
-            .fetch_for(authz::Action::Modify)
-            .await?;
+                // Delete existing memberships for user
+                diesel::delete(dsl::silo_group_membership)
+                    .filter(dsl::silo_user_id.eq(silo_user_id))
+                    .execute(conn)?;
 
-        use db::schema::silo_group_membership::dsl;
-        diesel::delete(dsl::silo_group_membership)
-            .filter(dsl::silo_user_id.eq(silo_user_id))
-            .filter(dsl::silo_group_id.eq(silo_group_id))
-            .execute_async(self.pool_authorized(opctx).await?)
+                // Create new memberships for user
+                let silo_group_memberships: Vec<db::model::SiloGroupMembership> = silo_group_ids
+                    .iter()
+                    .map(|group_id| db::model::SiloGroupMembership {
+                        silo_group_id: *group_id,
+                        silo_user_id: silo_user_id,
+                    })
+                    .collect();
+
+                diesel::insert_into(dsl::silo_group_membership)
+                    .values(silo_group_memberships)
+                    .execute(conn)?;
+
+                Ok(())
+            })
             .await
-            .map_err(|e| {
-                Error::internal_error(&format!(
-                    "error deleting group membership of group {} for user {}: {:?}",
-                    silo_group_id,
-                    silo_user_id,
-                    e,
-                ))
-            })?;
-        Ok(())
+            .map_err(|e: TransactionError<PoolError>|
+                Error::internal_error(&format!("Transaction error: {}", e))
+            )
     }
 
     pub async fn silo_group_delete(
