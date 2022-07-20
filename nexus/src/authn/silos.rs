@@ -404,7 +404,8 @@ impl SamlIdentityProvider {
                                         // Read comma separated group names
                                         for group in value.split(',') {
                                             // Trim whitespace
-                                            let group = group.trim().to_string();
+                                            let group =
+                                                group.trim().to_string();
 
                                             // Skip empty groups
                                             if group.len() == 0 {

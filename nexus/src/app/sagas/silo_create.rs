@@ -130,16 +130,18 @@ async fn saga_create_silo_admin_group(
         let silo_admin_group_id =
             sagactx.lookup::<Uuid>("silo_admin_group_id")?;
 
-        let silo_group = osagactx.datastore().silo_group_create(
-            &opctx,
-            db::model::SiloGroup::new(
-                silo_admin_group_id,
-                silo.id(),
-                admin_group_name.clone(),
+        let silo_group = osagactx
+            .datastore()
+            .silo_group_create(
+                &opctx,
+                db::model::SiloGroup::new(
+                    silo_admin_group_id,
+                    silo.id(),
+                    admin_group_name.clone(),
+                ),
             )
-        )
-        .await
-        .map_err(ActionError::action_failed)?;
+            .await
+            .map_err(ActionError::action_failed)?;
 
         // Grant silo admin role for members of the admin group.
         let policy = shared::Policy {

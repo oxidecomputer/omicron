@@ -23,16 +23,8 @@ pub struct SiloGroup {
 }
 
 impl SiloGroup {
-    pub fn new(
-        id: Uuid,
-        silo_id: Uuid,
-        external_id: String,
-    ) -> Self {
-        Self {
-            identity: SiloGroupIdentity::new(id),
-            silo_id,
-            external_id,
-        }
+    pub fn new(id: Uuid, silo_id: Uuid, external_id: String) -> Self {
+        Self { identity: SiloGroupIdentity::new(id), silo_id, external_id }
     }
 }
 

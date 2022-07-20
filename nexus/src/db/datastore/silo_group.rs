@@ -14,16 +14,16 @@ use crate::db::error::TransactionError;
 use crate::db::model::SiloGroup;
 use crate::db::model::SiloGroupMembership;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::{AsyncConnection, OptionalExtension, PoolError};
 use chrono::Utc;
 use diesel::prelude::*;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
+use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::UpdateResult;
-use omicron_common::api::external::Error;
 use uuid::Uuid;
-use async_bb8_diesel::{AsyncConnection, OptionalExtension, PoolError};
 
 impl DataStore {
     pub async fn silo_group_create(
@@ -105,7 +105,9 @@ impl DataStore {
                     .execute(conn)?;
 
                 // Create new memberships for user
-                let silo_group_memberships: Vec<db::model::SiloGroupMembership> = silo_group_ids
+                let silo_group_memberships: Vec<
+                    db::model::SiloGroupMembership,
+                > = silo_group_ids
                     .iter()
                     .map(|group_id| db::model::SiloGroupMembership {
                         silo_group_id: *group_id,
@@ -120,9 +122,9 @@ impl DataStore {
                 Ok(())
             })
             .await
-            .map_err(|e: TransactionError<PoolError>|
+            .map_err(|e: TransactionError<PoolError>| {
                 Error::internal_error(&format!("Transaction error: {}", e))
-            )
+            })
     }
 
     pub async fn silo_group_delete(
@@ -141,20 +143,24 @@ impl DataStore {
 
         let group_id = authz_silo_group.id();
 
-        self.pool_authorized(opctx).await?
+        self.pool_authorized(opctx)
+            .await?
             .transaction(move |conn| {
                 use db::schema::silo_group_membership;
 
                 // Don't delete groups that still have memberships
                 let group_memberships =
                     silo_group_membership::dsl::silo_group_membership
-                        .filter(silo_group_membership::dsl::silo_group_id.eq(group_id))
+                        .filter(
+                            silo_group_membership::dsl::silo_group_id
+                                .eq(group_id),
+                        )
                         .select(SiloGroupMembership::as_returning())
                         .load(conn)?;
 
                 if !group_memberships.is_empty() {
                     return Err(TxnError::CustomError(
-                        SiloDeleteError::GroupStillHasMemberships(group_id)
+                        SiloDeleteError::GroupStillHasMemberships(group_id),
                     ));
                 }
 
@@ -172,7 +178,10 @@ impl DataStore {
             .map_err(|e| match e {
                 TxnError::CustomError(
                     SiloDeleteError::GroupStillHasMemberships(id),
-                ) => Error::invalid_request(&format!("group {0} still has memberships", id)),
+                ) => Error::invalid_request(&format!(
+                    "group {0} still has memberships",
+                    id
+                )),
 
                 _ => {
                     Error::internal_error(&format!("Transaction error: {}", e))

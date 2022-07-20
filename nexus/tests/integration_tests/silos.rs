@@ -241,16 +241,16 @@ async fn test_silo_admin_group(cptestctx: &ControlPlaneTestContext) {
             .await
             .unwrap();
 
-    assert!(
-        nexus.datastore().silo_group_optional_lookup(
+    assert!(nexus
+        .datastore()
+        .silo_group_optional_lookup(
             &authn_opctx,
             &authz_silo,
             "administrator".into(),
         )
         .await
         .unwrap()
-        .is_some()
-    );
+        .is_some());
 
     // Test that a user is granted privileges from their group membership
     let admin_group_user = nexus

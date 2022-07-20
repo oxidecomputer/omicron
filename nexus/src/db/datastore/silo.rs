@@ -122,9 +122,9 @@ impl DataStore {
 
         use db::schema::organization;
         use db::schema::silo;
-        use db::schema::silo_user;
         use db::schema::silo_group;
         use db::schema::silo_group_membership;
+        use db::schema::silo_user;
 
         // Make sure there are no organizations present within this silo.
         let id = authz_silo.id();

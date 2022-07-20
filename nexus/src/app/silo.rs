@@ -223,17 +223,19 @@ impl super::Nexus {
         // IdP sent us. Also, if the silo user provision type is Jit, create
         // silo groups if new groups from the IdP are seen.
 
-        let mut silo_user_group_ids: Vec<Uuid> = Vec::with_capacity(authenticated_subject.groups.len());
+        let mut silo_user_group_ids: Vec<Uuid> =
+            Vec::with_capacity(authenticated_subject.groups.len());
 
         for group in &authenticated_subject.groups {
             let silo_group = match db_silo.user_provision_type {
                 db::model::UserProvisionType::Fixed => {
-                    self.db_datastore.silo_group_optional_lookup(
-                        opctx,
-                        &authz_silo,
-                        group.clone(),
-                    )
-                    .await?
+                    self.db_datastore
+                        .silo_group_optional_lookup(
+                            opctx,
+                            &authz_silo,
+                            group.clone(),
+                        )
+                        .await?
                 }
 
                 db::model::UserProvisionType::Jit => {
@@ -252,10 +254,11 @@ impl super::Nexus {
             if let Some(silo_group) = silo_group {
                 // We're going to (potentially) modify group membership, so
                 // do an authz check here.
-                let (_authz_silo_group, ..) = LookupPath::new(opctx, &self.db_datastore)
-                    .silo_group_id(silo_group.id())
-                    .fetch_for(authz::Action::Modify)
-                    .await?;
+                let (_authz_silo_group, ..) =
+                    LookupPath::new(opctx, &self.db_datastore)
+                        .silo_group_id(silo_group.id())
+                        .fetch_for(authz::Action::Modify)
+                        .await?;
 
                 silo_user_group_ids.push(silo_group.id());
             }
@@ -263,11 +266,13 @@ impl super::Nexus {
 
         // Update the user's group memberships
 
-        self.db_datastore.silo_group_membership_replace_for_user(
-            opctx,
-            silo_user.id(),
-            silo_user_group_ids,
-        ).await?;
+        self.db_datastore
+            .silo_group_membership_replace_for_user(
+                opctx,
+                silo_user.id(),
+                silo_user_group_ids,
+            )
+            .await?;
 
         Ok(Some(silo_user))
     }
@@ -280,7 +285,8 @@ impl super::Nexus {
         authz_silo: &authz::Silo,
         external_id: &String,
     ) -> LookupResult<db::model::SiloGroup> {
-        match self.db_datastore
+        match self
+            .db_datastore
             .silo_group_optional_lookup(opctx, authz_silo, external_id.clone())
             .await?
         {
