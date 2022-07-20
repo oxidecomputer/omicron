@@ -2,8 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::db::identity::Asset;
 use crate::db::schema::silo_user;
 use db_macros::Asset;
+use nexus_types::external_api::views;
 use uuid::Uuid;
 
 /// Describes a silo user within the database.
@@ -22,5 +24,15 @@ pub struct SiloUser {
 impl SiloUser {
     pub fn new(silo_id: Uuid, user_id: Uuid, external_id: String) -> Self {
         Self { identity: SiloUserIdentity::new(user_id), silo_id, external_id }
+    }
+}
+
+impl From<SiloUser> for views::User {
+    fn from(user: SiloUser) -> Self {
+        Self {
+            id: user.id(),
+            // TODO the use of external_id as display_name is temporary
+            display_name: user.external_id,
+        }
     }
 }

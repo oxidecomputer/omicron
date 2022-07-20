@@ -4,10 +4,12 @@
 
 use super::{Generation, Organization};
 use crate::db::collection_insert::DatastoreCollection;
+use crate::db::identity::Resource;
 use crate::db::model::impl_enum_type;
 use crate::db::schema::{organization, silo};
 use crate::external_api::{params, shared};
 use db_macros::Resource;
+use nexus_types::external_api::views;
 use uuid::Uuid;
 
 impl_enum_type!(
@@ -29,6 +31,15 @@ impl From<shared::UserProvisionType> for UserProvisionType {
         match params {
             shared::UserProvisionType::Fixed => UserProvisionType::Fixed,
             shared::UserProvisionType::Jit => UserProvisionType::Jit,
+        }
+    }
+}
+
+impl From<UserProvisionType> for shared::UserProvisionType {
+    fn from(model: UserProvisionType) -> Self {
+        match model {
+            UserProvisionType::Fixed => Self::Fixed,
+            UserProvisionType::Jit => Self::Jit,
         }
     }
 }
@@ -60,6 +71,16 @@ impl Silo {
             discoverable: params.discoverable,
             user_provision_type: params.user_provision_type.into(),
             rcgen: Generation::new(),
+        }
+    }
+}
+
+impl From<Silo> for views::Silo {
+    fn from(silo: Silo) -> Self {
+        Self {
+            identity: silo.identity(),
+            discoverable: silo.discoverable,
+            user_provision_type: silo.user_provision_type.into(),
         }
     }
 }

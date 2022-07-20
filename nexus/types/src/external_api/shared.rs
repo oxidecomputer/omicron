@@ -4,8 +4,6 @@
 
 //! Types that are used as both views and params
 
-use crate::db;
-use anyhow::anyhow;
 use omicron_common::api::external::Error;
 use schemars::JsonSchema;
 use serde::de::Error as _;
@@ -80,37 +78,6 @@ pub struct RoleAssignment<AllowedRoles> {
     pub role_name: AllowedRoles,
 }
 
-impl<AllowedRoles> TryFrom<db::model::RoleAssignment>
-    for RoleAssignment<AllowedRoles>
-where
-    AllowedRoles: db::model::DatabaseString,
-{
-    type Error = Error;
-
-    fn try_from(
-        role_asgn: db::model::RoleAssignment,
-    ) -> Result<Self, Self::Error> {
-        Ok(Self {
-            identity_type: IdentityType::try_from(role_asgn.identity_type)
-                .map_err(|error| {
-                    Error::internal_error(&format!(
-                        "parsing database role assignment: {:#}",
-                        error
-                    ))
-                })?,
-            identity_id: role_asgn.identity_id,
-            role_name: AllowedRoles::from_database_string(&role_asgn.role_name)
-                .map_err(|error| {
-                    Error::internal_error(&format!(
-                        "parsing database role assignment: \
-                        unrecognized role name {:?}: {:#}",
-                        &role_asgn.role_name, error,
-                    ))
-                })?,
-        })
-    }
-}
-
 /// Describes what kind of identity is described by an id
 // This is a subset of the identity types that might be found in the database
 // because we do not expose some (e.g., built-in users) externally.
@@ -120,19 +87,6 @@ where
 #[serde(rename_all = "snake_case")]
 pub enum IdentityType {
     SiloUser,
-}
-
-impl TryFrom<db::model::IdentityType> for IdentityType {
-    type Error = anyhow::Error;
-
-    fn try_from(other: db::model::IdentityType) -> Result<Self, Self::Error> {
-        match other {
-            db::model::IdentityType::UserBuiltin => {
-                Err(anyhow!("unsupported db identity type: {:?}", other))
-            }
-            db::model::IdentityType::SiloUser => Ok(IdentityType::SiloUser),
-        }
-    }
 }
 
 /// How users will be provisioned in a silo during authentication.
@@ -146,15 +100,6 @@ pub enum UserProvisionType {
     /// Create users during authentication if they do not exist in the database
     /// already, using information provided by the identity provider.
     Jit,
-}
-
-impl From<db::model::UserProvisionType> for UserProvisionType {
-    fn from(model: db::model::UserProvisionType) -> UserProvisionType {
-        match model {
-            db::model::UserProvisionType::Fixed => UserProvisionType::Fixed,
-            db::model::UserProvisionType::Jit => UserProvisionType::Jit,
-        }
-    }
 }
 
 /// An IP Range is a contiguous range of IP addresses, usually within an IP
@@ -330,14 +275,12 @@ mod test {
     use super::IdentityType;
     use super::Policy;
     use super::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE;
-    use crate::db;
     use crate::external_api::shared;
     use crate::external_api::shared::IpRange;
     use crate::external_api::shared::Ipv4Range;
     use crate::external_api::shared::Ipv6Range;
     use anyhow::anyhow;
     use omicron_common::api::external::Error;
-    use omicron_common::api::external::ResourceType;
     use serde::Deserialize;
     use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;
@@ -346,21 +289,6 @@ mod test {
     #[serde(rename_all = "kebab-case")]
     pub enum DummyRoles {
         Bogus,
-    }
-    impl db::model::DatabaseString for DummyRoles {
-        type Error = anyhow::Error;
-
-        fn to_database_string(&self) -> &str {
-            unimplemented!()
-        }
-
-        fn from_database_string(s: &str) -> Result<Self, Self::Error> {
-            if s == "bogus" {
-                Ok(DummyRoles::Bogus)
-            } else {
-                Err(anyhow!("unsupported DummyRoles: {:?}", s))
-            }
-        }
     }
 
     #[test]
@@ -393,75 +321,6 @@ mod test {
             error.to_string(),
             "invalid length 65, expected a list of at most 64 role assignments"
         );
-    }
-
-    #[test]
-    fn test_role_assignment_from_database() {
-        let identity_id =
-            "75ec4a39-67cf-4549-9e74-44b92947c37c".parse().unwrap();
-        let resource_id =
-            "9e3e3be8-4051-4ddb-92fa-32cc5294f066".parse().unwrap();
-
-        let ok_input = db::model::RoleAssignment {
-            identity_type: db::model::IdentityType::SiloUser,
-            identity_id,
-            resource_type: ResourceType::Organization.to_string(),
-            resource_id,
-            role_name: String::from("bogus"),
-        };
-
-        let bad_input_role = db::model::RoleAssignment {
-            role_name: String::from("bogosity"),
-            ..ok_input.clone()
-        };
-
-        let bad_input_idtype = db::model::RoleAssignment {
-            identity_type: db::model::IdentityType::UserBuiltin,
-            ..ok_input.clone()
-        };
-
-        let error =
-            <shared::RoleAssignment<DummyRoles>>::try_from(bad_input_role)
-                .expect_err("unexpectedly succeeding parsing database role");
-        println!("error: {:#}", error);
-        if let Error::InternalError { internal_message } = error {
-            assert_eq!(
-                internal_message,
-                "parsing database role assignment: unrecognized role name \
-                \"bogosity\": unsupported DummyRoles: \"bogosity\""
-            );
-        } else {
-            panic!(
-                "expected internal error for database parse failure, \
-                found {:?}",
-                error
-            );
-        }
-
-        let error =
-            <shared::RoleAssignment<DummyRoles>>::try_from(bad_input_idtype)
-                .expect_err("unexpectedly succeeding parsing database role");
-        println!("error: {:#}", error);
-        if let Error::InternalError { internal_message } = error {
-            assert_eq!(
-                internal_message,
-                "parsing database role assignment: \
-                unsupported db identity type: UserBuiltin"
-            );
-        } else {
-            panic!(
-                "expected internal error for database parse failure, \
-                found {:?}",
-                error
-            );
-        }
-
-        let success = <shared::RoleAssignment<DummyRoles>>::try_from(ok_input)
-            .expect("parsing valid role assignment from database");
-        println!("success: {:?}", success);
-        assert_eq!(success.identity_type, IdentityType::SiloUser);
-        assert_eq!(success.identity_id, identity_id);
-        assert_eq!(success.role_name, DummyRoles::Bogus);
     }
 
     #[test]

@@ -2,10 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::db::identity::Resource;
 use crate::db::model::impl_enum_type;
 use crate::db::schema::{identity_provider, saml_identity_provider};
 use db_macros::Resource;
 
+use nexus_types::external_api::views;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -22,6 +24,14 @@ impl_enum_type!(
     Saml => b"saml"
 );
 
+impl From<IdentityProviderType> for views::IdentityProviderType {
+    fn from(idp_type: IdentityProviderType) -> Self {
+        match idp_type {
+            IdentityProviderType::Saml => views::IdentityProviderType::Saml,
+        }
+    }
+}
+
 #[derive(Queryable, Insertable, Clone, Debug, Selectable, Resource)]
 #[diesel(table_name = identity_provider)]
 pub struct IdentityProvider {
@@ -31,6 +41,15 @@ pub struct IdentityProvider {
 
     pub silo_id: Uuid,
     pub provider_type: IdentityProviderType,
+}
+
+impl From<IdentityProvider> for views::IdentityProvider {
+    fn from(idp: IdentityProvider) -> Self {
+        Self {
+            identity: idp.identity(),
+            provider_type: idp.provider_type.into(),
+        }
+    }
 }
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable, Resource)]
@@ -50,4 +69,18 @@ pub struct SamlIdentityProvider {
     pub technical_contact_email: String,
     pub public_cert: Option<String>,
     pub private_key: Option<String>,
+}
+
+impl From<SamlIdentityProvider> for views::SamlIdentityProvider {
+    fn from(saml_idp: SamlIdentityProvider) -> Self {
+        Self {
+            identity: saml_idp.identity(),
+            idp_entity_id: saml_idp.idp_entity_id,
+            sp_client_id: saml_idp.sp_client_id,
+            acs_url: saml_idp.acs_url,
+            slo_url: saml_idp.slo_url,
+            technical_contact_email: saml_idp.technical_contact_email,
+            public_cert: saml_idp.public_cert,
+        }
+    }
 }

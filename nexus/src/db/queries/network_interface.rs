@@ -2116,7 +2116,7 @@ mod tests {
         inserted: &NetworkInterface,
     ) {
         assert_eq!(inserted.id(), incomplete.identity.id);
-        assert_eq!(inserted.name(), &incomplete.identity.name);
+        assert_eq!(inserted.name(), &incomplete.identity.name.0);
         assert_eq!(inserted.description(), incomplete.identity.description);
         assert_eq!(inserted.instance_id, incomplete.instance_id);
         assert_eq!(inserted.vpc_id, incomplete.vpc_id);
@@ -2149,7 +2149,7 @@ mod tests {
                 Uuid::new_v4(),
                 context.net1.vpc_id,
                 IdentityMetadataCreateParams {
-                    name: context.net1.subnets[0].name().clone().0,
+                    name: context.net1.subnets[0].name().clone(),
                     description: context.net1.subnets[0]
                         .description()
                         .to_string(),
@@ -2198,7 +2198,7 @@ mod tests {
             Uuid::new_v4(),
             context.net1.vpc_id,
             IdentityMetadataCreateParams {
-                name: context.net1.subnets[0].name().clone().0,
+                name: context.net1.subnets[0].name().clone(),
                 description: context.net1.subnets[0].description().to_string(),
             },
             *context.net1.subnets[0].ipv4_block,

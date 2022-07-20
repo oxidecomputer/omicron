@@ -5,6 +5,7 @@
 //! Model types for IP Pools and the CIDR blocks therein.
 
 use crate::db::collection_insert::DatastoreCollection;
+use crate::db::identity::Resource;
 use crate::db::model::Name;
 use crate::db::schema::ip_pool;
 use crate::db::schema::ip_pool_range;
@@ -15,6 +16,7 @@ use chrono::Utc;
 use db_macros::Resource;
 use diesel::Selectable;
 use ipnetwork::IpNetwork;
+use nexus_types::external_api::views;
 use omicron_common::api::external;
 use std::net::IpAddr;
 use uuid::Uuid;
@@ -47,6 +49,12 @@ impl IpPool {
             project_id,
             rcgen: 0,
         }
+    }
+}
+
+impl From<IpPool> for views::IpPool {
+    fn from(pool: IpPool) -> Self {
+        Self { identity: pool.identity(), project_id: pool.project_id }
     }
 }
 
@@ -116,6 +124,16 @@ impl IpPoolRange {
             ip_pool_id,
             project_id,
             rcgen: 0,
+        }
+    }
+}
+
+impl From<IpPoolRange> for views::IpPoolRange {
+    fn from(range: IpPoolRange) -> Self {
+        Self {
+            id: range.id,
+            time_created: range.time_created,
+            range: IpRange::from(&range),
         }
     }
 }

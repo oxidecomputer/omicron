@@ -758,7 +758,7 @@ async fn sic_create_instance_record(
         .await
         .map_err(ActionError::action_failed)?;
 
-    Ok(instance.name().clone())
+    Ok(instance.name().clone().into())
 }
 
 async fn sic_delete_instance_record(

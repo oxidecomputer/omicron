@@ -6,9 +6,9 @@
 
 // Copyright 2021 Oxide Computer Company
 
-use super::model::Name;
 use chrono::{DateTime, Utc};
-use omicron_common::api::external;
+use omicron_common::api::external::IdentityMetadata;
+use omicron_common::api::external::Name;
 use uuid::Uuid;
 
 /// Identity-related accessors for resources.
@@ -28,10 +28,10 @@ pub trait Resource {
     fn time_modified(&self) -> DateTime<Utc>;
     fn time_deleted(&self) -> Option<DateTime<Utc>>;
 
-    fn identity(&self) -> external::IdentityMetadata {
-        external::IdentityMetadata {
+    fn identity(&self) -> IdentityMetadata {
+        IdentityMetadata {
             id: self.id(),
-            name: self.name().clone().into(),
+            name: self.name().clone(),
             description: self.description().to_string(),
             time_created: self.time_created(),
             time_modified: self.time_modified(),
