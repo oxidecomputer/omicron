@@ -149,6 +149,22 @@ impl DataStore {
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Delete, authz_silo_group).await?;
 
+        // Delete silo group memberships
+
+        use db::schema::silo_group_membership;
+        diesel::delete(silo_group_membership::dsl::silo_group_membership)
+            .filter(silo_group_membership::dsl::silo_group_id.eq(authz_silo_group.id()))
+            .execute_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_silo_group),
+                )
+            })?;
+
+        // Delete silo group
+
         use db::schema::silo_group::dsl;
         diesel::update(dsl::silo_group)
             .filter(dsl::id.eq(authz_silo_group.id()))

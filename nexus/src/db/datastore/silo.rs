@@ -123,6 +123,8 @@ impl DataStore {
         use db::schema::organization;
         use db::schema::silo;
         use db::schema::silo_user;
+        use db::schema::silo_group;
+        use db::schema::silo_group_membership;
 
         // Make sure there are no organizations present within this silo.
         let id = authz_silo.id();
@@ -187,6 +189,50 @@ impl DataStore {
             })?;
 
         info!(opctx.log, "deleted {} silo users for silo {}", updated_rows, id);
+
+        // delete all silo group memberships
+        let updated_rows =
+            diesel::delete(silo_group_membership::dsl::silo_group_membership)
+                .filter(
+                    silo_group_membership::dsl::silo_group_id.eq_any(
+                        silo_group::dsl::silo_group
+                            .filter(silo_group::dsl::silo_id.eq(id))
+                            .filter(silo_group::dsl::time_deleted.is_not_null())
+                            .select(silo_group::dsl::id),
+                    ),
+                )
+                .execute_async(self.pool_authorized(opctx).await?)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel_pool(
+                        e,
+                        ErrorHandler::NotFoundByResource(authz_silo),
+                    )
+                })?;
+
+        info!(
+            opctx.log,
+            "deleted {} silo group memberships for silo {}", updated_rows, id
+        );
+
+        // delete all silo groups
+        let updated_rows = diesel::update(silo_group::dsl::silo_group)
+            .filter(silo_group::dsl::silo_id.eq(id))
+            .filter(silo_group::dsl::time_deleted.is_null())
+            .set(silo_group::dsl::time_deleted.eq(now))
+            .execute_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_silo),
+                )
+            })?;
+
+        info!(
+            opctx.log,
+            "deleted {} silo groups for silo {}", updated_rows, id
+        );
 
         // delete all silo identity providers
         use db::schema::identity_provider::dsl as idp_dsl;
