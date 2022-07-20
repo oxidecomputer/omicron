@@ -272,15 +272,11 @@ pub enum IpKind {
 
 #[cfg(test)]
 mod test {
-    use super::IdentityType;
     use super::Policy;
     use super::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE;
-    use crate::external_api::shared;
     use crate::external_api::shared::IpRange;
     use crate::external_api::shared::Ipv4Range;
     use crate::external_api::shared::Ipv6Range;
-    use anyhow::anyhow;
-    use omicron_common::api::external::Error;
     use serde::Deserialize;
     use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;

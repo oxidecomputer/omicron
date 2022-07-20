@@ -2,6 +2,4 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-pub mod external_api;
-pub mod identity;
-pub mod internal_api;
+pub mod params;
