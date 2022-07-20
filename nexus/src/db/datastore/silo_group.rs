@@ -80,22 +80,6 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    // For use in [`load_roles_for_resource`], which cannot perform authz
-    // lookup, because that would cause an infinite loop and overload the stack
-    pub async fn silo_group_membership_for_user_no_authz(
-        &self,
-        opctx: &OpContext,
-        silo_user_id: Uuid,
-    ) -> ListResultVec<SiloGroupMembership> {
-        use db::schema::silo_group_membership::dsl;
-        dsl::silo_group_membership
-            .filter(dsl::silo_user_id.eq(silo_user_id))
-            .select(SiloGroupMembership::as_returning())
-            .get_results_async(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
-    }
-
     /// Update a silo user's group membership:
     ///
     /// - add the user to groups they are supposed to be a member of, and
