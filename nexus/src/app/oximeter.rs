@@ -284,6 +284,14 @@ impl super::Nexus {
                 Some(limit),
             )
             .await
+            .or_else(|err| {
+                // If the timeseries name exists in the API, but not in Clickhouse,
+                // it might just not have been populated yet.
+                match err {
+                    oximeter_db::Error::TimeseriesNotFound(_) => Ok(vec![]),
+                    _ => Err(err),
+                }
+            })
             .map_err(map_oximeter_err)?;
 
         if timeseries_list.len() > 1 {

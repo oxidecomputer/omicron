@@ -80,11 +80,10 @@ impl Client {
         //  to/from the database, as well as the cost of parsing them for each measurement, only to
         //  promptly throw away almost all of them (except for the first).
         let timeseries_name = TimeseriesName::try_from(timeseries_name)?;
-        let schema = match self.schema_for_timeseries(&timeseries_name).await? {
-            Some(schema) => schema,
-            // If the timeseries doesn't exist, just return an empty Vec.
-            None => return Ok(Vec::new()),
-        };
+        let schema =
+            self.schema_for_timeseries(&timeseries_name).await?.ok_or_else(
+                || Error::TimeseriesNotFound(format!("{timeseries_name}")),
+            )?;
         let query_builder = query::SelectQueryBuilder::new(&schema)
             .start_time(start_time)
             .end_time(end_time);
@@ -127,10 +126,7 @@ impl Client {
             .schema_for_timeseries(&params.timeseries_name)
             .await?
             .ok_or_else(|| {
-                Error::QueryError(format!(
-                    "No such timeseries: '{}'",
-                    params.timeseries_name
-                ))
+                Error::TimeseriesNotFound(format!("{}", params.timeseries_name))
             })?;
         // TODO: Handle inclusive/exclusive timestamps in general.
         //

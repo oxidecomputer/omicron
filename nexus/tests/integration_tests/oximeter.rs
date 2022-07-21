@@ -121,7 +121,7 @@ async fn test_oximeter_reregistration() {
                     Ok(maybe_series)
                 }
             }
-            Err(oximeter_db::Error::QueryError(_)) => {
+            Err(oximeter_db::Error::TimeseriesNotFound(_)) => {
                 Err(CondCheckError::NotYet)
             }
             Err(e) => Err(CondCheckError::from(e)),
