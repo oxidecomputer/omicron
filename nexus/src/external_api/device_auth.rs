@@ -15,10 +15,12 @@ use crate::context::OpContext;
 use crate::db::model::DeviceAccessToken;
 use crate::ServerContext;
 use dropshot::{
-    endpoint, HttpError, HttpResponseOk, RequestContext, TypedBody,
+    endpoint, HttpError, HttpResponseUpdatedNoContent, RequestContext,
+    TypedBody,
 };
 use http::{header, Response, StatusCode};
 use hyper::Body;
+use omicron_common::api::external::InternalContext;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -154,13 +156,15 @@ pub async fn device_auth_success(
 pub async fn device_auth_confirm(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     params: TypedBody<DeviceAuthVerify>,
-) -> Result<HttpResponseOk<()>, HttpError> {
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let params = params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let &actor = opctx.authn.actor_required()?;
+        let &actor = opctx.authn.actor_required().internal_context(
+            "creating new device auth session for current user",
+        )?;
         let _token = nexus
             .device_auth_request_verify(
                 &opctx,
@@ -168,7 +172,7 @@ pub async fn device_auth_confirm(
                 actor.actor_id(),
             )
             .await?;
-        Ok(HttpResponseOk(()))
+        Ok(HttpResponseUpdatedNoContent())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

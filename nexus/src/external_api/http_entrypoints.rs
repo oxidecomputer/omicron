@@ -57,6 +57,7 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Instance;
+use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::NetworkInterface;
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteCreateParams;
@@ -164,6 +165,8 @@ pub fn external_api() -> NexusApiDescription {
         api.register(instance_network_interface_view_by_id)?;
         api.register(instance_network_interface_update)?;
         api.register(instance_network_interface_delete)?;
+
+        api.register(instance_external_ip_list)?;
 
         api.register(vpc_router_list)?;
         api.register(vpc_router_view)?;
@@ -521,7 +524,7 @@ async fn silo_policy_update(
 /// List Silo identity providers
 #[endpoint {
     method = GET,
-    path = "/silos/{silo_name}/identity_providers",
+    path = "/silos/{silo_name}/identity-providers",
     tags = ["silos"],
 }]
 async fn silo_identity_provider_list(
@@ -558,7 +561,7 @@ async fn silo_identity_provider_list(
 /// Create a new SAML identity provider for a silo.
 #[endpoint {
     method = POST,
-    path = "/silos/{silo_name}/saml_identity_providers",
+    path = "/silos/{silo_name}/saml-identity-providers",
     tags = ["silos"],
 }]
 async fn silo_identity_provider_create(
@@ -595,7 +598,7 @@ struct SiloSamlPathParam {
 /// GET a silo's SAML identity provider
 #[endpoint {
     method = GET,
-    path = "/silos/{silo_name}/saml_identity_providers/{provider_name}",
+    path = "/silos/{silo_name}/saml-identity-providers/{provider_name}",
     tags = ["silos"],
 }]
 async fn silo_identity_provider_view(
@@ -2486,6 +2489,39 @@ async fn instance_network_interface_update(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+// External IP addresses for instances
+
+/// List external IP addresses associated with an instance
+#[endpoint {
+    method = GET,
+    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/external-ips",
+    tags = ["instances"],
+}]
+async fn instance_external_ip_list(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<InstancePathParam>,
+) -> Result<HttpResponseOk<Vec<views::ExternalIp>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
+    let project_name = &path.project_name;
+    let instance_name = &path.instance_name;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let ips = nexus
+            .instance_list_external_ips(
+                &opctx,
+                organization_name,
+                project_name,
+                instance_name,
+            )
+            .await?;
+        Ok(HttpResponseOk(ips))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 // Snapshots
 
 /// List snapshots in a project.
@@ -3951,7 +3987,10 @@ async fn session_sshkey_list(
     let query = query_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let &actor = opctx.authn.actor_required()?;
+        let &actor = opctx
+            .authn
+            .actor_required()
+            .internal_context("listing current user's ssh keys")?;
         let page_params =
             data_page_params_for(&rqctx, &query)?.map_name(Name::ref_cast);
         let ssh_keys = nexus
@@ -3983,7 +4022,10 @@ async fn session_sshkey_create(
     let nexus = &apictx.nexus;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let &actor = opctx.authn.actor_required()?;
+        let &actor = opctx
+            .authn
+            .actor_required()
+            .internal_context("creating ssh key for current user")?;
         let ssh_key = nexus
             .ssh_key_create(&opctx, actor.actor_id(), new_key.into_inner())
             .await?;
@@ -4014,7 +4056,10 @@ async fn session_sshkey_view(
     let ssh_key_name = &path.ssh_key_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let &actor = opctx.authn.actor_required()?;
+        let &actor = opctx
+            .authn
+            .actor_required()
+            .internal_context("fetching one of current user's ssh keys")?;
         let ssh_key =
             nexus.ssh_key_fetch(&opctx, actor.actor_id(), ssh_key_name).await?;
         Ok(HttpResponseOk(ssh_key.into()))
@@ -4038,7 +4083,10 @@ async fn session_sshkey_delete(
     let ssh_key_name = &path.ssh_key_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let &actor = opctx.authn.actor_required()?;
+        let &actor = opctx
+            .authn
+            .actor_required()
+            .internal_context("deleting one of current user's ssh keys")?;
         nexus.ssh_key_delete(&opctx, actor.actor_id(), ssh_key_name).await?;
         Ok(HttpResponseDeleted())
     };

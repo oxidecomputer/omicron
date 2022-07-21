@@ -7,6 +7,7 @@ use super::{impl_authenticated_saga_params, saga_generate_uuid};
 use crate::authn;
 use crate::context::OpContext;
 use crate::db::identity::Resource;
+use crate::db::model::IpKind;
 use crate::external_api::params;
 use crate::saga_interface::SagaContext;
 use lazy_static::lazy_static;
@@ -163,12 +164,44 @@ async fn sim_instance_migrate(
         )),
         ..old_runtime
     };
-    let external_ip = osagactx
+
+    // Collect the external IPs for the instance.
+    //  https://github.com/oxidecomputer/omicron/issues/1467
+    // TODO-correctness: Handle Floating IPs, see
+    //  https://github.com/oxidecomputer/omicron/issues/1334
+    let (snat_ip, external_ips): (Vec<_>, Vec<_>) = osagactx
         .datastore()
-        .instance_lookup_external_ip(&opctx, instance_id)
+        .instance_lookup_external_ips(&opctx, instance_id)
         .await
-        .map_err(ActionError::action_failed)
-        .map(ExternalIp::from)?;
+        .map_err(ActionError::action_failed)?
+        .into_iter()
+        .partition(|ip| ip.kind == IpKind::SNat);
+
+    // Sanity checks on the number and kind of each IP address.
+    if external_ips.len() > crate::app::MAX_EPHEMERAL_IPS_PER_INSTANCE {
+        return Err(ActionError::action_failed(Error::internal_error(
+            format!(
+                "Expected the number of external IPs to be limited to \
+            {}, but found {}",
+                crate::app::MAX_EPHEMERAL_IPS_PER_INSTANCE,
+                external_ips.len(),
+            )
+            .as_str(),
+        )));
+    }
+    if snat_ip.len() != 1 {
+        return Err(ActionError::action_failed(Error::internal_error(
+            "Expected exactly one SNAT IP address for an instance",
+        )));
+    }
+
+    // For now, we take the Ephemeral IP, if it exists, or the SNAT IP if not.
+    // TODO-correctness: Handle multiple IP addresses, see
+    //  https://github.com/oxidecomputer/omicron/issues/1467
+    let external_ip = ExternalIp::from(
+        external_ips.into_iter().chain(snat_ip).next().unwrap(),
+    );
+
     let instance_hardware = InstanceHardware {
         runtime: runtime.into(),
         // TODO: populate NICs

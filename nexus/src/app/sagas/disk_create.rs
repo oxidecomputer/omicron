@@ -459,8 +459,6 @@ async fn sdc_regions_ensure(
                         // TODO open a control socket for the whole volume, not
                         // in the sub volumes
                         control: None,
-                        metric_register: None,
-                        metric_collect: None,
                     },
                 },
             ],

@@ -5,25 +5,64 @@
 //! Model types for external IPs, both for instances and externally-facing
 //! services.
 
+use crate::db::model::impl_enum_type;
+use crate::db::model::Name;
 use crate::db::model::SqlU16;
 use crate::db::schema::instance_external_ip;
+use crate::external_api::shared;
+use crate::external_api::views;
 use chrono::DateTime;
 use chrono::Utc;
 use diesel::Queryable;
 use diesel::Selectable;
 use ipnetwork::IpNetwork;
+use omicron_common::api::external::Error;
+use std::convert::TryFrom;
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Copy, Selectable, Queryable, Insertable)]
+impl_enum_type!(
+    #[derive(SqlType, Debug, Clone, Copy)]
+    #[diesel(postgres_type(name = "ip_kind"))]
+     pub struct IpKindEnum;
+
+     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq)]
+     #[diesel(sql_type = IpKindEnum)]
+     pub enum IpKind;
+
+     SNat => b"snat"
+     Ephemeral => b"ephemeral"
+     Floating => b"floating"
+);
+
+/// The main model type for external IP addresses for instances.
+///
+/// This encompasses the three flavors of external IPs: automatic source NAT
+/// IPs, Ephemeral IPs, and Floating IPs. The first two are similar in that they
+/// are anonymous, lacking a name or description, which a Floating IP is a named
+/// API resource. The second two are similar in that they are externally-visible
+/// addresses and port ranges, while source NAT IPs are not discoverable in the
+/// API at all, and only provide outbound connectivity to instances, not
+/// inbound.
+#[derive(Debug, Clone, Selectable, Queryable, Insertable)]
 #[diesel(table_name = instance_external_ip)]
 pub struct InstanceExternalIp {
     pub id: Uuid,
+    // Only Some(_) for Floating IPs
+    pub name: Option<Name>,
+    // Only Some(_) for Floating IPs
+    pub description: Option<String>,
     pub time_created: DateTime<Utc>,
     pub time_modified: DateTime<Utc>,
     pub time_deleted: Option<DateTime<Utc>>,
     pub ip_pool_id: Uuid,
     pub ip_pool_range_id: Uuid,
-    pub instance_id: Uuid,
+    pub project_id: Uuid,
+    // This is Some(_) for:
+    //  - all instance SNAT IPs
+    //  - all ephemeral IPs
+    //  - a floating IP attached to an instance.
+    pub instance_id: Option<Uuid>,
+    pub kind: IpKind,
     pub ip: IpNetwork,
     pub first_port: SqlU16,
     pub last_port: SqlU16,
@@ -32,31 +71,135 @@ pub struct InstanceExternalIp {
 impl From<InstanceExternalIp> for sled_agent_client::types::ExternalIp {
     fn from(eip: InstanceExternalIp) -> Self {
         Self {
-            ip: eip.ip.ip().to_string(),
+            ip: eip.ip.ip(),
             first_port: eip.first_port.0,
             last_port: eip.last_port.0,
         }
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+/// An incomplete external IP, used to store state required for issuing the
+/// database query that selects an available IP and stores the resulting record.
+#[derive(Debug, Clone)]
 pub struct IncompleteInstanceExternalIp {
-    pub id: Uuid,
-    pub time_created: DateTime<Utc>,
-    pub time_modified: DateTime<Utc>,
-    pub time_deleted: Option<DateTime<Utc>>,
-    pub instance_id: Uuid,
+    id: Uuid,
+    name: Option<Name>,
+    description: Option<String>,
+    time_created: DateTime<Utc>,
+    kind: IpKind,
+    project_id: Uuid,
+    instance_id: Option<Uuid>,
+    pool_id: Option<Uuid>,
 }
 
 impl IncompleteInstanceExternalIp {
-    pub fn new(instance_id: Uuid) -> Self {
-        let now = Utc::now();
+    pub fn for_instance_source_nat(
+        id: Uuid,
+        project_id: Uuid,
+        instance_id: Uuid,
+        pool_id: Option<Uuid>,
+    ) -> Self {
         Self {
-            id: Uuid::new_v4(),
-            time_created: now,
-            time_modified: now,
-            time_deleted: None,
-            instance_id,
+            id,
+            name: None,
+            description: None,
+            time_created: Utc::now(),
+            kind: IpKind::SNat,
+            project_id,
+            instance_id: Some(instance_id),
+            pool_id,
         }
+    }
+
+    pub fn for_ephemeral(
+        id: Uuid,
+        project_id: Uuid,
+        instance_id: Uuid,
+        pool_id: Option<Uuid>,
+    ) -> Self {
+        Self {
+            id,
+            name: None,
+            description: None,
+            time_created: Utc::now(),
+            kind: IpKind::Ephemeral,
+            project_id,
+            instance_id: Some(instance_id),
+            pool_id,
+        }
+    }
+
+    pub fn for_floating(
+        id: Uuid,
+        name: &Name,
+        description: &str,
+        project_id: Uuid,
+        pool_id: Option<Uuid>,
+    ) -> Self {
+        Self {
+            id,
+            name: Some(name.clone()),
+            description: Some(description.to_string()),
+            time_created: Utc::now(),
+            kind: IpKind::Floating,
+            project_id,
+            instance_id: None,
+            pool_id,
+        }
+    }
+
+    pub fn id(&self) -> &Uuid {
+        &self.id
+    }
+
+    pub fn name(&self) -> &Option<Name> {
+        &self.name
+    }
+
+    pub fn description(&self) -> &Option<String> {
+        &self.description
+    }
+
+    pub fn time_created(&self) -> &DateTime<Utc> {
+        &self.time_created
+    }
+
+    pub fn kind(&self) -> &IpKind {
+        &self.kind
+    }
+
+    pub fn project_id(&self) -> &Uuid {
+        &self.project_id
+    }
+
+    pub fn instance_id(&self) -> &Option<Uuid> {
+        &self.instance_id
+    }
+
+    pub fn pool_id(&self) -> &Option<Uuid> {
+        &self.pool_id
+    }
+}
+
+impl TryFrom<IpKind> for shared::IpKind {
+    type Error = Error;
+
+    fn try_from(kind: IpKind) -> Result<Self, Self::Error> {
+        match kind {
+            IpKind::Ephemeral => Ok(shared::IpKind::Ephemeral),
+            IpKind::Floating => Ok(shared::IpKind::Floating),
+            _ => Err(Error::internal_error(
+                "SNAT IP addresses should not be exposed in the API",
+            )),
+        }
+    }
+}
+
+impl TryFrom<InstanceExternalIp> for views::ExternalIp {
+    type Error = Error;
+
+    fn try_from(ip: InstanceExternalIp) -> Result<Self, Self::Error> {
+        let kind = ip.kind.try_into()?;
+        Ok(views::ExternalIp { kind, ip: ip.ip.ip() })
     }
 }

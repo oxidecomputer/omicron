@@ -12,7 +12,7 @@ use omicron_common::api::external::{
 use schemars::JsonSchema;
 use serde::{
     de::{self, Visitor},
-    Deserialize, Deserializer, Serialize,
+    Deserialize, Deserializer, Serialize, Serializer,
 };
 use std::net::IpAddr;
 use uuid::Uuid;
@@ -315,6 +315,14 @@ pub struct NetworkInterfaceUpdate {
 
 // IP POOLS
 
+// Type used to identify a Project in request bodies, where one may not have
+// the path in the request URL.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+pub struct ProjectPath {
+    pub organization: Name,
+    pub project: Name,
+}
+
 /// Create-time parameters for an IP Pool.
 ///
 /// See [`IpPool`](omicron_nexus::external_api::views::IpPool)
@@ -322,6 +330,8 @@ pub struct NetworkInterfaceUpdate {
 pub struct IpPoolCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
+    #[serde(flatten)]
+    pub project: Option<ProjectPath>,
 }
 
 /// Parameters for updating an IP Pool
@@ -392,6 +402,17 @@ pub struct InstanceDiskAttach {
     pub name: Name,
 }
 
+/// Parameters for creating an external IP address for instances.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ExternalIpCreate {
+    /// An IP address providing both inbound and outbound access. The address is
+    /// automatically-assigned from the provided IP Pool, or all available pools
+    /// if not specified.
+    Ephemeral { pool_name: Option<Name> },
+    // TODO: Add floating IPs: https://github.com/oxidecomputer/omicron/issues/1334
+}
+
 /// Create-time parameters for an [`Instance`](omicron_common::api::external::Instance)
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceCreate {
@@ -404,24 +425,36 @@ pub struct InstanceCreate {
     /// User data for instance initialization systems (such as cloud-init).
     /// Must be a Base64-encoded string, as specified in RFC 4648 § 4 (+ and /
     /// characters with padding). Maximum 32 KiB unencoded data.
-    // TODO: this should emit `"format": "byte"`, but progenitor doesn't
-    // understand that yet.
-    #[schemars(default, with = "String")]
-    #[serde(default, with = "serde_user_data")]
+    // While serde happily accepts #[serde(with = "<mod>")] as a shorthand for
+    // specifing `serialize_with` and `deserialize_with`, schemars requires the
+    // argument to `with` to be a type rather than merely a path prefix (i.e. a
+    // mod or type). It's admittedly a bit tricky for schemars to address;
+    // unlike `serialize` or `deserialize`, `JsonSchema` requires several
+    // functions working together. It's unfortunate that schemars has this
+    // built-in incompatibility, exacerbated by its glacial rate of progress
+    // and immunity to offers of help.
+    #[serde(default, with = "UserData")]
     pub user_data: Vec<u8>,
 
     /// The network interfaces to be created for this instance.
     #[serde(default)]
     pub network_interfaces: InstanceNetworkInterfaceAttachment,
 
+    /// The external IP addresses provided to this instance.
+    ///
+    /// By default, all instances have outbound connectivity, but no inbound
+    /// connectivity. These external addresses can be used to provide a fixed,
+    /// known IP address for making inbound connections to the instance.
+    #[serde(default)]
+    pub external_ips: Vec<ExternalIpCreate>,
+
     /// The disks to be created or attached for this instance.
     #[serde(default)]
     pub disks: Vec<InstanceDiskAttachment>,
 }
 
-mod serde_user_data {
-    use serde::{de::Error, Deserialize, Deserializer, Serialize, Serializer};
-
+struct UserData;
+impl UserData {
     pub fn serialize<S>(
         data: &Vec<u8>,
         serializer: S,
@@ -440,7 +473,7 @@ mod serde_user_data {
             Ok(buf) => {
                 // if you change this, also update the stress test in crate::cidata
                 if buf.len() > crate::cidata::MAX_USER_DATA_BYTES {
-                    Err(D::Error::invalid_length(
+                    Err(<D::Error as serde::de::Error>::invalid_length(
                         buf.len(),
                         &"less than 32 KiB",
                     ))
@@ -448,11 +481,32 @@ mod serde_user_data {
                     Ok(buf)
                 }
             }
-            Err(_) => Err(D::Error::invalid_value(
+            Err(_) => Err(<D::Error as serde::de::Error>::invalid_value(
                 serde::de::Unexpected::Other("invalid base64 string"),
                 &"a valid base64 string",
             )),
         }
+    }
+}
+
+impl JsonSchema for UserData {
+    fn schema_name() -> String {
+        "String".to_string()
+    }
+
+    fn json_schema(
+        _: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::SchemaObject {
+            instance_type: Some(schemars::schema::InstanceType::String.into()),
+            format: Some("byte".to_string()),
+            ..Default::default()
+        }
+        .into()
+    }
+
+    fn is_referenceable() -> bool {
+        false
     }
 }
 

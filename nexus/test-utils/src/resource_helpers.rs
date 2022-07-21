@@ -73,6 +73,7 @@ pub async fn create_ip_pool(
     client: &ClientTestContext,
     pool_name: &str,
     ip_range: Option<IpRange>,
+    project_path: Option<params::ProjectPath>,
 ) -> (IpPool, IpPoolRange) {
     let ip_range = ip_range.unwrap_or_else(|| {
         use std::net::Ipv4Addr;
@@ -90,6 +91,7 @@ pub async fn create_ip_pool(
                 name: pool_name.parse().unwrap(),
                 description: String::from("an ip pool"),
             },
+            project: project_path,
         },
     )
     .await;
@@ -228,6 +230,7 @@ pub async fn create_instance_with_nics(
                 b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
                     .to_vec(),
             network_interfaces: nics.clone(),
+            external_ips: vec![],
             disks: vec![],
         },
     )

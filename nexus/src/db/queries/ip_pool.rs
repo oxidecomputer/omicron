@@ -209,7 +209,7 @@ impl QueryFragment<Pg> for FilterOverlappingIpRanges {
             &self.range.time_modified,
         )?;
         out.push_sql(", ");
-        out.push_bind_param::< sql_types::Nullable<sql_types::Timestamptz>, Option<DateTime<Utc>>>(&self.range.time_deleted)?;
+        out.push_bind_param::<sql_types::Nullable<sql_types::Timestamptz>, Option<DateTime<Utc>>>(&self.range.time_deleted)?;
         out.push_sql(", ");
         out.push_bind_param::<sql_types::Inet, IpNetwork>(
             &self.range.first_address,
@@ -220,6 +220,8 @@ impl QueryFragment<Pg> for FilterOverlappingIpRanges {
         )?;
         out.push_sql(", ");
         out.push_bind_param::<sql_types::Uuid, Uuid>(&self.range.ip_pool_id)?;
+        out.push_sql(", ");
+        out.push_bind_param::<sql_types::Nullable<sql_types::Uuid>, Option<Uuid>>(&self.range.project_id)?;
         out.push_sql(", ");
         out.push_bind_param::<sql_types::BigInt, i64>(&self.range.rcgen)?;
 

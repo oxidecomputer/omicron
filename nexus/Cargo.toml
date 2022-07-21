@@ -11,12 +11,11 @@ path = "../rpaths"
 anyhow = "1.0"
 async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "ab1f49e0b3f95557aa96bf593282199fafeef4bd" }
 async-trait = "0.1.56"
-authz-macros = { path = "src/authz/authz-macros" }
 base64 = "0.13.0"
 bb8 = "0.8.0"
 clap = { version = "3.2", features = ["derive"] }
 cookie = "0.16"
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "fed3e8ca7762130ee146fc516a4ef6eed2b91629" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "2add0de8489f1d4de901bfe98fc28b0a6efcc3ea" }
 diesel = { version = "2.0.0-rc.0", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 diesel-dtrace = { git = "https://github.com/oxidecomputer/diesel-dtrace" }
 fatfs = "0.3.5"
@@ -25,7 +24,6 @@ headers = "0.3.7"
 hex = "0.4.3"
 http = "0.2.7"
 hyper = "0.14"
-db-macros = { path = "src/db/db-macros" }
 internal-dns-client = { path = "../internal-dns-client" }
 ipnetwork = "0.18"
 lazy_static = "1.4.0"
@@ -51,7 +49,7 @@ ring = "0.16"
 samael = { git = "https://github.com/njaremko/samael", features = ["xmlsec"], branch = "master" }
 serde_json = "1.0"
 serde_urlencoded = "0.7.1"
-serde_with = "1.14.0"
+serde_with = "2.0.0"
 sled-agent-client = { path = "../sled-agent-client" }
 slog-dtrace = "0.2"
 tempfile = "3.3"
@@ -59,6 +57,9 @@ thiserror = "1.0"
 toml = "0.5.9"
 tough = { version = "0.12", features = [ "http" ] }
 usdt = "0.3.1"
+
+authz-macros = { path = "authz-macros" }
+db-macros = { path = "db-macros" }
 
 [dependencies.api_identity]
 path = "../api_identity"
@@ -105,7 +106,7 @@ git = "https://github.com/oxidecomputer/steno"
 branch = "main"
 
 [dependencies.tokio]
-version = "1.18"
+version = "1.20"
 features = [ "full" ]
 
 [dependencies.tokio-postgres]
@@ -124,7 +125,7 @@ nexus-test-utils-macros = { path = "test-utils-macros" }
 nexus-test-utils = { path = "test-utils" }
 omicron-test-utils = { path = "../test-utils" }
 openapiv3 = "1.0"
-regex = "1.5.6"
+regex = "1.6.0"
 subprocess = "0.2.9"
 term = "0.7"
 httptest = "0.15.4"

@@ -8,10 +8,11 @@ use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Context;
 use anyhow::Result;
+use gateway_messages::sp_impl;
 use gateway_messages::sp_impl::SpHandler;
-use gateway_messages::sp_impl::SpServer;
 use gateway_messages::Request;
 use gateway_messages::SerializedSize;
+use gateway_messages::SpMessage;
 use gateway_messages::SpPort;
 use slog::debug;
 use slog::error;
@@ -122,7 +123,7 @@ pub fn logger(config: &Config) -> Result<Logger> {
 pub(crate) async fn handle_request<'a, H: SpHandler>(
     handler: &mut H,
     recv: Result<(&[u8], SocketAddrV6)>,
-    server: &'a mut SpServer,
+    out: &'a mut [u8; SpMessage::MAX_SIZE],
     responsiveness: Responsiveness,
     port_num: SpPort,
 ) -> Result<Option<(&'a [u8], SocketAddrV6)>> {
@@ -137,9 +138,8 @@ pub(crate) async fn handle_request<'a, H: SpHandler>(
     let (data, addr) =
         recv.with_context(|| format!("recv on {:?}", port_num))?;
 
-    let resp = server
-        .dispatch(addr, port_num, data, handler)
+    let n = sp_impl::handle_message(addr, port_num, data, handler, out)
         .map_err(|err| anyhow!("dispatching message failed: {:?}", err))?;
 
-    Ok(Some((resp, addr)))
+    Ok(Some((&out[..n], addr)))
 }

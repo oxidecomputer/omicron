@@ -45,6 +45,7 @@ instance_delete                          /organizations/{organization_name}/proj
 instance_disk_attach                     /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/attach
 instance_disk_detach                     /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/detach
 instance_disk_list                       /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks
+instance_external_ip_list                /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/external-ips
 instance_list                            /organizations/{organization_name}/projects/{project_name}/instances
 instance_migrate                         /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/migrate
 instance_network_interface_create        /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces
@@ -128,9 +129,9 @@ API operations found with tag "silos"
 OPERATION ID                             URL PATH
 silo_create                              /silos
 silo_delete                              /silos/{silo_name}
-silo_identity_provider_create            /silos/{silo_name}/saml_identity_providers
-silo_identity_provider_list              /silos/{silo_name}/identity_providers
-silo_identity_provider_view              /silos/{silo_name}/saml_identity_providers/{provider_name}
+silo_identity_provider_create            /silos/{silo_name}/saml-identity-providers
+silo_identity_provider_list              /silos/{silo_name}/identity-providers
+silo_identity_provider_view              /silos/{silo_name}/saml-identity-providers/{provider_name}
 silo_list                                /silos
 silo_policy_update                       /silos/{silo_name}/policy
 silo_policy_view                         /silos/{silo_name}/policy

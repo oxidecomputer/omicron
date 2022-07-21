@@ -4,10 +4,9 @@
 
 //! Views are response bodies, most of which are public lenses onto DB models.
 
-use crate::authn;
 use crate::db::identity::{Asset, Resource};
 use crate::db::model;
-use crate::external_api::shared::{self, IpRange};
+use crate::external_api::shared::{self, IpKind, IpRange};
 use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
@@ -17,6 +16,7 @@ use omicron_common::api::external::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::net::IpAddr;
 use std::net::SocketAddrV6;
 use uuid::Uuid;
 
@@ -352,15 +352,18 @@ impl From<model::VpcRouter> for VpcRouter {
     }
 }
 
+// IP POOLS
+
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct IpPool {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
+    pub project_id: Option<Uuid>,
 }
 
 impl From<model::IpPool> for IpPool {
     fn from(pool: model::IpPool) -> Self {
-        Self { identity: pool.identity() }
+        Self { identity: pool.identity(), project_id: pool.project_id }
     }
 }
 
@@ -379,6 +382,15 @@ impl From<model::IpPoolRange> for IpPoolRange {
             range: IpRange::from(&range),
         }
     }
+}
+
+// INSTANCE EXTERNAL IP ADDRESSES
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct ExternalIp {
+    pub ip: IpAddr,
+    pub kind: IpKind,
 }
 
 // RACKS
@@ -449,20 +461,6 @@ pub struct UserBuiltin {
 impl From<model::UserBuiltin> for UserBuiltin {
     fn from(user: model::UserBuiltin) -> Self {
         Self { identity: user.identity() }
-    }
-}
-
-/// Client view of currently authed user.
-// TODO: this may end up merged with User once more details about the user are
-// stored in the auth context. Right now there is only the ID.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
-pub struct SessionUser {
-    pub id: Uuid,
-}
-
-impl From<authn::Actor> for SessionUser {
-    fn from(actor: authn::Actor) -> Self {
-        Self { id: actor.actor_id() }
     }
 }
 

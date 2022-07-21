@@ -129,9 +129,9 @@ async fn test_device_auth_flow(cptestctx: &ControlPlaneTestContext) {
     NexusRequest::new(
         RequestBuilder::new(testctx, Method::POST, "/device/confirm")
             .body(Some(&confirm_params))
-            .expect_status(Some(StatusCode::OK)),
+            .expect_status(Some(StatusCode::NO_CONTENT)),
     )
-    .authn_as(AuthnMode::PrivilegedUser)
+    .authn_as(AuthnMode::UnprivilegedUser)
     .execute()
     .await
     .expect("failed to confirm");
@@ -143,7 +143,7 @@ async fn test_device_auth_flow(cptestctx: &ControlPlaneTestContext) {
             .body_urlencoded(Some(&token_params))
             .expect_status(Some(StatusCode::OK)),
     )
-    .authn_as(AuthnMode::PrivilegedUser)
+    .authn_as(AuthnMode::UnprivilegedUser)
     .execute()
     .await
     .expect("failed to get token")
