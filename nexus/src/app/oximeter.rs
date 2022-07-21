@@ -225,7 +225,8 @@ impl super::Nexus {
     /// * `timeseries_name`: The "target:metric" name identifying the metric to
     /// be queried.
     /// * `criteria`: Any additional parameters to help narrow down the query
-    /// selection further.
+    /// selection further. These parameters are passed directly to
+    /// [oximeter::db::Client::select_timeseries_with].
     /// * `query_params`: Pagination parameter, identifying which page of
     /// results to return.
     /// * `limit`: The maximum number of results to return in a paginated
@@ -243,11 +244,18 @@ impl super::Nexus {
         }
 
         let (start_time, end_time, query) = match query_params.page {
+            // Generally, we want the time bounds to be inclusive for the
+            // start time, and exclusive for the end time...
             dropshot::WhichPage::First(query) => (
                 Timestamp::Inclusive(query.start_time),
                 Timestamp::Exclusive(query.end_time),
                 query,
             ),
+            // ... but for subsequent pages, we use the "last observed"
+            // timestamp as the start time. If we used an inclusive bound,
+            // we'd duplicate the returned measurement. To return each
+            // measurement exactly once, we make the start time "exclusive"
+            // on all "next" pages.
             dropshot::WhichPage::Next(query) => (
                 Timestamp::Exclusive(query.start_time),
                 Timestamp::Exclusive(query.end_time),
@@ -288,16 +296,12 @@ impl super::Nexus {
         }
 
         // If we received no data, exit early.
-        let mut timeseries =
+        let timeseries =
             if let Some(timeseries) = timeseries_list.into_iter().next() {
                 timeseries
             } else {
                 return Ok(no_results());
             };
-
-        // Otherwise, sort the output result, and prepare the next page
-        // to-be-queried.
-        timeseries.measurements.sort_by_key(|m| m.timestamp());
 
         Ok(dropshot::ResultsPage::new(
             timeseries.measurements,

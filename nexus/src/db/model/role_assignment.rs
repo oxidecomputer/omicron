@@ -6,7 +6,6 @@ use super::impl_enum_type;
 use crate::db::schema::role_assignment;
 use crate::external_api::shared;
 use serde::{Deserialize, Serialize};
-use std::io::Write;
 use uuid::Uuid;
 
 impl_enum_type!(

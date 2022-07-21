@@ -26,18 +26,25 @@ pub struct IpPool {
     #[diesel(embed)]
     pub identity: IpPoolIdentity,
 
+    /// An optional ID of the project for which this pool is reserved.
+    pub project_id: Option<Uuid>,
+
     /// Child resource generation number, for optimistic concurrency control of
     /// the contained ranges.
     pub rcgen: i64,
 }
 
 impl IpPool {
-    pub fn new(pool_identity: &external::IdentityMetadataCreateParams) -> Self {
+    pub fn new(
+        pool_identity: &external::IdentityMetadataCreateParams,
+        project_id: Option<Uuid>,
+    ) -> Self {
         Self {
             identity: IpPoolIdentity::new(
                 Uuid::new_v4(),
                 pool_identity.clone(),
             ),
+            project_id,
             rcgen: 0,
         }
     }
@@ -76,13 +83,20 @@ pub struct IpPoolRange {
     pub last_address: IpNetwork,
     /// Foreign-key to the `ip_pool` table with the parent pool for this range
     pub ip_pool_id: Uuid,
+    /// Foreign-key to the `project` table, with the Project to which this range
+    /// is restricted, if any (derived from the `ip_pool` table).
+    pub project_id: Option<Uuid>,
     /// The child resource generation number, tracking IP addresses allocated or
     /// used from this range.
     pub rcgen: i64,
 }
 
 impl IpPoolRange {
-    pub fn new(range: &IpRange, ip_pool_id: Uuid) -> Self {
+    pub fn new(
+        range: &IpRange,
+        ip_pool_id: Uuid,
+        project_id: Option<Uuid>,
+    ) -> Self {
         let now = Utc::now();
         let first_address = range.first_address();
         let last_address = range.last_address();
@@ -100,6 +114,7 @@ impl IpPoolRange {
             first_address: IpNetwork::from(range.first_address()),
             last_address: IpNetwork::from(range.last_address()),
             ip_pool_id,
+            project_id,
             rcgen: 0,
         }
     }

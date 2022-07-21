@@ -1420,28 +1420,29 @@ mod tests {
             .await
             .expect("Failed to select timeseries")[0];
         assert_eq!(timeseries.measurements.len() as u32, limit.get());
-
-        let get_last = |timeseries: &Timeseries| {
-            timeseries
-                .measurements
-                .iter()
-                .map(|m| m.timestamp())
-                .reduce(|latest, ts| if latest >= ts { latest } else { ts })
-                .unwrap()
-        };
+        assert_eq!(
+            all_measurements[..all_measurements.len() / 2],
+            timeseries.measurements
+        );
 
         // Get the other half of the results.
         let timeseries = &client
             .select_timeseries_with(
                 timeseries_name,
                 &[],
-                Some(query::Timestamp::Exclusive(get_last(timeseries))),
+                Some(query::Timestamp::Exclusive(
+                    timeseries.measurements.last().unwrap().timestamp(),
+                )),
                 None,
                 Some(limit),
             )
             .await
             .expect("Failed to select timeseries")[0];
         assert_eq!(timeseries.measurements.len() as u32, limit.get());
+        assert_eq!(
+            all_measurements[all_measurements.len() / 2..],
+            timeseries.measurements
+        );
 
         db.cleanup().await.expect("Failed to cleanup database");
     }

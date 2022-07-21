@@ -317,6 +317,14 @@ pub struct NetworkInterfaceUpdate {
 
 // IP POOLS
 
+// Type used to identify a Project in request bodies, where one may not have
+// the path in the request URL.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+pub struct ProjectPath {
+    pub organization: Name,
+    pub project: Name,
+}
+
 /// Create-time parameters for an IP Pool.
 ///
 /// See [`IpPool`](omicron_nexus::external_api::views::IpPool)
@@ -324,6 +332,8 @@ pub struct NetworkInterfaceUpdate {
 pub struct IpPoolCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
+    #[serde(flatten)]
+    pub project: Option<ProjectPath>,
 }
 
 /// Parameters for updating an IP Pool
@@ -394,6 +404,17 @@ pub struct InstanceDiskAttach {
     pub name: Name,
 }
 
+/// Parameters for creating an external IP address for instances.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ExternalIpCreate {
+    /// An IP address providing both inbound and outbound access. The address is
+    /// automatically-assigned from the provided IP Pool, or all available pools
+    /// if not specified.
+    Ephemeral { pool_name: Option<Name> },
+    // TODO: Add floating IPs: https://github.com/oxidecomputer/omicron/issues/1334
+}
+
 /// Create-time parameters for an [`Instance`](omicron_common::api::external::Instance)
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceCreate {
@@ -420,6 +441,14 @@ pub struct InstanceCreate {
     /// The network interfaces to be created for this instance.
     #[serde(default)]
     pub network_interfaces: InstanceNetworkInterfaceAttachment,
+
+    /// The external IP addresses provided to this instance.
+    ///
+    /// By default, all instances have outbound connectivity, but no inbound
+    /// connectivity. These external addresses can be used to provide a fixed,
+    /// known IP address for making inbound connections to the instance.
+    #[serde(default)]
+    pub external_ips: Vec<ExternalIpCreate>,
 
     /// The disks to be created or attached for this instance.
     #[serde(default)]
@@ -809,7 +838,9 @@ pub struct SshKeyCreate {
 /// Query parameters common to resource metrics endpoints.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ResourceMetrics {
+    /// An inclusive start time of metrics.
     pub start_time: DateTime<Utc>,
+    /// An exclusive end time of metrics.
     pub end_time: DateTime<Utc>,
 }
 

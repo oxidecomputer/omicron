@@ -1715,6 +1715,7 @@ mod tests {
             hostname: "inst".to_string(),
             user_data: vec![],
             network_interfaces: InstanceNetworkInterfaceAttachment::None,
+            external_ips: vec![],
             disks: vec![],
         };
         let runtime = InstanceRuntimeState {

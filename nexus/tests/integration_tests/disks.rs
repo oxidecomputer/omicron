@@ -32,6 +32,7 @@ use omicron_common::api::external::DiskState;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::Name;
+use omicron_common::backoff;
 use omicron_nexus::TestInterfaces as _;
 use omicron_nexus::{external_api::params, Nexus};
 use oximeter::types::Datum;
@@ -70,7 +71,7 @@ fn get_disk_detach_url(instance_name: &str) -> String {
 }
 
 async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
-    create_ip_pool(&client, "p0", None).await;
+    create_ip_pool(&client, "p0", None, None).await;
     create_organization(&client, ORG_NAME).await;
     let project = create_project(client, ORG_NAME, PROJECT_NAME).await;
     project.identity.id
@@ -846,6 +847,27 @@ async fn create_instance_with_disk(client: &ClientTestContext) {
 const ALL_METRICS: [&'static str; 6] =
     ["activated", "read", "write", "read_bytes", "write_bytes", "flush"];
 
+async fn query_for_metrics_until_they_exist(
+    client: &ClientTestContext,
+    path: &str,
+) -> ResultsPage<Measurement> {
+    backoff::retry_notify(
+        backoff::internal_service_policy(),
+        || async {
+            let measurements: ResultsPage<Measurement> =
+                objects_list_page_authz(client, path).await;
+
+            if measurements.items.is_empty() {
+                return Err(backoff::BackoffError::transient("No metrics yet"));
+            }
+            Ok(measurements)
+        },
+        |_, _| {},
+    )
+    .await
+    .expect("Failed to query for measurements")
+}
+
 #[nexus_test]
 async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
@@ -853,13 +875,13 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
     create_org_and_project(client).await;
     create_disk(&client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
 
-    // Whenever we grab this URL, get the last few seconds of metrics.
+    // Whenever we grab this URL, get the surrounding few seconds of metrics.
     let metric_url = |metric_type: &str| {
         let disk_url = format!("{}/{}", get_disks_url(), DISK_NAME);
         format!(
             "{disk_url}/metrics/{metric_type}?start_time={:?}&end_time={:?}",
-            Utc::now() - chrono::Duration::seconds(5),
-            Utc::now(),
+            Utc::now() - chrono::Duration::seconds(2),
+            Utc::now() + chrono::Duration::seconds(2),
         )
     };
 
@@ -874,14 +896,11 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
     // Create an instance, attach the disk to it.
     create_instance_with_disk(client).await;
 
-    // NOTE: This is a little gnarly, but we sleep long enough to allow some
-    // metrics to be populated. Noted that this relies on the producer server
-    // within the simulated disk using an interval smaller than a second.
-    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-
     for metric in &ALL_METRICS {
-        let measurements: ResultsPage<Measurement> =
-            objects_list_page_authz(client, &metric_url(metric)).await;
+        let measurements =
+            query_for_metrics_until_they_exist(client, &metric_url(metric))
+                .await;
+
         assert!(!measurements.items.is_empty());
         for item in &measurements.items {
             let cumulative = match item.datum() {
@@ -901,19 +920,21 @@ async fn test_disk_metrics_paginated(cptestctx: &ControlPlaneTestContext) {
     create_disk(&client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
     create_instance_with_disk(client).await;
 
-    // NOTE: This is a little gnarly, but we sleep long enough to allow some
-    // metrics to be populated. Noted that this relies on the producer server
-    // within the simulated disk using an interval smaller than a second.
-    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-
     for metric in &ALL_METRICS {
         let collection_url =
-            format!("{}/{DISK_NAME}/metrics/{metric}", get_disks_url(),);
+            format!("{}/{DISK_NAME}/metrics/{metric}", get_disks_url());
         let initial_params = format!(
             "start_time={:?}&end_time={:?}",
-            Utc::now() - chrono::Duration::seconds(5),
-            Utc::now(),
+            Utc::now() - chrono::Duration::seconds(2),
+            Utc::now() + chrono::Duration::seconds(2),
         );
+
+        query_for_metrics_until_they_exist(
+            client,
+            &format!("{collection_url}?{initial_params}"),
+        )
+        .await;
+
         let measurements_paginated: Collection<Measurement> =
             NexusRequest::iter_collection_authn(
                 client,
@@ -934,9 +955,9 @@ async fn test_disk_metrics_paginated(cptestctx: &ControlPlaneTestContext) {
             };
             assert!(cumulative.start_time() <= item.timestamp());
 
-            // Validate that the timestamps increase.
+            // Validate that the timestamps are non-decreasing.
             if let Some(last_ts) = last_timestamp {
-                assert!(last_ts < item.timestamp());
+                assert!(last_ts <= item.timestamp());
             }
             // Validate that the values increase.
             if let Some(last_value) = last_value {

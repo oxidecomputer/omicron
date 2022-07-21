@@ -168,6 +168,8 @@ pub fn external_api() -> NexusApiDescription {
         api.register(instance_network_interface_update)?;
         api.register(instance_network_interface_delete)?;
 
+        api.register(instance_external_ip_list)?;
+
         api.register(vpc_router_list)?;
         api.register(vpc_router_view)?;
         api.register(vpc_router_view_by_id)?;
@@ -2542,6 +2544,39 @@ async fn instance_network_interface_update(
             )
             .await?;
         Ok(HttpResponseOk(NetworkInterface::from(interface)))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+// External IP addresses for instances
+
+/// List external IP addresses associated with an instance
+#[endpoint {
+    method = GET,
+    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/external-ips",
+    tags = ["instances"],
+}]
+async fn instance_external_ip_list(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<InstancePathParam>,
+) -> Result<HttpResponseOk<Vec<views::ExternalIp>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
+    let project_name = &path.project_name;
+    let instance_name = &path.instance_name;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let ips = nexus
+            .instance_list_external_ips(
+                &opctx,
+                organization_name,
+                project_name,
+                instance_name,
+            )
+            .await?;
+        Ok(HttpResponseOk(ips))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

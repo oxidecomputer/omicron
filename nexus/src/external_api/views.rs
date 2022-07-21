@@ -6,7 +6,7 @@
 
 use crate::db::identity::{Asset, Resource};
 use crate::db::model;
-use crate::external_api::shared::{self, IpRange};
+use crate::external_api::shared::{self, IpKind, IpRange};
 use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
@@ -16,6 +16,7 @@ use omicron_common::api::external::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::net::IpAddr;
 use std::net::SocketAddrV6;
 use uuid::Uuid;
 
@@ -353,15 +354,18 @@ impl From<model::VpcRouter> for VpcRouter {
     }
 }
 
+// IP POOLS
+
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct IpPool {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
+    pub project_id: Option<Uuid>,
 }
 
 impl From<model::IpPool> for IpPool {
     fn from(pool: model::IpPool) -> Self {
-        Self { identity: pool.identity() }
+        Self { identity: pool.identity(), project_id: pool.project_id }
     }
 }
 
@@ -380,6 +384,15 @@ impl From<model::IpPoolRange> for IpPoolRange {
             range: IpRange::from(&range),
         }
     }
+}
+
+// INSTANCE EXTERNAL IP ADDRESSES
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct ExternalIp {
+    pub ip: IpAddr,
+    pub kind: IpKind,
 }
 
 // RACKS

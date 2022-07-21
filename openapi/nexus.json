@@ -2276,6 +2276,7 @@
           {
             "in": "query",
             "name": "end_time",
+            "description": "An exclusive end time of metrics.",
             "schema": {
               "type": "string",
               "format": "date-time"
@@ -2307,6 +2308,7 @@
           {
             "in": "query",
             "name": "start_time",
+            "description": "An inclusive start time of metrics.",
             "schema": {
               "type": "string",
               "format": "date-time"
@@ -3023,6 +3025,66 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Disk"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/external-ips": {
+      "get": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "List external IP addresses associated with an instance",
+        "operationId": "instance_external_ip_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "organization_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "project_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_ExternalIp",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ExternalIp"
+                  }
                 }
               }
             }
@@ -7661,6 +7723,50 @@
           "request_id"
         ]
       },
+      "ExternalIp": {
+        "type": "object",
+        "properties": {
+          "ip": {
+            "type": "string",
+            "format": "ip"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/IpKind"
+          }
+        },
+        "required": [
+          "ip",
+          "kind"
+        ]
+      },
+      "ExternalIpCreate": {
+        "description": "Parameters for creating an external IP address for instances.",
+        "oneOf": [
+          {
+            "description": "An IP address providing both inbound and outbound access. The address is automatically-assigned from the provided IP Pool, or all available pools if not specified.",
+            "type": "object",
+            "properties": {
+              "pool_name": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Name"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ephemeral"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
       "FieldSchema": {
         "description": "The name and type information for a field of a timeseries schema.",
         "type": "object",
@@ -8360,6 +8466,14 @@
               "$ref": "#/components/schemas/InstanceDiskAttachment"
             }
           },
+          "external_ips": {
+            "description": "The external IP addresses provided to this instance.\n\nBy default, all instances have outbound connectivity, but no inbound connectivity. These external addresses can be used to provide a fixed, known IP address for making inbound connections to the instance.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExternalIpCreate"
+            }
+          },
           "hostname": {
             "type": "string"
           },
@@ -8600,6 +8714,14 @@
           "destroyed"
         ]
       },
+      "IpKind": {
+        "description": "The kind of an external IP address for an instance",
+        "type": "string",
+        "enum": [
+          "ephemeral",
+          "floating"
+        ]
+      },
       "IpNet": {
         "oneOf": [
           {
@@ -8641,6 +8763,11 @@
               }
             ]
           },
+          "project_id": {
+            "nullable": true,
+            "type": "string",
+            "format": "uuid"
+          },
           "time_created": {
             "description": "timestamp when this resource was created",
             "type": "string",
@@ -8668,6 +8795,12 @@
             "type": "string"
           },
           "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "organization": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "project": {
             "$ref": "#/components/schemas/Name"
           }
         },
@@ -8807,7 +8940,7 @@
         "title": "An IPv6 subnet",
         "description": "An IPv6 subnet, including prefix and subnet mask",
         "type": "string",
-        "pattern": "^([fF][dD])[0-9a-fA-F]{2}:(([0-9a-fA-F]{1,4}:){6}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,6}:)\\/(6[4-9]|[7-9][0-9]|1[0-1][0-9]|12[0-6])$"
+        "pattern": "^([fF][dD])[0-9a-fA-F]{2}:(([0-9a-fA-F]{1,4}:){6}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,6}:)\\/([1-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$"
       },
       "Ipv6Range": {
         "description": "A non-decreasing IPv6 address range, inclusive of both ends.\n\nThe first address must be less than or equal to the last address.",
