@@ -310,7 +310,7 @@ mod test {
 
     #[tokio::test]
     async fn test_unregistered_resource() {
-        let logctx = dev::test_setup_log("test_organization");
+        let logctx = dev::test_setup_log("test_unregistered_resource");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) =
             crate::db::datastore::datastore_test(&logctx, &db).await;
