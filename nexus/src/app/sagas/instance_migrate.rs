@@ -178,12 +178,12 @@ async fn sim_instance_migrate(
         .partition(|ip| ip.kind == IpKind::SNat);
 
     // Sanity checks on the number and kind of each IP address.
-    if external_ips.len() > crate::app::MAX_EPHEMERAL_IPS_PER_INSTANCE {
+    if external_ips.len() > crate::app::MAX_EXTERNAL_IPS_PER_INSTANCE {
         return Err(ActionError::action_failed(Error::internal_error(
             format!(
                 "Expected the number of external IPs to be limited to \
-            {}, but found {}",
-                crate::app::MAX_EPHEMERAL_IPS_PER_INSTANCE,
+                {}, but found {}",
+                crate::app::MAX_EXTERNAL_IPS_PER_INSTANCE,
                 external_ips.len(),
             )
             .as_str(),

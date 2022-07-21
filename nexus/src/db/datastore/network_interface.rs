@@ -72,8 +72,6 @@ impl DataStore {
     }
 
     /// Delete all network interfaces attached to the given instance.
-    // NOTE: This is mostly useful in the context of sagas, but might be helpful
-    // in other situations, such as moving an instance between VPC Subnets.
     pub async fn instance_delete_all_network_interfaces(
         &self,
         opctx: &OpContext,

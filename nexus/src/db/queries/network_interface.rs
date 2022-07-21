@@ -505,7 +505,8 @@ impl NextNicSlot {
     pub fn new(instance_id: Uuid) -> Self {
         let generator = DefaultShiftGenerator {
             base: 0,
-            max_shift: i64::from(MAX_NICS_PER_INSTANCE),
+            max_shift: i64::try_from(MAX_NICS_PER_INSTANCE)
+                .expect("Too many network interfaces"),
             min_shift: 0,
         };
         Self { inner: NextItem::new_scoped(generator, instance_id) }
@@ -661,8 +662,7 @@ fn push_ensure_unique_vpc_expression<'a>(
 ///        WHERE
 ///            instance_id = <instance_id> AND
 ///            time_deleted IS NULL AND
-///            subnet_id = <subnet_id> AND
-///            id != <interface_id>
+///            subnet_id = <subnet_id>
 ///     ),
 ///     'non-unique-subnets', -- the literal string "non-unique-subnets",
 ///     '<subnet_id>', -- <subnet_id> as a string,
@@ -673,49 +673,8 @@ fn push_ensure_unique_vpc_expression<'a>(
 /// That is, if the subnet ID provided in the query already exists for an
 /// interface on the target instance, we return the literal string
 /// `'non-unique-subnets'`, which will fail casting to a UUID.
-///
-/// The interface ID check
-/// ----------------------
-///
-/// You'll notice what appears to be an unecessary check on the actual `id`
-/// column, `id != <interface_id>`, in the where clause of the above. This is
-/// unfortunately part of a tradeoff for two situations:
-///
-/// - Re-inserting a network interface as part of retrying a saga action
-/// - The instance's VPC Subnet validation
-///
-/// During a saga replay, we try to insert a NIC with the _exact_ same data,
-/// including the same primary key, as an existing record. This fails,
-/// obviously, but we detect and handle that case specially, since it's only
-/// possible in that one situation.
-///
-/// However, when we do that, we still run the select statement here, even
-/// though this ultimately appears on the "unevaluated" side of a `COALESCE`
-/// statement. I.e.,:
-///
-/// ```sql
-/// SELECT COALESCE(
-///     (subquery run to detect the saga replay),
-///     (subquery run to insert a new NIC)
-/// )
-/// ```
-///
-/// The documentation of the `COALESCE` function clearly indicates that the
-/// second expression will not run if the first evaluates to non-NULL.
-/// Empirically, that's not true. This doesn't appear to be due to `CAST`, since
-/// other queries without that show the same behavior.
-///
-/// This additional, redundant check is to handle the first case, saga replay.
-/// We check that the VPC Subnet for any interfaces _not equal to this one_ are
-/// different. This allows us to do the check on new interfaces, but not fail in
-/// the saga-replay case.
-///
-/// See https://github.com/oxidecomputer/omicron/issues/1166 for more background
-/// on this issue, and https://github.com/cockroachdb/cockroach/issues/82498 for
-/// the related CRDB issue.
 fn push_ensure_unique_vpc_subnet_expression<'a>(
     mut out: AstPass<'_, 'a, Pg>,
-    interface_id: &'a Uuid,
     subnet_id: &'a Uuid,
     subnet_id_str: &'a String,
     instance_id: &'a Uuid,
@@ -734,17 +693,13 @@ fn push_ensure_unique_vpc_subnet_expression<'a>(
     out.push_identifier(dsl::subnet_id::NAME)?;
     out.push_sql(" = ");
     out.push_bind_param::<sql_types::Uuid, Uuid>(subnet_id)?;
-    out.push_sql(" AND ");
-    out.push_identifier(dsl::id::NAME)?;
-    out.push_sql(" != ");
-    out.push_bind_param::<sql_types::Uuid, Uuid>(interface_id)?;
     out.push_sql("), 'non-unique-subnets', ");
     out.push_bind_param::<sql_types::Text, String>(subnet_id_str)?;
     out.push_sql(") AS UUID)");
     Ok(())
 }
 
-/// Push the main instance-validate common-table expression.
+/// Push the main instance-validation common-table expression.
 ///
 /// This generates a CTE that looks like:
 ///
@@ -761,7 +716,6 @@ fn push_ensure_unique_vpc_subnet_expression<'a>(
 #[allow(clippy::too_many_arguments)]
 fn push_instance_validation_cte<'a>(
     mut out: AstPass<'_, 'a, Pg>,
-    interface_id: &'a Uuid,
     vpc_id: &'a Uuid,
     vpc_id_str: &'a String,
     subnet_id: &'a Uuid,
@@ -795,7 +749,6 @@ fn push_instance_validation_cte<'a>(
     out.push_sql(", ");
     push_ensure_unique_vpc_subnet_expression(
         out.reborrow(),
-        interface_id,
         subnet_id,
         subnet_id_str,
         instance_id,
@@ -829,9 +782,9 @@ fn push_instance_validation_cte<'a>(
     Ok(())
 }
 
-/// Subquery used to insert a _new_ `NetworkInterface` from parameters.
+/// Subquery used to insert a new `NetworkInterface` from parameters.
 ///
-/// This function is used to construct a query that allows inserting a
+/// This type is used to construct a query that allows inserting a
 /// `NetworkInterface`, supporting both optionally allocating a new IP address
 /// and verifying that the attached instance's networking is contained within a
 /// single VPC. The general query looks like:
@@ -908,183 +861,6 @@ fn push_instance_validation_cte<'a>(
 /// portion of the query might need to be placed behind a conditional evaluation
 /// expression, such as `IF` or `COALESCE`, which only runs the subquery when
 /// the instance-validation check passes.
-fn push_interface_allocation_subquery<'a>(
-    mut out: AstPass<'_, 'a, Pg>,
-    query: &'a InsertQuery,
-) -> diesel::QueryResult<()> {
-    // Push subqueries that validate the provided instance. This generates a CTE
-    // with the name `validated_instance` and columns:
-    //  - `vpc_id`
-    //  - `subnet_id`
-    //  - `slot`
-    //  - `is_primary`
-    push_instance_validation_cte(
-        out.reborrow(),
-        &query.interface.identity.id,
-        &query.interface.vpc_id,
-        &query.vpc_id_str,
-        &query.interface.subnet.identity.id,
-        &query.subnet_id_str,
-        &query.interface.instance_id,
-        &query.instance_id_str,
-        &query.next_slot_subquery,
-        &query.is_primary_subquery,
-    )?;
-
-    // Push the columns, values and names, that are named directly. These
-    // are known regardless of whether we're allocating an IP address. These
-    // are all written as `SELECT <value1> AS <name1>, <value2> AS <name2>, ...
-    out.push_sql("SELECT ");
-    out.push_bind_param::<sql_types::Uuid, Uuid>(&query.interface.identity.id)?;
-    out.push_sql(" AS ");
-    out.push_identifier(dsl::id::NAME)?;
-    out.push_sql(", ");
-
-    out.push_bind_param::<sql_types::Text, db::model::Name>(
-        &query.interface.identity.name,
-    )?;
-    out.push_sql(" AS ");
-    out.push_identifier(dsl::name::NAME)?;
-    out.push_sql(", ");
-
-    out.push_bind_param::<sql_types::Text, String>(
-        &query.interface.identity.description,
-    )?;
-    out.push_sql(" AS ");
-    out.push_identifier(dsl::description::NAME)?;
-    out.push_sql(", ");
-
-    out.push_bind_param::<sql_types::Timestamptz, DateTime<Utc>>(&query.now)?;
-    out.push_sql(" AS ");
-    out.push_identifier(dsl::time_created::NAME)?;
-    out.push_sql(", ");
-
-    out.push_bind_param::<sql_types::Timestamptz, DateTime<Utc>>(&query.now)?;
-    out.push_sql(" AS ");
-    out.push_identifier(dsl::time_modified::NAME)?;
-    out.push_sql(", ");
-
-    out.push_bind_param::<sql_types::Nullable<sql_types::Timestamptz>, Option<DateTime<Utc>>>(&None)?;
-    out.push_sql(" AS ");
-    out.push_identifier(dsl::time_deleted::NAME)?;
-    out.push_sql(", ");
-
-    out.push_bind_param::<sql_types::Uuid, Uuid>(&query.interface.instance_id)?;
-    out.push_sql(" AS ");
-    out.push_identifier(dsl::instance_id::NAME)?;
-    out.push_sql(", ");
-
-    // Helper function to push a subquery selecting something from the CTE.
-    fn select_from_cte(
-        mut out: AstPass<Pg>,
-        column: &'static str,
-    ) -> diesel::QueryResult<()> {
-        out.push_sql("(SELECT ");
-        out.push_identifier(column)?;
-        out.push_sql(" FROM validated_instance)");
-        Ok(())
-    }
-
-    select_from_cte(out.reborrow(), dsl::vpc_id::NAME)?;
-    out.push_sql(", ");
-    select_from_cte(out.reborrow(), dsl::subnet_id::NAME)?;
-    out.push_sql(", ");
-
-    // Push the subquery for selecting the a MAC address.
-    out.push_sql("(");
-    query.next_mac_subquery.walk_ast(out.reborrow())?;
-    out.push_sql(") AS ");
-    out.push_identifier(dsl::mac::NAME)?;
-    out.push_sql(", ");
-
-    // If the user specified an IP address, then insert it by value. If they
-    // did not, meaning we're allocating the next available one on their
-    // behalf, then insert that subquery here.
-    if let Some(ref ip) = &query.ip_sql {
-        out.push_bind_param::<sql_types::Inet, IpNetwork>(ip)?;
-    } else {
-        out.push_sql("(");
-        query.next_ipv4_address_subquery.walk_ast(out.reborrow())?;
-        out.push_sql(")");
-    }
-    out.push_sql(" AS ");
-    out.push_identifier(dsl::ip::NAME)?;
-    out.push_sql(", ");
-
-    select_from_cte(out.reborrow(), dsl::slot::NAME)?;
-    out.push_sql(", ");
-    select_from_cte(out.reborrow(), dsl::is_primary::NAME)?;
-
-    Ok(())
-}
-
-/// Type used to insert conditionally insert a network interface.
-///
-/// This type implements a query that does one of two things
-///
-/// - Insert a new network interface, performing validation and possibly IP
-/// allocation
-/// - Return an existing interface record, if it has the same primary key.
-///
-/// The first case is implemented in the [`push_interface_allocation_subquery`]
-/// function. See that function's documentation for the details.
-///
-/// The second case is implemented in this type's `walk_ast` method.
-///
-/// Details
-/// -------
-///
-/// The `push_interface_allocation_subquery` performs a number of validations on
-/// the data provided, such as verifying that a requested IP address isn't
-/// already assigned, or ensuring that the instance that will receive this
-/// interface isn't already associated with another VPC.
-///
-/// However, the query is also meant to run during an instance creation saga. In
-/// that case, the guardrails and unique indexes on this table make it
-/// impossible for the query to both be idempotent and also catch these
-/// constraints.
-///
-/// For example, imaging the instance creation saga crashes partway through
-/// allocation a list of NICs. That node of the saga will be replayed during
-/// saga recovery. This will create a record with exactly the same UUID for each
-/// interface, which will ulimately result in a conflicting primary key error
-/// from the database. This is both intentional and integral to the sagas
-/// correct functioning. We catch this error deliberately, assuming that the
-/// uniqueness of 128-bit UUIDs guarantees that the only practical situation
-/// under which this can occur is a saga node replay after a crash.
-///
-/// Query structure
-/// ---------------
-///
-/// This query looks like the following:
-///
-/// ```text
-/// SELECT (candidate).* FROM (SELECT COALESCE(
-///     <existing interface, if it has the same primary key>,
-///     <subquery to insert new interface, with data validation, and return it>
-/// )
-/// ```
-///
-/// That is, we return the exact record that's already in the database, if there
-/// is one, or run the entire validating query otherwise. In the context of
-/// sagas, this is helpful because we generate the UUIDs for the interfaces in a
-/// separate saga node, prior to inserting any interfaces. So if we have a
-/// record with that exact UUID, we assert that it must be the record from the
-/// saga itself. Note that, at this point, we return only the primary key, since
-/// it's sufficiently unlikely that there's an existing key whose other data
-/// does _not_ match the data we wanted to insert in a saga.
-///
-/// The odd syntax in the initial section, `SELECT (candidate).*` is because the
-/// result of the `COALESCE` expression is a tuple. That is CockroachDB's syntax
-/// for expanding a tuple into its constituent columns.
-///
-/// Note that the result of this expression is ultimately inserted into the
-/// `network_interface` table. The way that fails (VPC-validation, IP
-/// exhaustion, primary key violation), is used for either forwarding an error
-/// on to the client (in the case of IP exhaustion, for example), or continuing
-/// with a saga (for PK uniqueness violations). See [`InsertError`] for a
-/// summary of the error conditions and their meaning, and the functions
-/// constructing the subqueries in this type for more details.
 #[derive(Debug, Clone)]
 pub struct InsertQuery {
     interface: IncompleteNetworkInterface,
@@ -1161,58 +937,116 @@ impl QueryFragment<Pg> for InsertQuery {
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
     ) -> diesel::QueryResult<()> {
-        let push_columns =
-            |mut out: AstPass<'_, 'a, Pg>| -> diesel::QueryResult<()> {
-                out.push_identifier(dsl::id::NAME)?;
-                out.push_sql(", ");
-                out.push_identifier(dsl::name::NAME)?;
-                out.push_sql(", ");
-                out.push_identifier(dsl::description::NAME)?;
-                out.push_sql(", ");
-                out.push_identifier(dsl::time_created::NAME)?;
-                out.push_sql(", ");
-                out.push_identifier(dsl::time_modified::NAME)?;
-                out.push_sql(", ");
-                out.push_identifier(dsl::time_deleted::NAME)?;
-                out.push_sql(", ");
-                out.push_identifier(dsl::instance_id::NAME)?;
-                out.push_sql(", ");
-                out.push_identifier(dsl::vpc_id::NAME)?;
-                out.push_sql(", ");
-                out.push_identifier(dsl::subnet_id::NAME)?;
-                out.push_sql(", ");
-                out.push_identifier(dsl::mac::NAME)?;
-                out.push_sql(", ");
-                out.push_identifier(dsl::ip::NAME)?;
-                out.push_sql(", ");
-                out.push_identifier(dsl::slot::NAME)?;
-                out.push_sql(", ");
-                out.push_identifier(dsl::is_primary::NAME)?;
-                Ok(())
-            };
+        // Push subqueries that validate the provided instance. This generates a CTE
+        // with the name `validated_instance` and columns:
+        //  - `vpc_id`
+        //  - `subnet_id`
+        //  - `slot`
+        //  - `is_primary`
+        push_instance_validation_cte(
+            out.reborrow(),
+            &self.interface.vpc_id,
+            &self.vpc_id_str,
+            &self.interface.subnet.identity.id,
+            &self.subnet_id_str,
+            &self.interface.instance_id,
+            &self.instance_id_str,
+            &self.next_slot_subquery,
+            &self.is_primary_subquery,
+        )?;
 
-        out.push_sql("SELECT (candidate).* FROM (SELECT COALESCE((");
-
-        // Add subquery to find exactly the record we might have already
-        // inserted during a saga.
+        // Push the columns, values and names, that are named directly. These
+        // are known regardless of whether we're allocating an IP address. These
+        // are all written as `SELECT <value1> AS <name1>, <value2> AS <name2>, ...
         out.push_sql("SELECT ");
-        push_columns(out.reborrow())?;
-        out.push_sql(" FROM ");
-        NETWORK_INTERFACE_FROM_CLAUSE.walk_ast(out.reborrow())?;
-        out.push_sql(" WHERE ");
-        out.push_identifier(dsl::id::NAME)?;
-        out.push_sql(" = ");
         out.push_bind_param::<sql_types::Uuid, Uuid>(
             &self.interface.identity.id,
         )?;
-        out.push_sql(" AND ");
-        out.push_identifier(dsl::time_deleted::NAME)?;
-        out.push_sql(" IS NULL)");
+        out.push_sql(" AS ");
+        out.push_identifier(dsl::id::NAME)?;
+        out.push_sql(", ");
 
-        // Push the main, data-validating subquery.
-        out.push_sql(", (");
-        push_interface_allocation_subquery(out.reborrow(), &self)?;
-        out.push_sql(")) AS candidate)");
+        out.push_bind_param::<sql_types::Text, db::model::Name>(
+            &self.interface.identity.name,
+        )?;
+        out.push_sql(" AS ");
+        out.push_identifier(dsl::name::NAME)?;
+        out.push_sql(", ");
+
+        out.push_bind_param::<sql_types::Text, String>(
+            &self.interface.identity.description,
+        )?;
+        out.push_sql(" AS ");
+        out.push_identifier(dsl::description::NAME)?;
+        out.push_sql(", ");
+
+        out.push_bind_param::<sql_types::Timestamptz, DateTime<Utc>>(
+            &self.now,
+        )?;
+        out.push_sql(" AS ");
+        out.push_identifier(dsl::time_created::NAME)?;
+        out.push_sql(", ");
+
+        out.push_bind_param::<sql_types::Timestamptz, DateTime<Utc>>(
+            &self.now,
+        )?;
+        out.push_sql(" AS ");
+        out.push_identifier(dsl::time_modified::NAME)?;
+        out.push_sql(", ");
+
+        out.push_bind_param::<sql_types::Nullable<sql_types::Timestamptz>, Option<DateTime<Utc>>>(&None)?;
+        out.push_sql(" AS ");
+        out.push_identifier(dsl::time_deleted::NAME)?;
+        out.push_sql(", ");
+
+        out.push_bind_param::<sql_types::Uuid, Uuid>(
+            &self.interface.instance_id,
+        )?;
+        out.push_sql(" AS ");
+        out.push_identifier(dsl::instance_id::NAME)?;
+        out.push_sql(", ");
+
+        // Helper function to push a subquery selecting something from the CTE.
+        fn select_from_cte(
+            mut out: AstPass<Pg>,
+            column: &'static str,
+        ) -> diesel::QueryResult<()> {
+            out.push_sql("(SELECT ");
+            out.push_identifier(column)?;
+            out.push_sql(" FROM validated_instance)");
+            Ok(())
+        }
+
+        select_from_cte(out.reborrow(), dsl::vpc_id::NAME)?;
+        out.push_sql(", ");
+        select_from_cte(out.reborrow(), dsl::subnet_id::NAME)?;
+        out.push_sql(", ");
+
+        // Push the subquery for selecting the a MAC address.
+        out.push_sql("(");
+        self.next_mac_subquery.walk_ast(out.reborrow())?;
+        out.push_sql(") AS ");
+        out.push_identifier(dsl::mac::NAME)?;
+        out.push_sql(", ");
+
+        // If the user specified an IP address, then insert it by value. If they
+        // did not, meaning we're allocating the next available one on their
+        // behalf, then insert that subquery here.
+        if let Some(ref ip) = &self.ip_sql {
+            out.push_bind_param::<sql_types::Inet, IpNetwork>(ip)?;
+        } else {
+            out.push_sql("(");
+            self.next_ipv4_address_subquery.walk_ast(out.reborrow())?;
+            out.push_sql(")");
+        }
+        out.push_sql(" AS ");
+        out.push_identifier(dsl::ip::NAME)?;
+        out.push_sql(", ");
+
+        select_from_cte(out.reborrow(), dsl::slot::NAME)?;
+        out.push_sql(", ");
+        select_from_cte(out.reborrow(), dsl::is_primary::NAME)?;
+
         Ok(())
     }
 }
@@ -2320,61 +2154,6 @@ mod tests {
         );
     }
 
-    // Test that inserting a record into the database with the same primary key
-    // returns the exact same record.
-    //
-    // This is an explicit test for the first expression within the `COALESCE`
-    // part of the query. That is specifically designed to be executed during
-    // sagas. In that case, we construct the UUIDs of each interface in one
-    // action, and then in the next, create and insert each interface.
-    #[tokio::test]
-    async fn test_insert_with_identical_primary_key() {
-        let context =
-            TestContext::new("test_insert_with_identical_primary_key").await;
-        let instance =
-            context.create_instance(external::InstanceState::Stopped).await;
-        let requested_ip = "172.30.0.5".parse().unwrap();
-        let interface = IncompleteNetworkInterface::new(
-            Uuid::new_v4(),
-            instance.id(),
-            context.net1.vpc_id,
-            context.net1.subnets[0].clone(),
-            IdentityMetadataCreateParams {
-                name: "interface-a".parse().unwrap(),
-                description: String::from("description"),
-            },
-            Some(requested_ip),
-        )
-        .unwrap();
-        let inserted_interface = context
-            .db_datastore
-            .instance_create_network_interface_raw(
-                &context.opctx,
-                interface.clone(),
-            )
-            .await
-            .expect("Failed to insert interface with known-good IP address");
-
-        // Attempt to insert the exact same record again.
-        let result = context
-            .db_datastore
-            .instance_create_network_interface_raw(
-                &context.opctx,
-                interface.clone(),
-            )
-            .await;
-        if let Err(InsertError::DuplicatePrimaryKey(key)) = result {
-            assert_eq!(key, inserted_interface.identity.id);
-        } else {
-            panic!(
-                "Expected a InsertError::DuplicatePrimaryKey \
-                error when inserting the exact same interface, found: {:?}",
-                result,
-            );
-        }
-        context.success().await;
-    }
-
     // Test that we fail to insert an interface if there are no available slots
     // on the instance.
     #[tokio::test]
@@ -2423,8 +2202,8 @@ mod tests {
                 )
                 .await
                 .expect("Should be able to insert up to 8 interfaces");
-            let actual_slot =
-                u32::try_from(inserted_interface.slot).expect("Bad slot index");
+            let actual_slot = usize::try_from(inserted_interface.slot)
+                .expect("Bad slot index");
             assert_eq!(
                 slot, actual_slot,
                 "Failed to allocate next available interface slot"

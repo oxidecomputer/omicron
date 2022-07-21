@@ -385,6 +385,21 @@ async fn test_instances_create_reboot_halt(
         .await
         .unwrap();
 
+    // Check that the network interfaces for that instance are gone, peeking
+    // at the subnet-scoped URL so we don't 404 at the instance-scoped route.
+    let url_interfaces = format!(
+        "/organizations/{}/projects/{}/vpcs/default/subnets/default/network-interfaces",
+        ORGANIZATION_NAME, PROJECT_NAME,
+    );
+    let interfaces =
+        objects_list_page_authz::<NetworkInterface>(client, &url_interfaces)
+            .await
+            .items;
+    assert!(
+        interfaces.is_empty(),
+        "Expected all network interfaces for the instance to be deleted"
+    );
+
     // TODO-coverage re-add tests that check the server-side state after
     // deleting.  We need to figure out how these actually get cleaned up from
     // the API namespace when this happens.
