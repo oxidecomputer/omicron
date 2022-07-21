@@ -30,10 +30,10 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::internal::nexus;
-use sled_agent_client::types::ExternalIp;
 use sled_agent_client::types::InstanceRuntimeStateMigrateParams;
 use sled_agent_client::types::InstanceRuntimeStateRequested;
 use sled_agent_client::types::InstanceStateRequested;
+use sled_agent_client::types::SourceNatConfig;
 use sled_agent_client::Client as SledAgentClient;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -538,6 +538,8 @@ impl super::Nexus {
             .partition(|ip| ip.kind == IpKind::SNat);
 
         // Sanity checks on the number and kind of each IP address.
+        // TODO-correctness: Handle multiple IP addresses, see
+        //  https://github.com/oxidecomputer/omicron/issues/1467
         if external_ips.len() > MAX_EXTERNAL_IPS_PER_INSTANCE {
             return Err(Error::internal_error(
                 format!(
@@ -549,18 +551,15 @@ impl super::Nexus {
                 .as_str(),
             ));
         }
+        let external_ips =
+            external_ips.into_iter().map(|model| model.ip.ip()).collect();
         if snat_ip.len() != 1 {
             return Err(Error::internal_error(
                 "Expected exactly one SNAT IP address for an instance",
             ));
         }
-
-        // For now, we take the Ephemeral IP, if it exists, or the SNAT IP if not.
-        // TODO-correctness: Handle multiple IP addresses, see
-        //  https://github.com/oxidecomputer/omicron/issues/1467
-        let external_ip = ExternalIp::from(
-            external_ips.into_iter().chain(snat_ip).next().unwrap(),
-        );
+        let source_nat =
+            SourceNatConfig::from(snat_ip.into_iter().next().unwrap());
 
         // Gather the SSH public keys of the actor make the request so
         // that they may be injected into the new image via cloud-init.
@@ -600,7 +599,8 @@ impl super::Nexus {
                 db_instance.runtime().clone(),
             ),
             nics,
-            external_ip,
+            source_nat,
+            external_ips,
             disks: disk_reqs,
             cloud_init_bytes: Some(base64::encode(
                 db_instance.generate_cidata(&public_keys)?,

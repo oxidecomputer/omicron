@@ -68,7 +68,7 @@ pub struct InstanceExternalIp {
     pub last_port: SqlU16,
 }
 
-impl From<InstanceExternalIp> for sled_agent_client::types::ExternalIp {
+impl From<InstanceExternalIp> for sled_agent_client::types::SourceNatConfig {
     fn from(eip: InstanceExternalIp) -> Self {
         Self {
             ip: eip.ip.ip(),
