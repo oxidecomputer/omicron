@@ -5,6 +5,8 @@
 //! Virtual Machine Instances
 
 use super::MAX_DISKS_PER_INSTANCE;
+use super::MAX_EXTERNAL_IPS_PER_INSTANCE;
+use super::MAX_NICS_PER_INSTANCE;
 use crate::app::sagas;
 use crate::authn;
 use crate::authz;
@@ -58,6 +60,37 @@ impl super::Nexus {
                 "cannot attach more than {} disks to instance!",
                 MAX_DISKS_PER_INSTANCE
             )));
+        }
+        if params.external_ips.len() > MAX_EXTERNAL_IPS_PER_INSTANCE {
+            return Err(Error::invalid_request(&format!(
+                "An instance may not have more than {} external IP addresses",
+                MAX_EXTERNAL_IPS_PER_INSTANCE,
+            )));
+        }
+        if let params::InstanceNetworkInterfaceAttachment::Create(ref ifaces) =
+            params.network_interfaces
+        {
+            if ifaces.len() > MAX_NICS_PER_INSTANCE {
+                return Err(Error::invalid_request(&format!(
+                    "An instance may not have more than {} network interfaces",
+                    MAX_NICS_PER_INSTANCE,
+                )));
+            }
+            // Check that all VPC names are the same.
+            //
+            // This isn't strictly necessary, as the queries to create these
+            // interfaces would fail in the saga, but it's easier to handle here.
+            if ifaces
+                .iter()
+                .map(|iface| &iface.vpc_name)
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+                != 1
+            {
+                return Err(Error::invalid_request(
+                    "All interfaces must be in the same VPC",
+                ));
+            }
         }
 
         // Reject instances where the memory is not at least
@@ -216,6 +249,9 @@ impl super::Nexus {
 
         self.db_datastore
             .project_delete_instance(opctx, &authz_instance)
+            .await?;
+        self.db_datastore
+            .instance_delete_all_network_interfaces(opctx, &authz_instance)
             .await?;
         // Ignore the count of addresses deleted
         self.db_datastore
@@ -502,12 +538,12 @@ impl super::Nexus {
             .partition(|ip| ip.kind == IpKind::SNat);
 
         // Sanity checks on the number and kind of each IP address.
-        if external_ips.len() > crate::app::MAX_EPHEMERAL_IPS_PER_INSTANCE {
+        if external_ips.len() > MAX_EXTERNAL_IPS_PER_INSTANCE {
             return Err(Error::internal_error(
                 format!(
                     "Expected the number of external IPs to be limited to \
-                {}, but found {}",
-                    crate::app::MAX_EPHEMERAL_IPS_PER_INSTANCE,
+                    {}, but found {}",
+                    MAX_EXTERNAL_IPS_PER_INSTANCE,
                     external_ips.len(),
                 )
                 .as_str(),
