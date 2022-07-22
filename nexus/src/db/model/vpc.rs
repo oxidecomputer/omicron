@@ -2,11 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{Generation, Ipv6Net, Name, VpcFirewallRule};
+use super::{Generation, Ipv6Net, Name, VpcFirewallRule, VpcSubnet};
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::identity::Resource;
 use crate::db::model::Vni;
-use crate::db::schema::{vpc, vpc_firewall_rule};
+use crate::db::schema::{vpc, vpc_firewall_rule, vpc_subnet};
 use crate::defaults;
 use crate::external_api::params;
 use chrono::{DateTime, Utc};
@@ -31,6 +31,9 @@ pub struct Vpc {
     /// firewall generation number, used as a child resource generation number
     /// per RFD 192
     pub firewall_gen: Generation,
+
+    /// VPC Subnet generation number
+    pub subnet_gen: Generation,
 }
 
 impl From<Vpc> for views::Vpc {
@@ -58,6 +61,7 @@ pub struct IncompleteVpc {
     pub ipv6_prefix: IpNetwork,
     pub dns_name: Name,
     pub firewall_gen: Generation,
+    pub subnet_gen: Generation,
 }
 
 impl IncompleteVpc {
@@ -92,6 +96,7 @@ impl IncompleteVpc {
             ipv6_prefix,
             dns_name: params.dns_name.into(),
             firewall_gen: Generation::new(),
+            subnet_gen: Generation::new(),
         })
     }
 }
@@ -101,6 +106,13 @@ impl DatastoreCollection<VpcFirewallRule> for Vpc {
     type GenerationNumberColumn = vpc::dsl::firewall_gen;
     type CollectionTimeDeletedColumn = vpc::dsl::time_deleted;
     type CollectionIdColumn = vpc_firewall_rule::dsl::vpc_id;
+}
+
+impl DatastoreCollection<VpcSubnet> for Vpc {
+    type CollectionId = Uuid;
+    type GenerationNumberColumn = vpc::dsl::subnet_gen;
+    type CollectionTimeDeletedColumn = vpc::dsl::time_deleted;
+    type CollectionIdColumn = vpc_subnet::dsl::vpc_id;
 }
 
 #[derive(AsChangeset)]

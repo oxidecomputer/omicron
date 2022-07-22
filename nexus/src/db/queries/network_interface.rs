@@ -1485,8 +1485,11 @@ mod tests {
     use crate::db::model::VpcSubnet;
     use crate::external_api::params::InstanceCreate;
     use crate::external_api::params::InstanceNetworkInterfaceAttachment;
+    use async_bb8_diesel::AsyncRunQueryDsl;
     use chrono::Utc;
     use dropshot::test_util::LogContext;
+    use ipnetwork::Ipv4Network;
+    use ipnetwork::Ipv6Network;
     use nexus_test_utils::db::test_setup_database;
     use omicron_common::api::external;
     use omicron_common::api::external::ByteCount;
@@ -1502,6 +1505,8 @@ mod tests {
     use omicron_test_utils::dev::db::CockroachInstance;
     use std::convert::TryInto;
     use std::net::IpAddr;
+    use std::net::Ipv4Addr;
+    use std::net::Ipv6Addr;
     use std::sync::Arc;
     use uuid::Uuid;
 
@@ -1579,48 +1584,61 @@ mod tests {
         instance
     }
 
-    // VPC with two VPC Subnets, for testing behavior of NIC queries.
+    // VPC with several distinct subnets.
     struct Network {
         vpc_id: Uuid,
-        subnets: [VpcSubnet; 2],
+        subnets: Vec<VpcSubnet>,
     }
 
     impl Network {
-        // Create a VPC with two distinct VPC Subnets.
-        fn new() -> Self {
+        // Create a VPC with N distinct VPC Subnets.
+        fn new(n_subnets: u8) -> Self {
             let vpc_id = Uuid::new_v4();
-            let subnet1 = VpcSubnet::new(
-                Uuid::new_v4(),
-                vpc_id,
-                IdentityMetadataCreateParams {
-                    name: String::from("first-subnet").try_into().unwrap(),
-                    description: String::from("first test subnet"),
-                },
-                Ipv4Net("172.30.0.0/28".parse().unwrap()),
-                Ipv6Net("fd12:3456:7890::/64".parse().unwrap()),
-            );
-            let subnet2 = VpcSubnet::new(
-                Uuid::new_v4(),
-                vpc_id,
-                IdentityMetadataCreateParams {
-                    name: String::from("second-subnet").try_into().unwrap(),
-                    description: String::from("second test subnet"),
-                },
-                Ipv4Net("172.31.0.0/28".parse().unwrap()),
-                Ipv6Net("fd12:3456:7891::/64".parse().unwrap()),
-            );
-            Self { vpc_id, subnets: [subnet1, subnet2] }
+            let mut subnets = Vec::with_capacity(n_subnets as _);
+            for i in 0..n_subnets {
+                let ipv4net = Ipv4Net(
+                    Ipv4Network::new(Ipv4Addr::new(172, 30, 0, i), 28).unwrap(),
+                );
+                let ipv6net = Ipv6Net(
+                    Ipv6Network::new(
+                        Ipv6Addr::new(
+                            0xfd12,
+                            0x3456,
+                            0x7890,
+                            i.into(),
+                            0,
+                            0,
+                            0,
+                            0,
+                        ),
+                        64,
+                    )
+                    .unwrap(),
+                );
+                let subnet = VpcSubnet::new(
+                    Uuid::new_v4(),
+                    vpc_id,
+                    IdentityMetadataCreateParams {
+                        name: format!("subnet-{i}").try_into().unwrap(),
+                        description: String::from("first test subnet"),
+                    },
+                    ipv4net,
+                    ipv6net,
+                );
+                subnets.push(subnet);
+            }
+            Self { vpc_id, subnets }
         }
 
-        fn available_ipv4_addresses(&self) -> [usize; 2] {
-            [
-                self.subnets[0].ipv4_block.size() as usize
-                    - crate::defaults::NUM_INITIAL_RESERVED_IP_ADDRESSES
-                    - 1,
-                self.subnets[1].ipv4_block.size() as usize
-                    - crate::defaults::NUM_INITIAL_RESERVED_IP_ADDRESSES
-                    - 1,
-            ]
+        fn available_ipv4_addresses(&self) -> Vec<usize> {
+            self.subnets
+                .iter()
+                .map(|subnet| {
+                    subnet.ipv4_block.size() as usize
+                        - crate::defaults::NUM_INITIAL_RESERVED_IP_ADDRESSES
+                        - 1
+                })
+                .collect()
         }
     }
 
@@ -1635,7 +1653,7 @@ mod tests {
     }
 
     impl TestContext {
-        async fn new(test_name: &str) -> Self {
+        async fn new(test_name: &str, n_subnets: u8) -> Self {
             let logctx = dev::test_setup_log(test_name);
             let log = logctx.log.new(o!());
             let db = test_setup_database(&log).await;
@@ -1645,14 +1663,19 @@ mod tests {
                 Arc::new(crate::db::DataStore::new(Arc::clone(&pool)));
             let opctx =
                 OpContext::for_tests(log.new(o!()), db_datastore.clone());
-            Self {
-                logctx,
-                opctx,
-                db,
-                db_datastore,
-                net1: Network::new(),
-                net2: Network::new(),
+
+            use crate::db::schema::vpc_subnet::dsl::vpc_subnet;
+            let p = db_datastore.pool_authorized(&opctx).await.unwrap();
+            let net1 = Network::new(n_subnets);
+            let net2 = Network::new(n_subnets);
+            for subnet in net1.subnets.iter().chain(net2.subnets.iter()) {
+                diesel::insert_into(vpc_subnet)
+                    .values(subnet.clone())
+                    .execute_async(p)
+                    .await
+                    .unwrap();
             }
+            Self { logctx, opctx, db, db_datastore, net1, net2 }
         }
 
         async fn success(mut self) {
@@ -1676,7 +1699,7 @@ mod tests {
     #[tokio::test]
     async fn test_insert_running_instance_fails() {
         let context =
-            TestContext::new("test_insert_running_instance_fails").await;
+            TestContext::new("test_insert_running_instance_fails", 2).await;
         let instance =
             context.create_instance(external::InstanceState::Running).await;
         let instance_id = instance.id();
@@ -1707,7 +1730,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_insert_request_exact_ip() {
-        let context = TestContext::new("test_insert_request_exact_ip").await;
+        let context = TestContext::new("test_insert_request_exact_ip", 2).await;
         let instance =
             context.create_instance(external::InstanceState::Stopped).await;
         let instance_id = instance.id();
@@ -1743,7 +1766,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_insert_no_instance_fails() {
-        let context = TestContext::new("test_insert_no_instance_fails").await;
+        let context =
+            TestContext::new("test_insert_no_instance_fails", 2).await;
         let interface = IncompleteNetworkInterface::new(
             Uuid::new_v4(),
             Uuid::new_v4(),
@@ -1774,7 +1798,7 @@ mod tests {
     #[tokio::test]
     async fn test_insert_sequential_ip_allocation() {
         let context =
-            TestContext::new("test_insert_sequential_ip_allocation").await;
+            TestContext::new("test_insert_sequential_ip_allocation", 2).await;
         let addresses = context.net1.subnets[0]
             .ipv4_block
             .iter()
@@ -1816,7 +1840,7 @@ mod tests {
     #[tokio::test]
     async fn test_insert_request_same_ip_fails() {
         let context =
-            TestContext::new("test_insert_request_same_ip_fails").await;
+            TestContext::new("test_insert_request_same_ip_fails", 2).await;
 
         let instance =
             context.create_instance(external::InstanceState::Stopped).await;
@@ -1870,7 +1894,7 @@ mod tests {
     #[tokio::test]
     async fn test_insert_with_duplicate_name_fails() {
         let context =
-            TestContext::new("test_insert_with_duplicate_name_fails").await;
+            TestContext::new("test_insert_with_duplicate_name_fails", 2).await;
         let instance =
             context.create_instance(external::InstanceState::Stopped).await;
         let interface = IncompleteNetworkInterface::new(
@@ -1922,7 +1946,7 @@ mod tests {
     #[tokio::test]
     async fn test_insert_same_vpc_subnet_fails() {
         let context =
-            TestContext::new("test_insert_same_vpc_subnet_fails").await;
+            TestContext::new("test_insert_same_vpc_subnet_fails", 2).await;
         let instance =
             context.create_instance(external::InstanceState::Stopped).await;
         let interface = IncompleteNetworkInterface::new(
@@ -1967,7 +1991,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_insert_multiple_vpcs_fails() {
-        let context = TestContext::new("test_insert_multiple_vpcs_fails").await;
+        let context =
+            TestContext::new("test_insert_multiple_vpcs_fails", 2).await;
         let instance =
             context.create_instance(external::InstanceState::Stopped).await;
         let interface = IncompleteNetworkInterface::new(
@@ -2021,7 +2046,7 @@ mod tests {
     // hitting the per-instance limit of NICs.
     #[tokio::test]
     async fn test_detect_ip_exhaustion() {
-        let context = TestContext::new("test_detect_ip_exhaustion").await;
+        let context = TestContext::new("test_detect_ip_exhaustion", 2).await;
         let n_interfaces = context.net1.available_ipv4_addresses()[0];
         for _ in 0..n_interfaces {
             let instance =
@@ -2078,7 +2103,8 @@ mod tests {
     #[tokio::test]
     async fn test_insert_multiple_vpc_subnets_succeeds() {
         let context =
-            TestContext::new("test_insert_multiple_vpc_subnets_succeeds").await;
+            TestContext::new("test_insert_multiple_vpc_subnets_succeeds", 2)
+                .await;
         let instance =
             context.create_instance(external::InstanceState::Stopped).await;
         for (i, subnet) in context.net1.subnets.iter().enumerate() {
@@ -2135,28 +2161,13 @@ mod tests {
     async fn test_limit_number_of_interfaces_per_instance_query() {
         let context = TestContext::new(
             "test_limit_number_of_interfaces_per_instance_query",
+            MAX_NICS_PER_INSTANCE as u8 + 1,
         )
         .await;
         let instance =
             context.create_instance(external::InstanceState::Stopped).await;
         for slot in 0..MAX_NICS_PER_INSTANCE {
-            // Each NIC must be in a different VPC Subnet.
-            //
-            // Note that this subnet is completely fictitious and nonsensical.
-            // It doesn't actually exist in the database, since that would
-            // violate the name-uniqueness and IP subnet-overlap checks.
-            let subnet = VpcSubnet::new(
-                Uuid::new_v4(),
-                context.net1.vpc_id,
-                IdentityMetadataCreateParams {
-                    name: context.net1.subnets[0].name().clone(),
-                    description: context.net1.subnets[0]
-                        .description()
-                        .to_string(),
-                },
-                *context.net1.subnets[0].ipv4_block,
-                *context.net1.subnets[0].ipv6_block,
-            );
+            let subnet = &context.net1.subnets[slot];
             let interface = IncompleteNetworkInterface::new(
                 Uuid::new_v4(),
                 instance.id(),
@@ -2194,21 +2205,11 @@ mod tests {
         }
 
         // The next one should fail
-        let subnet = VpcSubnet::new(
-            Uuid::new_v4(),
-            context.net1.vpc_id,
-            IdentityMetadataCreateParams {
-                name: context.net1.subnets[0].name().clone(),
-                description: context.net1.subnets[0].description().to_string(),
-            },
-            *context.net1.subnets[0].ipv4_block,
-            *context.net1.subnets[0].ipv6_block,
-        );
         let interface = IncompleteNetworkInterface::new(
             Uuid::new_v4(),
             instance.id(),
             context.net1.vpc_id,
-            subnet,
+            context.net1.subnets.last().unwrap().clone(),
             IdentityMetadataCreateParams {
                 name: "interface-8".parse().unwrap(),
                 description: String::from("description"),

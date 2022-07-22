@@ -261,10 +261,22 @@ impl super::Nexus {
             LookupType::ById(db_vpc.system_router_id),
         );
 
+        // Possibly delete the VPC, then the router and firewall.
+        //
+        // We must delete the VPC first. This will fail if the VPC still
+        // contains at least one subnet, since those are independent containers
+        // that track network interfaces as child resources. If we delete the
+        // router first, it'll succeed even if the VPC contains Subnets, which
+        // means the router is now gone from an otherwise-live subnet.
+        //
+        // This is a good example of need for the original comment:
+        //
         // TODO: This should eventually use a saga to call the
         // networking subsystem to have it clean up the networking resources
+        self.db_datastore
+            .project_delete_vpc(opctx, &db_vpc, &authz_vpc)
+            .await?;
         self.db_datastore.vpc_delete_router(&opctx, &authz_vpc_router).await?;
-        self.db_datastore.project_delete_vpc(opctx, &authz_vpc).await?;
 
         // Delete all firewall rules after deleting the VPC, to ensure no
         // firewall rules get added between rules deletion and VPC deletion.

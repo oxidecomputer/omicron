@@ -2537,12 +2537,13 @@ async fn instances_list(
 }
 
 /// Convenience function for starting, stopping, or rebooting an instance.
-enum InstanceOp {
+pub enum InstanceOp {
     Start,
     Stop,
     Reboot,
 }
-async fn instance_post(
+
+pub async fn instance_post(
     client: &ClientTestContext,
     instance_url: &str,
     which: InstanceOp,
@@ -2590,7 +2591,7 @@ fn instances_eq(instance1: &Instance, instance2: &Instance) {
 /// have to look up the instance, then get the sled agent associated with that
 /// instance, and then tell it to finish simulating whatever async transition is
 /// going on.
-async fn instance_simulate(nexus: &Arc<Nexus>, id: &Uuid) {
+pub async fn instance_simulate(nexus: &Arc<Nexus>, id: &Uuid) {
     let sa = nexus.instance_sled_by_id(id).await.unwrap();
     sa.instance_finish_transition(id.clone()).await;
 }

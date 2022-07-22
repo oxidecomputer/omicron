@@ -134,7 +134,15 @@ async fn test_vpc_firewall(cptestctx: &ControlPlaneTestContext) {
     .await
     .unwrap();
 
-    // Delete a VPC and ensure we can't read its firewall anymore
+    // Delete a VPC Subnet / VPC and ensure we can't read its firewall anymore
+    NexusRequest::object_delete(
+        client,
+        format!("{}/{}/subnets/default", vpcs_url, other_vpc).as_str(),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
     NexusRequest::object_delete(
         client,
         format!("{}/{}", vpcs_url, other_vpc).as_str(),

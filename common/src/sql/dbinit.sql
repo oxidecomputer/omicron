@@ -721,7 +721,10 @@ CREATE TABLE omicron.public.vpc (
 
     /* Used to ensure that two requests do not concurrently modify the
        VPC's firewall */
-    firewall_gen INT NOT NULL
+    firewall_gen INT NOT NULL,
+
+    /* Child-resource generation number for VPC Subnets. */
+    subnet_gen INT8 NOT NULL
 );
 
 CREATE UNIQUE INDEX ON omicron.public.vpc (
@@ -745,6 +748,8 @@ CREATE TABLE omicron.public.vpc_subnet (
     /* Indicates that the object has been deleted */
     time_deleted TIMESTAMPTZ,
     vpc_id UUID NOT NULL,
+    /* Child resource creation generation number */
+    rcgen INT8 NOT NULL,
     ipv4_block INET NOT NULL,
     ipv6_block INET NOT NULL
 );
