@@ -33,6 +33,7 @@ members = [
     "oximeter-client",
     "test-utils",
     "wicket",
+    "end-to-end-tests",
 ]
 
 default-members = [

@@ -12,6 +12,9 @@
 #: [dependencies.package]
 #: job = "helios / package"
 #:
+#: [dependencies.build-end-to-end-tests]
+#: job = "helios / build-end-to-end-tests"
+#:
 
 set -o errexit
 set -o pipefail
@@ -106,7 +109,28 @@ pfexec chown build:build /opt/oxide/work
 cd /opt/oxide/work
 
 ptime -m tar xvzf /input/package/work/package.tar.gz
+mkdir tests
+for p in /input/build-end-to-end-tests/work/*.gz; do
+	ptime -m gunzip < "$p" > "tests/$(basename "${p%.gz}")"
+	chmod a+x "tests/$(basename "${p%.gz}")"
+done
+
 ptime -m pfexec ./tools/create_virtual_hardware.sh
+
+#
+# Image-related tests use images served by catacomb. The lab network is
+# IPv4-only; the propolis zones are IPv6-only. These steps set up tcpproxy
+# configured to proxy to catacomb via port 54321 in the global zone.
+#
+pfexec mkdir -p /usr/oxide
+pfexec rm -f /usr/oxide/tcpproxy
+pfexec curl -sSfL -o /usr/oxide/tcpproxy \
+	http://catacomb.eng.oxide.computer:12346/tcpproxy
+pfexec chmod +x /usr/oxide/tcpproxy
+pfexec rm -f /var/svc/manifest/site/tcpproxy.xml
+pfexec curl -sSfL -o /var/svc/manifest/site/tcpproxy.xml \
+	http://catacomb.eng.oxide.computer:12346/tcpproxy.xml
+pfexec svccfg import /var/svc/manifest/site/tcpproxy.xml
 
 #
 # XXX Right now, the Nexus external API is available on a specific IPv4 address
@@ -129,27 +153,8 @@ pfexec ipadm create-addr -T static -a 192.168.1.199/24 igb0/sidehatch
 OMICRON_NO_UNINSTALL=1 \
     ptime -m pfexec ./target/release/omicron-package install
 
-# Wait up to 5 minutes for RSS to say it's done
-for _i in {1..30}; do
-	sleep 10
-	grep "Finished setting up services" "$(svcs -L sled-agent)" && break
+./tests/bootstrap
+rm ./tests/bootstrap
+for test_bin in tests/*; do
+	./"$test_bin"
 done
-
-set +o xtrace
-
-start=$SECONDS
-while :; do
-	if (( SECONDS - start > 60 )); then
-		printf 'FAILURE: NEXUS DID NOT BECOME AVAILABLE\n' >&2
-		exit 1
-	fi
-
-	if curl --max-time 1 --fail-with-body -i http://192.168.1.20/spoof_login; then
-		printf 'ok; nexus became available!\n'
-		break
-	fi
-done
-
-#
-# XXX add tests here!
-#
