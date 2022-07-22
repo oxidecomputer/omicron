@@ -85,9 +85,6 @@ pub enum InsertError {
     NoAvailableIpAddresses,
     /// An explicitly-requested IP address is already in use
     IpAddressNotAvailable(std::net::IpAddr),
-    /// A primary key violation, which is intentionally caused in some cases
-    /// during instance creation sagas.
-    DuplicatePrimaryKey(Uuid),
     /// There are no slots available on the instance
     NoSlotsAvailable,
     /// There are no MAC addresses available
@@ -150,14 +147,6 @@ impl InsertError {
                     "The IP address '{}' is not available",
                     ip
                 ))
-            }
-            InsertError::DuplicatePrimaryKey(id) => {
-                external::Error::InternalError {
-                    internal_message: format!(
-                        "Found duplicate primary key '{}' when inserting network interface",
-                        id
-                    ),
-                }
             }
             InsertError::NoSlotsAvailable => {
                 external::Error::invalid_request(&format!(
@@ -229,15 +218,6 @@ fn decode_database_error(
     // same instance.
     const NAME_CONFLICT_CONSTRAINT: &str =
         "network_interface_instance_id_name_key";
-
-    // The primary key constraint. This is intended only to be caught, and
-    // usually ignored, in sagas. UUIDs are allocated in one node of the saga,
-    // and then the NICs in a following node. In that case, primary key
-    // conflicts would be expected, if we're recovering from a crash during that
-    // node and replaying it, without first having unwound the whole saga. This
-    // should _only_ be ignored in that case. In any other circumstance, this
-    // should likely be converted to a 500-level server error
-    const PRIMARY_KEY_CONSTRAINT: &str = "primary";
 
     // The check  violated in the case where we try to insert more that the
     // maximum number of NICs (`MAX_NICS_PER_INSTANCE`).
@@ -348,11 +328,6 @@ fn decode_database_error(
                         interface.identity.name.as_str(),
                     ),
                 ))
-            }
-
-            // Primary key constraint violation. See notes above.
-            Some(constraint) if constraint == PRIMARY_KEY_CONSTRAINT => {
-                InsertError::DuplicatePrimaryKey(interface.identity.id)
             }
 
             // Any other constraint violation is a bug

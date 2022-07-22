@@ -1572,7 +1572,9 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
     );
     let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
-    // Create two interfaces, with the same IP addresses.
+    // Create two interfaces, in the same VPC Subnet. This will trigger an
+    // error on creation of the second NIC, and we'll make sure that both are
+    // deleted.
     let default_name = "default".parse::<Name>().unwrap();
     let if0_params = params::NetworkInterfaceCreate {
         identity: IdentityMetadataCreateParams {
@@ -1590,7 +1592,7 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
         },
         vpc_name: default_name.clone(),
         subnet_name: default_name.clone(),
-        ip: Some("172.30.0.6".parse().unwrap()),
+        ip: Some("172.30.0.7".parse().unwrap()),
     };
     let interface_params =
         params::InstanceNetworkInterfaceAttachment::Create(vec![

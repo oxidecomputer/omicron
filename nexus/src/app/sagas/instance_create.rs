@@ -112,6 +112,12 @@ fn saga_instance_create() -> SagaTemplate<SagaInstanceCreate> {
     // always unwind after failures.
     for i in 0..MAX_NICS_PER_INSTANCE {
         template_builder.append(
+            format!("network_interface_id{i}").as_str(),
+            "CreateNetworkInterfaceId",
+            new_action_noop_undo(saga_generate_uuid),
+        );
+
+        template_builder.append(
             format!("network_interface{i}").as_str(),
             "CreateNetworkInterface",
             ActionFunc::new_action(
@@ -127,6 +133,11 @@ fn saga_instance_create() -> SagaTemplate<SagaInstanceCreate> {
 
     // Allocate an external IP address for the default outbound connectivity
     template_builder.append(
+        "snat_ip_id",
+        "CreateSnatIpId",
+        new_action_noop_undo(saga_generate_uuid),
+    );
+    template_builder.append(
         "snat_ip",
         "CreateSnatIp",
         ActionFunc::new_action(
@@ -140,8 +151,14 @@ fn saga_instance_create() -> SagaTemplate<SagaInstanceCreate> {
     // unwind after failures.
     for i in 0..MAX_EXTERNAL_IPS_PER_INSTANCE {
         template_builder.append(
+            format!("external_ip_id{i}").as_str(),
+            "CreateExternalIpId",
+            new_action_noop_undo(saga_generate_uuid),
+        );
+
+        template_builder.append(
             format!("external_ip{i}").as_str(),
-            "CreateEphemeralIp",
+            "CreateExternalIp",
             ActionFunc::new_action(
                 async move |sagactx| {
                     sic_allocate_instance_external_ip(sagactx, i).await
@@ -218,15 +235,15 @@ async fn sic_alloc_server(
 }
 
 /// Create a network interface for an instance, using the parameters at index
-/// `iface_index`, returning the UUID for the NIC (or None).
+/// `nic_index`, returning the UUID for the NIC (or None).
 async fn sic_create_network_interface(
     sagactx: ActionContext<SagaInstanceCreate>,
     nic_index: usize,
-) -> Result<Option<Uuid>, ActionError> {
+) -> Result<(), ActionError> {
     let saga_params = sagactx.saga_params();
     let interface_params = &saga_params.create_params.network_interfaces;
     match interface_params {
-        params::InstanceNetworkInterfaceAttachment::None => Ok(None),
+        params::InstanceNetworkInterfaceAttachment::None => Ok(()),
         params::InstanceNetworkInterfaceAttachment::Default => {
             sic_create_default_primary_network_interface(&sagactx, nic_index)
                 .await
@@ -234,9 +251,10 @@ async fn sic_create_network_interface(
         params::InstanceNetworkInterfaceAttachment::Create(
             ref create_params,
         ) => match create_params.get(nic_index) {
-            None => Ok(None),
+            None => Ok(()),
             Some(ref prs) => {
-                sic_create_custom_network_interface(&sagactx, prs).await
+                sic_create_custom_network_interface(&sagactx, nic_index, prs)
+                    .await
             }
         },
     }
@@ -245,7 +263,7 @@ async fn sic_create_network_interface(
 /// Delete one network interface, by index.
 async fn sic_create_network_interface_undo(
     sagactx: ActionContext<SagaInstanceCreate>,
-    iface_index: usize,
+    nic_index: usize,
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
@@ -253,7 +271,7 @@ async fn sic_create_network_interface_undo(
     let opctx =
         OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
     let interface_id = sagactx.lookup::<Option<Uuid>>(
-        format!("network_interface{iface_index}").as_str(),
+        format!("network_interface_id{nic_index}").as_str(),
     )?;
     match interface_id {
         None => Ok(()),
@@ -264,20 +282,38 @@ async fn sic_create_network_interface_undo(
                 .lookup_for(authz::Action::Modify)
                 .await
                 .map_err(ActionError::action_failed)?;
-            let (.., authz_interface) = LookupPath::new(&opctx, &datastore)
+            match LookupPath::new(&opctx, &datastore)
                 .network_interface_id(id)
                 .lookup_for(authz::Action::Delete)
                 .await
-                .map_err(ActionError::action_failed)?;
-            datastore
-                .instance_delete_network_interface(
-                    &opctx,
-                    &authz_instance,
-                    &authz_interface,
-                )
-                .await
-                .map_err(|e| e.into_external())?;
-            Ok(())
+            {
+                Ok((.., authz_interface)) => {
+                    datastore
+                        .instance_delete_network_interface(
+                            &opctx,
+                            &authz_instance,
+                            &authz_interface,
+                        )
+                        .await
+                        .map_err(|e| e.into_external())?;
+                    Ok(())
+                }
+                Err(Error::ObjectNotFound { .. }) => {
+                    // The saga is attempting to delete the NIC by the ID cached
+                    // in the saga log. If we're running this, the NIC already
+                    // appears to be gone, which is odd, but not exactly an
+                    // error. Swallowing the error allows the saga to continue,
+                    // but this is another place we might want to consider
+                    // bumping a counter or otherwise tracking things.
+                    warn!(
+                        osagactx.log(),
+                        "During saga unwind, NIC already appears deleted";
+                        "interface_id" => %id,
+                    );
+                    Ok(())
+                }
+                Err(e) => Err(e.into()),
+            }
         }
     }
 }
@@ -285,15 +321,22 @@ async fn sic_create_network_interface_undo(
 /// Create one custom (non-default) network interfaces for the provided instance.
 async fn sic_create_custom_network_interface(
     sagactx: &ActionContext<SagaInstanceCreate>,
+    nic_index: usize,
     interface_params: &params::NetworkInterfaceCreate,
-) -> Result<Option<Uuid>, ActionError> {
+) -> Result<(), ActionError> {
+    let interface_id = match sagactx.lookup::<Option<Uuid>>(
+        format!("network_interface_id{nic_index}").as_str(),
+    )? {
+        None => return Ok(()),
+        Some(id) => id,
+    };
+
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
     let saga_params = sagactx.saga_params();
     let opctx =
         OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
-    let interface_id = Uuid::new_v4();
 
     // Lookup authz objects, used in the call to create the NIC itself.
     let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
@@ -339,7 +382,7 @@ async fn sic_create_custom_network_interface(
         )
         .await
         .map_err(|e| ActionError::action_failed(e.into_external()))?;
-    Ok(Some(interface_id))
+    Ok(())
 }
 
 /// Create a default primary network interface for an instance during the create
@@ -347,14 +390,19 @@ async fn sic_create_custom_network_interface(
 async fn sic_create_default_primary_network_interface(
     sagactx: &ActionContext<SagaInstanceCreate>,
     nic_index: usize,
-) -> Result<Option<Uuid>, ActionError> {
+) -> Result<(), ActionError> {
     // We're statically creating up to MAX_NICS_PER_INSTANCE saga nodes, but
     // this method only applies to the case where there's exactly one parameter
     // of type `InstanceNetworkInterfaceAttachment::Default`, so ignore any
     // later calls.
     if nic_index > 0 {
-        return Ok(None);
+        return Ok(());
     }
+    let interface_id =
+        match sagactx.lookup::<Option<Uuid>>("network_interface_id0")? {
+            None => return Ok(()),
+            Some(id) => id,
+        };
 
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
@@ -402,7 +450,6 @@ async fn sic_create_default_primary_network_interface(
             .await
             .map_err(ActionError::action_failed)?;
 
-    let interface_id = Uuid::new_v4();
     let interface = db::model::IncompleteNetworkInterface::new(
         interface_id,
         instance_id,
@@ -422,7 +469,7 @@ async fn sic_create_default_primary_network_interface(
         .await
         .map_err(InsertNicError::into_external)
         .map_err(ActionError::action_failed)?;
-    Ok(Some(interface_id))
+    Ok(())
 }
 
 /// Create an external IP address for instance source NAT.
