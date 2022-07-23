@@ -89,7 +89,10 @@ pub trait ApiResourceWithRoles: ApiResource {
 pub trait ApiResourceWithRolesType: ApiResourceWithRoles {
     type AllowedRoles: serde::Serialize
         + serde::de::DeserializeOwned
-        + db::model::DatabaseString;
+        + db::model::DatabaseString
+        + Clone
+        + Send
+        + Sync;
 }
 
 impl<T: ApiResource + oso::ToPolar + Clone> AuthorizedResource for T {

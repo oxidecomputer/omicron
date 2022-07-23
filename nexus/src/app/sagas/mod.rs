@@ -24,7 +24,6 @@ pub mod disk_create;
 pub mod disk_delete;
 pub mod instance_create;
 pub mod instance_migrate;
-pub mod silo_create;
 
 // We'll need a richer mechanism for registering sagas, but this works for now.
 lazy_static! {

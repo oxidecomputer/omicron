@@ -10,6 +10,7 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
+use crate::db::error::TransactionError;
 use crate::db::fixed_data::role_assignment::BUILTIN_ROLE_ASSIGNMENTS;
 use crate::db::fixed_data::role_builtin::BUILTIN_ROLES;
 use crate::db::model::DatabaseString;
@@ -21,6 +22,7 @@ use crate::external_api::shared;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
+use diesel_dtrace::DTraceConnection;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
@@ -233,6 +235,37 @@ impl DataStore {
         // TODO-security We should carefully review what permissions are
         // required for modifying the policy of a resource.
         opctx.authorize(authz::Action::ModifyPolicy, authz_resource).await?;
+        let authz_resource = authz_resource.clone();
+        let new_assignments = new_assignments.to_vec();
+        self.pool_authorized(opctx)
+            .await?
+            .transaction(move |conn| {
+                DataStore::role_assignment_do_replace_visible(
+                    &authz_resource,
+                    &new_assignments,
+                    conn,
+                )
+            })
+            .await
+            .map_err(|e| match e {
+                TransactionError::CustomError(e) => e,
+                TransactionError::Pool(e) => {
+                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                }
+            })
+    }
+
+    // XXX must be called inside a transaction, not just for correctness, but
+    // because otherwise these will be sync!
+    // XXX authz has to happen in the caller
+    pub(super) fn role_assignment_do_replace_visible<T>(
+        authz_resource: &T,
+        new_assignments: &[shared::RoleAssignment<T::AllowedRoles>],
+        conn: &mut DTraceConnection<PgConnection>,
+    ) -> Result<Vec<db::model::RoleAssignment>, TransactionError<Error>>
+    where
+        T: authz::ApiResourceWithRolesType + Clone,
+    {
         bail_unless!(
             new_assignments.len() <= shared::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE
         );
@@ -277,13 +310,7 @@ impl DataStore {
         // We might instead want to first-class the idea of Policies in the
         // database so that we can build up a whole new Policy in batches and
         // then flip the resource over to using it.
-        self.pool_authorized(opctx)
-            .await?
-            .transaction(move |conn| {
-                delete_old_query.execute(conn)?;
-                Ok(insert_new_query.get_results(conn)?)
-            })
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+        delete_old_query.execute(conn)?;
+        Ok(insert_new_query.get_results(conn)?)
     }
 }

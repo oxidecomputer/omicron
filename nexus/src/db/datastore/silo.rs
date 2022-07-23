@@ -9,13 +9,19 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::error::diesel_pool_result_optional;
+use crate::db::error::public_error_from_diesel_create;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
+use crate::db::error::TransactionError;
 use crate::db::fixed_data::silo::DEFAULT_SILO;
+use crate::db::identity::Asset;
 use crate::db::identity::Resource;
 use crate::db::model::Name;
 use crate::db::model::Silo;
 use crate::db::pagination::paginated;
+use crate::external_api::params;
+use crate::external_api::shared;
+use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
@@ -24,6 +30,7 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
+use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use uuid::Uuid;
 
@@ -54,26 +61,70 @@ impl DataStore {
     pub async fn silo_create(
         &self,
         opctx: &OpContext,
-        silo: Silo,
+        silo_params: params::SiloCreate,
     ) -> CreateResult<Silo> {
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
 
-        let silo_id = silo.id();
+        let silo_id = Uuid::new_v4();
+        let admin_group_name = silo_params.admin_group_name.clone();
+        let silo = db::model::Silo::new_with_id(silo_id, silo_params);
 
-        use db::schema::silo::dsl;
-        diesel::insert_into(dsl::silo)
-            .values(silo)
-            .returning(Silo::as_returning())
-            .get_result_async(self.pool_authorized(opctx).await?)
+        self.pool_authorized(opctx)
+            .await?
+            .transaction(move |conn| {
+                use db::schema::silo::dsl;
+                let silo_created = diesel::insert_into(dsl::silo)
+                    .values(silo)
+                    .returning(Silo::as_returning())
+                    .get_result(conn)
+                    .map_err(|e| {
+                        public_error_from_diesel_create(
+                            e,
+                            ResourceType::Silo,
+                            silo_id.to_string().as_str(),
+                        )
+                    })?;
+                if admin_group_name.is_none() {
+                    return Ok(silo_created);
+                }
+
+                let silo_admin_group_id = Uuid::new_v4();
+                let silo_group = db::model::SiloGroup::new(
+                    silo_admin_group_id,
+                    silo_id,
+                    admin_group_name.unwrap(),
+                );
+                let silo_group_created =
+                    DataStore::silo_group_do_create(silo_group, conn)?;
+
+                // Grant silo admin role for members of the admin group.
+                let policy = shared::Policy {
+                    role_assignments: vec![shared::RoleAssignment {
+                        identity_type: shared::IdentityType::SiloGroup,
+                        identity_id: silo_group_created.id(),
+                        role_name: authz::SiloRole::Admin,
+                    }],
+                };
+
+                let authz_silo = authz::Silo::new(
+                    authz::FLEET,
+                    silo_id,
+                    LookupType::ById(silo_id),
+                );
+                let _ = DataStore::role_assignment_do_replace_visible(
+                    &authz_silo,
+                    &policy.role_assignments,
+                    conn,
+                )?;
+
+                Ok(silo_created)
+            })
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::Conflict(
-                        ResourceType::Silo,
-                        silo_id.to_string().as_str(),
-                    ),
-                )
+            .map_err(|e| match e {
+                TransactionError::CustomError(e) => e,
+                TransactionError::Pool(e) => {
+                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                }
             })
     }
 

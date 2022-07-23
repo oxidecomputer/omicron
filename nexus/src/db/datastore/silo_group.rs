@@ -17,6 +17,7 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use async_bb8_diesel::{AsyncConnection, OptionalExtension, PoolError};
 use chrono::Utc;
 use diesel::prelude::*;
+use diesel_dtrace::DTraceConnection;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -31,14 +32,34 @@ impl DataStore {
         opctx: &OpContext,
         silo_group: SiloGroup,
     ) -> CreateResult<SiloGroup> {
+        // XXX authz
+        self.pool_authorized(opctx)
+            .await?
+            .transaction(move |conn| {
+                DataStore::silo_group_do_create(silo_group, conn)
+            })
+            .await
+            .map_err(|e| match e {
+                TransactionError::CustomError(e) => e,
+                TransactionError::Pool(e) => {
+                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                }
+            })
+    }
+
+    // XXX must be called inside a transaction, not just for correctness, but
+    // because otherwise these will be sync!
+    // XXX authz has to happen in the caller
+    pub(super) fn silo_group_do_create(
+        silo_group: SiloGroup,
+        conn: &mut DTraceConnection<PgConnection>,
+    ) -> Result<SiloGroup, TransactionError<Error>> {
         use db::schema::silo_group::dsl;
 
-        diesel::insert_into(dsl::silo_group)
+        Ok(diesel::insert_into(dsl::silo_group)
             .values(silo_group)
             .returning(SiloGroup::as_returning())
-            .get_result_async(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .get_result(conn)?)
     }
 
     pub async fn silo_group_optional_lookup(
