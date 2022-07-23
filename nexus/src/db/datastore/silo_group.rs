@@ -16,7 +16,14 @@ use crate::db::model::SiloGroupMembership;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use async_bb8_diesel::{AsyncConnection, OptionalExtension, PoolError};
 use chrono::Utc;
+use diesel::dsl::AsSelect;
+use diesel::internal::table_macro::SelectStatement;
 use diesel::prelude::*;
+use diesel::query_builder::AsQuery;
+use diesel::query_builder::InsertStatement;
+use diesel::query_builder::Query;
+use diesel::query_builder::QueryFragment;
+use diesel::query_dsl::methods::BoxedDsl;
 use diesel_dtrace::DTraceConnection;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
@@ -33,33 +40,28 @@ impl DataStore {
         silo_group: SiloGroup,
     ) -> CreateResult<SiloGroup> {
         // XXX authz
-        self.pool_authorized(opctx)
-            .await?
-            .transaction(move |conn| {
-                DataStore::silo_group_do_create(silo_group, conn)
-            })
+        DataStore::silo_group_do_create(silo_group)
+            .get_result_async(self.pool_authorized(opctx).await?)
             .await
-            .map_err(|e| match e {
-                TransactionError::CustomError(e) => e,
-                TransactionError::Pool(e) => {
-                    public_error_from_diesel_pool(e, ErrorHandler::Server)
-                }
-            })
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     // XXX must be called inside a transaction, not just for correctness, but
     // because otherwise these will be sync!
     // XXX authz has to happen in the caller
-    pub(super) fn silo_group_do_create(
+    pub(super) fn silo_group_do_create<'a, DB>(
         silo_group: SiloGroup,
-        conn: &mut DTraceConnection<PgConnection>,
-    ) -> Result<SiloGroup, TransactionError<Error>> {
+    ) -> db::schema::silo_group::BoxedQuery<
+        'a,
+        DB,
+        db::schema::silo_group::SqlType,
+    > {
         use db::schema::silo_group::dsl;
 
-        Ok(diesel::insert_into(dsl::silo_group)
+        let x = diesel::insert_into(dsl::silo_group)
             .values(silo_group)
-            .returning(SiloGroup::as_returning())
-            .get_result(conn)?)
+            .returning(SiloGroup::as_returning());
+        x // XXX-dap
     }
 
     pub async fn silo_group_optional_lookup(

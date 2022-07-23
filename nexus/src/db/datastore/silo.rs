@@ -18,6 +18,7 @@ use crate::db::identity::Asset;
 use crate::db::identity::Resource;
 use crate::db::model::Name;
 use crate::db::model::Silo;
+use crate::db::model::SiloGroup;
 use crate::db::pagination::paginated;
 use crate::external_api::params;
 use crate::external_api::shared;
@@ -94,8 +95,9 @@ impl DataStore {
                     silo_id,
                     admin_group_name.unwrap(),
                 );
-                let silo_group_created =
-                    DataStore::silo_group_do_create(silo_group, conn)?;
+                let silo_group_created: SiloGroup =
+                    DataStore::silo_group_do_create(silo_group)
+                        .get_result(conn)?;
 
                 // Grant silo admin role for members of the admin group.
                 let policy = shared::Policy {
