@@ -16,8 +16,8 @@ use crate::instance_manager::InstanceTicket;
 use crate::nexus::LazyNexusClient;
 use crate::opte::PortManager;
 use crate::opte::PortTicket;
-use crate::params::ExternalIp;
 use crate::params::NetworkInterface;
+use crate::params::SourceNatConfig;
 use crate::params::{
     InstanceHardware, InstanceMigrateParams, InstanceRuntimeStateRequested,
     InstanceSerialConsoleData,
@@ -219,7 +219,8 @@ struct InstanceInner {
 
     // Guest NIC and OPTE port information
     requested_nics: Vec<NetworkInterface>,
-    external_ip: ExternalIp,
+    source_nat: SourceNatConfig,
+    external_ips: Vec<IpAddr>,
 
     // Disk related properties
     requested_disks: Vec<DiskRequest>,
@@ -480,7 +481,8 @@ impl Instance {
             vnic_allocator,
             port_manager,
             requested_nics: initial.nics,
-            external_ip: initial.external_ip,
+            source_nat: initial.source_nat,
+            external_ips: initial.external_ips,
             requested_disks: initial.disks,
             cloud_init_bytes: initial.cloud_init_bytes,
             state: InstanceStates::new(initial.runtime),
@@ -502,12 +504,16 @@ impl Instance {
         let mut opte_ports = Vec::with_capacity(inner.requested_nics.len());
         let mut port_tickets = Vec::with_capacity(inner.requested_nics.len());
         for nic in inner.requested_nics.iter() {
-            let external_ip =
-                if nic.primary { Some(inner.external_ip) } else { None };
+            let (snat, external_ips) = if nic.primary {
+                (Some(inner.source_nat), Some(inner.external_ips.clone()))
+            } else {
+                (None, None)
+            };
             let port = inner.port_manager.create_port(
                 *inner.id(),
                 nic,
-                external_ip,
+                snat,
+                external_ips,
             )?;
             port_tickets.push(port.ticket());
             opte_ports.push(port);
@@ -793,8 +799,8 @@ mod test {
     use crate::illumos::dladm::Etherstub;
     use crate::nexus::LazyNexusClient;
     use crate::opte::PortManager;
-    use crate::params::ExternalIp;
     use crate::params::InstanceStateRequested;
+    use crate::params::SourceNatConfig;
     use chrono::Utc;
     use macaddr::MacAddr6;
     use omicron_common::api::external::{
@@ -839,11 +845,12 @@ mod test {
                 time_updated: Utc::now(),
             },
             nics: vec![],
-            external_ip: ExternalIp {
+            source_nat: SourceNatConfig {
                 ip: IpAddr::from(Ipv4Addr::new(10, 0, 0, 1)),
                 first_port: 0,
-                last_port: 1 << 14 - 1,
+                last_port: 16_384,
             },
+            external_ips: vec![],
             disks: vec![],
             cloud_init_bytes: None,
         }
