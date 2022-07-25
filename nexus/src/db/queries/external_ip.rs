@@ -49,11 +49,7 @@ const INSTANCE_EXTERNAL_IP_FROM_CLAUSE: InstanceExternalIpFromClause =
 // instead to check if a candidate port range has any overlap with an existing
 // port range, which is more complicated. That's deferred until we actually have
 // that situation (which may be as soon as allocating ephemeral IPs).
-//
-// TODO-correctness: We're currently providing the entire port range, even for
-// source NAT. We'd like to chunk this up in to something more like quadrants,
-// e.g., ranges `[0, 16384)`, `[16384, 32768)`, etc.
-const NUM_SOURCE_NAT_PORTS: usize = 1 << 16;
+const NUM_SOURCE_NAT_PORTS: usize = 1 << 14;
 const MAX_PORT: i32 = u16::MAX as _;
 
 /// Select the next available IP address and port range for an instance's
