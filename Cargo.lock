@@ -1163,9 +1163,9 @@ dependencies = [
 
 [[package]]
 name = "diesel"
-version = "2.0.0-rc.0"
+version = "2.0.0-rc.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e531d0abf8147036383c88ce3785d9cda6fe1b8b1183021ffa01cf49c5819d24"
+checksum = "876a12f2d98c35d1dfaf74083664be5bb71606b72f4756f3792cdb1ddb192b46"
 dependencies = [
  "bitflags",
  "byteorder",
@@ -1183,7 +1183,7 @@ dependencies = [
 [[package]]
 name = "diesel-dtrace"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/diesel-dtrace#2eece1d9e0ef8a95034f47e5e7b2906bb741ae50"
+source = "git+https://github.com/oxidecomputer/diesel-dtrace?rev=b9262a79db59f0727ca28ca9baed6fc6e3cc31e7#b9262a79db59f0727ca28ca9baed6fc6e3cc31e7"
 dependencies = [
  "diesel",
  "lock_api",
@@ -1194,9 +1194,9 @@ dependencies = [
 
 [[package]]
 name = "diesel_derives"
-version = "2.0.0-rc.0"
+version = "2.0.0-rc.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "212ba0cdc611523c37f26c7b3b4aedb4af7cbfe9239c4e7736a8a7c82284d77b"
+checksum = "2497d9cefebedc40492310f3c94493e1d0bd5b11b5e1bfc0a7f4b106012203ea"
 dependencies = [
  "proc-macro-error",
  "proc-macro2",
@@ -2257,7 +2257,7 @@ dependencies = [
 [[package]]
 name = "illumos-ddi-dki"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=eb9e0c687e3c072dbc7d4782475f4ba5a6f50258#eb9e0c687e3c072dbc7d4782475f4ba5a6f50258"
+source = "git+https://github.com/oxidecomputer/opte?rev=23884d35aa7908e23accaa77f125a370ddf5c606#23884d35aa7908e23accaa77f125a370ddf5c606"
 dependencies = [
  "illumos-sys-hdrs",
 ]
@@ -2265,7 +2265,7 @@ dependencies = [
 [[package]]
 name = "illumos-sys-hdrs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=eb9e0c687e3c072dbc7d4782475f4ba5a6f50258#eb9e0c687e3c072dbc7d4782475f4ba5a6f50258"
+source = "git+https://github.com/oxidecomputer/opte?rev=23884d35aa7908e23accaa77f125a370ddf5c606#23884d35aa7908e23accaa77f125a370ddf5c606"
 
 [[package]]
 name = "impl-trait-for-tuples"
@@ -2809,6 +2809,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-types"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "api_identity 0.1.0",
+ "base64",
+ "chrono",
+ "omicron-common 0.1.0",
+ "openssl",
+ "openssl-probe",
+ "openssl-sys",
+ "schemars",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "nibble_vec"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3048,7 +3066,6 @@ name = "omicron-nexus"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "api_identity 0.1.0",
  "async-bb8-diesel",
  "async-trait",
  "authz-macros",
@@ -3081,6 +3098,7 @@ dependencies = [
  "newtype_derive",
  "nexus-test-utils",
  "nexus-test-utils-macros",
+ "nexus-types",
  "num-integer",
  "omicron-common 0.1.0",
  "omicron-rpaths",
@@ -3361,7 +3379,7 @@ dependencies = [
 [[package]]
 name = "opte"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=eb9e0c687e3c072dbc7d4782475f4ba5a6f50258#eb9e0c687e3c072dbc7d4782475f4ba5a6f50258"
+source = "git+https://github.com/oxidecomputer/opte?rev=23884d35aa7908e23accaa77f125a370ddf5c606#23884d35aa7908e23accaa77f125a370ddf5c606"
 dependencies = [
  "anymap",
  "cfg-if 0.1.10",
@@ -3378,7 +3396,7 @@ dependencies = [
 [[package]]
 name = "opte-ioctl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=eb9e0c687e3c072dbc7d4782475f4ba5a6f50258#eb9e0c687e3c072dbc7d4782475f4ba5a6f50258"
+source = "git+https://github.com/oxidecomputer/opte?rev=23884d35aa7908e23accaa77f125a370ddf5c606#23884d35aa7908e23accaa77f125a370ddf5c606"
 dependencies = [
  "libc",
  "libnet",
@@ -4069,7 +4087,7 @@ dependencies = [
 [[package]]
 name = "progenitor"
 version = "0.1.2-dev"
-source = "git+https://github.com/oxidecomputer/progenitor#a149b409231456dcb995a45a13dd755256a5baa9"
+source = "git+https://github.com/oxidecomputer/progenitor#bfd194f39c2ce1a3ce16b5a1bddf79699c72aa0b"
 dependencies = [
  "anyhow",
  "clap 3.2.12",
@@ -4084,7 +4102,7 @@ dependencies = [
 [[package]]
 name = "progenitor-client"
 version = "0.1.2-dev"
-source = "git+https://github.com/oxidecomputer/progenitor#a149b409231456dcb995a45a13dd755256a5baa9"
+source = "git+https://github.com/oxidecomputer/progenitor#bfd194f39c2ce1a3ce16b5a1bddf79699c72aa0b"
 dependencies = [
  "bytes",
  "futures-core",
@@ -4098,7 +4116,7 @@ dependencies = [
 [[package]]
 name = "progenitor-impl"
 version = "0.1.2-dev"
-source = "git+https://github.com/oxidecomputer/progenitor#a149b409231456dcb995a45a13dd755256a5baa9"
+source = "git+https://github.com/oxidecomputer/progenitor#bfd194f39c2ce1a3ce16b5a1bddf79699c72aa0b"
 dependencies = [
  "getopts",
  "heck 0.4.0",
@@ -4120,7 +4138,7 @@ dependencies = [
 [[package]]
 name = "progenitor-macro"
 version = "0.1.2-dev"
-source = "git+https://github.com/oxidecomputer/progenitor#a149b409231456dcb995a45a13dd755256a5baa9"
+source = "git+https://github.com/oxidecomputer/progenitor#bfd194f39c2ce1a3ce16b5a1bddf79699c72aa0b"
 dependencies = [
  "openapiv3",
  "proc-macro2",
@@ -6158,7 +6176,7 @@ checksum = "dcf81ac59edc17cc8697ff311e8f5ef2d99fcbd9817b34cec66f90b6c3dfd987"
 [[package]]
 name = "typify"
 version = "0.0.10-dev"
-source = "git+https://github.com/oxidecomputer/typify#46c474efa1d3d99e1e0820b4dd2ac42e3a9b5d6e"
+source = "git+https://github.com/oxidecomputer/typify#69b65c3c050eefa0fc0dc52e7ac6a6014449c025"
 dependencies = [
  "typify-impl",
  "typify-macro",
@@ -6167,7 +6185,7 @@ dependencies = [
 [[package]]
 name = "typify-impl"
 version = "0.0.10-dev"
-source = "git+https://github.com/oxidecomputer/typify#46c474efa1d3d99e1e0820b4dd2ac42e3a9b5d6e"
+source = "git+https://github.com/oxidecomputer/typify#69b65c3c050eefa0fc0dc52e7ac6a6014449c025"
 dependencies = [
  "heck 0.4.0",
  "log",
@@ -6185,7 +6203,7 @@ dependencies = [
 [[package]]
 name = "typify-macro"
 version = "0.0.10-dev"
-source = "git+https://github.com/oxidecomputer/typify#46c474efa1d3d99e1e0820b4dd2ac42e3a9b5d6e"
+source = "git+https://github.com/oxidecomputer/typify#69b65c3c050eefa0fc0dc52e7ac6a6014449c025"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6220,9 +6238,9 @@ checksum = "099b7128301d285f79ddd55b9a83d5e6b9e97c92e0ea0daebee7263e932de992"
 
 [[package]]
 name = "unicode-ident"
-version = "1.0.1"
+version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5bd2fe26506023ed7b5e1e315add59d6f584c621d037f9368fea9cfb988f368c"
+checksum = "15c61ba63f9235225a22310255a29b806b907c9b8c964bcbd0a2c70f3f2deea7"
 
 [[package]]
 name = "unicode-normalization"

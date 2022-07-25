@@ -4,6 +4,7 @@
 
 use super::{Generation, Ipv6Net, Name, VpcFirewallRule};
 use crate::db::collection_insert::DatastoreCollection;
+use crate::db::identity::Resource;
 use crate::db::model::Vni;
 use crate::db::schema::{vpc, vpc_firewall_rule};
 use crate::defaults;
@@ -11,6 +12,7 @@ use crate::external_api::params;
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
 use ipnetwork::IpNetwork;
+use nexus_types::external_api::views;
 use omicron_common::api::external;
 use uuid::Uuid;
 
@@ -29,6 +31,18 @@ pub struct Vpc {
     /// firewall generation number, used as a child resource generation number
     /// per RFD 192
     pub firewall_gen: Generation,
+}
+
+impl From<Vpc> for views::Vpc {
+    fn from(vpc: Vpc) -> Self {
+        Self {
+            identity: vpc.identity(),
+            project_id: vpc.project_id,
+            system_router_id: vpc.system_router_id,
+            ipv6_prefix: *vpc.ipv6_prefix,
+            dns_name: vpc.dns_name.0,
+        }
+    }
 }
 
 /// An `IncompleteVpc` is a candidate VPC, where some of the values may be

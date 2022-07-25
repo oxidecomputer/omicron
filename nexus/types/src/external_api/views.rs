@@ -4,9 +4,8 @@
 
 //! Views are response bodies, most of which are public lenses onto DB models.
 
-use crate::db::identity::{Asset, Resource};
-use crate::db::model;
-use crate::external_api::shared::{self, IpRange};
+use crate::external_api::shared::{self, IpKind, IpRange};
+use crate::identity::Asset;
 use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
@@ -16,6 +15,7 @@ use omicron_common::api::external::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::net::IpAddr;
 use std::net::SocketAddrV6;
 use uuid::Uuid;
 
@@ -62,16 +62,6 @@ pub struct Silo {
     pub user_provision_type: shared::UserProvisionType,
 }
 
-impl Into<Silo> for model::Silo {
-    fn into(self) -> Silo {
-        Silo {
-            identity: self.identity(),
-            discoverable: self.discoverable,
-            user_provision_type: self.user_provision_type.into(),
-        }
-    }
-}
-
 // IDENTITY PROVIDER
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
@@ -79,14 +69,6 @@ impl Into<Silo> for model::Silo {
 pub enum IdentityProviderType {
     /// SAML identity provider
     Saml,
-}
-
-impl Into<IdentityProviderType> for model::IdentityProviderType {
-    fn into(self) -> IdentityProviderType {
-        match self {
-            model::IdentityProviderType::Saml => IdentityProviderType::Saml,
-        }
-    }
 }
 
 /// Client view of an [`IdentityProvider`]
@@ -97,15 +79,6 @@ pub struct IdentityProvider {
 
     /// Identity provider type
     pub provider_type: IdentityProviderType,
-}
-
-impl Into<IdentityProvider> for model::IdentityProvider {
-    fn into(self) -> IdentityProvider {
-        IdentityProvider {
-            identity: self.identity(),
-            provider_type: self.provider_type.into(),
-        }
-    }
 }
 
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -132,20 +105,6 @@ pub struct SamlIdentityProvider {
     pub public_cert: Option<String>,
 }
 
-impl From<model::SamlIdentityProvider> for SamlIdentityProvider {
-    fn from(saml_idp: model::SamlIdentityProvider) -> Self {
-        Self {
-            identity: saml_idp.identity(),
-            idp_entity_id: saml_idp.idp_entity_id,
-            sp_client_id: saml_idp.sp_client_id,
-            acs_url: saml_idp.acs_url,
-            slo_url: saml_idp.slo_url,
-            technical_contact_email: saml_idp.technical_contact_email,
-            public_cert: saml_idp.public_cert,
-        }
-    }
-}
-
 // ORGANIZATIONS
 
 /// Client view of an [`Organization`]
@@ -154,12 +113,6 @@ pub struct Organization {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
     // Important: Silo ID does not get presented to user
-}
-
-impl From<model::Organization> for Organization {
-    fn from(org: model::Organization) -> Self {
-        Self { identity: org.identity() }
-    }
 }
 
 // PROJECTS
@@ -172,15 +125,6 @@ pub struct Project {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
     pub organization_id: Uuid,
-}
-
-impl From<model::Project> for Project {
-    fn from(project: model::Project) -> Self {
-        Self {
-            identity: project.identity(),
-            organization_id: project.organization_id,
-        }
-    }
 }
 
 // IMAGES
@@ -282,18 +226,6 @@ pub struct Vpc {
     pub dns_name: Name,
 }
 
-impl From<model::Vpc> for Vpc {
-    fn from(vpc: model::Vpc) -> Self {
-        Self {
-            identity: vpc.identity(),
-            project_id: vpc.project_id,
-            system_router_id: vpc.system_router_id,
-            ipv6_prefix: *vpc.ipv6_prefix,
-            dns_name: vpc.dns_name.0,
-        }
-    }
-}
-
 /// A VPC subnet represents a logical grouping for instances that allows network traffic between
 /// them, within a IPv4 subnetwork or optionall an IPv6 subnetwork.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -312,31 +244,11 @@ pub struct VpcSubnet {
     pub ipv6_block: Ipv6Net,
 }
 
-impl From<model::VpcSubnet> for VpcSubnet {
-    fn from(subnet: model::VpcSubnet) -> Self {
-        Self {
-            identity: subnet.identity(),
-            vpc_id: subnet.vpc_id,
-            ipv4_block: subnet.ipv4_block.0,
-            ipv6_block: subnet.ipv6_block.0,
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum VpcRouterKind {
     System,
     Custom,
-}
-
-impl From<model::VpcRouterKind> for VpcRouterKind {
-    fn from(kind: model::VpcRouterKind) -> Self {
-        match kind {
-            model::VpcRouterKind::Custom => Self::Custom,
-            model::VpcRouterKind::System => Self::System,
-        }
-    }
 }
 
 /// A VPC router defines a series of rules that indicate where traffic
@@ -353,26 +265,13 @@ pub struct VpcRouter {
     pub vpc_id: Uuid,
 }
 
-impl From<model::VpcRouter> for VpcRouter {
-    fn from(router: model::VpcRouter) -> Self {
-        Self {
-            identity: router.identity(),
-            vpc_id: router.vpc_id,
-            kind: router.kind.into(),
-        }
-    }
-}
+// IP POOLS
 
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct IpPool {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
-}
-
-impl From<model::IpPool> for IpPool {
-    fn from(pool: model::IpPool) -> Self {
-        Self { identity: pool.identity() }
-    }
+    pub project_id: Option<Uuid>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]
@@ -382,14 +281,13 @@ pub struct IpPoolRange {
     pub range: IpRange,
 }
 
-impl From<model::IpPoolRange> for IpPoolRange {
-    fn from(range: model::IpPoolRange) -> Self {
-        Self {
-            id: range.id,
-            time_created: range.time_created,
-            range: IpRange::from(&range),
-        }
-    }
+// INSTANCE EXTERNAL IP ADDRESSES
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct ExternalIp {
+    pub ip: IpAddr,
+    pub kind: IpKind,
 }
 
 // RACKS
@@ -399,12 +297,6 @@ impl From<model::IpPoolRange> for IpPoolRange {
 pub struct Rack {
     #[serde(flatten)]
     pub identity: AssetIdentityMetadata,
-}
-
-impl From<model::Rack> for Rack {
-    fn from(rack: model::Rack) -> Self {
-        Self { identity: AssetIdentityMetadata::from(&rack) }
-    }
 }
 
 // SLEDS
@@ -417,15 +309,6 @@ pub struct Sled {
     pub service_address: SocketAddrV6,
 }
 
-impl From<model::Sled> for Sled {
-    fn from(sled: model::Sled) -> Self {
-        Self {
-            identity: AssetIdentityMetadata::from(&sled),
-            service_address: sled.address(),
-        }
-    }
-}
-
 // SILO USERS
 
 /// Client view of a [`User`]
@@ -434,16 +317,6 @@ pub struct User {
     pub id: Uuid,
     /** Human-readable name that can identify the user */
     pub display_name: String,
-}
-
-impl From<model::SiloUser> for User {
-    fn from(user: model::SiloUser) -> Self {
-        Self {
-            id: user.id(),
-            // TODO the use of external_id as display_name is temporary
-            display_name: user.external_id,
-        }
-    }
 }
 
 // BUILT-IN USERS
@@ -457,12 +330,6 @@ pub struct UserBuiltin {
     pub identity: IdentityMetadata,
 }
 
-impl From<model::UserBuiltin> for UserBuiltin {
-    fn from(user: model::UserBuiltin) -> Self {
-        Self { identity: user.identity() }
-    }
-}
-
 // ROLES
 
 /// Client view of a [`Role`]
@@ -470,15 +337,6 @@ impl From<model::UserBuiltin> for UserBuiltin {
 pub struct Role {
     pub name: RoleName,
     pub description: String,
-}
-
-impl From<model::RoleBuiltin> for Role {
-    fn from(role: model::RoleBuiltin) -> Self {
-        Self {
-            name: RoleName::new(&role.resource_type, &role.role_name),
-            description: role.description,
-        }
-    }
 }
 
 // SSH KEYS
@@ -494,16 +352,6 @@ pub struct SshKey {
 
     /// SSH public key, e.g., `"ssh-ed25519 AAAAC3NzaC..."`
     pub public_key: String,
-}
-
-impl From<model::SshKey> for SshKey {
-    fn from(ssh_key: model::SshKey) -> Self {
-        Self {
-            identity: ssh_key.identity(),
-            silo_user_id: ssh_key.silo_user_id,
-            public_key: ssh_key.public_key,
-        }
-    }
 }
 
 // OAUTH 2.0 DEVICE AUTHORIZATION REQUESTS & TOKENS
@@ -531,26 +379,6 @@ pub struct DeviceAuthResponse {
     pub expires_in: u16,
 }
 
-impl DeviceAuthResponse {
-    // We need the host to construct absolute verification URIs.
-    pub fn from_model(model: model::DeviceAuthRequest, host: &str) -> Self {
-        Self {
-            // TODO-security: use HTTPS
-            verification_uri: format!("http://{}/device/verify", host),
-            verification_uri_complete: format!(
-                "http://{}/device/verify?user_code={}",
-                host, &model.user_code
-            ),
-            user_code: model.user_code,
-            device_code: model.device_code,
-            expires_in: model
-                .time_expires
-                .signed_duration_since(model.time_created)
-                .num_seconds() as u16,
-        }
-    }
-}
-
 /// Successful access token grant. See RFC 6749 §5.1.
 /// TODO-security: `expires_in`, `refresh_token`, etc.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -560,15 +388,6 @@ pub struct DeviceAccessTokenGrant {
 
     /// The type of the token issued, as described in RFC 6749 §7.1.
     pub token_type: DeviceAccessTokenType,
-}
-
-impl From<model::DeviceAccessToken> for DeviceAccessTokenGrant {
-    fn from(access_token: model::DeviceAccessToken) -> Self {
-        Self {
-            access_token: format!("oxide-token-{}", access_token.token),
-            token_type: DeviceAccessTokenType::Bearer,
-        }
-    }
 }
 
 /// The kind of token granted.

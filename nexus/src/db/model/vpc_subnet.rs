@@ -3,10 +3,11 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{Ipv4Net, Ipv6Net, Name};
-use crate::db::schema::vpc_subnet;
+use crate::db::{identity::Resource, schema::vpc_subnet};
 use crate::external_api::params;
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
+use nexus_types::external_api::views;
 use omicron_common::api::external;
 use std::net::IpAddr;
 use uuid::Uuid;
@@ -72,6 +73,17 @@ impl VpcSubnet {
             "Address '{}' not in subnet '{}' or is reserved for rack services",
             addr, subnet,
         )))
+    }
+}
+
+impl From<VpcSubnet> for views::VpcSubnet {
+    fn from(subnet: VpcSubnet) -> Self {
+        Self {
+            identity: subnet.identity(),
+            vpc_id: subnet.vpc_id,
+            ipv4_block: subnet.ipv4_block.0,
+            ipv6_block: subnet.ipv6_block.0,
+        }
     }
 }
 

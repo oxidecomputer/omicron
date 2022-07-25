@@ -8,7 +8,7 @@ use crate::opte::BoundaryServices;
 use crate::opte::Gateway;
 use crate::opte::PortTicket;
 use crate::opte::Vni;
-use crate::params::ExternalIp;
+use crate::params::SourceNatConfig;
 use ipnetwork::IpNetwork;
 use macaddr::MacAddr6;
 use std::net::IpAddr;
@@ -34,9 +34,12 @@ struct PortInner {
     _vni: Vni,
     // IP address of the hosting sled
     _underlay_ip: Ipv6Addr,
-    // The external IP information for this port, or None if it has no external
-    // connectivity. Only the primary interface has Some(_) here.
-    external_ip: Option<ExternalIp>,
+    // The external IP address and port range provided for this port, to allow
+    // outbound network connectivity.
+    source_nat: Option<SourceNatConfig>,
+    // The external IP addresses provided to this port, to allow _inbound_
+    // network connectivity.
+    external_ips: Option<Vec<IpAddr>>,
     // Information about the virtual gateway, aka OPTE
     _gateway: Gateway,
     // Information about Boundary Services, for forwarding traffic between sleds
@@ -75,7 +78,8 @@ impl Port {
         slot: u8,
         vni: Vni,
         underlay_ip: Ipv6Addr,
-        external_ip: Option<ExternalIp>,
+        source_nat: Option<SourceNatConfig>,
+        external_ips: Option<Vec<IpAddr>>,
         gateway: Gateway,
         boundary_services: BoundaryServices,
         vnic: String,
@@ -90,7 +94,8 @@ impl Port {
                 slot,
                 _vni: vni,
                 _underlay_ip: underlay_ip,
-                external_ip,
+                source_nat,
+                external_ips,
                 _gateway: gateway,
                 _boundary_services: boundary_services,
                 vnic,
@@ -98,8 +103,12 @@ impl Port {
         }
     }
 
-    pub fn external_ip(&self) -> &Option<ExternalIp> {
-        &self.inner.external_ip
+    pub fn source_nat(&self) -> &Option<SourceNatConfig> {
+        &self.inner.source_nat
+    }
+
+    pub fn external_ips(&self) -> &Option<Vec<IpAddr>> {
+        &self.inner.external_ips
     }
 
     pub fn mac(&self) -> &MacAddr6 {

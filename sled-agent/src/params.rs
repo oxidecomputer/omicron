@@ -26,9 +26,10 @@ pub struct NetworkInterface {
     pub slot: u8,
 }
 
-/// An external IP address used for external connectivity for an instance.
+/// An IP address and port range used for instance source NAT, i.e., making
+/// outbound network connections from guests.
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, JsonSchema)]
-pub struct ExternalIp {
+pub struct SourceNatConfig {
     /// The external address provided to the instance
     pub ip: IpAddr,
     /// The first port used for instance NAT, inclusive.
@@ -75,7 +76,10 @@ pub struct DiskEnsureBody {
 pub struct InstanceHardware {
     pub runtime: InstanceRuntimeState,
     pub nics: Vec<NetworkInterface>,
-    pub external_ip: ExternalIp,
+    pub source_nat: SourceNatConfig,
+    /// Zero or more external IP addresses (either floating or ephemeral),
+    /// provided to an instance to allow inbound connectivity.
+    pub external_ips: Vec<IpAddr>,
     pub disks: Vec<propolis_client::api::DiskRequest>,
     pub cloud_init_bytes: Option<String>,
 }

@@ -250,8 +250,8 @@ mod test {
     use crate::illumos::{dladm::MockDladm, zone::MockZones};
     use crate::instance::MockInstance;
     use crate::nexus::LazyNexusClient;
-    use crate::params::ExternalIp;
     use crate::params::InstanceStateRequested;
+    use crate::params::SourceNatConfig;
     use chrono::Utc;
     use macaddr::MacAddr6;
     use omicron_common::api::external::{
@@ -291,11 +291,12 @@ mod test {
                 time_updated: Utc::now(),
             },
             nics: vec![],
-            external_ip: ExternalIp {
+            source_nat: SourceNatConfig {
                 ip: IpAddr::from(Ipv4Addr::new(10, 0, 0, 1)),
                 first_port: 0,
                 last_port: 1 << 14 - 1,
             },
+            external_ips: vec![],
             disks: vec![],
             cloud_init_bytes: None,
         }

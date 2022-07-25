@@ -8,6 +8,7 @@ use crate::db::ipv6;
 use crate::db::schema::{service, sled, zpool};
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
+use nexus_types::external_api::views;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use uuid::Uuid;
@@ -59,6 +60,15 @@ impl Sled {
 
     pub fn address_with_port(&self, port: u16) -> SocketAddrV6 {
         SocketAddrV6::new(self.ip(), port, 0, 0)
+    }
+}
+
+impl From<Sled> for views::Sled {
+    fn from(sled: Sled) -> Self {
+        Self {
+            identity: views::AssetIdentityMetadata::from(&sled),
+            service_address: sled.address(),
+        }
     }
 }
 

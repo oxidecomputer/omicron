@@ -3,10 +3,11 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::Name;
-use crate::db::schema::project;
+use crate::db::{identity::Resource, schema::project};
 use crate::external_api::params;
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
+use nexus_types::external_api::views;
 use uuid::Uuid;
 
 /// Describes a project within the database.
@@ -25,6 +26,15 @@ impl Project {
         Self {
             identity: ProjectIdentity::new(Uuid::new_v4(), params.identity),
             organization_id,
+        }
+    }
+}
+
+impl From<Project> for views::Project {
+    fn from(project: Project) -> Self {
+        Self {
+            identity: project.identity(),
+            organization_id: project.organization_id,
         }
     }
 }
