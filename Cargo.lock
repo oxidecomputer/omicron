@@ -2809,6 +2809,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-types"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "api_identity 0.1.0",
+ "base64",
+ "chrono",
+ "omicron-common 0.1.0",
+ "openssl",
+ "openssl-probe",
+ "openssl-sys",
+ "schemars",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "nibble_vec"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3048,7 +3066,6 @@ name = "omicron-nexus"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "api_identity 0.1.0",
  "async-bb8-diesel",
  "async-trait",
  "authz-macros",
@@ -3081,6 +3098,7 @@ dependencies = [
  "newtype_derive",
  "nexus-test-utils",
  "nexus-test-utils-macros",
+ "nexus-types",
  "num-integer",
  "omicron-common 0.1.0",
  "omicron-rpaths",

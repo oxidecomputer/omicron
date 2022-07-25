@@ -3,6 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::db::schema::role_builtin;
+use nexus_types::external_api::views;
+use omicron_common::api::external::RoleName;
 
 /// Describes a built-in role, as stored in the database
 #[derive(Queryable, Insertable, Debug, Selectable)]
@@ -29,5 +31,14 @@ impl RoleBuiltin {
 
     pub fn id(&self) -> (String, String) {
         (self.resource_type.clone(), self.role_name.clone())
+    }
+}
+
+impl From<RoleBuiltin> for views::Role {
+    fn from(role: RoleBuiltin) -> Self {
+        Self {
+            name: RoleName::new(&role.resource_type, &role.role_name),
+            description: role.description,
+        }
     }
 }

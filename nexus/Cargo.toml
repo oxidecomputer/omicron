@@ -60,9 +60,7 @@ usdt = "0.3.1"
 
 authz-macros = { path = "authz-macros" }
 db-macros = { path = "db-macros" }
-
-[dependencies.api_identity]
-path = "../api_identity"
+nexus-types = { path = "types" }
 
 [dependencies.chrono]
 version = "0.4"

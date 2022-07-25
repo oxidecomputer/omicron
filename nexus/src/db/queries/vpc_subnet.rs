@@ -13,6 +13,7 @@ use diesel::prelude::*;
 use diesel::query_builder::*;
 use diesel::sql_types;
 use omicron_common::api::external;
+use ref_cast::RefCast;
 use uuid::Uuid;
 
 /// Errors related to allocating VPC Subnets.
@@ -279,7 +280,7 @@ impl QueryFragment<Pg> for FilterConflictingVpcSubnetRangesQuery {
         out.push_bind_param::<sql_types::Uuid, Uuid>(&self.subnet.identity.id)?;
         out.push_sql(", ");
         out.push_bind_param::<sql_types::Text, db::model::Name>(
-            &self.subnet.name(),
+            db::model::Name::ref_cast(self.subnet.name()),
         )?;
         out.push_sql(", ");
         out.push_bind_param::<sql_types::Text, String>(

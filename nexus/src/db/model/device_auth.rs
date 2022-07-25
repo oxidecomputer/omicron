@@ -9,6 +9,7 @@
 use crate::db::schema::{device_access_token, device_auth_request};
 
 use chrono::{DateTime, Duration, Utc};
+use nexus_types::external_api::views;
 use rand::{distributions::Slice, rngs::StdRng, Rng, RngCore, SeedableRng};
 use uuid::Uuid;
 
@@ -27,6 +28,26 @@ pub struct DeviceAuthRequest {
     pub user_code: String,
     pub time_created: DateTime<Utc>,
     pub time_expires: DateTime<Utc>,
+}
+
+impl DeviceAuthRequest {
+    // We need the host to construct absolute verification URIs.
+    pub fn into_response(self, host: &str) -> views::DeviceAuthResponse {
+        views::DeviceAuthResponse {
+            // TODO-security: use HTTPS
+            verification_uri: format!("http://{}/device/verify", host),
+            verification_uri_complete: format!(
+                "http://{}/device/verify?user_code={}",
+                host, &self.user_code
+            ),
+            user_code: self.user_code,
+            device_code: self.device_code,
+            expires_in: self
+                .time_expires
+                .signed_duration_since(self.time_created)
+                .num_seconds() as u16,
+        }
+    }
 }
 
 /// Neither the device code nor the access token is meant to be
@@ -132,6 +153,15 @@ impl DeviceAccessToken {
     pub fn expires(mut self, time: DateTime<Utc>) -> Self {
         self.time_expires = Some(time);
         self
+    }
+}
+
+impl From<DeviceAccessToken> for views::DeviceAccessTokenGrant {
+    fn from(access_token: DeviceAccessToken) -> Self {
+        Self {
+            access_token: format!("oxide-token-{}", access_token.token),
+            token_type: views::DeviceAccessTokenType::Bearer,
+        }
     }
 }
 

@@ -453,6 +453,10 @@ pub struct InstanceCreate {
     pub disks: Vec<InstanceDiskAttachment>,
 }
 
+// If you change this, also update the error message in
+// `UserData::deserialize()` below.
+pub const MAX_USER_DATA_BYTES: usize = 32 * 1024; // 32 KiB
+
 struct UserData;
 impl UserData {
     pub fn serialize<S>(
@@ -472,7 +476,7 @@ impl UserData {
         match base64::decode(<&str>::deserialize(deserializer)?) {
             Ok(buf) => {
                 // if you change this, also update the stress test in crate::cidata
-                if buf.len() > crate::cidata::MAX_USER_DATA_BYTES {
+                if buf.len() > MAX_USER_DATA_BYTES {
                     Err(<D::Error as serde::de::Error>::invalid_length(
                         buf.len(),
                         &"less than 32 KiB",
