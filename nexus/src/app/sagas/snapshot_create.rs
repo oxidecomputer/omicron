@@ -166,12 +166,22 @@ fn saga_snapshot_create() -> SagaTemplate<SagaSnapshotCreate> {
         ),
     );
 
-    // The following two saga actions iterate over the datasets and regions for
-    // a disk and make requests for each tuple, and this violates the saga's
+    // Send a snapshot request to propolis
+    template_builder.append(
+        "snapshot_request",
+        "SendSnapshotRequest",
+        ActionFunc::new_action(
+            ssc_send_snapshot_request,
+            ssc_send_snapshot_request_undo,
+        ),
+    );
+
+    // The following saga action iterates over the datasets and regions for a
+    // disk and make requests for each tuple, and this violates the saga's
     // mental model where actions should do one thing at a time and be
-    // idempotent. If only a few of the requests succeed, the saga will leave
-    // things in a partial state because the undo function of a node is not run
-    // when the action fails.
+    // idempotent + atomic. If only a few of the requests succeed, the saga will
+    // leave things in a partial state because the undo function of a node is
+    // not run when the action fails.
     //
     // Use a noop action and an undo, followed by an action + no undo, to work
     // around this:
@@ -180,18 +190,6 @@ fn saga_snapshot_create() -> SagaTemplate<SagaSnapshotCreate> {
     // - [action function, noop]
     //
     // With this, if the action function fails, the undo function will run.
-
-    // Send a snapshot request to propolis
-    template_builder.append(
-        "noop_for_snapshot_request",
-        "NoopForSendSnapshotRequest",
-        ActionFunc::new_action(ssc_noop, ssc_send_snapshot_request_undo),
-    );
-    template_builder.append(
-        "snapshot_request",
-        "SendSnapshotRequest",
-        new_action_noop_undo(ssc_send_snapshot_request),
-    );
 
     // Validate with crucible agent and start snapshot downstairs
     template_builder.append(
