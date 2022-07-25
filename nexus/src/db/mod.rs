@@ -30,7 +30,6 @@ mod update_and_check;
 #[cfg(test)]
 mod test_utils;
 
-// TODO-jkg
 pub use nexus_db_model as model;
 use nexus_db_model::saga_types;
 pub use nexus_db_model::schema;
