@@ -13,18 +13,11 @@ use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
 use crate::db::model::SiloGroup;
 use crate::db::model::SiloGroupMembership;
+use crate::db::pool::DbConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use async_bb8_diesel::{AsyncConnection, OptionalExtension, PoolError};
 use chrono::Utc;
-use diesel::dsl::AsSelect;
-use diesel::internal::table_macro::SelectStatement;
 use diesel::prelude::*;
-use diesel::query_builder::AsQuery;
-use diesel::query_builder::InsertStatement;
-use diesel::query_builder::Query;
-use diesel::query_builder::QueryFragment;
-use diesel::query_dsl::methods::BoxedDsl;
-use diesel_dtrace::DTraceConnection;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -46,22 +39,16 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    // XXX must be called inside a transaction, not just for correctness, but
-    // because otherwise these will be sync!
-    // XXX authz has to happen in the caller
-    pub(super) fn silo_group_do_create<'a, DB>(
+    pub(super) fn silo_group_do_create(
         silo_group: SiloGroup,
-    ) -> db::schema::silo_group::BoxedQuery<
-        'a,
-        DB,
-        db::schema::silo_group::SqlType,
-    > {
+    ) -> impl RunQueryDsl<DbConnection>
+           + diesel::query_dsl::LoadQuery<'static, DbConnection, SiloGroup>
+    {
         use db::schema::silo_group::dsl;
 
-        let x = diesel::insert_into(dsl::silo_group)
+        diesel::insert_into(dsl::silo_group)
             .values(silo_group)
-            .returning(SiloGroup::as_returning());
-        x // XXX-dap
+            .returning(SiloGroup::as_returning())
     }
 
     pub async fn silo_group_optional_lookup(
