@@ -71,7 +71,7 @@ impl DataStore {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         use db::schema::sled::dsl;
 
-        sql_function!(fn random() -> Text);
+        sql_function!(fn random() -> diesel::sql_types::Float);
         Ok(dsl::sled
             .filter(dsl::time_deleted.is_null())
             .order(random())
