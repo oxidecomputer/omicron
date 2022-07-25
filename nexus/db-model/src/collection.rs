@@ -13,7 +13,7 @@ use std::fmt::Debug;
 /// Projects, the Organization datatype should implement this trait.
 /// ```
 /// # use diesel::prelude::*;
-/// # use nexus_db_model::DatastoreCollection;
+/// # use nexus_db_model::DatastoreCollectionConfig;
 /// # use nexus_db_model::Generation;
 /// #
 /// # table! {
@@ -48,7 +48,7 @@ use std::fmt::Debug;
 ///     pub rcgen: Generation,
 /// }
 ///
-/// impl DatastoreCollection<Project> for Organization {
+/// impl DatastoreCollectionConfig<Project> for Organization {
 ///     // Type of Organization::identity::id and Project::organization_id
 ///     type CollectionId = uuid::Uuid;
 ///
@@ -82,7 +82,7 @@ pub trait DatastoreCollectionConfig<ResourceType> {
 /// Disks, the Instance datatype should implement this trait.
 /// ```
 /// # use diesel::prelude::*;
-/// # use nexus_db_model::DatastoreAttachTarget;
+/// # use nexus_db_model::DatastoreAttachTargetConfig;
 /// #
 /// # table! {
 /// #     test_schema.instance (id) {
@@ -114,7 +114,7 @@ pub trait DatastoreCollectionConfig<ResourceType> {
 ///     pub time_deleted: Option<chrono::DateTime<chrono::Utc>>,
 /// }
 ///
-/// impl DatastoreAttachTarget<Disk> for Instance {
+/// impl DatastoreAttachTargetConfig<Disk> for Instance {
 ///     // Type of instance::id and disk::id.
 ///     type Id = uuid::Uuid;
 ///
