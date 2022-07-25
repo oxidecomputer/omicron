@@ -679,11 +679,12 @@ async fn ssc_finalize_snapshot_record(
     info!(log, "snapshot final lookup...");
 
     let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
-    let (.., authz_snapshot, db_snapshot) = LookupPath::new(&opctx, &osagactx.datastore())
-        .snapshot_id(snapshot_id)
-        .fetch_for(authz::Action::Modify)
-        .await
-        .map_err(ActionError::action_failed)?;
+    let (.., authz_snapshot, db_snapshot) =
+        LookupPath::new(&opctx, &osagactx.datastore())
+            .snapshot_id(snapshot_id)
+            .fetch_for(authz::Action::Modify)
+            .await
+            .map_err(ActionError::action_failed)?;
 
     info!(log, "snapshot final lookup ok");
 
