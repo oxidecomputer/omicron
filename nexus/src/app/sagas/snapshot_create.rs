@@ -59,7 +59,7 @@
 //! there will be six new ZFS snapshots, one in each downstair's zfs dataset,
 //! each with the same name.
 //!
-//! Next, this saga will valiate with the crucible agent that the snapshot was
+//! Next, this saga will validate with the crucible agent that the snapshot was
 //! created ok, and start a new read-only downstairs process for each snapshot.
 //! The validation step isn't strictly required as the flush (with the extra
 //! snapshot parameter) wouldn't have returned successfully if there was a
