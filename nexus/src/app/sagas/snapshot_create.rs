@@ -98,7 +98,7 @@ use sled_agent_client::types::{
     DiskSnapshotRequestBody, InstanceIssueDiskSnapshotRequestBody,
     VolumeConstructionRequest,
 };
-use slog::warn;
+use slog::info;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use steno::new_action_noop_undo;
