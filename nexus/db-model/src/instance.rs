@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{ByteCount, Disk, Generation, InstanceCpuCount, InstanceState};
-use crate::collection::DatastoreAttachTarget;
+use crate::collection::DatastoreAttachTargetConfig;
 use crate::schema::{disk, instance};
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
@@ -69,7 +69,7 @@ impl Into<external::Instance> for Instance {
     }
 }
 
-impl DatastoreAttachTarget<Disk> for Instance {
+impl DatastoreAttachTargetConfig<Disk> for Instance {
     type Id = Uuid;
 
     type CollectionIdColumn = instance::dsl::id;

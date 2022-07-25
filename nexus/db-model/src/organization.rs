@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{Generation, Name, Project};
-use crate::collection::DatastoreCollection;
+use crate::collection::DatastoreCollectionConfig;
 use crate::schema::{organization, project};
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
@@ -43,7 +43,7 @@ impl From<Organization> for views::Organization {
     }
 }
 
-impl DatastoreCollection<Project> for Organization {
+impl DatastoreCollectionConfig<Project> for Organization {
     type CollectionId = Uuid;
     type GenerationNumberColumn = organization::dsl::rcgen;
     type CollectionTimeDeletedColumn = organization::dsl::time_deleted;

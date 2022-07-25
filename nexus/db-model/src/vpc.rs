@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{Generation, Ipv6Net, Name, VpcFirewallRule};
-use crate::collection::DatastoreCollection;
+use crate::collection::DatastoreCollectionConfig;
 use crate::schema::{vpc, vpc_firewall_rule};
 use crate::Vni;
 use chrono::{DateTime, Utc};
@@ -96,7 +96,7 @@ impl IncompleteVpc {
     }
 }
 
-impl DatastoreCollection<VpcFirewallRule> for Vpc {
+impl DatastoreCollectionConfig<VpcFirewallRule> for Vpc {
     type CollectionId = Uuid;
     type GenerationNumberColumn = vpc::dsl::firewall_gen;
     type CollectionTimeDeletedColumn = vpc::dsl::time_deleted;

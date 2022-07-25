@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{impl_enum_type, Generation, Name, RouterRoute};
-use crate::collection::DatastoreCollection;
+use crate::collection::DatastoreCollectionConfig;
 use crate::schema::{router_route, vpc_router};
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
@@ -68,7 +68,7 @@ impl From<VpcRouter> for views::VpcRouter {
     }
 }
 
-impl DatastoreCollection<RouterRoute> for VpcRouter {
+impl DatastoreCollectionConfig<RouterRoute> for VpcRouter {
     type CollectionId = Uuid;
     type GenerationNumberColumn = vpc_router::dsl::rcgen;
     type CollectionTimeDeletedColumn = vpc_router::dsl::time_deleted;

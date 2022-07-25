@@ -9,7 +9,7 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
-use crate::db::collection_insert::DatastoreCollectionExt;
+use crate::db::collection_insert::DatastoreCollection;
 use crate::db::collection_insert::SyncInsertError;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;

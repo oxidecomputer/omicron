@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{Generation, Organization};
-use crate::collection::DatastoreCollection;
+use crate::collection::DatastoreCollectionConfig;
 use crate::impl_enum_type;
 use crate::schema::{organization, silo};
 use db_macros::Resource;
@@ -85,7 +85,7 @@ impl From<Silo> for views::Silo {
     }
 }
 
-impl DatastoreCollection<Organization> for Silo {
+impl DatastoreCollectionConfig<Organization> for Silo {
     type CollectionId = Uuid;
     type GenerationNumberColumn = silo::dsl::rcgen;
     type CollectionTimeDeletedColumn = silo::dsl::time_deleted;

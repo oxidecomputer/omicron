@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{ByteCount, Dataset, Generation};
-use crate::collection::DatastoreCollection;
+use crate::collection::DatastoreCollectionConfig;
 use crate::schema::{dataset, zpool};
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
@@ -46,7 +46,7 @@ impl Zpool {
     }
 }
 
-impl DatastoreCollection<Dataset> for Zpool {
+impl DatastoreCollectionConfig<Dataset> for Zpool {
     type CollectionId = Uuid;
     type GenerationNumberColumn = zpool::dsl::rcgen;
     type CollectionTimeDeletedColumn = zpool::dsl::time_deleted;

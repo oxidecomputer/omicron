@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{Generation, SqlU16};
-use crate::collection::DatastoreCollection;
+use crate::collection::DatastoreCollectionConfig;
 use crate::ipv6;
 use crate::schema::{service, sled, zpool};
 use chrono::{DateTime, Utc};
@@ -72,14 +72,14 @@ impl From<Sled> for views::Sled {
     }
 }
 
-impl DatastoreCollection<super::Zpool> for Sled {
+impl DatastoreCollectionConfig<super::Zpool> for Sled {
     type CollectionId = Uuid;
     type GenerationNumberColumn = sled::dsl::rcgen;
     type CollectionTimeDeletedColumn = sled::dsl::time_deleted;
     type CollectionIdColumn = zpool::dsl::sled_id;
 }
 
-impl DatastoreCollection<super::Service> for Sled {
+impl DatastoreCollectionConfig<super::Service> for Sled {
     type CollectionId = Uuid;
     type GenerationNumberColumn = sled::dsl::rcgen;
     type CollectionTimeDeletedColumn = sled::dsl::time_deleted;

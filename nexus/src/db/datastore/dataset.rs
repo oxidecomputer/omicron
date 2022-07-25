@@ -9,7 +9,7 @@ use super::RunnableQuery;
 use super::REGION_REDUNDANCY_THRESHOLD;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
-use crate::db::collection_insert::DatastoreCollectionExt;
+use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Asset;

@@ -27,23 +27,23 @@ use diesel::query_builder::*;
 use diesel::query_dsl::methods as query_methods;
 use diesel::query_source::Table;
 use diesel::sql_types::{BigInt, Nullable, SingleValue};
-use nexus_db_model::DatastoreAttachTarget;
+use nexus_db_model::DatastoreAttachTargetConfig;
 use std::fmt::Debug;
 
 /// A collection of type aliases particularly relevant to collection-based CTEs.
 pub(crate) mod aliases {
     use super::{
-        Column, DatastoreAttachTarget, Table, TableDefaultWhereClause,
+        Column, DatastoreAttachTargetConfig, Table, TableDefaultWhereClause,
     };
 
     /// The table representing the collection. The resource references
     /// this table.
-    pub type CollectionTable<ResourceType, C> = <<C as DatastoreAttachTarget<
+    pub type CollectionTable<ResourceType, C> = <<C as DatastoreAttachTargetConfig<
         ResourceType,
     >>::CollectionIdColumn as Column>::Table;
     /// The table representing the resource. This table contains an
     /// ID acting as a foreign key into the collection table.
-    pub type ResourceTable<ResourceType, C> = <<C as DatastoreAttachTarget<
+    pub type ResourceTable<ResourceType, C> = <<C as DatastoreAttachTargetConfig<
         ResourceType,
     >>::ResourceIdColumn as Column>::Table;
 
@@ -55,9 +55,9 @@ pub(crate) mod aliases {
         TableDefaultWhereClause<ResourceTable<ResourceType, C>>;
 
     pub type CollectionIdColumn<ResourceType, C> =
-        <C as DatastoreAttachTarget<ResourceType>>::CollectionIdColumn;
+        <C as DatastoreAttachTargetConfig<ResourceType>>::CollectionIdColumn;
     pub type ResourceIdColumn<ResourceType, C> =
-        <C as DatastoreAttachTarget<ResourceType>>::ResourceIdColumn;
+        <C as DatastoreAttachTargetConfig<ResourceType>>::ResourceIdColumn;
 
     /// Representation of Primary Key in Rust.
     pub type CollectionPrimaryKey<ResourceType, C> =
@@ -65,7 +65,7 @@ pub(crate) mod aliases {
     pub type ResourcePrimaryKey<ResourceType, C> =
         <ResourceTable<ResourceType, C> as Table>::PrimaryKey;
     pub type ResourceForeignKey<ResourceType, C> =
-        <C as DatastoreAttachTarget<ResourceType>>::ResourceCollectionIdColumn;
+        <C as DatastoreAttachTargetConfig<ResourceType>>::ResourceCollectionIdColumn;
 
     /// Representation of Primary Key in SQL.
     pub type SerializedCollectionPrimaryKey<ResourceType, C> =
@@ -80,8 +80,8 @@ use aliases::*;
 
 /// Extension trait adding behavior to types that implement
 /// `nexus_db_model::DatastoreAttachTarget`.
-pub trait DatastoreAttachTargetExt<ResourceType>:
-    DatastoreAttachTarget<ResourceType>
+pub trait DatastoreAttachTarget<ResourceType>:
+    DatastoreAttachTargetConfig<ResourceType>
 {
     /// Creates a statement for attaching a resource to the given collection.
     ///
@@ -256,14 +256,15 @@ pub trait DatastoreAttachTargetExt<ResourceType>:
     }
 }
 
-impl<T, R> DatastoreAttachTargetExt<R> for T where T: DatastoreAttachTarget<R> {}
+impl<T, R> DatastoreAttachTarget<R> for T where T: DatastoreAttachTargetConfig<R>
+{}
 
 /// The CTE described in the module docs
 #[must_use = "Queries must be executed"]
 pub struct AttachToCollectionStatement<ResourceType, V, C>
 where
     ResourceType: Selectable<Pg>,
-    C: DatastoreAttachTarget<ResourceType>,
+    C: DatastoreAttachTargetConfig<ResourceType>,
 {
     // Query which answers: "Does the collection exist?"
     collection_exists_query: Box<dyn QueryFragment<Pg> + Send>,
@@ -290,7 +291,7 @@ impl<ResourceType, V, C> QueryId
     for AttachToCollectionStatement<ResourceType, V, C>
 where
     ResourceType: Selectable<Pg>,
-    C: DatastoreAttachTarget<ResourceType>,
+    C: DatastoreAttachTargetConfig<ResourceType>,
 {
     type QueryId = ();
     const HAS_STATIC_QUERY_ID: bool = false;
@@ -331,7 +332,7 @@ pub type RawOutput<ResourceType, C> =
 impl<ResourceType, V, C> AttachToCollectionStatement<ResourceType, V, C>
 where
     ResourceType: 'static + Debug + Send + Selectable<Pg>,
-    C: 'static + Debug + DatastoreAttachTarget<ResourceType> + Send,
+    C: 'static + Debug + DatastoreAttachTargetConfig<ResourceType> + Send,
     ResourceTable<ResourceType, C>: 'static + Table + Send + Copy + Debug,
     V: 'static + Send,
     AttachToCollectionStatement<ResourceType, V, C>: Send,
@@ -409,7 +410,7 @@ impl<ResourceType, V, C> Query
     for AttachToCollectionStatement<ResourceType, V, C>
 where
     ResourceType: Selectable<Pg>,
-    C: DatastoreAttachTarget<ResourceType>,
+    C: DatastoreAttachTargetConfig<ResourceType>,
 {
     type SqlType = (
         // The number of resources attached to the collection before update.
@@ -427,7 +428,7 @@ impl<ResourceType, V, C> RunQueryDsl<DbConnection>
     for AttachToCollectionStatement<ResourceType, V, C>
 where
     ResourceType: Selectable<Pg>,
-    C: DatastoreAttachTarget<ResourceType>,
+    C: DatastoreAttachTargetConfig<ResourceType>,
 {
 }
 
@@ -503,7 +504,7 @@ impl<ResourceType, V, C> QueryFragment<Pg>
     for AttachToCollectionStatement<ResourceType, V, C>
 where
     ResourceType: Selectable<Pg>,
-    C: DatastoreAttachTarget<ResourceType>,
+    C: DatastoreAttachTargetConfig<ResourceType>,
     CollectionPrimaryKey<ResourceType, C>: diesel::Column,
     // Necessary to "walk_ast" over "self.update_resource_statement".
     BoxedUpdateStatement<'static, Pg, ResourceTable<ResourceType, C>, V>:
@@ -675,7 +676,7 @@ mod test {
         pub identity: CollectionIdentity,
     }
 
-    impl DatastoreAttachTarget<Resource> for Collection {
+    impl DatastoreAttachTargetConfig<Resource> for Collection {
         type Id = uuid::Uuid;
 
         type CollectionIdColumn = collection::dsl::id;

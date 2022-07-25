@@ -10,7 +10,7 @@ use crate::authz::ApiResource;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::collection_attach::AttachError;
-use crate::db::collection_attach::DatastoreAttachTargetExt;
+use crate::db::collection_attach::DatastoreAttachTarget;
 use crate::db::collection_detach::DatastoreDetachTarget;
 use crate::db::collection_detach::DetachError;
 use crate::db::error::public_error_from_diesel_pool;

@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{Generation, Region};
-use crate::collection::DatastoreCollection;
+use crate::collection::DatastoreCollectionConfig;
 use crate::schema::{region, volume};
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
@@ -47,7 +47,7 @@ impl Volume {
 }
 
 // Volumes contain regions
-impl DatastoreCollection<Region> for Volume {
+impl DatastoreCollectionConfig<Region> for Volume {
     type CollectionId = Uuid;
     type GenerationNumberColumn = volume::dsl::rcgen;
     type CollectionTimeDeletedColumn = volume::dsl::time_deleted;

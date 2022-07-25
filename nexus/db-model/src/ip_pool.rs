@@ -4,7 +4,7 @@
 
 //! Model types for IP Pools and the CIDR blocks therein.
 
-use crate::collection::DatastoreCollection;
+use crate::collection::DatastoreCollectionConfig;
 use crate::schema::ip_pool;
 use crate::schema::ip_pool_range;
 use crate::Name;
@@ -162,7 +162,7 @@ impl From<&IpPoolRange> for IpRange {
     }
 }
 
-impl DatastoreCollection<IpPoolRange> for IpPool {
+impl DatastoreCollectionConfig<IpPoolRange> for IpPool {
     type CollectionId = uuid::Uuid;
     type GenerationNumberColumn = ip_pool::dsl::rcgen;
     type CollectionTimeDeletedColumn = ip_pool::dsl::time_deleted;

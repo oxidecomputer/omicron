@@ -58,7 +58,7 @@ use std::fmt::Debug;
 ///     type CollectionIdColumn = project::dsl::organization_id;
 /// }
 /// ```
-pub trait DatastoreCollection<ResourceType> {
+pub trait DatastoreCollectionConfig<ResourceType> {
     /// The Rust type of the collection id (typically Uuid for us)
     type CollectionId: Copy + Debug;
 
@@ -126,7 +126,9 @@ pub trait DatastoreCollection<ResourceType> {
 ///     type ResourceTimeDeletedColumn = disk::dsl::time_deleted;
 /// }
 /// ```
-pub trait DatastoreAttachTarget<ResourceType>: Selectable<Pg> + Sized {
+pub trait DatastoreAttachTargetConfig<ResourceType>:
+    Selectable<Pg> + Sized
+{
     /// The Rust type of the collection and resource ids (typically Uuid).
     type Id: Copy + Debug + PartialEq + Send + 'static;
 
