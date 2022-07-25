@@ -218,6 +218,9 @@ pub struct InstanceIssueDiskSnapshotRequestResponse {
     snapshot_id: Uuid,
 }
 
+/// Take a snapshot of a disk that is attached to an instance
+///
+/// For disks not attached to an instance, see [`issue_disk_snapshot_request`]
 #[endpoint {
     method = POST,
     path = "/instances/{instance_id}/disks/{disk_id}/snapshot",
@@ -260,6 +263,10 @@ pub struct DiskSnapshotRequestResponse {
     snapshot_id: Uuid,
 }
 
+/// Take a snapshot of a disk that is not attached to an instance.
+///
+/// For disks attached to an instance, see
+/// [`instance_issue_disk_snapshot_request`]
 #[endpoint {
     method = POST,
     path = "/disks/{disk_id}/snapshot",

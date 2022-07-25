@@ -57,6 +57,8 @@
     },
     "/disks/{disk_id}/snapshot": {
       "post": {
+        "summary": "Take a snapshot of a disk that is not attached to an instance.",
+        "description": "For disks attached to an instance, see [`instance_issue_disk_snapshot_request`]",
         "operationId": "issue_disk_snapshot_request",
         "parameters": [
           {
@@ -173,6 +175,8 @@
     },
     "/instances/{instance_id}/disks/{disk_id}/snapshot": {
       "post": {
+        "summary": "Take a snapshot of a disk that is attached to an instance",
+        "description": "For disks not attached to an instance, see [`issue_disk_snapshot_request`]",
         "operationId": "instance_issue_disk_snapshot_request",
         "parameters": [
           {
