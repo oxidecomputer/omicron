@@ -98,8 +98,7 @@ const MAX_PORT: i32 = u16::MAX as _;
 ///             FROM
 ///                 ip_pool_range
 ///             WHERE
-///                 project_id = <project_id> OR
-///                 project_id IS NULL AND
+///                 <pool restriction clause> AND
 ///                 time_deleted IS NULL
 ///         )
 ///     CROSS JOIN
@@ -183,9 +182,29 @@ const MAX_PORT: i32 = u16::MAX as _;
 /// (even though we send the start/stop to the database as `i32`s). We need to
 /// cast it on the way out of the database, so that Diesel can correctly
 /// deserialize it into an `i32`.
+///
+/// Pool restriction
+/// ----------------
+///
+/// Clients may optionally request an external address from a specific IP Pool.
+/// If they don't provide a pool, the query is restricted to all IP Pools
+/// available to their project (not reserved for a different project). In the
+/// first case, the restriction is:
+///
+/// ```sql
+/// pool_id = <pool_id>
+/// ```
+///
+/// In the latter:
+///
+/// ```sql
+/// (project_id = <project_id> OR project_id IS NULL)
+/// ```
+///
+/// I.e., the pool is reserved for _this instance's_ project, or not reserved at
+/// all.
 #[derive(Debug, Clone)]
 pub struct NextExternalIp {
-    // TODO-completeness: Add `ip_pool_id`, and restrict search to it.
     ip: IncompleteInstanceExternalIp,
     // Number of ports reserved per IP address. Only applicable if the IP kind
     // is snat.
@@ -390,7 +409,7 @@ impl NextExternalIp {
     // FROM
     //     ip_pool_range
     // WHERE
-    //     (project_id = <project_id> OR project_id IS NULL) AND
+    //     <pool_restriction> AND
     //     time_deleted IS NULL
     // ```
     fn push_address_sequence_subquery<'a>(
@@ -410,13 +429,21 @@ impl NextExternalIp {
         out.push_identifier(dsl::first_address::NAME)?;
         out.push_sql(") AS candidate_ip FROM ");
         IP_POOL_RANGE_FROM_CLAUSE.walk_ast(out.reborrow())?;
-        out.push_sql(" WHERE (");
-        out.push_identifier(dsl::project_id::NAME)?;
-        out.push_sql(" = ");
-        out.push_bind_param::<sql_types::Uuid, Uuid>(self.ip.project_id())?;
-        out.push_sql(" OR ");
-        out.push_identifier(dsl::project_id::NAME)?;
-        out.push_sql(" IS NULL) AND ");
+        out.push_sql(" WHERE ");
+        if let Some(ref pool_id) = self.ip.pool_id() {
+            out.push_identifier(dsl::ip_pool_id::NAME)?;
+            out.push_sql(" = ");
+            out.push_bind_param::<sql_types::Uuid, Uuid>(pool_id)?;
+        } else {
+            out.push_sql("(");
+            out.push_identifier(dsl::project_id::NAME)?;
+            out.push_sql(" = ");
+            out.push_bind_param::<sql_types::Uuid, Uuid>(self.ip.project_id())?;
+            out.push_sql(" OR ");
+            out.push_identifier(dsl::project_id::NAME)?;
+            out.push_sql(" IS NULL)");
+        }
+        out.push_sql(" AND ");
         out.push_identifier(dsl::time_deleted::NAME)?;
         out.push_sql(" IS NULL");
         Ok(())
@@ -581,6 +608,7 @@ mod tests {
     use crate::db::model::IpKind;
     use crate::db::model::IpPool;
     use crate::db::model::IpPoolRange;
+    use crate::db::model::Name;
     use crate::external_api::shared::IpRange;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use dropshot::test_util::LogContext;
@@ -996,6 +1024,53 @@ mod tests {
         assert_eq!(ip.ip, new_ip.ip);
         assert_eq!(ip.first_port, new_ip.first_port);
         assert_eq!(ip.last_port, new_ip.last_port);
+
+        context.success().await;
+    }
+
+    #[tokio::test]
+    async fn test_next_external_ip_is_restricted_to_pools() {
+        let context =
+            TestContext::new("test_next_external_ip_is_restricted_to_pools")
+                .await;
+
+        // Create two pools, neither project-restricted.
+        let first_range = IpRange::try_from((
+            Ipv4Addr::new(10, 0, 0, 1),
+            Ipv4Addr::new(10, 0, 0, 3),
+        ))
+        .unwrap();
+        context.create_ip_pool("p0", first_range, None).await;
+        let second_range = IpRange::try_from((
+            Ipv4Addr::new(10, 0, 0, 4),
+            Ipv4Addr::new(10, 0, 0, 6),
+        ))
+        .unwrap();
+        context.create_ip_pool("p1", second_range, None).await;
+
+        // Allocating an address on an instance in the second pool should be
+        // respected, even though there are IPs available in the first.
+        let instance_id = Uuid::new_v4();
+        let project_id = Uuid::new_v4();
+        let id = Uuid::new_v4();
+        let pool_name = Some(Name("p1".parse().unwrap()));
+
+        let ip = context
+            .db_datastore
+            .allocate_instance_ephemeral_ip(
+                &context.opctx,
+                id,
+                project_id,
+                instance_id,
+                pool_name,
+            )
+            .await
+            .expect("Failed to allocate instance ephemeral IP address");
+        assert_eq!(ip.kind, IpKind::Ephemeral);
+        assert_eq!(ip.ip.ip(), second_range.first_address());
+        assert_eq!(ip.first_port.0, 0);
+        assert_eq!(ip.last_port.0, u16::MAX);
+        assert_eq!(ip.project_id, project_id);
 
         context.success().await;
     }
