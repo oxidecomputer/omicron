@@ -238,7 +238,7 @@ async fn ssc_create_snapshot_record(
     // state until the saga has completed.
     let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
 
-    debug!(log, "grabbing disk by name {}", params.create_params.disk);
+    info!(log, "grabbing disk by name {}", params.create_params.disk);
 
     let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
         .project_id(params.project_id)
@@ -247,7 +247,7 @@ async fn ssc_create_snapshot_record(
         .await
         .map_err(ActionError::action_failed)?;
 
-    debug!(log, "creating snapshot {} from disk {}", snapshot_id, disk.id());
+    info!(log, "creating snapshot {} from disk {}", snapshot_id, disk.id());
 
     let snapshot = db::model::Snapshot {
         identity: db::model::SnapshotIdentity::new(
@@ -277,7 +277,7 @@ async fn ssc_create_snapshot_record(
         .await
         .map_err(ActionError::action_failed)?;
 
-    debug!(log, "created snapshot {} ok", snapshot_id);
+    info!(log, "created snapshot {} ok", snapshot_id);
 
     Ok(snapshot_created)
 }
@@ -291,7 +291,7 @@ async fn ssc_create_snapshot_record_undo(
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
 
     let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
-    debug!(log, "deleting snapshot {}", snapshot_id);
+    info!(log, "deleting snapshot {}", snapshot_id);
 
     let (.., authz_snapshot, db_snapshot) =
         LookupPath::new(&opctx, &osagactx.datastore())
@@ -328,7 +328,7 @@ async fn ssc_send_snapshot_request(
 
     match disk.runtime().attach_instance_id {
         Some(instance_id) => {
-            debug!(log, "disk {} instance is {}", disk.id(), instance_id);
+            info!(log, "disk {} instance is {}", disk.id(), instance_id);
 
             // Get the instance's sled agent client
             let (.., instance) = LookupPath::new(&opctx, &osagactx.datastore())
@@ -343,7 +343,7 @@ async fn ssc_send_snapshot_request(
                 .await
                 .map_err(ActionError::action_failed)?;
 
-            debug!(log, "instance {} sled agent created ok", instance_id);
+            info!(log, "instance {} sled agent created ok", instance_id);
 
             // Send a snapshot request to propolis through sled agent
             sled_agent_client
@@ -358,7 +358,7 @@ async fn ssc_send_snapshot_request(
         }
 
         None => {
-            debug!(log, "disk {} not attached to an instance", disk.id());
+            info!(log, "disk {} not attached to an instance", disk.id());
 
             // Grab volume construction request for the disk
             let disk_volume = osagactx
@@ -367,7 +367,7 @@ async fn ssc_send_snapshot_request(
                 .await
                 .map_err(ActionError::action_failed)?;
 
-            debug!(
+            info!(
                 log,
                 "disk volume construction request {}",
                 disk_volume.data()
@@ -440,7 +440,7 @@ async fn ssc_send_snapshot_request_undo(
         let client = CrucibleAgentClient::new(&url);
 
         // Delete snapshot, it was created by this saga
-        debug!(log, "deleting snapshot {} {} {}", url, region.id(), snapshot_id);
+        info!(log, "deleting snapshot {} {} {}", url, region.id(), snapshot_id);
         client
             .region_delete_snapshot(
                 &RegionId(region.id().to_string()),
@@ -486,7 +486,7 @@ async fn ssc_start_running_snapshot(
         let url = format!("http://{}", dataset.address());
         let client = CrucibleAgentClient::new(&url);
 
-        debug!(log, "dataset {:?} region {:?} url {}", dataset, region, url);
+        info!(log, "dataset {:?} region {:?} url {}", dataset, region, url);
 
         // Validate with the Crucible agent that the snapshot exists
         let crucible_region = client
@@ -495,7 +495,7 @@ async fn ssc_start_running_snapshot(
             .map_err(|e| e.to_string())
             .map_err(ActionError::action_failed)?;
 
-        debug!(log, "crucible region {:?}", crucible_region);
+        info!(log, "crucible region {:?}", crucible_region);
 
         let crucible_snapshot = client
             .region_get_snapshot(
@@ -506,7 +506,7 @@ async fn ssc_start_running_snapshot(
             .map_err(|e| e.to_string())
             .map_err(ActionError::action_failed)?;
 
-        debug!(log, "crucible snapshot {:?}", crucible_snapshot);
+        info!(log, "crucible snapshot {:?}", crucible_snapshot);
 
         // Start the snapshot running
         let crucible_running_snapshot = client
@@ -518,7 +518,7 @@ async fn ssc_start_running_snapshot(
             .map_err(|e| e.to_string())
             .map_err(ActionError::action_failed)?;
 
-        debug!(log, "crucible running snapshot {:?}", crucible_running_snapshot);
+        info!(log, "crucible running snapshot {:?}", crucible_running_snapshot);
 
         // Map from the region to the snapshot
         let region_addr = format!(
@@ -529,7 +529,7 @@ async fn ssc_start_running_snapshot(
             "{}",
             dataset.address_with_port(crucible_running_snapshot.port_number)
         );
-        debug!(log, "map {} to {}", region_addr, snapshot_addr);
+        info!(log, "map {} to {}", region_addr, snapshot_addr);
         map.insert(region_addr, snapshot_addr);
     }
 
@@ -566,7 +566,7 @@ async fn ssc_start_running_snapshot_undo(
         let client = CrucibleAgentClient::new(&url);
 
         // Delete running snapshot
-        debug!(
+        info!(
             log,
             "deleting running snapshot {} {} {}",
             url,
@@ -612,7 +612,7 @@ async fn ssc_create_volume_record(
         .await
         .map_err(ActionError::action_failed)?;
 
-    debug!(log, "disk volume construction request {}", disk_volume.data());
+    info!(log, "disk volume construction request {}", disk_volume.data());
 
     let disk_volume_construction_request =
         serde_json::from_str(&disk_volume.data()).map_err(|e| {
@@ -642,7 +642,7 @@ async fn ssc_create_volume_record(
         serde_json::to_string(&volume_construction_request).map_err(|e| {
             ActionError::action_failed(Error::internal_error(&e.to_string()))
         })?;
-    debug!(log, "snapshot volume construction request {}", volume_data);
+    info!(log, "snapshot volume construction request {}", volume_data);
     let volume = db::model::Volume::new(volume_id, volume_data);
 
     let volume_created = osagactx
@@ -651,7 +651,7 @@ async fn ssc_create_volume_record(
         .await
         .map_err(ActionError::action_failed)?;
 
-    debug!(log, "volume {} created ok", volume_id);
+    info!(log, "volume {} created ok", volume_id);
 
     Ok(volume_created)
 }
@@ -662,7 +662,7 @@ async fn ssc_create_volume_record_undo(
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
-    debug!(log, "deleting volume {}", volume_id);
+    info!(log, "deleting volume {}", volume_id);
     osagactx.datastore().volume_delete(volume_id).await?;
 
     Ok(())
@@ -676,7 +676,7 @@ async fn ssc_finalize_snapshot_record(
     let params = sagactx.saga_params();
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
 
-    debug!(log, "snapshot final lookup...");
+    info!(log, "snapshot final lookup...");
 
     let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
     let (.., authz_snapshot, db_snapshot) = LookupPath::new(&opctx, &osagactx.datastore())
@@ -685,7 +685,7 @@ async fn ssc_finalize_snapshot_record(
         .await
         .map_err(ActionError::action_failed)?;
 
-    debug!(log, "snapshot final lookup ok");
+    info!(log, "snapshot final lookup ok");
 
     let snapshot = osagactx
         .datastore()
@@ -698,7 +698,7 @@ async fn ssc_finalize_snapshot_record(
         .await
         .map_err(ActionError::action_failed)?;
 
-    debug!(log, "snapshot finalized!");
+    info!(log, "snapshot finalized!");
 
     Ok(snapshot)
 }
