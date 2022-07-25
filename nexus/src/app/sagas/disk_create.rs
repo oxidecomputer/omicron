@@ -359,7 +359,7 @@ async fn sdc_regions_ensure(
     > = match &params.create_params.disk_source {
         params::DiskSource::Blank { block_size: _ } => None,
         params::DiskSource::Snapshot { snapshot_id } => {
-            warn!(log, "grabbing snapshot {}", snapshot_id);
+            debug!(log, "grabbing snapshot {}", snapshot_id);
 
             let (.., db_snapshot) =
                 LookupPath::new(&opctx, &osagactx.datastore())
@@ -406,7 +406,7 @@ async fn sdc_regions_ensure(
             }));
         }
         params::DiskSource::GlobalImage { image_id } => {
-            warn!(log, "grabbing image {}", image_id);
+            debug!(log, "grabbing image {}", image_id);
 
             let (.., global_image) =
                 LookupPath::new(&opctx, &osagactx.datastore())
