@@ -153,7 +153,6 @@ impl DataStore {
         // but we can't have NICs be a child of both tables at this point, and
         // we need to prevent VPC Subnets from being deleted while they have
         // NICs in them as well.
-        println!("ABOUT TO SEARCH FOR SUBNETS");
         if diesel_pool_result_optional(
             vpc_subnet::dsl::vpc_subnet
                 .filter(vpc_subnet::dsl::vpc_id.eq(authz_vpc.id()))
@@ -166,18 +165,15 @@ impl DataStore {
         .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?
         .is_some()
         {
-            println!("FOUND SOME SUBNETS");
             return Err(Error::InvalidRequest {
                 message: String::from(
                     "VPC cannot be deleted while VPC Subnets exist",
                 ),
             });
         }
-        println!("FOUND NO SUBNETS");
 
         // Delete the VPC, conditional on the subnet_gen not having changed.
         let now = Utc::now();
-        println!("ABOUT TO UPDATE");
         let updated_rows = diesel::update(dsl::vpc)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(authz_vpc.id()))
@@ -186,22 +182,18 @@ impl DataStore {
             .execute_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                println!("FAILED TO UPDATE");
                 public_error_from_diesel_pool(
                     e,
                     ErrorHandler::NotFoundByResource(authz_vpc),
                 )
             })?;
-        println!("FINISHED UPDATE");
         if updated_rows == 0 {
-            println!("NO ROWS UPDATED");
             Err(Error::InvalidRequest {
                 message: String::from(
                     "deletion failed to to concurrent modification",
                 ),
             })
         } else {
-            println!("SOME ROWS UPDATED");
             Ok(())
         }
     }
