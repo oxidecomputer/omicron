@@ -287,6 +287,7 @@ async fn query(
             filters.as_slice(),
             start,
             end,
+            None,
         )
         .await?;
     println!("{}", serde_json::to_string(&timeseries).unwrap());

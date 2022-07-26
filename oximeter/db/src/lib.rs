@@ -43,9 +43,8 @@ pub enum Error {
         actual: BTreeMap<String, FieldType>,
     },
 
-    /// An error querying or filtering data
-    #[error("Invalid query or data filter: {0}")]
-    QueryError(String),
+    #[error("Timeseries not found for: {0}")]
+    TimeseriesNotFound(String),
 
     #[error("The field comparison operation '{op}' is not valid for field '{field_name}' with type {field_type}")]
     InvalidSelectionOp { op: String, field_name: String, field_type: FieldType },
