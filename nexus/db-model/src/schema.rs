@@ -439,6 +439,7 @@ table! {
         ipv6_prefix -> Inet,
         dns_name -> Text,
         firewall_gen -> Int8,
+        subnet_gen -> Int8,
     }
 }
 
@@ -451,6 +452,7 @@ table! {
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         vpc_id -> Uuid,
+        rcgen -> Int8,
         ipv4_block -> Inet,
         ipv6_block -> Inet,
     }

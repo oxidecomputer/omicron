@@ -2,8 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use super::Generation;
 use super::{Ipv4Net, Ipv6Net, Name};
+use crate::collection::DatastoreCollectionConfig;
+use crate::schema::network_interface;
 use crate::schema::vpc_subnet;
+use crate::NetworkInterface;
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
 use nexus_types::external_api::params;
@@ -20,6 +24,7 @@ pub struct VpcSubnet {
     pub identity: VpcSubnetIdentity,
 
     pub vpc_id: Uuid,
+    pub rcgen: Generation,
     pub ipv4_block: Ipv4Net,
     pub ipv6_block: Ipv6Net,
 }
@@ -40,6 +45,7 @@ impl VpcSubnet {
         Self {
             identity,
             vpc_id,
+            rcgen: Generation::new(),
             ipv4_block: Ipv4Net(ipv4_block),
             ipv6_block: Ipv6Net(ipv6_block),
         }
@@ -104,4 +110,11 @@ impl From<params::VpcSubnetUpdate> for VpcSubnetUpdate {
             time_modified: Utc::now(),
         }
     }
+}
+
+impl DatastoreCollectionConfig<NetworkInterface> for VpcSubnet {
+    type CollectionId = Uuid;
+    type GenerationNumberColumn = vpc_subnet::dsl::rcgen;
+    type CollectionTimeDeletedColumn = vpc_subnet::dsl::time_deleted;
+    type CollectionIdColumn = network_interface::dsl::subnet_id;
 }
