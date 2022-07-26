@@ -2972,11 +2972,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Array_of_ExternalIp",
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/ExternalIp"
-                  }
+                  "$ref": "#/components/schemas/ExternalIpResultsPage"
                 }
               }
             }
@@ -7259,6 +7255,27 @@
               "type"
             ]
           }
+        ]
+      },
+      "ExternalIpResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExternalIp"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
         ]
       },
       "FieldSchema": {

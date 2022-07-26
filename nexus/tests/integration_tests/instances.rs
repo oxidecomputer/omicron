@@ -27,7 +27,7 @@ use omicron_common::api::external::NetworkInterface;
 use omicron_nexus::external_api::shared::IpKind;
 use omicron_nexus::external_api::shared::IpRange;
 use omicron_nexus::external_api::shared::Ipv4Range;
-use omicron_nexus::external_api::views::ExternalIp;
+use omicron_nexus::external_api::views;
 use omicron_nexus::TestInterfaces as _;
 use omicron_nexus::{external_api::params, Nexus};
 use sled_agent_client::TestInterfaces as _;
@@ -36,7 +36,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use dropshot::test_util::ClientTestContext;
-use dropshot::HttpErrorResponseBody;
+use dropshot::{HttpErrorResponseBody, ResultsPage};
 
 use nexus_test_utils::identity_eq;
 use nexus_test_utils::resource_helpers::{
@@ -2500,13 +2500,13 @@ async fn test_instance_ephemeral_ip_from_correct_project(
         .execute()
         .await
         .expect("Failed to fetch external IPs")
-        .parsed_body::<Vec<ExternalIp>>()
+        .parsed_body::<ResultsPage<views::ExternalIp>>()
         .expect("Failed to parse external IPs");
-    assert_eq!(ips.len(), 1);
-    assert_eq!(ips[0].kind, IpKind::Ephemeral);
+    assert_eq!(ips.items.len(), 1);
+    assert_eq!(ips.items[0].kind, IpKind::Ephemeral);
     assert!(
-        ips[0].ip >= second_range.first_address()
-            && ips[0].ip <= second_range.last_address(),
+        ips.items[0].ip >= second_range.first_address()
+            && ips.items[0].ip <= second_range.last_address(),
         "Expected the Ephemeral IP to come from the second address \
         range, since the first is reserved for a project different from \
         the instance's project."
