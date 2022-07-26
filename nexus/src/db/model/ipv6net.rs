@@ -2,13 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::defaults;
 use diesel::backend::{Backend, RawValue};
 use diesel::deserialize::{self, FromSql};
 use diesel::pg::Pg;
 use diesel::serialize::{self, ToSql};
 use diesel::sql_types;
 use ipnetwork::IpNetwork;
+use nexus_defaults as defaults;
 use omicron_common::api::external;
 use rand::{rngs::StdRng, SeedableRng};
 use std::net::Ipv6Addr;
