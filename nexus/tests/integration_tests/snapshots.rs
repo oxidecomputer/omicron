@@ -50,7 +50,7 @@ async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
 async fn test_snapshot(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
-    create_ip_pool(&client, "p0", None).await;
+    create_ip_pool(&client, "p0", None, None).await;
     create_org_and_project(client).await;
     let disks_url = get_disks_url();
 
@@ -145,6 +145,7 @@ async fn test_snapshot(cptestctx: &ControlPlaneTestContext) {
             disks: vec![params::InstanceDiskAttachment::Attach(
                 params::InstanceDiskAttach { name: base_disk_name.clone() },
             )],
+            external_ips: vec![],
         },
     )
     .await;
@@ -176,7 +177,7 @@ async fn test_snapshot(cptestctx: &ControlPlaneTestContext) {
 async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
-    create_ip_pool(&client, "p0", None).await;
+    create_ip_pool(&client, "p0", None, None).await;
     create_org_and_project(client).await;
     let disks_url = get_disks_url();
 
@@ -272,7 +273,7 @@ async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
 async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
-    create_ip_pool(&client, "p0", None).await;
+    create_ip_pool(&client, "p0", None, None).await;
     create_org_and_project(client).await;
     let disks_url = get_disks_url();
 
