@@ -7,18 +7,17 @@
 use super::datastore::DataStore;
 use super::identity::Asset;
 use super::identity::Resource;
-use super::model;
 use crate::{
     authz,
     context::OpContext,
     db,
     db::error::{public_error_from_diesel_pool, ErrorHandler},
-    db::model::Name,
-    db::model::UpdateArtifactKind,
 };
 use async_bb8_diesel::AsyncRunQueryDsl;
 use db_macros::lookup_resource;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
+use nexus_db_model::Name;
+use nexus_db_model::UpdateArtifactKind;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::{LookupResult, LookupType, ResourceType};

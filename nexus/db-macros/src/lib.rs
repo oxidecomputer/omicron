@@ -334,7 +334,7 @@ fn build_resource_impl(
             }
         };
 
-        impl crate::db::identity::Resource for #struct_name {
+        impl ::nexus_types::identity::Resource for #struct_name {
             fn id(&self) -> ::uuid::Uuid {
                 self.identity.id
             }
@@ -381,7 +381,7 @@ fn build_asset_impl(
             }
         };
 
-        impl crate::db::identity::Asset for #struct_name {
+        impl ::nexus_types::identity::Asset for #struct_name {
             fn id(&self) -> ::uuid::Uuid {
                 self.identity.id
             }
