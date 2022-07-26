@@ -40,6 +40,7 @@ use std::sync::Arc;
 extern crate slog;
 #[macro_use]
 extern crate newtype_derive;
+#[cfg(test)]
 #[macro_use]
 extern crate diesel;
 

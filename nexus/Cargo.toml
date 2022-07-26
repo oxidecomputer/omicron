@@ -61,6 +61,7 @@ usdt = "0.3.1"
 authz-macros = { path = "authz-macros" }
 db-macros = { path = "db-macros" }
 nexus-defaults = { path = "defaults" }
+nexus-db-model = { path = "db-model" }
 nexus-types = { path = "types" }
 
 [dependencies.chrono]
