@@ -4,10 +4,12 @@
 
 use super::{impl_enum_type, Generation, Name, RouterRoute};
 use crate::db::collection_insert::DatastoreCollection;
+use crate::db::identity::Resource;
 use crate::db::schema::{router_route, vpc_router};
 use crate::external_api::params;
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
+use nexus_types::external_api::views;
 use uuid::Uuid;
 
 impl_enum_type!(
@@ -23,6 +25,15 @@ impl_enum_type!(
     System => b"system"
     Custom => b"custom"
 );
+
+impl From<VpcRouterKind> for views::VpcRouterKind {
+    fn from(kind: VpcRouterKind) -> Self {
+        match kind {
+            VpcRouterKind::Custom => Self::Custom,
+            VpcRouterKind::System => Self::System,
+        }
+    }
+}
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable, Resource)]
 #[diesel(table_name = vpc_router)]
@@ -44,6 +55,16 @@ impl VpcRouter {
     ) -> Self {
         let identity = VpcRouterIdentity::new(router_id, params.identity);
         Self { identity, vpc_id, kind, rcgen: Generation::new() }
+    }
+}
+
+impl From<VpcRouter> for views::VpcRouter {
+    fn from(router: VpcRouter) -> Self {
+        Self {
+            identity: router.identity(),
+            vpc_id: router.vpc_id,
+            kind: router.kind.into(),
+        }
     }
 }
 

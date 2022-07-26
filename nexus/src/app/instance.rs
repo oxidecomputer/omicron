@@ -5,6 +5,8 @@
 //! Virtual Machine Instances
 
 use super::MAX_DISKS_PER_INSTANCE;
+use super::MAX_EXTERNAL_IPS_PER_INSTANCE;
+use super::MAX_NICS_PER_INSTANCE;
 use crate::app::sagas;
 use crate::authn;
 use crate::authz;
@@ -28,10 +30,10 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::internal::nexus;
-use sled_agent_client::types::ExternalIp;
 use sled_agent_client::types::InstanceRuntimeStateMigrateParams;
 use sled_agent_client::types::InstanceRuntimeStateRequested;
 use sled_agent_client::types::InstanceStateRequested;
+use sled_agent_client::types::SourceNatConfig;
 use sled_agent_client::Client as SledAgentClient;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -58,6 +60,37 @@ impl super::Nexus {
                 "cannot attach more than {} disks to instance!",
                 MAX_DISKS_PER_INSTANCE
             )));
+        }
+        if params.external_ips.len() > MAX_EXTERNAL_IPS_PER_INSTANCE {
+            return Err(Error::invalid_request(&format!(
+                "An instance may not have more than {} external IP addresses",
+                MAX_EXTERNAL_IPS_PER_INSTANCE,
+            )));
+        }
+        if let params::InstanceNetworkInterfaceAttachment::Create(ref ifaces) =
+            params.network_interfaces
+        {
+            if ifaces.len() > MAX_NICS_PER_INSTANCE {
+                return Err(Error::invalid_request(&format!(
+                    "An instance may not have more than {} network interfaces",
+                    MAX_NICS_PER_INSTANCE,
+                )));
+            }
+            // Check that all VPC names are the same.
+            //
+            // This isn't strictly necessary, as the queries to create these
+            // interfaces would fail in the saga, but it's easier to handle here.
+            if ifaces
+                .iter()
+                .map(|iface| &iface.vpc_name)
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+                != 1
+            {
+                return Err(Error::invalid_request(
+                    "All interfaces must be in the same VPC",
+                ));
+            }
         }
 
         // Reject instances where the memory is not at least
@@ -216,6 +249,9 @@ impl super::Nexus {
 
         self.db_datastore
             .project_delete_instance(opctx, &authz_instance)
+            .await?;
+        self.db_datastore
+            .instance_delete_all_network_interfaces(opctx, &authz_instance)
             .await?;
         // Ignore the count of addresses deleted
         self.db_datastore
@@ -502,29 +538,28 @@ impl super::Nexus {
             .partition(|ip| ip.kind == IpKind::SNat);
 
         // Sanity checks on the number and kind of each IP address.
-        if external_ips.len() > crate::app::MAX_EPHEMERAL_IPS_PER_INSTANCE {
+        // TODO-correctness: Handle multiple IP addresses, see
+        //  https://github.com/oxidecomputer/omicron/issues/1467
+        if external_ips.len() > MAX_EXTERNAL_IPS_PER_INSTANCE {
             return Err(Error::internal_error(
                 format!(
                     "Expected the number of external IPs to be limited to \
-                {}, but found {}",
-                    crate::app::MAX_EPHEMERAL_IPS_PER_INSTANCE,
+                    {}, but found {}",
+                    MAX_EXTERNAL_IPS_PER_INSTANCE,
                     external_ips.len(),
                 )
                 .as_str(),
             ));
         }
+        let external_ips =
+            external_ips.into_iter().map(|model| model.ip.ip()).collect();
         if snat_ip.len() != 1 {
             return Err(Error::internal_error(
                 "Expected exactly one SNAT IP address for an instance",
             ));
         }
-
-        // For now, we take the Ephemeral IP, if it exists, or the SNAT IP if not.
-        // TODO-correctness: Handle multiple IP addresses, see
-        //  https://github.com/oxidecomputer/omicron/issues/1467
-        let external_ip = ExternalIp::from(
-            external_ips.into_iter().chain(snat_ip).next().unwrap(),
-        );
+        let source_nat =
+            SourceNatConfig::from(snat_ip.into_iter().next().unwrap());
 
         // Gather the SSH public keys of the actor make the request so
         // that they may be injected into the new image via cloud-init.
@@ -564,7 +599,8 @@ impl super::Nexus {
                 db_instance.runtime().clone(),
             ),
             nics,
-            external_ip,
+            source_nat,
+            external_ips,
             disks: disk_reqs,
             cloud_init_bytes: Some(base64::encode(
                 db_instance.generate_cidata(&public_keys)?,

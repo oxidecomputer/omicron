@@ -15,13 +15,13 @@ use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use serde::Deserialize;
 use serde::Serialize;
-use sled_agent_client::types::ExternalIp;
 use sled_agent_client::types::InstanceEnsureBody;
 use sled_agent_client::types::InstanceHardware;
 use sled_agent_client::types::InstanceMigrateParams;
 use sled_agent_client::types::InstanceRuntimeStateMigrateParams;
 use sled_agent_client::types::InstanceRuntimeStateRequested;
 use sled_agent_client::types::InstanceStateRequested;
+use sled_agent_client::types::SourceNatConfig;
 use std::net::Ipv6Addr;
 use std::sync::Arc;
 use steno::new_action_noop_undo;
@@ -178,35 +178,32 @@ async fn sim_instance_migrate(
         .partition(|ip| ip.kind == IpKind::SNat);
 
     // Sanity checks on the number and kind of each IP address.
-    if external_ips.len() > crate::app::MAX_EPHEMERAL_IPS_PER_INSTANCE {
+    if external_ips.len() > crate::app::MAX_EXTERNAL_IPS_PER_INSTANCE {
         return Err(ActionError::action_failed(Error::internal_error(
             format!(
                 "Expected the number of external IPs to be limited to \
-            {}, but found {}",
-                crate::app::MAX_EPHEMERAL_IPS_PER_INSTANCE,
+                {}, but found {}",
+                crate::app::MAX_EXTERNAL_IPS_PER_INSTANCE,
                 external_ips.len(),
             )
             .as_str(),
         )));
     }
+    let external_ips =
+        external_ips.into_iter().map(|model| model.ip.ip()).collect();
     if snat_ip.len() != 1 {
         return Err(ActionError::action_failed(Error::internal_error(
             "Expected exactly one SNAT IP address for an instance",
         )));
     }
-
-    // For now, we take the Ephemeral IP, if it exists, or the SNAT IP if not.
-    // TODO-correctness: Handle multiple IP addresses, see
-    //  https://github.com/oxidecomputer/omicron/issues/1467
-    let external_ip = ExternalIp::from(
-        external_ips.into_iter().chain(snat_ip).next().unwrap(),
-    );
+    let source_nat = SourceNatConfig::from(snat_ip.into_iter().next().unwrap());
 
     let instance_hardware = InstanceHardware {
         runtime: runtime.into(),
         // TODO: populate NICs
         nics: vec![],
-        external_ip,
+        source_nat,
+        external_ips,
         // TODO: populate disks
         disks: vec![],
         // TODO: populate cloud init bytes

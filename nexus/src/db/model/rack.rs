@@ -4,6 +4,7 @@
 
 use crate::db::schema::rack;
 use db_macros::Asset;
+use nexus_types::external_api::views;
 use uuid::Uuid;
 
 /// Information about a local rack.
@@ -24,5 +25,11 @@ impl Rack {
             initialized: false,
             tuf_base_url: None,
         }
+    }
+}
+
+impl From<Rack> for views::Rack {
+    fn from(rack: Rack) -> Self {
+        Self { identity: views::AssetIdentityMetadata::from(&rack) }
     }
 }

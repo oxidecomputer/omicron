@@ -9,7 +9,7 @@ license = "MPL-2.0"
 anyhow = "1.0.58"
 async-trait = "0.1.53"
 bincode = "1.3.3"
-bytes = "1.1"
+bytes = "1.2"
 cfg-if = "1.0"
 chrono = { version = "0.4", features = [ "serde" ] }
 clap = { version = "3.2", features = ["derive"] }
@@ -62,8 +62,8 @@ vsss-rs = { version = "2.0.0-pre2", default-features = false, features = ["std"]
 zone = "0.1"
 
 [target.'cfg(target_os = "illumos")'.dependencies]
-opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "eb9e0c687e3c072dbc7d4782475f4ba5a6f50258" }
-opte = { git = "https://github.com/oxidecomputer/opte", rev = "eb9e0c687e3c072dbc7d4782475f4ba5a6f50258", features = [ "api", "std" ] }
+opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "23884d35aa7908e23accaa77f125a370ddf5c606" }
+opte = { git = "https://github.com/oxidecomputer/opte", rev = "23884d35aa7908e23accaa77f125a370ddf5c606", features = [ "api", "std" ] }
 
 [dev-dependencies]
 expectorate = "1.0.5"

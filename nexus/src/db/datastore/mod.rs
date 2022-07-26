@@ -245,6 +245,7 @@ mod test {
         ByteCount, Error, IdentityMetadataCreateParams, LookupType, Name,
     };
     use omicron_test_utils::dev;
+    use ref_cast::RefCast;
     use std::collections::HashSet;
     use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;
@@ -285,7 +286,9 @@ mod test {
 
         let (.., organization_after_project_create) =
             LookupPath::new(&opctx, &datastore)
-                .organization_name(organization.name())
+                .organization_name(db::model::Name::ref_cast(
+                    organization.name(),
+                ))
                 .fetch()
                 .await
                 .unwrap();

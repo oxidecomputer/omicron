@@ -415,9 +415,9 @@ checksum = "14c189c53d098945499cdfa7ecc63567cf3886b3332b312a5b4585d8d3a6a610"
 
 [[package]]
 name = "bytes"
-version = "1.1.0"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c4872d67bab6358e59559027aa3b9157c53d9358c51423c17554809a8858e0f8"
+checksum = "f0b3de4a0c5e67e16066a0715723abd91edc2f9001d09c46e1dca929351e130e"
 dependencies = [
  "serde",
 ]
@@ -746,9 +746,9 @@ dependencies = [
 
 [[package]]
 name = "crossbeam"
-version = "0.8.1"
+version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ae5588f6b3c3cb05239e90bd110f257254aecd01e4635400391aeae07497845"
+checksum = "2801af0d36612ae591caa9568261fddce32ce6e08a7275ea334a06a4ad021a2c"
 dependencies = [
  "cfg-if 1.0.0",
  "crossbeam-channel",
@@ -1163,9 +1163,9 @@ dependencies = [
 
 [[package]]
 name = "diesel"
-version = "2.0.0-rc.0"
+version = "2.0.0-rc.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e531d0abf8147036383c88ce3785d9cda6fe1b8b1183021ffa01cf49c5819d24"
+checksum = "876a12f2d98c35d1dfaf74083664be5bb71606b72f4756f3792cdb1ddb192b46"
 dependencies = [
  "bitflags",
  "byteorder",
@@ -1183,7 +1183,7 @@ dependencies = [
 [[package]]
 name = "diesel-dtrace"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/diesel-dtrace#2eece1d9e0ef8a95034f47e5e7b2906bb741ae50"
+source = "git+https://github.com/oxidecomputer/diesel-dtrace?rev=b9262a79db59f0727ca28ca9baed6fc6e3cc31e7#b9262a79db59f0727ca28ca9baed6fc6e3cc31e7"
 dependencies = [
  "diesel",
  "lock_api",
@@ -1194,9 +1194,9 @@ dependencies = [
 
 [[package]]
 name = "diesel_derives"
-version = "2.0.0-rc.0"
+version = "2.0.0-rc.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "212ba0cdc611523c37f26c7b3b4aedb4af7cbfe9239c4e7736a8a7c82284d77b"
+checksum = "2497d9cefebedc40492310f3c94493e1d0bd5b11b5e1bfc0a7f4b106012203ea"
 dependencies = [
  "proc-macro-error",
  "proc-macro2",
@@ -2257,7 +2257,7 @@ dependencies = [
 [[package]]
 name = "illumos-ddi-dki"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=eb9e0c687e3c072dbc7d4782475f4ba5a6f50258#eb9e0c687e3c072dbc7d4782475f4ba5a6f50258"
+source = "git+https://github.com/oxidecomputer/opte?rev=23884d35aa7908e23accaa77f125a370ddf5c606#23884d35aa7908e23accaa77f125a370ddf5c606"
 dependencies = [
  "illumos-sys-hdrs",
 ]
@@ -2265,7 +2265,7 @@ dependencies = [
 [[package]]
 name = "illumos-sys-hdrs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=eb9e0c687e3c072dbc7d4782475f4ba5a6f50258#eb9e0c687e3c072dbc7d4782475f4ba5a6f50258"
+source = "git+https://github.com/oxidecomputer/opte?rev=23884d35aa7908e23accaa77f125a370ddf5c606#23884d35aa7908e23accaa77f125a370ddf5c606"
 
 [[package]]
 name = "impl-trait-for-tuples"
@@ -2809,6 +2809,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-types"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "api_identity 0.1.0",
+ "base64",
+ "chrono",
+ "omicron-common 0.1.0",
+ "openssl",
+ "openssl-probe",
+ "openssl-sys",
+ "schemars",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "nibble_vec"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3048,7 +3066,6 @@ name = "omicron-nexus"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "api_identity 0.1.0",
  "async-bb8-diesel",
  "async-trait",
  "authz-macros",
@@ -3081,6 +3098,7 @@ dependencies = [
  "newtype_derive",
  "nexus-test-utils",
  "nexus-test-utils-macros",
+ "nexus-types",
  "num-integer",
  "omicron-common 0.1.0",
  "omicron-rpaths",
@@ -3363,7 +3381,7 @@ dependencies = [
 [[package]]
 name = "opte"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=eb9e0c687e3c072dbc7d4782475f4ba5a6f50258#eb9e0c687e3c072dbc7d4782475f4ba5a6f50258"
+source = "git+https://github.com/oxidecomputer/opte?rev=23884d35aa7908e23accaa77f125a370ddf5c606#23884d35aa7908e23accaa77f125a370ddf5c606"
 dependencies = [
  "anymap",
  "cfg-if 0.1.10",
@@ -3380,7 +3398,7 @@ dependencies = [
 [[package]]
 name = "opte-ioctl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=eb9e0c687e3c072dbc7d4782475f4ba5a6f50258#eb9e0c687e3c072dbc7d4782475f4ba5a6f50258"
+source = "git+https://github.com/oxidecomputer/opte?rev=23884d35aa7908e23accaa77f125a370ddf5c606#23884d35aa7908e23accaa77f125a370ddf5c606"
 dependencies = [
  "libc",
  "libnet",
@@ -6146,7 +6164,7 @@ version = "1.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
 dependencies = [
- "cfg-if 0.1.10",
+ "cfg-if 1.0.0",
  "rand 0.8.5",
  "static_assertions",
 ]

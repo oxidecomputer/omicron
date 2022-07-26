@@ -16,8 +16,8 @@ bb8 = "0.8.0"
 clap = { version = "3.2", features = ["derive"] }
 cookie = "0.16"
 crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "2add0de8489f1d4de901bfe98fc28b0a6efcc3ea" }
-diesel = { version = "2.0.0-rc.0", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
-diesel-dtrace = { git = "https://github.com/oxidecomputer/diesel-dtrace" }
+diesel = { version = "2.0.0-rc.1", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
+diesel-dtrace = { git = "https://github.com/oxidecomputer/diesel-dtrace", rev = "b9262a79db59f0727ca28ca9baed6fc6e3cc31e7" }
 fatfs = "0.3.5"
 futures = "0.3.21"
 headers = "0.3.7"
@@ -60,9 +60,7 @@ usdt = "0.3.1"
 
 authz-macros = { path = "authz-macros" }
 db-macros = { path = "db-macros" }
-
-[dependencies.api_identity]
-path = "../api_identity"
+nexus-types = { path = "types" }
 
 [dependencies.chrono]
 version = "0.4"

@@ -6,7 +6,7 @@ use serde::Serialize;
 use std::io::{self, Cursor, Write};
 use uuid::Uuid;
 
-pub const MAX_USER_DATA_BYTES: usize = 32 * 1024; // 32 KiB
+pub use nexus_types::external_api::params::MAX_USER_DATA_BYTES;
 
 impl Instance {
     pub fn generate_cidata(

@@ -339,8 +339,8 @@ fn build_resource_impl(
                 self.identity.id
             }
 
-            fn name(&self) -> &crate::db::model::Name {
-                &self.identity.name
+            fn name(&self) -> &::omicron_common::api::external::Name {
+                &self.identity.name.0
             }
 
             fn description(&self) -> &str {

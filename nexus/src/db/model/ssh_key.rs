@@ -2,9 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::db::identity::Resource;
 use crate::db::schema::ssh_key;
 use crate::external_api::params;
 use db_macros::Resource;
+use nexus_types::external_api::views;
 use uuid::Uuid;
 
 /// Describes a user's public SSH key within the database.
@@ -32,6 +34,16 @@ impl SshKey {
             identity: SshKeyIdentity::new(id, params.identity),
             silo_user_id,
             public_key: params.public_key,
+        }
+    }
+}
+
+impl From<SshKey> for views::SshKey {
+    fn from(ssh_key: SshKey) -> Self {
+        Self {
+            identity: ssh_key.identity(),
+            silo_user_id: ssh_key.silo_user_id,
+            public_key: ssh_key.public_key,
         }
     }
 }

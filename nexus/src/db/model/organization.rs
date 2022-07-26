@@ -4,10 +4,12 @@
 
 use super::{Generation, Name, Project};
 use crate::db::collection_insert::DatastoreCollection;
+use crate::db::identity::Resource;
 use crate::db::schema::{organization, project};
 use crate::external_api::params;
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
+use nexus_types::external_api::views;
 use uuid::Uuid;
 
 /// Describes an organization within the database.
@@ -32,6 +34,12 @@ impl Organization {
             silo_id,
             rcgen: Generation::new(),
         }
+    }
+}
+
+impl From<Organization> for views::Organization {
+    fn from(org: Organization) -> Self {
+        Self { identity: org.identity() }
     }
 }
 
