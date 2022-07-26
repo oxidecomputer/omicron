@@ -34,6 +34,8 @@ pub use crucible_agent_client;
 use external_api::http_entrypoints::external_api;
 use internal_api::http_entrypoints::internal_api;
 use slog::Logger;
+use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 #[macro_use]
@@ -71,7 +73,9 @@ pub fn run_openapi_internal() -> Result<(), String> {
 pub struct Server {
     /// shared state used by API request handlers
     pub apictx: Arc<ServerContext>,
-    /// dropshot server for external API
+    /// dropshot server for external API (encrypted)
+    pub https_server_external: dropshot::HttpServer<Arc<ServerContext>>,
+    /// dropshot server for external API (unencrypted)
     pub http_server_external: dropshot::HttpServer<Arc<ServerContext>>,
     /// dropshot server for internal API
     pub http_server_internal: dropshot::HttpServer<Arc<ServerContext>>,
@@ -92,26 +96,76 @@ impl Server {
             ServerContext::new(config.deployment.rack_id, ctxlog, &config)
                 .await?;
 
-        let http_server_starter_external = dropshot::HttpServerStarter::new(
-            &config.deployment.dropshot_external,
+        // We launch separate dropshot servers for the "encrypted" and
+        // "unencrypted" ports.
+
+        const HTTPS_PORT: u16 = 443;
+        const HTTP_PORT: u16 = 80;
+
+        let dropshot_external_https_config = dropshot::ConfigDropshot {
+            bind_address: SocketAddr::new(
+                config.deployment.external_ip,
+                HTTPS_PORT,
+            ),
+            request_body_max_bytes: 1048576,
+            tls: Some(dropshot::ConfigTls {
+                cert_file: PathBuf::from("/var/nexus/certs/cert.pem"),
+                key_file: PathBuf::from("/var/nexus/certs/key.pem"),
+            }),
+        };
+        // TODO: Consider removing this interface when all clients are using
+        // https?
+        let dropshot_external_http_config = dropshot::ConfigDropshot {
+            bind_address: SocketAddr::new(
+                config.deployment.external_ip,
+                HTTP_PORT,
+            ),
+            request_body_max_bytes: 1048576,
+            tls: None,
+        };
+
+        let dropshot_internal_config = dropshot::ConfigDropshot {
+            bind_address: SocketAddr::new(
+                config.deployment.internal_ip,
+                omicron_common::address::NEXUS_INTERNAL_PORT,
+            ),
+            request_body_max_bytes: 1048576,
+            ..Default::default()
+        };
+
+        let https_server_starter_external = dropshot::HttpServerStarter::new(
+            &dropshot_external_https_config,
             external_api(),
             Arc::clone(&apictx),
-            &log.new(o!("component" => "dropshot_external")),
+            &log.new(o!("component" => "dropshot_external (encrypted)")),
         )
         .map_err(|error| format!("initializing external server: {}", error))?;
+        let https_server_external = https_server_starter_external.start();
+
+        let http_server_starter_external = dropshot::HttpServerStarter::new(
+            &dropshot_external_http_config,
+            external_api(),
+            Arc::clone(&apictx),
+            &log.new(o!("component" => "dropshot_external (unencrypted)")),
+        )
+        .map_err(|error| format!("initializing external server: {}", error))?;
+        let http_server_external = http_server_starter_external.start();
 
         let http_server_starter_internal = dropshot::HttpServerStarter::new(
-            &config.deployment.dropshot_internal,
+            &dropshot_internal_config,
             internal_api(),
             Arc::clone(&apictx),
             &log.new(o!("component" => "dropshot_internal")),
         )
         .map_err(|error| format!("initializing internal server: {}", error))?;
-
-        let http_server_external = http_server_starter_external.start();
         let http_server_internal = http_server_starter_internal.start();
 
-        Ok(Server { apictx, http_server_external, http_server_internal })
+        Ok(Server {
+            apictx,
+            https_server_external,
+            http_server_external,
+            http_server_internal,
+        })
     }
 
     /// Wait for the given server to shut down

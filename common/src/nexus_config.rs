@@ -7,11 +7,11 @@
 
 use super::address::{Ipv6Subnet, RACK_PREFIX};
 use super::postgres_config::PostgresConfigWithUrl;
-use dropshot::ConfigDropshot;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use serde_with::DisplayFromStr;
 use std::fmt;
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
@@ -104,10 +104,10 @@ pub struct DeploymentConfig {
     pub id: Uuid,
     /// Uuid of the Rack where Nexus is executing.
     pub rack_id: Uuid,
-    /// Dropshot configuration for external API server
-    pub dropshot_external: ConfigDropshot,
-    /// Dropshot configuration for internal API server
-    pub dropshot_internal: ConfigDropshot,
+    /// External address of Nexus.
+    pub external_ip: IpAddr,
+    /// Internal address of Nexus.
+    pub internal_ip: IpAddr,
     /// Portion of the IP space to be managed by the Rack.
     pub subnet: Ipv6Subnet<RACK_PREFIX>,
     /// DB configuration.

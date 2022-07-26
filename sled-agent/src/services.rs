@@ -13,7 +13,6 @@ use crate::illumos::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use crate::illumos::zone::AddressRequest;
 use crate::params::{ServiceEnsureBody, ServiceRequest, ServiceType};
 use crate::zone::Zones;
-use dropshot::ConfigDropshot;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::OXIMETER_PORT;
 use omicron_common::address::RACK_PREFIX;
@@ -25,7 +24,7 @@ use omicron_common::postgres_config::PostgresConfigWithUrl;
 use slog::Logger;
 use std::collections::HashSet;
 use std::iter::FromIterator;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use tokio::io::AsyncWriteExt;
@@ -373,13 +372,13 @@ impl ServiceManager {
             let default_smf_name = format!("{}:default", smf_name);
 
             match service.service_type {
-                ServiceType::Nexus { internal_address, external_address } => {
+                ServiceType::Nexus { internal_ip, external_ip } => {
                     info!(self.log, "Setting up Nexus service");
 
                     // The address of Nexus' external interface is a special
                     // case; it may be an IPv4 address.
                     let addr_request =
-                        AddressRequest::new_static(external_address.ip(), None);
+                        AddressRequest::new_static(external_ip, None);
                     running_zone
                         .ensure_external_address_with_name(
                             addr_request,
@@ -387,7 +386,7 @@ impl ServiceManager {
                         )
                         .await?;
 
-                    if let IpAddr::V4(_public_addr4) = external_address.ip() {
+                    if let IpAddr::V4(_public_addr4) = external_ip {
                         // If requested, create a default route back through
                         // the internet gateway.
                         if let Some(ref gateway) = self.config.gateway_address {
@@ -406,21 +405,8 @@ impl ServiceManager {
                     let deployment_config = NexusDeploymentConfig {
                         id: service.id,
                         rack_id: self.rack_id,
-                        dropshot_external: ConfigDropshot {
-                            bind_address: external_address,
-                            request_body_max_bytes: 1048576,
-                            tls: Some(
-                                dropshot::ConfigTls {
-                                    cert_file: PathBuf::from("/var/nexus/certs/cert.pem"),
-                                    key_file: PathBuf::from("/var/nexus/certs/key.pem"),
-                                }
-                            ),
-                        },
-                        dropshot_internal: ConfigDropshot {
-                            bind_address: SocketAddr::V6(internal_address),
-                            request_body_max_bytes: 1048576,
-                            ..Default::default()
-                        },
+                        external_ip,
+                        internal_ip: IpAddr::V6(internal_ip),
                         subnet: Ipv6Subnet::<RACK_PREFIX>::new(
                             self.underlay_address,
                         ),
