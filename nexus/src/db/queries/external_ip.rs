@@ -987,8 +987,8 @@ mod tests {
         assert_eq!(ip.id, new_ip.id);
         assert_eq!(ip.name, new_ip.name);
         assert_eq!(ip.description, new_ip.description);
-        assert!(ip.time_created < new_ip.time_created);
-        assert!(ip.time_modified < new_ip.time_modified);
+        assert!(ip.time_created <= new_ip.time_created);
+        assert!(ip.time_modified <= new_ip.time_modified);
         assert_eq!(ip.time_deleted, new_ip.time_deleted);
         assert_eq!(ip.ip_pool_id, new_ip.ip_pool_id);
         assert_eq!(ip.ip_pool_range_id, new_ip.ip_pool_range_id);
