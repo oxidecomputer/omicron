@@ -2500,7 +2500,7 @@ async fn instance_network_interface_update(
 async fn instance_external_ip_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstancePathParam>,
-) -> Result<HttpResponseOk<Vec<views::ExternalIp>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<views::ExternalIp>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
@@ -2517,7 +2517,7 @@ async fn instance_external_ip_list(
                 instance_name,
             )
             .await?;
-        Ok(HttpResponseOk(ips))
+        Ok(HttpResponseOk(ResultsPage { items: ips, next_page: None }))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
