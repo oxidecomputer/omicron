@@ -686,7 +686,7 @@ CREATE TABLE omicron.public.metric_producer (
     oximeter_id UUID NOT NULL
 );
 
-CREATE INDEX ON omicron.public.metric_producer (
+CREATE UNIQUE INDEX ON omicron.public.metric_producer (
     oximeter_id,
     id
 );
@@ -1135,8 +1135,9 @@ CREATE UNIQUE INDEX ON omicron.public.instance_external_ip (
 )
     WHERE time_deleted IS NULL;
 
-CREATE INDEX ON omicron.public.instance_external_ip (
-    instance_id
+CREATE UNIQUE INDEX ON omicron.public.instance_external_ip (
+    instance_id,
+    id
 )
     WHERE instance_id IS NOT NULL AND time_deleted IS NULL;
 
