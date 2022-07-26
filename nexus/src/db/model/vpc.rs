@@ -7,7 +7,6 @@ use crate::db::collection_insert::DatastoreCollection;
 use crate::db::identity::Resource;
 use crate::db::model::Vni;
 use crate::db::schema::{vpc, vpc_firewall_rule, vpc_subnet};
-use crate::defaults;
 use crate::external_api::params;
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
