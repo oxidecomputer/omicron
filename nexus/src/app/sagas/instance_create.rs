@@ -475,14 +475,14 @@ async fn sic_create_default_primary_network_interface(
 /// Create an external IP address for instance source NAT.
 async fn sic_allocate_instance_snat_ip(
     sagactx: ActionContext<SagaInstanceCreate>,
-) -> Result<Uuid, ActionError> {
+) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
     let saga_params = sagactx.saga_params();
     let opctx =
         OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
-    let ip_id = Uuid::new_v4();
+    let ip_id = sagactx.lookup::<Uuid>("snat_ip_id")?;
     datastore
         .allocate_instance_snat_ip(
             &opctx,
@@ -492,7 +492,7 @@ async fn sic_allocate_instance_snat_ip(
         )
         .await
         .map_err(ActionError::action_failed)?;
-    Ok(ip_id)
+    Ok(())
 }
 
 /// Destroy an allocated SNAT IP address for the instance.
@@ -504,7 +504,7 @@ async fn sic_allocate_instance_snat_ip_undo(
     let saga_params = sagactx.saga_params();
     let opctx =
         OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
-    let ip_id = sagactx.lookup::<Uuid>("snat_ip")?;
+    let ip_id = sagactx.lookup::<Uuid>("snat_ip_id")?;
     datastore
         .deallocate_instance_external_ip(&opctx, ip_id)
         .await
@@ -517,23 +517,28 @@ async fn sic_allocate_instance_snat_ip_undo(
 async fn sic_allocate_instance_external_ip(
     sagactx: ActionContext<SagaInstanceCreate>,
     ip_index: usize,
-) -> Result<Option<Uuid>, ActionError> {
+) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
     let saga_params = sagactx.saga_params();
     let ip_params = saga_params.create_params.external_ips.get(ip_index);
     let ip_params = match ip_params {
         None => {
-            return Ok(None);
+            return Ok(());
         }
         Some(ref prs) => prs,
     };
     let opctx =
         OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+    let name = format!("external_ip_id{ip_index}");
+    let ip_id = sagactx.lookup::<Option<Uuid>>(&name)?.ok_or_else(|| {
+        ActionError::action_failed(Error::internal_error(
+            "Expected a UUID for instance external IP",
+        ))
+    })?;
 
-    // Generate an ID and collect the possible pool name for this IP address
-    let ip_id = Uuid::new_v4();
+    // Collect the possible pool name for this IP address
     let pool_name = match ip_params {
         params::ExternalIpCreate::Ephemeral { ref pool_name } => {
             pool_name.as_ref().map(|name| db::model::Name(name.clone()))
@@ -549,7 +554,7 @@ async fn sic_allocate_instance_external_ip(
         )
         .await
         .map_err(ActionError::action_failed)?;
-    Ok(Some(ip_id))
+    Ok(())
 }
 
 async fn sic_allocate_instance_external_ip_undo(
@@ -559,16 +564,23 @@ async fn sic_allocate_instance_external_ip_undo(
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
     let saga_params = sagactx.saga_params();
+    if ip_index >= saga_params.create_params.external_ips.len() {
+        return Ok(());
+    }
+
     let opctx =
         OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
-    let name = format!("external_ip{ip_index}");
-    let maybe_ip_id = sagactx.lookup::<Option<Uuid>>(name.as_str())?;
-    if let Some(ip_id) = maybe_ip_id {
-        datastore
-            .deallocate_instance_external_ip(&opctx, ip_id)
-            .await
-            .map_err(ActionError::action_failed)?;
-    }
+    let name = format!("external_ip_id{ip_index}");
+    let ip_id =
+        sagactx.lookup::<Option<Uuid>>(name.as_str())?.ok_or_else(|| {
+            ActionError::action_failed(Error::internal_error(
+                "Expected a UUID for instance external IP",
+            ))
+        })?;
+    datastore
+        .deallocate_instance_external_ip(&opctx, ip_id)
+        .await
+        .map_err(ActionError::action_failed)?;
     Ok(())
 }
 
