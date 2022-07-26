@@ -9,9 +9,9 @@ use super::views::IpPoolRange;
 use super::{
     console_api, device_auth, params, views,
     views::{
-        GlobalImage, IdentityProvider, Image, Measurement, Organization,
-        Project, Rack, Role, Silo, Sled, Snapshot, SshKey, User, UserBuiltin,
-        Vpc, VpcRouter, VpcSubnet,
+        GlobalImage, IdentityProvider, Image, Organization, Project, Rack,
+        Role, Silo, Sled, Snapshot, SshKey, User, UserBuiltin, Vpc, VpcRouter,
+        VpcSubnet,
     },
 };
 use crate::authz;
@@ -1538,8 +1538,10 @@ pub enum DiskMetricName {
 async fn disk_metrics_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<MetricsPathParam<DiskPathParam, DiskMetricName>>,
-    query_params: Query<params::ResourceMetricsPagination>,
-) -> Result<HttpResponseOk<ResultsPage<Measurement>>, HttpError> {
+    query_params: Query<
+        PaginationParams<params::ResourceMetrics, params::ResourceMetrics>,
+    >,
+) -> Result<HttpResponseOk<ResultsPage<oximeter_db::Measurement>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
 

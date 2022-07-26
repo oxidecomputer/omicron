@@ -6,7 +6,6 @@
 
 use crate::external_api::shared;
 use chrono::{DateTime, Utc};
-use dropshot::PaginationParams;
 use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
     InstanceCpuCount, Ipv4Net, Ipv6Net, Name,
@@ -847,9 +846,6 @@ pub struct ResourceMetrics {
     /// An exclusive end time of metrics.
     pub end_time: DateTime<Utc>,
 }
-
-pub type ResourceMetricsPagination =
-    PaginationParams<ResourceMetrics, ResourceMetrics>;
 
 #[cfg(test)]
 mod test {

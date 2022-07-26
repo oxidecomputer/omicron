@@ -9,8 +9,8 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::Asset;
 use crate::external_api::params::ResourceMetrics;
-use crate::external_api::params::ResourceMetricsPagination;
 use crate::internal_api::params::OximeterInfo;
+use dropshot::PaginationParams;
 use internal_dns_client::{
     multiclient::{ResolveError, Resolver},
     names::{ServiceName, SRV},
@@ -235,7 +235,7 @@ impl super::Nexus {
         &self,
         timeseries_name: &str,
         criteria: &[&str],
-        query_params: ResourceMetricsPagination,
+        query_params: PaginationParams<ResourceMetrics, ResourceMetrics>,
         limit: NonZeroU32,
     ) -> Result<dropshot::ResultsPage<Measurement>, Error> {
         #[inline]

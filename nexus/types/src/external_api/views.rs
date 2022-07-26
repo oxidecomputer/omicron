@@ -19,8 +19,6 @@ use std::net::IpAddr;
 use std::net::SocketAddrV6;
 use uuid::Uuid;
 
-pub use oximeter_db::Measurement;
-
 // IDENTITY METADATA
 
 /// Identity-related metadata that's included in "asset" public API objects
