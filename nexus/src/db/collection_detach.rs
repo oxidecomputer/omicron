@@ -16,7 +16,6 @@ use super::cte_utils::{
     QueryFromClause, QuerySqlType,
 };
 use super::pool::DbConnection;
-use crate::db::collection_attach::DatastoreAttachTarget;
 use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager, PoolError};
 use diesel::associations::HasTable;
 use diesel::expression::{AsExpression, Expression};
@@ -27,6 +26,7 @@ use diesel::query_builder::*;
 use diesel::query_dsl::methods as query_methods;
 use diesel::query_source::Table;
 use diesel::sql_types::{Nullable, SingleValue};
+use nexus_db_model::DatastoreAttachTargetConfig;
 use std::fmt::Debug;
 
 /// Trait to be implemented by structs representing a detachable collection.
@@ -34,7 +34,7 @@ use std::fmt::Debug;
 /// A blanket implementation is provided for traits that implement
 /// [`DatastoreAttachTarget`].
 pub trait DatastoreDetachTarget<ResourceType>:
-    DatastoreAttachTarget<ResourceType>
+    DatastoreAttachTargetConfig<ResourceType>
 {
     /// Creates a statement for detaching a resource from the given collection.
     ///
@@ -191,7 +191,7 @@ pub trait DatastoreDetachTarget<ResourceType>:
 }
 
 impl<T, ResourceType> DatastoreDetachTarget<ResourceType> for T where
-    T: DatastoreAttachTarget<ResourceType>
+    T: DatastoreAttachTargetConfig<ResourceType>
 {
 }
 
@@ -500,7 +500,7 @@ where
 
 #[cfg(test)]
 mod test {
-    use super::{DatastoreDetachTarget, DetachError};
+    use super::*;
     use crate::db::collection_attach::DatastoreAttachTarget;
     use crate::db::{
         self, error::TransactionError, identity::Resource as IdentityResource,
@@ -592,7 +592,7 @@ mod test {
         pub identity: CollectionIdentity,
     }
 
-    impl DatastoreAttachTarget<Resource> for Collection {
+    impl DatastoreAttachTargetConfig<Resource> for Collection {
         type Id = uuid::Uuid;
 
         type CollectionIdColumn = collection::dsl::id;

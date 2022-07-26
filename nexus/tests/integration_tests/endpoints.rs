@@ -230,7 +230,7 @@ lazy_static! {
 
     // The instance needs a network interface, too.
     pub static ref DEMO_INSTANCE_NIC_NAME: Name =
-        omicron_nexus::defaults::DEFAULT_PRIMARY_NIC_NAME.parse().unwrap();
+        nexus_defaults::DEFAULT_PRIMARY_NIC_NAME.parse().unwrap();
     pub static ref DEMO_INSTANCE_NIC_URL: String =
         format!("{}/{}", *DEMO_INSTANCE_NICS_URL, *DEMO_INSTANCE_NIC_NAME);
     pub static ref DEMO_INSTANCE_NIC_CREATE: params::NetworkInterfaceCreate =
