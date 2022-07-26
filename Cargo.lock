@@ -3480,6 +3480,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxide-client"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "futures",
+ "progenitor",
+ "regress",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "oximeter"
 version = "0.1.0"
 dependencies = [
