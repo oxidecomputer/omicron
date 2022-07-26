@@ -208,7 +208,7 @@ async fn test_instances_create_reboot_halt(
     assert_eq!(network_interfaces[0].instance_id, instance.identity.id);
     assert_eq!(
         network_interfaces[0].identity.name,
-        omicron_nexus::defaults::DEFAULT_PRIMARY_NIC_NAME
+        nexus_defaults::DEFAULT_PRIMARY_NIC_NAME
     );
 
     // Now, simulate completion of instance boot and check the state reported.
