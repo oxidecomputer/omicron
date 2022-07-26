@@ -10,6 +10,7 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
+use crate::db::error::TransactionError;
 use crate::db::identity::Resource;
 use crate::db::model::Generation;
 use crate::db::model::Name;
@@ -17,6 +18,7 @@ use crate::db::model::Snapshot;
 use crate::db::model::SnapshotState;
 use crate::db::pagination::paginated;
 use crate::db::update_and_check::UpdateAndCheck;
+use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
@@ -24,7 +26,6 @@ use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
-use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::bail_unless;
@@ -129,37 +130,48 @@ impl DataStore {
     ) -> Result<Uuid, Error> {
         opctx.authorize(authz::Action::Delete, authz_snapshot).await?;
 
-        use db::schema::snapshot::dsl;
         let now = Utc::now();
 
         // A snapshot can be deleted in any state. It's never attached to an
         // instance, and any disk launched from it will copy and modify the volume
-        // construction request it's based on.
+        // construction request it's based on. The associated volume can be also
+        // be deleted - this will not affect any active crucible connections
+        // because no actual resources are cleaned up here.
+        //
+        // TODO-correctness this will leak on-disk snapshots and currently
+        // running read-only downstairs, which will need to be cleaned up once
+        // all volumes that reference them are gone.
 
         let snapshot_id = authz_snapshot.id();
         let gen = db_snapshot.gen;
         let volume_id = db_snapshot.volume_id;
 
-        diesel::update(dsl::snapshot)
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::gen.eq(gen))
-            .filter(dsl::id.eq(snapshot_id))
-            .set(dsl::time_deleted.eq(now))
-            .check_if_exists::<Snapshot>(snapshot_id)
-            .execute_and_check(self.pool())
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Snapshot,
-                        LookupType::ById(snapshot_id),
-                    ),
-                )
-            })?;
+        let volume_delete_query = self.volume_delete_query(volume_id);
 
-        // After deleting the snapshot, remove the associated volume.
-        self.volume_delete(volume_id).await?;
+        self.pool_authorized(&opctx)
+            .await?
+            .transaction(move |conn| {
+                use db::schema::snapshot::dsl;
+
+                diesel::update(dsl::snapshot)
+                    .filter(dsl::time_deleted.is_null())
+                    .filter(dsl::gen.eq(gen))
+                    .filter(dsl::id.eq(snapshot_id))
+                    .set(dsl::time_deleted.eq(now))
+                    .check_if_exists::<Snapshot>(snapshot_id)
+                    .execute(conn)?;
+
+                volume_delete_query.execute(conn)?;
+
+                Ok(())
+            })
+            .await
+            .map_err(|e| match e {
+                TransactionError::CustomError(e) => e,
+                TransactionError::Pool(e) => {
+                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                }
+            })?;
 
         Ok(snapshot_id)
     }

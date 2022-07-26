@@ -10,7 +10,6 @@ use crate::db::schema::snapshot;
 use crate::external_api::views;
 use db_macros::Resource;
 use serde::{Deserialize, Serialize};
-use std::io::Write;
 use uuid::Uuid;
 
 impl_enum_type!(

@@ -10,7 +10,6 @@ use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Asset;
 use crate::db::model::Volume;
-use crate::db::update_and_check::UpdateAndCheck;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
@@ -43,15 +42,26 @@ impl DataStore {
             })
     }
 
-    pub async fn volume_delete(&self, volume_id: Uuid) -> DeleteResult {
+    pub fn volume_delete_query<T>(
+        &self,
+        volume_id: Uuid,
+    ) -> impl diesel::query_builder::QueryFragment<diesel::pg::Pg>
+           + RunQueryDsl<T>
+           + diesel::query_builder::QueryId
+    where
+        T: Connection,
+    {
         use db::schema::volume::dsl;
 
         let now = Utc::now();
         diesel::update(dsl::volume)
             .filter(dsl::id.eq(volume_id))
             .set(dsl::time_deleted.eq(now))
-            .check_if_exists::<Volume>(volume_id)
-            .execute_and_check(self.pool())
+    }
+
+    pub async fn volume_delete(&self, volume_id: Uuid) -> DeleteResult {
+        self.volume_delete_query(volume_id)
+            .execute_async(self.pool())
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
@@ -62,6 +72,7 @@ impl DataStore {
                     ),
                 )
             })?;
+
         Ok(())
     }
 
