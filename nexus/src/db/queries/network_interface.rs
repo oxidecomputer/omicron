@@ -1474,6 +1474,7 @@ mod tests {
     use super::last_address_offset;
     use super::InsertError;
     use super::MAX_NICS_PER_INSTANCE;
+    use super::NUM_INITIAL_RESERVED_IP_ADDRESSES;
     use crate::context::OpContext;
     use crate::db::datastore::DataStore;
     use crate::db::identity::Resource;
@@ -1635,7 +1636,7 @@ mod tests {
                 .iter()
                 .map(|subnet| {
                     subnet.ipv4_block.size() as usize
-                        - crate::defaults::NUM_INITIAL_RESERVED_IP_ADDRESSES
+                        - NUM_INITIAL_RESERVED_IP_ADDRESSES
                         - 1
                 })
                 .collect()
@@ -1802,7 +1803,7 @@ mod tests {
         let addresses = context.net1.subnets[0]
             .ipv4_block
             .iter()
-            .skip(nexus_defaults::NUM_INITIAL_RESERVED_IP_ADDRESSES);
+            .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES);
 
         for (i, expected_address) in addresses.take(2).enumerate() {
             let instance =
