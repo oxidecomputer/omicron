@@ -186,7 +186,6 @@ table! {
 
         discoverable -> Bool,
         user_provision_type -> crate::db::model::UserProvisionTypeEnum,
-        admin_group_name -> Nullable<Text>,
 
         rcgen -> Int8,
     }

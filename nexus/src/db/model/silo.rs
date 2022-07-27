@@ -45,9 +45,6 @@ pub struct Silo {
 
     pub user_provision_type: UserProvisionType,
 
-    /// if set, this group will be created and granted the silo admin role
-    pub admin_group_name: Option<String>,
-
     /// child resource generation number, per RFD 192
     pub rcgen: Generation,
 }
@@ -63,7 +60,6 @@ impl Silo {
             identity: SiloIdentity::new(id, params.identity),
             discoverable: params.discoverable,
             user_provision_type: params.user_provision_type.into(),
-            admin_group_name: params.admin_group_name,
             rcgen: Generation::new(),
         }
     }
