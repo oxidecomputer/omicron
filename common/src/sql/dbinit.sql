@@ -316,10 +316,6 @@ CREATE INDEX ON omicron.public.silo_group_membership (
     silo_group_id
 );
 
-CREATE INDEX ON omicron.public.silo_group_membership (
-    silo_user_id
-);
-
 /*
  * Silo identity provider list
  */
