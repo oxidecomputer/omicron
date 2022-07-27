@@ -16,7 +16,7 @@ use crate::db::lookup::LookupPath;
 use crate::db::model::SiloGroup;
 use crate::db::model::SiloGroupMembership;
 use async_bb8_diesel::AsyncRunQueryDsl;
-use async_bb8_diesel::{AsyncConnection, OptionalExtension, PoolError};
+use async_bb8_diesel::{AsyncConnection, OptionalExtension};
 use chrono::Utc;
 use diesel::prelude::*;
 use omicron_common::api::external::CreateResult;
@@ -140,9 +140,7 @@ impl DataStore {
                 Ok(())
             })
             .await
-            .map_err(|e: TransactionError<PoolError>| {
-                Error::internal_error(&format!("Transaction error: {}", e))
-            })
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     pub async fn silo_group_delete(
@@ -201,9 +199,10 @@ impl DataStore {
                     id
                 )),
 
-                _ => {
-                    Error::internal_error(&format!("Transaction error: {}", e))
-                }
+                TxnError::Pool(pool_error) => public_error_from_diesel_pool(
+                    pool_error,
+                    ErrorHandler::Server,
+                ),
             })
     }
 }
