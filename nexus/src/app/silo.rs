@@ -77,19 +77,6 @@ impl super::Nexus {
         self.db_datastore.silo_delete(opctx, &authz_silo, &db_silo).await
     }
 
-    pub async fn silo_delete_by_id(
-        &self,
-        opctx: &OpContext,
-        id: Uuid,
-    ) -> DeleteResult {
-        let (.., authz_silo, db_silo) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .silo_id(id)
-                .fetch_for(authz::Action::Delete)
-                .await?;
-        self.db_datastore.silo_delete(opctx, &authz_silo, &db_silo).await
-    }
-
     // Role assignments
 
     pub async fn silo_fetch_policy(
