@@ -372,7 +372,7 @@ impl From<ServiceType> for sled_agent_client::types::ServiceType {
     }
 }
 
-/// Describes a request to create a service. This informatios tn
+/// Describes a request to create a service. This information
 /// should be sufficient for a Sled Agent to start a zone
 /// containing the requested service.
 #[derive(

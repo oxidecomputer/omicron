@@ -26,6 +26,7 @@ use omicron_nexus::authn::external::HttpAuthnScheme;
 use omicron_nexus::authn::external::SiloUserSilo;
 use omicron_nexus::db::fixed_data::silo::SILO_ID;
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
@@ -296,10 +297,20 @@ async fn start_whoami_server(
     };
 
     let log = logctx.log.new(o!());
+
+    assert!(matches!(
+        config.deployment.port_picker,
+        omicron_common::nexus_config::PortPicker::Zero
+    ));
+    let config_dropshot = dropshot::ConfigDropshot {
+        bind_address: SocketAddr::new(config.deployment.external_ip, 0),
+        request_body_max_bytes: 1048576,
+        tls: None,
+    };
     TestContext::new(
         whoami_api,
         server_state,
-        &config.deployment.dropshot_external,
+        &config_dropshot,
         Some(logctx),
         log,
     )

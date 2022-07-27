@@ -98,6 +98,23 @@ pub enum Database {
     },
 }
 
+/// Describes how ports are selected for dropshot's HTTP servers.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PortPicker {
+    /// Use default values for ports, defined by Nexus.
+    NexusChoice,
+    /// Use port zero - this is avoids conflicts during tests,
+    /// by letting the OS pick free ports.
+    Zero,
+}
+
+impl Default for PortPicker {
+    fn default() -> Self {
+        PortPicker::NexusChoice
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct DeploymentConfig {
     /// Uuid of the Nexus instance
@@ -108,6 +125,9 @@ pub struct DeploymentConfig {
     pub external_ip: IpAddr,
     /// Internal address of Nexus.
     pub internal_ip: IpAddr,
+    /// Decides how ports are selected
+    #[serde(default)]
+    pub port_picker: PortPicker,
     /// Portion of the IP space to be managed by the Rack.
     pub subnet: Ipv6Subnet<RACK_PREFIX>,
     /// DB configuration.

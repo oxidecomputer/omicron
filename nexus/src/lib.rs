@@ -74,7 +74,7 @@ pub struct Server {
     /// shared state used by API request handlers
     pub apictx: Arc<ServerContext>,
     /// dropshot server for external API (encrypted)
-    pub https_server_external: dropshot::HttpServer<Arc<ServerContext>>,
+    pub https_server_external: Option<dropshot::HttpServer<Arc<ServerContext>>>,
     /// dropshot server for external API (unencrypted)
     pub http_server_external: dropshot::HttpServer<Arc<ServerContext>>,
     /// dropshot server for internal API
@@ -96,61 +96,26 @@ impl Server {
             ServerContext::new(config.deployment.rack_id, ctxlog, &config)
                 .await?;
 
-        // We launch separate dropshot servers for the "encrypted" and
-        // "unencrypted" ports.
+        // Determine port choices
 
-        const HTTPS_PORT: u16 = 443;
-        const HTTP_PORT: u16 = 80;
+        let (external_http_port, external_https_port, internal_http_port) =
+            match config.deployment.port_picker {
+                omicron_common::nexus_config::PortPicker::NexusChoice => {
+                    (80, 443, omicron_common::address::NEXUS_INTERNAL_PORT)
+                }
+                omicron_common::nexus_config::PortPicker::Zero => (0, 0, 0),
+            };
 
-        let dropshot_external_https_config = dropshot::ConfigDropshot {
-            bind_address: SocketAddr::new(
-                config.deployment.external_ip,
-                HTTPS_PORT,
-            ),
-            request_body_max_bytes: 1048576,
-            tls: Some(dropshot::ConfigTls {
-                cert_file: PathBuf::from("/var/nexus/certs/cert.pem"),
-                key_file: PathBuf::from("/var/nexus/certs/key.pem"),
-            }),
-        };
-        // TODO: Consider removing this interface when all clients are using
-        // https?
-        let dropshot_external_http_config = dropshot::ConfigDropshot {
-            bind_address: SocketAddr::new(
-                config.deployment.external_ip,
-                HTTP_PORT,
-            ),
-            request_body_max_bytes: 1048576,
-            tls: None,
-        };
+        // Launch the internal server.
 
         let dropshot_internal_config = dropshot::ConfigDropshot {
             bind_address: SocketAddr::new(
                 config.deployment.internal_ip,
-                omicron_common::address::NEXUS_INTERNAL_PORT,
+                internal_http_port,
             ),
             request_body_max_bytes: 1048576,
             ..Default::default()
         };
-
-        let https_server_starter_external = dropshot::HttpServerStarter::new(
-            &dropshot_external_https_config,
-            external_api(),
-            Arc::clone(&apictx),
-            &log.new(o!("component" => "dropshot_external (encrypted)")),
-        )
-        .map_err(|error| format!("initializing external server: {}", error))?;
-        let https_server_external = https_server_starter_external.start();
-
-        let http_server_starter_external = dropshot::HttpServerStarter::new(
-            &dropshot_external_http_config,
-            external_api(),
-            Arc::clone(&apictx),
-            &log.new(o!("component" => "dropshot_external (unencrypted)")),
-        )
-        .map_err(|error| format!("initializing external server: {}", error))?;
-        let http_server_external = http_server_starter_external.start();
-
         let http_server_starter_internal = dropshot::HttpServerStarter::new(
             &dropshot_internal_config,
             internal_api(),
@@ -159,6 +124,63 @@ impl Server {
         )
         .map_err(|error| format!("initializing internal server: {}", error))?;
         let http_server_internal = http_server_starter_internal.start();
+
+        // Launch the external server(s).
+        //
+        // - The HTTP server is unconditionally started.
+        // - The HTTPS server is started if the necessary certificate files
+        // exist.
+        //
+        // TODO: Consider changing this disposition, making "HTTPS" the default,
+        // and returning an error if the certificates don't exist. Doing so
+        // would be the more secure long-term plan, but would make gradual
+        // deployment of this feature more difficult.
+
+        let cert_file = PathBuf::from("/var/nexus/certs/cert.pem");
+        let key_file = PathBuf::from("/var/nexus/certs/key.pem");
+
+        let https_server_external = if cert_file.exists() && key_file.exists() {
+            let dropshot_external_https_config = dropshot::ConfigDropshot {
+                bind_address: SocketAddr::new(
+                    config.deployment.external_ip,
+                    external_https_port,
+                ),
+                request_body_max_bytes: 1048576,
+                tls: Some(dropshot::ConfigTls { cert_file, key_file }),
+            };
+            let https_server_starter_external =
+                dropshot::HttpServerStarter::new(
+                    &dropshot_external_https_config,
+                    external_api(),
+                    Arc::clone(&apictx),
+                    &log.new(
+                        o!("component" => "dropshot_external (encrypted)"),
+                    ),
+                )
+                .map_err(|error| {
+                    format!("initializing external server: {}", error)
+                })?;
+            Some(https_server_starter_external.start())
+        } else {
+            None
+        };
+
+        let dropshot_external_http_config = dropshot::ConfigDropshot {
+            bind_address: SocketAddr::new(
+                config.deployment.external_ip,
+                external_http_port,
+            ),
+            request_body_max_bytes: 1048576,
+            tls: None,
+        };
+        let http_server_starter_external = dropshot::HttpServerStarter::new(
+            &dropshot_external_http_config,
+            external_api(),
+            Arc::clone(&apictx),
+            &log.new(o!("component" => "dropshot_external (unencrypted)")),
+        )
+        .map_err(|error| format!("initializing external server: {}", error))?;
+        let http_server_external = http_server_starter_external.start();
 
         Ok(Server {
             apictx,

@@ -407,6 +407,7 @@ impl ServiceManager {
                         rack_id: self.rack_id,
                         external_ip,
                         internal_ip: IpAddr::V6(internal_ip),
+                        port_picker: nexus_config::PortPicker::default(),
                         subnet: Ipv6Subnet::<RACK_PREFIX>::new(
                             self.underlay_address,
                         ),
