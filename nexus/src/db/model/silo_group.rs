@@ -7,9 +7,7 @@ use db_macros::Asset;
 use uuid::Uuid;
 
 /// Describes a silo group within the database.
-#[derive(
-    Asset, Queryable, Insertable, Debug, Selectable,
-)]
+#[derive(Asset, Queryable, Insertable, Debug, Selectable)]
 #[diesel(table_name = silo_group)]
 pub struct SiloGroup {
     #[diesel(embed)]
