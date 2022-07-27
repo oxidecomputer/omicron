@@ -77,19 +77,23 @@ const REGION_REDUNDANCY_THRESHOLD: usize = 3;
 // This helper trait lets the statement either be executed or explained.
 //
 // U: The output type of executing the statement.
-trait RunnableQuery<U>:
-    RunQueryDsl<DbConnection>
-    + QueryFragment<Pg>
-    + LoadQuery<'static, DbConnection, U>
-    + QueryId
+pub trait RunnableQueryNoReturn:
+    RunQueryDsl<DbConnection> + QueryFragment<Pg> + QueryId
+{
+}
+
+impl<T> RunnableQueryNoReturn for T where
+    T: RunQueryDsl<DbConnection> + QueryFragment<Pg> + QueryId
+{
+}
+
+pub trait RunnableQuery<U>:
+    RunnableQueryNoReturn + LoadQuery<'static, DbConnection, U>
 {
 }
 
 impl<U, T> RunnableQuery<U> for T where
-    T: RunQueryDsl<DbConnection>
-        + QueryFragment<Pg>
-        + LoadQuery<'static, DbConnection, U>
-        + QueryId
+    T: RunnableQueryNoReturn + LoadQuery<'static, DbConnection, U>
 {
 }
 

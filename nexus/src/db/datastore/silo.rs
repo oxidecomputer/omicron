@@ -8,14 +8,19 @@ use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::datastore::RunnableQuery;
 use crate::db::error::diesel_pool_result_optional;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
+use crate::db::error::TransactionError;
 use crate::db::fixed_data::silo::DEFAULT_SILO;
 use crate::db::identity::Resource;
 use crate::db::model::Name;
 use crate::db::model::Silo;
 use crate::db::pagination::paginated;
+use crate::external_api::params;
+use crate::external_api::shared;
+use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
@@ -24,7 +29,7 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
-use omicron_common::api::external::ResourceType;
+use omicron_common::api::external::LookupType;
 use uuid::Uuid;
 
 impl DataStore {
@@ -51,29 +56,103 @@ impl DataStore {
         Ok(())
     }
 
+    pub async fn silo_create_query(
+        opctx: &OpContext,
+        silo: Silo,
+    ) -> Result<impl RunnableQuery<Silo>, Error> {
+        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
+
+        use db::schema::silo::dsl;
+        Ok(diesel::insert_into(dsl::silo)
+            .values(silo)
+            .returning(Silo::as_returning()))
+    }
+
     pub async fn silo_create(
         &self,
         opctx: &OpContext,
-        silo: Silo,
+        new_silo_params: params::SiloCreate,
     ) -> CreateResult<Silo> {
-        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
+        let silo_id = Uuid::new_v4();
+        let silo_group_id = Uuid::new_v4();
 
-        let silo_id = silo.id();
+        let silo_create_query = DataStore::silo_create_query(
+            opctx,
+            db::model::Silo::new_with_id(silo_id, new_silo_params.clone()),
+        )
+        .await?;
 
-        use db::schema::silo::dsl;
-        diesel::insert_into(dsl::silo)
-            .values(silo)
-            .returning(Silo::as_returning())
-            .get_result_async(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::Conflict(
-                        ResourceType::Silo,
-                        silo_id.to_string().as_str(),
+        let authz_silo =
+            authz::Silo::new(authz::FLEET, silo_id, LookupType::ById(silo_id));
+
+        let silo_admin_group_create_query = if let Some(ref admin_group_name) =
+            new_silo_params.admin_group_name
+        {
+            let silo_admin_group_create_query =
+                DataStore::silo_group_create_query(
+                    opctx,
+                    &authz_silo,
+                    db::model::SiloGroup::new(
+                        silo_group_id,
+                        silo_id,
+                        admin_group_name.clone(),
                     ),
                 )
+                .await?;
+
+            Some(silo_admin_group_create_query)
+        } else {
+            None
+        };
+
+        let silo_admin_group_role_assignment_queries =
+            if new_silo_params.admin_group_name.is_some() {
+                // Grant silo admin role for members of the admin group.
+                let policy = shared::Policy {
+                    role_assignments: vec![shared::RoleAssignment {
+                        identity_type: shared::IdentityType::SiloGroup,
+                        identity_id: silo_group_id,
+                        role_name: authz::SiloRole::Admin,
+                    }],
+                };
+
+                let silo_admin_group_role_assignment_queries =
+                    DataStore::role_assignment_replace_visible_queries(
+                        opctx,
+                        &authz_silo,
+                        &policy.role_assignments,
+                    )
+                    .await?;
+
+                Some(silo_admin_group_role_assignment_queries)
+            } else {
+                None
+            };
+
+        self.pool_authorized(opctx)
+            .await?
+            .transaction(move |conn| {
+                let silo = silo_create_query.get_result(conn)?;
+
+                if let Some(query) = silo_admin_group_create_query {
+                    query.get_result(conn)?;
+                }
+
+                if let Some(queries) = silo_admin_group_role_assignment_queries
+                {
+                    let (delete_old_query, insert_new_query) = queries;
+                    delete_old_query.execute(conn)?;
+                    insert_new_query.execute(conn)?;
+                }
+
+                Ok(silo)
+            })
+            .await
+            .map_err(|e| match e {
+                TransactionError::CustomError(e) => e,
+                TransactionError::Pool(e) => {
+                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                }
             })
     }
 

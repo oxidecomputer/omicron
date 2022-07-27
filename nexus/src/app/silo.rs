@@ -6,7 +6,6 @@
 
 use std::sync::Arc;
 
-use crate::app::sagas;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::{Asset, Resource};
@@ -34,26 +33,7 @@ impl super::Nexus {
         opctx: &OpContext,
         new_silo_params: params::SiloCreate,
     ) -> CreateResult<db::model::Silo> {
-        let saga_params = Arc::new(sagas::silo_create::Params {
-            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
-            create_params: new_silo_params.clone(),
-        });
-
-        let saga_outputs = self
-            .execute_saga(
-                Arc::clone(&sagas::silo_create::SAGA_TEMPLATE),
-                sagas::silo_create::SAGA_NAME,
-                saga_params,
-            )
-            .await?;
-
-        let silo_created = saga_outputs
-            .lookup_output::<db::model::Silo>("created_silo")
-            .map_err(|e| Error::InternalError {
-                internal_message: e.to_string(),
-            })?;
-
-        Ok(silo_created)
+        self.datastore().silo_create(&opctx, new_silo_params).await
     }
 
     pub async fn silos_list_by_name(
@@ -154,6 +134,7 @@ impl super::Nexus {
             .into_iter()
             .map(|r| r.try_into())
             .collect::<Result<Vec<_>, _>>()?;
+
         Ok(shared::Policy { role_assignments })
     }
 
@@ -296,6 +277,7 @@ impl super::Nexus {
                 self.db_datastore
                     .silo_group_create(
                         opctx,
+                        authz_silo,
                         db::model::SiloGroup::new(
                             Uuid::new_v4(),
                             authz_silo.id(),

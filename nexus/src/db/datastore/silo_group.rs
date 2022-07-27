@@ -8,6 +8,7 @@ use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::datastore::RunnableQuery;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
@@ -26,16 +27,27 @@ use omicron_common::api::external::UpdateResult;
 use uuid::Uuid;
 
 impl DataStore {
+    pub async fn silo_group_create_query(
+        opctx: &OpContext,
+        authz_silo: &authz::Silo,
+        silo_group: SiloGroup,
+    ) -> Result<impl RunnableQuery<SiloGroup>, Error> {
+        opctx.authorize(authz::Action::CreateChild, authz_silo).await?;
+
+        use db::schema::silo_group::dsl;
+        Ok(diesel::insert_into(dsl::silo_group)
+            .values(silo_group)
+            .returning(SiloGroup::as_returning()))
+    }
+
     pub async fn silo_group_create(
         &self,
         opctx: &OpContext,
+        authz_silo: &authz::Silo,
         silo_group: SiloGroup,
     ) -> CreateResult<SiloGroup> {
-        use db::schema::silo_group::dsl;
-
-        diesel::insert_into(dsl::silo_group)
-            .values(silo_group)
-            .returning(SiloGroup::as_returning())
+        DataStore::silo_group_create_query(opctx, authz_silo, silo_group)
+            .await?
             .get_result_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
