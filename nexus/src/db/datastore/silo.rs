@@ -262,7 +262,7 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
 
-        info!(opctx.log, "deleted {} silo users for silo {}", updated_rows, id);
+        debug!(opctx.log, "deleted {} silo users for silo {}", updated_rows, id);
 
         // delete all silo group memberships
         let updated_rows =
@@ -279,7 +279,7 @@ impl DataStore {
                 .await
                 .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
 
-        info!(
+        debug!(
             opctx.log,
             "deleted {} silo group memberships for silo {}", updated_rows, id
         );
@@ -293,7 +293,7 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
 
-        info!(
+        debug!(
             opctx.log,
             "deleted {} silo groups for silo {}", updated_rows, id
         );
@@ -309,7 +309,7 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
 
-        info!(opctx.log, "deleted {} silo IdPs for silo {}", updated_rows, id);
+        debug!(opctx.log, "deleted {} silo IdPs for silo {}", updated_rows, id);
 
         use db::schema::saml_identity_provider::dsl as saml_idp_dsl;
 
@@ -321,7 +321,7 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
 
-        info!(
+        debug!(
             opctx.log,
             "deleted {} silo saml IdPs for silo {}", updated_rows, id
         );
