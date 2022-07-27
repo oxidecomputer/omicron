@@ -10,6 +10,474 @@
     "version": "0.0.1"
   },
   "paths": {
+    "/by-id/disks/{id}": {
+      "get": {
+        "tags": [
+          "disks"
+        ],
+        "summary": "Get a disk by id",
+        "operationId": "disk_view_by_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Disk"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/by-id/global-images/{id}": {
+      "get": {
+        "tags": [
+          "images:global"
+        ],
+        "summary": "Get a global image by id.",
+        "operationId": "image_global_view_by_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GlobalImage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/by-id/images/{id}": {
+      "get": {
+        "tags": [
+          "images"
+        ],
+        "summary": "Fetch an image by id",
+        "operationId": "image_view_by_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Image"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/by-id/instances/{id}": {
+      "get": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "Get an instance by id.",
+        "operationId": "instance_view_by_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Instance"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/by-id/network-interfaces/{id}": {
+      "get": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "Get an instance's network interface by id.",
+        "operationId": "instance_network_interface_view_by_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NetworkInterface"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/by-id/organizations/{id}": {
+      "get": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "Get an organization by id",
+        "operationId": "organization_view_by_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Organization"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/by-id/projects/{id}": {
+      "get": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "Get a project by id",
+        "operationId": "project_view_by_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Project"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/by-id/snapshots/{id}": {
+      "get": {
+        "tags": [
+          "snapshots"
+        ],
+        "summary": "Get a snapshot by id.",
+        "operationId": "snapshot_view_by_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Snapshot"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/by-id/vpc-router-routes/{id}": {
+      "get": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "Get a vpc router route by id",
+        "operationId": "vpc_router_route_view_by_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouterRoute"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/by-id/vpc-routers/{id}": {
+      "get": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "Get a VPC Router by id",
+        "operationId": "vpc_router_view_by_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VpcRouter"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/by-id/vpc-subnets/{id}": {
+      "get": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "Get a VPC subnet by id.",
+        "operationId": "vpc_subnet_view_by_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VpcSubnet"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/by-id/vpcs/{id}": {
+      "get": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "Get a VPC by id.",
+        "operationId": "vpc_view_by_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vpc"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/device/auth": {
       "post": {
         "tags": [
@@ -59,19 +527,8 @@
           "required": true
         },
         "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "title": "Null",
-                  "type": "string",
-                  "enum": [
-                    null
-                  ]
-                }
-              }
-            }
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -1674,7 +2131,7 @@
         "tags": [
           "disks"
         ],
-        "summary": "Fetch a single disk in a project.",
+        "summary": "Get a single disk in a project.",
         "operationId": "disk_view",
         "parameters": [
           {
@@ -1770,6 +2227,114 @@
             "$ref": "#/components/responses/Error"
           }
         }
+      }
+    },
+    "/organizations/{organization_name}/projects/{project_name}/disks/{disk_name}/metrics/{metric_name}": {
+      "get": {
+        "tags": [
+          "disks"
+        ],
+        "summary": "Fetch metrics for a disk.",
+        "operationId": "disk_metrics_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "disk_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "metric_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/DiskMetricName"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "organization_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "project_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "query",
+            "name": "end_time",
+            "description": "An exclusive end time of metrics.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "start_time",
+            "description": "An inclusive start time of metrics.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeasurementResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
       }
     },
     "/organizations/{organization_name}/projects/{project_name}/images": {
@@ -2460,6 +3025,62 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Disk"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/external-ips": {
+      "get": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "List external IP addresses associated with an instance",
+        "operationId": "instance_external_ip_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "organization_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "project_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalIpResultsPage"
                 }
               }
             }
@@ -5356,7 +5977,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SessionUser"
+                  "$ref": "#/components/schemas/User"
                 }
               }
             }
@@ -5695,7 +6316,7 @@
         }
       }
     },
-    "/silos/{silo_name}/identity_providers": {
+    "/silos/{silo_name}/identity-providers": {
       "get": {
         "tags": [
           "silos"
@@ -5851,7 +6472,7 @@
         }
       }
     },
-    "/silos/{silo_name}/saml_identity_providers": {
+    "/silos/{silo_name}/saml-identity-providers": {
       "post": {
         "tags": [
           "silos"
@@ -5900,7 +6521,7 @@
         }
       }
     },
-    "/silos/{silo_name}/saml_identity_providers/{provider_name}": {
+    "/silos/{silo_name}/saml-identity-providers/{provider_name}": {
       "get": {
         "tags": [
           "silos"
@@ -6195,6 +6816,194 @@
       }
     },
     "schemas": {
+      "BinRangedouble": {
+        "description": "A type storing a range over `T`.\n\nThis type supports ranges similar to the `RangeTo`, `Range` and `RangeFrom` types in the standard library. Those cover `(..end)`, `(start..end)`, and `(start..)` respectively.",
+        "oneOf": [
+          {
+            "description": "A range unbounded below and exclusively above, `..end`.",
+            "type": "object",
+            "properties": {
+              "end": {
+                "type": "number",
+                "format": "double"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range_to"
+                ]
+              }
+            },
+            "required": [
+              "end",
+              "type"
+            ]
+          },
+          {
+            "description": "A range bounded inclusively below and exclusively above, `start..end`.",
+            "type": "object",
+            "properties": {
+              "end": {
+                "type": "number",
+                "format": "double"
+              },
+              "start": {
+                "type": "number",
+                "format": "double"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range"
+                ]
+              }
+            },
+            "required": [
+              "end",
+              "start",
+              "type"
+            ]
+          },
+          {
+            "description": "A range bounded inclusively below and unbounded above, `start..`.",
+            "type": "object",
+            "properties": {
+              "start": {
+                "type": "number",
+                "format": "double"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range_from"
+                ]
+              }
+            },
+            "required": [
+              "start",
+              "type"
+            ]
+          }
+        ]
+      },
+      "BinRangeint64": {
+        "description": "A type storing a range over `T`.\n\nThis type supports ranges similar to the `RangeTo`, `Range` and `RangeFrom` types in the standard library. Those cover `(..end)`, `(start..end)`, and `(start..)` respectively.",
+        "oneOf": [
+          {
+            "description": "A range unbounded below and exclusively above, `..end`.",
+            "type": "object",
+            "properties": {
+              "end": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range_to"
+                ]
+              }
+            },
+            "required": [
+              "end",
+              "type"
+            ]
+          },
+          {
+            "description": "A range bounded inclusively below and exclusively above, `start..end`.",
+            "type": "object",
+            "properties": {
+              "end": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "start": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range"
+                ]
+              }
+            },
+            "required": [
+              "end",
+              "start",
+              "type"
+            ]
+          },
+          {
+            "description": "A range bounded inclusively below and unbounded above, `start..`.",
+            "type": "object",
+            "properties": {
+              "start": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range_from"
+                ]
+              }
+            },
+            "required": [
+              "start",
+              "type"
+            ]
+          }
+        ]
+      },
+      "Bindouble": {
+        "description": "Type storing bin edges and a count of samples within it.",
+        "type": "object",
+        "properties": {
+          "count": {
+            "description": "The total count of samples in this bin.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "range": {
+            "description": "The range of the support covered by this bin.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BinRangedouble"
+              }
+            ]
+          }
+        },
+        "required": [
+          "count",
+          "range"
+        ]
+      },
+      "Binint64": {
+        "description": "Type storing bin edges and a count of samples within it.",
+        "type": "object",
+        "properties": {
+          "count": {
+            "description": "The total count of samples in this bin.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "range": {
+            "description": "The range of the support covered by this bin.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BinRangeint64"
+              }
+            ]
+          }
+        },
+        "required": [
+          "count",
+          "range"
+        ]
+      },
       "BlockSize": {
         "title": "disk block size in bytes",
         "type": "integer",
@@ -6209,6 +7018,216 @@
         "type": "integer",
         "format": "uint64",
         "minimum": 0
+      },
+      "Cumulativedouble": {
+        "description": "A cumulative or counter data type.",
+        "type": "object",
+        "properties": {
+          "start_time": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "value": {
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "required": [
+          "start_time",
+          "value"
+        ]
+      },
+      "Cumulativeint64": {
+        "description": "A cumulative or counter data type.",
+        "type": "object",
+        "properties": {
+          "start_time": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "value": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "start_time",
+          "value"
+        ]
+      },
+      "Datum": {
+        "description": "A `Datum` is a single sampled data point from a metric.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "type": "boolean"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "bool"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "i64"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "type": "number",
+                "format": "double"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "f64"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "string"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "uint8",
+                  "minimum": 0
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "bytes"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "$ref": "#/components/schemas/Cumulativeint64"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "cumulative_i64"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "$ref": "#/components/schemas/Cumulativedouble"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "cumulative_f64"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "$ref": "#/components/schemas/Histogramint64"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "histogram_i64"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "$ref": "#/components/schemas/Histogramdouble"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "histogram_f64"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
+          }
+        ]
       },
       "DatumType": {
         "description": "The type of an individual datum of a metric.",
@@ -6700,6 +7719,71 @@
           "request_id"
         ]
       },
+      "ExternalIp": {
+        "type": "object",
+        "properties": {
+          "ip": {
+            "type": "string",
+            "format": "ip"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/IpKind"
+          }
+        },
+        "required": [
+          "ip",
+          "kind"
+        ]
+      },
+      "ExternalIpCreate": {
+        "description": "Parameters for creating an external IP address for instances.",
+        "oneOf": [
+          {
+            "description": "An IP address providing both inbound and outbound access. The address is automatically-assigned from the provided IP Pool, or all available pools if not specified.",
+            "type": "object",
+            "properties": {
+              "pool_name": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Name"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ephemeral"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
+      "ExternalIpResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExternalIp"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
       "FieldSchema": {
         "description": "The name and type information for a field of a timeseries schema.",
         "type": "object",
@@ -6928,6 +8012,58 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "Histogramdouble": {
+        "description": "A simple type for managing a histogram metric.\n\nA histogram maintains the count of any number of samples, over a set of bins. Bins are specified on construction via their _left_ edges, inclusive. There can't be any \"gaps\" in the bins, and an additional bin may be added to the left, right, or both so that the bins extend to the entire range of the support.\n\nNote that any gaps, unsorted bins, or non-finite values will result in an error.\n\nExample ------- ```rust use oximeter::histogram::{BinRange, Histogram};\n\nlet edges = [0i64, 10, 20]; let mut hist = Histogram::new(&edges).unwrap(); assert_eq!(hist.n_bins(), 4); // One additional bin for the range (20..) assert_eq!(hist.n_samples(), 0); hist.sample(4); hist.sample(100); assert_eq!(hist.n_samples(), 2);\n\nlet data = hist.iter().collect::<Vec<_>>(); assert_eq!(data[0].range, BinRange::range(i64::MIN, 0)); // An additional bin for `..0` assert_eq!(data[0].count, 0); // Nothing is in this bin\n\nassert_eq!(data[1].range, BinRange::range(0, 10)); // The range `0..10` assert_eq!(data[1].count, 1); // 4 is sampled into this bin ```\n\nNotes -----\n\nHistograms may be constructed either from their left bin edges, or from a sequence of ranges. In either case, the left-most bin may be converted upon construction. In particular, if the left-most value is not equal to the minimum of the support, a new bin will be added from the minimum to that provided value. If the left-most value _is_ the support's minimum, because the provided bin was unbounded below, such as `(..0)`, then that bin will be converted into one bounded below, `(MIN..0)` in this case.\n\nThe short of this is that, most of the time, it shouldn't matter. If one specifies the extremes of the support as their bins, be aware that the left-most may be converted from a `BinRange::RangeTo` into a `BinRange::Range`. In other words, the first bin of a histogram is _always_ a `Bin::Range` or a `Bin::RangeFrom` after construction. In fact, every bin is one of those variants, the `BinRange::RangeTo` is only provided as a convenience during construction.",
+        "type": "object",
+        "properties": {
+          "bins": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Bindouble"
+            }
+          },
+          "n_samples": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "start_time": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "bins",
+          "n_samples",
+          "start_time"
+        ]
+      },
+      "Histogramint64": {
+        "description": "A simple type for managing a histogram metric.\n\nA histogram maintains the count of any number of samples, over a set of bins. Bins are specified on construction via their _left_ edges, inclusive. There can't be any \"gaps\" in the bins, and an additional bin may be added to the left, right, or both so that the bins extend to the entire range of the support.\n\nNote that any gaps, unsorted bins, or non-finite values will result in an error.\n\nExample ------- ```rust use oximeter::histogram::{BinRange, Histogram};\n\nlet edges = [0i64, 10, 20]; let mut hist = Histogram::new(&edges).unwrap(); assert_eq!(hist.n_bins(), 4); // One additional bin for the range (20..) assert_eq!(hist.n_samples(), 0); hist.sample(4); hist.sample(100); assert_eq!(hist.n_samples(), 2);\n\nlet data = hist.iter().collect::<Vec<_>>(); assert_eq!(data[0].range, BinRange::range(i64::MIN, 0)); // An additional bin for `..0` assert_eq!(data[0].count, 0); // Nothing is in this bin\n\nassert_eq!(data[1].range, BinRange::range(0, 10)); // The range `0..10` assert_eq!(data[1].count, 1); // 4 is sampled into this bin ```\n\nNotes -----\n\nHistograms may be constructed either from their left bin edges, or from a sequence of ranges. In either case, the left-most bin may be converted upon construction. In particular, if the left-most value is not equal to the minimum of the support, a new bin will be added from the minimum to that provided value. If the left-most value _is_ the support's minimum, because the provided bin was unbounded below, such as `(..0)`, then that bin will be converted into one bounded below, `(MIN..0)` in this case.\n\nThe short of this is that, most of the time, it shouldn't matter. If one specifies the extremes of the support as their bins, be aware that the left-most may be converted from a `BinRange::RangeTo` into a `BinRange::Range`. In other words, the first bin of a histogram is _always_ a `Bin::Range` or a `Bin::RangeFrom` after construction. In fact, every bin is one of those variants, the `BinRange::RangeTo` is only provided as a convenience during construction.",
+        "type": "object",
+        "properties": {
+          "bins": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Binint64"
+            }
+          },
+          "n_samples": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "start_time": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "bins",
+          "n_samples",
+          "start_time"
         ]
       },
       "IdentityProvider": {
@@ -7347,6 +8483,14 @@
               "$ref": "#/components/schemas/InstanceDiskAttachment"
             }
           },
+          "external_ips": {
+            "description": "The external IP addresses provided to this instance.\n\nBy default, all instances have outbound connectivity, but no inbound connectivity. These external addresses can be used to provide a fixed, known IP address for making inbound connections to the instance.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExternalIpCreate"
+            }
+          },
           "hostname": {
             "type": "string"
           },
@@ -7373,7 +8517,8 @@
           "user_data": {
             "description": "User data for instance initialization systems (such as cloud-init). Must be a Base64-encoded string, as specified in RFC 4648 § 4 (+ and / characters with padding). Maximum 32 KiB unencoded data.",
             "default": "",
-            "type": "string"
+            "type": "string",
+            "format": "byte"
           }
         },
         "required": [
@@ -7586,6 +8731,14 @@
           "destroyed"
         ]
       },
+      "IpKind": {
+        "description": "The kind of an external IP address for an instance",
+        "type": "string",
+        "enum": [
+          "ephemeral",
+          "floating"
+        ]
+      },
       "IpNet": {
         "oneOf": [
           {
@@ -7627,6 +8780,11 @@
               }
             ]
           },
+          "project_id": {
+            "nullable": true,
+            "type": "string",
+            "format": "uuid"
+          },
           "time_created": {
             "description": "timestamp when this resource was created",
             "type": "string",
@@ -7654,6 +8812,12 @@
             "type": "string"
           },
           "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "organization": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "project": {
             "$ref": "#/components/schemas/Name"
           }
         },
@@ -7768,8 +8932,7 @@
         "title": "An IPv4 subnet",
         "description": "An IPv4 subnet, including prefix and subnet mask",
         "type": "string",
-        "pattern": "(^(10\\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9]\\.){2}(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])/(1[0-9]|2[0-8]|[8-9]))$)|(^(172\\.16\\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])/(1[2-9]|2[0-8]))$)|(^(192\\.168\\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])/(1[6-9]|2[0-8]))$)",
-        "maxLength": 18
+        "pattern": "^(10\\.([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\.([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\.([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\/([8-9]|1[0-9]|2[0-9]|3[0-2])|172\\.(1[6-9]|2[0-9]|3[0-1])\\.([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\.([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\/(1[2-9]|2[0-9]|3[0-2])|192\\.168\\.([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\.([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\/(1[6-9]|2[0-9]|3[0-2]))$"
       },
       "Ipv4Range": {
         "description": "A non-decreasing IPv4 address range, inclusive of both ends.\n\nThe first address must be less than or equal to the last address.",
@@ -7794,8 +8957,7 @@
         "title": "An IPv6 subnet",
         "description": "An IPv6 subnet, including prefix and subnet mask",
         "type": "string",
-        "pattern": "^(fd|FD)[0-9a-fA-F]{2}:((([0-9a-fA-F]{1,4}\\:){6}[0-9a-fA-F]{1,4})|(([0-9a-fA-F]{1,4}:){1,6}:))/(6[4-9]|[7-9][0-9]|1[0-1][0-9]|12[0-6])$",
-        "maxLength": 43
+        "pattern": "^([fF][dD])[0-9a-fA-F]{2}:(([0-9a-fA-F]{1,4}:){6}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,6}:)\\/([1-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$"
       },
       "Ipv6Range": {
         "description": "A non-decreasing IPv6 address range, inclusive of both ends.\n\nThe first address must be less than or equal to the last address.",
@@ -7833,11 +8995,49 @@
         "minLength": 17,
         "maxLength": 17
       },
+      "Measurement": {
+        "description": "A `Measurement` is a timestamped datum from a single metric",
+        "type": "object",
+        "properties": {
+          "datum": {
+            "$ref": "#/components/schemas/Datum"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "datum",
+          "timestamp"
+        ]
+      },
+      "MeasurementResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Measurement"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
       "Name": {
-        "title": "A name used in the API",
-        "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'.",
+        "title": "A name unique within the parent collection",
+        "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID though they may contain a UUID.",
         "type": "string",
-        "pattern": "[a-z](|[a-zA-Z0-9-]*[a-zA-Z0-9])",
+        "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z][a-z0-9-]*[a-zA-Z0-9]$",
         "maxLength": 63
       },
       "NetworkInterface": {
@@ -9013,19 +10213,6 @@
           "slo_url",
           "sp_client_id",
           "technical_contact_email"
-        ]
-      },
-      "SessionUser": {
-        "description": "Client view of currently authed user.",
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "id"
         ]
       },
       "Silo": {
@@ -10468,6 +11655,17 @@
           "name_ascending",
           "name_descending",
           "id_ascending"
+        ]
+      },
+      "DiskMetricName": {
+        "type": "string",
+        "enum": [
+          "activated",
+          "flush",
+          "read",
+          "read_bytes",
+          "write",
+          "write_bytes"
         ]
       }
     }

@@ -23,7 +23,7 @@ fn rss_sled_plan_path() -> PathBuf {
     Path::new(omicron_common::OMICRON_CONFIG_PATH).join("rss-sled-plan.toml")
 }
 
-fn generate_rack_secret<'a>(
+pub fn generate_rack_secret<'a>(
     rack_secret_threshold: usize,
     member_device_id_certs: &'a [Ed25519Certificate],
     log: &Logger,
@@ -121,33 +121,8 @@ impl Plan {
         log: &Logger,
         config: &Config,
         bootstrap_addrs: Vec<Ipv6Addr>,
-        member_device_id_certs: &[Ed25519Certificate],
     ) -> Result<Self, PlanError> {
         let rack_id = Uuid::new_v4();
-
-        // Create a rack secret, unless we're in the single-sled case.
-        let mut maybe_rack_secret_shares = generate_rack_secret(
-            config.rack_secret_threshold,
-            member_device_id_certs,
-            log,
-        )?;
-        // Confirm that the returned iterator (if we got one) is the length we
-        // expect.
-        if let Some(rack_secret_shares) = maybe_rack_secret_shares.as_ref() {
-            // TODO-cleanup Asserting here seems fine as long as
-            // `member_device_id_certs` is hard-coded from a config file, but
-            // once we start collecting them over the management network we
-            // should probably attach them at the type level to the bootstrap
-            // addrs, which would remove the need for this assertion.
-            assert_eq!(
-                rack_secret_shares.len(),
-                bootstrap_addrs.len(),
-                concat!(
-                    "Number of trust quorum members does not match ",
-                    "number of bootstrap addresses"
-                )
-            );
-        }
 
         let bootstrap_addrs = bootstrap_addrs.into_iter().enumerate();
         let allocations = bootstrap_addrs.map(|(idx, bootstrap_addr)| {
@@ -160,20 +135,7 @@ impl Plan {
 
             (
                 bootstrap_addr,
-                SledAgentRequest {
-                    id: Uuid::new_v4(),
-                    subnet,
-                    rack_id,
-                    trust_quorum_share: maybe_rack_secret_shares.as_mut().map(
-                        |shares_iter| {
-                            // We asserted when creating
-                            // `maybe_rack_secret_shares` that it contained
-                            // exactly the number of shares as we have
-                            // bootstrap addrs, so we can unwrap here.
-                            shares_iter.next().unwrap()
-                        },
-                    ),
-                },
+                SledAgentRequest { id: Uuid::new_v4(), subnet, rack_id },
             )
         });
 

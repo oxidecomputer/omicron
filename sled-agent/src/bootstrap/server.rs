@@ -269,16 +269,20 @@ async fn serve_request_before_quorum_initialization(
     .map_err(|err| format!("Failed to establish sprockets session: {err}"))?;
 
     let response = match read_request(&mut stream).await? {
-        Request::SledAgentRequest(request) => {
-            match bootstrap_agent.request_agent(&*request).await {
+        Request::SledAgentRequest(request, trust_quorum_share) => {
+            let trust_quorum_share =
+                trust_quorum_share.map(ShareDistribution::from);
+            match bootstrap_agent
+                .request_agent(&*request, &trust_quorum_share)
+                .await
+            {
                 Ok(response) => {
                     // If this send fails, it means our caller already received
                     // our share from a different
                     // `serve_request_before_quorum_initialization()` task
                     // (i.e., from another incoming request from RSS). We'll
                     // ignore such failures.
-                    let _ =
-                        tx_share.send(request.trust_quorum_share.clone()).await;
+                    let _ = tx_share.send(trust_quorum_share).await;
 
                     Ok(Response::SledAgentResponse(response))
                 }
@@ -319,7 +323,7 @@ async fn serve_request_after_quorum_initialization(
     .map_err(|err| format!("Failed to establish sprockets session: {err}"))?;
 
     let response = match read_request(&mut stream).await? {
-        Request::SledAgentRequest(request) => {
+        Request::SledAgentRequest(request, _trust_quorum_share) => {
             warn!(
                 log, "Received sled agent request after we're initialized";
                 "request" => ?request,

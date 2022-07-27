@@ -13,6 +13,7 @@ use diesel::prelude::*;
 use diesel::query_builder::*;
 use diesel::sql_types;
 use omicron_common::api::external;
+use ref_cast::RefCast;
 use uuid::Uuid;
 
 /// Errors related to allocating VPC Subnets.
@@ -190,7 +191,8 @@ fn push_null_if_overlapping_ip_range<'a>(
 ///     time_created,
 ///     time_modified,
 ///     time_deleted,
-///     vpc_id
+///     vpc_id,
+///     rcgen
 /// ) AS (VALUES (
 ///     <id>,
 ///     <name>,
@@ -199,6 +201,7 @@ fn push_null_if_overlapping_ip_range<'a>(
 ///     <time_modified>,
 ///     NULL::TIMESTAMPTZ,
 ///     <vpc_id>,
+///     0
 /// )),
 /// candidate_ipv4(ipv4_block) AS (
 ///     SELECT(
@@ -275,11 +278,13 @@ impl QueryFragment<Pg> for FilterConflictingVpcSubnetRangesQuery {
         out.push_identifier(dsl::time_deleted::NAME)?;
         out.push_sql(", ");
         out.push_identifier(dsl::vpc_id::NAME)?;
+        out.push_sql(",");
+        out.push_identifier(dsl::rcgen::NAME)?;
         out.push_sql(") AS (VALUES (");
         out.push_bind_param::<sql_types::Uuid, Uuid>(&self.subnet.identity.id)?;
         out.push_sql(", ");
         out.push_bind_param::<sql_types::Text, db::model::Name>(
-            &self.subnet.name(),
+            db::model::Name::ref_cast(self.subnet.name()),
         )?;
         out.push_sql(", ");
         out.push_bind_param::<sql_types::Text, String>(
@@ -296,7 +301,7 @@ impl QueryFragment<Pg> for FilterConflictingVpcSubnetRangesQuery {
         out.push_sql(", ");
         out.push_sql("NULL::TIMESTAMPTZ, ");
         out.push_bind_param::<sql_types::Uuid, Uuid>(&self.subnet.vpc_id)?;
-        out.push_sql(")), ");
+        out.push_sql(", 0)), ");
 
         // Push the candidate IPv4 and IPv6 selection subqueries, which return
         // NULL if the corresponding address range overlaps.
@@ -377,6 +382,8 @@ impl QueryFragment<Pg> for FilterConflictingVpcSubnetRangesQueryValues {
         out.push_identifier(dsl::time_deleted::NAME)?;
         out.push_sql(", ");
         out.push_identifier(dsl::vpc_id::NAME)?;
+        out.push_sql(", ");
+        out.push_identifier(dsl::rcgen::NAME)?;
         out.push_sql(", ");
         out.push_identifier(dsl::ipv4_block::NAME)?;
         out.push_sql(", ");

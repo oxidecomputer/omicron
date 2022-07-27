@@ -7,7 +7,7 @@
 use crate::illumos::dladm::Etherstub;
 use crate::illumos::vnic::VnicAllocator;
 use crate::nexus::LazyNexusClient;
-use crate::opte::OptePortAllocator;
+use crate::opte::PortManager;
 use crate::params::{
     InstanceHardware, InstanceMigrateParams, InstanceRuntimeStateRequested,
     InstanceSerialConsoleData,
@@ -33,6 +33,9 @@ pub enum Error {
 
     #[error("No such instance ID: {0}")]
     NoSuchInstance(Uuid),
+
+    #[error("OPTE port management error: {0}")]
+    Opte(#[from] crate::opte::Error),
 }
 
 struct InstanceManagerInternal {
@@ -46,8 +49,7 @@ struct InstanceManagerInternal {
     instances: Mutex<BTreeMap<Uuid, (Uuid, Instance)>>,
 
     vnic_allocator: VnicAllocator<Etherstub>,
-    underlay_addr: Ipv6Addr,
-    port_allocator: OptePortAllocator,
+    port_manager: PortManager,
 }
 
 /// All instances currently running on the sled.
@@ -61,7 +63,7 @@ impl InstanceManager {
         log: Logger,
         lazy_nexus_client: LazyNexusClient,
         etherstub: Etherstub,
-        underlay_addr: Ipv6Addr,
+        underlay_ip: Ipv6Addr,
         gateway_mac: MacAddr6,
     ) -> InstanceManager {
         InstanceManager {
@@ -70,8 +72,11 @@ impl InstanceManager {
                 lazy_nexus_client,
                 instances: Mutex::new(BTreeMap::new()),
                 vnic_allocator: VnicAllocator::new("Instance", etherstub),
-                underlay_addr,
-                port_allocator: OptePortAllocator::new(gateway_mac),
+                port_manager: PortManager::new(
+                    log.new(o!("component" => "PortManager")),
+                    underlay_ip,
+                    gateway_mac,
+                ),
             }),
         }
     }
@@ -122,10 +127,9 @@ impl InstanceManager {
                     let instance = Instance::new(
                         instance_log,
                         instance_id,
-                        self.inner.vnic_allocator.clone(),
-                        self.inner.underlay_addr,
-                        self.inner.port_allocator.clone(),
                         initial_hardware,
+                        self.inner.vnic_allocator.clone(),
+                        self.inner.port_manager.clone(),
                         self.inner.lazy_nexus_client.clone(),
                     )?;
                     let instance_clone = instance.clone();
@@ -226,8 +230,8 @@ mod test {
     use crate::illumos::{dladm::MockDladm, zone::MockZones};
     use crate::instance::MockInstance;
     use crate::nexus::LazyNexusClient;
-    use crate::params::ExternalIp;
     use crate::params::InstanceStateRequested;
+    use crate::params::SourceNatConfig;
     use chrono::Utc;
     use macaddr::MacAddr6;
     use omicron_common::api::external::{
@@ -267,11 +271,12 @@ mod test {
                 time_updated: Utc::now(),
             },
             nics: vec![],
-            external_ip: ExternalIp {
+            source_nat: SourceNatConfig {
                 ip: IpAddr::from(Ipv4Addr::new(10, 0, 0, 1)),
                 first_port: 0,
                 last_port: 1 << 14 - 1,
             },
+            external_ips: vec![],
             disks: vec![],
             cloud_init_bytes: None,
         }
@@ -319,7 +324,7 @@ mod test {
         let ticket = Arc::new(std::sync::Mutex::new(None));
         let ticket_clone = ticket.clone();
         let instance_new_ctx = MockInstance::new_context();
-        instance_new_ctx.expect().return_once(move |_, _, _, _, _, _, _| {
+        instance_new_ctx.expect().return_once(move |_, _, _, _, _, _| {
             let mut inst = MockInstance::default();
             inst.expect_clone().return_once(move || {
                 let mut inst = MockInstance::default();
@@ -393,7 +398,7 @@ mod test {
         let ticket_clone = ticket.clone();
         let instance_new_ctx = MockInstance::new_context();
         let mut seq = mockall::Sequence::new();
-        instance_new_ctx.expect().return_once(move |_, _, _, _, _, _, _| {
+        instance_new_ctx.expect().return_once(move |_, _, _, _, _, _| {
             let mut inst = MockInstance::default();
             // First call to ensure (start + transition).
             inst.expect_clone().times(1).in_sequence(&mut seq).return_once(

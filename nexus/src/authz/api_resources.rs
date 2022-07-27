@@ -601,6 +601,22 @@ authz_resource! {
 }
 
 authz_resource! {
+    name = "Image",
+    parent = "Project",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = InProject,
+}
+
+authz_resource! {
+    name = "Snapshot",
+    parent = "Project",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = InProject,
+}
+
+authz_resource! {
     name = "Instance",
     parent = "Project",
     primary_key = Uuid,
@@ -822,7 +838,7 @@ mod test {
     use super::OrganizationRole;
     use super::ProjectRole;
     use super::SiloRole;
-    use crate::db::model::test_database_string_impl;
+    use crate::db::test_database_string_impl;
 
     #[test]
     fn test_roles_database_strings() {

@@ -10,15 +10,17 @@
 //! the client to make other API requests.
 
 use super::console_api::console_index_or_login_redirect;
-use super::views::{DeviceAccessTokenGrant, DeviceAuthResponse};
+use super::views::DeviceAccessTokenGrant;
 use crate::context::OpContext;
 use crate::db::model::DeviceAccessToken;
 use crate::ServerContext;
 use dropshot::{
-    endpoint, HttpError, HttpResponseOk, RequestContext, TypedBody,
+    endpoint, HttpError, HttpResponseUpdatedNoContent, RequestContext,
+    TypedBody,
 };
 use http::{header, Response, StatusCode};
 use hyper::Body;
+use omicron_common::api::external::InternalContext;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -97,10 +99,7 @@ pub async fn device_auth_request(
 
         let model =
             nexus.device_auth_request_create(&opctx, params.client_id).await?;
-        build_oauth_response(
-            StatusCode::OK,
-            &DeviceAuthResponse::from_model(model, host),
-        )
+        build_oauth_response(StatusCode::OK, &model.into_response(host))
     };
     // TODO: instrumentation doesn't work because we use `Response<Body>`
     //apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -154,13 +153,15 @@ pub async fn device_auth_success(
 pub async fn device_auth_confirm(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     params: TypedBody<DeviceAuthVerify>,
-) -> Result<HttpResponseOk<()>, HttpError> {
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let params = params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let &actor = opctx.authn.actor_required()?;
+        let &actor = opctx.authn.actor_required().internal_context(
+            "creating new device auth session for current user",
+        )?;
         let _token = nexus
             .device_auth_request_verify(
                 &opctx,
@@ -168,7 +169,7 @@ pub async fn device_auth_confirm(
                 actor.actor_id(),
             )
             .await?;
-        Ok(HttpResponseOk(()))
+        Ok(HttpResponseUpdatedNoContent())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

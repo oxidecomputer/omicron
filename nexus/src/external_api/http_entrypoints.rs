@@ -57,6 +57,7 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Instance;
+use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::NetworkInterface;
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteCreateParams;
@@ -66,6 +67,7 @@ use omicron_common::api::external::Saga;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
 use omicron_common::bail_unless;
+use parse_display::Display;
 use ref_cast::RefCast;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -84,6 +86,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(organization_list)?;
         api.register(organization_create)?;
         api.register(organization_view)?;
+        api.register(organization_view_by_id)?;
         api.register(organization_delete)?;
         api.register(organization_update)?;
         api.register(organization_policy_view)?;
@@ -92,6 +95,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(project_list)?;
         api.register(project_create)?;
         api.register(project_view)?;
+        api.register(project_view_by_id)?;
         api.register(project_delete)?;
         api.register(project_update)?;
         api.register(project_policy_view)?;
@@ -110,11 +114,14 @@ pub fn external_api() -> NexusApiDescription {
         api.register(disk_list)?;
         api.register(disk_create)?;
         api.register(disk_view)?;
+        api.register(disk_view_by_id)?;
         api.register(disk_delete)?;
+        api.register(disk_metrics_list)?;
 
         api.register(instance_list)?;
         api.register(instance_create)?;
         api.register(instance_view)?;
+        api.register(instance_view_by_id)?;
         api.register(instance_delete)?;
         api.register(instance_migrate)?;
         api.register(instance_reboot)?;
@@ -126,6 +133,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(image_list)?;
         api.register(image_create)?;
         api.register(image_view)?;
+        api.register(image_view_by_id)?;
         api.register(image_delete)?;
 
         api.register(instance_disk_list)?;
@@ -135,16 +143,19 @@ pub fn external_api() -> NexusApiDescription {
         api.register(snapshot_list)?;
         api.register(snapshot_create)?;
         api.register(snapshot_view)?;
+        api.register(snapshot_view_by_id)?;
         api.register(snapshot_delete)?;
 
         api.register(vpc_list)?;
         api.register(vpc_create)?;
         api.register(vpc_view)?;
+        api.register(vpc_view_by_id)?;
         api.register(vpc_update)?;
         api.register(vpc_delete)?;
 
         api.register(vpc_subnet_list)?;
         api.register(vpc_subnet_view)?;
+        api.register(vpc_subnet_view_by_id)?;
         api.register(vpc_subnet_create)?;
         api.register(vpc_subnet_delete)?;
         api.register(vpc_subnet_update)?;
@@ -153,17 +164,22 @@ pub fn external_api() -> NexusApiDescription {
         api.register(instance_network_interface_create)?;
         api.register(instance_network_interface_list)?;
         api.register(instance_network_interface_view)?;
+        api.register(instance_network_interface_view_by_id)?;
         api.register(instance_network_interface_update)?;
         api.register(instance_network_interface_delete)?;
 
+        api.register(instance_external_ip_list)?;
+
         api.register(vpc_router_list)?;
         api.register(vpc_router_view)?;
+        api.register(vpc_router_view_by_id)?;
         api.register(vpc_router_create)?;
         api.register(vpc_router_delete)?;
         api.register(vpc_router_update)?;
 
         api.register(vpc_router_route_list)?;
         api.register(vpc_router_route_view)?;
+        api.register(vpc_router_route_view_by_id)?;
         api.register(vpc_router_route_create)?;
         api.register(vpc_router_route_delete)?;
         api.register(vpc_router_route_update)?;
@@ -207,6 +223,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(image_global_list)?;
         api.register(image_global_create)?;
         api.register(image_global_view)?;
+        api.register(image_global_view_by_id)?;
         api.register(image_global_delete)?;
 
         api.register(updates_refresh)?;
@@ -255,6 +272,11 @@ pub fn external_api() -> NexusApiDescription {
 //   DELETE /organizations/{org_name} (delete a organization in the collection)
 //   PUT    /organizations/{org_name} (update a organization in the collection)
 //
+// An exception to this are id lookup operations which have a different top-level route
+// but will still be grouped with the collection.  For example:
+//
+//  GET    /by-id/organizations/{id} (look up a organization in the collection by id)
+//
 // We pick a name for the function that implements a given API entrypoint
 // based on how we expect it to appear in the CLI subcommand hierarchy. For
 // example:
@@ -299,6 +321,12 @@ async fn policy_view(
         Ok(HttpResponseOk(policy))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Path parameters for `/by-id/` endpoints
+#[derive(Deserialize, JsonSchema)]
+struct ByIdPathParams {
+    id: Uuid,
 }
 
 /// Update the top-level IAM policy
@@ -498,7 +526,7 @@ async fn silo_policy_update(
 /// List Silo identity providers
 #[endpoint {
     method = GET,
-    path = "/silos/{silo_name}/identity_providers",
+    path = "/silos/{silo_name}/identity-providers",
     tags = ["silos"],
 }]
 async fn silo_identity_provider_list(
@@ -535,7 +563,7 @@ async fn silo_identity_provider_list(
 /// Create a new SAML identity provider for a silo.
 #[endpoint {
     method = POST,
-    path = "/silos/{silo_name}/saml_identity_providers",
+    path = "/silos/{silo_name}/saml-identity-providers",
     tags = ["silos"],
 }]
 async fn silo_identity_provider_create(
@@ -572,7 +600,7 @@ struct SiloSamlPathParam {
 /// GET a silo's SAML identity provider
 #[endpoint {
     method = GET,
-    path = "/silos/{silo_name}/saml_identity_providers/{provider_name}",
+    path = "/silos/{silo_name}/saml-identity-providers/{provider_name}",
     tags = ["silos"],
 }]
 async fn silo_identity_provider_view(
@@ -691,6 +719,28 @@ async fn organization_view(
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let organization =
             nexus.organization_fetch(&opctx, &organization_name).await?;
+        Ok(HttpResponseOk(organization.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Get an organization by id
+#[endpoint {
+    method = GET,
+    path = "/by-id/organizations/{id}",
+    tags = ["organizations"],
+}]
+async fn organization_view_by_id(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ByIdPathParams>,
+) -> Result<HttpResponseOk<Organization>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let id = &path.id;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let organization = nexus.organization_fetch_by_id(&opctx, id).await?;
         Ok(HttpResponseOk(organization.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -924,6 +974,28 @@ async fn project_view(
         let project = nexus
             .project_fetch(&opctx, &organization_name, &project_name)
             .await?;
+        Ok(HttpResponseOk(project.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Get a project by id
+#[endpoint {
+    method = GET,
+    path = "/by-id/projects/{id}",
+    tags = ["projects"],
+}]
+async fn project_view_by_id(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ByIdPathParams>,
+) -> Result<HttpResponseOk<Project>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let id = &path.id;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let project = nexus.project_fetch_by_id(&opctx, id).await?;
         Ok(HttpResponseOk(project.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -1366,7 +1438,7 @@ struct DiskPathParam {
     disk_name: Name,
 }
 
-/// Fetch a single disk in a project.
+/// Get a single disk in a project.
 #[endpoint {
     method = GET,
     path = "/organizations/{organization_name}/projects/{project_name}/disks/{disk_name}",
@@ -1387,6 +1459,28 @@ async fn disk_view(
         let disk = nexus
             .disk_fetch(&opctx, &organization_name, &project_name, &disk_name)
             .await?;
+        Ok(HttpResponseOk(disk.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Get a disk by id
+#[endpoint {
+    method = GET,
+    path = "/by-id/disks/{id}",
+    tags = ["disks"],
+}]
+async fn disk_view_by_id(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ByIdPathParams>,
+) -> Result<HttpResponseOk<Disk>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let id = &path.id;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let disk = nexus.disk_fetch_by_id(&opctx, id).await?;
         Ok(HttpResponseOk(disk.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -1419,6 +1513,65 @@ async fn disk_delete(
             )
             .await?;
         Ok(HttpResponseDeleted())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+#[derive(Display, Deserialize, JsonSchema)]
+#[display(style = "snake_case")]
+#[serde(rename_all = "snake_case")]
+pub enum DiskMetricName {
+    Activated,
+    Flush,
+    Read,
+    ReadBytes,
+    Write,
+    WriteBytes,
+}
+
+/// Fetch metrics for a disk.
+#[endpoint {
+    method = GET,
+    path = "/organizations/{organization_name}/projects/{project_name}/disks/{disk_name}/metrics/{metric_name}",
+    tags = ["disks"],
+}]
+async fn disk_metrics_list(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<MetricsPathParam<DiskPathParam, DiskMetricName>>,
+    query_params: Query<
+        PaginationParams<params::ResourceMetrics, params::ResourceMetrics>,
+    >,
+) -> Result<HttpResponseOk<ResultsPage<oximeter_db::Measurement>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+
+    let path = path_params.into_inner();
+    let organization_name = &path.inner.organization_name;
+    let project_name = &path.inner.project_name;
+    let disk_name = &path.inner.disk_name;
+    let metric_name = path.metric_name;
+
+    let query = query_params.into_inner();
+    let limit = rqctx.page_limit(&query)?;
+
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+
+        // This ensures the user is authorized on Action::Read for this disk
+        let disk = nexus
+            .disk_fetch(&opctx, organization_name, project_name, disk_name)
+            .await?;
+        let upstairs_uuid = disk.id();
+        let result = nexus
+            .select_timeseries(
+                &format!("crucible_upstairs:{}", metric_name),
+                &[&format!("upstairs_uuid=={}", upstairs_uuid)],
+                query,
+                limit,
+            )
+            .await?;
+
+        Ok(HttpResponseOk(result))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1538,6 +1691,28 @@ async fn instance_view(
                 &instance_name,
             )
             .await?;
+        Ok(HttpResponseOk(instance.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Get an instance by id.
+#[endpoint {
+    method = GET,
+    path = "/by-id/instances/{id}",
+    tags = ["instances"],
+}]
+async fn instance_view_by_id(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ByIdPathParams>,
+) -> Result<HttpResponseOk<Instance>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let id = &path.id;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let instance = nexus.instance_fetch_by_id(&opctx, id).await?;
         Ok(HttpResponseOk(instance.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -1935,6 +2110,28 @@ async fn image_global_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Get a global image by id.
+#[endpoint {
+    method = GET,
+    path = "/by-id/global-images/{id}",
+    tags = ["images:global"],
+}]
+async fn image_global_view_by_id(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ByIdPathParams>,
+) -> Result<HttpResponseOk<GlobalImage>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let id = &path.id;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let image = nexus.global_image_fetch_by_id(&opctx, id).await?;
+        Ok(HttpResponseOk(image.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /// Delete a global image.
 ///
 /// Permanently delete a global image. This operation cannot be undone. Any
@@ -2074,6 +2271,28 @@ async fn image_view(
                 &image_name,
             )
             .await?;
+        Ok(HttpResponseOk(image.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch an image by id
+#[endpoint {
+    method = GET,
+    path = "/by-id/images/{id}",
+    tags = ["images"],
+}]
+async fn image_view_by_id(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ByIdPathParams>,
+) -> Result<HttpResponseOk<Image>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let id = &path.id;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let image = nexus.project_image_fetch_by_id(&opctx, id).await?;
         Ok(HttpResponseOk(image.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2272,6 +2491,29 @@ async fn instance_network_interface_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Get an instance's network interface by id.
+#[endpoint {
+    method = GET,
+    path = "/by-id/network-interfaces/{id}",
+    tags = ["instances"],
+}]
+async fn instance_network_interface_view_by_id(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ByIdPathParams>,
+) -> Result<HttpResponseOk<NetworkInterface>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let id = &path.id;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let network_interface =
+            nexus.network_interface_fetch_by_id(&opctx, id).await?;
+        Ok(HttpResponseOk(network_interface.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /// Update information about an instance's network interface
 #[endpoint {
     method = PUT,
@@ -2304,6 +2546,39 @@ async fn instance_network_interface_update(
             )
             .await?;
         Ok(HttpResponseOk(NetworkInterface::from(interface)))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+// External IP addresses for instances
+
+/// List external IP addresses associated with an instance
+#[endpoint {
+    method = GET,
+    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/external-ips",
+    tags = ["instances"],
+}]
+async fn instance_external_ip_list(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<InstancePathParam>,
+) -> Result<HttpResponseOk<ResultsPage<views::ExternalIp>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
+    let project_name = &path.project_name;
+    let instance_name = &path.instance_name;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let ips = nexus
+            .instance_list_external_ips(
+                &opctx,
+                organization_name,
+                project_name,
+                instance_name,
+            )
+            .await?;
+        Ok(HttpResponseOk(ResultsPage { items: ips, next_page: None }))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -2421,6 +2696,28 @@ async fn snapshot_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Get a snapshot by id.
+#[endpoint {
+    method = GET,
+    path = "/by-id/snapshots/{id}",
+    tags = ["snapshots"],
+}]
+async fn snapshot_view_by_id(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ByIdPathParams>,
+) -> Result<HttpResponseOk<Snapshot>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let id = &path.id;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let snapshot = nexus.snapshot_fetch_by_id(&opctx, id).await?;
+        Ok(HttpResponseOk(snapshot.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /// Delete a snapshot from a project.
 #[endpoint {
     method = DELETE,
@@ -2524,6 +2821,28 @@ async fn vpc_view(
         let vpc = nexus
             .vpc_fetch(&opctx, &organization_name, &project_name, &vpc_name)
             .await?;
+        Ok(HttpResponseOk(vpc.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Get a VPC by id.
+#[endpoint {
+    method = GET,
+    path = "/by-id/vpcs/{id}",
+    tags = ["vpcs"],
+}]
+async fn vpc_view_by_id(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ByIdPathParams>,
+) -> Result<HttpResponseOk<Vpc>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let id = &path.id;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let vpc = nexus.vpc_fetch_by_id(&opctx, id).await?;
         Ok(HttpResponseOk(vpc.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2694,6 +3013,28 @@ async fn vpc_subnet_view(
                 &path.subnet_name,
             )
             .await?;
+        Ok(HttpResponseOk(subnet.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Get a VPC subnet by id.
+#[endpoint {
+    method = GET,
+    path = "/by-id/vpc-subnets/{id}",
+    tags = ["vpcs"],
+}]
+async fn vpc_subnet_view_by_id(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ByIdPathParams>,
+) -> Result<HttpResponseOk<VpcSubnet>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let id = &path.id;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let subnet = nexus.vpc_subnet_fetch_by_id(&opctx, id).await?;
         Ok(HttpResponseOk(subnet.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2978,6 +3319,28 @@ async fn vpc_router_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Get a VPC Router by id
+#[endpoint {
+    method = GET,
+    path = "/by-id/vpc-routers/{id}",
+    tags = ["vpcs"],
+}]
+async fn vpc_router_view_by_id(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ByIdPathParams>,
+) -> Result<HttpResponseOk<VpcRouter>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let id = &path.id;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let router = nexus.vpc_router_fetch_by_id(&opctx, id).await?;
+        Ok(HttpResponseOk(router.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /// Create a VPC Router
 #[endpoint {
     method = POST,
@@ -3146,6 +3509,28 @@ async fn vpc_router_route_view(
                 &path.route_name,
             )
             .await?;
+        Ok(HttpResponseOk(route.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Get a vpc router route by id
+#[endpoint {
+    method = GET,
+    path = "/by-id/vpc-router-routes/{id}",
+    tags = ["vpcs"]
+}]
+async fn vpc_router_route_view_by_id(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ByIdPathParams>,
+) -> Result<HttpResponseOk<RouterRoute>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let id = &path.id;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let route = nexus.route_fetch_by_id(&opctx, id).await?;
         Ok(HttpResponseOk(route.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -3663,7 +4048,10 @@ async fn session_sshkey_list(
     let query = query_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let &actor = opctx.authn.actor_required()?;
+        let &actor = opctx
+            .authn
+            .actor_required()
+            .internal_context("listing current user's ssh keys")?;
         let page_params =
             data_page_params_for(&rqctx, &query)?.map_name(Name::ref_cast);
         let ssh_keys = nexus
@@ -3695,7 +4083,10 @@ async fn session_sshkey_create(
     let nexus = &apictx.nexus;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let &actor = opctx.authn.actor_required()?;
+        let &actor = opctx
+            .authn
+            .actor_required()
+            .internal_context("creating ssh key for current user")?;
         let ssh_key = nexus
             .ssh_key_create(&opctx, actor.actor_id(), new_key.into_inner())
             .await?;
@@ -3726,7 +4117,10 @@ async fn session_sshkey_view(
     let ssh_key_name = &path.ssh_key_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let &actor = opctx.authn.actor_required()?;
+        let &actor = opctx
+            .authn
+            .actor_required()
+            .internal_context("fetching one of current user's ssh keys")?;
         let ssh_key =
             nexus.ssh_key_fetch(&opctx, actor.actor_id(), ssh_key_name).await?;
         Ok(HttpResponseOk(ssh_key.into()))
@@ -3750,11 +4144,23 @@ async fn session_sshkey_delete(
     let ssh_key_name = &path.ssh_key_name;
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let &actor = opctx.authn.actor_required()?;
+        let &actor = opctx
+            .authn
+            .actor_required()
+            .internal_context("deleting one of current user's ssh keys")?;
         nexus.ssh_key_delete(&opctx, actor.actor_id(), ssh_key_name).await?;
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Path parameters for metrics requests where `/metrics/{metric_name}` is
+/// appended to an existing path parameter type
+#[derive(Deserialize, JsonSchema)]
+struct MetricsPathParam<T, M> {
+    #[serde(flatten)]
+    inner: T,
+    metric_name: M,
 }
 
 #[cfg(test)]

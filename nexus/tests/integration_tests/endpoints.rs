@@ -8,6 +8,7 @@
 //! THERE ARE NO TESTS IN THIS FILE.
 
 use crate::integration_tests::unauthorized::HTTP_SERVER;
+use chrono::Utc;
 use http::method::Method;
 use lazy_static::lazy_static;
 use nexus_test_utils::RACK_UUID;
@@ -177,6 +178,13 @@ lazy_static! {
             disk_source: params::DiskSource::Blank { block_size: params::BlockSize::try_from(4096).unwrap() },
             size: ByteCount::from_gibibytes_u32(16),
         };
+    pub static ref DEMO_DISK_METRICS_URL: String =
+        format!(
+            "{}/metrics/activated?start_time={:?}&end_time={:?}",
+            *DEMO_DISK_URL,
+            Utc::now(),
+            Utc::now(),
+        );
 
     // Instance used for testing
     pub static ref DEMO_INSTANCE_NAME: Name = "demo-instance".parse().unwrap();
@@ -198,6 +206,8 @@ lazy_static! {
         format!("{}/detach", *DEMO_INSTANCE_DISKS_URL);
     pub static ref DEMO_INSTANCE_NICS_URL: String =
         format!("{}/network-interfaces", *DEMO_INSTANCE_URL);
+    pub static ref DEMO_INSTANCE_EXTERNAL_IPS_URL: String =
+        format!("{}/external-ips", *DEMO_INSTANCE_URL);
     pub static ref DEMO_INSTANCE_SERIAL_URL: String =
         format!("{}/serial-console", *DEMO_INSTANCE_URL);
     pub static ref DEMO_INSTANCE_CREATE: params::InstanceCreate =
@@ -212,12 +222,15 @@ lazy_static! {
             user_data: vec![],
             network_interfaces:
                 params::InstanceNetworkInterfaceAttachment::Default,
+            external_ips: vec![
+                params::ExternalIpCreate::Ephemeral { pool_name: None }
+            ],
             disks: vec![],
         };
 
     // The instance needs a network interface, too.
     pub static ref DEMO_INSTANCE_NIC_NAME: Name =
-        omicron_nexus::defaults::DEFAULT_PRIMARY_NIC_NAME.parse().unwrap();
+        nexus_defaults::DEFAULT_PRIMARY_NIC_NAME.parse().unwrap();
     pub static ref DEMO_INSTANCE_NIC_URL: String =
         format!("{}/{}", *DEMO_INSTANCE_NICS_URL, *DEMO_INSTANCE_NIC_NAME);
     pub static ref DEMO_INSTANCE_NIC_CREATE: params::NetworkInterfaceCreate =
@@ -284,6 +297,7 @@ lazy_static! {
                 name: DEMO_IP_POOL_NAME.clone(),
                 description: String::from("an IP pool"),
             },
+            project: None,
         };
     pub static ref DEMO_IP_POOL_URL: String = format!("/ip-pools/{}", *DEMO_IP_POOL_NAME);
     pub static ref DEMO_IP_POOL_UPDATE: params::IpPoolUpdate =
@@ -313,12 +327,27 @@ lazy_static! {
             },
             disk: DEMO_DISK_NAME.clone(),
         };
+
+    // SSH keys
+    pub static ref DEMO_SSHKEYS_URL: &'static str = "/session/me/sshkeys";
+    pub static ref DEMO_SSHKEY_NAME: Name = "aaaaa-ssh-key".parse().unwrap();
+    pub static ref DEMO_SSHKEY_CREATE: params::SshKeyCreate = params::SshKeyCreate {
+        identity: IdentityMetadataCreateParams {
+            name: DEMO_SSHKEY_NAME.clone(),
+            description: "a demo key".to_string(),
+        },
+
+        public_key: "AAAAAAAAAAAAAAA".to_string(),
+    };
+
+    pub static ref DEMO_SPECIFIC_SSHKEY_URL: String =
+        format!("{}/{}", *DEMO_SSHKEYS_URL, *DEMO_SSHKEY_NAME);
 }
 
 lazy_static! {
     // Identity providers
-    pub static ref IDENTITY_PROVIDERS_URL: String = format!("/silos/default-silo/identity_providers");
-    pub static ref SAML_IDENTITY_PROVIDERS_URL: String = format!("/silos/default-silo/saml_identity_providers");
+    pub static ref IDENTITY_PROVIDERS_URL: String = format!("/silos/default-silo/identity-providers");
+    pub static ref SAML_IDENTITY_PROVIDERS_URL: String = format!("/silos/default-silo/saml-identity-providers");
 
     pub static ref DEMO_SAML_IDENTITY_PROVIDER_NAME: Name = "demo-saml-provider".parse().unwrap();
     pub static ref SPECIFIC_SAML_IDENTITY_PROVIDER_URL: String = format!("{}/{}", *SAML_IDENTITY_PROVIDERS_URL, *DEMO_SAML_IDENTITY_PROVIDER_NAME);
@@ -346,6 +375,7 @@ lazy_static! {
 ///
 /// These structs are also used to check whether we're covering all endpoints in
 /// the public OpenAPI spec.
+#[derive(Debug)]
 pub struct VerifyEndpoint {
     /// URL path for the HTTP resource to test
     ///
@@ -365,6 +395,9 @@ pub struct VerifyEndpoint {
     /// unauthorized users will get a 404.
     pub visibility: Visibility,
 
+    /// Specify level of unprivileged access an authenticated user has
+    pub unprivileged_access: UnprivilegedAccess,
+
     /// Specifies what HTTP methods are supported for this HTTP resource
     ///
     /// The test runner tests a variety of HTTP methods.  For each method, if
@@ -377,7 +410,21 @@ pub struct VerifyEndpoint {
     pub allowed_methods: Vec<AllowedMethod>,
 }
 
+/// Describe what access authenticated unprivileged users have.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum UnprivilegedAccess {
+    /// Users have full CRUD access to the endpoint
+    Full,
+
+    /// Users only have read access to the endpoint
+    ReadOnly,
+
+    /// Users have no access at all to the endpoint
+    None,
+}
+
 /// Describes the visibility of an HTTP resource
+#[derive(Debug)]
 pub enum Visibility {
     /// All users can see the resource (including unauthenticated or
     /// unauthorized users)
@@ -392,6 +439,7 @@ pub enum Visibility {
 }
 
 /// Describes an HTTP method supported by a particular API endpoint
+#[derive(Debug)]
 pub enum AllowedMethod {
     /// HTTP "DELETE" method
     Delete,
@@ -464,6 +512,7 @@ lazy_static! {
         VerifyEndpoint {
             url: *POLICY_URL,
             visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Put(
@@ -480,6 +529,7 @@ lazy_static! {
         VerifyEndpoint {
             url: *DEMO_IP_POOLS_URL,
             visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Post(
@@ -492,6 +542,7 @@ lazy_static! {
         VerifyEndpoint {
             url: &*DEMO_IP_POOL_URL,
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Put(
@@ -505,6 +556,7 @@ lazy_static! {
         VerifyEndpoint {
             url: &*DEMO_IP_POOL_RANGES_URL,
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get
             ],
@@ -514,6 +566,7 @@ lazy_static! {
         VerifyEndpoint {
             url: &*DEMO_IP_POOL_RANGES_ADD_URL,
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Post(
                     serde_json::to_value(&*DEMO_IP_POOL_RANGE).unwrap()
@@ -525,6 +578,7 @@ lazy_static! {
         VerifyEndpoint {
             url: &*DEMO_IP_POOL_RANGES_DEL_URL,
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Post(
                     serde_json::to_value(&*DEMO_IP_POOL_RANGE).unwrap()
@@ -536,6 +590,7 @@ lazy_static! {
         VerifyEndpoint {
             url: "/silos",
             visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Post(
@@ -546,6 +601,7 @@ lazy_static! {
         VerifyEndpoint {
             url: &*DEMO_SILO_URL,
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Delete,
@@ -554,6 +610,7 @@ lazy_static! {
         VerifyEndpoint {
             url: &*DEMO_SILO_POLICY_URL,
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Put(
@@ -566,12 +623,21 @@ lazy_static! {
             ],
         },
 
+        VerifyEndpoint {
+            url: "/users",
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::ReadOnly,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
 
         /* Organizations */
 
         VerifyEndpoint {
             url: "/organizations",
             visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Post(
@@ -579,9 +645,20 @@ lazy_static! {
                 )
             ],
         },
+
+        VerifyEndpoint {
+            url: "/by-id/organizations/{id}",
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
+
         VerifyEndpoint {
             url: &*DEMO_ORG_URL,
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Delete,
@@ -595,9 +672,11 @@ lazy_static! {
                 ),
             ],
         },
+
         VerifyEndpoint {
             url: &*DEMO_ORG_POLICY_URL,
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Put(
@@ -623,6 +702,7 @@ lazy_static! {
         VerifyEndpoint {
             url: &*DEMO_ORG_PROJECTS_URL,
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Post(
@@ -630,9 +710,20 @@ lazy_static! {
                 ),
             ],
         },
+
+        VerifyEndpoint {
+            url: "/by-id/projects/{id}",
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
+
         VerifyEndpoint {
             url: &*DEMO_PROJECT_URL,
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Delete,
@@ -646,9 +737,11 @@ lazy_static! {
                 ),
             ],
         },
+
         VerifyEndpoint {
             url: &*DEMO_PROJECT_POLICY_URL,
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Put(
@@ -665,6 +758,7 @@ lazy_static! {
         VerifyEndpoint {
             url: &*DEMO_PROJECT_URL_VPCS,
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Post(
@@ -674,8 +768,18 @@ lazy_static! {
         },
 
         VerifyEndpoint {
+            url: "/by-id/vpcs/{id}",
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
+
+        VerifyEndpoint {
             url: &*DEMO_VPC_URL,
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Put(
@@ -695,6 +799,7 @@ lazy_static! {
         VerifyEndpoint {
             url: &*DEMO_VPC_URL_FIREWALL_RULES,
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Put(
@@ -709,6 +814,7 @@ lazy_static! {
         VerifyEndpoint {
             url: &*DEMO_VPC_URL_SUBNETS,
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Post(
@@ -718,8 +824,18 @@ lazy_static! {
         },
 
         VerifyEndpoint {
+            url: "/by-id/vpc-subnets/{id}",
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
+
+        VerifyEndpoint {
             url: &*DEMO_VPC_SUBNET_URL,
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Put(
@@ -737,6 +853,7 @@ lazy_static! {
         VerifyEndpoint {
             url: &*DEMO_VPC_SUBNET_INTERFACES_URL,
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get,
             ],
@@ -747,6 +864,7 @@ lazy_static! {
         VerifyEndpoint {
             url: &*DEMO_VPC_URL_ROUTERS,
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Post(
@@ -756,8 +874,18 @@ lazy_static! {
         },
 
         VerifyEndpoint {
+            url: "/by-id/vpc-routers/{id}",
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
+
+        VerifyEndpoint {
             url: &*DEMO_VPC_ROUTER_URL,
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Put(
@@ -777,6 +905,7 @@ lazy_static! {
         VerifyEndpoint {
             url: &*DEMO_VPC_ROUTER_URL_ROUTES,
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Post(
@@ -786,8 +915,18 @@ lazy_static! {
         },
 
         VerifyEndpoint {
+            url: "/by-id/vpc-router-routes/{id}",
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
+
+        VerifyEndpoint {
             url: &*DEMO_ROUTER_ROUTE_URL,
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Put(
@@ -806,12 +945,12 @@ lazy_static! {
             ],
         },
 
-
         /* Disks */
 
         VerifyEndpoint {
             url: &*DEMO_PROJECT_URL_DISKS,
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Post(
@@ -821,8 +960,18 @@ lazy_static! {
         },
 
         VerifyEndpoint {
+            url: "/by-id/disks/{id}",
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
+
+        VerifyEndpoint {
             url: &*DEMO_DISK_URL,
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Delete,
@@ -830,8 +979,18 @@ lazy_static! {
         },
 
         VerifyEndpoint {
+            url: &*DEMO_DISK_METRICS_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
+
+        VerifyEndpoint {
             url: &*DEMO_INSTANCE_DISKS_URL,
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get,
             ],
@@ -839,6 +998,7 @@ lazy_static! {
         VerifyEndpoint {
             url: &*DEMO_INSTANCE_DISKS_ATTACH_URL,
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Post(
                     serde_json::to_value(params::DiskIdentifier {
@@ -850,6 +1010,7 @@ lazy_static! {
         VerifyEndpoint {
             url: &*DEMO_INSTANCE_DISKS_DETACH_URL,
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Post(
                     serde_json::to_value(params::DiskIdentifier {
@@ -864,6 +1025,7 @@ lazy_static! {
         VerifyEndpoint {
             url: &*DEMO_PROJECT_URL_IMAGES,
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::GetUnimplemented,
                 AllowedMethod::Post(
@@ -873,8 +1035,18 @@ lazy_static! {
         },
 
         VerifyEndpoint {
+            url: "/by-id/images/{id}",
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::GetUnimplemented,
+            ],
+        },
+
+        VerifyEndpoint {
             url: &*DEMO_PROJECT_IMAGE_URL,
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::GetUnimplemented,
                 AllowedMethod::Delete,
@@ -886,6 +1058,7 @@ lazy_static! {
         VerifyEndpoint {
             url: &*DEMO_PROJECT_URL_SNAPSHOTS,
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::GetUnimplemented,
                 AllowedMethod::Post(
@@ -893,9 +1066,20 @@ lazy_static! {
                 )
             ]
         },
+
+        VerifyEndpoint {
+            url: "/by-id/snapshots/{id}",
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::GetUnimplemented,
+            ],
+        },
+
         VerifyEndpoint {
             url: &*DEMO_SNAPSHOT_URL,
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::GetUnimplemented,
                 AllowedMethod::Delete,
@@ -906,6 +1090,7 @@ lazy_static! {
         VerifyEndpoint {
             url: &*DEMO_PROJECT_URL_INSTANCES,
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Post(
@@ -915,8 +1100,18 @@ lazy_static! {
         },
 
         VerifyEndpoint {
+            url: "/by-id/instances/{id}",
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
+
+        VerifyEndpoint {
             url: &*DEMO_INSTANCE_URL,
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Delete,
@@ -926,6 +1121,7 @@ lazy_static! {
         VerifyEndpoint {
             url: &*DEMO_INSTANCE_START_URL,
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Post(serde_json::Value::Null)
             ],
@@ -933,6 +1129,7 @@ lazy_static! {
         VerifyEndpoint {
             url: &*DEMO_INSTANCE_STOP_URL,
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Post(serde_json::Value::Null)
             ],
@@ -940,6 +1137,7 @@ lazy_static! {
         VerifyEndpoint {
             url: &*DEMO_INSTANCE_REBOOT_URL,
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Post(serde_json::Value::Null)
             ],
@@ -947,6 +1145,7 @@ lazy_static! {
         VerifyEndpoint {
             url: &*DEMO_INSTANCE_MIGRATE_URL,
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Post(serde_json::to_value(
                     params::InstanceMigrate {
@@ -958,6 +1157,7 @@ lazy_static! {
         VerifyEndpoint {
             url: &*DEMO_INSTANCE_SERIAL_URL,
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::GetNonexistent // has required query parameters
             ],
@@ -967,6 +1167,7 @@ lazy_static! {
         VerifyEndpoint {
             url: &*DEMO_INSTANCE_NICS_URL,
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Post(
@@ -974,9 +1175,20 @@ lazy_static! {
                 ),
             ],
         },
+
+        VerifyEndpoint {
+            url: "/by-id/network-interfaces/{id}",
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
+
         VerifyEndpoint {
             url: &*DEMO_INSTANCE_NIC_URL,
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Delete,
@@ -986,27 +1198,39 @@ lazy_static! {
             ],
         },
 
+        /* Instance external IP addresses */
+        VerifyEndpoint {
+            url: &*DEMO_INSTANCE_EXTERNAL_IPS_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![AllowedMethod::Get],
+        },
+
         /* IAM */
 
         VerifyEndpoint {
             url: "/roles",
             visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Get],
         },
         VerifyEndpoint {
             url: "/roles/fleet.admin",
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Get],
         },
 
         VerifyEndpoint {
             url: "/system/user",
             visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Get],
         },
         VerifyEndpoint {
             url: &*URL_USERS_DB_INIT,
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Get],
         },
 
@@ -1015,24 +1239,28 @@ lazy_static! {
         VerifyEndpoint {
             url: "/hardware/racks",
             visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Get],
         },
 
         VerifyEndpoint {
             url: &*HARDWARE_RACK_URL,
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Get],
         },
 
         VerifyEndpoint {
             url: "/hardware/sleds",
             visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Get],
         },
 
         VerifyEndpoint {
             url: &*HARDWARE_SLED_URL,
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Get],
         },
 
@@ -1041,12 +1269,14 @@ lazy_static! {
         VerifyEndpoint {
             url: "/sagas",
             visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Get],
         },
 
         VerifyEndpoint {
             url: "/sagas/48a1b8c8-fc1c-6fea-9de9-fdeb8dda7823",
             visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::GetNonexistent],
         },
 
@@ -1055,6 +1285,7 @@ lazy_static! {
         VerifyEndpoint {
             url: "/timeseries/schema",
             visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Get],
         },
 
@@ -1063,6 +1294,7 @@ lazy_static! {
         VerifyEndpoint {
             url: "/updates/refresh",
             visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Post(
                 serde_json::Value::Null
             )],
@@ -1073,6 +1305,7 @@ lazy_static! {
         VerifyEndpoint {
             url: "/images",
             visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::ReadOnly,
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Post(
@@ -1082,8 +1315,18 @@ lazy_static! {
         },
 
         VerifyEndpoint {
+            url: "/by-id/global-images/{id}",
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::ReadOnly,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
+
+        VerifyEndpoint {
             url: &*DEMO_GLOBAL_IMAGE_URL,
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::ReadOnly,
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Delete,
@@ -1092,18 +1335,19 @@ lazy_static! {
 
         /* Silo identity providers */
 
-        /*
         VerifyEndpoint {
-            url: &*IDENTITY_PROVIDERS_URL, // in ignore list
+            url: &*IDENTITY_PROVIDERS_URL,
             visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::ReadOnly,
             allowed_methods: vec![
                 AllowedMethod::Get,
             ],
         },
-        */
+
         VerifyEndpoint {
             url: &*SAML_IDENTITY_PROVIDERS_URL,
             visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Post(
                 serde_json::to_value(&*SAML_IDENTITY_PROVIDER).unwrap(),
             )],
@@ -1111,7 +1355,42 @@ lazy_static! {
         VerifyEndpoint {
             url: &*SPECIFIC_SAML_IDENTITY_PROVIDER_URL,
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Get],
+        },
+
+        /* Misc */
+
+        VerifyEndpoint {
+            url: "/session/me",
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::ReadOnly,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
+
+        /* SSH keys */
+
+        VerifyEndpoint {
+            url: &*DEMO_SSHKEYS_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::Full,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_SSHKEY_CREATE).unwrap(),
+                ),
+            ],
+        },
+        VerifyEndpoint {
+            url: &*DEMO_SPECIFIC_SSHKEY_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::Full,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Delete,
+            ],
         },
     ];
 }

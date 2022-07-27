@@ -219,7 +219,7 @@ async fn test_listing_identity_providers(cptestctx: &ControlPlaneTestContext) {
     // List providers - should be none
     let providers = objects_list_page_authz::<IdentityProvider>(
         client,
-        "/silos/default-silo/identity_providers",
+        "/silos/default-silo/identity-providers",
     )
     .await
     .items;
@@ -238,7 +238,7 @@ async fn test_listing_identity_providers(cptestctx: &ControlPlaneTestContext) {
 
     let silo_saml_idp_1: SamlIdentityProvider = object_create(
         client,
-        &"/silos/default-silo/saml_identity_providers",
+        &"/silos/default-silo/saml-identity-providers",
         &params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "some-totally-real-saml-provider"
@@ -265,7 +265,7 @@ async fn test_listing_identity_providers(cptestctx: &ControlPlaneTestContext) {
 
     let silo_saml_idp_2: SamlIdentityProvider = object_create(
         client,
-        &"/silos/default-silo/saml_identity_providers",
+        &"/silos/default-silo/saml-identity-providers",
         &params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "another-totally-real-saml-provider"
@@ -293,7 +293,7 @@ async fn test_listing_identity_providers(cptestctx: &ControlPlaneTestContext) {
     // List providers again - expect 2
     let providers = objects_list_page_authz::<IdentityProvider>(
         client,
-        "/silos/default-silo/identity_providers",
+        "/silos/default-silo/identity-providers",
     )
     .await
     .items;
@@ -325,7 +325,7 @@ async fn test_deleting_a_silo_deletes_the_idp(
 
     let silo_saml_idp: SamlIdentityProvider = object_create(
         client,
-        &format!("/silos/{}/saml_identity_providers", SILO_NAME),
+        &format!("/silos/{}/saml-identity-providers", SILO_NAME),
         &params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "some-totally-real-saml-provider"
@@ -417,7 +417,7 @@ async fn test_saml_idp_metadata_data_valid(
 
     let silo_saml_idp: SamlIdentityProvider = object_create(
         client,
-        "/silos/blahblah/saml_identity_providers",
+        "/silos/blahblah/saml-identity-providers",
         &params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "some-totally-real-saml-provider"
@@ -478,7 +478,7 @@ async fn test_saml_idp_metadata_data_truncated(
         RequestBuilder::new(
             client,
             Method::POST,
-            &"/silos/blahblah/saml_identity_providers",
+            "/silos/blahblah/saml-identity-providers",
         )
         .body(Some(&params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
@@ -529,7 +529,7 @@ async fn test_saml_idp_metadata_data_invalid(
         RequestBuilder::new(
             client,
             Method::POST,
-            &format!("/silos/{}/saml_identity_providers", SILO_NAME),
+            &format!("/silos/{}/saml-identity-providers", SILO_NAME),
         )
         .body(Some(&params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {

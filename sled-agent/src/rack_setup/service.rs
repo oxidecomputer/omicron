@@ -14,7 +14,7 @@ use crate::rack_setup::plan::service::{
     Plan as ServicePlan, PlanError as ServicePlanError,
 };
 use crate::rack_setup::plan::sled::{
-    Plan as SledPlan, PlanError as SledPlanError,
+    generate_rack_secret, Plan as SledPlan, PlanError as SledPlanError,
 };
 use internal_dns_client::multiclient::{
     DnsError, Resolver as DnsResolver, Updater as DnsUpdater,
@@ -551,17 +551,47 @@ impl ServiceInner {
             plan
         } else {
             info!(self.log, "Creating new allocation plan");
-            SledPlan::create(&self.log, &config, addrs, member_device_id_certs)
-                .await?
+            SledPlan::create(&self.log, &config, addrs).await?
         };
+
+        // Generate our rack secret, unless we're in the single-sled case.
+        let mut maybe_rack_secret_shares = generate_rack_secret(
+            config.rack_secret_threshold,
+            member_device_id_certs,
+            &self.log,
+        )?;
+
+        // Confirm that the returned iterator (if we got one) is the length we
+        // expect.
+        if let Some(rack_secret_shares) = maybe_rack_secret_shares.as_ref() {
+            // TODO-cleanup Asserting here seems fine as long as
+            // `member_device_id_certs` is hard-coded from a config file, but
+            // once we start collecting them over the management network we
+            // should probably attach them at the type level to the bootstrap
+            // addrs, which would remove the need for this assertion.
+            assert_eq!(
+                rack_secret_shares.len(),
+                plan.sleds.len(),
+                concat!(
+                    "Number of trust quorum members does not match ",
+                    "number of sleds in the plan"
+                )
+            );
+        }
 
         // Forward the sled initialization requests to our sled-agent.
         local_bootstrap_agent
             .initialize_sleds(
                 plan.sleds
                     .iter()
-                    .map(|(bootstrap_addr, initialization_request)| {
-                        (*bootstrap_addr, initialization_request.clone())
+                    .map(move |(bootstrap_addr, initialization_request)| {
+                        (
+                            *bootstrap_addr,
+                            initialization_request.clone(),
+                            maybe_rack_secret_shares
+                                .as_mut()
+                                .map(|shares| shares.next().unwrap()),
+                        )
                     })
                     .collect(),
             )
