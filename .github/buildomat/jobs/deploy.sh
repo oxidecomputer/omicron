@@ -144,12 +144,10 @@ while :; do
 		exit 1
 	fi
 
-	if curl --fail-with-body -i http://192.168.1.20/spoof_login; then
+	if curl --max-time 1 --fail-with-body -i http://192.168.1.20/spoof_login; then
 		printf 'ok; nexus became available!\n'
 		break
 	fi
-
-	sleep 1
 done
 
 #
