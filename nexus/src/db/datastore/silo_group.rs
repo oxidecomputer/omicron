@@ -12,6 +12,7 @@ use crate::db::datastore::RunnableQuery;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
+use crate::db::lookup::LookupPath;
 use crate::db::model::SiloGroup;
 use crate::db::model::SiloGroupMembership;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -106,6 +107,11 @@ impl DataStore {
         silo_user_id: Uuid,
         silo_group_ids: Vec<Uuid>,
     ) -> UpdateResult<()> {
+        let (_authz_silo_user, ..) = LookupPath::new(opctx, &self)
+            .silo_user_id(silo_user_id)
+            .fetch_for(authz::Action::Modify)
+            .await?;
+
         self.pool_authorized(opctx)
             .await?
             .transaction(move |conn| {

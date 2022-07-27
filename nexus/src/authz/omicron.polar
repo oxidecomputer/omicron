@@ -392,6 +392,8 @@ has_permission(actor: AuthenticatedActor, "read", silo: Silo)
 	if has_role(actor, "external-authenticator", silo.fleet);
 has_permission(actor: AuthenticatedActor, "read", user: SiloUser)
 	if has_role(actor, "external-authenticator", user.silo.fleet);
+has_permission(actor: AuthenticatedActor, "modify", user: SiloUser)
+	if has_role(actor, "external-authenticator", user.silo.fleet);
 has_permission(actor: AuthenticatedActor, "read", group: SiloGroup)
 	if has_role(actor, "external-authenticator", group.silo.fleet);
 has_permission(actor: AuthenticatedActor, "modify", group: SiloGroup)

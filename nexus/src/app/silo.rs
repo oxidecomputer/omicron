@@ -220,14 +220,6 @@ impl super::Nexus {
             };
 
             if let Some(silo_group) = silo_group {
-                // We're going to (potentially) modify group membership, so
-                // do an authz check here.
-                let (_authz_silo_group, ..) =
-                    LookupPath::new(opctx, &self.db_datastore)
-                        .silo_group_id(silo_group.id())
-                        .fetch_for(authz::Action::Modify)
-                        .await?;
-
                 silo_user_group_ids.push(silo_group.id());
             }
         }
