@@ -357,8 +357,8 @@ impl From<ServiceType> for sled_agent_client::types::ServiceType {
 
         match s {
             St::Nexus { internal_ip, external_ip } => AutoSt::Nexus {
-                internal_address: internal_ip.to_string(),
-                external_address: external_ip.to_string(),
+                internal_ip,
+                external_ip,
             },
             St::InternalDns { server_address, dns_address } => {
                 AutoSt::InternalDns {

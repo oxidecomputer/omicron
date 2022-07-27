@@ -19,6 +19,7 @@ zone = true
 setup_hint = """
 - Run `./tools/ci_download_console` to download the web console assets
 - Run `pkg install library/postgresql-13` to download Postgres libraries
+- Run `./tools/create_self_signed_cert.sh` to generate a certificate
 """
 
 [[package.omicron-nexus.paths]]
