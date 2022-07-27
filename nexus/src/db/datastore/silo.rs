@@ -260,12 +260,7 @@ impl DataStore {
             .set(silo_user::dsl::time_deleted.eq(now))
             .execute_async(self.pool_authorized(opctx).await?)
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByResource(authz_silo),
-                )
-            })?;
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
 
         info!(opctx.log, "deleted {} silo users for silo {}", updated_rows, id);
 
@@ -282,12 +277,7 @@ impl DataStore {
                 )
                 .execute_async(self.pool_authorized(opctx).await?)
                 .await
-                .map_err(|e| {
-                    public_error_from_diesel_pool(
-                        e,
-                        ErrorHandler::NotFoundByResource(authz_silo),
-                    )
-                })?;
+                .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
 
         info!(
             opctx.log,
@@ -301,12 +291,7 @@ impl DataStore {
             .set(silo_group::dsl::time_deleted.eq(now))
             .execute_async(self.pool_authorized(opctx).await?)
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByResource(authz_silo),
-                )
-            })?;
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
 
         info!(
             opctx.log,
@@ -322,12 +307,7 @@ impl DataStore {
             .set(idp_dsl::time_deleted.eq(Utc::now()))
             .execute_async(self.pool_authorized(opctx).await?)
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByResource(authz_silo),
-                )
-            })?;
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
 
         info!(opctx.log, "deleted {} silo IdPs for silo {}", updated_rows, id);
 
@@ -339,12 +319,7 @@ impl DataStore {
             .set(saml_idp_dsl::time_deleted.eq(Utc::now()))
             .execute_async(self.pool_authorized(opctx).await?)
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByResource(authz_silo),
-                )
-            })?;
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
 
         info!(
             opctx.log,
