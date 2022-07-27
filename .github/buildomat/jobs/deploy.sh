@@ -102,7 +102,7 @@ set +o xtrace
 
 start=$SECONDS
 while :; do
-	if (( $SECONDS - $start > 60 )); then
+	if (( SECONDS - start > 60 )); then
 		printf 'FAILURE: NEXUS DID NOT BECOME AVAILABLE\n' >&2
 		break
 	fi
@@ -140,10 +140,10 @@ pfexec ptree -z global
 pfexec svcs -xv
 for z in $(zoneadm list -n); do
 	banner "${z/oxz_/}"
-	pfexec svcs -xv -z $z
-	pfexec ptree -z $z
-	pfexec zlogin $z ipadm
-	pfexec zlogin $z netstat -rncva
-	pfexec zlogin $z netstat -anu
-	pfexec zlogin $z arp -an
+	pfexec svcs -xv -z "$z"
+	pfexec ptree -z "$z"
+	pfexec zlogin "$z" ipadm
+	pfexec zlogin "$z" netstat -rncva
+	pfexec zlogin "$z" netstat -anu
+	pfexec zlogin "$z" arp -an
 done
