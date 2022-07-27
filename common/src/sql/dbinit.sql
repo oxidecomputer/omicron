@@ -703,7 +703,7 @@ CREATE TABLE omicron.public.metric_producer (
     oximeter_id UUID NOT NULL
 );
 
-CREATE INDEX ON omicron.public.metric_producer (
+CREATE UNIQUE INDEX ON omicron.public.metric_producer (
     oximeter_id,
     id
 );
@@ -738,7 +738,10 @@ CREATE TABLE omicron.public.vpc (
 
     /* Used to ensure that two requests do not concurrently modify the
        VPC's firewall */
-    firewall_gen INT NOT NULL
+    firewall_gen INT NOT NULL,
+
+    /* Child-resource generation number for VPC Subnets. */
+    subnet_gen INT8 NOT NULL
 );
 
 CREATE UNIQUE INDEX ON omicron.public.vpc (
@@ -762,6 +765,8 @@ CREATE TABLE omicron.public.vpc_subnet (
     /* Indicates that the object has been deleted */
     time_deleted TIMESTAMPTZ,
     vpc_id UUID NOT NULL,
+    /* Child resource creation generation number */
+    rcgen INT8 NOT NULL,
     ipv4_block INET NOT NULL,
     ipv6_block INET NOT NULL
 );
@@ -975,6 +980,9 @@ CREATE TABLE omicron.public.ip_pool (
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
 
+    /* Optional ID of the project for which this pool is reserved. */
+    project_id UUID,
+
     /* The collection's child-resource generation number */
     rcgen INT8 NOT NULL
 );
@@ -1001,6 +1009,15 @@ CREATE TABLE omicron.public.ip_pool_range (
     /* The range is inclusive of the last address. */
     last_address INET NOT NULL,
     ip_pool_id UUID NOT NULL,
+    /* Optional ID of the project for which this range is reserved.
+     *
+     * NOTE: This denormalizes the tables a bit, since the project_id is
+     * duplicated here and in the parent `ip_pool` table. We're allowing this
+     * for now, since it reduces the complexity of the already-bad IP allocation
+     * query, but we may want to revisit that, and JOIN with the parent table
+     * instead.
+     */
+    project_id UUID,
     /* Tracks child resources, IP addresses allocated out of this range. */
     rcgen INT8 NOT NULL
 );
@@ -1022,14 +1039,46 @@ STORING (first_address)
 WHERE time_deleted IS NULL;
 
 /*
- * External IP addresses used for instance source NAT.
- *
- * NOTE: This currently stores only address and port information for the
- * automatic source NAT supplied for all guest instances. It does not currently
- * store information about ephemeral or floating IPs.
+ * Index supporting allocation of IPs out of a Pool reserved for a project.
+ */
+CREATE INDEX ON omicron.public.ip_pool_range (
+    project_id
+) WHERE
+    time_deleted IS NULL;
+
+
+/* The kind of external IP address. */
+CREATE TYPE omicron.public.ip_kind AS ENUM (
+    /* Automatic source NAT provided to all guests by default */
+    'snat',
+
+    /*
+     * An ephemeral IP is a fixed, known address whose lifetime is the same as
+     * the instance to which it is attached.
+     */
+    'ephemeral',
+
+    /*
+     * A floating IP is an independent, named API resource. It is a fixed,
+     * known address that can be moved between instances. Its lifetime is not
+     * fixed to any instance.
+     */
+    'floating'
+);
+
+/*
+ * External IP addresses used for guest instances
  */
 CREATE TABLE omicron.public.instance_external_ip (
+    /* Identity metadata */
     id UUID PRIMARY KEY,
+
+    /* Name for floating IPs. See the constraints below. */
+    name STRING(128),
+
+    /* Description for floating IPs. See the constraints below. */
+    description STRING(512),
+
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
@@ -1040,8 +1089,14 @@ CREATE TABLE omicron.public.instance_external_ip (
     /* FK to the `ip_pool_range` table. */
     ip_pool_range_id UUID NOT NULL,
 
-    /* FK to the `instance` table. */
-    instance_id UUID NOT NULL,
+    /* FK to the `project` table. */
+    project_id UUID NOT NULL,
+
+    /* FK to the `instance` table. See the constraints below. */
+    instance_id UUID,
+
+    /* The kind of external address, e.g., ephemeral. */
+    kind omicron.public.ip_kind NOT NULL,
 
     /* The actual external IP address. */
     ip INET NOT NULL,
@@ -1050,7 +1105,28 @@ CREATE TABLE omicron.public.instance_external_ip (
     first_port INT4 NOT NULL,
 
     /* The last port in the allowed range, also inclusive. */
-    last_port INT4 NOT NULL
+    last_port INT4 NOT NULL,
+
+    /* The name must be non-NULL iff this is a floating IP. */
+    CONSTRAINT null_fip_name CHECK (
+        (kind != 'floating' AND name IS NULL) OR
+        (kind = 'floating' AND name IS NOT NULL)
+    ),
+
+    /* The description must be non-NULL iff this is a floating IP. */
+    CONSTRAINT null_fip_description CHECK (
+        (kind != 'floating' AND description IS NULL) OR
+        (kind = 'floating' AND description IS NOT NULL)
+    ),
+
+    /*
+     * Only nullable if this is a floating IP, which may exist not attached
+     * to any instance.
+     */
+    CONSTRAINT null_non_fip_instance_id CHECK (
+        (kind != 'floating' AND instance_id IS NOT NULL) OR
+        (kind = 'floating')
+    )
 );
 
 /*
@@ -1076,10 +1152,11 @@ CREATE UNIQUE INDEX ON omicron.public.instance_external_ip (
 )
     WHERE time_deleted IS NULL;
 
-CREATE INDEX ON omicron.public.instance_external_ip (
-    instance_id
+CREATE UNIQUE INDEX ON omicron.public.instance_external_ip (
+    instance_id,
+    id
 )
-    WHERE time_deleted IS NULL;
+    WHERE instance_id IS NOT NULL AND time_deleted IS NULL;
 
 /*******************************************************************/
 

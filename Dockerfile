@@ -19,8 +19,8 @@ WORKDIR /usr/src/omicron
 
 # sudo and path thing are only needed to get prereqs script to run
 ENV PATH=/usr/src/omicron/out/cockroachdb/bin:/usr/src/omicron/out/clickhouse:${PATH} 
-RUN apt-get update && apt-get install -y sudo --no-install-recommends && rm -rf /var/lib/apt/lists/*
-RUN tools/install_prerequisites.sh -y
+RUN apt-get update && apt-get install -y sudo --no-install-recommends
+RUN tools/install_builder_prerequisites.sh -y
 
 RUN cargo build --release
 
@@ -30,15 +30,13 @@ RUN cargo build --release
 
 FROM debian:sid-slim
 
-RUN apt-get update && apt-get install -y \
-	ca-certificates \
-	libpq5 \
-	libssl1.1 \
-	libsqlite3-0 \
-	--no-install-recommends \
-	&& rm -rf /var/lib/apt/lists/*
+# Install run-time dependencies
+COPY --from=cargo-build /usr/src/omicron/tools/install_runner_prerequisites.sh /tmp/
+RUN apt-get update && apt-get install -y sudo --no-install-recommends
+RUN /tmp/install_runner_prerequisites.sh -y
+RUN rm -rf /tmp/install_runner_prerequisites.sh /var/lib/apt/lists/*
 
-
+# Copy Omicron executables
 COPY --from=cargo-build /usr/src/omicron/target/release/nexus /usr/bin/nexus
 COPY --from=cargo-build /usr/src/omicron/target/release/omicron-dev /usr/bin/omicron-dev
 COPY --from=cargo-build /usr/src/omicron/target/release/omicron-package /usr/bin/omicron-package

@@ -46,6 +46,7 @@ impl Server {
         let sled_agent = Arc::new(SledAgent::new_simulated_with_id(
             &config,
             sa_log,
+            config.nexus_address,
             Arc::clone(&nexus_client),
         ));
 

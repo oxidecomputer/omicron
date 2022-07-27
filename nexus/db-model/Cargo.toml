@@ -1,0 +1,30 @@
+[package]
+name = "nexus-db-model"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[dependencies]
+anyhow = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+diesel = { version = "2.0.0-rc.1", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
+hex = "0.4.3"
+internal-dns-client = { path = "../../internal-dns-client" }
+ipnetwork = "0.20"
+macaddr = { version = "1.0.1", features = [ "serde_std" ]}
+newtype_derive = "0.1.6"
+parse-display = "0.5.4"
+rand = "0.8.5"
+ref-cast = "1.0"
+schemars = { version = "0.8.10", features = ["chrono", "uuid1"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+uuid = { version = "1.1.0", features = ["serde", "v4"] }
+
+steno = { git = "https://github.com/oxidecomputer/steno", branch = "main" }
+
+db-macros = { path = "../db-macros" }
+omicron-common = { path = "../../common" }
+nexus-defaults = { path = "../defaults" }
+nexus-types = { path = "../types" }
+sled-agent-client = { path = "../../sled-agent-client" }

@@ -6,7 +6,7 @@ license = "MPL-2.0"
 
 [dependencies]
 anyhow = "1.0"
-bytes = "1.0.1"
+bytes = "1.2.0"
 chrono = { version = "0.4",  features = [ "serde" ] }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
 headers = "0.3.7"
@@ -30,4 +30,4 @@ uuid = { version = "1.1.0", features = [ "serde", "v4" ] }
 [build-dependencies]
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
 omicron-test-utils = { path = "../../test-utils" }
-tokio = { version = "1.18" }
+tokio = { version = "1.20" }

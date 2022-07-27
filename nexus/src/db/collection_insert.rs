@@ -21,76 +21,15 @@ use diesel::query_builder::*;
 use diesel::query_dsl::methods as query_methods;
 use diesel::query_source::Table;
 use diesel::sql_types::SingleValue;
+use nexus_db_model::DatastoreCollectionConfig;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 
-/// Trait to be implemented by any structs representing a collection.
-/// For example, since Organizations have a one-to-many relationship with
-/// Projects, the Organization datatype should implement this trait.
-/// ```
-/// # use diesel::prelude::*;
-/// # use omicron_nexus::db::collection_insert::DatastoreCollection;
-/// # use omicron_nexus::db::model::Generation;
-/// #
-/// # table! {
-/// #     test_schema.organization (id) {
-/// #         id -> Uuid,
-/// #         time_deleted -> Nullable<Timestamptz>,
-/// #         rcgen -> Int8,
-/// #     }
-/// # }
-/// #
-/// # table! {
-/// #     test_schema.project (id) {
-/// #         id -> Uuid,
-/// #         time_deleted -> Nullable<Timestamptz>,
-/// #         organization_id -> Uuid,
-/// #     }
-/// # }
-///
-/// #[derive(Queryable, Insertable, Debug, Selectable)]
-/// #[diesel(table_name = project)]
-/// struct Project {
-///     pub id: uuid::Uuid,
-///     pub time_deleted: Option<chrono::DateTime<chrono::Utc>>,
-///     pub organization_id: uuid::Uuid,
-/// }
-///
-/// #[derive(Queryable, Insertable, Debug, Selectable)]
-/// #[diesel(table_name = organization)]
-/// struct Organization {
-///     pub id: uuid::Uuid,
-///     pub time_deleted: Option<chrono::DateTime<chrono::Utc>>,
-///     pub rcgen: Generation,
-/// }
-///
-/// impl DatastoreCollection<Project> for Organization {
-///     // Type of Organization::identity::id and Project::organization_id
-///     type CollectionId = uuid::Uuid;
-///
-///     type GenerationNumberColumn = organization::dsl::rcgen;
-///     type CollectionTimeDeletedColumn = organization::dsl::time_deleted;
-///
-///     type CollectionIdColumn = project::dsl::organization_id;
-/// }
-/// ```
-pub trait DatastoreCollection<ResourceType> {
-    /// The Rust type of the collection id (typically Uuid for us)
-    type CollectionId: Copy + Debug;
-
-    /// The column in the CollectionTable that acts as a generation number.
-    /// This is the "child-resource-generation-number" in RFD 192.
-    type GenerationNumberColumn: Column + Default;
-
-    /// The time deleted column in the CollectionTable
-    // We enforce that this column comes from the same table as
-    // GenerationNumberColumn when defining insert_resource() below.
-    type CollectionTimeDeletedColumn: Column + Default;
-
-    /// The column in the ResourceTable that acts as a foreign key into
-    /// the CollectionTable
-    type CollectionIdColumn: Column;
-
+/// Extension trait adding behavior to types that implement
+/// `nexus_db_model::DatastoreCollection`.
+pub trait DatastoreCollection<ResourceType>:
+    DatastoreCollectionConfig<ResourceType>
+{
     /// Create a statement for inserting a resource into the given collection.
     ///
     /// The ISR type is the same type as the second generic argument to
@@ -176,23 +115,25 @@ pub trait DatastoreCollection<ResourceType> {
     }
 }
 
+impl<T, R> DatastoreCollection<R> for T where T: DatastoreCollectionConfig<R> {}
+
 /// Utility type to make trait bounds below easier to read.
 type CollectionId<ResourceType, C> =
-    <C as DatastoreCollection<ResourceType>>::CollectionId;
+    <C as DatastoreCollectionConfig<ResourceType>>::CollectionId;
 /// The table representing the collection. The resource references
 /// this table.
-type CollectionTable<ResourceType, C> = <<C as DatastoreCollection<
+type CollectionTable<ResourceType, C> = <<C as DatastoreCollectionConfig<
     ResourceType,
 >>::GenerationNumberColumn as Column>::Table;
 /// The table representing the resource. This table contains an
 /// ID acting as a foreign key into the collection table.
-type ResourceTable<ResourceType, C> = <<C as DatastoreCollection<
+type ResourceTable<ResourceType, C> = <<C as DatastoreCollectionConfig<
     ResourceType,
 >>::CollectionIdColumn as Column>::Table;
 type CollectionTimeDeletedColumn<ResourceType, C> =
-    <C as DatastoreCollection<ResourceType>>::CollectionTimeDeletedColumn;
+    <C as DatastoreCollectionConfig<ResourceType>>::CollectionTimeDeletedColumn;
 type GenerationNumberColumn<ResourceType, C> =
-    <C as DatastoreCollection<ResourceType>>::GenerationNumberColumn;
+    <C as DatastoreCollectionConfig<ResourceType>>::GenerationNumberColumn;
 
 // Trick to check that columns come from the same table
 pub trait TypesAreSame {}
@@ -203,7 +144,7 @@ impl<T> TypesAreSame for (T, T) {}
 pub struct InsertIntoCollectionStatement<ResourceType, ISR, C>
 where
     ResourceType: Selectable<Pg>,
-    C: DatastoreCollection<ResourceType>,
+    C: DatastoreCollectionConfig<ResourceType>,
 {
     insert_statement: InsertStatement<ResourceTable<ResourceType, C>, ISR>,
     filter_subquery: Box<dyn QueryFragment<Pg> + Send>,
@@ -215,7 +156,7 @@ where
 impl<ResourceType, ISR, C> QueryId
     for InsertIntoCollectionStatement<ResourceType, ISR, C>
 where
-    C: DatastoreCollection<ResourceType>,
+    C: DatastoreCollectionConfig<ResourceType>,
     ResourceType: Selectable<Pg>,
 {
     type QueryId = ();
@@ -249,7 +190,7 @@ pub enum SyncInsertError {
 impl<ResourceType, ISR, C> InsertIntoCollectionStatement<ResourceType, ISR, C>
 where
     ResourceType: 'static + Debug + Send + Selectable<Pg>,
-    C: 'static + DatastoreCollection<ResourceType> + Send,
+    C: 'static + DatastoreCollectionConfig<ResourceType> + Send,
     CollectionId<ResourceType, C>: 'static + PartialEq + Send,
     ResourceTable<ResourceType, C>: 'static + Table + Send + Copy + Debug,
     ISR: 'static + Send,
@@ -376,7 +317,7 @@ impl<ResourceType, ISR, C> Query
     for InsertIntoCollectionStatement<ResourceType, ISR, C>
 where
     ResourceType: Selectable<Pg>,
-    C: DatastoreCollection<ResourceType>,
+    C: DatastoreCollectionConfig<ResourceType>,
 {
     type SqlType = SelectableSqlType<ResourceType>;
 }
@@ -385,7 +326,7 @@ impl<ResourceType, ISR, C> RunQueryDsl<DbConnection>
     for InsertIntoCollectionStatement<ResourceType, ISR, C>
 where
     ResourceType: Selectable<Pg>,
-    C: DatastoreCollection<ResourceType>,
+    C: DatastoreCollectionConfig<ResourceType>,
 {
 }
 
@@ -448,7 +389,7 @@ impl<ResourceType, ISR, C> QueryFragment<Pg>
     for InsertIntoCollectionStatement<ResourceType, ISR, C>
 where
     ResourceType: Selectable<Pg>,
-    C: DatastoreCollection<ResourceType>,
+    C: DatastoreCollectionConfig<ResourceType>,
     CollectionPrimaryKey<ResourceType, C>: diesel::Column,
     // Necessary to "walk_ast" over "select.from_clause".
     <CollectionTable<ResourceType, C> as QuerySource>::FromClause:
@@ -504,7 +445,7 @@ where
 
 #[cfg(test)]
 mod test {
-    use super::{AsyncInsertError, DatastoreCollection, SyncInsertError};
+    use super::*;
     use crate::db::{
         self, error::TransactionError, identity::Resource as IdentityResource,
     };
@@ -582,7 +523,7 @@ mod test {
     }
 
     struct Collection;
-    impl DatastoreCollection<Resource> for Collection {
+    impl DatastoreCollectionConfig<Resource> for Collection {
         type CollectionId = uuid::Uuid;
         type GenerationNumberColumn = collection::dsl::rcgen;
         type CollectionIdColumn = resource::dsl::collection_id;

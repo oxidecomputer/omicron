@@ -250,6 +250,22 @@ impl<S: Simulatable + 'static> SimCollection<S> {
         }
     }
 
+    pub async fn sim_ensure_producer(
+        self: &Arc<Self>,
+        id: &Uuid,
+        args: S::ProducerArgs,
+    ) -> Result<(), Error> {
+        self.objects
+            .lock()
+            .await
+            .get_mut(id)
+            .expect("Setting producer on object that does not exist")
+            .object
+            .set_producer(args)
+            .await?;
+        Ok(())
+    }
+
     /// Move the object identified by `id` from its current state to the
     /// requested state `target`.  The object does not need to exist already; if
     /// not, it will be created from `current`.  (This is the only case where

@@ -25,6 +25,7 @@ use hubpack::SerializedSize;
 use std::net::SocketAddrV6;
 
 #[cfg(not(feature = "std"))]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct SocketAddrV6 {
     pub ip: smoltcp::wire::Ipv6Address,
     pub port: u16,
@@ -169,86 +170,74 @@ impl Iterator for SerialConsolePackets<'_, '_> {
     }
 }
 
-#[derive(Debug)]
-pub struct SpServer {
-    buf: [u8; SpMessage::MAX_SIZE],
-}
-
-impl Default for SpServer {
-    fn default() -> Self {
-        Self { buf: [0; SpMessage::MAX_SIZE] }
+/// Handle a single incoming message.
+///
+/// The incoming message is described by `sender` (the remote address of the
+/// sender), `port` (the local port the message arived on), and `data` (the raw
+/// message). It will be deserialized, and the appropriate method will be called
+/// on `handler` to craft a response. The response will then be serialized into
+/// `out`, and returned `Ok(n)` value specifies length of the serialized
+/// response.
+pub fn handle_message<H: SpHandler>(
+    sender: SocketAddrV6,
+    port: SpPort,
+    data: &[u8],
+    handler: &mut H,
+    out: &mut [u8; SpMessage::MAX_SIZE],
+) -> Result<usize, Error> {
+    // parse request, with sanity checks on sizes
+    if data.len() > Request::MAX_SIZE {
+        return Err(Error::DataTooLarge);
     }
-}
-
-impl SpServer {
-    /// Handler for incoming UDP requests.
-    ///
-    /// `data` should be a UDP packet that has arrived from `sender` on `port`.
-    /// It will be parsed (into a [`Request`]), the appropriate method will be
-    /// called on `handler`, and a serialized response will be returned, which
-    /// the caller should send back to the requester.
-    pub fn dispatch<H: SpHandler>(
-        &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
-        data: &[u8],
-        handler: &mut H,
-    ) -> Result<&[u8], Error> {
-        // parse request, with sanity checks on sizes
-        if data.len() > Request::MAX_SIZE {
-            return Err(Error::DataTooLarge);
-        }
-        let (request, leftover) = hubpack::deserialize::<Request>(data)?;
-        if !leftover.is_empty() {
-            return Err(Error::LeftoverData);
-        }
-
-        // `version` is intentionally the first 4 bytes of the packet; we could
-        // check it before trying to deserialize?
-        if request.version != version::V1 {
-            return Err(Error::UnsupportedVersion(request.version));
-        }
-
-        // call out to handler to provide response
-        let result = match request.kind {
-            RequestKind::Discover => {
-                handler.discover(sender, port).map(ResponseKind::Discover)
-            }
-            RequestKind::IgnitionState { target } => handler
-                .ignition_state(sender, port, target)
-                .map(ResponseKind::IgnitionState),
-            RequestKind::BulkIgnitionState => handler
-                .bulk_ignition_state(sender, port)
-                .map(ResponseKind::BulkIgnitionState),
-            RequestKind::IgnitionCommand { target, command } => handler
-                .ignition_command(sender, port, target, command)
-                .map(|()| ResponseKind::IgnitionCommandAck),
-            RequestKind::SpState => {
-                handler.sp_state(sender, port).map(ResponseKind::SpState)
-            }
-            RequestKind::SerialConsoleWrite(packet) => handler
-                .serial_console_write(sender, port, packet)
-                .map(|()| ResponseKind::SerialConsoleWriteAck),
-        };
-
-        // we control `SpMessage` and know all cases can successfully serialize
-        // into `self.buf`
-        let response = SpMessage {
-            version: version::V1,
-            kind: SpMessageKind::Response {
-                request_id: request.request_id,
-                result,
-            },
-        };
-        let n = match hubpack::serialize(&mut self.buf, &response) {
-            Ok(n) => n,
-            Err(_) => panic!(),
-        };
-
-        // Do we want some mechanism for remembering `n` if our caller wants to
-        // resend this packet, which would have to happen before calling this
-        // method again? For now (and maybe forever), force them to just call us
-        // again, and we'll reserialize.
-        Ok(&self.buf[..n])
+    let (request, leftover) = hubpack::deserialize::<Request>(data)?;
+    if !leftover.is_empty() {
+        return Err(Error::LeftoverData);
     }
+
+    // `version` is intentionally the first 4 bytes of the packet; we could
+    // check it before trying to deserialize?
+    if request.version != version::V1 {
+        return Err(Error::UnsupportedVersion(request.version));
+    }
+
+    // call out to handler to provide response
+    let result = match request.kind {
+        RequestKind::Discover => {
+            handler.discover(sender, port).map(ResponseKind::Discover)
+        }
+        RequestKind::IgnitionState { target } => handler
+            .ignition_state(sender, port, target)
+            .map(ResponseKind::IgnitionState),
+        RequestKind::BulkIgnitionState => handler
+            .bulk_ignition_state(sender, port)
+            .map(ResponseKind::BulkIgnitionState),
+        RequestKind::IgnitionCommand { target, command } => handler
+            .ignition_command(sender, port, target, command)
+            .map(|()| ResponseKind::IgnitionCommandAck),
+        RequestKind::SpState => {
+            handler.sp_state(sender, port).map(ResponseKind::SpState)
+        }
+        RequestKind::SerialConsoleWrite(packet) => handler
+            .serial_console_write(sender, port, packet)
+            .map(|()| ResponseKind::SerialConsoleWriteAck),
+    };
+
+    // we control `SpMessage` and know all cases can successfully serialize
+    // into `self.buf`
+    let response = SpMessage {
+        version: version::V1,
+        kind: SpMessageKind::Response {
+            request_id: request.request_id,
+            result,
+        },
+    };
+
+    // We know `response` is well-formed and fits into `out` (since it's
+    // statically sized for `SpMessage`), so we can unwrap serialization.
+    let n = match hubpack::serialize(&mut out[..], &response) {
+        Ok(n) => n,
+        Err(_) => panic!(),
+    };
+
+    Ok(n)
 }
