@@ -4,12 +4,11 @@
 
 use crate::db::schema::{silo_group, silo_group_membership};
 use db_macros::Asset;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Describes a silo group within the database.
 #[derive(
-    Asset, Queryable, Insertable, Debug, Selectable, Serialize, Deserialize,
+    Asset, Queryable, Insertable, Debug, Selectable,
 )]
 #[diesel(table_name = silo_group)]
 pub struct SiloGroup {
@@ -29,7 +28,7 @@ impl SiloGroup {
 }
 
 /// Describe which silo users belong to which silo groups
-#[derive(Queryable, Insertable, Debug, Selectable, Serialize, Deserialize)]
+#[derive(Queryable, Insertable, Debug, Selectable)]
 #[diesel(table_name = silo_group_membership)]
 pub struct SiloGroupMembership {
     pub silo_group_id: Uuid,

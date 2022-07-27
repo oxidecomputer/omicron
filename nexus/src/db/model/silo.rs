@@ -8,7 +8,6 @@ use crate::db::model::impl_enum_type;
 use crate::db::schema::{organization, silo};
 use crate::external_api::{params, shared};
 use db_macros::Resource;
-use serde::{Deserialize, Serialize};
 use std::io::Write;
 use uuid::Uuid;
 
@@ -17,7 +16,7 @@ impl_enum_type!(
     #[diesel(postgres_type(name = "user_provision_type"))]
     pub struct UserProvisionTypeEnum;
 
-    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq, Serialize, Deserialize)]
+    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
     #[diesel(sql_type = UserProvisionTypeEnum)]
     pub enum UserProvisionType;
 
@@ -37,7 +36,7 @@ impl From<shared::UserProvisionType> for UserProvisionType {
 
 /// Describes a silo within the database.
 #[derive(
-    Queryable, Insertable, Debug, Resource, Selectable, Serialize, Deserialize,
+    Queryable, Insertable, Debug, Resource, Selectable,
 )]
 #[diesel(table_name = silo)]
 pub struct Silo {
