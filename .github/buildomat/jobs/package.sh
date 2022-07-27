@@ -16,8 +16,7 @@ set -o xtrace
 cargo --version
 rustc --version
 
-sed -i -e 's^pfexec ./tools/install_opte.sh^true^' ./tools/install_prerequisites.sh
-ptime -m ./tools/install_prerequisites.sh -yp
+ptime -m ./tools/install_builder_prerequisites.sh -yp
 
 ptime -m cargo run --locked --release --bin omicron-package -- package
 
