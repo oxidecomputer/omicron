@@ -146,7 +146,7 @@ pub async fn load_roles_for_resource(
         let roles = datastore
             .role_asgn_list_for(
                 opctx,
-                actor.actor_type(),
+                actor.into(),
                 actor.actor_id(),
                 resource_type,
                 resource_id,

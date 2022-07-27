@@ -315,16 +315,12 @@ impl OpContext {
 
         let log = if let Some(actor) = authn.actor() {
             let actor_id = actor.actor_id();
-            let actor_type = actor.actor_type();
             metadata
                 .insert(String::from("authenticated"), String::from("true"));
-            metadata.insert(
-                String::from("actor_type"),
-                format!("{:?}", actor_type),
-            );
-            metadata.insert(String::from("actor_id"), actor_id.to_string());
+            metadata.insert(String::from("actor"), format!("{:?}", actor));
+
             log.new(
-                o!("authenticated" => true, "actor" => actor_id.to_string()),
+                o!("authenticated" => true, "actor_id" => actor_id.to_string()),
             )
         } else {
             metadata

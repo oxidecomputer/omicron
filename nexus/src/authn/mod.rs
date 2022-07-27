@@ -306,13 +306,6 @@ pub enum Actor {
 }
 
 impl Actor {
-    pub fn actor_type(&self) -> db::model::IdentityType {
-        match self {
-            Actor::UserBuiltin { .. } => db::model::IdentityType::UserBuiltin,
-            Actor::SiloUser { .. } => db::model::IdentityType::SiloUser,
-        }
-    }
-
     pub fn actor_id(&self) -> Uuid {
         match self {
             Actor::UserBuiltin { user_builtin_id, .. } => *user_builtin_id,
@@ -324,6 +317,22 @@ impl Actor {
         match self {
             Actor::UserBuiltin { .. } => None,
             Actor::SiloUser { silo_id, .. } => Some(*silo_id),
+        }
+    }
+
+    pub fn silo_user_id(&self) -> Option<Uuid> {
+        match self {
+            Actor::UserBuiltin { .. } => None,
+            Actor::SiloUser { silo_user_id, .. } => Some(*silo_user_id),
+        }
+    }
+}
+
+impl From<&Actor> for db::model::IdentityType {
+    fn from(actor: &Actor) -> db::model::IdentityType {
+        match actor {
+            Actor::UserBuiltin { .. } => db::model::IdentityType::UserBuiltin,
+            Actor::SiloUser { .. } => db::model::IdentityType::SiloUser,
         }
     }
 }
