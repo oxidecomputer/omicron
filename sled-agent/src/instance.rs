@@ -893,6 +893,10 @@ mod test {
         )
         .unwrap();
 
+        // Remove the logfile before we expect to panic, or it'll never be
+        // cleaned up.
+        logctx.cleanup_successful();
+
         // Trying to transition before the instance has been initialized will
         // result in a panic.
         inst.transition(InstanceRuntimeStateRequested {
@@ -901,7 +905,5 @@ mod test {
         })
         .await
         .unwrap();
-
-        logctx.cleanup_successful();
     }
 }
