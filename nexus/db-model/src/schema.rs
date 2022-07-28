@@ -346,6 +346,7 @@ table! {
         rcgen -> Int8,
 
         rack_id -> Uuid,
+        is_scrimlet -> Bool,
         ip -> Inet,
         port -> Int4,
         last_used_address -> Inet,
