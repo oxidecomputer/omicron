@@ -131,7 +131,7 @@ impl Client {
     ) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>> {
         // TODO should we be able to attach through the openapi client?
         let path = format!(
-            "ws://{}:{}/sp/sled/{}/component/sp3/serial_console/attach",
+            "ws://{}:{}/sp/sled/{}/component/sp3/serial-console/attach",
             self.server, self.port, self.sled
         );
         let (ws, _response) = tokio_tungstenite::connect_async(path)
