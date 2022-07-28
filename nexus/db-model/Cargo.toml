@@ -9,7 +9,7 @@ anyhow = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
 diesel = { version = "2.0.0-rc.1", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 hex = "0.4.3"
-ipnetwork = "0.18"
+ipnetwork = "0.20"
 macaddr = { version = "1.0.1", features = [ "serde_std" ]}
 newtype_derive = "0.1.6"
 parse-display = "0.5.4"

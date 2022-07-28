@@ -66,6 +66,7 @@ impl Client {
         criteria: &[&str],
         start_time: Option<query::Timestamp>,
         end_time: Option<query::Timestamp>,
+        limit: Option<NonZeroU32>,
     ) -> Result<Vec<Timeseries>, Error> {
         // Querying uses up to three queries to the database:
         //  1. Retrieve the schema
@@ -79,18 +80,20 @@ impl Client {
         //  to/from the database, as well as the cost of parsing them for each measurement, only to
         //  promptly throw away almost all of them (except for the first).
         let timeseries_name = TimeseriesName::try_from(timeseries_name)?;
-        let schema = self
-            .schema_for_timeseries(&timeseries_name)
-            .await?
-            .ok_or_else(|| {
-                Error::QueryError(format!(
-                    "No such timeseries: '{}'",
-                    timeseries_name
-                ))
-            })?;
-        let mut query_builder = query::SelectQueryBuilder::new(&schema)
+        let schema =
+            self.schema_for_timeseries(&timeseries_name).await?.ok_or_else(
+                || Error::TimeseriesNotFound(format!("{timeseries_name}")),
+            )?;
+        let query_builder = query::SelectQueryBuilder::new(&schema)
             .start_time(start_time)
             .end_time(end_time);
+
+        let mut query_builder = if let Some(limit) = limit {
+            query_builder.limit(limit)
+        } else {
+            query_builder
+        };
+
         for criterion in criteria.iter() {
             query_builder = query_builder.filter_raw(criterion)?;
         }
@@ -123,10 +126,7 @@ impl Client {
             .schema_for_timeseries(&params.timeseries_name)
             .await?
             .ok_or_else(|| {
-                Error::QueryError(format!(
-                    "No such timeseries: '{}'",
-                    params.timeseries_name
-                ))
+                Error::TimeseriesNotFound(format!("{}", params.timeseries_name))
             })?;
         // TODO: Handle inclusive/exclusive timestamps in general.
         //
@@ -838,6 +838,7 @@ mod tests {
                 &criteria.iter().map(|x| x.as_str()).collect::<Vec<_>>(),
                 None,
                 None,
+                None,
             )
             .await
             .unwrap();
@@ -1002,6 +1003,7 @@ mod tests {
                 &["id==0"],
                 None,
                 None,
+                None,
             )
             .await
             .expect("Failed to select test samples");
@@ -1090,6 +1092,7 @@ mod tests {
                 criteria,
                 start_time,
                 end_time,
+                None,
             )
             .await
             .expect("Failed to select timeseries");
@@ -1346,6 +1349,7 @@ mod tests {
                 &[],
                 Some(query::Timestamp::Exclusive(start_time)),
                 None,
+                None,
             )
             .await
             .expect("Failed to select timeseries");
@@ -1360,6 +1364,82 @@ mod tests {
                 assert!(meas.timestamp() > start_time);
             }
         }
+        db.cleanup().await.expect("Failed to cleanup database");
+    }
+
+    #[tokio::test]
+    async fn test_select_timeseries_with_limit() {
+        let (_, _, samples) = setup_select_test();
+        let mut db = ClickHouseInstance::new(0)
+            .await
+            .expect("Failed to start ClickHouse");
+        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
+        let log = Logger::root(slog::Discard, o!());
+        let client = Client::new(address, &log);
+        client
+            .init_db()
+            .await
+            .expect("Failed to initialize timeseries database");
+        client
+            .insert_samples(&samples)
+            .await
+            .expect("Failed to insert samples");
+        let timeseries_name = "service:request_latency";
+
+        // First, query without a limit. We should see all the results.
+        let all_measurements = &client
+            .select_timeseries_with(timeseries_name, &[], None, None, None)
+            .await
+            .expect("Failed to select timeseries")[0]
+            .measurements;
+
+        // Check some constraints on the number of measurements - we
+        // can change these, but these assumptions make the test simpler.
+        //
+        // For now, assume we can cleanly cut the number of measurements in
+        // half.
+        assert!(all_measurements.len() >= 2);
+        assert!(all_measurements.len() % 2 == 0);
+
+        // Next, let's set a limit to half the results and query again.
+        let limit =
+            NonZeroU32::new(u32::try_from(all_measurements.len() / 2).unwrap())
+                .unwrap();
+        let timeseries = &client
+            .select_timeseries_with(
+                timeseries_name,
+                &[],
+                None,
+                None,
+                Some(limit),
+            )
+            .await
+            .expect("Failed to select timeseries")[0];
+        assert_eq!(timeseries.measurements.len() as u32, limit.get());
+        assert_eq!(
+            all_measurements[..all_measurements.len() / 2],
+            timeseries.measurements
+        );
+
+        // Get the other half of the results.
+        let timeseries = &client
+            .select_timeseries_with(
+                timeseries_name,
+                &[],
+                Some(query::Timestamp::Exclusive(
+                    timeseries.measurements.last().unwrap().timestamp(),
+                )),
+                None,
+                Some(limit),
+            )
+            .await
+            .expect("Failed to select timeseries")[0];
+        assert_eq!(timeseries.measurements.len() as u32, limit.get());
+        assert_eq!(
+            all_measurements[all_measurements.len() / 2..],
+            timeseries.measurements
+        );
+
         db.cleanup().await.expect("Failed to cleanup database");
     }
 
