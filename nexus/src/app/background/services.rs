@@ -18,7 +18,7 @@ use crate::db::model::Sled;
 use crate::db::model::Zpool;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use omicron_common::address::{
-    DNS_PORT, DNS_REDUNDANCY, DNS_SERVER_PORT, NEXUS_EXTERNAL_PORT,
+    DnsSubnet, DNS_PORT, DNS_REDUNDANCY, DNS_SERVER_PORT, NEXUS_EXTERNAL_PORT,
     NEXUS_INTERNAL_PORT,
 };
 use omicron_common::api::external::Error;
@@ -37,7 +37,9 @@ enum ServiceRedundancy {
     PerRack(u32),
 
     // This service must exist on at least this many sleds
-    // within the availability zone.
+    // within the availability zone. Note that this is specific
+    // for the DNS service, as some expectations surrounding
+    // addressing are specific to that service.
     DnsPerAz(u32),
 }
 
@@ -47,7 +49,8 @@ struct ExpectedService {
     redundancy: ServiceRedundancy,
 }
 
-// NOTE: longer-term, when we integrate multi-rack support,
+// TODO(https://github.com/oxidecomputer/omicron/issues/1276):
+// Longer-term, when we integrate multi-rack support,
 // it is expected that Nexus will manage multiple racks
 // within the fleet, rather than simply per-rack services.
 //
@@ -81,6 +84,8 @@ const EXPECTED_DATASETS: [ExpectedDataset; 3] = [
     },
     ExpectedDataset {
         kind: DatasetKind::Cockroach,
+        // TODO(https://github.com/oxidecomputer/omicron/issues/727):
+        // Update this to more than one.
         redundancy: DatasetRedundancy::PerRack(1),
     },
     ExpectedDataset {
@@ -133,10 +138,12 @@ where
         stream::iter(&sled_ids)
             .map(Ok::<_, Error>)
             .try_for_each_concurrent(None, |sled_id| async {
-                // TODO: This interface kinda sucks; ideally we would
-                // only insert the *new* services.
+                // Query for all services that should be running on a Sled,
+                // and notify Sled Agent about all of them.
                 //
-                // Inserting the old ones too is costing us an extra query.
+                // TODO: This interface could be better; ideally we would only
+                // insert the *new* services. Inserting the old ones too is
+                // costing us an extra query.
                 let services = self
                     .nexus
                     .datastore()
@@ -156,14 +163,13 @@ where
                                     Self::get_service_name_and_type(
                                         address, s.kind,
                                     );
-
-                                // TODO: This is hacky, specifically to inject
-                                // global zone addresses in the DNS service.
                                 let gz_addresses = match &s.kind {
                                     ServiceKind::InternalDNS => {
-                                        let mut octets = address.octets();
-                                        octets[15] = octets[15] + 1;
-                                        vec![Ipv6Addr::from(octets)]
+                                        vec![DnsSubnet::from_dns_address(
+                                            address,
+                                        )
+                                        .gz_address()
+                                        .ip()]
                                     }
                                     _ => vec![],
                                 };
@@ -359,9 +365,9 @@ where
                 let sled_client = sled_clients.get(&sled.id()).unwrap();
 
                 let dataset_kind = match kind {
-                    // TODO: This set of "all addresses" isn't right.
-                    // TODO: ... should we even be using "all addresses" to contact CRDB?
-                    // Can it just rely on DNS, somehow?
+                    // TODO(https://github.com/oxidecomputer/omicron/issues/727):
+                    // This set of "all addresses" isn't right. We'll need to
+                    // deal with that before supporting multi-node CRDB.
                     DatasetKind::Cockroach => {
                         SledAgentTypes::DatasetKind::CockroachDb(vec![])
                     }
@@ -461,25 +467,6 @@ mod test {
     use omicron_test_utils::dev;
     use std::sync::Arc;
     use uuid::Uuid;
-
-    // TODO: maybe figure out what you *want* to test?
-    // I suspect we'll need to refactor this API for testability.
-    //
-    // - Dataset init:
-    //   - Call to DB
-    //  - For each new dataset...
-    //     - Call to Sled (filesystem put)
-    //     - Update DNS record
-    //
-    // - Service init:
-    //   - Call to DB
-    //   - For each sled...
-    //     - List svcs
-    //     - Put svcs
-    //  - For each new service...
-    //     - Update DNS record
-    //
-    // TODO: Also, idempotency check
 
     struct ProvisionTest {
         logctx: LogContext,

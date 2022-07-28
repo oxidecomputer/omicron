@@ -299,11 +299,6 @@ impl DataStore {
                             TxnError::CustomError(ServiceError::NotEnoughIps)
                         })?;
                     let address = dns_subnet.dns_address().ip();
-
-                    // TODO: How are we tracking the GZ address that must be
-                    // allocated? They're tracked by the "DnsSubnet" object
-                    // in address.rs, but I don't think they're getting
-                    // propagated out of here.
                     let service = db::model::Service::new(
                         svc_id,
                         sled.id(),
