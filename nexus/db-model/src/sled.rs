@@ -24,6 +24,8 @@ pub struct Sled {
 
     pub rack_id: Uuid,
 
+    is_scrimlet: bool,
+
     // ServiceAddress (Sled Agent).
     pub ip: ipv6::Ipv6Addr,
     pub port: SqlU16,
@@ -33,7 +35,12 @@ pub struct Sled {
 }
 
 impl Sled {
-    pub fn new(id: Uuid, addr: SocketAddrV6, rack_id: Uuid) -> Self {
+    pub fn new(
+        id: Uuid,
+        addr: SocketAddrV6,
+        is_scrimlet: bool,
+        rack_id: Uuid,
+    ) -> Self {
         let last_used_address = {
             let mut segments = addr.ip().segments();
             segments[7] += omicron_common::address::RSS_RESERVED_ADDRESSES;
@@ -44,10 +51,15 @@ impl Sled {
             time_deleted: None,
             rcgen: Generation::new(),
             rack_id,
+            is_scrimlet,
             ip: ipv6::Ipv6Addr::from(addr.ip()),
             port: addr.port().into(),
             last_used_address,
         }
+    }
+
+    pub fn is_scrimlet(&self) -> bool {
+        self.is_scrimlet
     }
 
     pub fn ip(&self) -> Ipv6Addr {
