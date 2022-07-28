@@ -356,10 +356,9 @@ impl From<ServiceType> for sled_agent_client::types::ServiceType {
         use ServiceType as St;
 
         match s {
-            St::Nexus { internal_ip, external_ip } => AutoSt::Nexus {
-                internal_ip,
-                external_ip,
-            },
+            St::Nexus { internal_ip, external_ip } => {
+                AutoSt::Nexus { internal_ip, external_ip }
+            }
             St::InternalDns { server_address, dns_address } => {
                 AutoSt::InternalDns {
                     server_address: server_address.to_string(),
