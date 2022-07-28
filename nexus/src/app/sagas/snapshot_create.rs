@@ -166,7 +166,7 @@ fn saga_snapshot_create() -> SagaTemplate<SagaSnapshotCreate> {
         ),
     );
 
-    // Send a snapshot request to propolis
+    // Send a snapshot request to a sled-agent
     template_builder.append(
         "snapshot_request",
         "SendSnapshotRequest",
