@@ -316,7 +316,7 @@ pub fn external_api() -> NexusApiDescription {
 /// Fetch the top-level IAM policy
 #[endpoint {
     method = GET,
-    path = "/policy",
+    path = "/global/policy",
     tags = ["policy"],
 }]
 async fn policy_view(
@@ -342,7 +342,7 @@ struct ByIdPathParams {
 /// Update the top-level IAM policy
 #[endpoint {
     method = PUT,
-    path = "/policy",
+    path = "/global/policy",
     tags = ["policy"],
 }]
 async fn policy_update(
@@ -369,7 +369,7 @@ async fn policy_update(
 /// Lists silos that are discoverable based on the current permissions.
 #[endpoint {
     method = GET,
-    path = "/silos",
+    path = "/global/silos",
     tags = ["silos"],
 }]
 async fn silo_list(
@@ -412,7 +412,7 @@ async fn silo_list(
 /// Create a silo
 #[endpoint {
     method = POST,
-    path = "/silos",
+    path = "/global/silos",
     tags = ["silos"],
 }]
 async fn silo_create(
@@ -442,7 +442,7 @@ struct SiloPathParam {
 /// Fetch a silo by name.
 #[endpoint {
     method = GET,
-    path = "/silos/{silo_name}",
+    path = "/global/silos/{silo_name}",
     tags = ["silos"],
 }]
 async fn silo_view(
@@ -466,7 +466,7 @@ async fn silo_view(
 /// Delete a silo by name.
 #[endpoint {
     method = DELETE,
-    path = "/silos/{silo_name}",
+    path = "/global/silos/{silo_name}",
     tags = ["silos"],
 }]
 async fn silo_delete(
@@ -488,7 +488,7 @@ async fn silo_delete(
 /// Fetch a silo's IAM policy
 #[endpoint {
     method = GET,
-    path = "/silos/{silo_name}/policy",
+    path = "/global/silos/{silo_name}/policy",
     tags = ["silos"],
 }]
 async fn silo_policy_view(
@@ -511,7 +511,7 @@ async fn silo_policy_view(
 /// Update a silo's IAM policy
 #[endpoint {
     method = PUT,
-    path = "/silos/{silo_name}/policy",
+    path = "/global/silos/{silo_name}/policy",
     tags = ["silos"],
 }]
 async fn silo_policy_update(
@@ -542,7 +542,7 @@ async fn silo_policy_update(
 /// List a silo's IDPs
 #[endpoint {
     method = GET,
-    path = "/silos/{silo_name}/identity-providers",
+    path = "/global/silos/{silo_name}/identity-providers",
     tags = ["silos"],
 }]
 async fn silo_identity_provider_list(
@@ -579,7 +579,7 @@ async fn silo_identity_provider_list(
 /// Create a SAML IDP
 #[endpoint {
     method = POST,
-    path = "/silos/{silo_name}/saml-identity-providers",
+    path = "/global/silos/{silo_name}/saml-identity-providers",
     tags = ["silos"],
 }]
 async fn silo_identity_provider_create(
@@ -616,7 +616,7 @@ struct SiloSamlPathParam {
 /// Fetch a SAML IDP
 #[endpoint {
     method = GET,
-    path = "/silos/{silo_name}/saml-identity-providers/{provider_name}",
+    path = "/global/silos/{silo_name}/saml-identity-providers/{provider_name}",
     tags = ["silos"],
 }]
 async fn silo_identity_provider_view(
@@ -1148,7 +1148,7 @@ pub struct IpPoolPathParam {
 /// List IP pools
 #[endpoint {
     method = GET,
-    path = "/ip-pools",
+    path = "/global/ip-pools",
     tags = ["ip-pools"],
 }]
 async fn ip_pool_list(
@@ -1189,7 +1189,7 @@ async fn ip_pool_list(
 /// Create an IP pool
 #[endpoint {
     method = POST,
-    path = "/ip-pools",
+    path = "/global/ip-pools",
     tags = ["ip-pools"],
 }]
 async fn ip_pool_create(
@@ -1210,7 +1210,7 @@ async fn ip_pool_create(
 /// Fetch an IP pool
 #[endpoint {
     method = GET,
-    path = "/ip-pools/{pool_name}",
+    path = "/global/ip-pools/{pool_name}",
     tags = ["ip-pools"],
 }]
 async fn ip_pool_view(
@@ -1232,7 +1232,7 @@ async fn ip_pool_view(
 /// Delete an IP Pool
 #[endpoint {
     method = DELETE,
-    path = "/ip-pools/{pool_name}",
+    path = "/global/ip-pools/{pool_name}",
     tags = ["ip-pools"],
 }]
 async fn ip_pool_delete(
@@ -1254,7 +1254,7 @@ async fn ip_pool_delete(
 /// Update an IP Pool
 #[endpoint {
     method = PUT,
-    path = "/ip-pools/{pool_name}",
+    path = "/global/ip-pools/{pool_name}",
     tags = ["ip-pools"],
 }]
 async fn ip_pool_update(
@@ -1304,7 +1304,7 @@ type IpPoolRangePaginationParams = PaginationParams<EmptyScanParams, IpNetwork>;
 /// Ranges are ordered by their first address.
 #[endpoint {
     method = GET,
-    path = "/ip-pools/{pool_name}/ranges",
+    path = "/global/ip-pools/{pool_name}/ranges",
     tags = ["ip-pools"],
 }]
 async fn ip_pool_range_list(
@@ -1348,7 +1348,7 @@ async fn ip_pool_range_list(
 /// Add a range to an IP pool
 #[endpoint {
     method = POST,
-    path = "/ip-pools/{pool_name}/ranges/add",
+    path = "/global/ip-pools/{pool_name}/ranges/add",
     tags = ["ip-pools"],
 }]
 async fn ip_pool_range_add(
@@ -1372,7 +1372,7 @@ async fn ip_pool_range_add(
 /// Remove a range from an IP pool
 #[endpoint {
     method = POST,
-    path = "/ip-pools/{pool_name}/ranges/remove",
+    path = "/global/ip-pools/{pool_name}/ranges/remove",
     tags = ["ip-pools"],
 }]
 async fn ip_pool_range_remove(
@@ -1766,7 +1766,7 @@ async fn instance_list(
 // resource created?
 #[endpoint {
     method = POST,
-     path = "/organizations/{organization_name}/projects/{project_name}/instances",
+    path = "/organizations/{organization_name}/projects/{project_name}/instances",
     tags = ["instances"],
 }]
 async fn instance_create(
@@ -2165,7 +2165,7 @@ async fn instance_disk_detach(
 /// by creation date, with the most recent images appearing first.
 #[endpoint {
     method = GET,
-    path = "/images",
+    path = "/global/images",
     tags = ["images:global"],
 }]
 async fn image_global_list(
@@ -2202,7 +2202,7 @@ async fn image_global_list(
 /// base for instances.
 #[endpoint {
     method = POST,
-    path = "/images",
+    path = "/global/images",
     tags = ["images:global"]
 }]
 async fn image_global_create(
@@ -2231,7 +2231,7 @@ struct GlobalImagePathParam {
 /// Returns the details of a specific global image.
 #[endpoint {
     method = GET,
-    path = "/images/{image_name}",
+    path = "/global/images/{image_name}",
     tags = ["images:global"],
 }]
 async fn image_global_view(
@@ -2279,7 +2279,7 @@ async fn image_global_view_by_id(
 /// can not be created with this image.
 #[endpoint {
     method = DELETE,
-    path = "/images/{image_name}",
+    path = "/global/images/{image_name}",
     tags = ["images:global"],
 }]
 async fn image_global_delete(
@@ -3779,7 +3779,7 @@ async fn vpc_router_route_update(
 /// List racks
 #[endpoint {
     method = GET,
-    path = "/hardware/racks",
+    path = "/global/hardware/racks",
     tags = ["hardware"],
 }]
 async fn rack_list(
@@ -3816,7 +3816,7 @@ struct RackPathParam {
 /// Fetch a rack
 #[endpoint {
     method = GET,
-    path = "/hardware/racks/{rack_id}",
+    path = "/global/hardware/racks/{rack_id}",
     tags = ["hardware"],
 }]
 async fn rack_view(
@@ -3839,7 +3839,7 @@ async fn rack_view(
 /// List sleds
 #[endpoint {
     method = GET,
-    path = "/hardware/sleds",
+    path = "/global/hardware/sleds",
     tags = ["hardware"],
 }]
 async fn sled_list(
@@ -3876,7 +3876,7 @@ struct SledPathParam {
 /// Fetch a sled
 #[endpoint {
     method = GET,
-    path = "/hardware/sleds/{sled_id}",
+    path = "/global/hardware/sleds/{sled_id}",
     tags = ["hardware"],
 }]
 async fn sled_view(
@@ -3898,9 +3898,9 @@ async fn sled_view(
 
 /// Refresh update data
 #[endpoint {
-     method = POST,
-     path = "/updates/refresh",
-     tags = ["updates"],
+    method = POST,
+    path = "/global/updates/refresh",
+    tags = ["updates"],
 }]
 async fn updates_refresh(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -3920,7 +3920,7 @@ async fn updates_refresh(
 /// List sagas
 #[endpoint {
     method = GET,
-    path = "/sagas",
+    path = "/global/sagas",
     tags = ["sagas"],
 }]
 async fn saga_list(
@@ -3953,7 +3953,7 @@ struct SagaPathParam {
 /// Fetch a saga
 #[endpoint {
     method = GET,
-    path = "/sagas/{saga_id}",
+    path = "/global/sagas/{saga_id}",
     tags = ["sagas"],
 }]
 async fn saga_view(
