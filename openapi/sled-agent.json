@@ -709,34 +709,6 @@
           "request_id"
         ]
       },
-      "ExternalIp": {
-        "description": "An external IP address used for external connectivity for an instance.",
-        "type": "object",
-        "properties": {
-          "first_port": {
-            "description": "The first port used for instance NAT, inclusive.",
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
-          },
-          "ip": {
-            "description": "The external address provided to the instance",
-            "type": "string",
-            "format": "ip"
-          },
-          "last_port": {
-            "description": "The last port used for instance NAT, also inclusive.",
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "first_port",
-          "ip",
-          "last_port"
-        ]
-      },
       "Generation": {
         "description": "Generation numbers stored in the database, used for optimistic concurrency control",
         "type": "integer",
@@ -798,8 +770,13 @@
               "$ref": "#/components/schemas/DiskRequest"
             }
           },
-          "external_ip": {
-            "$ref": "#/components/schemas/ExternalIp"
+          "external_ips": {
+            "description": "Zero or more external IP addresses (either floating or ephemeral), provided to an instance to allow inbound connectivity.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ip"
+            }
           },
           "nics": {
             "type": "array",
@@ -809,13 +786,17 @@
           },
           "runtime": {
             "$ref": "#/components/schemas/InstanceRuntimeState"
+          },
+          "source_nat": {
+            "$ref": "#/components/schemas/SourceNatConfig"
           }
         },
         "required": [
           "disks",
-          "external_ip",
+          "external_ips",
           "nics",
-          "runtime"
+          "runtime",
+          "source_nat"
         ]
       },
       "InstanceMigrateParams": {
@@ -1040,7 +1021,7 @@
         "title": "An IPv6 subnet",
         "description": "An IPv6 subnet, including prefix and subnet mask",
         "type": "string",
-        "pattern": "^([fF][dD])[0-9a-fA-F]{2}:(([0-9a-fA-F]{1,4}:){6}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,6}:)\\/(6[4-9]|[7-9][0-9]|1[0-1][0-9]|12[0-6])$"
+        "pattern": "^([fF][dD])[0-9a-fA-F]{2}:(([0-9a-fA-F]{1,4}:){6}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,6}:)\\/([1-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$"
       },
       "MacAddr": {
         "example": "ff:ff:ff:ff:ff:ff",
@@ -1235,6 +1216,34 @@
         "type": "integer",
         "format": "uint8",
         "minimum": 0
+      },
+      "SourceNatConfig": {
+        "description": "An IP address and port range used for instance source NAT, i.e., making outbound network connections from guests.",
+        "type": "object",
+        "properties": {
+          "first_port": {
+            "description": "The first port used for instance NAT, inclusive.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "ip": {
+            "description": "The external address provided to the instance",
+            "type": "string",
+            "format": "ip"
+          },
+          "last_port": {
+            "description": "The last port used for instance NAT, also inclusive.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "first_port",
+          "ip",
+          "last_port"
+        ]
       },
       "UpdateArtifact": {
         "description": "Description of a single update artifact.",

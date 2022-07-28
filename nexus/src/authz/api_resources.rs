@@ -847,7 +847,7 @@ mod test {
     use super::OrganizationRole;
     use super::ProjectRole;
     use super::SiloRole;
-    use crate::db::model::test_database_string_impl;
+    use crate::db::test_database_string_impl;
 
     #[test]
     fn test_roles_database_strings() {

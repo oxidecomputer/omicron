@@ -8,7 +8,9 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::Asset;
+use crate::external_api::params::ResourceMetrics;
 use crate::internal_api::params::OximeterInfo;
+use dropshot::PaginationParams;
 use internal_dns_client::{
     multiclient::{ResolveError, Resolver},
     names::{ServiceName, SRV},
@@ -21,6 +23,8 @@ use omicron_common::api::external::PaginationOrder;
 use omicron_common::api::internal::nexus;
 use omicron_common::backoff;
 use oximeter_client::Client as OximeterClient;
+use oximeter_db::query::Timestamp;
+use oximeter_db::Measurement;
 use oximeter_db::TimeseriesSchema;
 use oximeter_db::TimeseriesSchemaPaginationParams;
 use oximeter_producer::register;
@@ -212,14 +216,112 @@ impl super::Nexus {
             .map_err(|e| Error::internal_error(&e.to_string()))?
             .timeseries_schema_list(&pag_params.page, limit)
             .await
-            .map_err(|e| match e {
-                oximeter_db::Error::DatabaseUnavailable(_) => {
-                    Error::ServiceUnavailable {
-                        internal_message: e.to_string(),
-                    }
+            .map_err(map_oximeter_err)
+    }
+
+    /// Returns a results from the timeseries DB based on the provided query
+    /// parameters.
+    ///
+    /// * `timeseries_name`: The "target:metric" name identifying the metric to
+    /// be queried.
+    /// * `criteria`: Any additional parameters to help narrow down the query
+    /// selection further. These parameters are passed directly to
+    /// [oximeter::db::Client::select_timeseries_with].
+    /// * `query_params`: Pagination parameter, identifying which page of
+    /// results to return.
+    /// * `limit`: The maximum number of results to return in a paginated
+    /// request.
+    pub async fn select_timeseries(
+        &self,
+        timeseries_name: &str,
+        criteria: &[&str],
+        query_params: PaginationParams<ResourceMetrics, ResourceMetrics>,
+        limit: NonZeroU32,
+    ) -> Result<dropshot::ResultsPage<Measurement>, Error> {
+        #[inline]
+        fn no_results() -> dropshot::ResultsPage<Measurement> {
+            dropshot::ResultsPage { next_page: None, items: Vec::new() }
+        }
+
+        let (start_time, end_time, query) = match query_params.page {
+            // Generally, we want the time bounds to be inclusive for the
+            // start time, and exclusive for the end time...
+            dropshot::WhichPage::First(query) => (
+                Timestamp::Inclusive(query.start_time),
+                Timestamp::Exclusive(query.end_time),
+                query,
+            ),
+            // ... but for subsequent pages, we use the "last observed"
+            // timestamp as the start time. If we used an inclusive bound,
+            // we'd duplicate the returned measurement. To return each
+            // measurement exactly once, we make the start time "exclusive"
+            // on all "next" pages.
+            dropshot::WhichPage::Next(query) => (
+                Timestamp::Exclusive(query.start_time),
+                Timestamp::Exclusive(query.end_time),
+                query,
+            ),
+        };
+        if query.start_time >= query.end_time {
+            return Ok(no_results());
+        }
+
+        let timeseries_list = self
+            .timeseries_client
+            .get()
+            .await
+            .map_err(|e| {
+                Error::internal_error(&format!(
+                    "Cannot access timeseries DB: {}",
+                    e
+                ))
+            })?
+            .select_timeseries_with(
+                timeseries_name,
+                criteria,
+                Some(start_time),
+                Some(end_time),
+                Some(limit),
+            )
+            .await
+            .or_else(|err| {
+                // If the timeseries name exists in the API, but not in Clickhouse,
+                // it might just not have been populated yet.
+                match err {
+                    oximeter_db::Error::TimeseriesNotFound(_) => Ok(vec![]),
+                    _ => Err(err),
                 }
-                _ => Error::InternalError { internal_message: e.to_string() },
             })
+            .map_err(map_oximeter_err)?;
+
+        if timeseries_list.len() > 1 {
+            return Err(Error::internal_error(&format!(
+                "expected 1 timeseries but got {} ({:?} {:?})",
+                timeseries_list.len(),
+                timeseries_name,
+                criteria
+            )));
+        }
+
+        // If we received no data, exit early.
+        let timeseries =
+            if let Some(timeseries) = timeseries_list.into_iter().next() {
+                timeseries
+            } else {
+                return Ok(no_results());
+            };
+
+        Ok(dropshot::ResultsPage::new(
+            timeseries.measurements,
+            &query,
+            |last_measurement: &Measurement, query: &ResourceMetrics| {
+                ResourceMetrics {
+                    start_time: last_measurement.timestamp(),
+                    end_time: query.end_time,
+                }
+            },
+        )
+        .unwrap())
     }
 
     // Internal helper to build an Oximeter client from its ID and address (common data between
@@ -257,5 +359,14 @@ impl super::Nexus {
             SocketAddr::from((info.ip.ip(), info.port.try_into().unwrap()));
         let id = info.id;
         Ok((self.build_oximeter_client(&id, address), id))
+    }
+}
+
+fn map_oximeter_err(error: oximeter_db::Error) -> Error {
+    match error {
+        oximeter_db::Error::DatabaseUnavailable(_) => {
+            Error::ServiceUnavailable { internal_message: error.to_string() }
+        }
+        _ => Error::InternalError { internal_message: error.to_string() },
     }
 }

@@ -163,7 +163,28 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(vpc.identity.description, "another description");
     assert_eq!(vpc.dns_name, "def");
 
-    // Delete the VPC.
+    // Deleting the VPC should fail, since the subnet still exists.
+    let error: HttpErrorResponseBody = NexusRequest::expect_failure(
+        client,
+        StatusCode::BAD_REQUEST,
+        Method::DELETE,
+        &vpc_url,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+    assert_eq!(error.message, "VPC cannot be deleted while VPC Subnets exist",);
+
+    // Delete the default VPC Subnet and VPC.
+    let default_subnet_url = format!("{vpc_url}/subnets/default");
+    NexusRequest::object_delete(client, &default_subnet_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
     NexusRequest::object_delete(client, &vpc_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()

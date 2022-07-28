@@ -67,6 +67,7 @@ use omicron_common::api::external::Saga;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
 use omicron_common::bail_unless;
+use parse_display::Display;
 use ref_cast::RefCast;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -115,6 +116,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(disk_view)?;
         api.register(disk_view_by_id)?;
         api.register(disk_delete)?;
+        api.register(disk_metrics_list)?;
 
         api.register(instance_list)?;
         api.register(instance_create)?;
@@ -165,6 +167,8 @@ pub fn external_api() -> NexusApiDescription {
         api.register(instance_network_interface_view_by_id)?;
         api.register(instance_network_interface_update)?;
         api.register(instance_network_interface_delete)?;
+
+        api.register(instance_external_ip_list)?;
 
         api.register(vpc_router_list)?;
         api.register(vpc_router_view)?;
@@ -1513,6 +1517,65 @@ async fn disk_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+#[derive(Display, Deserialize, JsonSchema)]
+#[display(style = "snake_case")]
+#[serde(rename_all = "snake_case")]
+pub enum DiskMetricName {
+    Activated,
+    Flush,
+    Read,
+    ReadBytes,
+    Write,
+    WriteBytes,
+}
+
+/// Fetch metrics for a disk.
+#[endpoint {
+    method = GET,
+    path = "/organizations/{organization_name}/projects/{project_name}/disks/{disk_name}/metrics/{metric_name}",
+    tags = ["disks"],
+}]
+async fn disk_metrics_list(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<MetricsPathParam<DiskPathParam, DiskMetricName>>,
+    query_params: Query<
+        PaginationParams<params::ResourceMetrics, params::ResourceMetrics>,
+    >,
+) -> Result<HttpResponseOk<ResultsPage<oximeter_db::Measurement>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+
+    let path = path_params.into_inner();
+    let organization_name = &path.inner.organization_name;
+    let project_name = &path.inner.project_name;
+    let disk_name = &path.inner.disk_name;
+    let metric_name = path.metric_name;
+
+    let query = query_params.into_inner();
+    let limit = rqctx.page_limit(&query)?;
+
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+
+        // This ensures the user is authorized on Action::Read for this disk
+        let disk = nexus
+            .disk_fetch(&opctx, organization_name, project_name, disk_name)
+            .await?;
+        let upstairs_uuid = disk.id();
+        let result = nexus
+            .select_timeseries(
+                &format!("crucible_upstairs:{}", metric_name),
+                &[&format!("upstairs_uuid=={}", upstairs_uuid)],
+                query,
+                limit,
+            )
+            .await?;
+
+        Ok(HttpResponseOk(result))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 // Instances
 
 /// List instances in a project.
@@ -2483,6 +2546,39 @@ async fn instance_network_interface_update(
             )
             .await?;
         Ok(HttpResponseOk(NetworkInterface::from(interface)))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+// External IP addresses for instances
+
+/// List external IP addresses associated with an instance
+#[endpoint {
+    method = GET,
+    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/external-ips",
+    tags = ["instances"],
+}]
+async fn instance_external_ip_list(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<InstancePathParam>,
+) -> Result<HttpResponseOk<ResultsPage<views::ExternalIp>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
+    let project_name = &path.project_name;
+    let instance_name = &path.instance_name;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let ips = nexus
+            .instance_list_external_ips(
+                &opctx,
+                organization_name,
+                project_name,
+                instance_name,
+            )
+            .await?;
+        Ok(HttpResponseOk(ResultsPage { items: ips, next_page: None }))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -4056,6 +4152,15 @@ async fn session_sshkey_delete(
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Path parameters for metrics requests where `/metrics/{metric_name}` is
+/// appended to an existing path parameter type
+#[derive(Deserialize, JsonSchema)]
+struct MetricsPathParam<T, M> {
+    #[serde(flatten)]
+    inner: T,
+    metric_name: M,
 }
 
 #[cfg(test)]

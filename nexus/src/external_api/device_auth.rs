@@ -10,7 +10,7 @@
 //! the client to make other API requests.
 
 use super::console_api::console_index_or_login_redirect;
-use super::views::{DeviceAccessTokenGrant, DeviceAuthResponse};
+use super::views::DeviceAccessTokenGrant;
 use crate::context::OpContext;
 use crate::db::model::DeviceAccessToken;
 use crate::ServerContext;
@@ -99,10 +99,7 @@ pub async fn device_auth_request(
 
         let model =
             nexus.device_auth_request_create(&opctx, params.client_id).await?;
-        build_oauth_response(
-            StatusCode::OK,
-            &DeviceAuthResponse::from_model(model, host),
-        )
+        build_oauth_response(StatusCode::OK, &model.into_response(host))
     };
     // TODO: instrumentation doesn't work because we use `Response<Body>`
     //apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

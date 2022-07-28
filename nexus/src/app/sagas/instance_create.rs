@@ -5,17 +5,20 @@
 use super::{
     impl_authenticated_saga_params, saga_generate_uuid, AuthenticatedSagaParams,
 };
-use crate::app::{MAX_DISKS_PER_INSTANCE, MAX_NICS_PER_INSTANCE};
+use crate::app::{
+    MAX_DISKS_PER_INSTANCE, MAX_EXTERNAL_IPS_PER_INSTANCE,
+    MAX_NICS_PER_INSTANCE,
+};
 use crate::context::OpContext;
 use crate::db::identity::Resource;
 use crate::db::lookup::LookupPath;
 use crate::db::queries::network_interface::InsertError as InsertNicError;
-use crate::defaults::DEFAULT_PRIMARY_NIC_NAME;
 use crate::external_api::params;
 use crate::saga_interface::SagaContext;
 use crate::{authn, authz, db};
 use chrono::Utc;
 use lazy_static::lazy_static;
+use nexus_defaults::DEFAULT_PRIMARY_NIC_NAME;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -27,7 +30,7 @@ use serde::Serialize;
 use sled_agent_client::types::InstanceRuntimeStateRequested;
 use sled_agent_client::types::InstanceStateRequested;
 use slog::warn;
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 use std::net::Ipv6Addr;
 use std::sync::Arc;
 use steno::new_action_noop_undo;
@@ -104,53 +107,68 @@ fn saga_instance_create() -> SagaTemplate<SagaInstanceCreate> {
         ),
     );
 
-    // NOTE: The separation of the ID-allocation and NIC creation nodes is
-    // intentional.
-    //
-    // The Nexus API supports creating multiple network interfaces at the time
-    // an instance is provisioned. However, each NIC creation is independent,
-    // and each can fail. For example, someone might specify multiple NICs with
-    // the same IP address. The first will be created successfully, but the
-    // later ones will fail. We need to handle this case gracefully, and always
-    // delete any NICs we create, even if the NIC creation node itself fails.
-    //
-    // To do that, we create an action that only allocates the UUIDs for each
-    // interface. This has an undo action that actually deletes any NICs for the
-    // instance to be provisioned. The forward action is infallible, so this
-    // undo action will always run, even (and especially) if the NIC creation
-    // action fails.
-    //
-    // It's also important that we allocate the UUIDs first. It's possible that
-    // we crash partway through the NIC creation action. In this case, the saga
-    // recovery machinery will pick it up where it left off, without first
-    // destroying the NICs we created before crashing. By allocating the UUIDs
-    // first, we can make the insertion idempotent, by ignoring conflicts on the
-    // UUID.
+    // Similar to disks (see block comment below), create a sequence of
+    // action-undo pairs for each requested network interface, to make sure we
+    // always unwind after failures.
+    for i in 0..MAX_NICS_PER_INSTANCE {
+        template_builder.append(
+            format!("network_interface_id{i}").as_str(),
+            "CreateNetworkInterfaceId",
+            new_action_noop_undo(saga_generate_uuid),
+        );
+
+        template_builder.append(
+            format!("network_interface{i}").as_str(),
+            "CreateNetworkInterface",
+            ActionFunc::new_action(
+                async move |sagactx| {
+                    sic_create_network_interface(sagactx, i).await
+                },
+                async move |sagactx| {
+                    sic_create_network_interface_undo(sagactx, i).await
+                },
+            ),
+        );
+    }
+
+    // Allocate an external IP address for the default outbound connectivity
     template_builder.append(
-        "network_interface_ids",
-        "NetworkInterfaceIds",
+        "snat_ip_id",
+        "CreateSnatIpId",
+        new_action_noop_undo(saga_generate_uuid),
+    );
+    template_builder.append(
+        "snat_ip",
+        "CreateSnatIp",
         ActionFunc::new_action(
-            sic_allocate_network_interface_ids,
-            sic_create_network_interfaces_undo,
+            sic_allocate_instance_snat_ip,
+            sic_allocate_instance_snat_ip_undo,
         ),
     );
 
-    template_builder.append(
-        "network_interfaces",
-        "CreateNetworkInterfaces",
-        new_action_noop_undo(sic_create_network_interfaces),
-    );
+    // Similar to disks (see block comment below), create a sequence of
+    // action-undo pairs for each requested external IP, to make sure we always
+    // unwind after failures.
+    for i in 0..MAX_EXTERNAL_IPS_PER_INSTANCE {
+        template_builder.append(
+            format!("external_ip_id{i}").as_str(),
+            "CreateExternalIpId",
+            new_action_noop_undo(saga_generate_uuid),
+        );
 
-    // Grab an external IP address and port range for the guest's Internet
-    // Gateway, allowing external connectivity.
-    template_builder.append(
-        "external_ip",
-        "ExternalIp",
-        ActionFunc::new_action(
-            sic_allocate_external_ip,
-            sic_allocate_external_ip_undo,
-        ),
-    );
+        template_builder.append(
+            format!("external_ip{i}").as_str(),
+            "CreateExternalIp",
+            ActionFunc::new_action(
+                async move |sagactx| {
+                    sic_allocate_instance_external_ip(sagactx, i).await
+                },
+                async move |sagactx| {
+                    sic_allocate_instance_external_ip_undo(sagactx, i).await
+                },
+            ),
+        );
+    }
 
     // Saga actions must be atomic - they have to fully complete or fully abort.
     // This is because Steno assumes that the saga actions are atomic and
@@ -216,63 +234,102 @@ async fn sic_alloc_server(
         .map_err(ActionError::action_failed)
 }
 
-async fn sic_allocate_network_interface_ids(
+/// Create a network interface for an instance, using the parameters at index
+/// `nic_index`, returning the UUID for the NIC (or None).
+async fn sic_create_network_interface(
     sagactx: ActionContext<SagaInstanceCreate>,
-) -> Result<Vec<Uuid>, ActionError> {
-    match sagactx.saga_params().create_params.network_interfaces {
-        params::InstanceNetworkInterfaceAttachment::None => Ok(vec![]),
-        params::InstanceNetworkInterfaceAttachment::Default => {
-            Ok(vec![Uuid::new_v4()])
-        }
-        params::InstanceNetworkInterfaceAttachment::Create(
-            ref create_params,
-        ) => {
-            if create_params.len() > MAX_NICS_PER_INSTANCE.try_into().unwrap() {
-                return Err(ActionError::action_failed(
-                    Error::invalid_request(
-                        format!(
-                            "Instances may not have more than {}
-                            network interfaces",
-                            MAX_NICS_PER_INSTANCE
-                        )
-                        .as_str(),
-                    ),
-                ));
-            }
-            let mut ids = Vec::with_capacity(create_params.len());
-            for _ in 0..create_params.len() {
-                ids.push(Uuid::new_v4());
-            }
-            Ok(ids)
-        }
-    }
-}
-
-async fn sic_create_network_interfaces(
-    sagactx: ActionContext<SagaInstanceCreate>,
+    nic_index: usize,
 ) -> Result<(), ActionError> {
-    match sagactx.saga_params().create_params.network_interfaces {
+    let saga_params = sagactx.saga_params();
+    let interface_params = &saga_params.create_params.network_interfaces;
+    match interface_params {
         params::InstanceNetworkInterfaceAttachment::None => Ok(()),
         params::InstanceNetworkInterfaceAttachment::Default => {
-            sic_create_default_primary_network_interface(&sagactx).await
+            sic_create_default_primary_network_interface(&sagactx, nic_index)
+                .await
         }
         params::InstanceNetworkInterfaceAttachment::Create(
             ref create_params,
-        ) => {
-            sic_create_custom_network_interfaces(&sagactx, &create_params).await
+        ) => match create_params.get(nic_index) {
+            None => Ok(()),
+            Some(ref prs) => {
+                sic_create_custom_network_interface(&sagactx, nic_index, prs)
+                    .await
+            }
+        },
+    }
+}
+
+/// Delete one network interface, by index.
+async fn sic_create_network_interface_undo(
+    sagactx: ActionContext<SagaInstanceCreate>,
+    nic_index: usize,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let datastore = osagactx.datastore();
+    let saga_params = sagactx.saga_params();
+    let opctx =
+        OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
+    let interface_id = sagactx.lookup::<Option<Uuid>>(
+        format!("network_interface_id{nic_index}").as_str(),
+    )?;
+    match interface_id {
+        None => Ok(()),
+        Some(id) => {
+            let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+            let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+                .instance_id(instance_id)
+                .lookup_for(authz::Action::Modify)
+                .await
+                .map_err(ActionError::action_failed)?;
+            match LookupPath::new(&opctx, &datastore)
+                .network_interface_id(id)
+                .lookup_for(authz::Action::Delete)
+                .await
+            {
+                Ok((.., authz_interface)) => {
+                    datastore
+                        .instance_delete_network_interface(
+                            &opctx,
+                            &authz_instance,
+                            &authz_interface,
+                        )
+                        .await
+                        .map_err(|e| e.into_external())?;
+                    Ok(())
+                }
+                Err(Error::ObjectNotFound { .. }) => {
+                    // The saga is attempting to delete the NIC by the ID cached
+                    // in the saga log. If we're running this, the NIC already
+                    // appears to be gone, which is odd, but not exactly an
+                    // error. Swallowing the error allows the saga to continue,
+                    // but this is another place we might want to consider
+                    // bumping a counter or otherwise tracking things.
+                    warn!(
+                        osagactx.log(),
+                        "During saga unwind, NIC already appears deleted";
+                        "interface_id" => %id,
+                    );
+                    Ok(())
+                }
+                Err(e) => Err(e.into()),
+            }
         }
     }
 }
 
-/// Create one or more custom (non-default) network interfaces for the provided
-/// instance.
-async fn sic_create_custom_network_interfaces(
+/// Create one custom (non-default) network interfaces for the provided instance.
+async fn sic_create_custom_network_interface(
     sagactx: &ActionContext<SagaInstanceCreate>,
-    interface_params: &[params::NetworkInterfaceCreate],
+    nic_index: usize,
+    interface_params: &params::NetworkInterfaceCreate,
 ) -> Result<(), ActionError> {
-    if interface_params.is_empty() {
-        return Ok(());
-    }
+    let interface_id = match sagactx.lookup::<Option<Uuid>>(
+        format!("network_interface_id{nic_index}").as_str(),
+    )? {
+        None => return Ok(()),
+        Some(id) => id,
+    };
 
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
@@ -280,7 +337,6 @@ async fn sic_create_custom_network_interfaces(
     let opctx =
         OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
-    let ids = sagactx.lookup::<Vec<Uuid>>("network_interface_ids")?;
 
     // Lookup authz objects, used in the call to create the NIC itself.
     let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
@@ -288,96 +344,44 @@ async fn sic_create_custom_network_interfaces(
         .lookup_for(authz::Action::CreateChild)
         .await
         .map_err(ActionError::action_failed)?;
-    let (.., authz_vpc, db_vpc) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_vpc) = LookupPath::new(&opctx, &datastore)
         .project_id(saga_params.project_id)
-        .vpc_name(&db::model::Name::from(interface_params[0].vpc_name.clone()))
-        .fetch()
+        .vpc_name(&db::model::Name::from(interface_params.vpc_name.clone()))
+        .lookup_for(authz::Action::Read)
         .await
         .map_err(ActionError::action_failed)?;
 
-    // Check that all VPC names are the same.
-    //
-    // This isn't strictly necessary, as the queries would fail below, but it's
-    // easier to handle here.
-    if interface_params.iter().any(|p| p.vpc_name != db_vpc.name().0) {
-        return Err(ActionError::action_failed(Error::invalid_request(
-            "All interfaces must be in the same VPC",
-        )));
-    }
-
-    if ids.len() != interface_params.len() {
-        return Err(ActionError::action_failed(Error::internal_error(
-            "found differing number of network interface IDs and interface \
-            parameters",
-        )));
-    }
-    for (interface_id, params) in ids.into_iter().zip(interface_params.iter()) {
-        // TODO-correctness: It seems racy to fetch the subnet and create the
-        // interface in separate requests, but outside of a transaction. This
-        // should probably either be in a transaction, or the
-        // `instance_create_network_interface` function/query needs some JOIN
-        // on the `vpc_subnet` table.
-        let (.., authz_subnet, db_subnet) = LookupPath::new(&opctx, &datastore)
-            .vpc_id(authz_vpc.id())
-            .vpc_subnet_name(&db::model::Name::from(params.subnet_name.clone()))
-            .fetch()
-            .await
-            .map_err(ActionError::action_failed)?;
-        let interface = db::model::IncompleteNetworkInterface::new(
-            interface_id,
-            instance_id,
-            authz_vpc.id(),
-            db_subnet.clone(),
-            params.identity.clone(),
-            params.ip,
+    // TODO-correctness: It seems racy to fetch the subnet and create the
+    // interface in separate requests, but outside of a transaction. This
+    // should probably either be in a transaction, or the
+    // `instance_create_network_interface` function/query needs some JOIN
+    // on the `vpc_subnet` table.
+    let (.., authz_subnet, db_subnet) = LookupPath::new(&opctx, &datastore)
+        .vpc_id(authz_vpc.id())
+        .vpc_subnet_name(&db::model::Name::from(
+            interface_params.subnet_name.clone(),
+        ))
+        .fetch()
+        .await
+        .map_err(ActionError::action_failed)?;
+    let interface = db::model::IncompleteNetworkInterface::new(
+        interface_id,
+        instance_id,
+        authz_vpc.id(),
+        db_subnet.clone(),
+        interface_params.identity.clone(),
+        interface_params.ip,
+    )
+    .map_err(ActionError::action_failed)?;
+    datastore
+        .instance_create_network_interface(
+            &opctx,
+            &authz_subnet,
+            &authz_instance,
+            interface,
         )
-        .map_err(ActionError::action_failed)?;
-        let result = datastore
-            .instance_create_network_interface(
-                &opctx,
-                &authz_subnet,
-                &authz_instance,
-                interface,
-            )
-            .await;
-
-        match result {
-            Ok(_) => Ok(()),
-
-            // Detect the specific error arising from this node being partially
-            // completed.
-            //
-            // The query used to insert network interfaces first checks for an
-            // existing record with the same primary key. It will attempt to
-            // insert that record if it exists, which obviously fails with a
-            // primary key violation. (If the record does _not_ exist, one will
-            // be inserted as usual, see
-            // `db::queries::network_interface::InsertQuery` for details).
-            //
-            // In this one specific case, we're asserting that any primary key
-            // duplicate arises because this saga node ran partway and then
-            // crashed. The saga recovery machinery will replay just this node,
-            // without first unwinding it, so any previously-inserted interfaces
-            // will still exist. This is expected.
-            Err(InsertNicError::DuplicatePrimaryKey(_)) => {
-                // TODO-observability: We should bump a counter here.
-                let log = osagactx.log();
-                warn!(
-                    log,
-                    "Detected duplicate primary key during saga to \
-                    create network interfaces for instance '{}'. \
-                    This likely occurred because \
-                    the saga action 'sic_create_custom_network_interfaces' \
-                    crashed and has been recovered.",
-                    instance_id;
-                    "primary_key" => interface_id.to_string(),
-                );
-                Ok(())
-            }
-            Err(e) => Err(e.into_external()),
-        }
-        .map_err(ActionError::action_failed)?;
-    }
+        .await
+        .map_err(|e| ActionError::action_failed(e.into_external()))?;
     Ok(())
 }
 
@@ -385,7 +389,21 @@ async fn sic_create_custom_network_interfaces(
 /// saga.
 async fn sic_create_default_primary_network_interface(
     sagactx: &ActionContext<SagaInstanceCreate>,
+    nic_index: usize,
 ) -> Result<(), ActionError> {
+    // We're statically creating up to MAX_NICS_PER_INSTANCE saga nodes, but
+    // this method only applies to the case where there's exactly one parameter
+    // of type `InstanceNetworkInterfaceAttachment::Default`, so ignore any
+    // later calls.
+    if nic_index > 0 {
+        return Ok(());
+    }
+    let interface_id =
+        match sagactx.lookup::<Option<Uuid>>("network_interface_id0")? {
+            None => return Ok(()),
+            Some(id) => id,
+        };
+
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
     let saga_params = sagactx.saga_params();
@@ -432,7 +450,6 @@ async fn sic_create_default_primary_network_interface(
             .await
             .map_err(ActionError::action_failed)?;
 
-    let interface_id = Uuid::new_v4();
     let interface = db::model::IncompleteNetworkInterface::new(
         interface_id,
         instance_id,
@@ -455,51 +472,31 @@ async fn sic_create_default_primary_network_interface(
     Ok(())
 }
 
-async fn sic_create_network_interfaces_undo(
+/// Create an external IP address for instance source NAT.
+async fn sic_allocate_instance_snat_ip(
     sagactx: ActionContext<SagaInstanceCreate>,
-) -> Result<(), anyhow::Error> {
-    // We issue a request to delete any interfaces associated with this instance.
-    // In the case we failed partway through allocating interfaces, we need to
-    // clean up any previously-created interface records from the database.
-    // Just delete every interface that exists, even if there are zero such
-    // records.
+) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
     let saga_params = sagactx.saga_params();
     let opctx =
         OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
-    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
-        .instance_id(instance_id)
-        .lookup_for(authz::Action::Modify)
-        .await
-        .map_err(ActionError::action_failed)?;
+    let ip_id = sagactx.lookup::<Uuid>("snat_ip_id")?;
     datastore
-        .instance_delete_all_network_interfaces(&opctx, &authz_instance)
+        .allocate_instance_snat_ip(
+            &opctx,
+            ip_id,
+            saga_params.project_id,
+            instance_id,
+        )
         .await
         .map_err(ActionError::action_failed)?;
     Ok(())
 }
 
-/// Create an external IP address for the instance.
-async fn sic_allocate_external_ip(
-    sagactx: ActionContext<SagaInstanceCreate>,
-) -> Result<Uuid, ActionError> {
-    let osagactx = sagactx.user_data();
-    let datastore = osagactx.datastore();
-    let saga_params = sagactx.saga_params();
-    let opctx =
-        OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
-    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
-    let external_ip = datastore
-        .allocate_instance_external_ip(&opctx, instance_id)
-        .await
-        .map_err(ActionError::action_failed)?;
-    Ok(external_ip.id)
-}
-
-/// Destroy / release an external IP address allocated for the instance.
-async fn sic_allocate_external_ip_undo(
+/// Destroy an allocated SNAT IP address for the instance.
+async fn sic_allocate_instance_snat_ip_undo(
     sagactx: ActionContext<SagaInstanceCreate>,
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
@@ -507,7 +504,79 @@ async fn sic_allocate_external_ip_undo(
     let saga_params = sagactx.saga_params();
     let opctx =
         OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
-    let ip_id = sagactx.lookup::<Uuid>("external_ip")?;
+    let ip_id = sagactx.lookup::<Uuid>("snat_ip_id")?;
+    datastore
+        .deallocate_instance_external_ip(&opctx, ip_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(())
+}
+
+/// Create an external IPs for the instance, using the request parameters at
+/// index `ip_index`, and return its ID if one is created (or None).
+async fn sic_allocate_instance_external_ip(
+    sagactx: ActionContext<SagaInstanceCreate>,
+    ip_index: usize,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let datastore = osagactx.datastore();
+    let saga_params = sagactx.saga_params();
+    let ip_params = saga_params.create_params.external_ips.get(ip_index);
+    let ip_params = match ip_params {
+        None => {
+            return Ok(());
+        }
+        Some(ref prs) => prs,
+    };
+    let opctx =
+        OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
+    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+    let name = format!("external_ip_id{ip_index}");
+    let ip_id = sagactx.lookup::<Option<Uuid>>(&name)?.ok_or_else(|| {
+        ActionError::action_failed(Error::internal_error(
+            "Expected a UUID for instance external IP",
+        ))
+    })?;
+
+    // Collect the possible pool name for this IP address
+    let pool_name = match ip_params {
+        params::ExternalIpCreate::Ephemeral { ref pool_name } => {
+            pool_name.as_ref().map(|name| db::model::Name(name.clone()))
+        }
+    };
+    datastore
+        .allocate_instance_ephemeral_ip(
+            &opctx,
+            ip_id,
+            saga_params.project_id,
+            instance_id,
+            pool_name,
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(())
+}
+
+async fn sic_allocate_instance_external_ip_undo(
+    sagactx: ActionContext<SagaInstanceCreate>,
+    ip_index: usize,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let datastore = osagactx.datastore();
+    let saga_params = sagactx.saga_params();
+    if ip_index >= saga_params.create_params.external_ips.len() {
+        return Ok(());
+    }
+
+    let opctx =
+        OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
+    let name = format!("external_ip_id{ip_index}");
+    let ip_id =
+        sagactx.lookup::<Option<Uuid>>(name.as_str())?.ok_or_else(|| {
+            ActionError::action_failed(Error::internal_error(
+                "Expected a UUID for instance external IP",
+            ))
+        })?;
     datastore
         .deallocate_instance_external_ip(&opctx, ip_id)
         .await
@@ -701,7 +770,7 @@ async fn sic_create_instance_record(
         .await
         .map_err(ActionError::action_failed)?;
 
-    Ok(instance.name().clone())
+    Ok(instance.name().clone().into())
 }
 
 async fn sic_delete_instance_record(

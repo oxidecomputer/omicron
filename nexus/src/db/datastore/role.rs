@@ -185,7 +185,7 @@ impl DataStore {
     // is mitigated because we cap the number of role assignments per resource
     // pretty tightly.
     pub async fn role_assignment_fetch_visible<
-        T: authz::ApiResourceWithRoles + Clone,
+        T: authz::ApiResourceWithRoles + Clone + oso::PolarClass,
     >(
         &self,
         opctx: &OpContext,
@@ -231,7 +231,7 @@ impl DataStore {
         new_assignments: &[shared::RoleAssignment<T::AllowedRoles>],
     ) -> ListResultVec<db::model::RoleAssignment>
     where
-        T: authz::ApiResourceWithRolesType + Clone,
+        T: authz::ApiResourceWithRolesType + Clone + oso::PolarClass,
     {
         // TODO-security We should carefully review what permissions are
         // required for modifying the policy of a resource.
@@ -283,7 +283,7 @@ impl DataStore {
         Error,
     >
     where
-        T: authz::ApiResourceWithRolesType + Clone,
+        T: authz::ApiResourceWithRolesType + oso::PolarClass + Clone,
     {
         opctx.authorize(authz::Action::ModifyPolicy, authz_resource).await?;
 

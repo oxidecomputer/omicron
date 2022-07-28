@@ -10,8 +10,8 @@ use crate::opte::Error;
 use crate::opte::Gateway;
 use crate::opte::Port;
 use crate::opte::Vni;
-use crate::params::ExternalIp;
 use crate::params::NetworkInterface;
+use crate::params::SourceNatConfig;
 use ipnetwork::IpNetwork;
 use macaddr::MacAddr6;
 use slog::debug;
@@ -109,7 +109,8 @@ impl PortManager {
         &self,
         instance_id: Uuid,
         nic: &NetworkInterface,
-        external_ip: Option<ExternalIp>,
+        source_nat: Option<SourceNatConfig>,
+        external_ips: Option<Vec<IpAddr>>,
     ) -> Result<Port, Error> {
         // TODO-completess: Remove IPv4 restrictions once OPTE supports virtual
         // IPv6 networks.
@@ -157,7 +158,8 @@ impl PortManager {
                 nic.slot,
                 vni,
                 self.inner.underlay_ip,
-                external_ip,
+                source_nat,
+                external_ips,
                 gateway,
                 boundary_services,
                 vnic,

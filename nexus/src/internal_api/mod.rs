@@ -3,4 +3,5 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 pub mod http_entrypoints;
-pub mod params;
+
+pub use nexus_types::internal_api::params;

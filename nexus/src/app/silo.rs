@@ -310,7 +310,7 @@ impl super::Nexus {
             .ssh_key_name(ssh_key_name)
             .fetch()
             .await?;
-        assert_eq!(ssh_key.name(), ssh_key_name);
+        assert_eq!(ssh_key.name(), &ssh_key_name.0);
         Ok(ssh_key)
     }
 

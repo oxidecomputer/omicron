@@ -140,7 +140,16 @@ impl QueryFragment<Pg> for InsertVpcQuery {
             &self.vpc.firewall_gen,
         )?;
         out.push_sql(" AS ");
-        out.push_identifier(dsl::ipv6_prefix::NAME)
+        out.push_identifier(dsl::firewall_gen::NAME)?;
+        out.push_sql(", ");
+
+        out.push_bind_param::<sql_types::Int8, Generation>(
+            &self.vpc.subnet_gen,
+        )?;
+        out.push_sql(" AS ");
+        out.push_identifier(dsl::subnet_gen::NAME)?;
+
+        Ok(())
     }
 }
 
@@ -186,6 +195,8 @@ impl QueryFragment<Pg> for InsertVpcQueryValues {
         out.push_identifier(dsl::ipv6_prefix::NAME)?;
         out.push_sql(", ");
         out.push_identifier(dsl::firewall_gen::NAME)?;
+        out.push_sql(", ");
+        out.push_identifier(dsl::subnet_gen::NAME)?;
         out.push_sql(")");
         self.0.walk_ast(out)
     }

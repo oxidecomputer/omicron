@@ -20,7 +20,6 @@ mod cidata;
 pub mod config; // Public for testing
 pub mod context; // Public for documentation examples
 pub mod db; // Public for documentation examples
-pub mod defaults; // Public for testing
 pub mod external_api; // Public for testing
 pub mod internal_api; // Public for testing
 mod populate;
@@ -41,6 +40,7 @@ use std::sync::Arc;
 extern crate slog;
 #[macro_use]
 extern crate newtype_derive;
+#[cfg(test)]
 #[macro_use]
 extern crate diesel;
 

@@ -8,6 +8,7 @@
 //! THERE ARE NO TESTS IN THIS FILE.
 
 use crate::integration_tests::unauthorized::HTTP_SERVER;
+use chrono::Utc;
 use http::method::Method;
 use lazy_static::lazy_static;
 use nexus_test_utils::RACK_UUID;
@@ -178,6 +179,13 @@ lazy_static! {
             disk_source: params::DiskSource::Blank { block_size: params::BlockSize::try_from(4096).unwrap() },
             size: ByteCount::from_gibibytes_u32(16),
         };
+    pub static ref DEMO_DISK_METRICS_URL: String =
+        format!(
+            "{}/metrics/activated?start_time={:?}&end_time={:?}",
+            *DEMO_DISK_URL,
+            Utc::now(),
+            Utc::now(),
+        );
 
     // Instance used for testing
     pub static ref DEMO_INSTANCE_NAME: Name = "demo-instance".parse().unwrap();
@@ -199,6 +207,8 @@ lazy_static! {
         format!("{}/detach", *DEMO_INSTANCE_DISKS_URL);
     pub static ref DEMO_INSTANCE_NICS_URL: String =
         format!("{}/network-interfaces", *DEMO_INSTANCE_URL);
+    pub static ref DEMO_INSTANCE_EXTERNAL_IPS_URL: String =
+        format!("{}/external-ips", *DEMO_INSTANCE_URL);
     pub static ref DEMO_INSTANCE_SERIAL_URL: String =
         format!("{}/serial-console", *DEMO_INSTANCE_URL);
     pub static ref DEMO_INSTANCE_CREATE: params::InstanceCreate =
@@ -213,12 +223,15 @@ lazy_static! {
             user_data: vec![],
             network_interfaces:
                 params::InstanceNetworkInterfaceAttachment::Default,
+            external_ips: vec![
+                params::ExternalIpCreate::Ephemeral { pool_name: None }
+            ],
             disks: vec![],
         };
 
     // The instance needs a network interface, too.
     pub static ref DEMO_INSTANCE_NIC_NAME: Name =
-        omicron_nexus::defaults::DEFAULT_PRIMARY_NIC_NAME.parse().unwrap();
+        nexus_defaults::DEFAULT_PRIMARY_NIC_NAME.parse().unwrap();
     pub static ref DEMO_INSTANCE_NIC_URL: String =
         format!("{}/{}", *DEMO_INSTANCE_NICS_URL, *DEMO_INSTANCE_NIC_NAME);
     pub static ref DEMO_INSTANCE_NIC_CREATE: params::NetworkInterfaceCreate =
@@ -285,6 +298,7 @@ lazy_static! {
                 name: DEMO_IP_POOL_NAME.clone(),
                 description: String::from("an IP pool"),
             },
+            project: None,
         };
     pub static ref DEMO_IP_POOL_URL: String = format!("/ip-pools/{}", *DEMO_IP_POOL_NAME);
     pub static ref DEMO_IP_POOL_UPDATE: params::IpPoolUpdate =
@@ -968,6 +982,15 @@ lazy_static! {
         },
 
         VerifyEndpoint {
+            url: &*DEMO_DISK_METRICS_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
+
+        VerifyEndpoint {
             url: &*DEMO_INSTANCE_DISKS_URL,
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
@@ -1176,6 +1199,14 @@ lazy_static! {
                     serde_json::to_value(&*DEMO_INSTANCE_NIC_PUT).unwrap()
                 ),
             ],
+        },
+
+        /* Instance external IP addresses */
+        VerifyEndpoint {
+            url: &*DEMO_INSTANCE_EXTERNAL_IPS_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![AllowedMethod::Get],
         },
 
         /* IAM */

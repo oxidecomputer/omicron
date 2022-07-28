@@ -12,8 +12,8 @@ use crate::opte::Error;
 use crate::opte::Gateway;
 use crate::opte::Port;
 use crate::opte::Vni;
-use crate::params::ExternalIp;
 use crate::params::NetworkInterface;
+use crate::params::SourceNatConfig;
 use ipnetwork::IpNetwork;
 use macaddr::MacAddr6;
 use opte::api::IpCidr;
@@ -97,9 +97,9 @@ impl PortManagerInner {
         let secondary_macs = ports
             .values()
             .filter_map(|port| {
-                // Only advertise Ports with an external address (primary
-                // interface for an instance).
-                if port.external_ip().is_some() {
+                // Only advertise Ports with a publicly-visible external IP
+                // address, on the primary interface for this instance.
+                if port.external_ips().is_some() {
                     Some(port.mac().to_string())
                 } else {
                     None
@@ -171,7 +171,8 @@ impl PortManager {
         &self,
         instance_id: Uuid,
         nic: &NetworkInterface,
-        external_ip: Option<ExternalIp>,
+        source_nat: Option<SourceNatConfig>,
+        external_ips: Option<Vec<IpAddr>>,
     ) -> Result<Port, Error> {
         // TODO-completess: Remove IPv4 restrictions once OPTE supports virtual
         // IPv6 networks.
@@ -210,9 +211,9 @@ impl PortManager {
         let boundary_services = BoundaryServices::default();
 
         // Describe the source NAT for this instance.
-        let snat = match external_ip {
-            Some(ip) => {
-                let public_ip = match ip.ip {
+        let snat = match source_nat {
+            Some(snat) => {
+                let public_ip = match snat.ip {
                     IpAddr::V4(ip) => ip.into(),
                     IpAddr::V6(_) => {
                         return Err(opte_ioctl::Error::InvalidArgument(
@@ -220,7 +221,7 @@ impl PortManager {
                         ).into());
                     }
                 };
-                let ports = ip.first_port..=ip.last_port;
+                let ports = snat.first_port..=snat.last_port;
                 Some(SNatCfg {
                     public_ip,
                     ports,
@@ -230,6 +231,26 @@ impl PortManager {
                 })
             }
             None => None,
+        };
+
+        // Describe the external IP addresses for this instance.
+        //
+        // Note that we're currently only taking the first address, which is all
+        // that OPTE supports. The array is guaranteed to be limited by Nexus.
+        // See https://github.com/oxidecomputer/omicron/issues/1467
+        // See https://github.com/oxidecomputer/opte/issues/196
+        let external_ip = match external_ips {
+            Some(ref ips) if !ips.is_empty() => {
+                match ips[0] {
+                    IpAddr::V4(ipv4) => Some(ipv4.into()),
+                    IpAddr::V6(_) => {
+                        return Err(opte_ioctl::Error::InvalidArgument(
+                            String::from("IPv6 is not yet supported for external addresses")
+                        ).into());
+                    }
+                }
+            }
+            _ => None,
         };
 
         // Create the xde device.
@@ -258,6 +279,7 @@ impl PortManager {
             vni,
             self.inner.underlay_ip,
             snat,
+            external_ip,
             /* passthru = */ false,
         )?;
         debug!(
@@ -329,7 +351,8 @@ impl PortManager {
                 nic.slot,
                 vni,
                 self.inner.underlay_ip,
-                external_ip,
+                source_nat,
+                external_ips,
                 gateway,
                 boundary_services,
                 vnic,

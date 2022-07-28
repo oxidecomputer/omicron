@@ -30,10 +30,19 @@ pub struct SimInstance {
 impl Simulatable for SimInstance {
     type CurrentState = InstanceRuntimeState;
     type RequestedState = InstanceRuntimeStateRequested;
+    type ProducerArgs = ();
     type Action = InstanceAction;
 
     fn new(current: InstanceRuntimeState) -> Self {
         SimInstance { state: InstanceStates::new(current) }
+    }
+
+    async fn set_producer(
+        &mut self,
+        _args: Self::ProducerArgs,
+    ) -> Result<(), Error> {
+        // NOTE: Not implemented, yet.
+        Ok(())
     }
 
     fn request_transition(

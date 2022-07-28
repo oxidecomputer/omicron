@@ -73,6 +73,7 @@ pub async fn create_ip_pool(
     client: &ClientTestContext,
     pool_name: &str,
     ip_range: Option<IpRange>,
+    project_path: Option<params::ProjectPath>,
 ) -> (IpPool, IpPoolRange) {
     let ip_range = ip_range.unwrap_or_else(|| {
         use std::net::Ipv4Addr;
@@ -90,6 +91,7 @@ pub async fn create_ip_pool(
                 name: pool_name.parse().unwrap(),
                 description: String::from("an ip pool"),
             },
+            project: project_path,
         },
     )
     .await;
@@ -187,28 +189,35 @@ pub async fn create_disk(
     .await
 }
 
+/// Creates an instance with a default NIC and no disks.
+///
+/// Wrapper around [`create_instance_with`].
 pub async fn create_instance(
     client: &ClientTestContext,
     organization_name: &str,
     project_name: &str,
     instance_name: &str,
 ) -> Instance {
-    create_instance_with_nics(
+    create_instance_with(
         client,
         organization_name,
         project_name,
         instance_name,
         &params::InstanceNetworkInterfaceAttachment::Default,
+        // Disks=
+        vec![],
     )
     .await
 }
 
-pub async fn create_instance_with_nics(
+/// Creates an instance with attached resou8rces.
+pub async fn create_instance_with(
     client: &ClientTestContext,
     organization_name: &str,
     project_name: &str,
     instance_name: &str,
     nics: &params::InstanceNetworkInterfaceAttachment,
+    disks: Vec<params::InstanceDiskAttachment>,
 ) -> Instance {
     let url = format!(
         "/organizations/{}/projects/{}/instances",
@@ -229,7 +238,8 @@ pub async fn create_instance_with_nics(
                 b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
                     .to_vec(),
             network_interfaces: nics.clone(),
-            disks: vec![],
+            external_ips: vec![],
+            disks,
         },
     )
     .await
