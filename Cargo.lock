@@ -1540,6 +1540,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "faux-mgs"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap 3.2.15",
+ "gateway-messages",
+ "slog",
+ "slog-async",
+ "slog-term",
+]
+
+[[package]]
 name = "ff"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
