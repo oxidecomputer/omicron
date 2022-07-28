@@ -45,6 +45,7 @@ impl FakeSledClient {
         })
     }
 
+    /// Returns the requests to create services on the sled.
     pub fn service_requests(&self) -> Vec<SledAgentTypes::ServiceRequest> {
         self.inner
             .lock()
@@ -55,6 +56,7 @@ impl FakeSledClient {
             .unwrap_or(vec![])
     }
 
+    /// Returns the requests to create datasets on the sled.
     pub fn dataset_requests(&self) -> Vec<SledAgentTypes::DatasetEnsureBody> {
         self.inner.lock().unwrap().dataset_requests.clone()
     }
