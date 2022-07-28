@@ -36,6 +36,9 @@ enum ServiceRedundancy {
     // within the rack.
     PerRack(u32),
 
+    // This service must exist on all Scrimlets within the rack.
+    AllScrimlets,
+
     // This service must exist on at least this many sleds
     // within the availability zone. Note that this is specific
     // for the DNS service, as some expectations surrounding
@@ -56,7 +59,7 @@ struct ExpectedService {
 //
 // When that happens, it is likely that many of the "per-rack"
 // services will become "per-fleet", such as Nexus and CRDB.
-const EXPECTED_SERVICES: [ExpectedService; 3] = [
+const EXPECTED_SERVICES: [ExpectedService; 4] = [
     ExpectedService {
         kind: ServiceKind::InternalDNS,
         redundancy: ServiceRedundancy::DnsPerAz(DNS_REDUNDANCY),
@@ -68,6 +71,10 @@ const EXPECTED_SERVICES: [ExpectedService; 3] = [
     ExpectedService {
         kind: ServiceKind::Oximeter,
         redundancy: ServiceRedundancy::PerRack(1),
+    },
+    ExpectedService {
+        kind: ServiceKind::Dendrite,
+        redundancy: ServiceRedundancy::AllScrimlets,
     },
 ];
 

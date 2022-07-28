@@ -158,6 +158,43 @@ impl DataStore {
             .get_results(conn)
     }
 
+    /// Ensures that all Scrimlets in `rack_id` have the `kind` service
+    /// provisioned.
+    pub async fn ensure_scrimlet_service(
+        &self,
+        opctx: &OpContext,
+        rack_id: Uuid,
+        kind: ServiceKind,
+    ) -> Result<Vec<Service>, Error> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+        #[derive(Debug)]
+        enum ServiceError {
+            NotEnoughSleds,
+            Other(Error),
+        }
+        type TxnError = TransactionError<ServiceError>;
+
+        self.pool()
+            .transaction(move |conn| {
+                // TODO: We should implement this once we have a way of
+                // identifying sleds as scrimlets or not.
+                todo!()
+            })
+            .await
+            .map_err(|e| match e {
+                TxnError::CustomError(ServiceError::NotEnoughSleds) => {
+                    Error::unavail("Not enough sleds for service allocation")
+                }
+                TxnError::CustomError(ServiceError::Other(e)) => e,
+                TxnError::Pool(e) => {
+                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                }
+            })
+    }
+
+    /// Ensures that `redundancy` sleds within `rack_id` have the `kind` service
+    /// provisioned.
     pub async fn ensure_rack_service(
         &self,
         opctx: &OpContext,
