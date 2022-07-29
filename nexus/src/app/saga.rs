@@ -4,6 +4,7 @@
 
 //! Saga management and execution
 
+use super::sagas::ACTION_REGISTRY;
 use crate::authz;
 use crate::context::OpContext;
 use crate::saga_interface::SagaContext;
@@ -75,31 +76,31 @@ impl super::Nexus {
         P: serde::Serialize,
     {
         todo!(); // XXX-dap
-        //let saga_id = SagaId(Uuid::new_v4());
-        //let saga_logger =
-        //    self.log.new(o!("template_name" => template_name.to_owned()));
-        //let saga_context = Arc::new(Arc::new(SagaContext::new(
-        //    Arc::clone(self),
-        //    saga_logger,
-        //    Arc::clone(&self.authz),
-        //)));
-        //let future = self
-        //    .sec_client
-        //    .saga_create(
-        //        saga_id,
-        //        saga_context,
-        //        saga_template,
-        //        template_name.to_owned(),
-        //        saga_params,
-        //    )
-        //    .await
-        //    .context("creating saga")
-        //    .map_err(|error| {
-        //        // TODO-error This could be a service unavailable error,
-        //        // depending on the failure mode.  We need more information from
-        //        // Steno.
-        //        Error::internal_error(&format!("{:#}", error))
-        //    })?;
+                 //let saga_id = SagaId(Uuid::new_v4());
+                 //let saga_logger =
+                 //    self.log.new(o!("template_name" => template_name.to_owned()));
+                 //let saga_context = Arc::new(Arc::new(SagaContext::new(
+                 //    Arc::clone(self),
+                 //    saga_logger,
+                 //    Arc::clone(&self.authz),
+                 //)));
+                 //let future = self
+                 //    .sec_client
+                 //    .saga_create(
+                 //        saga_id,
+                 //        saga_context,
+                 //        saga_template,
+                 //        template_name.to_owned(),
+                 //        saga_params,
+                 //    )
+                 //    .await
+                 //    .context("creating saga")
+                 //    .map_err(|error| {
+                 //        // TODO-error This could be a service unavailable error,
+                 //        // depending on the failure mode.  We need more information from
+                 //        // Steno.
+                 //        Error::internal_error(&format!("{:#}", error))
+                 //    })?;
 
         //self.sec_client
         //    .saga_start(saga_id)
@@ -114,5 +115,51 @@ impl super::Nexus {
         //        Error::InternalError { internal_message: e.to_string() }
         //    })
         //})
+    }
+
+    /// Given a saga template and parameters, create a new saga and execute it.
+    pub(crate) async fn execute_saga_new(
+        // XXX-dap rename this function once all callers are converted
+        self: &Arc<Self>,
+        saga: steno::SagaDag,
+    ) -> Result<SagaResultOk, Error> {
+        let saga_id = SagaId(Uuid::new_v4());
+        let saga_logger =
+            self.log.new(o!("saga_name" => saga.saga_name().to_string()));
+        let saga_context = Arc::new(Arc::new(SagaContext::new(
+            Arc::clone(self),
+            saga_logger,
+            Arc::clone(&self.authz),
+        )));
+        let future = self
+            .sec_client
+            .saga_create(
+                saga_id,
+                saga_context,
+                Arc::new(saga),
+                ACTION_REGISTRY.clone(),
+            )
+            .await
+            .context("creating saga")
+            .map_err(|error| {
+                // TODO-error This could be a service unavailable error,
+                // depending on the failure mode.  We need more information from
+                // Steno.
+                Error::internal_error(&format!("{:#}", error))
+            })?;
+
+        self.sec_client
+            .saga_start(saga_id)
+            .await
+            .context("starting saga")
+            .map_err(|error| Error::internal_error(&format!("{:#}", error)))?;
+
+        let result = future.await;
+        result.kind.map_err(|saga_error| {
+            saga_error.error_source.convert::<Error>().unwrap_or_else(|e| {
+                // TODO-error more context would be useful
+                Error::InternalError { internal_message: e.to_string() }
+            })
+        })
     }
 }

@@ -87,7 +87,9 @@ lazy_static! {
     pub (super) static ref ACTION_GENERATE_ID: NexusAction =
         new_action_noop_undo("common.uuid_generate", saga_generate_uuid);
 
-    pub static ref ACTION_REGISTRY: ActionRegistry = make_action_registry();
+    pub static ref ACTION_REGISTRY: Arc<ActionRegistry> =
+        Arc::new(make_action_registry());
+
     // XXX-dap replace with all NexusSaga impls
     // pub static ref ALL_TEMPLATES: BTreeMap<&'static str, Arc<dyn SagaTemplateGeneric<Arc<SagaContext>>>> = todo!();
 }
