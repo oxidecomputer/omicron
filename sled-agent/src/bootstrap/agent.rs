@@ -263,11 +263,20 @@ impl Agent {
 
             return Ok(SledAgentResponse { id: server.id() });
         }
+
+        // TODO(https://github.com/oxidecomputer/omicron/issues/823):
+        // Currently, the prescence or abscence of RSS is our signal
+        // for "is this a scrimlet or not".
+        // Longer-term, we should make this call based on the underlying
+        // hardware.
+        let is_scrimlet = self.rss.lock().await.is_some();
+
         // Server does not exist, initialize it.
         let server = SledServer::start(
             &self.sled_config,
             self.parent_log.clone(),
             sled_address,
+            is_scrimlet,
             request.rack_id,
         )
         .await

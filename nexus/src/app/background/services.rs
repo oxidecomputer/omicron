@@ -147,10 +147,6 @@ where
             .try_for_each_concurrent(None, |sled_id| async {
                 // Query for all services that should be running on a Sled,
                 // and notify Sled Agent about all of them.
-                //
-                // TODO: This interface could be better; ideally we would only
-                // insert the *new* services. Inserting the old ones too is
-                // costing us an extra query.
                 let services = self
                     .nexus
                     .datastore()
@@ -227,6 +223,8 @@ where
                         0,
                     )
                     .to_string(),
+
+                    // TODO: This is wrong! needs a separate address for Nexus
                     external_address: SocketAddrV6::new(
                         address,
                         NEXUS_EXTERNAL_PORT,
@@ -262,36 +260,6 @@ where
         }
     }
 
-    // Provision the services within the database.
-    async fn provision_rack_service(
-        &self,
-        opctx: &OpContext,
-        kind: ServiceKind,
-        desired_count: u32,
-    ) -> Result<Vec<Service>, Error> {
-        self.nexus
-            .datastore()
-            .ensure_rack_service(
-                opctx,
-                self.nexus.rack_id(),
-                kind,
-                desired_count,
-            )
-            .await
-    }
-
-    // Provision the services within the database.
-    async fn provision_dns_service(
-        &self,
-        opctx: &OpContext,
-        desired_count: u32,
-    ) -> Result<Vec<Service>, Error> {
-        self.nexus
-            .datastore()
-            .ensure_dns_service(opctx, self.nexus.rack_subnet(), desired_count)
-            .await
-    }
-
     async fn ensure_services_provisioned(
         &self,
         opctx: &OpContext,
@@ -305,8 +273,11 @@ where
                 ServiceRedundancy::PerRack(desired_count) => {
                     svcs.extend_from_slice(
                         &self
-                            .provision_rack_service(
+                            .nexus
+                            .datastore()
+                            .ensure_rack_service(
                                 opctx,
+                                self.nexus.rack_id(),
                                 expected_svc.kind,
                                 desired_count,
                             )
@@ -316,7 +287,26 @@ where
                 ServiceRedundancy::DnsPerAz(desired_count) => {
                     svcs.extend_from_slice(
                         &self
-                            .provision_dns_service(opctx, desired_count)
+                            .nexus
+                            .datastore()
+                            .ensure_dns_service(
+                                opctx,
+                                self.nexus.rack_subnet(),
+                                desired_count,
+                            )
+                            .await?,
+                    );
+                }
+                ServiceRedundancy::AllScrimlets => {
+                    svcs.extend_from_slice(
+                        &self
+                            .nexus
+                            .datastore()
+                            .ensure_scrimlet_service(
+                                opctx,
+                                self.nexus.rack_id(),
+                                expected_svc.kind,
+                            )
                             .await?,
                     );
                 }
@@ -512,7 +502,8 @@ mod test {
             0,
         );
         let sled_id = Uuid::new_v4();
-        let sled = Sled::new(sled_id, bogus_addr.clone(), rack_id);
+        let is_scrimlet = false;
+        let sled = Sled::new(sled_id, bogus_addr.clone(), is_scrimlet, rack_id);
         datastore.sled_upsert(sled).await.unwrap();
         sled_id
     }
@@ -739,15 +730,164 @@ mod test {
         test.cleanup().await;
     }
 
-    /*
     #[tokio::test]
-    async fn test_provision_service_per_rack() {
-        todo!();
+    async fn test_provision_oximeter_service_per_rack() {
+        let test =
+            ProvisionTest::new("test_provision_oximeter_service_per_rack")
+                .await;
+
+        let rack_subnet = Ipv6Subnet::new(Ipv6Addr::LOCALHOST);
+        let nexus = FakeNexus::new(test.datastore.clone(), rack_subnet);
+        let dns_updater = FakeDnsUpdater::new();
+        let service_balancer = ServiceBalancer::new(
+            test.logctx.log.clone(),
+            nexus.clone(),
+            dns_updater.clone(),
+        );
+
+        // Setup: Create three sleds, with the goal of putting services on two
+        // of them.
+        const SLED_COUNT: u32 = 3;
+        const SERVICE_COUNT: u32 = 2;
+        let mut sleds = vec![];
+        for _ in 0..SLED_COUNT {
+            sleds
+                .push(create_test_sled(nexus.rack_id(), &test.datastore).await);
+        }
+        let expected_services = [ExpectedService {
+            kind: ServiceKind::Oximeter,
+            redundancy: ServiceRedundancy::PerRack(SERVICE_COUNT),
+        }];
+
+        // Request the services
+        service_balancer
+            .ensure_services_provisioned(&test.opctx, &expected_services)
+            .await
+            .unwrap();
+
+        // Observe the service on SERVICE_COUNT of the SLED_COUNT sleds.
+        let mut observed_service_count = 0;
+        for sled_id in &sleds {
+            let sled = nexus.sled_client(&sled_id).await.unwrap();
+            let requests = sled.service_requests();
+
+            match requests.len() {
+                0 => (), // Ignore the sleds where nothing was provisioned
+                1 => {
+                    assert_eq!(requests[0].name, "oximeter");
+                    assert!(matches!(
+                        requests[0].service_type,
+                        SledAgentTypes::ServiceType::Oximeter
+                    ));
+                    assert!(requests[0].gz_addresses.is_empty());
+                    observed_service_count += 1;
+                }
+                _ => {
+                    panic!("Unexpected requests (should only see one per sled): {:#?}", requests);
+                }
+            }
+        }
+        assert_eq!(observed_service_count, SERVICE_COUNT);
+
+        test.cleanup().await;
     }
 
     #[tokio::test]
-    async fn test_provision_service_dns_per_az() {
+    async fn test_provision_nexus_service_per_rack() {
+        let test =
+            ProvisionTest::new("test_provision_nexus_service_per_rack").await;
+
+        let rack_subnet = Ipv6Subnet::new(Ipv6Addr::LOCALHOST);
+        let nexus = FakeNexus::new(test.datastore.clone(), rack_subnet);
+        let dns_updater = FakeDnsUpdater::new();
+        let service_balancer = ServiceBalancer::new(
+            test.logctx.log.clone(),
+            nexus.clone(),
+            dns_updater.clone(),
+        );
+
+        // Setup: Create three sleds, with the goal of putting services on two
+        // of them.
+        const SLED_COUNT: u32 = 3;
+        const SERVICE_COUNT: u32 = 2;
+        let mut sleds = vec![];
+        for _ in 0..SLED_COUNT {
+            sleds
+                .push(create_test_sled(nexus.rack_id(), &test.datastore).await);
+        }
+        let expected_services = [ExpectedService {
+            kind: ServiceKind::Nexus,
+            redundancy: ServiceRedundancy::PerRack(SERVICE_COUNT),
+        }];
+
+        // Request the services
+        service_balancer
+            .ensure_services_provisioned(&test.opctx, &expected_services)
+            .await
+            .unwrap();
+
+        // Observe the service on SERVICE_COUNT of the SLED_COUNT sleds.
+        let mut observed_service_count = 0;
+        for sled_id in &sleds {
+            let sled = nexus.sled_client(&sled_id).await.unwrap();
+            let requests = sled.service_requests();
+            match requests.len() {
+                0 => (), // Ignore the sleds where nothing was provisioned
+                1 => {
+                    assert_eq!(requests[0].name, "nexus");
+                    match &requests[0].service_type {
+                        SledAgentTypes::ServiceType::Nexus {
+                            internal_address,
+                            external_address,
+                        } => {
+                            let internal_address = internal_address
+                                .parse::<SocketAddrV6>()
+                                .unwrap();
+                            let external_address = external_address
+                                .parse::<SocketAddrV6>()
+                                .unwrap();
+
+                            // TODO: This is currently failing! We need to make
+                            // the Nexus external IP come from an IP pool for
+                            // external addresses.
+                            assert_ne!(
+                                internal_address.ip(),
+                                external_address.ip()
+                            );
+
+                            // TODO: check ports too, maybe?
+                        }
+                        _ => panic!(
+                            "unexpected service type: {:?}",
+                            requests[0].service_type
+                        ),
+                    }
+                    assert!(requests[0].gz_addresses.is_empty());
+                    observed_service_count += 1;
+                }
+                _ => {
+                    panic!("Unexpected requests (should only see one per sled): {:#?}", requests);
+                }
+            }
+        }
+        assert_eq!(observed_service_count, SERVICE_COUNT);
+
+        test.cleanup().await;
+    }
+
+    /*
+
+    // TODO: Check for GZ?
+    #[tokio::test]
+    async fn test_provision_dns_service_per_az() {
         todo!();
     }
+
+    // TODO: Check for value of 'asic'?
+    #[tokio::test]
+    async fn test_provision_scrimlet_service() {
+        todo!();
+    }
+
     */
 }

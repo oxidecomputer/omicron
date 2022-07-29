@@ -140,6 +140,8 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
+    // List all sleds on a rack, with info about provisioned services of a
+    // particular type.
     fn sled_and_service_list_sync(
         conn: &mut DbConnection,
         rack_id: Uuid,
@@ -160,6 +162,8 @@ impl DataStore {
 
     /// Ensures that all Scrimlets in `rack_id` have the `kind` service
     /// provisioned.
+    ///
+    /// TODO: Returns what?
     pub async fn ensure_scrimlet_service(
         &self,
         opctx: &OpContext,
@@ -168,25 +172,61 @@ impl DataStore {
     ) -> Result<Vec<Service>, Error> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
 
-        #[derive(Debug)]
-        enum ServiceError {
-            NotEnoughSleds,
-            Other(Error),
-        }
-        type TxnError = TransactionError<ServiceError>;
+        type TxnError = TransactionError<Error>;
 
         self.pool()
             .transaction(move |conn| {
-                // TODO: We should implement this once we have a way of
-                // identifying sleds as scrimlets or not.
-                todo!()
+                let sleds_and_maybe_svcs =
+                    Self::sled_and_service_list_sync(conn, rack_id, kind)?;
+
+                // Split the set of returned sleds into "those with" and "those
+                // without" the requested service.
+                let (sleds_with_svc, sleds_without_svc): (Vec<_>, Vec<_>) =
+                    sleds_and_maybe_svcs
+                        .into_iter()
+                        .partition(|(_, maybe_svc)| maybe_svc.is_some());
+
+                // Identify sleds without services (targets for future
+                // allocation).
+                let sleds_without_svc =
+                    sleds_without_svc.into_iter().map(|(sled, _)| sled);
+
+                // Identify sleds with services (part of output).
+                let mut svcs: Vec<_> = sleds_with_svc
+                    .into_iter()
+                    .map(|(_, maybe_svc)| {
+                        maybe_svc.expect(
+                            "Should have filtered by sleds with the service",
+                        )
+                    })
+                    .collect();
+
+                // Add this service to all scrimlets without it.
+                for sled in sleds_without_svc {
+                    if sled.is_scrimlet() {
+                        let svc_id = Uuid::new_v4();
+                        let address =
+                            Self::next_ipv6_address_sync(conn, sled.id())
+                                .map_err(|e| TxnError::CustomError(e))?;
+
+                        let service = db::model::Service::new(
+                            svc_id,
+                            sled.id(),
+                            address,
+                            kind,
+                        );
+
+                        let svc = Self::service_upsert_sync(conn, service)
+                            .map_err(|e| TxnError::CustomError(e))?;
+                        svcs.push(svc);
+                    }
+                }
+
+                return Ok(svcs);
             })
             .await
             .map_err(|e| match e {
-                TxnError::CustomError(ServiceError::NotEnoughSleds) => {
-                    Error::unavail("Not enough sleds for service allocation")
-                }
-                TxnError::CustomError(ServiceError::Other(e)) => e,
+                TxnError::CustomError(e) => e,
                 TxnError::Pool(e) => {
                     public_error_from_diesel_pool(e, ErrorHandler::Server)
                 }
@@ -195,6 +235,8 @@ impl DataStore {
 
     /// Ensures that `redundancy` sleds within `rack_id` have the `kind` service
     /// provisioned.
+    ///
+    /// Returns all services which have been allocated within the rack.
     pub async fn ensure_rack_service(
         &self,
         opctx: &OpContext,
@@ -222,6 +264,7 @@ impl DataStore {
                     sleds_and_maybe_svcs
                         .into_iter()
                         .partition(|(_, maybe_svc)| maybe_svc.is_some());
+
                 // Identify sleds without services (targets for future
                 // allocation).
                 let mut sleds_without_svc =
@@ -280,6 +323,10 @@ impl DataStore {
             })
     }
 
+    /// Ensures that `redundancy` sleds within the `rack_subnet` have a DNS
+    /// service provisioned.
+    ///
+    /// TODO: Returns what?
     pub async fn ensure_dns_service(
         &self,
         opctx: &OpContext,
