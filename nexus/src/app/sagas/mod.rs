@@ -94,6 +94,7 @@ lazy_static! {
     // pub static ref ALL_TEMPLATES: BTreeMap<&'static str, Arc<dyn SagaTemplateGeneric<Arc<SagaContext>>>> = todo!();
 }
 
+// XXX-dap move into execute_saga?
 pub fn new_saga<N: NexusSaga>(
     nexus_saga: &N,
     params: N::Params,
@@ -109,6 +110,7 @@ fn make_action_registry() -> ActionRegistry {
     registry.register(Arc::clone(&*ACTION_GENERATE_ID));
 
     // XXX-dap register each of the NexusSaga impls
+    <disk_create::SagaDiskCreate as NexusSaga>::register_actions(&mut registry);
 
     registry
 }
