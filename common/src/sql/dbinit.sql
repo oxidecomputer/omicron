@@ -1167,12 +1167,10 @@ CREATE TABLE omicron.public.saga (
     id UUID PRIMARY KEY,
     /* unique id of the creator */
     creator UUID NOT NULL,
-    /* name of the saga template name being run */
-    template_name STRING(127) NOT NULL,
     /* time the saga was started */
     time_created TIMESTAMPTZ NOT NULL,
-    /* saga parameters */
-    saga_params JSONB NOT NULL,
+    /* saga DAG (includes params and name) */
+    saga_dag JSONB NOT NULL,
 
     /*
      * TODO:

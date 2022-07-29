@@ -184,9 +184,8 @@ impl FromSql<SagaCachedStateEnum, Pg> for SagaCachedState {
 pub struct Saga {
     pub id: SagaId,
     pub creator: SecId,
-    pub template_name: String,
     pub time_created: chrono::DateTime<chrono::Utc>,
-    pub saga_params: serde_json::Value,
+    pub saga_dag: serde_json::Value,
     pub saga_state: SagaCachedState,
     pub current_sec: Option<SecId>,
     pub adopt_generation: super::Generation,
@@ -196,13 +195,11 @@ pub struct Saga {
 impl Saga {
     pub fn new(id: SecId, params: steno::SagaCreateParams) -> Self {
         let now = chrono::Utc::now();
-        // XXX-dap need to use params.dag
         Self {
             id: params.id.into(),
             creator: id,
-            template_name: todo!(), // XXX-dap
             time_created: now,
-            saga_params: todo!(), // XXX-dap
+            saga_dag: params.dag,
             saga_state: params.state.into(),
             current_sec: Some(id),
             adopt_generation: Generation::new().into(),

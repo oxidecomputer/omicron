@@ -297,9 +297,8 @@ table! {
     saga (id) {
         id -> Uuid,
         creator -> Uuid,
-        template_name -> Text,
         time_created -> Timestamptz,
-        saga_params -> Jsonb,
+        saga_dag -> Jsonb,
         saga_state -> crate::saga_types::SagaCachedStateEnum,
         current_sec -> Nullable<Uuid>,
         adopt_generation -> Int8,
