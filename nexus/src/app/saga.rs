@@ -19,10 +19,11 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
 use std::sync::Arc;
+use steno::DagBuilder;
 use steno::SagaDag;
 use steno::SagaId;
+use steno::SagaName;
 use steno::SagaResultOk;
-use steno::SagaType;
 use uuid::Uuid;
 
 impl super::Nexus {
@@ -55,7 +56,7 @@ impl super::Nexus {
     ) -> LookupResult<external::Saga> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         self.sec_client
-            .saga_get(steno::SagaId::from(id))
+            .saga_get(SagaId::from(id))
             .await
             .map(external::Saga::from)
             .map(Ok)
@@ -70,10 +71,10 @@ impl super::Nexus {
         params: N::Params,
     ) -> Result<SagaResultOk, Error> {
         let saga = {
-            let builder = steno::DagBuilder::new(steno::SagaName::new(N::NAME));
+            let builder = DagBuilder::new(SagaName::new(N::NAME));
             let dag = N::make_saga_dag(&params, builder)?;
             let params = serde_json::to_value(&params)?;
-            steno::SagaDag::new(dag, params)
+            SagaDag::new(dag, params)
         };
 
         let saga_id = SagaId(Uuid::new_v4());

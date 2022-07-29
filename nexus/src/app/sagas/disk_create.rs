@@ -46,27 +46,27 @@ pub struct Params {
 
 lazy_static! {
     static ref CREATE_DISK_RECORD: NexusAction = ActionFunc::new_action(
-        "disk.create_disk_record",
+        "disk-create.create-disk-record",
         sdc_create_disk_record,
         sdc_create_disk_record_undo
     );
     static ref REGIONS_ALLOC: NexusAction = ActionFunc::new_action(
-        "disk.regions_alloc",
+        "disk-create.regions-alloc",
         sdc_alloc_regions,
         sdc_alloc_regions_undo
     );
     static ref REGIONS_ENSURE: NexusAction = ActionFunc::new_action(
-        "disk.regions_ensure",
+        "disk-create.regions-ensure",
         sdc_regions_ensure,
         sdc_regions_ensure_undo
     );
     static ref CREATE_VOLUME_RECORD: NexusAction = ActionFunc::new_action(
-        "disk.create_volume_record",
+        "disk-create.create-volume-record",
         sdc_create_volume_record,
         sdc_create_volume_record_undo,
     );
     static ref FINALIZE_DISK_RECORD: NexusAction = new_action_noop_undo(
-        "disk.finalize_disk_record",
+        "disk-create.finalize-disk-record",
         sdc_finalize_disk_record
     );
 }
@@ -88,7 +88,7 @@ impl NexusSaga for SagaDiskCreate {
     }
 
     fn make_saga_dag(
-        params: &Self::Params,
+        _params: &Self::Params,
         mut builder: steno::DagBuilder,
     ) -> Result<steno::Dag, SagaInitError> {
         builder.append(Node::action(

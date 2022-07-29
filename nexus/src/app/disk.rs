@@ -167,7 +167,6 @@ impl super::Nexus {
             project_id: authz_project.id(),
             create_params: params.clone(),
         };
-
         let saga_outputs = self
             .execute_saga::<sagas::disk_create::SagaDiskCreate>(saga_params)
             .await?;
@@ -337,16 +336,10 @@ impl super::Nexus {
             .lookup_for(authz::Action::Delete)
             .await?;
 
-        todo!(); // XXX-dap
-                 //let saga_params =
-                 //    Arc::new(sagas::disk_delete::Params { disk_id: authz_disk.id() });
-                 //self.execute_saga(
-                 //    Arc::clone(&sagas::disk_delete::SAGA_TEMPLATE),
-                 //    sagas::disk_delete::SAGA_NAME,
-                 //    saga_params,
-                 //)
-                 //.await?;
-
+        let saga_params =
+            sagas::disk_delete::Params { disk_id: authz_disk.id() };
+        self.execute_saga::<sagas::disk_delete::SagaDiskDelete>(saga_params)
+            .await?;
         Ok(())
     }
 

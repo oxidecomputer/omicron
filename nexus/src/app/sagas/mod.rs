@@ -12,7 +12,6 @@
 use crate::authn;
 use crate::saga_interface::SagaContext;
 use lazy_static::lazy_static;
-use std::collections::BTreeMap;
 use std::sync::Arc;
 use steno::new_action_noop_undo;
 use steno::ActionContext;
@@ -21,8 +20,9 @@ use steno::SagaType;
 use thiserror::Error;
 use uuid::Uuid;
 
+// XXX-dap finish converting
 pub mod disk_create;
-// pub mod disk_delete; // XXX-dap
+pub mod disk_delete;
 // pub mod instance_create;
 // pub mod instance_migrate;
 
@@ -86,12 +86,8 @@ impl From<SagaInitError> for omicron_common::api::external::Error {
 lazy_static! {
     pub (super) static ref ACTION_GENERATE_ID: NexusAction =
         new_action_noop_undo("common.uuid_generate", saga_generate_uuid);
-
     pub static ref ACTION_REGISTRY: Arc<ActionRegistry> =
         Arc::new(make_action_registry());
-
-    // XXX-dap replace with all NexusSaga impls
-    // pub static ref ALL_TEMPLATES: BTreeMap<&'static str, Arc<dyn SagaTemplateGeneric<Arc<SagaContext>>>> = todo!();
 }
 
 fn make_action_registry() -> ActionRegistry {
@@ -103,34 +99,6 @@ fn make_action_registry() -> ActionRegistry {
 
     registry
 }
-
-// fn all_templates(
-// ) -> BTreeMap<&'static str, Arc<dyn SagaTemplateGeneric<Arc<SagaContext>>>> {
-//     vec![
-//         (
-//             instance_create::SAGA_NAME,
-//             Arc::clone(&instance_create::SAGA_TEMPLATE)
-//                 as Arc<dyn SagaTemplateGeneric<Arc<SagaContext>>>,
-//         ),
-//         (
-//             instance_migrate::SAGA_NAME,
-//             Arc::clone(&instance_migrate::SAGA_TEMPLATE)
-//                 as Arc<dyn SagaTemplateGeneric<Arc<SagaContext>>>,
-//         ),
-//         (
-//             disk_create::SAGA_NAME,
-//             Arc::clone(&disk_create::SAGA_TEMPLATE)
-//                 as Arc<dyn SagaTemplateGeneric<Arc<SagaContext>>>,
-//         ),
-//         (
-//             disk_delete::SAGA_NAME,
-//             Arc::clone(&disk_delete::SAGA_TEMPLATE)
-//                 as Arc<dyn SagaTemplateGeneric<Arc<SagaContext>>>,
-//         ),
-//     ]
-//     .into_iter()
-//     .collect()
-// }
 
 pub(super) async fn saga_generate_uuid<UserType: SagaType>(
     _: ActionContext<UserType>,
