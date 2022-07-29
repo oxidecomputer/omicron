@@ -901,7 +901,7 @@ impl From<steno::SagaView> for Saga {
 pub enum SagaState {
     Running,
     Succeeded,
-    Failed { error_node_name: String, error_info: SagaErrorInfo },
+    Failed { error_node_name: steno::NodeName, error_info: SagaErrorInfo },
 }
 
 #[derive(Clone, Debug, Serialize, JsonSchema)]

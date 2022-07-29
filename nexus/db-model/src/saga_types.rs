@@ -196,12 +196,13 @@ pub struct Saga {
 impl Saga {
     pub fn new(id: SecId, params: steno::SagaCreateParams) -> Self {
         let now = chrono::Utc::now();
+        // XXX-dap need to use params.dag
         Self {
             id: params.id.into(),
             creator: id,
-            template_name: params.template_name,
+            template_name: todo!(), // XXX-dap
             time_created: now,
-            saga_params: params.saga_params,
+            saga_params: todo!(), // XXX-dap
             saga_state: params.state.into(),
             current_sec: Some(id),
             adopt_generation: Generation::new().into(),

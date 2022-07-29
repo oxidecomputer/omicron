@@ -17,9 +17,9 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
 use std::sync::Arc;
+use steno::SagaDag;
 use steno::SagaId;
 use steno::SagaResultOk;
-use steno::SagaTemplate;
 use steno::SagaType;
 use uuid::Uuid;
 
@@ -65,57 +65,54 @@ impl super::Nexus {
     /// Given a saga template and parameters, create a new saga and execute it.
     pub(crate) async fn execute_saga<P, S>(
         self: &Arc<Self>,
-        saga_template: Arc<SagaTemplate<S>>,
-        template_name: &str,
+        saga: SagaDag,
         saga_params: Arc<P>,
     ) -> Result<SagaResultOk, Error>
     where
-        S: SagaType<
-            ExecContextType = Arc<SagaContext>,
-            SagaParamsType = Arc<P>,
-        >,
+        S: SagaType<ExecContextType = Arc<SagaContext>>,
         // TODO-cleanup The bound `P: Serialize` should not be necessary because
         // SagaParamsType must already impl Serialize.
         P: serde::Serialize,
     {
-        let saga_id = SagaId(Uuid::new_v4());
-        let saga_logger =
-            self.log.new(o!("template_name" => template_name.to_owned()));
-        let saga_context = Arc::new(Arc::new(SagaContext::new(
-            Arc::clone(self),
-            saga_logger,
-            Arc::clone(&self.authz),
-        )));
-        let future = self
-            .sec_client
-            .saga_create(
-                saga_id,
-                saga_context,
-                saga_template,
-                template_name.to_owned(),
-                saga_params,
-            )
-            .await
-            .context("creating saga")
-            .map_err(|error| {
-                // TODO-error This could be a service unavailable error,
-                // depending on the failure mode.  We need more information from
-                // Steno.
-                Error::internal_error(&format!("{:#}", error))
-            })?;
+        todo!(); // XXX-dap
+        //let saga_id = SagaId(Uuid::new_v4());
+        //let saga_logger =
+        //    self.log.new(o!("template_name" => template_name.to_owned()));
+        //let saga_context = Arc::new(Arc::new(SagaContext::new(
+        //    Arc::clone(self),
+        //    saga_logger,
+        //    Arc::clone(&self.authz),
+        //)));
+        //let future = self
+        //    .sec_client
+        //    .saga_create(
+        //        saga_id,
+        //        saga_context,
+        //        saga_template,
+        //        template_name.to_owned(),
+        //        saga_params,
+        //    )
+        //    .await
+        //    .context("creating saga")
+        //    .map_err(|error| {
+        //        // TODO-error This could be a service unavailable error,
+        //        // depending on the failure mode.  We need more information from
+        //        // Steno.
+        //        Error::internal_error(&format!("{:#}", error))
+        //    })?;
 
-        self.sec_client
-            .saga_start(saga_id)
-            .await
-            .context("starting saga")
-            .map_err(|error| Error::internal_error(&format!("{:#}", error)))?;
+        //self.sec_client
+        //    .saga_start(saga_id)
+        //    .await
+        //    .context("starting saga")
+        //    .map_err(|error| Error::internal_error(&format!("{:#}", error)))?;
 
-        let result = future.await;
-        result.kind.map_err(|saga_error| {
-            saga_error.error_source.convert::<Error>().unwrap_or_else(|e| {
-                // TODO-error more context would be useful
-                Error::InternalError { internal_message: e.to_string() }
-            })
-        })
+        //let result = future.await;
+        //result.kind.map_err(|saga_error| {
+        //    saga_error.error_source.convert::<Error>().unwrap_or_else(|e| {
+        //        // TODO-error more context would be useful
+        //        Error::InternalError { internal_message: e.to_string() }
+        //    })
+        //})
     }
 }

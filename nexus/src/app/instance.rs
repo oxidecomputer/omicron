@@ -120,26 +120,27 @@ impl super::Nexus {
             });
         }
 
-        let saga_params = Arc::new(sagas::instance_create::Params {
-            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
-            organization_name: organization_name.clone().into(),
-            project_name: project_name.clone().into(),
-            project_id: authz_project.id(),
-            create_params: params.clone(),
-        });
+        todo!(); // XXX-dap
+        //let saga_params = Arc::new(sagas::instance_create::Params {
+        //    serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+        //    organization_name: organization_name.clone().into(),
+        //    project_name: project_name.clone().into(),
+        //    project_id: authz_project.id(),
+        //    create_params: params.clone(),
+        //});
 
-        let saga_outputs = self
-            .execute_saga(
-                Arc::clone(&sagas::instance_create::SAGA_TEMPLATE),
-                sagas::instance_create::SAGA_NAME,
-                saga_params,
-            )
-            .await?;
-        // TODO-error more context would be useful
-        let instance_id =
-            saga_outputs.lookup_output::<Uuid>("instance_id").map_err(|e| {
-                Error::InternalError { internal_message: e.to_string() }
-            })?;
+        // let saga_outputs = self
+        //     .execute_saga(
+        //         Arc::clone(&sagas::instance_create::SAGA_TEMPLATE),
+        //         sagas::instance_create::SAGA_NAME,
+        //         saga_params,
+        //     )
+        //     .await?;
+        // // TODO-error more context would be useful
+        // let instance_id =
+        //     saga_outputs.lookup_output::<Uuid>("instance_id").map_err(|e| {
+        //         Error::InternalError { internal_message: e.to_string() }
+        //     })?;
         // TODO-correctness TODO-robustness TODO-design It's not quite correct
         // to take this instance id and look it up again.  It's possible that
         // it's been modified or even deleted since the saga executed.  In that
@@ -175,11 +176,12 @@ impl super::Nexus {
         //
         // TODO Even worse, post-authz, we do two lookups here instead of one.
         // Maybe sagas should be able to emit `authz::Instance`-type objects.
-        let (.., db_instance) = LookupPath::new(opctx, &self.db_datastore)
-            .instance_id(instance_id)
-            .fetch()
-            .await?;
-        Ok(db_instance)
+
+        // let (.., db_instance) = LookupPath::new(opctx, &self.db_datastore)
+        //     .instance_id(instance_id)
+        //     .fetch()
+        //     .await?;
+        // Ok(db_instance)
     }
 
     pub async fn project_list_instances(
@@ -279,23 +281,25 @@ impl super::Nexus {
             .lookup_for(authz::Action::Modify)
             .await?;
 
-        // Kick off the migration saga
-        let saga_params = Arc::new(sagas::instance_migrate::Params {
-            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
-            instance_id: authz_instance.id(),
-            migrate_params: params,
-        });
-        self.execute_saga(
-            Arc::clone(&sagas::instance_migrate::SAGA_TEMPLATE),
-            sagas::instance_migrate::SAGA_NAME,
-            saga_params,
-        )
-        .await?;
+        todo!(); // XXX-dap
 
-        // TODO correctness TODO robustness TODO design
-        // Should we lookup the instance again here?
-        // See comment in project_create_instance.
-        self.db_datastore.instance_refetch(opctx, &authz_instance).await
+        // // Kick off the migration saga
+        // let saga_params = Arc::new(sagas::instance_migrate::Params {
+        //     serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+        //     instance_id: authz_instance.id(),
+        //     migrate_params: params,
+        // });
+        // self.execute_saga(
+        //     Arc::clone(&sagas::instance_migrate::SAGA_TEMPLATE),
+        //     sagas::instance_migrate::SAGA_NAME,
+        //     saga_params,
+        // )
+        // .await?;
+
+        // // TODO correctness TODO robustness TODO design
+        // // Should we lookup the instance again here?
+        // // See comment in project_create_instance.
+        // self.db_datastore.instance_refetch(opctx, &authz_instance).await
     }
 
     /// Idempotently place the instance in a 'Migrating' state.

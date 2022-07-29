@@ -42,9 +42,9 @@ impl steno::SecStore for CockroachDbSecStore {
         &self,
         create_params: steno::SagaCreateParams,
     ) -> Result<(), anyhow::Error> {
+        // XXX-dap include saga name in log
         info!(&self.log, "creating saga";
             "saga_id" => create_params.id.to_string(),
-            "template_name" => &create_params.template_name,
         );
         self.datastore
             .saga_create(&db::saga_types::Saga::new(self.sec_id, create_params))

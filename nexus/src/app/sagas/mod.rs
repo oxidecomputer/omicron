@@ -14,50 +14,87 @@ use crate::saga_interface::SagaContext;
 use lazy_static::lazy_static;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use steno::new_action_noop_undo;
 use steno::ActionContext;
 use steno::ActionError;
-use steno::SagaTemplateGeneric;
 use steno::SagaType;
 use uuid::Uuid;
 
 pub mod disk_create;
-pub mod disk_delete;
-pub mod instance_create;
-pub mod instance_migrate;
+// pub mod disk_delete; // XXX-dap
+// pub mod instance_create;
+// pub mod instance_migrate;
 
-// We'll need a richer mechanism for registering sagas, but this works for now.
+pub type ActionRegistry = steno::ActionRegistry<NexusSagaType>;
+
+#[derive(Debug)]
+pub struct NexusSagaType;
+impl steno::SagaType for NexusSagaType {
+    type ExecContextType = Arc<SagaContext>;
+}
+
+pub(super) trait NexusSaga {
+    const NAME: &'static str;
+
+    type Params: serde::Serialize
+        + serde::de::DeserializeOwned
+        + std::fmt::Debug;
+
+    fn register_actions(
+        registry: &mut ActionRegistry,
+    ) -> Result<(), anyhow::Error>;
+
+    fn make_saga(
+        params: &Self::Params,
+    ) -> Result<steno::SagaDag, anyhow::Error>;
+}
+
 lazy_static! {
-    pub static ref ALL_TEMPLATES: BTreeMap<&'static str, Arc<dyn SagaTemplateGeneric<Arc<SagaContext>>>> =
-        all_templates();
+    pub (super) static ref ACTION_GENERATE_ID:
+        Arc<dyn steno::Action<NexusSagaType>> =
+        new_action_noop_undo("generate-uuid", saga_generate_uuid);
+
+    pub static ref ACTION_REGISTRY: ActionRegistry = make_action_registry();
+    // XXX-dap replace with all NexusSaga impls
+    // pub static ref ALL_TEMPLATES: BTreeMap<&'static str, Arc<dyn SagaTemplateGeneric<Arc<SagaContext>>>> = todo!();
 }
 
-fn all_templates(
-) -> BTreeMap<&'static str, Arc<dyn SagaTemplateGeneric<Arc<SagaContext>>>> {
-    vec![
-        (
-            instance_create::SAGA_NAME,
-            Arc::clone(&instance_create::SAGA_TEMPLATE)
-                as Arc<dyn SagaTemplateGeneric<Arc<SagaContext>>>,
-        ),
-        (
-            instance_migrate::SAGA_NAME,
-            Arc::clone(&instance_migrate::SAGA_TEMPLATE)
-                as Arc<dyn SagaTemplateGeneric<Arc<SagaContext>>>,
-        ),
-        (
-            disk_create::SAGA_NAME,
-            Arc::clone(&disk_create::SAGA_TEMPLATE)
-                as Arc<dyn SagaTemplateGeneric<Arc<SagaContext>>>,
-        ),
-        (
-            disk_delete::SAGA_NAME,
-            Arc::clone(&disk_delete::SAGA_TEMPLATE)
-                as Arc<dyn SagaTemplateGeneric<Arc<SagaContext>>>,
-        ),
-    ]
-    .into_iter()
-    .collect()
+fn make_action_registry() -> ActionRegistry {
+    let mut registry = steno::ActionRegistry::new();
+    registry.register(Arc::clone(&*ACTION_GENERATE_ID));
+
+    // XXX-dap register each of the NexusSaga impls
+
+    registry
 }
+
+// fn all_templates(
+// ) -> BTreeMap<&'static str, Arc<dyn SagaTemplateGeneric<Arc<SagaContext>>>> {
+//     vec![
+//         (
+//             instance_create::SAGA_NAME,
+//             Arc::clone(&instance_create::SAGA_TEMPLATE)
+//                 as Arc<dyn SagaTemplateGeneric<Arc<SagaContext>>>,
+//         ),
+//         (
+//             instance_migrate::SAGA_NAME,
+//             Arc::clone(&instance_migrate::SAGA_TEMPLATE)
+//                 as Arc<dyn SagaTemplateGeneric<Arc<SagaContext>>>,
+//         ),
+//         (
+//             disk_create::SAGA_NAME,
+//             Arc::clone(&disk_create::SAGA_TEMPLATE)
+//                 as Arc<dyn SagaTemplateGeneric<Arc<SagaContext>>>,
+//         ),
+//         (
+//             disk_delete::SAGA_NAME,
+//             Arc::clone(&disk_delete::SAGA_TEMPLATE)
+//                 as Arc<dyn SagaTemplateGeneric<Arc<SagaContext>>>,
+//         ),
+//     ]
+//     .into_iter()
+//     .collect()
+// }
 
 pub(super) async fn saga_generate_uuid<UserType: SagaType>(
     _: ActionContext<UserType>,

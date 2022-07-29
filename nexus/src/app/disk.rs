@@ -166,19 +166,22 @@ impl super::Nexus {
             project_id: authz_project.id(),
             create_params: params.clone(),
         });
-        let saga_outputs = self
-            .execute_saga(
-                Arc::clone(&sagas::disk_create::SAGA_TEMPLATE),
-                sagas::disk_create::SAGA_NAME,
-                saga_params,
-            )
-            .await?;
-        let disk_created = saga_outputs
-            .lookup_output::<db::model::Disk>("created_disk")
-            .map_err(|e| Error::InternalError {
-                internal_message: e.to_string(),
-            })?;
-        Ok(disk_created)
+
+        todo!(); // XXX-dap
+
+        // let saga_outputs = self
+        //     .execute_saga(
+        //         Arc::clone(&sagas::disk_create::SAGA_TEMPLATE),
+        //         sagas::disk_create::SAGA_NAME,
+        //         saga_params,
+        //     )
+        //     .await?;
+        // let disk_created = saga_outputs
+        //     .lookup_output::<db::model::Disk>("created_disk")
+        //     .map_err(|e| Error::InternalError {
+        //         internal_message: e.to_string(),
+        //     })?;
+        // Ok(disk_created)
     }
 
     pub async fn project_list_disks(
@@ -340,14 +343,15 @@ impl super::Nexus {
             .lookup_for(authz::Action::Delete)
             .await?;
 
-        let saga_params =
-            Arc::new(sagas::disk_delete::Params { disk_id: authz_disk.id() });
-        self.execute_saga(
-            Arc::clone(&sagas::disk_delete::SAGA_TEMPLATE),
-            sagas::disk_delete::SAGA_NAME,
-            saga_params,
-        )
-        .await?;
+        todo!(); // XXX-dap
+                 //let saga_params =
+                 //    Arc::new(sagas::disk_delete::Params { disk_id: authz_disk.id() });
+                 //self.execute_saga(
+                 //    Arc::clone(&sagas::disk_delete::SAGA_TEMPLATE),
+                 //    sagas::disk_delete::SAGA_NAME,
+                 //    saga_params,
+                 //)
+                 //.await?;
 
         Ok(())
     }

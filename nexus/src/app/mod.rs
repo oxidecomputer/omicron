@@ -45,7 +45,7 @@ mod vpc_subnet;
 
 // Sagas are not part of the "Nexus" implementation, but they are
 // application logic.
-mod sagas;
+pub mod sagas; // XXX-dap we should probably move ActionRegistry and other primitives into something that can be accessed by saga_recovery.rs.
 
 // TODO: When referring to API types, we should try to include
 // the prefix unless it is unambiguous.
@@ -215,7 +215,7 @@ impl Nexus {
             ))),
             db_datastore,
             Arc::clone(&sec_client),
-            &sagas::ALL_TEMPLATES,
+            &sagas::ACTION_REGISTRY,
         );
 
         *nexus.recovery_task.lock().unwrap() = Some(recovery_task);
