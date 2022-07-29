@@ -13,6 +13,7 @@ use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::create_ip_pool;
 use nexus_test_utils::resource_helpers::create_organization;
 use nexus_test_utils::resource_helpers::create_project;
+use nexus_test_utils::resource_helpers::create_silo;
 use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils::ControlPlaneTestContext;
@@ -23,9 +24,16 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::Name;
+use omicron_nexus::context::OpContext;
+use omicron_nexus::db;
+use omicron_nexus::db::identity::Resource;
+use omicron_nexus::db::lookup::LookupPath;
 use omicron_nexus::external_api::params;
 use omicron_nexus::external_api::views;
+use omicron_nexus::external_api::shared;
+use omicron_common::api::external;
 use uuid::Uuid;
+use chrono::Utc;
 
 use httptest::{matchers::*, responders::*, Expectation, ServerBuilder};
 
@@ -366,3 +374,65 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     .await
     .unwrap();
 }
+
+// Test that the code that Saga nodes call is idempotent
+
+#[nexus_test]
+async fn test_create_snapshot_record_idempotent(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.apictx.nexus;
+    let datastore = nexus.datastore();
+
+    const SILO_NAME: &str = "snapshot-silo";
+    let silo = create_silo(
+        &client,
+        SILO_NAME,
+        true,
+        shared::UserProvisionType::Fixed,
+    ).await;
+
+    let snapshot = db::model::Snapshot {
+        identity: db::model::SnapshotIdentity {
+            id: Uuid::new_v4(),
+            name: external::Name::try_from("snapshot".to_string()).unwrap().into(),
+            description: "snapshot".into(),
+
+            time_created: Utc::now(),
+            time_modified: Utc::now(),
+            time_deleted: None,
+        },
+
+        project_id: Uuid::new_v4(),
+        disk_id: Uuid::new_v4(),
+        volume_id: Uuid::new_v4(),
+
+        gen: db::model::Generation::new(),
+        state: db::model::SnapshotState::Creating,
+        block_size: db::model::BlockSize::Traditional,
+        size: external::ByteCount::try_from(1024u32).unwrap().into(),
+    };
+
+    let opctx = OpContext::for_tests(
+        cptestctx.logctx.log.new(o!()),
+        datastore.clone(),
+    );
+
+    let (authz_silo, ..) = LookupPath::new(&opctx, &datastore)
+        .silo_id(silo.identity.id)
+        .fetch()
+        .await
+        .unwrap();
+
+    let snapshot_created_1 = datastore
+        .project_create_snapshot(&opctx, &authz_silo, snapshot.clone())
+        .await
+        .unwrap();
+
+    let snapshot_created_2 = datastore
+        .project_create_snapshot(&opctx, &authz_silo, snapshot)
+        .await
+        .unwrap();
+
+    assert_eq!(snapshot_created_1.id(), snapshot_created_2.id());
+}
+

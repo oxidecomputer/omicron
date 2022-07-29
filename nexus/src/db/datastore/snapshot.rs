@@ -26,7 +26,6 @@ use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
-use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::bail_unless;
 use uuid::Uuid;
@@ -43,7 +42,6 @@ impl DataStore {
         use db::schema::snapshot::dsl;
 
         let gen = snapshot.gen;
-        let name = snapshot.name().clone();
         let snapshot: Snapshot = diesel::insert_into(dsl::snapshot)
             .values(snapshot)
             .on_conflict(dsl::id)
@@ -54,10 +52,7 @@ impl DataStore {
             .map_err(|e| {
                 public_error_from_diesel_pool(
                     e,
-                    ErrorHandler::Conflict(
-                        ResourceType::Snapshot,
-                        name.as_str(),
-                    ),
+                    ErrorHandler::Server,
                 )
             })?;
 
