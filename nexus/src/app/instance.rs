@@ -121,13 +121,13 @@ impl super::Nexus {
         }
 
         todo!(); // XXX-dap
-        //let saga_params = Arc::new(sagas::instance_create::Params {
-        //    serialized_authn: authn::saga::Serialized::for_opctx(opctx),
-        //    organization_name: organization_name.clone().into(),
-        //    project_name: project_name.clone().into(),
-        //    project_id: authz_project.id(),
-        //    create_params: params.clone(),
-        //});
+                 //let saga_params = Arc::new(sagas::instance_create::Params {
+                 //    serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+                 //    organization_name: organization_name.clone().into(),
+                 //    project_name: project_name.clone().into(),
+                 //    project_id: authz_project.id(),
+                 //    create_params: params.clone(),
+                 //});
 
         // let saga_outputs = self
         //     .execute_saga(
@@ -281,25 +281,21 @@ impl super::Nexus {
             .lookup_for(authz::Action::Modify)
             .await?;
 
-        todo!(); // XXX-dap
+        // Kick off the migration saga
+        let saga_params = sagas::instance_migrate::Params {
+            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+            instance_id: authz_instance.id(),
+            migrate_params: params,
+        };
+        self.execute_saga::<sagas::instance_migrate::SagaInstanceMigrate>(
+            saga_params,
+        )
+        .await?;
 
-        // // Kick off the migration saga
-        // let saga_params = Arc::new(sagas::instance_migrate::Params {
-        //     serialized_authn: authn::saga::Serialized::for_opctx(opctx),
-        //     instance_id: authz_instance.id(),
-        //     migrate_params: params,
-        // });
-        // self.execute_saga(
-        //     Arc::clone(&sagas::instance_migrate::SAGA_TEMPLATE),
-        //     sagas::instance_migrate::SAGA_NAME,
-        //     saga_params,
-        // )
-        // .await?;
-
-        // // TODO correctness TODO robustness TODO design
-        // // Should we lookup the instance again here?
-        // // See comment in project_create_instance.
-        // self.db_datastore.instance_refetch(opctx, &authz_instance).await
+        // TODO correctness TODO robustness TODO design
+        // Should we lookup the instance again here?
+        // See comment in project_create_instance.
+        self.db_datastore.instance_refetch(opctx, &authz_instance).await
     }
 
     /// Idempotently place the instance in a 'Migrating' state.

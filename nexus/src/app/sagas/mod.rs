@@ -24,7 +24,7 @@ use uuid::Uuid;
 pub mod disk_create;
 pub mod disk_delete;
 // pub mod instance_create;
-// pub mod instance_migrate;
+pub mod instance_migrate;
 
 #[derive(Debug)]
 pub struct NexusSagaType;
@@ -84,7 +84,7 @@ impl From<SagaInitError> for omicron_common::api::external::Error {
 }
 
 lazy_static! {
-    pub (super) static ref ACTION_GENERATE_ID: NexusAction =
+    pub(super) static ref ACTION_GENERATE_ID: NexusAction =
         new_action_noop_undo("common.uuid_generate", saga_generate_uuid);
     pub static ref ACTION_REGISTRY: Arc<ActionRegistry> =
         Arc::new(make_action_registry());
@@ -118,9 +118,7 @@ pub(super) trait AuthenticatedSagaParams {
 /// parameter types which have a field called `serialized_authn`.
 macro_rules! impl_authenticated_saga_params {
     ($typ:ty) => {
-        impl crate::app::sagas::AuthenticatedSagaParams
-            for <$typ as SagaType>::SagaParamsType
-        {
+        impl crate::app::sagas::AuthenticatedSagaParams for $typ {
             fn serialized_authn(&self) -> &authn::saga::Serialized {
                 &self.serialized_authn
             }
