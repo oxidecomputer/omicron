@@ -4,18 +4,14 @@
 
 //! Handles recovery of sagas
 
-use crate::app::sagas::ActionRegistry;
 use crate::context::OpContext;
 use crate::db;
-use crate::saga_interface::SagaContext;
 use futures::{future::BoxFuture, TryFutureExt};
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::backoff::internal_service_policy;
 use omicron_common::backoff::retry_notify;
 use omicron_common::backoff::BackoffError;
-use std::collections::BTreeMap;
-use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;

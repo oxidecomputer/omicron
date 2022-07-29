@@ -4,6 +4,7 @@
 
 //! Saga management and execution
 
+use super::sagas::NexusSaga;
 use super::sagas::ACTION_REGISTRY;
 use crate::authz;
 use crate::context::OpContext;
@@ -64,26 +65,17 @@ impl super::Nexus {
     }
 
     /// Given a saga template and parameters, create a new saga and execute it.
-    pub(crate) async fn execute_saga<P, S>(
+    pub(crate) async fn execute_saga<N: NexusSaga>(
         self: &Arc<Self>,
-        saga: SagaDag,
-        saga_params: Arc<P>,
-    ) -> Result<SagaResultOk, Error>
-    where
-        S: SagaType<ExecContextType = Arc<SagaContext>>,
-        // TODO-cleanup The bound `P: Serialize` should not be necessary because
-        // SagaParamsType must already impl Serialize.
-        P: serde::Serialize,
-    {
-        todo!();
-    }
-
-    /// Given a saga template and parameters, create a new saga and execute it.
-    pub(crate) async fn execute_saga_new(
-        // XXX-dap rename this function once all callers are converted
-        self: &Arc<Self>,
-        saga: steno::SagaDag,
+        params: N::Params,
     ) -> Result<SagaResultOk, Error> {
+        let saga = {
+            let builder = steno::DagBuilder::new(steno::SagaName::new(N::NAME));
+            let dag = N::make_saga_dag(&params, builder)?;
+            let params = serde_json::to_value(&params)?;
+            steno::SagaDag::new(dag, params)
+        };
+
         let saga_id = SagaId(Uuid::new_v4());
         let saga_logger =
             self.log.new(o!("saga_name" => saga.saga_name().to_string()));

@@ -94,17 +94,6 @@ lazy_static! {
     // pub static ref ALL_TEMPLATES: BTreeMap<&'static str, Arc<dyn SagaTemplateGeneric<Arc<SagaContext>>>> = todo!();
 }
 
-// XXX-dap move into execute_saga?
-pub fn new_saga<N: NexusSaga>(
-    nexus_saga: &N,
-    params: N::Params,
-) -> Result<steno::SagaDag, SagaInitError> {
-    let builder = steno::DagBuilder::new(steno::SagaName::new(N::NAME));
-    let dag = N::make_saga_dag(&params, builder)?;
-    let params = serde_json::to_value(&params)?;
-    Ok(steno::SagaDag::new(dag, params))
-}
-
 fn make_action_registry() -> ActionRegistry {
     let mut registry = steno::ActionRegistry::new();
     registry.register(Arc::clone(&*ACTION_GENERATE_ID));

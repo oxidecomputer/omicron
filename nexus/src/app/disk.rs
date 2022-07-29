@@ -168,10 +168,9 @@ impl super::Nexus {
             create_params: params.clone(),
         };
 
-        let saga =
-            sagas::new_saga(&sagas::disk_create::SagaDiskCreate, saga_params)?;
-
-        let saga_outputs = self.execute_saga_new(saga).await?;
+        let saga_outputs = self
+            .execute_saga::<sagas::disk_create::SagaDiskCreate>(saga_params)
+            .await?;
         let disk_created = saga_outputs
             .lookup_node_output::<db::model::Disk>("created_disk")
             .map_err(|e| Error::internal_error(&format!("{:#}", &e)))

@@ -45,7 +45,7 @@ mod vpc_subnet;
 
 // Sagas are not part of the "Nexus" implementation, but they are
 // application logic.
-pub mod sagas; // XXX-dap we should probably move ActionRegistry and other primitives into something that can be accessed by saga_recovery.rs.
+mod sagas;
 
 // TODO: When referring to API types, we should try to include
 // the prefix unless it is unambiguous.
