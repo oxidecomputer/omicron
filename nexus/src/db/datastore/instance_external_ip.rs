@@ -61,11 +61,19 @@ impl DataStore {
             // entirely clear how that'll work in the API, so see RFD 288 and
             // https://github.com/oxidecomputer/omicron/issues/1470 for more
             // details.
+            //
+            // For now, we just ensure that the pool is either unreserved, or
+            // reserved for the instance's project.
             use db::schema::ip_pool::dsl;
             Some(
                 dsl::ip_pool
                     .filter(dsl::name.eq(name.clone()))
                     .filter(dsl::time_deleted.is_null())
+                    .filter(
+                        dsl::project_id
+                            .is_null()
+                            .or(dsl::project_id.eq(Some(project_id))),
+                    )
                     .select(IpPool::as_select())
                     .first_async::<IpPool>(self.pool_authorized(opctx).await?)
                     .await

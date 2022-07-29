@@ -188,21 +188,28 @@ const MAX_PORT: i32 = u16::MAX as _;
 ///
 /// Clients may optionally request an external address from a specific IP Pool.
 /// If they don't provide a pool, the query is restricted to all IP Pools
-/// available to their project (not reserved for a different project). In the
-/// first case, the restriction is:
-///
-/// ```sql
-/// pool_id = <pool_id>
-/// ```
-///
-/// In the latter:
+/// available to their project (not reserved for a different project). In that
+/// case, the pool restriction looks like:
 ///
 /// ```sql
 /// (project_id = <project_id> OR project_id IS NULL)
 /// ```
 ///
-/// I.e., the pool is reserved for _this instance's_ project, or not reserved at
-/// all.
+/// That is, we search for all pools that are unreserved for reserved for _this
+/// instance's_ project.
+///
+/// If the client does provide a pool, an additional filtering clause is added,
+/// so that the whole filter looks like:
+///
+/// ```sql
+/// pool_id = <pool_id> AND
+/// (project_id = <project_id> OR project_id IS NULL)
+/// ```
+///
+/// That filter on `project_id` is a bit redundant, as the caller should be
+/// looking up the pool's ID by name, among those available to the instance's
+/// project. However, it helps provides safety in the case that the caller
+/// violates that expectation.
 #[derive(Debug, Clone)]
 pub struct NextExternalIp {
     ip: IncompleteInstanceExternalIp,
@@ -617,6 +624,7 @@ mod tests {
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev;
     use omicron_test_utils::dev::db::CockroachInstance;
+    use std::net::IpAddr;
     use std::net::Ipv4Addr;
     use std::sync::Arc;
     use uuid::Uuid;
@@ -1071,6 +1079,68 @@ mod tests {
         assert_eq!(ip.first_port.0, 0);
         assert_eq!(ip.last_port.0, u16::MAX);
         assert_eq!(ip.project_id, project_id);
+
+        context.success().await;
+    }
+
+    #[tokio::test]
+    async fn test_ensure_pool_exhaustion_does_not_use_other_pool() {
+        let context = TestContext::new(
+            "test_ensure_pool_exhaustion_does_not_use_other_pool",
+        )
+        .await;
+
+        // Create two pools, neither project-restricted.
+        let first_range = IpRange::try_from((
+            Ipv4Addr::new(10, 0, 0, 1),
+            Ipv4Addr::new(10, 0, 0, 3),
+        ))
+        .unwrap();
+        context.create_ip_pool("p0", first_range, None).await;
+        let first_address = Ipv4Addr::new(10, 0, 0, 4);
+        let last_address = Ipv4Addr::new(10, 0, 0, 6);
+        let second_range =
+            IpRange::try_from((first_address, last_address)).unwrap();
+        context.create_ip_pool("p1", second_range, None).await;
+
+        // Allocate all available addresses in the second pool.
+        let instance_id = Uuid::new_v4();
+        let project_id = Uuid::new_v4();
+        let pool_name = Some(Name("p1".parse().unwrap()));
+        let first_octet = first_address.octets()[3];
+        let last_octet = last_address.octets()[3];
+        for octet in first_octet..=last_octet {
+            let ip = context
+                .db_datastore
+                .allocate_instance_ephemeral_ip(
+                    &context.opctx,
+                    Uuid::new_v4(),
+                    project_id,
+                    instance_id,
+                    pool_name.clone(),
+                )
+                .await
+                .expect("Failed to allocate instance ephemeral IP address");
+            println!("{ip:#?}");
+            if let IpAddr::V4(addr) = ip.ip.ip() {
+                assert_eq!(addr.octets()[3], octet);
+            } else {
+                panic!("Expected an IPv4 address");
+            }
+        }
+
+        // Allocating another address should _fail_, and not use the first pool.
+        context
+            .db_datastore
+            .allocate_instance_ephemeral_ip(
+                &context.opctx,
+                Uuid::new_v4(),
+                project_id,
+                instance_id,
+                pool_name,
+            )
+            .await
+            .expect_err("Should not use IP addresses from a different pool");
 
         context.success().await;
     }
