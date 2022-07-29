@@ -5556,7 +5556,7 @@ dependencies = [
 [[package]]
 name = "steno"
 version = "0.2.0"
-source = "git+https://github.com/oxidecomputer/steno?branch=ajs-experiments#79a6f9da688d39849fe0e8fb01c1803ebcc631e8"
+source = "git+https://github.com/oxidecomputer/steno?branch=ajs-experiments#8e9240bdf56cb215375af875a0b01ffbd4f95e16"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6249,7 +6249,7 @@ version = "1.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
 dependencies = [
- "cfg-if 1.0.0",
+ "cfg-if 0.1.10",
  "rand 0.8.5",
  "static_assertions",
 ]

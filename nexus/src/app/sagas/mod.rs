@@ -18,6 +18,7 @@ use steno::new_action_noop_undo;
 use steno::ActionContext;
 use steno::ActionError;
 use steno::SagaType;
+use thiserror::Error;
 use uuid::Uuid;
 
 pub mod disk_create;
@@ -25,38 +26,80 @@ pub mod disk_create;
 // pub mod instance_create;
 // pub mod instance_migrate;
 
-pub type ActionRegistry = steno::ActionRegistry<NexusSagaType>;
-
 #[derive(Debug)]
 pub struct NexusSagaType;
 impl steno::SagaType for NexusSagaType {
     type ExecContextType = Arc<SagaContext>;
 }
 
-pub(super) trait NexusSaga {
+pub type ActionRegistry = steno::ActionRegistry<NexusSagaType>;
+pub type NexusAction = Arc<dyn steno::Action<NexusSagaType>>;
+pub type NexusActionContext = steno::ActionContext<NexusSagaType>;
+
+// XXX this should be the internal version of the trait
+pub trait NexusSaga {
     const NAME: &'static str;
 
     type Params: serde::Serialize
         + serde::de::DeserializeOwned
         + std::fmt::Debug;
 
-    fn register_actions(
-        registry: &mut ActionRegistry,
-    ) -> Result<(), anyhow::Error>;
+    fn register_actions(registry: &mut ActionRegistry);
 
-    fn make_saga(
+    fn make_saga_dag(
         params: &Self::Params,
-    ) -> Result<steno::SagaDag, anyhow::Error>;
+        builder: steno::DagBuilder,
+    ) -> Result<steno::Dag, SagaInitError>;
+}
+
+#[derive(Debug, Error)]
+pub enum SagaInitError {
+    #[error("internal error building saga graph: {0:#}")]
+    DagBuildError(steno::DagBuilderError),
+    #[error("failed to serialize saga parameters: {0:#}")]
+    SerializeParamsError(serde_json::Error),
+}
+
+impl From<steno::DagBuilderError> for SagaInitError {
+    fn from(error: steno::DagBuilderError) -> Self {
+        SagaInitError::DagBuildError(error)
+    }
+}
+
+impl From<serde_json::Error> for SagaInitError {
+    fn from(error: serde_json::Error) -> Self {
+        SagaInitError::SerializeParamsError(error)
+    }
+}
+
+impl From<SagaInitError> for omicron_common::api::external::Error {
+    fn from(error: SagaInitError) -> Self {
+        // All of these errors reflect things that shouldn't be possible.
+        // They're basically bugs.
+        omicron_common::api::external::Error::internal_error(&format!(
+            "creating saga: {:#}",
+            error
+        ))
+    }
 }
 
 lazy_static! {
-    pub (super) static ref ACTION_GENERATE_ID:
-        Arc<dyn steno::Action<NexusSagaType>> =
-        new_action_noop_undo("generate-uuid", saga_generate_uuid);
+    pub (super) static ref ACTION_GENERATE_ID: NexusAction =
+        new_action_noop_undo("common.uuid_generate", saga_generate_uuid);
 
     pub static ref ACTION_REGISTRY: ActionRegistry = make_action_registry();
     // XXX-dap replace with all NexusSaga impls
     // pub static ref ALL_TEMPLATES: BTreeMap<&'static str, Arc<dyn SagaTemplateGeneric<Arc<SagaContext>>>> = todo!();
+}
+
+pub fn new_saga<N: NexusSaga>(
+    nexus_saga: &N,
+    params: N::Params,
+) -> Result<steno::SagaDag, SagaInitError> {
+    let builder = steno::DagBuilder::new(steno::SagaName::new(N::NAME));
+    let dag = N::make_saga_dag(&params, builder)?;
+    let params = serde_json::to_value(&params)?;
+    Ok(steno::SagaDag::new(dag, params))
 }
 
 fn make_action_registry() -> ActionRegistry {
