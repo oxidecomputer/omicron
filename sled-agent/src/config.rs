@@ -13,7 +13,7 @@ use serde::Deserialize;
 use serde_with::serde_as;
 use serde_with::DisplayFromStr;
 use serde_with::PickFirst;
-use std::net::{Ipv4Addr, SocketAddr};
+use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
@@ -23,8 +23,6 @@ use uuid::Uuid;
 pub struct Config {
     /// Unique id for the sled
     pub id: Uuid,
-    /// Address of Nexus instance
-    pub nexus_address: SocketAddr,
     /// Configuration for the sled agent debug log
     pub log: ConfigLogging,
     /// Optional VLAN ID to be used for tagging guest VNICs.
