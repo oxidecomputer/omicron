@@ -1327,7 +1327,7 @@
         "tags": [
           "login"
         ],
-        "summary": "Ask the user to login to their identity provider",
+        "summary": "Prompt user login",
         "description": "Either display a page asking a user for their credentials, or redirect them to their identity provider.",
         "operationId": "login",
         "parameters": [
@@ -1365,7 +1365,7 @@
         "tags": [
           "login"
         ],
-        "summary": "Consume some sort of credentials, and authenticate a user.",
+        "summary": "Authenticate a user",
         "description": "Either receive a username and password, or some sort of identity provider data (like a SAMLResponse). Use these to set the user's session cookie.",
         "operationId": "consume_credentials",
         "parameters": [
