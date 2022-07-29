@@ -14,6 +14,12 @@
         "url": "http://oxide.computer/docs/#xxx"
       }
     },
+    "global": {
+      "description": "Groups endpoints which have global scope",
+      "external_docs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
     "hidden": {
       "description": "TODO operations that will not ship to customers",
       "external_docs": {
@@ -22,12 +28,6 @@
     },
     "images": {
       "description": "Images are read-only Virtual Disks that may be used to boot Virtual Machines",
-      "external_docs": {
-        "url": "http://oxide.computer/docs/#xxx"
-      }
-    },
-    "images:global": {
-      "description": "Images are read-only Virtual Disks that may be used to boot Virtual Machines. These images are scoped globally.",
       "external_docs": {
         "url": "http://oxide.computer/docs/#xxx"
       }
@@ -56,32 +56,14 @@
         "url": "http://oxide.computer/docs/#xxx"
       }
     },
-    "silos": {
-      "description": "Silos represent a logical partition of users and resources.",
-      "external_docs": {
-        "url": "http://oxide.computer/docs/#xxx"
-      }
-    },
     "organizations": {
       "description": "Organizations represent a subset of users and projects in an Oxide deployment.",
       "external_docs": {
         "url": "http://oxide.computer/docs/#xxx"
       }
     },
-    "policy": {
-      "description": "System-wide IAM policy",
-      "external_docs": {
-        "url": "http://oxide.computer/docs/#xxx"
-      }
-    },
     "projects": {
       "description": "Projects are a grouping of associated resources such as instances and disks within an organization for purposes of billing and access control.",
-      "external_docs": {
-        "url": "http://oxide.computer/docs/#xxx"
-      }
-    },
-    "hardware": {
-      "description": "These operations pertain to hardware inventory and management. Racks are the unit of expansion of an Oxide deployment. Racks are in turn composed of sleds, switches, power supplies, and a cabled backplane.",
       "external_docs": {
         "url": "http://oxide.computer/docs/#xxx"
       }
@@ -100,12 +82,6 @@
     },
     "routes": {
       "description": "Routes define router policy.",
-      "external_docs": {
-        "url": "http://oxide.computer/docs/#xxx"
-      }
-    },
-    "sagas": {
-      "description": "Sagas are the abstraction used to represent multi-step operations within the Oxide deployment. These operations can be used to query saga status and report errors.",
       "external_docs": {
         "url": "http://oxide.computer/docs/#xxx"
       }
@@ -130,12 +106,6 @@
     },
     "system": {
       "description": "Internal system information",
-      "external_docs": {
-        "url": "http://oxide.computer/docs/#xxx"
-      }
-    },
-    "updates": {
-      "description": "This tag should be moved into a operations tag",
       "external_docs": {
         "url": "http://oxide.computer/docs/#xxx"
       }
