@@ -178,7 +178,7 @@ impl Error {
     /// `context` prepended to it to provide more context
     ///
     /// If the error has no internal message, then it is returned unchanged.
-    fn prepend_internal_message<C>(self, context: C) -> Error
+    pub fn internal_context<C>(self, context: C) -> Error
     where
         C: Display + Send + Sync + 'static,
     {
@@ -452,7 +452,7 @@ impl<T> InternalContext<T> for Result<T, Error> {
     where
         C: Display + Send + Sync + 'static,
     {
-        self.map_err(|error| error.prepend_internal_message(context))
+        self.map_err(|error| error.internal_context(context))
     }
 
     fn with_internal_context<C, F>(self, make_context: F) -> Result<T, Error>
@@ -460,7 +460,7 @@ impl<T> InternalContext<T> for Result<T, Error> {
         C: Display + Send + Sync + 'static,
         F: FnOnce() -> C,
     {
-        self.map_err(|error| error.prepend_internal_message(make_context()))
+        self.map_err(|error| error.internal_context(make_context()))
     }
 }
 

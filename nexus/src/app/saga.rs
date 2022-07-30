@@ -110,10 +110,14 @@ impl super::Nexus {
 
         let result = future.await;
         result.kind.map_err(|saga_error| {
-            saga_error.error_source.convert::<Error>().unwrap_or_else(|e| {
-                // TODO-error more context would be useful
-                Error::InternalError { internal_message: e.to_string() }
-            })
+            saga_error
+                .error_source
+                .convert::<Error>()
+                .unwrap_or_else(|e| Error::internal_error(&e.to_string()))
+                .internal_context(format!(
+                    "saga error at node {:?}",
+                    saga_error.error_node_name
+                ))
         })
     }
 }
