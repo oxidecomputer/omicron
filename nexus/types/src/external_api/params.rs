@@ -474,7 +474,7 @@ impl UserData {
     where
         D: Deserializer<'de>,
     {
-        match base64::decode(<&str>::deserialize(deserializer)?) {
+        match base64::decode(<String>::deserialize(deserializer)?) {
             Ok(buf) => {
                 // if you change this, also update the stress test in crate::cidata
                 if buf.len() > MAX_USER_DATA_BYTES {
@@ -493,6 +493,83 @@ impl UserData {
         }
     }
 }
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+struct Dummy {
+    #[serde(default, with = "UserData")]
+    d: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct Dummy2 {
+    pub junk: InstanceCreate,
+}
+
+#[test]
+fn test_dap1() {
+    // Simplest repro of the immediate problem.
+    let input = serde_json::json! { { "d": "" } };
+    println!("{:?}", serde_json::from_value::<Dummy>(input));
+}
+
+#[test]
+fn test_dap2() {
+    let input = serde_json::json! {
+        {
+          "name": "i1",
+          "description": "asdf",
+          "ncpus": 1,
+          "memory": 1073741824,
+          "hostname": "asdf",
+          "user_data": "",
+          "network_interfaces": {
+            "type": "default"
+          },
+          "external_ips": [],
+          "disks": []
+        }
+    };
+    let busted_as_string = serde_json::to_string_pretty(&input).unwrap();
+    println!("busted input:\n{}", busted_as_string);
+    println!("\nresult of parsing the serde_json::Value:");
+    println!("{:?}", serde_json::from_value::<InstanceCreate>(input));
+    println!("\nresult of parsing the same value, serialized to a string:");
+    println!("{:?}", serde_json::from_str::<InstanceCreate>(&busted_as_string));
+}
+
+// A round-trip of a valid InstanceCreate does not work.
+// Client generates this input:
+//    let input = serde_json::json! {
+//        {
+//            "description": "asdf",
+//            "hostname": "asdf",
+//            "memory": 1073741824,
+//            "name": "i1",
+//            "ncpus": 1,
+//            "network_interfaces": {
+//              "type": "default"
+//            },
+//        }
+//    };
+//    // We deserialize it in Dropshot:
+//    let deserialized1: InstanceCreate = serde_json::from_value(input).unwrap();
+//
+//    // Suppose we serialize that again:
+//    let serialized1 = serde_json::to_string_pretty(&deserialized1).unwrap();
+//    println!("serialized:\n{}", serialized1);
+//    // And then deserialize it again:
+//    let deserialized2: Result<InstanceCreate, _> =
+//        serde_json::from_str(&serialized1);
+//    eprintln!("round-tripped: {:?}", deserialized2);
+//
+//    // Now suppose we serialize _that_ and deserialize it again:
+//    let serialized2 =
+//        serde_json::to_string_pretty(&deserialized2.unwrap()).unwrap();
+//    println!("serialized:\n{}", serialized2);
+//    let deserialized3: Result<InstanceCreate, _> =
+//        serde_json::from_str(&serialized2);
+//    eprintln!("round-tripped: {:?}", deserialized3);
+//    deserialized3.unwrap();
 
 impl JsonSchema for UserData {
     fn schema_name() -> String {
