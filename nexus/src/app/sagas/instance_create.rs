@@ -58,65 +58,6 @@ pub struct Params {
     pub create_params: params::InstanceCreate,
 }
 
-// XXX-dap begin
-#[derive(Debug, Deserialize, Serialize)]
-pub struct DummyParams {
-    //pub serialized_authn: authn::saga::Serialized,
-    //pub organization_name: Name,
-    //pub project_name: Name,
-    //pub project_id: Uuid,
-    pub create_params: DummyInstanceCreate,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct DummyInstanceCreate {
-    #[serde(flatten)]
-    pub identity: IdentityMetadataCreateParams,
-    pub ncpus: omicron_common::api::external::InstanceCpuCount,
-    pub memory: omicron_common::api::external::ByteCount,
-    pub hostname: String, // TODO-cleanup different type?
-
-    /// User data for instance initialization systems (such as cloud-init).
-    /// Must be a Base64-encoded string, as specified in RFC 4648 § 4 (+ and /
-    /// characters with padding). Maximum 32 KiB unencoded data.
-    // While serde happily accepts #[serde(with = "<mod>")] as a shorthand for
-    // specifing `serialize_with` and `deserialize_with`, schemars requires the
-    // argument to `with` to be a type rather than merely a path prefix (i.e. a
-    // mod or type). It's admittedly a bit tricky for schemars to address;
-    // unlike `serialize` or `deserialize`, `JsonSchema` requires several
-    // functions working together. It's unfortunate that schemars has this
-    // built-in incompatibility, exacerbated by its glacial rate of progress
-    // and immunity to offers of help.
-    //#[serde(default, with = "UserData")]
-    //pub user_data: Vec<u8>,
-
-    /// The network interfaces to be created for this instance.
-    #[serde(default)]
-    pub network_interfaces: params::InstanceNetworkInterfaceAttachment,
-
-    /// The external IP addresses provided to this instance.
-    ///
-    /// By default, all instances have outbound connectivity, but no inbound
-    /// connectivity. These external addresses can be used to provide a fixed,
-    /// known IP address for making inbound connections to the instance.
-    #[serde(default)]
-    pub external_ips: Vec<params::ExternalIpCreate>,
-
-    /// The disks to be created or attached for this instance.
-    #[serde(default)]
-    pub disks: Vec<params::InstanceDiskAttachment>,
-}
-
-// XXX-dap
-#[test]
-fn test_dap() {
-    let input = serde_json::json! {
-        {"create_params":{"description":"asdf","disks":[],"external_ips":[],"hostname":"asdf","memory":1073741824,"name":"i1","ncpus":1,"network_interfaces":{"type":"default"},"user_data":""},"organization_name":"o1","project_id":"8d9b0de0-8435-4d70-a989-31d81e0bc54c","project_name":"p1","serialized_authn":{"kind":{"Authenticated":{"actor":{"SiloUser":{"silo_id":"001de000-5110-4000-8000-000000000000","silo_user_id":"001de000-05e4-4000-8000-000000004007"}}}}}}
-    };
-    let b: DummyParams = serde_json::from_value(input).unwrap();
-}
-// XXX-dap end
-
 // instance create saga: actions
 
 lazy_static! {
