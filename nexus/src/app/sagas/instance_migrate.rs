@@ -3,10 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::instance_create::allocate_sled_ipv6;
-use super::{
-    impl_authenticated_saga_params, NexusActionContext, NexusSaga,
-    ACTION_GENERATE_ID,
-};
+use super::{NexusActionContext, NexusSaga, ACTION_GENERATE_ID};
 use crate::app::sagas::NexusAction;
 use crate::authn;
 use crate::context::OpContext;
@@ -39,7 +36,6 @@ pub struct Params {
     pub instance_id: Uuid,
     pub migrate_params: params::InstanceMigrate,
 }
-impl_authenticated_saga_params!(Params);
 
 // instance migrate saga: actions
 
@@ -69,7 +65,6 @@ lazy_static! {
 
 #[derive(Debug)]
 pub struct SagaInstanceMigrate;
-
 impl NexusSaga for SagaInstanceMigrate {
     const NAME: &'static str = "instance-migrate";
     type Params = Params;
@@ -83,7 +78,7 @@ impl NexusSaga for SagaInstanceMigrate {
 
     fn make_saga_dag(
         _params: &Self::Params,
-        builder: steno::DagBuilder,
+        mut builder: steno::DagBuilder,
     ) -> Result<steno::Dag, super::SagaInitError> {
         builder.append(Node::action(
             "migrate_id",
@@ -158,7 +153,9 @@ async fn sim_migrate_prep(
 async fn sim_allocate_propolis_ip(
     sagactx: NexusActionContext,
 ) -> Result<Ipv6Addr, ActionError> {
-    allocate_sled_ipv6(sagactx, "dst_sled_uuid").await
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    allocate_sled_ipv6(&opctx, sagactx, "dst_sled_uuid").await
 }
 
 async fn sim_instance_migrate(

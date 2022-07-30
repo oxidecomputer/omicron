@@ -9,7 +9,6 @@
 // correctness, idempotence, etc.  The more constrained this interface is, the
 // easier it will be to test, version, and update in deployed systems.
 
-use crate::authn;
 use crate::saga_interface::SagaContext;
 use lazy_static::lazy_static;
 use std::sync::Arc;
@@ -20,10 +19,9 @@ use steno::SagaType;
 use thiserror::Error;
 use uuid::Uuid;
 
-// XXX-dap finish converting
 pub mod disk_create;
 pub mod disk_delete;
-// pub mod instance_create;
+pub mod instance_create;
 pub mod instance_migrate;
 
 #[derive(Debug)]
@@ -36,7 +34,6 @@ pub type ActionRegistry = steno::ActionRegistry<NexusSagaType>;
 pub type NexusAction = Arc<dyn steno::Action<NexusSagaType>>;
 pub type NexusActionContext = steno::ActionContext<NexusSagaType>;
 
-// XXX this should be the internal version of the trait
 pub trait NexusSaga {
     const NAME: &'static str;
 
@@ -94,8 +91,14 @@ fn make_action_registry() -> ActionRegistry {
     let mut registry = steno::ActionRegistry::new();
     registry.register(Arc::clone(&*ACTION_GENERATE_ID));
 
-    // XXX-dap register each of the NexusSaga impls
     <disk_create::SagaDiskCreate as NexusSaga>::register_actions(&mut registry);
+    <disk_delete::SagaDiskDelete as NexusSaga>::register_actions(&mut registry);
+    <instance_create::SagaInstanceCreate as NexusSaga>::register_actions(
+        &mut registry,
+    );
+    <instance_migrate::SagaInstanceMigrate as NexusSaga>::register_actions(
+        &mut registry,
+    );
 
     registry
 }
@@ -105,25 +108,3 @@ pub(super) async fn saga_generate_uuid<UserType: SagaType>(
 ) -> Result<Uuid, ActionError> {
     Ok(Uuid::new_v4())
 }
-
-/// A trait for sagas with serialized authentication information.
-///
-/// This allows sharing code in different sagas which rely on some
-/// authentication information, for example when doing database lookups.
-pub(super) trait AuthenticatedSagaParams {
-    fn serialized_authn(&self) -> &authn::saga::Serialized;
-}
-
-/// A helper macro which implements the `AuthenticatedSagaParams` trait for saga
-/// parameter types which have a field called `serialized_authn`.
-macro_rules! impl_authenticated_saga_params {
-    ($typ:ty) => {
-        impl crate::app::sagas::AuthenticatedSagaParams for $typ {
-            fn serialized_authn(&self) -> &authn::saga::Serialized {
-                &self.serialized_authn
-            }
-        }
-    };
-}
-
-pub(super) use impl_authenticated_saga_params;
