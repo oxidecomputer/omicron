@@ -306,8 +306,9 @@ mod test {
     use omicron_test_utils::dev;
     use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
     use steno::{
-        new_action_noop_undo, ActionContext, ActionError, SagaId, SagaTemplate,
-        SagaTemplateBuilder, SagaTemplateGeneric, SagaType, SecClient,
+        new_action_noop_undo, Action, ActionContext, ActionError,
+        ActionRegistry, DagBuilder, Node, SagaDag, SagaId, SagaName, SagaType,
+        SecClient,
     };
     use uuid::Uuid;
 
@@ -380,15 +381,15 @@ mod test {
         let mut registry = ActionRegistry::new();
         registry.register(Arc::clone(&ACTION_N1));
         registry.register(Arc::clone(&ACTION_N2));
-        Arc::new(registry);
+        Arc::new(registry)
     }
 
-    fn saga_object_create() -> Arc<steno::SagaDag> {
-        let mut builder = steno::DagBuilder::new();
-        builder.append("n1_out", "NodeOne", &*ACTION_N1);
-        builder.append("n2_out", "NodeTwo", &*ACTION_N2);
+    fn saga_object_create() -> Arc<SagaDag> {
+        let mut builder = DagBuilder::new(SagaName::new("test-saga"));
+        builder.append(Node::action("n1_out", "NodeOne", ACTION_N1.as_ref()));
+        builder.append(Node::action("n2_out", "NodeTwo", ACTION_N2.as_ref()));
         let dag = builder.build().unwrap();
-        SagaDag::new(dag, serde_json::Value::Null)
+        Arc::new(SagaDag::new(dag, serde_json::Value::Null))
     }
 
     async fn node_one(ctx: ActionContext<TestOp>) -> Result<i32, ActionError> {
@@ -487,7 +488,7 @@ mod test {
             uctx.clone(),
             db_datastore,
             sec_client.clone(),
-            &ALL_TEMPLATES,
+            registry_create(),
         )
         .await // Await the loading and resuming of the sagas
         .unwrap()
@@ -549,7 +550,7 @@ mod test {
             uctx.clone(),
             db_datastore,
             sec_client.clone(),
-            SAGA_TWO_NODE_OP_REGISTRY.clone(),
+            registry_create(),
         )
         .await
         .unwrap()
