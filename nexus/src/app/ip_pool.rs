@@ -129,6 +129,13 @@ impl super::Nexus {
         self.db_datastore.ip_pool_delete_range(opctx, &authz_pool, range).await
     }
 
+    // The "ip_pool_service_..." functions look up IP pools for Oxide service usage,
+    // rather than for VMs. As such, they're identified by rack UUID, not
+    // by pool names.
+    //
+    // TODO(https://github.com/oxidecomputer/omicron/issues/1276): Should be
+    // AZ UUID, probably.
+
     pub async fn ip_pool_service_list_ranges(
         &self,
         opctx: &OpContext,
