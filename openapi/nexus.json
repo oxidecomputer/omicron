@@ -15,7 +15,7 @@
         "tags": [
           "disks"
         ],
-        "summary": "Get a disk by id",
+        "summary": "Fetch a disk by id",
         "operationId": "disk_view_by_id",
         "parameters": [
           {
@@ -54,7 +54,7 @@
         "tags": [
           "images:global"
         ],
-        "summary": "Get a global image by id.",
+        "summary": "Fetch a global image by id",
         "operationId": "image_global_view_by_id",
         "parameters": [
           {
@@ -132,7 +132,7 @@
         "tags": [
           "instances"
         ],
-        "summary": "Get an instance by id.",
+        "summary": "Fetch an instance by id",
         "operationId": "instance_view_by_id",
         "parameters": [
           {
@@ -171,7 +171,7 @@
         "tags": [
           "instances"
         ],
-        "summary": "Get an instance's network interface by id.",
+        "summary": "Fetch a network interface by id",
         "operationId": "instance_network_interface_view_by_id",
         "parameters": [
           {
@@ -210,7 +210,7 @@
         "tags": [
           "organizations"
         ],
-        "summary": "Get an organization by id",
+        "summary": "Fetch an organization by id",
         "operationId": "organization_view_by_id",
         "parameters": [
           {
@@ -249,7 +249,7 @@
         "tags": [
           "projects"
         ],
-        "summary": "Get a project by id",
+        "summary": "Fetch a project by id",
         "operationId": "project_view_by_id",
         "parameters": [
           {
@@ -288,7 +288,7 @@
         "tags": [
           "snapshots"
         ],
-        "summary": "Get a snapshot by id.",
+        "summary": "Fetch a snapshot by id",
         "operationId": "snapshot_view_by_id",
         "parameters": [
           {
@@ -327,7 +327,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "Get a vpc router route by id",
+        "summary": "Fetch a route by id",
         "operationId": "vpc_router_route_view_by_id",
         "parameters": [
           {
@@ -366,7 +366,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "Get a VPC Router by id",
+        "summary": "Get a router by id",
         "operationId": "vpc_router_view_by_id",
         "parameters": [
           {
@@ -405,7 +405,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "Get a VPC subnet by id.",
+        "summary": "Fetch a subnet by id",
         "operationId": "vpc_subnet_view_by_id",
         "parameters": [
           {
@@ -444,7 +444,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "Get a VPC by id.",
+        "summary": "Fetch a VPC",
         "operationId": "vpc_view_by_id",
         "parameters": [
           {
@@ -574,7 +574,7 @@
         "tags": [
           "hardware"
         ],
-        "summary": "List racks in the system.",
+        "summary": "List racks",
         "operationId": "rack_list",
         "parameters": [
           {
@@ -634,7 +634,7 @@
         "tags": [
           "hardware"
         ],
-        "summary": "Fetch information about a particular rack.",
+        "summary": "Fetch a rack",
         "operationId": "rack_view",
         "parameters": [
           {
@@ -674,7 +674,7 @@
         "tags": [
           "hardware"
         ],
-        "summary": "List sleds in the system.",
+        "summary": "List sleds",
         "operationId": "sled_list",
         "parameters": [
           {
@@ -734,7 +734,7 @@
         "tags": [
           "hardware"
         ],
-        "summary": "Fetch information about a sled in the system.",
+        "summary": "Fetch a sled",
         "operationId": "sled_view",
         "parameters": [
           {
@@ -774,7 +774,7 @@
         "tags": [
           "images:global"
         ],
-        "summary": "List global images.",
+        "summary": "List global images",
         "description": "Returns a list of all the global images. Global images are returned sorted by creation date, with the most recent images appearing first.",
         "operationId": "image_global_list",
         "parameters": [
@@ -833,7 +833,7 @@
         "tags": [
           "images:global"
         ],
-        "summary": "Create a global image.",
+        "summary": "Create a global image",
         "description": "Create a new global image. This image can then be used by any user as a base for instances.",
         "operationId": "image_global_create",
         "requestBody": {
@@ -871,7 +871,7 @@
         "tags": [
           "images:global"
         ],
-        "summary": "Get a global image.",
+        "summary": "Fetch a global image",
         "description": "Returns the details of a specific global image.",
         "operationId": "image_global_view",
         "parameters": [
@@ -908,7 +908,7 @@
         "tags": [
           "images:global"
         ],
-        "summary": "Delete a global image.",
+        "summary": "Delete a global image",
         "description": "Permanently delete a global image. This operation cannot be undone. Any instances using the global image will continue to run, however new instances can not be created with this image.",
         "operationId": "image_global_delete",
         "parameters": [
@@ -940,7 +940,7 @@
         "tags": [
           "ip-pools"
         ],
-        "summary": "List IP Pools.",
+        "summary": "List IP pools",
         "operationId": "ip_pool_list",
         "parameters": [
           {
@@ -998,7 +998,7 @@
         "tags": [
           "ip-pools"
         ],
-        "summary": "Create a new IP Pool.",
+        "summary": "Create an IP pool",
         "operationId": "ip_pool_create",
         "requestBody": {
           "content": {
@@ -1035,7 +1035,7 @@
         "tags": [
           "ip-pools"
         ],
-        "summary": "Fetch a single IP Pool.",
+        "summary": "Fetch an IP pool",
         "operationId": "ip_pool_view",
         "parameters": [
           {
@@ -1071,7 +1071,7 @@
         "tags": [
           "ip-pools"
         ],
-        "summary": "Update an IP Pool.",
+        "summary": "Update an IP Pool",
         "operationId": "ip_pool_update",
         "parameters": [
           {
@@ -1117,7 +1117,7 @@
         "tags": [
           "ip-pools"
         ],
-        "summary": "Delete an IP Pool.",
+        "summary": "Delete an IP Pool",
         "operationId": "ip_pool_delete",
         "parameters": [
           {
@@ -1148,8 +1148,8 @@
         "tags": [
           "ip-pools"
         ],
-        "summary": "List the ranges of IP addresses within an existing IP Pool.",
-        "description": "Note that ranges are listed sorted by their first address.",
+        "summary": "List ranges for an IP pool",
+        "description": "Ranges are ordered by their first address.",
         "operationId": "ip_pool_range_list",
         "parameters": [
           {
@@ -1210,7 +1210,7 @@
         "tags": [
           "ip-pools"
         ],
-        "summary": "Add a new range to an existing IP Pool.",
+        "summary": "Add a range to an IP pool",
         "operationId": "ip_pool_range_add",
         "parameters": [
           {
@@ -1258,7 +1258,7 @@
         "tags": [
           "ip-pools"
         ],
-        "summary": "Remove a range from an existing IP Pool.",
+        "summary": "Remove a range from an IP pool",
         "operationId": "ip_pool_range_remove",
         "parameters": [
           {
@@ -1327,7 +1327,7 @@
         "tags": [
           "login"
         ],
-        "summary": "Ask the user to login to their identity provider",
+        "summary": "Prompt user login",
         "description": "Either display a page asking a user for their credentials, or redirect them to their identity provider.",
         "operationId": "login",
         "parameters": [
@@ -1365,7 +1365,7 @@
         "tags": [
           "login"
         ],
-        "summary": "Consume some sort of credentials, and authenticate a user.",
+        "summary": "Authenticate a user",
         "description": "Either receive a username and password, or some sort of identity provider data (like a SAMLResponse). Use these to set the user's session cookie.",
         "operationId": "consume_credentials",
         "parameters": [
@@ -1434,7 +1434,7 @@
         "tags": [
           "organizations"
         ],
-        "summary": "List all organizations.",
+        "summary": "List organizations",
         "operationId": "organization_list",
         "parameters": [
           {
@@ -1492,7 +1492,7 @@
         "tags": [
           "organizations"
         ],
-        "summary": "Create a new organization.",
+        "summary": "Create an organization",
         "operationId": "organization_create",
         "requestBody": {
           "content": {
@@ -1529,7 +1529,7 @@
         "tags": [
           "organizations"
         ],
-        "summary": "Fetch a specific organization",
+        "summary": "Fetch an organization",
         "operationId": "organization_view",
         "parameters": [
           {
@@ -1566,7 +1566,7 @@
         "tags": [
           "organizations"
         ],
-        "summary": "Update a specific organization.",
+        "summary": "Update an organization",
         "operationId": "organization_update",
         "parameters": [
           {
@@ -1613,7 +1613,7 @@
         "tags": [
           "organizations"
         ],
-        "summary": "Delete a specific organization.",
+        "summary": "Delete an organization",
         "operationId": "organization_delete",
         "parameters": [
           {
@@ -1645,7 +1645,7 @@
         "tags": [
           "organizations"
         ],
-        "summary": "Fetch the IAM policy for this Organization",
+        "summary": "Fetch an organization's IAM policy",
         "operationId": "organization_policy_view",
         "parameters": [
           {
@@ -1682,7 +1682,7 @@
         "tags": [
           "organizations"
         ],
-        "summary": "Update the IAM policy for this Organization",
+        "summary": "Update an organization's IAM policy",
         "operationId": "organization_policy_update",
         "parameters": [
           {
@@ -1731,7 +1731,7 @@
         "tags": [
           "projects"
         ],
-        "summary": "List all projects.",
+        "summary": "List projects",
         "operationId": "project_list",
         "parameters": [
           {
@@ -1799,7 +1799,7 @@
         "tags": [
           "projects"
         ],
-        "summary": "Create a new project.",
+        "summary": "Create a project",
         "operationId": "project_create",
         "parameters": [
           {
@@ -1848,7 +1848,7 @@
         "tags": [
           "projects"
         ],
-        "summary": "Fetch a specific project",
+        "summary": "Fetch a project",
         "operationId": "project_view",
         "parameters": [
           {
@@ -1895,7 +1895,7 @@
         "tags": [
           "projects"
         ],
-        "summary": "Update a specific project.",
+        "summary": "Update a project",
         "operationId": "project_update",
         "parameters": [
           {
@@ -1952,7 +1952,7 @@
         "tags": [
           "projects"
         ],
-        "summary": "Delete a specific project.",
+        "summary": "Delete a project",
         "operationId": "project_delete",
         "parameters": [
           {
@@ -1994,7 +1994,7 @@
         "tags": [
           "disks"
         ],
-        "summary": "List disks in a project.",
+        "summary": "List disks",
         "operationId": "disk_list",
         "parameters": [
           {
@@ -2072,7 +2072,7 @@
         "tags": [
           "disks"
         ],
-        "summary": "Create a disk in a project.",
+        "summary": "Create a disk",
         "operationId": "disk_create",
         "parameters": [
           {
@@ -2131,7 +2131,7 @@
         "tags": [
           "disks"
         ],
-        "summary": "Get a single disk in a project.",
+        "summary": "Fetch a disk",
         "operationId": "disk_view",
         "parameters": [
           {
@@ -2185,7 +2185,7 @@
         "tags": [
           "disks"
         ],
-        "summary": "Delete a disk from a project.",
+        "summary": "Delete a disk",
         "operationId": "disk_delete",
         "parameters": [
           {
@@ -2234,7 +2234,7 @@
         "tags": [
           "disks"
         ],
-        "summary": "Fetch metrics for a disk.",
+        "summary": "Fetch disk metrics",
         "operationId": "disk_metrics_list",
         "parameters": [
           {
@@ -2481,8 +2481,8 @@
         "tags": [
           "images"
         ],
-        "summary": "Get an image",
-        "description": "Get the details of a specific image in a project.",
+        "summary": "Fetch an image",
+        "description": "Fetch the details for a specific image in a project.",
         "operationId": "image_view",
         "parameters": [
           {
@@ -2586,7 +2586,7 @@
         "tags": [
           "instances"
         ],
-        "summary": "List instances in a project.",
+        "summary": "List instances",
         "operationId": "instance_list",
         "parameters": [
           {
@@ -2664,7 +2664,7 @@
         "tags": [
           "instances"
         ],
-        "summary": "Create an instance in a project.",
+        "summary": "Create an instance",
         "operationId": "instance_create",
         "parameters": [
           {
@@ -2723,7 +2723,7 @@
         "tags": [
           "instances"
         ],
-        "summary": "Get an instance in a project.",
+        "summary": "Fetch an instance",
         "operationId": "instance_view",
         "parameters": [
           {
@@ -2777,7 +2777,7 @@
         "tags": [
           "instances"
         ],
-        "summary": "Delete an instance from a project.",
+        "summary": "Delete an instance",
         "operationId": "instance_delete",
         "parameters": [
           {
@@ -2826,7 +2826,7 @@
         "tags": [
           "instances"
         ],
-        "summary": "List disks attached to this instance.",
+        "summary": "List an instance's disks",
         "operationId": "instance_disk_list",
         "parameters": [
           {
@@ -2913,6 +2913,7 @@
         "tags": [
           "instances"
         ],
+        "summary": "Attach a disk to an instance",
         "operationId": "instance_disk_attach",
         "parameters": [
           {
@@ -2978,6 +2979,7 @@
         "tags": [
           "instances"
         ],
+        "summary": "Detach a disk from an instance",
         "operationId": "instance_disk_detach",
         "parameters": [
           {
@@ -3043,7 +3045,7 @@
         "tags": [
           "instances"
         ],
-        "summary": "List external IP addresses associated with an instance",
+        "summary": "List external IP addresses",
         "operationId": "instance_external_ip_list",
         "parameters": [
           {
@@ -3099,7 +3101,7 @@
         "tags": [
           "instances"
         ],
-        "summary": "Migrate an instance to a different propolis-server, possibly on a different sled.",
+        "summary": "Migrate an instance",
         "operationId": "instance_migrate",
         "parameters": [
           {
@@ -3165,7 +3167,7 @@
         "tags": [
           "instances"
         ],
-        "summary": "List network interfaces attached to this instance.",
+        "summary": "List network interfaces",
         "operationId": "instance_network_interface_list",
         "parameters": [
           {
@@ -3250,7 +3252,7 @@
         "tags": [
           "instances"
         ],
-        "summary": "Create a network interface for an instance.",
+        "summary": "Create a network interface",
         "operationId": "instance_network_interface_create",
         "parameters": [
           {
@@ -3316,7 +3318,7 @@
         "tags": [
           "instances"
         ],
-        "summary": "Get an interface attached to an instance.",
+        "summary": "Fetch a network interface",
         "operationId": "instance_network_interface_view",
         "parameters": [
           {
@@ -3379,7 +3381,7 @@
         "tags": [
           "instances"
         ],
-        "summary": "Update information about an instance's network interface",
+        "summary": "Update a network interface",
         "operationId": "instance_network_interface_update",
         "parameters": [
           {
@@ -3452,7 +3454,7 @@
         "tags": [
           "instances"
         ],
-        "summary": "Detach a network interface from an instance.",
+        "summary": "Delete a network interface",
         "description": "Note that the primary interface for an instance cannot be deleted if there are any secondary interfaces. A new primary interface must be designated first. The primary interface can be deleted if there are no secondary interfaces.",
         "operationId": "instance_network_interface_delete",
         "parameters": [
@@ -3511,7 +3513,7 @@
         "tags": [
           "instances"
         ],
-        "summary": "Reboot an instance.",
+        "summary": "Reboot an instance",
         "operationId": "instance_reboot",
         "parameters": [
           {
@@ -3567,7 +3569,7 @@
         "tags": [
           "instances"
         ],
-        "summary": "Get contents of an instance's serial console.",
+        "summary": "Fetch an instance's serial console",
         "operationId": "instance_serial_console",
         "parameters": [
           {
@@ -3659,7 +3661,7 @@
         "tags": [
           "instances"
         ],
-        "summary": "Boot an instance.",
+        "summary": "Boot an instance",
         "operationId": "instance_start",
         "parameters": [
           {
@@ -3715,7 +3717,7 @@
         "tags": [
           "instances"
         ],
-        "summary": "Halt an instance.",
+        "summary": "Halt an instance",
         "operationId": "instance_stop",
         "parameters": [
           {
@@ -3771,7 +3773,7 @@
         "tags": [
           "projects"
         ],
-        "summary": "Fetch the IAM policy for this Project",
+        "summary": "Fetch a project's IAM policy",
         "operationId": "project_policy_view",
         "parameters": [
           {
@@ -3818,7 +3820,7 @@
         "tags": [
           "projects"
         ],
-        "summary": "Update the IAM policy for this Project",
+        "summary": "Update a project's IAM policy",
         "operationId": "project_policy_update",
         "parameters": [
           {
@@ -3877,7 +3879,7 @@
         "tags": [
           "snapshots"
         ],
-        "summary": "List snapshots in a project.",
+        "summary": "List snapshots",
         "operationId": "snapshot_list",
         "parameters": [
           {
@@ -3955,7 +3957,8 @@
         "tags": [
           "snapshots"
         ],
-        "summary": "Create a snapshot of a disk.",
+        "summary": "Create a snapshot",
+        "description": "Creates a point-in-time snapshot from a disk.",
         "operationId": "snapshot_create",
         "parameters": [
           {
@@ -4014,7 +4017,7 @@
         "tags": [
           "snapshots"
         ],
-        "summary": "Get a snapshot in a project.",
+        "summary": "Fetch a snapshot",
         "operationId": "snapshot_view",
         "parameters": [
           {
@@ -4068,7 +4071,7 @@
         "tags": [
           "snapshots"
         ],
-        "summary": "Delete a snapshot from a project.",
+        "summary": "Delete a snapshot",
         "operationId": "snapshot_delete",
         "parameters": [
           {
@@ -4117,7 +4120,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "List VPCs in a project.",
+        "summary": "List VPCs",
         "operationId": "vpc_list",
         "parameters": [
           {
@@ -4195,7 +4198,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "Create a VPC in a project.",
+        "summary": "Create a VPC",
         "operationId": "vpc_create",
         "parameters": [
           {
@@ -4254,7 +4257,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "Get a VPC in a project.",
+        "summary": "Fetch a VPC",
         "operationId": "vpc_view",
         "parameters": [
           {
@@ -4308,7 +4311,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "Update a VPC.",
+        "summary": "Update a VPC",
         "operationId": "vpc_update",
         "parameters": [
           {
@@ -4372,7 +4375,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "Delete a vpc from a project.",
+        "summary": "Delete a VPC",
         "operationId": "vpc_delete",
         "parameters": [
           {
@@ -4421,7 +4424,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "List firewall rules for a VPC.",
+        "summary": "List firewall rules",
         "operationId": "vpc_firewall_rules_view",
         "parameters": [
           {
@@ -4475,7 +4478,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "Replace the firewall rules for a VPC",
+        "summary": "Replace firewall rules",
         "operationId": "vpc_firewall_rules_update",
         "parameters": [
           {
@@ -4541,7 +4544,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "List VPC Custom and System Routers",
+        "summary": "List routers",
         "operationId": "vpc_router_list",
         "parameters": [
           {
@@ -4626,7 +4629,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "Create a VPC Router",
+        "summary": "Create a router",
         "operationId": "vpc_router_create",
         "parameters": [
           {
@@ -4692,7 +4695,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "Get a VPC Router",
+        "summary": "Get a router",
         "operationId": "vpc_router_view",
         "parameters": [
           {
@@ -4755,7 +4758,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "Update a VPC Router",
+        "summary": "Update a router",
         "operationId": "vpc_router_update",
         "parameters": [
           {
@@ -4828,7 +4831,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "Delete a router from its VPC",
+        "summary": "Delete a router",
         "operationId": "vpc_router_delete",
         "parameters": [
           {
@@ -4886,7 +4889,8 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "List a Router's routes",
+        "summary": "List routes",
+        "description": "List the routes associated with a router in a particular VPC.",
         "operationId": "vpc_router_route_list",
         "parameters": [
           {
@@ -4980,7 +4984,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "Create a VPC Router",
+        "summary": "Create a router",
         "operationId": "vpc_router_route_create",
         "parameters": [
           {
@@ -5055,7 +5059,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "Get a VPC Router route",
+        "summary": "Fetch a route",
         "operationId": "vpc_router_route_view",
         "parameters": [
           {
@@ -5127,7 +5131,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "Update a Router route",
+        "summary": "Update a route",
         "operationId": "vpc_router_route_update",
         "parameters": [
           {
@@ -5209,7 +5213,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "Delete a route from its router",
+        "summary": "Delete a route",
         "operationId": "vpc_router_route_delete",
         "parameters": [
           {
@@ -5276,7 +5280,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "List subnets in a VPC.",
+        "summary": "List subnets",
         "operationId": "vpc_subnet_list",
         "parameters": [
           {
@@ -5361,7 +5365,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "Create a subnet in a VPC.",
+        "summary": "Create a subnet",
         "operationId": "vpc_subnet_create",
         "parameters": [
           {
@@ -5427,7 +5431,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "Get subnet in a VPC.",
+        "summary": "Fetch a subnet",
         "operationId": "vpc_subnet_view",
         "parameters": [
           {
@@ -5490,7 +5494,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "Update a VPC Subnet.",
+        "summary": "Update a subnet",
         "operationId": "vpc_subnet_update",
         "parameters": [
           {
@@ -5563,7 +5567,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "Delete a subnet from a VPC.",
+        "summary": "Delete a subnet",
         "operationId": "vpc_subnet_delete",
         "parameters": [
           {
@@ -5621,7 +5625,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "List network interfaces in a VPC subnet.",
+        "summary": "List network interfaces",
         "operationId": "vpc_subnet_list_network_interfaces",
         "parameters": [
           {
@@ -5779,7 +5783,7 @@
         "tags": [
           "roles"
         ],
-        "summary": "List the built-in roles",
+        "summary": "List built-in roles",
         "operationId": "role_list",
         "parameters": [
           {
@@ -5831,7 +5835,7 @@
         "tags": [
           "roles"
         ],
-        "summary": "Fetch a specific built-in role",
+        "summary": "Fetch a built-in role",
         "operationId": "role_view",
         "parameters": [
           {
@@ -5870,7 +5874,7 @@
         "tags": [
           "sagas"
         ],
-        "summary": "List all sagas (for debugging)",
+        "summary": "List sagas",
         "operationId": "saga_list",
         "parameters": [
           {
@@ -5930,7 +5934,7 @@
         "tags": [
           "sagas"
         ],
-        "summary": "Fetch information about a single saga (for debugging)",
+        "summary": "Fetch a saga",
         "operationId": "saga_view",
         "parameters": [
           {
@@ -5996,7 +6000,8 @@
         "tags": [
           "session"
         ],
-        "summary": "List the current user's SSH public keys",
+        "summary": "List SSH public keys",
+        "description": "Lists SSH public keys for the currently authenticated user.",
         "operationId": "session_sshkey_list",
         "parameters": [
           {
@@ -6054,7 +6059,8 @@
         "tags": [
           "session"
         ],
-        "summary": "Create a new SSH public key for the current user",
+        "summary": "Create an SSH public key",
+        "description": "Create an SSH public key for the currently authenticated user.",
         "operationId": "session_sshkey_create",
         "requestBody": {
           "content": {
@@ -6091,7 +6097,8 @@
         "tags": [
           "session"
         ],
-        "summary": "Get (by name) an SSH public key belonging to the current user",
+        "summary": "Fetch an SSH public key",
+        "description": "Fetch an SSH public key associated with the currently authenticated user.",
         "operationId": "session_sshkey_view",
         "parameters": [
           {
@@ -6127,7 +6134,8 @@
         "tags": [
           "session"
         ],
-        "summary": "Delete (by name) an SSH public key belonging to the current user",
+        "summary": "Delete an SSH public key",
+        "description": "Delete an SSH public key associated with the currently authenticated user.",
         "operationId": "session_sshkey_delete",
         "parameters": [
           {
@@ -6158,6 +6166,8 @@
         "tags": [
           "silos"
         ],
+        "summary": "List silos",
+        "description": "Lists silos that are discoverable based on the current permissions.",
         "operationId": "silo_list",
         "parameters": [
           {
@@ -6215,7 +6225,7 @@
         "tags": [
           "silos"
         ],
-        "summary": "Create a new silo.",
+        "summary": "Create a silo",
         "operationId": "silo_create",
         "requestBody": {
           "content": {
@@ -6252,7 +6262,8 @@
         "tags": [
           "silos"
         ],
-        "summary": "Fetch a specific silo",
+        "summary": "Fetch a silo",
+        "description": "Fetch a silo by name.",
         "operationId": "silo_view",
         "parameters": [
           {
@@ -6289,7 +6300,8 @@
         "tags": [
           "silos"
         ],
-        "summary": "Delete a specific silo.",
+        "summary": "Delete a silo",
+        "description": "Delete a silo by name.",
         "operationId": "silo_delete",
         "parameters": [
           {
@@ -6321,7 +6333,7 @@
         "tags": [
           "silos"
         ],
-        "summary": "List Silo identity providers",
+        "summary": "List a silo's IDPs",
         "operationId": "silo_identity_provider_list",
         "parameters": [
           {
@@ -6391,7 +6403,7 @@
         "tags": [
           "silos"
         ],
-        "summary": "Fetch the IAM policy for this Silo",
+        "summary": "Fetch a silo's IAM policy",
         "operationId": "silo_policy_view",
         "parameters": [
           {
@@ -6428,7 +6440,7 @@
         "tags": [
           "silos"
         ],
-        "summary": "Update the IAM policy for this Silo",
+        "summary": "Update a silo's IAM policy",
         "operationId": "silo_policy_update",
         "parameters": [
           {
@@ -6477,7 +6489,7 @@
         "tags": [
           "silos"
         ],
-        "summary": "Create a new SAML identity provider for a silo.",
+        "summary": "Create a SAML IDP",
         "operationId": "silo_identity_provider_create",
         "parameters": [
           {
@@ -6526,7 +6538,7 @@
         "tags": [
           "silos"
         ],
-        "summary": "GET a silo's SAML identity provider",
+        "summary": "Fetch a SAML IDP",
         "operationId": "silo_identity_provider_view",
         "parameters": [
           {
@@ -6575,7 +6587,7 @@
         "tags": [
           "system"
         ],
-        "summary": "List the built-in system users",
+        "summary": "List built-in users",
         "operationId": "system_user_list",
         "parameters": [
           {
@@ -6635,7 +6647,7 @@
         "tags": [
           "system"
         ],
-        "summary": "Fetch a specific built-in system user",
+        "summary": "Fetch a built-in user",
         "operationId": "system_user_view",
         "parameters": [
           {
@@ -6674,7 +6686,7 @@
         "tags": [
           "metrics"
         ],
-        "summary": "List all timeseries schema",
+        "summary": "List timeseries schema",
         "operationId": "timeseries_schema_get",
         "parameters": [
           {
@@ -6726,7 +6738,7 @@
         "tags": [
           "updates"
         ],
-        "summary": "Refresh update metadata",
+        "summary": "Refresh update data",
         "operationId": "updates_refresh",
         "responses": {
           "204": {

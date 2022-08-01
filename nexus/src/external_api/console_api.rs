@@ -226,7 +226,7 @@ impl RelayState {
     }
 }
 
-/// Ask the user to login to their identity provider
+/// Prompt user login
 ///
 /// Either display a page asking a user for their credentials, or redirect them
 /// to their identity provider.
@@ -310,7 +310,7 @@ pub async fn login(
     handler.await
 }
 
-/// Consume some sort of credentials, and authenticate a user.
+/// Authenticate a user
 ///
 /// Either receive a username and password, or some sort of identity provider
 /// data (like a SAMLResponse). Use these to set the user's session cookie.
