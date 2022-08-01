@@ -134,13 +134,10 @@ impl super::Nexus {
             )
             .await?;
 
-        // TODO-error more context would be useful
-        let instance_id =
-            saga_outputs.lookup_node_output::<Uuid>("instance_id").map_err(
-                // XXX-dap this can be cleaned up as elsewhere with
-                // internal_context, etc.
-                |e| Error::InternalError { internal_message: e.to_string() },
-            )?;
+        let instance_id = saga_outputs
+            .lookup_node_output::<Uuid>("instance_id")
+            .map_err(|e| Error::internal_error(&format!("{:#}", &e)))
+            .internal_context("looking up output from instance create saga")?;
 
         // TODO-correctness TODO-robustness TODO-design It's not quite correct
         // to take this instance id and look it up again.  It's possible that
