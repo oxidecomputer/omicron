@@ -24,11 +24,14 @@ use slog::warn;
 use slog::Drain;
 use slog::Level;
 use slog::Logger;
+use std::io;
 use std::net::SocketAddrV6;
 use std::net::UdpSocket;
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
+
+mod usart;
 
 /// Command line program that can send MGS messages to a single SP.
 #[derive(Parser, Debug)]
@@ -67,6 +70,13 @@ enum Commands {
 
     /// Ask SP for its current state.
     State,
+
+    /// Attach to the SP's USART.
+    UsartAttach {
+        /// Put the local terminal in raw mode.
+        #[clap(long)]
+        raw: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -88,6 +98,9 @@ fn main() -> Result<()> {
     let request_kind = match args.command {
         Commands::Discover => RequestKind::Discover,
         Commands::State => RequestKind::SpState,
+        Commands::UsartAttach { raw } => {
+            return usart::run(log, socket, args.sp, raw);
+        }
     };
 
     let response = request_response(&log, &socket, args.sp, request_kind)?;
@@ -151,28 +164,35 @@ fn send_request(
     Ok(request_id)
 }
 
-fn recv_sp_message(log: &Logger, socket: &UdpSocket) -> Result<SpMessage> {
+#[derive(Debug, thiserror::Error)]
+enum RecvError {
+    #[error(transparent)]
+    Io(#[from] io::Error),
+    #[error("failed to deserialize response: {0}")]
+    Deserialize(#[from] gateway_messages::HubpackError),
+    #[error("incorrect message version (expected {expected}, got {got})")]
+    IncorrectVersion { expected: u32, got: u32 },
+}
+
+fn recv_sp_message(
+    log: &Logger,
+    socket: &UdpSocket,
+) -> Result<SpMessage, RecvError> {
     let mut resp = [0; SpMessage::MAX_SIZE];
 
-    let (n, peer) = socket
-        .recv_from(&mut resp[..])
-        .with_context(|| format!("failed to receive response"))?;
+    let (n, _peer) = socket.recv_from(&mut resp[..])?;
     let resp = &resp[..n];
     trace!(log, "received packet"; "data" => ?resp);
 
-    let (message, _leftover) = gateway_messages::deserialize::<SpMessage>(resp)
-        .with_context(|| {
-            format!("failed to deserialize response from {peer}")
-        })?;
+    let (message, _) = gateway_messages::deserialize::<SpMessage>(resp)?;
     debug!(log, "received response"; "response" => ?message);
 
-    if message.version != version::V1 {
-        bail!(
-            "incorrect message versiom from {peer}: {} (expected {})",
-            message.version,
-            version::V1
-        );
+    if message.version == version::V1 {
+        Ok(message)
+    } else {
+        Err(RecvError::IncorrectVersion {
+            expected: version::V1,
+            got: message.version,
+        })
     }
-
-    Ok(message)
 }
