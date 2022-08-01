@@ -5556,7 +5556,7 @@ dependencies = [
 [[package]]
 name = "steno"
 version = "0.2.0"
-source = "git+https://github.com/oxidecomputer/steno?branch=ajs-experiments#c73805091460c5a1bc1cbfd33b1ae19647fbf04f"
+source = "git+https://github.com/oxidecomputer/steno?branch=ajs-experiments#f933566ee1c013104f626cabc6d3d8b8670663e3"
 dependencies = [
  "anyhow",
  "async-trait",
