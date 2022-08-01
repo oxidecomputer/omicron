@@ -70,6 +70,9 @@ ip_pool_list                             /ip-pools
 ip_pool_range_add                        /ip-pools/{pool_name}/ranges/add
 ip_pool_range_list                       /ip-pools/{pool_name}/ranges
 ip_pool_range_remove                     /ip-pools/{pool_name}/ranges/remove
+ip_pool_service_range_add                /ip-pools-service/{rack_id}/ranges/add
+ip_pool_service_range_list               /ip-pools-service/{rack_id}/ranges
+ip_pool_service_range_remove             /ip-pools-service/{rack_id}/ranges/remove
 ip_pool_update                           /ip-pools/{pool_name}
 ip_pool_view                             /ip-pools/{pool_name}
 
