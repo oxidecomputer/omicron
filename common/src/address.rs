@@ -87,6 +87,11 @@ pub struct DnsSubnet {
 }
 
 impl DnsSubnet {
+    /// Creates a subnet, given an address for the DNS server itself.
+    pub fn from_dns_address(address: Ipv6Addr) -> Self {
+        Self { subnet: Ipv6Subnet::new(address) }
+    }
+
     /// Returns the DNS server address within the subnet.
     ///
     /// This is the first address within the subnet.

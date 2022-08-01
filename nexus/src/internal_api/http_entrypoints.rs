@@ -37,7 +37,7 @@ type NexusApiDescription = ApiDescription<Arc<ServerContext>>;
 /// Returns a description of the internal nexus API
 pub fn internal_api() -> NexusApiDescription {
     fn register_endpoints(api: &mut NexusApiDescription) -> Result<(), String> {
-        api.register(cpapi_sled_agents_post)?;
+        api.register(sled_agent_put)?;
         api.register(rack_initialization_complete)?;
         api.register(zpool_put)?;
         api.register(dataset_put)?;
@@ -64,15 +64,11 @@ struct SledAgentPathParam {
 }
 
 /// Report that the sled agent for the specified sled has come online.
-// TODO: Should probably be "PUT", since:
-// 1. We're upserting the value
-// 2. The client supplies the UUID
-// 3. This call is idempotent (mod "time_modified").
 #[endpoint {
      method = POST,
      path = "/sled-agents/{sled_id}",
  }]
-async fn cpapi_sled_agents_post(
+async fn sled_agent_put(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<SledAgentPathParam>,
     sled_info: TypedBody<SledAgentStartupInfo>,
@@ -80,10 +76,10 @@ async fn cpapi_sled_agents_post(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let si = sled_info.into_inner();
+    let info = sled_info.into_inner();
     let sled_id = &path.sled_id;
     let handler = async {
-        nexus.upsert_sled(*sled_id, si.sa_address).await?;
+        nexus.upsert_sled(*sled_id, info).await?;
         Ok(HttpResponseUpdatedNoContent())
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await

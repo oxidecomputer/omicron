@@ -34,6 +34,8 @@ impl DataStore {
                 dsl::time_modified.eq(Utc::now()),
                 dsl::ip.eq(sled.ip),
                 dsl::port.eq(sled.port),
+                dsl::rack_id.eq(sled.rack_id),
+                dsl::is_scrimlet.eq(sled.is_scrimlet()),
             ))
             .returning(Sled::as_returning())
             .get_result_async(self.pool())

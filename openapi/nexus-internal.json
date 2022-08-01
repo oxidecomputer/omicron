@@ -277,7 +277,7 @@
     "/sled-agents/{sled_id}": {
       "post": {
         "summary": "Report that the sled agent for the specified sled has come online.",
-        "operationId": "cpapi_sled_agents_post",
+        "operationId": "sled_agent_put",
         "parameters": [
           {
             "in": "path",
@@ -1826,13 +1826,30 @@
         "description": "Sent by a sled agent on startup to Nexus to request further instruction",
         "type": "object",
         "properties": {
+          "role": {
+            "description": "Describes the responsibilities of the sled",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SledRole"
+              }
+            ]
+          },
           "sa_address": {
-            "description": "the address of the sled agent's API endpoint",
+            "description": "The address of the sled agent's API endpoint",
             "type": "string"
           }
         },
         "required": [
+          "role",
           "sa_address"
+        ]
+      },
+      "SledRole": {
+        "description": "Describes the role of the sled within the rack.\n\nNote that this may change if the sled is physically moved within the rack.",
+        "type": "string",
+        "enum": [
+          "gimlet",
+          "scrimlet"
         ]
       },
       "ZpoolPutRequest": {

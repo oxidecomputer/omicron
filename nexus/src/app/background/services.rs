@@ -18,7 +18,7 @@ use crate::db::model::Sled;
 use crate::db::model::Zpool;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use omicron_common::address::{
-    DNS_PORT, DNS_REDUNDANCY, DNS_SERVER_PORT, NEXUS_EXTERNAL_PORT,
+    DnsSubnet, DNS_PORT, DNS_REDUNDANCY, DNS_SERVER_PORT, NEXUS_EXTERNAL_PORT,
     NEXUS_INTERNAL_PORT,
 };
 use omicron_common::api::external::Error;
@@ -36,8 +36,13 @@ enum ServiceRedundancy {
     // within the rack.
     PerRack(u32),
 
+    // This service must exist on all Scrimlets within the rack.
+    AllScrimlets,
+
     // This service must exist on at least this many sleds
-    // within the availability zone.
+    // within the availability zone. Note that this is specific
+    // for the DNS service, as some expectations surrounding
+    // addressing are specific to that service.
     DnsPerAz(u32),
 }
 
@@ -47,13 +52,14 @@ struct ExpectedService {
     redundancy: ServiceRedundancy,
 }
 
-// NOTE: longer-term, when we integrate multi-rack support,
+// TODO(https://github.com/oxidecomputer/omicron/issues/1276):
+// Longer-term, when we integrate multi-rack support,
 // it is expected that Nexus will manage multiple racks
 // within the fleet, rather than simply per-rack services.
 //
 // When that happens, it is likely that many of the "per-rack"
 // services will become "per-fleet", such as Nexus and CRDB.
-const EXPECTED_SERVICES: [ExpectedService; 3] = [
+const EXPECTED_SERVICES: [ExpectedService; 4] = [
     ExpectedService {
         kind: ServiceKind::InternalDNS,
         redundancy: ServiceRedundancy::DnsPerAz(DNS_REDUNDANCY),
@@ -65,6 +71,10 @@ const EXPECTED_SERVICES: [ExpectedService; 3] = [
     ExpectedService {
         kind: ServiceKind::Oximeter,
         redundancy: ServiceRedundancy::PerRack(1),
+    },
+    ExpectedService {
+        kind: ServiceKind::Dendrite,
+        redundancy: ServiceRedundancy::AllScrimlets,
     },
 ];
 
@@ -81,6 +91,8 @@ const EXPECTED_DATASETS: [ExpectedDataset; 3] = [
     },
     ExpectedDataset {
         kind: DatasetKind::Cockroach,
+        // TODO(https://github.com/oxidecomputer/omicron/issues/727):
+        // Update this to more than one.
         redundancy: DatasetRedundancy::PerRack(1),
     },
     ExpectedDataset {
@@ -133,10 +145,8 @@ where
         stream::iter(&sled_ids)
             .map(Ok::<_, Error>)
             .try_for_each_concurrent(None, |sled_id| async {
-                // TODO: This interface kinda sucks; ideally we would
-                // only insert the *new* services.
-                //
-                // Inserting the old ones too is costing us an extra query.
+                // Query for all services that should be running on a Sled,
+                // and notify Sled Agent about all of them.
                 let services = self
                     .nexus
                     .datastore()
@@ -156,14 +166,13 @@ where
                                     Self::get_service_name_and_type(
                                         address, s.kind,
                                     );
-
-                                // TODO: This is hacky, specifically to inject
-                                // global zone addresses in the DNS service.
                                 let gz_addresses = match &s.kind {
                                     ServiceKind::InternalDNS => {
-                                        let mut octets = address.octets();
-                                        octets[15] = octets[15] + 1;
-                                        vec![Ipv6Addr::from(octets)]
+                                        vec![DnsSubnet::from_dns_address(
+                                            address,
+                                        )
+                                        .gz_address()
+                                        .ip()]
                                     }
                                     _ => vec![],
                                 };
@@ -214,6 +223,8 @@ where
                         0,
                     )
                     .to_string(),
+
+                    // TODO: This is wrong! needs a separate address for Nexus
                     external_address: SocketAddrV6::new(
                         address,
                         NEXUS_EXTERNAL_PORT,
@@ -249,36 +260,6 @@ where
         }
     }
 
-    // Provision the services within the database.
-    async fn provision_rack_service(
-        &self,
-        opctx: &OpContext,
-        kind: ServiceKind,
-        desired_count: u32,
-    ) -> Result<Vec<Service>, Error> {
-        self.nexus
-            .datastore()
-            .ensure_rack_service(
-                opctx,
-                self.nexus.rack_id(),
-                kind,
-                desired_count,
-            )
-            .await
-    }
-
-    // Provision the services within the database.
-    async fn provision_dns_service(
-        &self,
-        opctx: &OpContext,
-        desired_count: u32,
-    ) -> Result<Vec<Service>, Error> {
-        self.nexus
-            .datastore()
-            .ensure_dns_service(opctx, self.nexus.rack_subnet(), desired_count)
-            .await
-    }
-
     async fn ensure_services_provisioned(
         &self,
         opctx: &OpContext,
@@ -292,8 +273,11 @@ where
                 ServiceRedundancy::PerRack(desired_count) => {
                     svcs.extend_from_slice(
                         &self
-                            .provision_rack_service(
+                            .nexus
+                            .datastore()
+                            .ensure_rack_service(
                                 opctx,
+                                self.nexus.rack_id(),
                                 expected_svc.kind,
                                 desired_count,
                             )
@@ -303,7 +287,26 @@ where
                 ServiceRedundancy::DnsPerAz(desired_count) => {
                     svcs.extend_from_slice(
                         &self
-                            .provision_dns_service(opctx, desired_count)
+                            .nexus
+                            .datastore()
+                            .ensure_dns_service(
+                                opctx,
+                                self.nexus.rack_subnet(),
+                                desired_count,
+                            )
+                            .await?,
+                    );
+                }
+                ServiceRedundancy::AllScrimlets => {
+                    svcs.extend_from_slice(
+                        &self
+                            .nexus
+                            .datastore()
+                            .ensure_scrimlet_service(
+                                opctx,
+                                self.nexus.rack_id(),
+                                expected_svc.kind,
+                            )
                             .await?,
                     );
                 }
@@ -359,9 +362,9 @@ where
                 let sled_client = sled_clients.get(&sled.id()).unwrap();
 
                 let dataset_kind = match kind {
-                    // TODO: This set of "all addresses" isn't right.
-                    // TODO: ... should we even be using "all addresses" to contact CRDB?
-                    // Can it just rely on DNS, somehow?
+                    // TODO(https://github.com/oxidecomputer/omicron/issues/727):
+                    // This set of "all addresses" isn't right. We'll need to
+                    // deal with that before supporting multi-node CRDB.
                     DatasetKind::Cockroach => {
                         SledAgentTypes::DatasetKind::CockroachDb(vec![])
                     }
@@ -462,25 +465,6 @@ mod test {
     use std::sync::Arc;
     use uuid::Uuid;
 
-    // TODO: maybe figure out what you *want* to test?
-    // I suspect we'll need to refactor this API for testability.
-    //
-    // - Dataset init:
-    //   - Call to DB
-    //  - For each new dataset...
-    //     - Call to Sled (filesystem put)
-    //     - Update DNS record
-    //
-    // - Service init:
-    //   - Call to DB
-    //   - For each sled...
-    //     - List svcs
-    //     - Put svcs
-    //  - For each new service...
-    //     - Update DNS record
-    //
-    // TODO: Also, idempotency check
-
     struct ProvisionTest {
         logctx: LogContext,
         opctx: OpContext,
@@ -518,7 +502,8 @@ mod test {
             0,
         );
         let sled_id = Uuid::new_v4();
-        let sled = Sled::new(sled_id, bogus_addr.clone(), rack_id);
+        let is_scrimlet = false;
+        let sled = Sled::new(sled_id, bogus_addr.clone(), is_scrimlet, rack_id);
         datastore.sled_upsert(sled).await.unwrap();
         sled_id
     }
@@ -663,6 +648,10 @@ mod test {
         test.cleanup().await;
     }
 
+    // Observe that "per-rack" dataset provisions can be completed.
+    //
+    // This test uses multiple racks, and verifies that a provision occurs
+    // on each one.
     #[tokio::test]
     async fn test_provision_dataset_per_rack() {
         let test = ProvisionTest::new("test_provision_dataset_per_rack").await;
@@ -705,38 +694,200 @@ mod test {
             .unwrap();
 
         // Observe that the datasets were requested on each rack.
-        let sled = nexus.sled_client(&sled1_id).await.unwrap();
-        let requests = sled.dataset_requests();
-        assert_eq!(1, requests.len());
-        assert_eq!(zpools[0], requests[0].zpool_id);
-        let sled = nexus.sled_client(&sled2_id).await.unwrap();
-        let requests = sled.dataset_requests();
-        assert_eq!(0, requests.len());
 
-        // TODO: This is currently failing, because the API to
-        // "ensure_rack_dataset" takes a single rack ID.
-        //
-        // I think "ensure_rack_service" would likely suffer from a similar
-        // issue; namely, that the requests will be scoped to a single rack.
-        //
-        // TODO: We could iterate over racks IDs? Would that be so awful?
+        // Rack 1: One of the two sleds should have a dataset.
+        let sled = nexus.sled_client(&sled1_id).await.unwrap();
+        let requests1 = sled.dataset_requests();
+        if !requests1.is_empty() {
+            assert_eq!(1, requests1.len());
+            assert_eq!(zpools[0], requests1[0].zpool_id);
+        }
+        let sled = nexus.sled_client(&sled2_id).await.unwrap();
+        let requests2 = sled.dataset_requests();
+        if !requests2.is_empty() {
+            assert_eq!(1, requests2.len());
+            assert_eq!(zpools[1], requests2[0].zpool_id);
+        }
+        assert!(
+            requests1.is_empty() ^ requests2.is_empty(),
+            "One of the sleds should have a dataset, the other should not"
+        );
+
+        // Rack 2: The sled should have a dataset.
         let sled = nexus.sled_client(&other_rack_sled_id).await.unwrap();
         let requests = sled.dataset_requests();
-        assert_eq!(1, requests.len());
-        assert_eq!(zpools[2], requests[0].zpool_id);
+        // TODO(https://github.com/oxidecomputer/omicron/issues/1276):
+        // We should see a request to the "other rack" when multi-rack
+        // is supported.
+        //
+        // At the moment, however, all requests for service-balancing are
+        // "rack-local".
+        assert_eq!(0, requests.len());
+
+        // We should be able to assert this when multi-rack is supported.
+        // assert_eq!(zpools[2], requests[0].zpool_id);
+
+        test.cleanup().await;
+    }
+
+    #[tokio::test]
+    async fn test_provision_oximeter_service_per_rack() {
+        let test =
+            ProvisionTest::new("test_provision_oximeter_service_per_rack")
+                .await;
+
+        let rack_subnet = Ipv6Subnet::new(Ipv6Addr::LOCALHOST);
+        let nexus = FakeNexus::new(test.datastore.clone(), rack_subnet);
+        let dns_updater = FakeDnsUpdater::new();
+        let service_balancer = ServiceBalancer::new(
+            test.logctx.log.clone(),
+            nexus.clone(),
+            dns_updater.clone(),
+        );
+
+        // Setup: Create three sleds, with the goal of putting services on two
+        // of them.
+        const SLED_COUNT: u32 = 3;
+        const SERVICE_COUNT: u32 = 2;
+        let mut sleds = vec![];
+        for _ in 0..SLED_COUNT {
+            sleds
+                .push(create_test_sled(nexus.rack_id(), &test.datastore).await);
+        }
+        let expected_services = [ExpectedService {
+            kind: ServiceKind::Oximeter,
+            redundancy: ServiceRedundancy::PerRack(SERVICE_COUNT),
+        }];
+
+        // Request the services
+        service_balancer
+            .ensure_services_provisioned(&test.opctx, &expected_services)
+            .await
+            .unwrap();
+
+        // Observe the service on SERVICE_COUNT of the SLED_COUNT sleds.
+        let mut observed_service_count = 0;
+        for sled_id in &sleds {
+            let sled = nexus.sled_client(&sled_id).await.unwrap();
+            let requests = sled.service_requests();
+
+            match requests.len() {
+                0 => (), // Ignore the sleds where nothing was provisioned
+                1 => {
+                    assert_eq!(requests[0].name, "oximeter");
+                    assert!(matches!(
+                        requests[0].service_type,
+                        SledAgentTypes::ServiceType::Oximeter
+                    ));
+                    assert!(requests[0].gz_addresses.is_empty());
+                    observed_service_count += 1;
+                }
+                _ => {
+                    panic!("Unexpected requests (should only see one per sled): {:#?}", requests);
+                }
+            }
+        }
+        assert_eq!(observed_service_count, SERVICE_COUNT);
+
+        test.cleanup().await;
+    }
+
+    #[tokio::test]
+    async fn test_provision_nexus_service_per_rack() {
+        let test =
+            ProvisionTest::new("test_provision_nexus_service_per_rack").await;
+
+        let rack_subnet = Ipv6Subnet::new(Ipv6Addr::LOCALHOST);
+        let nexus = FakeNexus::new(test.datastore.clone(), rack_subnet);
+        let dns_updater = FakeDnsUpdater::new();
+        let service_balancer = ServiceBalancer::new(
+            test.logctx.log.clone(),
+            nexus.clone(),
+            dns_updater.clone(),
+        );
+
+        // Setup: Create three sleds, with the goal of putting services on two
+        // of them.
+        const SLED_COUNT: u32 = 3;
+        const SERVICE_COUNT: u32 = 2;
+        let mut sleds = vec![];
+        for _ in 0..SLED_COUNT {
+            sleds
+                .push(create_test_sled(nexus.rack_id(), &test.datastore).await);
+        }
+        let expected_services = [ExpectedService {
+            kind: ServiceKind::Nexus,
+            redundancy: ServiceRedundancy::PerRack(SERVICE_COUNT),
+        }];
+
+        // Request the services
+        service_balancer
+            .ensure_services_provisioned(&test.opctx, &expected_services)
+            .await
+            .unwrap();
+
+        // Observe the service on SERVICE_COUNT of the SLED_COUNT sleds.
+        let mut observed_service_count = 0;
+        for sled_id in &sleds {
+            let sled = nexus.sled_client(&sled_id).await.unwrap();
+            let requests = sled.service_requests();
+            match requests.len() {
+                0 => (), // Ignore the sleds where nothing was provisioned
+                1 => {
+                    assert_eq!(requests[0].name, "nexus");
+                    match &requests[0].service_type {
+                        SledAgentTypes::ServiceType::Nexus {
+                            internal_address,
+                            external_address,
+                        } => {
+                            let internal_address = internal_address
+                                .parse::<SocketAddrV6>()
+                                .unwrap();
+                            let external_address = external_address
+                                .parse::<SocketAddrV6>()
+                                .unwrap();
+
+                            // TODO: This is currently failing! We need to make
+                            // the Nexus external IP come from an IP pool for
+                            // external addresses.
+                            assert_ne!(
+                                internal_address.ip(),
+                                external_address.ip()
+                            );
+
+                            // TODO: check ports too, maybe?
+                        }
+                        _ => panic!(
+                            "unexpected service type: {:?}",
+                            requests[0].service_type
+                        ),
+                    }
+                    assert!(requests[0].gz_addresses.is_empty());
+                    observed_service_count += 1;
+                }
+                _ => {
+                    panic!("Unexpected requests (should only see one per sled): {:#?}", requests);
+                }
+            }
+        }
+        assert_eq!(observed_service_count, SERVICE_COUNT);
 
         test.cleanup().await;
     }
 
     /*
+
+    // TODO: Check for GZ?
     #[tokio::test]
-    async fn test_provision_service_per_rack() {
+    async fn test_provision_dns_service_per_az() {
         todo!();
     }
 
+    // TODO: Check for value of 'asic'?
     #[tokio::test]
-    async fn test_provision_service_dns_per_az() {
+    async fn test_provision_scrimlet_service() {
         todo!();
     }
+
     */
 }

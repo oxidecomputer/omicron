@@ -23,7 +23,7 @@ mock! {
         pub fn new(server_addr: &str, log: Logger) -> Self;
         pub fn client(&self) -> reqwest::Client;
         pub fn baseurl(&self) -> &'static str;
-        pub async fn cpapi_sled_agents_post(
+        pub async fn sled_agent_put(
             &self,
             id: &Uuid,
             info: &SledAgentStartupInfo,

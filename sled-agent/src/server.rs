@@ -38,6 +38,7 @@ impl Server {
         log: Logger,
         sled_id: Uuid,
         addr: SocketAddrV6,
+        is_scrimlet: bool,
         rack_id: Uuid,
     ) -> Result<Server, String> {
         info!(log, "setting up sled agent server");
@@ -84,15 +85,22 @@ impl Server {
                     log,
                     "contacting server nexus, registering sled: {}", sled_id
                 );
+                let role = if is_scrimlet {
+                    nexus_client::types::SledRole::Scrimlet
+                } else {
+                    nexus_client::types::SledRole::Gimlet
+                };
+
                 let nexus_client = lazy_nexus_client
                     .get()
                     .await
                     .map_err(|err| BackoffError::transient(err.to_string()))?;
                 nexus_client
-                    .cpapi_sled_agents_post(
+                    .sled_agent_put(
                         &sled_id,
                         &nexus_client::types::SledAgentStartupInfo {
                             sa_address: sled_address.to_string(),
+                            role,
                         },
                     )
                     .await

@@ -23,7 +23,7 @@ use uuid::Uuid;
 
 /// A fake implementation of a Sled Agent client.
 ///
-/// In lieu of any networked requests, stores onto the requested services and
+/// In lieu of any networked requests, stores the requested services and
 /// datasets for later inspection.
 pub struct FakeSledClientInner {
     service_request: Option<SledAgentTypes::ServiceEnsureBody>,
@@ -45,6 +45,7 @@ impl FakeSledClient {
         })
     }
 
+    /// Returns the requests to create services on the sled.
     pub fn service_requests(&self) -> Vec<SledAgentTypes::ServiceRequest> {
         self.inner
             .lock()
@@ -55,6 +56,7 @@ impl FakeSledClient {
             .unwrap_or(vec![])
     }
 
+    /// Returns the requests to create datasets on the sled.
     pub fn dataset_requests(&self) -> Vec<SledAgentTypes::DatasetEnsureBody> {
         self.inner.lock().unwrap().dataset_requests.clone()
     }
@@ -68,6 +70,11 @@ impl SledClientInterface for FakeSledClient {
     ) -> Result<(), Error> {
         let old =
             self.inner.lock().unwrap().service_request.replace(body.clone());
+
+        // NOTE: This is technically a limitation of the fake.
+        //
+        // We can relax this constraint if it's useful, but we should
+        // deal with conflicts of prior invocations.
         assert!(
             old.is_none(),
             "Should only set services once (was {old:?}, inserted {body:?})"

@@ -285,7 +285,7 @@ dependencies = [
  "bitflags",
  "cexpr",
  "clang-sys",
- "clap 3.2.15",
+ "clap 3.2.16",
  "env_logger",
  "lazy_static",
  "lazycell",
@@ -415,9 +415,9 @@ checksum = "14c189c53d098945499cdfa7ecc63567cf3886b3332b312a5b4585d8d3a6a610"
 
 [[package]]
 name = "bytes"
-version = "1.2.0"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f0b3de4a0c5e67e16066a0715723abd91edc2f9001d09c46e1dca929351e130e"
+checksum = "ec8a7b6a70fde80372154c65702f00a0f56f3e1c36abbc6c440484be248856db"
 dependencies = [
  "serde",
 ]
@@ -536,9 +536,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "3.2.15"
+version = "3.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "44bbe24bbd31a185bc2c4f7c2abe80bea13a20d57ee4e55be70ac512bdc76417"
+checksum = "a3dbbb6653e7c55cc8595ad3e1f7be8f32aba4eb7ff7f0fd1163d4f3d137c0a9"
 dependencies = [
  "atty",
  "bitflags",
@@ -1363,9 +1363,9 @@ dependencies = [
 
 [[package]]
 name = "dyn-clone"
-version = "1.0.5"
+version = "1.0.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21e50f3adc76d6a43f5ed73b698a87d0760ca74617f60f7c3b879003536fdd28"
+checksum = "9d07a982d1fb29db01e5a59b1918e03da4df7297eaeee7686ac45542fd4e59c8"
 
 [[package]]
 name = "ecdsa"
@@ -1776,7 +1776,7 @@ name = "gateway-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 3.2.15",
+ "clap 3.2.16",
  "futures",
  "gateway-client",
  "libc",
@@ -2257,7 +2257,7 @@ dependencies = [
 [[package]]
 name = "illumos-ddi-dki"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=23884d35aa7908e23accaa77f125a370ddf5c606#23884d35aa7908e23accaa77f125a370ddf5c606"
+source = "git+https://github.com/oxidecomputer/opte?rev=52176b99cc578f5b7b90f9bae8935013f961086c#52176b99cc578f5b7b90f9bae8935013f961086c"
 dependencies = [
  "illumos-sys-hdrs",
 ]
@@ -2265,7 +2265,7 @@ dependencies = [
 [[package]]
 name = "illumos-sys-hdrs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=23884d35aa7908e23accaa77f125a370ddf5c606#23884d35aa7908e23accaa77f125a370ddf5c606"
+source = "git+https://github.com/oxidecomputer/opte?rev=52176b99cc578f5b7b90f9bae8935013f961086c#52176b99cc578f5b7b90f9bae8935013f961086c"
 
 [[package]]
 name = "impl-trait-for-tuples"
@@ -2322,7 +2322,7 @@ name = "internal-dns"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 3.2.15",
+ "clap 3.2.16",
  "dropshot",
  "expectorate",
  "internal-dns-client",
@@ -3064,7 +3064,7 @@ name = "omicron-deploy"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 3.2.15",
+ "clap 3.2.16",
  "crossbeam",
  "omicron-package",
  "omicron-sled-agent",
@@ -3080,7 +3080,7 @@ dependencies = [
 name = "omicron-gateway"
 version = "0.1.0"
 dependencies = [
- "clap 3.2.15",
+ "clap 3.2.16",
  "dropshot",
  "expectorate",
  "futures",
@@ -3119,7 +3119,7 @@ dependencies = [
  "base64",
  "bb8",
  "chrono",
- "clap 3.2.15",
+ "clap 3.2.16",
  "cookie",
  "criterion",
  "crucible-agent-client",
@@ -3198,7 +3198,7 @@ name = "omicron-package"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 3.2.15",
+ "clap 3.2.16",
  "futures",
  "hex",
  "indicatif",
@@ -3236,7 +3236,7 @@ dependencies = [
  "bytes",
  "cfg-if 1.0.0",
  "chrono",
- "clap 3.2.15",
+ "clap 3.2.16",
  "crucible",
  "crucible-agent-client",
  "ddm-admin-client",
@@ -3298,7 +3298,7 @@ name = "omicron-test-utils"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 3.2.15",
+ "clap 3.2.16",
  "dropshot",
  "expectorate",
  "futures",
@@ -3430,7 +3430,7 @@ dependencies = [
 [[package]]
 name = "opte"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=23884d35aa7908e23accaa77f125a370ddf5c606#23884d35aa7908e23accaa77f125a370ddf5c606"
+source = "git+https://github.com/oxidecomputer/opte?rev=52176b99cc578f5b7b90f9bae8935013f961086c#52176b99cc578f5b7b90f9bae8935013f961086c"
 dependencies = [
  "anymap",
  "cfg-if 0.1.10",
@@ -3447,7 +3447,7 @@ dependencies = [
 [[package]]
 name = "opte-ioctl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=23884d35aa7908e23accaa77f125a370ddf5c606#23884d35aa7908e23accaa77f125a370ddf5c606"
+source = "git+https://github.com/oxidecomputer/opte?rev=52176b99cc578f5b7b90f9bae8935013f961086c#52176b99cc578f5b7b90f9bae8935013f961086c"
 dependencies = [
  "libc",
  "libnet",
@@ -3550,7 +3550,7 @@ dependencies = [
 name = "oximeter-collector"
 version = "0.1.0"
 dependencies = [
- "clap 3.2.15",
+ "clap 3.2.16",
  "dropshot",
  "expectorate",
  "internal-dns-client",
@@ -3581,7 +3581,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "chrono",
- "clap 3.2.15",
+ "clap 3.2.16",
  "dropshot",
  "itertools",
  "omicron-test-utils",
@@ -4155,7 +4155,7 @@ version = "0.1.2-dev"
 source = "git+https://github.com/oxidecomputer/progenitor#ea5a6a5a79e741d3b3ed9ad4f0f489c6602cf358"
 dependencies = [
  "anyhow",
- "clap 3.2.15",
+ "clap 3.2.16",
  "openapiv3",
  "progenitor-client",
  "progenitor-impl",
@@ -5403,7 +5403,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "clap 3.2.15",
+ "clap 3.2.16",
  "dropshot",
  "futures",
  "gateway-messages",
@@ -5472,7 +5472,7 @@ version = "0.1.0"
 source = "git+http://github.com/oxidecomputer/sprockets?rev=0361fd13ff19cda6696242fe40f1325fca30d3d1#0361fd13ff19cda6696242fe40f1325fca30d3d1"
 dependencies = [
  "anyhow",
- "clap 3.2.15",
+ "clap 3.2.16",
  "derive_more",
  "futures",
  "pin-project",
@@ -5882,9 +5882,9 @@ checksum = "cda74da7e1a664f795bb1f8a87ec406fb89a02522cf6e50620d016add6dbbf5c"
 
 [[package]]
 name = "tokio"
-version = "1.20.0"
+version = "1.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57aec3cfa4c296db7255446efb4928a6be304b431a806216105542a67b6ca82e"
+checksum = "7a8325f63a7d4774dd041e363b2409ed1c5cbbd0f867795e661df066b2b0a581"
 dependencies = [
  "autocfg 1.1.0",
  "bytes",
@@ -6017,9 +6017,9 @@ dependencies = [
 
 [[package]]
 name = "tough"
-version = "0.12.2"
+version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a72582c980b86ac5b86cd8deb4e6841b44efaed2db9efae9b486b98288d9de2"
+checksum = "e1a0aa977ae8d619536dfcf7c27848bc280030ee18d358fa5c3174ad094e189c"
 dependencies = [
  "chrono",
  "dyn-clone",
