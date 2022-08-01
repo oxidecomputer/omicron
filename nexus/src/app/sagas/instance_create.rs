@@ -98,7 +98,7 @@ lazy_static! {
         sic_allocate_instance_snat_ip,
         sic_allocate_instance_snat_ip_undo,
     );
-    static ref CREATE_EXTERNAL_IP: NexusAction = ActionFuncMultiply::new_action(
+    static ref CREATE_EXTERNAL_IP: NexusAction = ActionFunc::new_action(
         "instance-create.create-external-ip",
         sic_allocate_instance_external_ip,
         sic_allocate_instance_external_ip_undo,
@@ -244,25 +244,47 @@ impl NexusSaga for SagaInstanceCreate {
         // action-undo pairs for each requested external IP, to make sure we
         // always unwind after failures.
         for i in 0..MAX_EXTERNAL_IPS_PER_INSTANCE {
-            builder.append(Node::action(
-                format!("external_ip_id{i}").as_str(),
-                format!("CreateExternalIpId-{i}").as_str(),
-                ACTION_GENERATE_ID.as_ref(),
+            let repeat_params = RepeatParams {
+                saga_params: params.clone(),
+                which: i,
+                instance_id,
+                new_id: Uuid::new_v4(),
+            };
+
+            // The "parameter" node is a constant node that goes into the outer
+            // saga.  Its value becomes the parameters for the one-node subsaga
+            // (defined below) that actually creates each NIC.
+            let params_node_name = format!("external_ip_params{i}");
+            builder.append(Node::constant(
+                &params_node_name,
+                serde_json::to_value(&repeat_params).map_err(|e| {
+                    // XXX-dap dag build error could instead embed dag name
+                    SagaInitError::SerializeError(
+                        format!("External IP {i} params"),
+                        e,
+                    )
+                })?,
             ));
 
-            builder.append(Node::action(
-                format!("external_ip{i}").as_str(),
+            // Create and append the one-node subsaga that creates each external
+            // IP
+            let mut subsaga_builder =
+                DagBuilder::new(SagaName::new("instance-create-nic"));
+            let output_name = format!("external_ip{i}");
+            subsaga_builder.append(Node::action(
+                "external_ip_output",
                 format!("CreateExternalIp-{i}").as_str(),
                 CREATE_EXTERNAL_IP.as_ref(),
-                // XXX-dap
-                //ActionFunc::new_action(
-                //    async move |sagactx| {
-                //        sic_allocate_instance_external_ip(sagactx, i).await
-                //    },
-                //    async move |sagactx| {
-                //        sic_allocate_instance_external_ip_undo(sagactx, i).await
-                //    },
-                //),
+            ));
+            builder.append(Node::subsaga(
+                output_name.as_str(),
+                subsaga_builder.build().map_err(|error| {
+                    SagaInitError::SubsagaDagBuildError(
+                        output_name.clone(),
+                        error,
+                    )
+                })?,
+                params_node_name,
             ));
         }
 
@@ -749,11 +771,12 @@ async fn sic_allocate_instance_snat_ip_undo(
 /// index `ip_index`, and return its ID if one is created (or None).
 async fn sic_allocate_instance_external_ip(
     sagactx: NexusActionContext,
-    ip_index: usize,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
-    let saga_params = sagactx.saga_params::<Params>()?;
+    let repeat_saga_params = sagactx.saga_params::<RepeatParams>()?;
+    let saga_params = repeat_saga_params.saga_params;
+    let ip_index = repeat_saga_params.which;
     let ip_params = saga_params.create_params.external_ips.get(ip_index);
     let ip_params = match ip_params {
         None => {
@@ -763,13 +786,8 @@ async fn sic_allocate_instance_external_ip(
     };
     let opctx =
         OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
-    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
-    let name = format!("external_ip_id{ip_index}");
-    let ip_id = sagactx.lookup::<Option<Uuid>>(&name)?.ok_or_else(|| {
-        ActionError::action_failed(Error::internal_error(
-            "Expected a UUID for instance external IP",
-        ))
-    })?;
+    let instance_id = repeat_saga_params.instance_id;
+    let ip_id = repeat_saga_params.new_id;
 
     // Collect the possible pool name for this IP address
     let pool_name = match ip_params {
@@ -792,24 +810,19 @@ async fn sic_allocate_instance_external_ip(
 
 async fn sic_allocate_instance_external_ip_undo(
     sagactx: NexusActionContext,
-    ip_index: usize,
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
-    let saga_params = sagactx.saga_params::<Params>()?;
+    let repeat_saga_params = sagactx.saga_params::<RepeatParams>()?;
+    let saga_params = repeat_saga_params.saga_params;
+    let ip_index = repeat_saga_params.which;
     if ip_index >= saga_params.create_params.external_ips.len() {
         return Ok(());
     }
 
     let opctx =
         OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
-    let name = format!("external_ip_id{ip_index}");
-    let ip_id =
-        sagactx.lookup::<Option<Uuid>>(name.as_str())?.ok_or_else(|| {
-            ActionError::action_failed(Error::internal_error(
-                "Expected a UUID for instance external IP",
-            ))
-        })?;
+    let ip_id = repeat_saga_params.new_id;
     datastore
         .deallocate_instance_external_ip(&opctx, ip_id)
         .await
