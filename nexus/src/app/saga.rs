@@ -5,6 +5,7 @@
 //! Saga management and execution
 
 use super::sagas::NexusSaga;
+use super::sagas::SagaInitError;
 use super::sagas::ACTION_REGISTRY;
 use crate::authz;
 use crate::context::OpContext;
@@ -73,7 +74,9 @@ impl super::Nexus {
         let saga = {
             let builder = DagBuilder::new(SagaName::new(N::NAME));
             let dag = N::make_saga_dag(&params, builder)?;
-            let params = serde_json::to_value(&params)?;
+            let params = serde_json::to_value(&params).map_err(|e| {
+                SagaInitError::SerializeError(String::from("saga params"), e)
+            })?;
             SagaDag::new(dag, params)
         };
 

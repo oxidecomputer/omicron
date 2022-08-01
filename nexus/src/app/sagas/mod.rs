@@ -53,19 +53,15 @@ pub trait NexusSaga {
 pub enum SagaInitError {
     #[error("internal error building saga graph: {0:#}")]
     DagBuildError(steno::DagBuilderError),
-    #[error("failed to serialize saga parameters: {0:#}")]
-    SerializeParamsError(serde_json::Error),
+    #[error("failed to serialize {0:?}: {1:#}")]
+    SerializeError(String, serde_json::Error),
+    #[error("internal error building saga graph for subsaga node {1:?}: {0:#}")]
+    SubsagaDagBuildError(String, steno::DagBuilderError),
 }
 
 impl From<steno::DagBuilderError> for SagaInitError {
     fn from(error: steno::DagBuilderError) -> Self {
         SagaInitError::DagBuildError(error)
-    }
-}
-
-impl From<serde_json::Error> for SagaInitError {
-    fn from(error: serde_json::Error) -> Self {
-        SagaInitError::SerializeParamsError(error)
     }
 }
 

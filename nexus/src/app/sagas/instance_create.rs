@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{NexusActionContext, NexusSaga, ACTION_GENERATE_ID};
+use super::{NexusActionContext, NexusSaga, SagaInitError, ACTION_GENERATE_ID};
 use crate::app::sagas::NexusAction;
 use crate::app::{
     MAX_DISKS_PER_INSTANCE, MAX_EXTERNAL_IPS_PER_INSTANCE,
@@ -34,8 +34,6 @@ use std::fmt;
 use std::fmt::Debug;
 use std::net::Ipv6Addr;
 use std::sync::Arc;
-use steno::Action;
-use steno::ActionContext;
 use steno::ActionData;
 use steno::ActionError;
 use steno::ActionFunc;
@@ -45,17 +43,29 @@ use steno::Node;
 use steno::SagaType;
 use steno::UndoResult;
 use steno::{new_action_noop_undo, ActionName};
+use steno::{Action, DagBuilder};
+use steno::{ActionContext, SagaName};
 use uuid::Uuid;
 
 // instance create saga: input parameters
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub organization_name: Name,
     pub project_name: Name,
     pub project_id: Uuid,
     pub create_params: params::InstanceCreate,
+}
+
+// Several nodes in this saga are wrapped in their own subsaga so that they can
+// have a parameter that denotes which node they are (e.g., which NIC or which
+// disk).  They also need the outer saga's parameters.
+#[derive(Debug, Deserialize, Serialize)]
+struct RepeatParams {
+    saga_params: Params,
+    which: usize,
+    instance_id: Uuid,
 }
 
 // instance create saga: actions
@@ -77,7 +87,7 @@ lazy_static! {
         sic_create_instance_record,
         sic_delete_instance_record,
     );
-    static ref CREATE_NETWORK_INTERFACE: NexusAction = ActionFuncMultiply::new_action(
+    static ref CREATE_NETWORK_INTERFACE: NexusAction = ActionFunc::new_action(
         "instance-create.create-network-interface",
         sic_create_network_interface,
         sic_create_network_interface_undo,
@@ -129,13 +139,16 @@ impl NexusSaga for SagaInstanceCreate {
     }
 
     fn make_saga_dag(
-        _params: &Self::Params,
+        params: &Self::Params,
         mut builder: steno::DagBuilder,
-    ) -> Result<steno::Dag, super::SagaInitError> {
-        builder.append(Node::action(
+    ) -> Result<steno::Dag, SagaInitError> {
+        let instance_id = Uuid::new_v4();
+
+        builder.append(Node::constant(
             "instance_id",
-            "GenerateInstanceId",
-            ACTION_GENERATE_ID.as_ref(),
+            serde_json::to_value(&instance_id).map_err(|e| {
+                SagaInitError::SerializeError(String::from("instance_id"), e)
+            })?,
         ));
 
         builder.append(Node::action(
@@ -164,27 +177,59 @@ impl NexusSaga for SagaInstanceCreate {
 
         // Similar to disks (see block comment below), create a sequence of
         // action-undo pairs for each requested network interface, to make sure
-        // we always unwind after failures.
+        // we always unwind after failures.  We put these pairs into subsagas,
+        // each with its own parameters.  That's the most convenient way to pass
+        // their index into them.
+        //
+        // TODO-cleanup More recent Steno versions support more flexibility here
+        // and we could clean this up.  Instead of always creating
+        // MAX_NICS_PER_INSTANCE and ignoring many of them we've got a default
+        // config or fewer than MAX_NICS_PER_INSTANCE NICs, we could just create
+        // the DAG with the right number of the right nodes.  We could also
+        // generate the uuid here and put it right in the parameters.
         for i in 0..MAX_NICS_PER_INSTANCE {
-            builder.append(Node::action(
+            let repeat_params = RepeatParams {
+                saga_params: params.clone(),
+                which: i,
+                instance_id,
+            };
+
+            // The "parameter" node is a constant node that goes into the outer
+            // saga.  Its value becomes the parameters for the two-node subsaga
+            // (defined below) that actually creates each NIC.
+            let params_node_name = format!("network_interface_params{i}");
+            builder.append(Node::constant(
+                &params_node_name,
+                serde_json::to_value(&repeat_params).map_err(|e| {
+                    SagaInitError::SerializeError(format!("NIC {i} params"), e)
+                })?,
+            ));
+
+            // Create and append the two-node subsaga that creates each NIC.
+            // XXX put this first node into the RepeatParams?
+            let mut subsaga_builder =
+                DagBuilder::new(SagaName::new("instance-create-nic"));
+            subsaga_builder.append(Node::action(
                 format!("network_interface_id{i}").as_str(),
                 "CreateNetworkInterfaceId",
                 ACTION_GENERATE_ID.as_ref(),
             ));
 
-            builder.append(Node::action(
-                format!("network_interface{i}").as_str(),
+            let output_name = format!("network_interface{i}");
+            subsaga_builder.append(Node::action(
+                "nic_output",
                 format!("CreateNetworkInterface-{i}").as_str(),
                 CREATE_NETWORK_INTERFACE.as_ref(),
-                // XXX-dap
-                //ActionFunc::new_action(
-                //    async move |sagactx| {
-                //        sic_create_network_interface(sagactx, i).await
-                //    },
-                //    async move |sagactx| {
-                //        sic_create_network_interface_undo(sagactx, i).await
-                //    },
-                //),
+            ));
+            builder.append(Node::subsaga(
+                output_name.as_str(),
+                subsaga_builder.build().map_err(|error| {
+                    SagaInitError::SubsagaDagBuildError(
+                        output_name.clone(),
+                        error,
+                    )
+                })?,
+                params_node_name,
             ));
         }
 
@@ -433,23 +478,36 @@ async fn sic_alloc_server(
 /// `nic_index`, returning the UUID for the NIC (or None).
 async fn sic_create_network_interface(
     sagactx: NexusActionContext,
-    nic_index: usize,
 ) -> Result<(), ActionError> {
-    let saga_params = sagactx.saga_params::<Params>()?;
+    let repeat_saga_params = sagactx.saga_params::<RepeatParams>()?;
+    let saga_params = repeat_saga_params.saga_params;
+    let nic_index = repeat_saga_params.which;
+    let instance_id = repeat_saga_params.instance_id;
     let interface_params = &saga_params.create_params.network_interfaces;
     match interface_params {
         params::InstanceNetworkInterfaceAttachment::None => Ok(()),
         params::InstanceNetworkInterfaceAttachment::Default => {
-            sic_create_default_primary_network_interface(&sagactx, nic_index)
-                .await
+            sic_create_default_primary_network_interface(
+                &sagactx,
+                &saga_params,
+                nic_index,
+                instance_id,
+            )
+            .await
         }
         params::InstanceNetworkInterfaceAttachment::Create(
             ref create_params,
         ) => match create_params.get(nic_index) {
             None => Ok(()),
             Some(ref prs) => {
-                sic_create_custom_network_interface(&sagactx, nic_index, prs)
-                    .await
+                sic_create_custom_network_interface(
+                    &sagactx,
+                    &saga_params,
+                    nic_index,
+                    instance_id,
+                    prs,
+                )
+                .await
             }
         },
     }
@@ -458,11 +516,13 @@ async fn sic_create_network_interface(
 /// Delete one network interface, by index.
 async fn sic_create_network_interface_undo(
     sagactx: NexusActionContext,
-    nic_index: usize,
 ) -> Result<(), anyhow::Error> {
+    let repeat_saga_params = sagactx.saga_params::<RepeatParams>()?;
+    let instance_id = repeat_saga_params.instance_id;
+    let saga_params = repeat_saga_params.saga_params;
+    let nic_index = repeat_saga_params.which;
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
-    let saga_params = sagactx.saga_params::<Params>()?;
     let opctx =
         OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
     let interface_id = sagactx.lookup::<Option<Uuid>>(
@@ -471,7 +531,6 @@ async fn sic_create_network_interface_undo(
     match interface_id {
         None => Ok(()),
         Some(id) => {
-            let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
             let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
                 .instance_id(instance_id)
                 .lookup_for(authz::Action::Modify)
@@ -516,7 +575,9 @@ async fn sic_create_network_interface_undo(
 /// Create one custom (non-default) network interfaces for the provided instance.
 async fn sic_create_custom_network_interface(
     sagactx: &NexusActionContext,
+    saga_params: &Params,
     nic_index: usize,
+    instance_id: Uuid,
     interface_params: &params::NetworkInterfaceCreate,
 ) -> Result<(), ActionError> {
     let interface_id = match sagactx.lookup::<Option<Uuid>>(
@@ -528,10 +589,8 @@ async fn sic_create_custom_network_interface(
 
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
-    let saga_params = sagactx.saga_params::<Params>()?;
     let opctx =
         OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
-    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
 
     // Lookup authz objects, used in the call to create the NIC itself.
     let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
@@ -584,7 +643,9 @@ async fn sic_create_custom_network_interface(
 /// saga.
 async fn sic_create_default_primary_network_interface(
     sagactx: &NexusActionContext,
+    saga_params: &Params,
     nic_index: usize,
+    instance_id: Uuid,
 ) -> Result<(), ActionError> {
     // We're statically creating up to MAX_NICS_PER_INSTANCE saga nodes, but
     // this method only applies to the case where there's exactly one parameter
@@ -601,10 +662,8 @@ async fn sic_create_default_primary_network_interface(
 
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
-    let saga_params = sagactx.saga_params::<Params>()?;
     let opctx =
         OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
-    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
 
     // The literal name "default" is currently used for the VPC and VPC Subnet,
     // when not specified in the client request.
