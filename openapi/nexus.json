@@ -5280,7 +5280,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "List a subnets",
+        "summary": "List subnets",
         "operationId": "vpc_subnet_list",
         "parameters": [
           {
