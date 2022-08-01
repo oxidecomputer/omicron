@@ -15,7 +15,6 @@ use crate::db::queries::network_interface::InsertError as InsertNicError;
 use crate::external_api::params;
 use crate::{authn, authz, db};
 use chrono::Utc;
-use futures::future::BoxFuture;
 use lazy_static::lazy_static;
 use nexus_defaults::DEFAULT_PRIMARY_NIC_NAME;
 use omicron_common::api::external::Error;
@@ -30,21 +29,14 @@ use sled_agent_client::types::InstanceRuntimeStateRequested;
 use sled_agent_client::types::InstanceStateRequested;
 use slog::warn;
 use std::convert::TryFrom;
-use std::fmt;
 use std::fmt::Debug;
 use std::net::Ipv6Addr;
 use std::sync::Arc;
-use steno::ActionData;
+use steno::new_action_noop_undo;
 use steno::ActionError;
 use steno::ActionFunc;
-use steno::ActionFuncResult;
-use steno::ActionResult;
 use steno::Node;
-use steno::SagaType;
-use steno::UndoResult;
-use steno::{new_action_noop_undo, ActionName};
-use steno::{Action, DagBuilder};
-use steno::{ActionContext, SagaName};
+use steno::{DagBuilder, SagaName};
 use uuid::Uuid;
 
 // instance create saga: input parameters
@@ -60,13 +52,21 @@ pub struct Params {
 
 // Several nodes in this saga are wrapped in their own subsaga so that they can
 // have a parameter that denotes which node they are (e.g., which NIC or which
-// disk).  They also need the outer saga's parameters.
+// external IP).  They also need the outer saga's parameters.
 #[derive(Debug, Deserialize, Serialize)]
-struct RepeatParams {
+struct NetParams {
     saga_params: Params,
     which: usize,
     instance_id: Uuid,
     new_id: Uuid,
+}
+
+// The disk-related nodes get a similar treatment, but the data they need are
+// different.
+#[derive(Debug, Deserialize, Serialize)]
+struct DiskParams {
+    saga_params: Params,
+    which: usize,
 }
 
 // instance create saga: actions
@@ -103,12 +103,12 @@ lazy_static! {
         sic_allocate_instance_external_ip,
         sic_allocate_instance_external_ip_undo,
     );
-    static ref CREATE_DISKS_FOR_INSTANCE: NexusAction = ActionFuncMultiply::new_action(
+    static ref CREATE_DISKS_FOR_INSTANCE: NexusAction = ActionFunc::new_action(
         "instance-create.create-disks-for-instance",
         sic_create_disks_for_instance,
         sic_create_disks_for_instance_undo,
     );
-    static ref ATTACH_DISKS_TO_INSTANCE: NexusAction = ActionFuncMultiply::new_action(
+    static ref ATTACH_DISKS_TO_INSTANCE: NexusAction = ActionFunc::new_action(
         "instance-create.attach-disks-to-instance",
         sic_attach_disks_to_instance,
         sic_attach_disks_to_instance_undo,
@@ -187,9 +187,10 @@ impl NexusSaga for SagaInstanceCreate {
         // MAX_NICS_PER_INSTANCE and ignoring many of them we've got a default
         // config or fewer than MAX_NICS_PER_INSTANCE NICs, we could just create
         // the DAG with the right number of the right nodes.  We could also
-        // generate the uuid here and put it right in the parameters.
+        // put the correct config into each subsaga's params node so that we
+        // don't have to pass the index around.
         for i in 0..MAX_NICS_PER_INSTANCE {
-            let repeat_params = RepeatParams {
+            let repeat_params = NetParams {
                 saga_params: params.clone(),
                 which: i,
                 instance_id,
@@ -208,8 +209,9 @@ impl NexusSaga for SagaInstanceCreate {
             ));
 
             // Create and append the one-node subsaga that creates each NIC.
-            let mut subsaga_builder =
-                DagBuilder::new(SagaName::new("instance-create-nic"));
+            let subsaga_name =
+                SagaName::new(&format!("instance-create-nic{i}"));
+            let mut subsaga_builder = DagBuilder::new(subsaga_name);
             let output_name = format!("network_interface{i}");
             subsaga_builder.append(Node::action(
                 "nic_output",
@@ -218,12 +220,7 @@ impl NexusSaga for SagaInstanceCreate {
             ));
             builder.append(Node::subsaga(
                 output_name.as_str(),
-                subsaga_builder.build().map_err(|error| {
-                    SagaInitError::SubsagaDagBuildError(
-                        output_name.clone(),
-                        error,
-                    )
-                })?,
+                subsaga_builder.build()?,
                 params_node_name,
             ));
         }
@@ -244,7 +241,7 @@ impl NexusSaga for SagaInstanceCreate {
         // action-undo pairs for each requested external IP, to make sure we
         // always unwind after failures.
         for i in 0..MAX_EXTERNAL_IPS_PER_INSTANCE {
-            let repeat_params = RepeatParams {
+            let repeat_params = NetParams {
                 saga_params: params.clone(),
                 which: i,
                 instance_id,
@@ -268,8 +265,9 @@ impl NexusSaga for SagaInstanceCreate {
 
             // Create and append the one-node subsaga that creates each external
             // IP
-            let mut subsaga_builder =
-                DagBuilder::new(SagaName::new("instance-create-nic"));
+            let subsaga_name =
+                SagaName::new(&format!("instance-create-external-ip{i}i"));
+            let mut subsaga_builder = DagBuilder::new(subsaga_name);
             let output_name = format!("external_ip{i}");
             subsaga_builder.append(Node::action(
                 "external_ip_output",
@@ -278,12 +276,7 @@ impl NexusSaga for SagaInstanceCreate {
             ));
             builder.append(Node::subsaga(
                 output_name.as_str(),
-                subsaga_builder.build().map_err(|error| {
-                    SagaInitError::SubsagaDagBuildError(
-                        output_name.clone(),
-                        error,
-                    )
-                })?,
+                subsaga_builder.build()?,
                 params_node_name,
             ));
         }
@@ -304,37 +297,43 @@ impl NexusSaga for SagaInstanceCreate {
         // contain conditional logic depending on if that disk index is going to
         // be used.  Steno does not currently support the saga node graph
         // changing shape.
-        for i in 0..MAX_DISKS_PER_INSTANCE {
-            builder.append(Node::action(
-                &format!("create_disks{}", i),
-                &format!("CreateDisksForInstance-{}", i),
-                CREATE_DISKS_FOR_INSTANCE.as_ref(),
-                // XXX-dap
-                //ActionFunc::new_action(
-                //    async move |sagactx| {
-                //        sic_create_disks_for_instance(sagactx, i as usize).await
-                //    },
-                //    async move |sagactx| {
-                //        sic_create_disks_for_instance_undo(sagactx, i as usize)
-                //            .await
-                //    },
-                //),
+        // XXX-dap update comment
+        for i in 0..(MAX_DISKS_PER_INSTANCE as usize) {
+            let disk_params =
+                DiskParams { saga_params: params.clone(), which: i };
+
+            // The "parameter" node is a constant node that goes into the outer
+            // saga.  Its value becomes the parameters for the two-node subsaga
+            // (defined below) that creates and attaches each disk.
+            let params_node_name = format!("disk_params{i}");
+            builder.append(Node::constant(
+                &params_node_name,
+                serde_json::to_value(&disk_params).map_err(|e| {
+                    // XXX-dap dag build error could instead embed dag name
+                    SagaInitError::SerializeError(format!("Disk {i} params"), e)
+                })?,
             ));
 
-            builder.append(Node::action(
-                &format!("attach_disks{}", i),
-                &format!("AttachDisksToInstance-{}", i),
+            // Create and append the two-node subsaga that creates and attaches
+            // each disk.
+            let subsaga_name =
+                SagaName::new(&format!("instance-create-disk{i}"));
+            let mut subsaga_builder = DagBuilder::new(subsaga_name);
+            subsaga_builder.append(Node::action(
+                "create_disk_output",
+                format!("CreateDisksForInstance-{i}").as_str(),
+                CREATE_DISKS_FOR_INSTANCE.as_ref(),
+            ));
+            subsaga_builder.append(Node::action(
+                "attach_disk_output",
+                format!("AttachDisksToInstance-{i}").as_str(),
                 ATTACH_DISKS_TO_INSTANCE.as_ref(),
-                // XXX-dap
-                //ActionFunc::new_action(
-                //    async move |sagactx| {
-                //        sic_attach_disks_to_instance(sagactx, i as usize).await
-                //    },
-                //    async move |sagactx| {
-                //        sic_attach_disks_to_instance_undo(sagactx, i as usize)
-                //            .await
-                //    },
-                //),
+            ));
+
+            builder.append(Node::subsaga(
+                &format!("disk{i}"),
+                subsaga_builder.build()?,
+                params_node_name,
             ));
         }
 
@@ -345,138 +344,6 @@ impl NexusSaga for SagaInstanceCreate {
         ));
 
         Ok(builder.build()?)
-    }
-}
-
-// XXX-dap copied from steno
-pub trait ActionFn<'c, S: steno::SagaType>: Send + Sync + 'static {
-    /** Type returned when the future finally resolves. */
-    type Output;
-    /** Type of the future returned when the function is called. */
-    type Future: futures::Future<Output = Self::Output> + Send + 'c;
-    /** Call the function. */
-    fn act(
-        &'c self,
-        ctx: steno::ActionContext<S>,
-        which: usize,
-    ) -> Self::Future;
-}
-
-// XXX-dap copied from Steno
-impl<'c, F, S, FF> ActionFn<'c, S> for F
-where
-    S: steno::SagaType,
-    F: Fn(steno::ActionContext<S>, usize) -> FF + Send + Sync + 'static,
-    FF: std::future::Future + Send + 'c,
-{
-    type Future = FF;
-    type Output = FF::Output;
-    fn act(&'c self, ctx: ActionContext<S>, which: usize) -> Self::Future {
-        self(ctx, which)
-    }
-}
-
-// XXX-dap TODO-doc this is copied from steno's ActionFunc
-pub struct ActionFuncMultiply<ActionFuncType, UndoFuncType> {
-    name: ActionName,
-    action_func: ActionFuncType,
-    undo_func: UndoFuncType,
-}
-
-// XXX-dap copied from Steno
-impl<ActionFuncType, UndoFuncType>
-    ActionFuncMultiply<ActionFuncType, UndoFuncType>
-{
-    pub fn new_action<UserType, ActionFuncOutput, S>(
-        name: S,
-        action_func: ActionFuncType,
-        undo_func: UndoFuncType,
-    ) -> Arc<dyn Action<UserType>>
-    where
-        S: AsRef<str>,
-        UserType: SagaType,
-        for<'c> ActionFuncType: ActionFn<
-            'c,
-            UserType,
-            Output = ActionFuncResult<ActionFuncOutput, ActionError>,
-        >,
-        ActionFuncOutput: ActionData,
-        for<'c> UndoFuncType: ActionFn<'c, UserType, Output = UndoResult>,
-    {
-        let name = ActionName::new(name.as_ref().to_string());
-        Arc::new(ActionFuncMultiply { name, action_func, undo_func })
-    }
-}
-
-// XXX-dap copied from Steno
-impl<UserType, ActionFuncType, ActionFuncOutput, UndoFuncType> Action<UserType>
-    for ActionFuncMultiply<ActionFuncType, UndoFuncType>
-where
-    UserType: SagaType,
-    for<'c> ActionFuncType: ActionFn<
-        'c,
-        UserType,
-        Output = ActionFuncResult<ActionFuncOutput, ActionError>,
-    >,
-    ActionFuncOutput: ActionData,
-    for<'c> UndoFuncType: ActionFn<'c, UserType, Output = UndoResult>,
-{
-    fn do_it(
-        &self,
-        sgctx: ActionContext<UserType>,
-    ) -> BoxFuture<'_, ActionResult> {
-        Box::pin(async move {
-            // XXX-dap
-            /* Figure out which instance we are from the label. */
-            let label = sgctx.node_label();
-            let which_str = label.rsplit('-').next().unwrap();
-            let which_num: usize = which_str.parse().unwrap(); // XXX
-
-            let fut = self.action_func.act(sgctx, which_num);
-            /*
-             * Execute the caller's function and translate its type into the
-             * generic JsonValue that the framework uses to store action
-             * outputs.
-             */
-            fut.await
-                .and_then(|func_output| {
-                    serde_json::to_value(func_output)
-                        .map_err(ActionError::new_serialize)
-                })
-                .map(Arc::new)
-        })
-    }
-
-    fn undo_it(
-        &self,
-        sgctx: ActionContext<UserType>,
-    ) -> BoxFuture<'_, UndoResult> {
-        Box::pin(async move {
-            // XXX-dap
-            /* Figure out which instance we are from the label. */
-            let label = sgctx.node_label();
-            let which_str = label.rsplit('-').next().unwrap();
-            let which_num: usize = which_str.parse().unwrap(); // XXX
-
-            self.undo_func.act(sgctx, which_num).await
-        })
-    }
-
-    fn name(&self) -> ActionName {
-        self.name.clone()
-    }
-}
-
-// XXX-dap copied from Steno
-impl<ActionFuncType, UndoFuncType> Debug
-    for ActionFuncMultiply<ActionFuncType, UndoFuncType>
-{
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        /*
-         * The type name for a function includes its name, so it's a handy
-         * summary for debugging.
-         */
-        f.write_str(&std::any::type_name::<ActionFuncType>())
     }
 }
 
@@ -496,7 +363,7 @@ async fn sic_alloc_server(
 async fn sic_create_network_interface(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
-    let repeat_saga_params = sagactx.saga_params::<RepeatParams>()?;
+    let repeat_saga_params = sagactx.saga_params::<NetParams>()?;
     let saga_params = repeat_saga_params.saga_params;
     let nic_index = repeat_saga_params.which;
     let instance_id = repeat_saga_params.instance_id;
@@ -536,7 +403,7 @@ async fn sic_create_network_interface(
 async fn sic_create_network_interface_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
-    let repeat_saga_params = sagactx.saga_params::<RepeatParams>()?;
+    let repeat_saga_params = sagactx.saga_params::<NetParams>()?;
     let instance_id = repeat_saga_params.instance_id;
     let saga_params = repeat_saga_params.saga_params;
     let osagactx = sagactx.user_data();
@@ -774,7 +641,7 @@ async fn sic_allocate_instance_external_ip(
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
-    let repeat_saga_params = sagactx.saga_params::<RepeatParams>()?;
+    let repeat_saga_params = sagactx.saga_params::<NetParams>()?;
     let saga_params = repeat_saga_params.saga_params;
     let ip_index = repeat_saga_params.which;
     let ip_params = saga_params.create_params.external_ips.get(ip_index);
@@ -813,7 +680,7 @@ async fn sic_allocate_instance_external_ip_undo(
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
-    let repeat_saga_params = sagactx.saga_params::<RepeatParams>()?;
+    let repeat_saga_params = sagactx.saga_params::<NetParams>()?;
     let saga_params = repeat_saga_params.saga_params;
     let ip_index = repeat_saga_params.which;
     if ip_index >= saga_params.create_params.external_ips.len() {
@@ -834,9 +701,10 @@ async fn sic_allocate_instance_external_ip_undo(
 // TODO implement
 async fn sic_create_disks_for_instance(
     sagactx: NexusActionContext,
-    disk_index: usize,
 ) -> Result<Option<String>, ActionError> {
-    let saga_params = sagactx.saga_params::<Params>()?;
+    let disk_params = sagactx.saga_params::<DiskParams>()?;
+    let saga_params = disk_params.saga_params;
+    let disk_index = disk_params.which;
     let saga_disks = &saga_params.create_params.disks;
 
     if disk_index >= saga_disks.len() {
@@ -862,37 +730,36 @@ async fn sic_create_disks_for_instance(
 // TODO implement
 async fn sic_create_disks_for_instance_undo(
     _sagactx: NexusActionContext,
-    _disk_index: usize,
 ) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
 async fn sic_attach_disks_to_instance(
     sagactx: NexusActionContext,
-    disk_index: usize,
 ) -> Result<(), ActionError> {
-    ensure_instance_disk_attach_state(sagactx, disk_index, true).await
+    ensure_instance_disk_attach_state(sagactx, true).await
 }
 
 async fn sic_attach_disks_to_instance_undo(
     sagactx: NexusActionContext,
-    disk_index: usize,
 ) -> Result<(), anyhow::Error> {
-    Ok(ensure_instance_disk_attach_state(sagactx, disk_index, false).await?)
+    Ok(ensure_instance_disk_attach_state(sagactx, false).await?)
 }
 
 async fn ensure_instance_disk_attach_state(
     sagactx: NexusActionContext,
-    disk_index: usize,
     attached: bool,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
-    let saga_params = sagactx.saga_params::<Params>()?;
+    let disk_params = sagactx.saga_params::<DiskParams>()?;
+    let saga_params = disk_params.saga_params;
+    let disk_index = disk_params.which;
     let opctx =
         OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
 
     let saga_disks = &saga_params.create_params.disks;
-    let instance_name = sagactx.lookup::<db::model::Name>("instance_name")?;
+    let instance_name =
+        db::model::Name(saga_params.create_params.identity.name);
 
     if disk_index >= saga_disks.len() {
         return Ok(());
@@ -1031,6 +898,9 @@ async fn sic_delete_instance_record(
 
     // We currently only support deleting an instance if it is stopped or
     // failed, so update the state accordingly to allow deletion.
+    // TODO-correctness TODO-security It's not correct to re-resolve the
+    // instance name now, as it might resolve to a different one than we
+    // actually created.
     let (.., authz_instance, db_instance) = LookupPath::new(&opctx, &datastore)
         .project_id(params.project_id)
         .instance_name(&instance_name)
@@ -1083,6 +953,9 @@ async fn sic_instance_ensure(
         migration_params: None,
     };
 
+    // TODO-correctness TODO-security It's not correct to re-resolve the
+    // instance name now, as it might resolve to a different one than we
+    // actually created.
     let instance_name = sagactx.lookup::<db::model::Name>("instance_name")?;
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
 

@@ -55,8 +55,6 @@ pub enum SagaInitError {
     DagBuildError(steno::DagBuilderError),
     #[error("failed to serialize {0:?}: {1:#}")]
     SerializeError(String, serde_json::Error),
-    #[error("internal error building saga graph for subsaga node {1:?}: {0:#}")]
-    SubsagaDagBuildError(String, steno::DagBuilderError),
 }
 
 impl From<steno::DagBuilderError> for SagaInitError {
