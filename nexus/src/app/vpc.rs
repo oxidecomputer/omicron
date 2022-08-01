@@ -7,6 +7,7 @@
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::identity::{Asset, Resource};
 use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
 use crate::db::model::VpcRouterKind;
@@ -17,6 +18,7 @@ use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
+use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
@@ -27,6 +29,8 @@ use omicron_common::api::external::RouterRouteCreateParams;
 use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
+
+use futures::future::join_all;
 use uuid::Uuid;
 
 impl super::Nexus {
@@ -62,7 +66,7 @@ impl super::Nexus {
         )?;
         let (authz_vpc, db_vpc) = self
             .db_datastore
-            .project_create_vpc(opctx, &authz_project, vpc)
+            .project_create_vpc(opctx, &authz_project, vpc.clone())
             .await?;
 
         // TODO: Ultimately when the VPC is created a system router w/ an
@@ -171,8 +175,9 @@ impl super::Nexus {
             defaults::DEFAULT_FIREWALL_RULES.clone(),
         );
         self.db_datastore
-            .vpc_update_firewall_rules(opctx, &authz_vpc, rules)
+            .vpc_update_firewall_rules(opctx, &authz_vpc, rules.clone())
             .await?;
+        self.send_sled_agents_firewall_rules(&db_vpc, &rules).await?;
         Ok(db_vpc)
     }
 
@@ -315,18 +320,120 @@ impl super::Nexus {
         vpc_name: &Name,
         params: &VpcFirewallRuleUpdateParams,
     ) -> UpdateResult<Vec<db::model::VpcFirewallRule>> {
-        let (.., authz_vpc) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .vpc_name(vpc_name)
-            .lookup_for(authz::Action::Modify)
-            .await?;
+        let (.., authz_vpc, db_vpc) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .organization_name(organization_name)
+                .project_name(project_name)
+                .vpc_name(vpc_name)
+                .fetch_for(authz::Action::Modify)
+                .await?;
         let rules = db::model::VpcFirewallRule::vec_from_params(
             authz_vpc.id(),
             params.clone(),
         );
-        self.db_datastore
+        let rules = self
+            .db_datastore
             .vpc_update_firewall_rules(opctx, &authz_vpc, rules)
-            .await
+            .await?;
+        self.send_sled_agents_firewall_rules(&db_vpc, &rules).await?;
+        Ok(rules)
+    }
+
+    async fn send_sled_agents_firewall_rules(
+        &self,
+        vpc: &db::model::Vpc,
+        rules: &[db::model::VpcFirewallRule],
+    ) -> Result<(), Error> {
+        info!(self.log, "sending firewall rules to sled agents");
+
+        let rules_for_sled =
+            self.resolve_firewall_rules_for_sled_agent(&vpc, rules).await?;
+        info!(self.log, "resolved {} rules for sleds", rules_for_sled.len());
+        let sled_rules_request =
+            sled_agent_client::types::VpcFirewallRulesEnsureBody {
+                rules: rules_for_sled,
+            };
+
+        let vpc_to_sleds =
+            self.db_datastore.vpc_resolve_to_sleds(vpc.id()).await?;
+        info!(self.log, "resolved sleds for vpc {}", vpc.name(); "vpc_to_sled" => ?vpc_to_sleds);
+        let mut sled_requests = Vec::with_capacity(vpc_to_sleds.len());
+        for sled in &vpc_to_sleds {
+            let sled_id = sled.id();
+            let vpc_id = vpc.id();
+            let sled_rules_request = sled_rules_request.clone();
+            sled_requests.push(async move {
+                self.sled_client(&sled_id)
+                    .await?
+                    .vpc_firewall_rules_put(&vpc_id, &sled_rules_request)
+                    .await
+                    .map_err(|e| Error::internal_error(&e.to_string()))
+            });
+        }
+
+        let results = join_all(sled_requests).await;
+        // TODO-correctness: handle more than one failure in the sled-agent requests
+        for (sled, result) in vpc_to_sleds.iter().zip(results) {
+            if let Err(e) = result {
+                warn!(self.log, "failed to update firewall rules on sled agent";
+                      "sled_id" => %sled.id(),
+                      "vpc_id" => %vpc.id(),
+                      "error" => %e);
+                return Err(e);
+            }
+        }
+        info!(
+            self.log,
+            "updated firewall rules on {} sleds",
+            vpc_to_sleds.len()
+        );
+
+        Ok(())
+    }
+
+    async fn resolve_firewall_rules_for_sled_agent(
+        &self,
+        vpc: &db::model::Vpc,
+        rules: &[db::model::VpcFirewallRule],
+    ) -> Result<Vec<sled_agent_client::types::VpcFirewallRule>, Error> {
+        Ok(rules
+            .iter()
+            .map(|rule| sled_agent_client::types::VpcFirewallRule {
+                status: rule.status.0.into(),
+                direction: rule.direction.0.into(),
+                targets: vec![], // XXX
+                filter_hosts: rule.filter_hosts.as_ref().map(|hosts| {
+                    hosts
+                        .iter()
+                        .filter_map(|host| match host {
+                            db::model::VpcFirewallRuleHostFilter(
+                                external::VpcFirewallRuleHostFilter::Ip(
+                                    std::net::IpAddr::V4(addr),
+                                ),
+                            ) => Some(sled_agent_client::types::IpNet::V4(
+                                external::Ipv4Net(
+                                    ipnetwork::Ipv4Network::new(
+                                        addr.clone(),
+                                        32,
+                                    )
+                                    .unwrap(),
+                                )
+                                .into(),
+                            )),
+                            _ => None, // XXX
+                        })
+                        .collect()
+                }),
+                filter_ports: rule
+                    .filter_ports
+                    .as_ref()
+                    .map(|ports| ports.iter().map(|v| v.0.into()).collect()),
+                filter_protocols: rule.filter_protocols.as_ref().map(
+                    |protocols| protocols.iter().map(|v| v.0.into()).collect(),
+                ),
+                action: rule.action.0.into(),
+                priority: rule.priority.0 .0,
+            })
+            .collect::<Vec<_>>())
     }
 }

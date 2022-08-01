@@ -235,6 +235,12 @@ impl From<omicron_common::api::external::IpNet> for types::IpNet {
     }
 }
 
+impl From<omicron_common::api::external::L4PortRange> for types::L4PortRange {
+    fn from(s: omicron_common::api::external::L4PortRange) -> Self {
+        Self::try_from(s.to_string()).unwrap_or_else(|e| panic!("{}: {}", s, e))
+    }
+}
+
 impl From<omicron_common::api::internal::nexus::UpdateArtifact>
     for types::UpdateArtifact
 {
@@ -257,6 +263,57 @@ impl From<omicron_common::api::internal::nexus::UpdateArtifactKind>
 
         match s {
             UpdateArtifactKind::Zone => types::UpdateArtifactKind::Zone,
+        }
+    }
+}
+
+impl From<omicron_common::api::external::VpcFirewallRuleAction>
+    for types::VpcFirewallRuleAction
+{
+    fn from(s: omicron_common::api::external::VpcFirewallRuleAction) -> Self {
+        use omicron_common::api::external::VpcFirewallRuleAction::*;
+        match s {
+            Allow => Self::Allow,
+            Deny => Self::Deny,
+        }
+    }
+}
+
+impl From<omicron_common::api::external::VpcFirewallRuleDirection>
+    for types::VpcFirewallRuleDirection
+{
+    fn from(
+        s: omicron_common::api::external::VpcFirewallRuleDirection,
+    ) -> Self {
+        use omicron_common::api::external::VpcFirewallRuleDirection::*;
+        match s {
+            Inbound => Self::Inbound,
+            Outbound => Self::Outbound,
+        }
+    }
+}
+
+impl From<omicron_common::api::external::VpcFirewallRuleStatus>
+    for types::VpcFirewallRuleStatus
+{
+    fn from(s: omicron_common::api::external::VpcFirewallRuleStatus) -> Self {
+        use omicron_common::api::external::VpcFirewallRuleStatus::*;
+        match s {
+            Enabled => Self::Enabled,
+            Disabled => Self::Disabled,
+        }
+    }
+}
+
+impl From<omicron_common::api::external::VpcFirewallRuleProtocol>
+    for types::VpcFirewallRuleProtocol
+{
+    fn from(s: omicron_common::api::external::VpcFirewallRuleProtocol) -> Self {
+        use omicron_common::api::external::VpcFirewallRuleProtocol::*;
+        match s {
+            Tcp => Self::Tcp,
+            Udp => Self::Udp,
+            Icmp => Self::Icmp,
         }
     }
 }

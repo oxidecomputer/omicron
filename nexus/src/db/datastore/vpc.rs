@@ -21,6 +21,7 @@ use crate::db::model::Name;
 use crate::db::model::NetworkInterface;
 use crate::db::model::RouterRoute;
 use crate::db::model::RouterRouteUpdate;
+use crate::db::model::Sled;
 use crate::db::model::Vpc;
 use crate::db::model::VpcFirewallRule;
 use crate::db::model::VpcRouter;
@@ -316,6 +317,30 @@ impl DataStore {
                     ErrorHandler::NotFoundByResource(authz_vpc),
                 ),
             })
+    }
+
+    /// Return the list of `Sled`s hosting instances with network interfaces
+    /// on the provided VPC.
+    pub async fn vpc_resolve_to_sleds(
+        &self,
+        vpc_id: Uuid,
+    ) -> Result<Vec<Sled>, Error> {
+        // Resolve each VNIC in the VPC to the Sled it's on, so we know which
+        // Sleds to notify when firewall rules change.
+        use db::schema::{instance, network_interface, sled};
+        network_interface::table
+            .inner_join(
+                instance::table
+                    .on(instance::id.eq(network_interface::instance_id)),
+            )
+            .inner_join(sled::table.on(sled::id.eq(instance::active_server_id)))
+            .filter(network_interface::vpc_id.eq(vpc_id))
+            .filter(network_interface::time_deleted.is_null())
+            .filter(instance::time_deleted.is_null())
+            .select(Sled::as_select())
+            .get_results_async(self.pool())
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     pub async fn vpc_list_subnets(
