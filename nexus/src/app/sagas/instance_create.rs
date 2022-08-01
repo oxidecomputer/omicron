@@ -66,6 +66,7 @@ struct RepeatParams {
     saga_params: Params,
     which: usize,
     instance_id: Uuid,
+    new_id: Uuid,
 }
 
 // instance create saga: actions
@@ -192,10 +193,11 @@ impl NexusSaga for SagaInstanceCreate {
                 saga_params: params.clone(),
                 which: i,
                 instance_id,
+                new_id: Uuid::new_v4(),
             };
 
             // The "parameter" node is a constant node that goes into the outer
-            // saga.  Its value becomes the parameters for the two-node subsaga
+            // saga.  Its value becomes the parameters for the one-node subsaga
             // (defined below) that actually creates each NIC.
             let params_node_name = format!("network_interface_params{i}");
             builder.append(Node::constant(
@@ -205,16 +207,9 @@ impl NexusSaga for SagaInstanceCreate {
                 })?,
             ));
 
-            // Create and append the two-node subsaga that creates each NIC.
-            // XXX put this first node into the RepeatParams?
+            // Create and append the one-node subsaga that creates each NIC.
             let mut subsaga_builder =
                 DagBuilder::new(SagaName::new("instance-create-nic"));
-            subsaga_builder.append(Node::action(
-                format!("network_interface_id{i}").as_str(),
-                "CreateNetworkInterfaceId",
-                ACTION_GENERATE_ID.as_ref(),
-            ));
-
             let output_name = format!("network_interface{i}");
             subsaga_builder.append(Node::action(
                 "nic_output",
@@ -483,6 +478,7 @@ async fn sic_create_network_interface(
     let saga_params = repeat_saga_params.saga_params;
     let nic_index = repeat_saga_params.which;
     let instance_id = repeat_saga_params.instance_id;
+    let interface_id = repeat_saga_params.new_id;
     let interface_params = &saga_params.create_params.network_interfaces;
     match interface_params {
         params::InstanceNetworkInterfaceAttachment::None => Ok(()),
@@ -492,6 +488,7 @@ async fn sic_create_network_interface(
                 &saga_params,
                 nic_index,
                 instance_id,
+                interface_id,
             )
             .await
         }
@@ -503,8 +500,8 @@ async fn sic_create_network_interface(
                 sic_create_custom_network_interface(
                     &sagactx,
                     &saga_params,
-                    nic_index,
                     instance_id,
+                    interface_id,
                     prs,
                 )
                 .await
@@ -520,73 +517,59 @@ async fn sic_create_network_interface_undo(
     let repeat_saga_params = sagactx.saga_params::<RepeatParams>()?;
     let instance_id = repeat_saga_params.instance_id;
     let saga_params = repeat_saga_params.saga_params;
-    let nic_index = repeat_saga_params.which;
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
     let opctx =
         OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
-    let interface_id = sagactx.lookup::<Option<Uuid>>(
-        format!("network_interface_id{nic_index}").as_str(),
-    )?;
-    match interface_id {
-        None => Ok(()),
-        Some(id) => {
-            let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
-                .instance_id(instance_id)
-                .lookup_for(authz::Action::Modify)
+    let interface_id = repeat_saga_params.new_id;
+    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+        .instance_id(instance_id)
+        .lookup_for(authz::Action::Modify)
+        .await
+        .map_err(ActionError::action_failed)?;
+    match LookupPath::new(&opctx, &datastore)
+        .network_interface_id(interface_id)
+        .lookup_for(authz::Action::Delete)
+        .await
+    {
+        Ok((.., authz_interface)) => {
+            datastore
+                .instance_delete_network_interface(
+                    &opctx,
+                    &authz_instance,
+                    &authz_interface,
+                )
                 .await
-                .map_err(ActionError::action_failed)?;
-            match LookupPath::new(&opctx, &datastore)
-                .network_interface_id(id)
-                .lookup_for(authz::Action::Delete)
-                .await
-            {
-                Ok((.., authz_interface)) => {
-                    datastore
-                        .instance_delete_network_interface(
-                            &opctx,
-                            &authz_instance,
-                            &authz_interface,
-                        )
-                        .await
-                        .map_err(|e| e.into_external())?;
-                    Ok(())
-                }
-                Err(Error::ObjectNotFound { .. }) => {
-                    // The saga is attempting to delete the NIC by the ID cached
-                    // in the saga log. If we're running this, the NIC already
-                    // appears to be gone, which is odd, but not exactly an
-                    // error. Swallowing the error allows the saga to continue,
-                    // but this is another place we might want to consider
-                    // bumping a counter or otherwise tracking things.
-                    warn!(
-                        osagactx.log(),
-                        "During saga unwind, NIC already appears deleted";
-                        "interface_id" => %id,
-                    );
-                    Ok(())
-                }
-                Err(e) => Err(e.into()),
-            }
+                .map_err(|e| e.into_external())?;
+            Ok(())
         }
+        Err(Error::ObjectNotFound { .. }) => {
+            // The saga is attempting to delete the NIC by the ID cached
+            // in the saga log. If we're running this, the NIC already
+            // appears to be gone, which is odd, but not exactly an
+            // error. Swallowing the error allows the saga to continue,
+            // but this is another place we might want to consider
+            // bumping a counter or otherwise tracking things.
+            warn!(
+                osagactx.log(),
+                "During saga unwind, NIC already appears deleted";
+                "interface_id" => %interface_id,
+            );
+            Ok(())
+        }
+        Err(e) => Err(e.into()),
     }
 }
 
-/// Create one custom (non-default) network interfaces for the provided instance.
+/// Create one custom (non-default) network interfaces for the provided
+/// instance.
 async fn sic_create_custom_network_interface(
     sagactx: &NexusActionContext,
     saga_params: &Params,
-    nic_index: usize,
     instance_id: Uuid,
+    interface_id: Uuid,
     interface_params: &params::NetworkInterfaceCreate,
 ) -> Result<(), ActionError> {
-    let interface_id = match sagactx.lookup::<Option<Uuid>>(
-        format!("network_interface_id{nic_index}").as_str(),
-    )? {
-        None => return Ok(()),
-        Some(id) => id,
-    };
-
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
     let opctx =
@@ -646,6 +629,7 @@ async fn sic_create_default_primary_network_interface(
     saga_params: &Params,
     nic_index: usize,
     instance_id: Uuid,
+    interface_id: Uuid,
 ) -> Result<(), ActionError> {
     // We're statically creating up to MAX_NICS_PER_INSTANCE saga nodes, but
     // this method only applies to the case where there's exactly one parameter
@@ -654,11 +638,6 @@ async fn sic_create_default_primary_network_interface(
     if nic_index > 0 {
         return Ok(());
     }
-    let interface_id =
-        match sagactx.lookup::<Option<Uuid>>("network_interface_id0")? {
-            None => return Ok(()),
-            Some(id) => id,
-        };
 
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
