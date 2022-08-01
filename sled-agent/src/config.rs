@@ -9,7 +9,6 @@ use crate::illumos::dladm::{self, Dladm, PhysicalLink};
 use crate::illumos::zpool::ZpoolName;
 use dropshot::ConfigLogging;
 use serde::Deserialize;
-use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
