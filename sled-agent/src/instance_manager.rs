@@ -10,7 +10,7 @@ use crate::nexus::LazyNexusClient;
 use crate::opte::PortManager;
 use crate::params::{
     InstanceHardware, InstanceMigrateParams, InstanceRuntimeStateRequested,
-    InstanceSerialConsoleData,
+    InstanceSerialConsoleData, VpcFirewallRule,
 };
 use crate::serial::ByteOffset;
 use macaddr::MacAddr6;
@@ -211,6 +211,22 @@ impl InstanceManager {
             .issue_snapshot_request(disk_id, snapshot_id)
             .await
             .map_err(Error::from)
+    }
+
+    pub async fn firewall_rules_ensure(
+        &self,
+        rules: &[VpcFirewallRule],
+    ) -> Result<(), Error> {
+        // TODO-correctness: map from VPC to VNICs on instances. Right now
+        // we just update each port on every instance, which is totally wrong.
+        for port_name in self.inner.port_manager.port_names() {
+            info!(
+                &self.inner.log,
+                "Updating firewall rules for OPTE port {}", &port_name
+            );
+            self.inner.port_manager.firewall_rules_ensure(port_name, rules)?;
+        }
+        Ok(())
     }
 }
 

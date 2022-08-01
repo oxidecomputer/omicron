@@ -14,15 +14,26 @@ use crate::opte::Port;
 use crate::opte::Vni;
 use crate::params::NetworkInterface;
 use crate::params::SourceNatConfig;
+use crate::params::VpcFirewallRule;
 use ipnetwork::IpNetwork;
 use macaddr::MacAddr6;
+use omicron_common::api::external::{
+    IpNet, VpcFirewallRuleAction, VpcFirewallRuleDirection,
+    VpcFirewallRuleProtocol, VpcFirewallRuleStatus,
+};
+use opte::api::Direction;
 use opte::api::IpCidr;
 use opte::api::Ipv4Cidr;
 use opte::api::Ipv4PrefixLen;
 use opte::api::MacAddr;
+use opte::api::Protocol;
 use opte::oxide_vpc::api::AddRouterEntryIpv4Req;
 use opte::oxide_vpc::api::RouterTarget;
 use opte::oxide_vpc::api::SNatCfg;
+use opte::oxide_vpc::api::SetFwRulesReq;
+use opte::oxide_vpc::api::{
+    Action, Address, Filters, FirewallRule, ProtoFilter,
+};
 use opte_ioctl::OpteHdl;
 use slog::debug;
 use slog::info;
@@ -435,6 +446,93 @@ impl PortManager {
         );
         Ok(port)
     }
+
+    pub fn port_names(&self) -> Vec<String> {
+        self.inner
+            .ports
+            .lock()
+            .unwrap()
+            .keys()
+            .map(|(_instance_id, port_name)| port_name.clone())
+            .collect::<Vec<String>>()
+    }
+
+    pub fn firewall_rules_ensure(
+        &self,
+        port_name: String,
+        rules: &[VpcFirewallRule],
+    ) -> Result<(), Error> {
+        let hdl = OpteHdl::open(OpteHdl::DLD_CTL)?;
+        let rules = opte_firewall_rules(rules);
+        info!(self.inner.log, "OPTE firewall rules"; "rules" => ?&rules,);
+        hdl.set_fw_rules(&SetFwRulesReq { port_name, rules })?;
+        Ok(())
+    }
+}
+
+/// Translate from a slice of VPC firewall rules to a vector of OPTE rules.
+fn opte_firewall_rules(rules: &[VpcFirewallRule]) -> Vec<FirewallRule> {
+    rules
+        .iter()
+        .filter_map(|rule| match rule.status {
+            VpcFirewallRuleStatus::Disabled => None,
+            VpcFirewallRuleStatus::Enabled => Some(FirewallRule {
+                direction: match rule.direction {
+                    VpcFirewallRuleDirection::Inbound => Direction::In,
+                    VpcFirewallRuleDirection::Outbound => Direction::Out,
+                },
+                filters: {
+                    let mut filters = Filters::new();
+                    filters
+                        .set_hosts(match rule.filter_hosts {
+                            None => Address::Any,
+                            // TODO: handle multiple host filters
+                            Some(ref hosts) if hosts.len() >0 => {
+                                match hosts[0] {
+                                    IpNet::V4(net) /*if net.prefix() == 32*/ => {
+                                        Address::Ip(net.ip().into())
+                                    }
+                                    /*IpNet::V4(net) => {
+                                        Address::Subnet(Ipv4Cidr::new(
+                                            net.ip().into(),
+                                            Ipv4PrefixLen::new(net.prefix())
+                                                .unwrap(),
+                                        ))
+                                    }*/
+                                    IpNet::V6(_net) => {
+                                        todo!("handle IPv6 host filters")
+                                    }
+                                }
+                            }
+                            _ => Address::Any,
+                        })
+                        .set_protocol(match rule.filter_protocols {
+                            None => ProtoFilter::Any,
+                            Some(ref protos) if protos.len() == 1 => {
+                                match protos[0] {
+                                    VpcFirewallRuleProtocol::Tcp => {
+                                        ProtoFilter::Proto(Protocol::TCP)
+                                    }
+                                    VpcFirewallRuleProtocol::Udp => {
+                                        ProtoFilter::Proto(Protocol::UDP)
+                                    }
+                                    VpcFirewallRuleProtocol::Icmp => {
+                                        ProtoFilter::Proto(Protocol::ICMP)
+                                    }
+                                }
+                            }
+                            _ => todo!("handle multiple protocol filters"),
+                        }); // XXX: .set_ports
+                    filters
+                },
+                action: match rule.action {
+                    VpcFirewallRuleAction::Allow => Action::Allow,
+                    VpcFirewallRuleAction::Deny => Action::Deny,
+                },
+                priority: rule.priority.0,
+            }),
+        })
+        .collect::<Vec<FirewallRule>>()
 }
 
 #[derive(Clone)]

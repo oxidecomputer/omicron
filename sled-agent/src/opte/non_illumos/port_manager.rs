@@ -12,6 +12,7 @@ use crate::opte::Port;
 use crate::opte::Vni;
 use crate::params::NetworkInterface;
 use crate::params::SourceNatConfig;
+use crate::params::VpcFirewallRule;
 use ipnetwork::IpNetwork;
 use macaddr::MacAddr6;
 use slog::debug;
@@ -181,6 +182,30 @@ impl PortManager {
             "port" => ?&port,
         );
         Ok(port)
+    }
+
+    pub fn port_names(&self) -> Vec<String> {
+        self.inner
+            .ports
+            .lock()
+            .unwrap()
+            .keys()
+            .map(|(_instance_id, port_name)| port_name.clone())
+            .collect::<Vec<String>>()
+    }
+
+    pub fn firewall_rules_ensure(
+        &self,
+        port_name: String,
+        rules: &[VpcFirewallRule],
+    ) -> Result<(), Error> {
+        info!(
+            self.inner.log,
+            "Ignoring {} firewall rules for {}",
+            rules.len(),
+            &port_name
+        );
+        Ok(())
     }
 }
 
