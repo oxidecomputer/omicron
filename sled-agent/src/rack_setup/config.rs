@@ -34,7 +34,8 @@ pub struct SetupServiceConfig {
     pub rack_secret_threshold: usize,
 
     /// The address on which Nexus should serve an external interface.
-    // TODO: Eventually, this should be pulled from a pool of addresses.
+    // TODO(https://github.com/oxidecomputer/omicron/issues/1530): Eventually,
+    // this should be pulled from a pool of addresses.
     pub nexus_external_address: IpAddr,
 }
 

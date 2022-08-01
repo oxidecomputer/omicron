@@ -28,7 +28,9 @@ impl From<internal_api::params::ServiceKind> for ServiceKind {
             internal_api::params::ServiceKind::InternalDNS => {
                 ServiceKind::InternalDNS
             }
-            internal_api::params::ServiceKind::Nexus => ServiceKind::Nexus,
+            internal_api::params::ServiceKind::Nexus { .. } => {
+                ServiceKind::Nexus
+            }
             internal_api::params::ServiceKind::Oximeter => {
                 ServiceKind::Oximeter
             }

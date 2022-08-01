@@ -1781,12 +1781,76 @@
       },
       "ServiceKind": {
         "description": "Describes the purpose of the service.",
-        "type": "string",
-        "enum": [
-          "internal_d_n_s",
-          "nexus",
-          "oximeter",
-          "dendrite"
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "internal_d_n_s"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "content": {
+                "type": "object",
+                "properties": {
+                  "external_address": {
+                    "type": "string",
+                    "format": "ip"
+                  }
+                },
+                "required": [
+                  "external_address"
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "nexus"
+                ]
+              }
+            },
+            "required": [
+              "content",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "oximeter"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "dendrite"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
         ]
       },
       "ServicePutRequest": {

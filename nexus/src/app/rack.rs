@@ -75,6 +75,8 @@ impl super::Nexus {
             })
             .collect();
 
+        // TODO: If nexus, add a pool?
+
         let datasets: Vec<_> = request
             .datasets
             .into_iter()
