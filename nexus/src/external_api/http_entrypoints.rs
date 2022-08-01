@@ -119,7 +119,6 @@ pub fn external_api() -> NexusApiDescription {
         api.register(ip_pool_service_range_remove)?;
 
         api.register(disk_list)?;
-        api.register(disk_list)?;
         api.register(disk_create)?;
         api.register(disk_view)?;
         api.register(disk_view_by_id)?;
