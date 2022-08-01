@@ -902,8 +902,6 @@ async fn ensure_instance_disk_attach_state(
 ///
 /// `sled_id_name` is the name of the serialized output containing the UUID for
 /// the targeted sled.
-// XXX-dap why don't we just pass the serialized_authn into this?  Or the
-// OpContext?
 pub(super) async fn allocate_sled_ipv6(
     opctx: &OpContext,
     sagactx: NexusActionContext,
