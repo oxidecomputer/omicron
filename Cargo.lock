@@ -1544,7 +1544,7 @@ name = "faux-mgs"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 3.2.15",
+ "clap 3.2.16",
  "crossbeam-channel",
  "gateway-messages",
  "mio",
