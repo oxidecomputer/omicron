@@ -128,4 +128,51 @@ impl super::Nexus {
             .await?;
         self.db_datastore.ip_pool_delete_range(opctx, &authz_pool, range).await
     }
+
+    pub async fn ip_pool_service_list_ranges(
+        &self,
+        opctx: &OpContext,
+        rack_id: Uuid,
+        pagparams: &DataPageParams<'_, IpNetwork>,
+    ) -> ListResultVec<db::model::IpPoolRange> {
+        let (authz_pool, ..) = self
+            .db_datastore
+            .ip_pools_lookup_by_rack_id(
+                opctx,
+                authz::Action::ListChildren,
+                rack_id,
+            )
+            .await?;
+        self.db_datastore
+            .ip_pool_list_ranges(opctx, &authz_pool, pagparams)
+            .await
+    }
+
+    pub async fn ip_pool_service_add_range(
+        &self,
+        opctx: &OpContext,
+        rack_id: Uuid,
+        range: &IpRange,
+    ) -> UpdateResult<db::model::IpPoolRange> {
+        let (authz_pool, db_pool) = self
+            .db_datastore
+            .ip_pools_lookup_by_rack_id(opctx, authz::Action::Modify, rack_id)
+            .await?;
+        self.db_datastore
+            .ip_pool_add_range(opctx, &authz_pool, &db_pool, range)
+            .await
+    }
+
+    pub async fn ip_pool_service_delete_range(
+        &self,
+        opctx: &OpContext,
+        rack_id: Uuid,
+        range: &IpRange,
+    ) -> DeleteResult {
+        let (authz_pool, ..) = self
+            .db_datastore
+            .ip_pools_lookup_by_rack_id(opctx, authz::Action::Modify, rack_id)
+            .await?;
+        self.db_datastore.ip_pool_delete_range(opctx, &authz_pool, range).await
+    }
 }

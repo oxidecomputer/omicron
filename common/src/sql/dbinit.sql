@@ -969,6 +969,14 @@ CREATE TABLE omicron.public.ip_pool (
     /* Optional ID of the project for which this pool is reserved. */
     project_id UUID,
 
+    /*
+     * Optional rack ID, indicating this is a reserved pool for internal
+     * services on a specific rack.
+     * TODO(https://github.com/oxidecomputer/omicron/issues/1276): This
+     * should probably point to an AZ or fleet, not a rack.
+     */
+    rack_id UUID,
+
     /* The collection's child-resource generation number */
     rcgen INT8 NOT NULL
 );
@@ -979,6 +987,15 @@ CREATE TABLE omicron.public.ip_pool (
 CREATE UNIQUE INDEX ON omicron.public.ip_pool (
     name
 ) WHERE
+    time_deleted IS NULL;
+
+/*
+ * Index ensuring uniqueness of IP pools by rack ID
+ */
+CREATE UNIQUE INDEX ON omicron.public.ip_pool (
+    rack_id
+) WHERE
+    rack_id IS NOT NULL AND
     time_deleted IS NULL;
 
 /*
