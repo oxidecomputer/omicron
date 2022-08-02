@@ -296,8 +296,7 @@ CREATE INDEX ON omicron.public.silo_group (
 CREATE UNIQUE INDEX ON omicron.public.silo_group (
     silo_id,
     external_id
-) WHERE
-    time_deleted IS NULL;
+);
 
 /*
  * Silo group membership

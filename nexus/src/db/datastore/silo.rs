@@ -85,11 +85,11 @@ impl DataStore {
         let authz_silo =
             authz::Silo::new(authz::FLEET, silo_id, LookupType::ById(silo_id));
 
-        let silo_admin_group_create_query = if let Some(ref admin_group_name) =
+        let silo_admin_group_ensure_query = if let Some(ref admin_group_name) =
             new_silo_params.admin_group_name
         {
-            let silo_admin_group_create_query =
-                DataStore::silo_group_create_query(
+            let silo_admin_group_ensure_query =
+                DataStore::silo_group_ensure_query(
                     opctx,
                     &authz_silo,
                     db::model::SiloGroup::new(
@@ -100,7 +100,7 @@ impl DataStore {
                 )
                 .await?;
 
-            Some(silo_admin_group_create_query)
+            Some(silo_admin_group_ensure_query)
         } else {
             None
         };
@@ -134,7 +134,7 @@ impl DataStore {
             .transaction(move |conn| {
                 let silo = silo_create_query.get_result(conn)?;
 
-                if let Some(query) = silo_admin_group_create_query {
+                if let Some(query) = silo_admin_group_ensure_query {
                     query.get_result(conn)?;
                 }
 

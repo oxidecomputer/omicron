@@ -28,7 +28,7 @@ use omicron_common::api::external::UpdateResult;
 use uuid::Uuid;
 
 impl DataStore {
-    pub async fn silo_group_create_query(
+    pub(super) async fn silo_group_ensure_query(
         opctx: &OpContext,
         authz_silo: &authz::Silo,
         silo_group: SiloGroup,
@@ -38,20 +38,31 @@ impl DataStore {
         use db::schema::silo_group::dsl;
         Ok(diesel::insert_into(dsl::silo_group)
             .values(silo_group)
+            .on_conflict((dsl::silo_id, dsl::external_id))
+            .do_nothing()
             .returning(SiloGroup::as_returning()))
     }
 
-    pub async fn silo_group_create(
+    pub async fn silo_group_ensure(
         &self,
         opctx: &OpContext,
         authz_silo: &authz::Silo,
         silo_group: SiloGroup,
     ) -> CreateResult<SiloGroup> {
-        DataStore::silo_group_create_query(opctx, authz_silo, silo_group)
+        let external_id = silo_group.external_id.clone();
+
+        DataStore::silo_group_ensure_query(opctx, authz_silo, silo_group)
             .await?
-            .get_result_async(self.pool_authorized(opctx).await?)
+            .execute_async(self.pool_authorized(opctx).await?)
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| {
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            })?;
+
+        Ok(self
+            .silo_group_optional_lookup(opctx, authz_silo, external_id)
+            .await?
+            .unwrap())
     }
 
     pub async fn silo_group_optional_lookup(

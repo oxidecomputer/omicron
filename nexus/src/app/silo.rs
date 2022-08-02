@@ -252,7 +252,7 @@ impl super::Nexus {
 
             None => {
                 self.db_datastore
-                    .silo_group_create(
+                    .silo_group_ensure(
                         opctx,
                         authz_silo,
                         db::model::SiloGroup::new(
