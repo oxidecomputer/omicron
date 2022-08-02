@@ -1169,6 +1169,8 @@ CREATE TABLE omicron.public.saga (
     creator UUID NOT NULL,
     /* time the saga was started */
     time_created TIMESTAMPTZ NOT NULL,
+    /* saga name */
+    name STRING(128) NOT NULL,
     /* saga DAG (includes params and name) */
     saga_dag JSONB NOT NULL,
 

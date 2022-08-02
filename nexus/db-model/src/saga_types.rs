@@ -185,6 +185,7 @@ pub struct Saga {
     pub id: SagaId,
     pub creator: SecId,
     pub time_created: chrono::DateTime<chrono::Utc>,
+    pub name: String,
     pub saga_dag: serde_json::Value,
     pub saga_state: SagaCachedState,
     pub current_sec: Option<SecId>,
@@ -193,15 +194,25 @@ pub struct Saga {
 }
 
 impl Saga {
-    pub fn new(id: SecId, params: steno::SagaCreateParams) -> Self {
+    pub fn new(creator: SecId, params: steno::SagaCreateParams) -> Self {
         let now = chrono::Utc::now();
+
+        // This match will help us identify a case where Steno adds a new field
+        // to `SagaCreateParams` that we aren't persisting in the database.  (If
+        // you're getting a compilation failure here, you need to figure out
+        // what to do with the new field.  The assumption as of this writing is
+        // that we must store it into the database or we won't be able to
+        // properly recover the saga.)
+        let steno::SagaCreateParams { id, name, dag, state } = params;
+
         Self {
-            id: params.id.into(),
-            creator: id,
+            id: id.into(),
+            creator,
             time_created: now,
-            saga_dag: params.dag,
-            saga_state: params.state.into(),
-            current_sec: Some(id),
+            name: name.to_string(),
+            saga_dag: dag,
+            saga_state: state.into(),
+            current_sec: Some(creator),
             adopt_generation: Generation::new().into(),
             adopt_time: now,
         }

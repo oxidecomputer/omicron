@@ -312,7 +312,7 @@ impl NexusSaga for SagaInstanceCreate {
                 &mut builder,
                 disk_params,
                 i,
-            );
+            )?;
         }
 
         builder.append(Node::action(

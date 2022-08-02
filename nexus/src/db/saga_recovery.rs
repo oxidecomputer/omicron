@@ -235,13 +235,19 @@ where
     T: steno::SagaType,
 {
     let saga_id: steno::SagaId = saga.id.into();
-    // XXX-dap would be nice to record saga name here in log
+    let saga_name = saga.name.clone();
     trace!(opctx.log, "recovering saga: start";
         "saga_id" => saga_id.to_string(),
+        "saga_name" => saga_name.clone(),
     );
 
     let log_events = load_saga_log(datastore, &saga).await?;
-    trace!(opctx.log, "recovering saga: loaded log"; "saga_id" => ?saga_id);
+    trace!(
+        opctx.log,
+        "recovering saga: loaded log";
+        "saga_id" => ?saga_id,
+        "saga_name" => saga_name.clone()
+    );
     let saga_completion = sec_client
         .saga_resume(
             saga_id,

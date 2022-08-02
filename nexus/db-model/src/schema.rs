@@ -298,6 +298,7 @@ table! {
         id -> Uuid,
         creator -> Uuid,
         time_created -> Timestamptz,
+        name -> Text,
         saga_dag -> Jsonb,
         saga_state -> crate::saga_types::SagaCachedStateEnum,
         current_sec -> Nullable<Uuid>,
