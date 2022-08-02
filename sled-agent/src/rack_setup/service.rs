@@ -356,6 +356,7 @@ impl ServiceInner {
                         id: Uuid::new_v4(),
                         subnet,
                         rack_id,
+                        gateway: config.gateway.clone(),
                     },
                     services_request: request,
                 },

@@ -4,6 +4,7 @@
 
 //! Sled agent implementation
 
+use crate::bootstrap::params::SledAgentRequest;
 use crate::config::Config;
 use crate::illumos::vnic::VnicKind;
 use crate::illumos::zfs::{
@@ -126,7 +127,7 @@ impl SledAgent {
         log: Logger,
         lazy_nexus_client: LazyNexusClient,
         sled_address: SocketAddrV6,
-        rack_id: Uuid,
+        request: SledAgentRequest,
     ) -> Result<SledAgent, Error> {
         let id = config.id;
 
@@ -254,11 +255,11 @@ impl SledAgent {
             lazy_nexus_client.clone(),
             etherstub.clone(),
             *sled_address.ip(),
-            config.gateway_mac,
+            request.gateway.mac,
         );
 
         let svc_config = services::Config {
-            gateway_address: config.gateway_address,
+            gateway_address: request.gateway.address,
             ..Default::default()
         };
         let services = ServiceManager::new(
@@ -268,7 +269,7 @@ impl SledAgent {
             *sled_address.ip(),
             svc_config,
             config.get_link()?,
-            rack_id,
+            request.rack_id,
         )
         .await?;
 

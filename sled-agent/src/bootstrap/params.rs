@@ -5,10 +5,34 @@
 //! Request types for the bootstrap agent
 
 use super::trust_quorum::SerializableShareDistribution;
+use macaddr::MacAddr6;
 use omicron_common::address::{Ipv6Subnet, SLED_PREFIX};
 use serde::{Deserialize, Serialize};
+use serde_with::serde_as;
+use serde_with::DisplayFromStr;
+use serde_with::PickFirst;
 use std::borrow::Cow;
+use std::net::Ipv4Addr;
 use uuid::Uuid;
+
+/// Information about the internet gateway used for externally-facing services.
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+pub struct Gateway {
+    /// IP address of the Internet gateway, which is particularly
+    /// relevant for external-facing services (such as Nexus).
+    pub address: Option<Ipv4Addr>,
+
+    /// MAC address of the internet gateway above. This is used to provide
+    /// external connectivity into guests, by allowing OPTE to forward traffic
+    /// destined for the broader network to the gateway.
+    // This uses the `serde_with` crate's `serde_as` attribute, which tries
+    // each of the listed serialization types (starting with the default) until
+    // one succeeds. This supports deserialization from either an array of u8,
+    // or the display-string representation.
+    #[serde_as(as = "PickFirst<(_, DisplayFromStr)>")]
+    pub mac: MacAddr6,
+}
 
 /// Configuration information for launching a Sled Agent.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -18,6 +42,15 @@ pub struct SledAgentRequest {
 
     /// Uuid of the rack to which this sled agent belongs.
     pub rack_id: Uuid,
+
+    /// Information about internet gateway to use
+    // NOTE: This information is currently being configured and sent from RSS,
+    // but it contains dynamic information that could plausibly change during
+    // the duration of the sled's lifetime.
+    //
+    // Longer-term, it probably makes sense to store this in CRDB and transfer
+    // it to Sled Agent as part of the request to launch Nexus.
+    pub gateway: Gateway,
 
     // Note: The order of these fields is load bearing, because we serialize
     // `SledAgentRequest`s as toml. `subnet` serializes as a TOML table, so it
@@ -109,8 +142,9 @@ mod tests {
             request: Request::SledAgentRequest(
                 Cow::Owned(SledAgentRequest {
                     id: Uuid::new_v4(),
-                    subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
                     rack_id: Uuid::new_v4(),
+                    gateway: Gateway { address: None, mac: MacAddr6::nil() },
+                    subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
                 }),
                 Some(
                     ShareDistribution {
