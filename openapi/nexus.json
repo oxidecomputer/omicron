@@ -10170,7 +10170,7 @@
           },
           "group_attribute_name": {
             "nullable": true,
-            "description": "if set, attributes with this name will be considered to denote a user's group membership, where the values will be the group names.",
+            "description": "If set, SAML attributes with this name will be considered to denote a user's group membership, where the attribute value(s) should be a comma-separated list of group names.",
             "type": "string"
           },
           "idp_entity_id": {
@@ -10281,7 +10281,7 @@
         "properties": {
           "admin_group_name": {
             "nullable": true,
-            "description": "if set, this group will be created and granted the silo admin role",
+            "description": "If set, this group will be created during Silo creation and granted the \"Silo Admin\" role. Identity providers can assert that users belong to this group and those users can log in and further initialize the Silo.\n\nNote that if configuring a SAML based identity provider, group_attribute_name must be set for users to be considered part of a group. See [`SamlIdentityProviderCreate`] for more information.",
             "type": "string"
           },
           "description": {
