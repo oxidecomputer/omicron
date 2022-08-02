@@ -746,8 +746,7 @@ async fn ensure_instance_disk_attach_state(
     let disk = &saga_disks[disk_index];
 
     // TODO-correctness TODO-security It's not correct to re-resolve the
-    // organization and name now, as it might resolve to a different
-    // organization or project than we've been assuming up to this point.
+    // organization and project names now.  See oxidecomputer/omicron#1536.
     let organization_name: db::model::Name =
         saga_params.organization_name.clone().into();
     let project_name: db::model::Name = saga_params.project_name.clone().into();
@@ -877,8 +876,7 @@ async fn sic_delete_instance_record(
     // We currently only support deleting an instance if it is stopped or
     // failed, so update the state accordingly to allow deletion.
     // TODO-correctness TODO-security It's not correct to re-resolve the
-    // instance name now, as it might resolve to a different one than we
-    // actually created.
+    // instance name now.  See oxidecomputer/omicron#1536.
     let (.., authz_instance, db_instance) = LookupPath::new(&opctx, &datastore)
         .project_id(params.project_id)
         .instance_name(&instance_name)
@@ -932,8 +930,7 @@ async fn sic_instance_ensure(
     };
 
     // TODO-correctness TODO-security It's not correct to re-resolve the
-    // instance name now, as it might resolve to a different one than we
-    // actually created.
+    // instance name now.  See oxidecomputer/omicron#1536.
     let instance_name = sagactx.lookup::<db::model::Name>("instance_name")?;
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
 
