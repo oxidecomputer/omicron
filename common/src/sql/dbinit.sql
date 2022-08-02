@@ -239,7 +239,7 @@ CREATE TYPE omicron.public.user_provision_type AS ENUM (
 CREATE TABLE omicron.public.silo (
     /* Identity metadata */
     id UUID PRIMARY KEY,
-    name STRING(128) NOT NULL,
+    name STRING(63) NOT NULL,
     description STRING(512) NOT NULL,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
@@ -287,7 +287,7 @@ CREATE TYPE omicron.public.provider_type AS ENUM (
 CREATE TABLE omicron.public.identity_provider (
     /* Identity metadata */
     id UUID PRIMARY KEY,
-    name STRING(128) NOT NULL,
+    name STRING(63) NOT NULL,
     description STRING(512) NOT NULL,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
@@ -315,7 +315,7 @@ CREATE INDEX ON omicron.public.identity_provider (
 CREATE TABLE omicron.public.saml_identity_provider (
     /* Identity metadata */
     id UUID PRIMARY KEY,
-    name STRING(128) NOT NULL,
+    name STRING(63) NOT NULL,
     description STRING(512) NOT NULL,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
@@ -1077,7 +1077,7 @@ CREATE TABLE omicron.public.instance_external_ip (
     id UUID PRIMARY KEY,
 
     /* Name for floating IPs. See the constraints below. */
-    name STRING(128),
+    name STRING(63),
 
     /* Description for floating IPs. See the constraints below. */
     description STRING(512),
