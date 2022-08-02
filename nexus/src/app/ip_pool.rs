@@ -26,7 +26,16 @@ impl super::Nexus {
         opctx: &OpContext,
         new_pool: &params::IpPoolCreate,
     ) -> CreateResult<db::model::IpPool> {
-        self.db_datastore.ip_pool_create(opctx, new_pool).await
+        self.db_datastore.ip_pool_create(opctx, new_pool, None).await
+    }
+
+    pub async fn ip_pool_services_create(
+        &self,
+        opctx: &OpContext,
+        new_pool: &params::IpPoolCreate,
+        rack_id: Uuid,
+    ) -> CreateResult<db::model::IpPool> {
+        self.db_datastore.ip_pool_create(opctx, new_pool, Some(rack_id)).await
     }
 
     pub async fn ip_pools_list_by_name(
@@ -144,12 +153,9 @@ impl super::Nexus {
     ) -> ListResultVec<db::model::IpPoolRange> {
         let (authz_pool, ..) = self
             .db_datastore
-            .ip_pools_lookup_by_rack_id(
-                opctx,
-                authz::Action::ListChildren,
-                rack_id,
-            )
+            .ip_pools_lookup_by_rack_id(opctx, rack_id)
             .await?;
+        opctx.authorize(authz::Action::Read, &authz_pool).await?;
         self.db_datastore
             .ip_pool_list_ranges(opctx, &authz_pool, pagparams)
             .await
@@ -163,8 +169,9 @@ impl super::Nexus {
     ) -> UpdateResult<db::model::IpPoolRange> {
         let (authz_pool, db_pool) = self
             .db_datastore
-            .ip_pools_lookup_by_rack_id(opctx, authz::Action::Modify, rack_id)
+            .ip_pools_lookup_by_rack_id(opctx, rack_id)
             .await?;
+        opctx.authorize(authz::Action::Modify, &authz_pool).await?;
         self.db_datastore
             .ip_pool_add_range(opctx, &authz_pool, &db_pool, range)
             .await
@@ -178,8 +185,9 @@ impl super::Nexus {
     ) -> DeleteResult {
         let (authz_pool, ..) = self
             .db_datastore
-            .ip_pools_lookup_by_rack_id(opctx, authz::Action::Modify, rack_id)
+            .ip_pools_lookup_by_rack_id(opctx, rack_id)
             .await?;
+        opctx.authorize(authz::Action::Modify, &authz_pool).await?;
         self.db_datastore.ip_pool_delete_range(opctx, &authz_pool, range).await
     }
 }
