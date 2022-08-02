@@ -4,8 +4,6 @@
 
 //! Silos, Users, and SSH Keys.
 
-use std::sync::Arc;
-
 use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::{Asset, Resource};
@@ -29,7 +27,7 @@ impl super::Nexus {
     // Silos
 
     pub async fn silo_create(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
         new_silo_params: params::SiloCreate,
     ) -> CreateResult<db::model::Silo> {
