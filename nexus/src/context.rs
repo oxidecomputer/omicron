@@ -372,12 +372,9 @@ impl OpContext {
         // come from steno, prepopulated with useful metadata similar to the
         // way dropshot::RequestContext does.
         let log = log.new(o!(
-            "saga_node" => sagactx.node_label().to_string(),
+            "saga_node" => sagactx.node_label(),
         ));
-        metadata.insert(
-            String::from("saga_node"),
-            sagactx.node_label().to_string(),
-        );
+        metadata.insert(String::from("saga_node"), sagactx.node_label());
 
         OpContext {
             log,

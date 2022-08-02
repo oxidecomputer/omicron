@@ -176,19 +176,56 @@ impl NexusSaga for SagaInstanceCreate {
             CREATE_INSTANCE_RECORD.as_ref(),
         ));
 
-        // Similar to disks (see block comment below), create a sequence of
-        // action-undo pairs for each requested network interface, to make sure
-        // we always unwind after failures.  We put these pairs into subsagas,
-        // each with its own parameters.  That's the most convenient way to pass
-        // their index into them.
+        // Helper function for append subsagas to our parent saga.
+        fn subsaga_append<S: Serialize>(
+            node_basename: &'static str,
+            subsaga_builder: steno::DagBuilder,
+            parent_builder: &mut steno::DagBuilder,
+            params: S,
+            which: usize,
+        ) -> Result<(), SagaInitError> {
+            // The "parameter" node is a constant node that goes into the outer
+            // saga.  Its value becomes the parameters for the one-node subsaga
+            // (defined below) that actually creates each NIC.
+            let params_node_name = format!("{}_params{}", node_basename, which);
+            parent_builder.append(Node::constant(
+                &params_node_name,
+                serde_json::to_value(&params).map_err(|e| {
+                    SagaInitError::SerializeError(params_node_name.clone(), e)
+                })?,
+            ));
+
+            let output_name = format!("{}{}", node_basename, which);
+            parent_builder.append(Node::subsaga(
+                output_name.as_str(),
+                subsaga_builder.build()?,
+                params_node_name,
+            ));
+            Ok(())
+        }
+
+        // We use a similar pattern here for NICs, external IPs and disks.  We
+        // want one saga action per item (i.e., per NIC, per external IP, or per
+        // disk).  That makes it much easier to make actions and undo actions
+        // idempotent.  But the user may ask for a variable number of these
+        // items.  Previous versions of Steno required the saga DAG to be fixed
+        // for all runs of a saga.  To address this, we put a static limit on
+        // the number of NICs, external IPs, or disks that you can request.
+        // Here where we're building the saga DAG, we always add that maximum
+        // number of nodes and we just have the extra nodes do nothing.
         //
-        // TODO-cleanup More recent Steno versions support more flexibility here
-        // and we could clean this up.  Instead of always creating
-        // MAX_NICS_PER_INSTANCE and ignoring many of them we've got a default
-        // config or fewer than MAX_NICS_PER_INSTANCE NICs, we could just create
-        // the DAG with the right number of the right nodes.  We could also
-        // put the correct config into each subsaga's params node so that we
-        // don't have to pass the index around.
+        // An easy way to pass this kind of information to an action node is to
+        // wrap it in a subsaga and put that information into the subsaga
+        // parameters.  That's what we do below.  subsaga_append() (defined
+        // above) handles much of the details.
+        //
+        // TODO-cleanup More recent Steno versions support more flexibility
+        // here.  Instead of always creating MAX_NICS_PER_INSTANCE and ignoring
+        // many of them if we've got a default config or fewer than
+        // MAX_NICS_PER_INSTANCE NICs, we could just create the DAG with the
+        // right number of the right nodes.  We could also put the correct
+        // config into each subsaga's params node so that we don't have to pass
+        // the index around.
         for i in 0..MAX_NICS_PER_INSTANCE {
             let repeat_params = NetParams {
                 saga_params: params.clone(),
@@ -196,33 +233,21 @@ impl NexusSaga for SagaInstanceCreate {
                 instance_id,
                 new_id: Uuid::new_v4(),
             };
-
-            // The "parameter" node is a constant node that goes into the outer
-            // saga.  Its value becomes the parameters for the one-node subsaga
-            // (defined below) that actually creates each NIC.
-            let params_node_name = format!("network_interface_params{i}");
-            builder.append(Node::constant(
-                &params_node_name,
-                serde_json::to_value(&repeat_params).map_err(|e| {
-                    SagaInitError::SerializeError(format!("NIC {i} params"), e)
-                })?,
-            ));
-
-            // Create and append the one-node subsaga that creates each NIC.
             let subsaga_name =
                 SagaName::new(&format!("instance-create-nic{i}"));
             let mut subsaga_builder = DagBuilder::new(subsaga_name);
-            let output_name = format!("network_interface{i}");
             subsaga_builder.append(Node::action(
-                "nic_output",
-                format!("CreateNetworkInterface-{i}").as_str(),
+                "output",
+                format!("CreateNetworkInterface{i}").as_str(),
                 CREATE_NETWORK_INTERFACE.as_ref(),
             ));
-            builder.append(Node::subsaga(
-                output_name.as_str(),
-                subsaga_builder.build()?,
-                params_node_name,
-            ));
+            subsaga_append(
+                "network_interface",
+                subsaga_builder,
+                &mut builder,
+                repeat_params,
+                i,
+            )?;
         }
 
         // Allocate an external IP address for the default outbound connectivity
@@ -237,9 +262,8 @@ impl NexusSaga for SagaInstanceCreate {
             CREATE_SNAT_IP.as_ref(),
         ));
 
-        // Similar to disks (see block comment below), create a sequence of
-        // action-undo pairs for each requested external IP, to make sure we
-        // always unwind after failures.
+        // See the comment above where we add nodes for creating NICs.  We use
+        // the same pattern here.
         for i in 0..MAX_EXTERNAL_IPS_PER_INSTANCE {
             let repeat_params = NetParams {
                 saga_params: params.clone(),
@@ -247,75 +271,28 @@ impl NexusSaga for SagaInstanceCreate {
                 instance_id,
                 new_id: Uuid::new_v4(),
             };
-
-            // The "parameter" node is a constant node that goes into the outer
-            // saga.  Its value becomes the parameters for the one-node subsaga
-            // (defined below) that actually creates each NIC.
-            let params_node_name = format!("external_ip_params{i}");
-            builder.append(Node::constant(
-                &params_node_name,
-                serde_json::to_value(&repeat_params).map_err(|e| {
-                    // XXX-dap dag build error could instead embed dag name
-                    SagaInitError::SerializeError(
-                        format!("External IP {i} params"),
-                        e,
-                    )
-                })?,
-            ));
-
-            // Create and append the one-node subsaga that creates each external
-            // IP
             let subsaga_name =
-                SagaName::new(&format!("instance-create-external-ip{i}i"));
+                SagaName::new(&format!("instance-create-external-ip{i}"));
             let mut subsaga_builder = DagBuilder::new(subsaga_name);
-            let output_name = format!("external_ip{i}");
             subsaga_builder.append(Node::action(
-                "external_ip_output",
-                format!("CreateExternalIp-{i}").as_str(),
+                "output",
+                format!("CreateExternalIp{i}").as_str(),
                 CREATE_EXTERNAL_IP.as_ref(),
             ));
-            builder.append(Node::subsaga(
-                output_name.as_str(),
-                subsaga_builder.build()?,
-                params_node_name,
-            ));
+            subsaga_append(
+                "external_ip",
+                subsaga_builder,
+                &mut builder,
+                repeat_params,
+                i,
+            )?;
         }
 
-        // Saga actions must be atomic - they have to fully complete or fully
-        // abort.  This is because Steno assumes that the saga actions are
-        // atomic and therefore undo actions are *not* run for the failing node.
-        //
-        // For this reason, each disk is created and attached with a separate
-        // saga node. If a saga node had a loop to attach or detach all disks,
-        // and one failed, any disks that were attached would not be detached
-        // because the corresponding undo action would not be run. Separate each
-        // disk create and attach to their own saga node and ensure that each
-        // function behaves atomically.
-        //
-        // Currently, instances can have a maximum of 8 disks attached. Create
-        // two saga nodes for each disk that will unconditionally run but
-        // contain conditional logic depending on if that disk index is going to
-        // be used.  Steno does not currently support the saga node graph
-        // changing shape.
-        // XXX-dap update comment
+        // See the comment above where we add nodes for creating NICs.  We use
+        // the same pattern here.
         for i in 0..(MAX_DISKS_PER_INSTANCE as usize) {
             let disk_params =
                 DiskParams { saga_params: params.clone(), which: i };
-
-            // The "parameter" node is a constant node that goes into the outer
-            // saga.  Its value becomes the parameters for the two-node subsaga
-            // (defined below) that creates and attaches each disk.
-            let params_node_name = format!("disk_params{i}");
-            builder.append(Node::constant(
-                &params_node_name,
-                serde_json::to_value(&disk_params).map_err(|e| {
-                    // XXX-dap dag build error could instead embed dag name
-                    SagaInitError::SerializeError(format!("Disk {i} params"), e)
-                })?,
-            ));
-
-            // Create and append the two-node subsaga that creates and attaches
-            // each disk.
             let subsaga_name =
                 SagaName::new(&format!("instance-create-disk{i}"));
             let mut subsaga_builder = DagBuilder::new(subsaga_name);
@@ -329,12 +306,13 @@ impl NexusSaga for SagaInstanceCreate {
                 format!("AttachDisksToInstance-{i}").as_str(),
                 ATTACH_DISKS_TO_INSTANCE.as_ref(),
             ));
-
-            builder.append(Node::subsaga(
-                &format!("disk{i}"),
-                subsaga_builder.build()?,
-                params_node_name,
-            ));
+            subsaga_append(
+                "disk",
+                subsaga_builder,
+                &mut builder,
+                disk_params,
+                i,
+            );
         }
 
         builder.append(Node::action(
