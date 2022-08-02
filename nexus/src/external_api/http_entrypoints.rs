@@ -108,6 +108,9 @@ pub fn external_api() -> NexusApiDescription {
         api.register(ip_pool_delete)?;
         api.register(ip_pool_update)?;
 
+        // Operator-Accessible IP Pools API
+        api.register(ip_pool_service_view)?;
+
         // Customer-Accessible IP Pool Range API (used by instances)
         api.register(ip_pool_range_list)?;
         api.register(ip_pool_range_add)?;
@@ -1268,6 +1271,28 @@ async fn ip_pool_update(
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let pool = nexus.ip_pool_update(&opctx, pool_name, &updates).await?;
         Ok(HttpResponseOk(pool.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch an IP pool
+#[endpoint {
+    method = GET,
+    path = "/ip-pools-service/{rack_id}",
+    tags = ["ip-pools"],
+}]
+async fn ip_pool_service_view(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<IpPoolServicePathParam>,
+) -> Result<HttpResponseOk<views::IpPool>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let rack_id = path.rack_id;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let pool = nexus.ip_pool_service_fetch(&opctx, rack_id).await?;
+        Ok(HttpResponseOk(IpPool::from(pool)))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

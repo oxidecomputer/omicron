@@ -50,6 +50,7 @@ impl DataStore {
             .authorize(authz::Action::ListChildren, &authz::IP_POOL_LIST)
             .await?;
         paginated(dsl::ip_pool, dsl::name, pagparams)
+            .filter(dsl::rack_id.is_null())
             .filter(dsl::time_deleted.is_null())
             .select(db::model::IpPool::as_select())
             .get_results_async(self.pool_authorized(opctx).await?)
@@ -57,6 +58,30 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
+    /// List IP Pools by their IDs
+    pub async fn ip_pools_list_by_id(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<IpPool> {
+        use db::schema::ip_pool::dsl;
+        opctx
+            .authorize(authz::Action::ListChildren, &authz::IP_POOL_LIST)
+            .await?;
+        paginated(dsl::ip_pool, dsl::id, pagparams)
+            .filter(dsl::rack_id.is_null())
+            .filter(dsl::time_deleted.is_null())
+            .select(db::model::IpPool::as_select())
+            .get_results_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    /// Looks up an IP pool by a particular Rack ID.
+    ///
+    /// An index exists to look up pools by rack ID, but it is not a primary
+    /// key, which requires this lookup function to be used instead of the
+    /// [`LookupPath`] utility.
     pub async fn ip_pools_lookup_by_rack_id(
         &self,
         opctx: &OpContext,
@@ -98,24 +123,6 @@ impl DataStore {
                 )
             })?;
         Ok((authz_pool, pool))
-    }
-
-    /// List IP Pools by their IDs
-    pub async fn ip_pools_list_by_id(
-        &self,
-        opctx: &OpContext,
-        pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<IpPool> {
-        use db::schema::ip_pool::dsl;
-        opctx
-            .authorize(authz::Action::ListChildren, &authz::IP_POOL_LIST)
-            .await?;
-        paginated(dsl::ip_pool, dsl::id, pagparams)
-            .filter(dsl::time_deleted.is_null())
-            .select(db::model::IpPool::as_select())
-            .get_results_async(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     /// Creates a new IP pool.
@@ -198,6 +205,7 @@ impl DataStore {
         // in between the above check for children and this query.
         let now = Utc::now();
         let updated_rows = diesel::update(dsl::ip_pool)
+            .filter(dsl::rack_id.is_null())
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(authz_pool.id()))
             .filter(dsl::rcgen.eq(db_pool.rcgen))
@@ -229,6 +237,7 @@ impl DataStore {
         use db::schema::ip_pool::dsl;
         opctx.authorize(authz::Action::Modify, authz_pool).await?;
         diesel::update(dsl::ip_pool)
+            .filter(dsl::rack_id.is_null())
             .filter(dsl::id.eq(authz_pool.id()))
             .filter(dsl::time_deleted.is_null())
             .set(updates)

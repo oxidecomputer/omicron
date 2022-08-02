@@ -23,8 +23,6 @@ use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::IdentityMetadata;
 use omicron_nexus::authn::external::spoof;
-use std::str::FromStr;
-use uuid::Uuid;
 
 // This test hits a list Nexus API endpoints using both unauthenticated and
 // unauthorized requests to make sure we get the expected behavior (generally:
@@ -57,24 +55,6 @@ use uuid::Uuid;
 async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
     DiskTest::new(cptestctx).await;
     let client = &cptestctx.external_client;
-
-    let nexus = &cptestctx.server.apictx.nexus;
-
-    // Creation of IP pools for internal services is not exposed through the
-    // API. We create an IP pool manually as a workaround.
-    let opctx = omicron_nexus::context::OpContext::for_tests(
-        cptestctx.logctx.log.new(o!()),
-        nexus.datastore().clone(),
-    );
-    nexus
-        .ip_pool_services_create(
-            &opctx,
-            &DEMO_IP_POOL_SERVICE_CREATE,
-            Uuid::from_str(nexus_test_utils::RACK_UUID).unwrap(),
-        )
-        .await
-        .unwrap();
-
     let log = &cptestctx.logctx.log;
     let mut setup_results = std::collections::BTreeMap::new();
 

@@ -316,14 +316,6 @@ lazy_static! {
     pub static ref DEMO_IP_POOL_RANGES_DEL_URL: String = format!("{}/remove", *DEMO_IP_POOL_RANGES_URL);
 
     // IP Pools (Services)
-    pub static ref DEMO_IP_POOL_SERVICE_CREATE: params::IpPoolCreate =
-        params::IpPoolCreate {
-            identity: IdentityMetadataCreateParams {
-                name: "pool1".parse::<Name>().unwrap(),
-                description: String::from("an IP pool"),
-            },
-            project: None,
-        };
     pub static ref DEMO_IP_POOLS_SERVICE_URL: &'static str = "/ip-pools-service";
     pub static ref DEMO_IP_POOL_SERVICE_URL: String = format!("{}/{}", *DEMO_IP_POOLS_SERVICE_URL, RACK_UUID);
     pub static ref DEMO_IP_POOL_SERVICE_RANGES_URL: String = format!("{}/ranges", *DEMO_IP_POOL_SERVICE_URL);
@@ -598,6 +590,16 @@ lazy_static! {
                 AllowedMethod::Post(
                     serde_json::to_value(&*DEMO_IP_POOL_RANGE).unwrap()
                 ),
+            ],
+        },
+
+        // IP Pool endpoint (Oxide services)
+        VerifyEndpoint {
+            url: &*DEMO_IP_POOL_SERVICE_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get
             ],
         },
 
