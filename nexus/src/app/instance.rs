@@ -174,7 +174,6 @@ impl super::Nexus {
         //
         // TODO Even worse, post-authz, we do two lookups here instead of one.
         // Maybe sagas should be able to emit `authz::Instance`-type objects.
-
         let (.., db_instance) = LookupPath::new(opctx, &self.db_datastore)
             .instance_id(instance_id)
             .fetch()

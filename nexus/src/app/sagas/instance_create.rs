@@ -176,7 +176,7 @@ impl NexusSaga for SagaInstanceCreate {
             CREATE_INSTANCE_RECORD.as_ref(),
         ));
 
-        // Helper function for append subsagas to our parent saga.
+        // Helper function for appending subsagas to our parent saga.
         fn subsaga_append<S: Serialize>(
             node_basename: &'static str,
             subsaga_builder: steno::DagBuilder,
@@ -211,7 +211,7 @@ impl NexusSaga for SagaInstanceCreate {
         // items.  Previous versions of Steno required the saga DAG to be fixed
         // for all runs of a saga.  To address this, we put a static limit on
         // the number of NICs, external IPs, or disks that you can request.
-        // Here where we're building the saga DAG, we always add that maximum
+        // Here, where we're building the saga DAG, we always add that maximum
         // number of nodes and we just have the extra nodes do nothing.
         //
         // An easy way to pass this kind of information to an action node is to
