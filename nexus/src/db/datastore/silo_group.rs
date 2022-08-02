@@ -172,6 +172,7 @@ impl DataStore {
                                 .eq(group_id),
                         )
                         .select(SiloGroupMembership::as_returning())
+                        .limit(1)
                         .load(conn)?;
 
                 if !group_memberships.is_empty() {
