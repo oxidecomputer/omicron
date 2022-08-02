@@ -750,11 +750,19 @@ async fn test_ip_pool_service(cptestctx: &ControlPlaneTestContext) {
 
     // Remove both ranges, observe that the IP Pool is empty.
     for range in ranges.iter() {
-        NexusRequest::objects_post(client, &ip_pool_remove_range_url, &range)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .unwrap();
+        NexusRequest::new(
+            RequestBuilder::new(
+                client,
+                Method::POST,
+                &ip_pool_remove_range_url,
+            )
+            .body(Some(&range))
+            .expect_status(Some(StatusCode::NO_CONTENT)),
+        )
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Failed to delete IP range from a pool");
     }
 
     let first_page =
