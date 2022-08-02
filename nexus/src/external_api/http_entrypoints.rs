@@ -1275,7 +1275,7 @@ async fn ip_pool_update(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch an IP pool
+/// Fetch an IP pool used for Oxide services.
 #[endpoint {
     method = GET,
     path = "/ip-pools-service/{rack_id}",

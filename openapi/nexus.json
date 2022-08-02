@@ -1299,7 +1299,7 @@
         "tags": [
           "ip-pools"
         ],
-        "summary": "Fetch an IP pool",
+        "summary": "Fetch an IP pool used for Oxide services.",
         "operationId": "ip_pool_service_view",
         "parameters": [
           {
