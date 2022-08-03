@@ -2819,7 +2819,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sled-agent-client",
- "steno 0.2.0",
+ "steno",
  "uuid",
 ]
 
@@ -3032,7 +3032,7 @@ dependencies = [
  "serde_with 2.0.0",
  "slog",
  "smf",
- "steno 0.2.0",
+ "steno",
  "thiserror",
  "tokio",
  "tokio-postgres",
@@ -3067,7 +3067,7 @@ dependencies = [
  "serde_with 1.14.0",
  "slog",
  "smf",
- "steno 0.1.0",
+ "steno",
  "thiserror",
  "tokio",
  "tokio-postgres",
@@ -3194,7 +3194,7 @@ dependencies = [
  "sled-agent-client",
  "slog",
  "slog-dtrace",
- "steno 0.2.0",
+ "steno",
  "strum",
  "subprocess",
  "tempfile",
@@ -5551,28 +5551,8 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "steno"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/steno?branch=main#703cad54fdd70815ac84dcf08a439b54077e9600"
-dependencies = [
- "anyhow",
- "async-trait",
- "chrono",
- "futures",
- "newtype_derive",
- "petgraph",
- "schemars",
- "serde",
- "serde_json",
- "slog",
- "thiserror",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "steno"
 version = "0.2.0"
-source = "git+https://github.com/oxidecomputer/steno?branch=ajs-experiments#e0223b3ae84e73a3d396d7a52c19da7bda194e35"
+source = "git+https://github.com/oxidecomputer/steno?branch=main#faa20daa38c27ddb1b99ae0587a6657d023b4b32"
 dependencies = [
  "anyhow",
  "async-trait",
