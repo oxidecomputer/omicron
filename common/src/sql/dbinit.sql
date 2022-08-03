@@ -291,7 +291,7 @@ CREATE TABLE omicron.public.silo_group (
 CREATE INDEX ON omicron.public.silo_group (
     silo_id
 ) WHERE
-    time_deleted IS NOT NULL;
+    time_deleted IS NULL;
 
 CREATE UNIQUE INDEX ON omicron.public.silo_group (
     silo_id,

@@ -276,7 +276,7 @@ impl DataStore {
                     silo_group_membership::dsl::silo_group_id.eq_any(
                         silo_group::dsl::silo_group
                             .filter(silo_group::dsl::silo_id.eq(id))
-                            .filter(silo_group::dsl::time_deleted.is_not_null())
+                            .filter(silo_group::dsl::time_deleted.is_null())
                             .select(silo_group::dsl::id),
                     ),
                 )
