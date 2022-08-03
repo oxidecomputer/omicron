@@ -34,6 +34,9 @@ pub struct Request {
 }
 
 #[derive(Debug, Clone, SerializedSize, Serialize, Deserialize)]
+// TODO: Rework how we serialize packets that contain a large amount of data
+// (`SerialConsole`, `UpdateChunk`) to make this enum smaller.
+#[allow(clippy::large_enum_variant)]
 pub enum RequestKind {
     Discover,
     // TODO do we want to be able to request IgnitionState for all targets in
@@ -43,6 +46,10 @@ pub enum RequestKind {
     IgnitionCommand { target: u8, command: IgnitionCommand },
     SpState,
     SerialConsoleWrite(SerialConsole),
+    UpdateStart(UpdateStart),
+    UpdateChunk(UpdateChunk),
+    SysResetPrepare,
+    SysResetTrigger,
 }
 
 /// Identifier for one of of an SP's KSZ8463 management-network-facing ports.
@@ -73,7 +80,13 @@ pub enum ResponseKind {
     BulkIgnitionState(BulkIgnitionState),
     IgnitionCommandAck,
     SpState(SpState),
+    UpdateStartAck,
+    UpdateChunkAck,
     SerialConsoleWriteAck,
+    SysResetPrepareAck,
+    // There is intentionally no `SysResetTriggerAck` response; the expected
+    // "resposne" to `SysResetTrigger` is an SP reset, which won't allow for
+    // acks to be sent.
 }
 
 #[derive(Debug, Clone, Copy, SerializedSize, Serialize, Deserialize)]
@@ -88,6 +101,7 @@ pub type SerialNumber = [u8; 16];
 #[derive(Debug, Clone, Copy, SerializedSize, Serialize, Deserialize)]
 pub struct SpState {
     pub serial_number: SerialNumber,
+    pub version: u32,
 }
 
 #[derive(Debug, Clone, Copy, SerializedSize, Serialize, Deserialize)]
@@ -106,6 +120,18 @@ pub enum ResponseError {
     RequestUnsupportedForComponent,
     /// The specified ignition target does not exist.
     IgnitionTargetDoesNotExist(u8),
+    /// An update is already in progress with the specified amount of data
+    /// already provided. MGS should resume the update at that offset.
+    UpdateInProgress { bytes_received: u32 },
+    /// Received an invalid update chunk; the in-progress update must be
+    /// abandoned and restarted.
+    InvalidUpdateChunk,
+    /// An update operation failed with the associated code.
+    UpdateFailed(u32),
+    /// Received a `SysResetTrigger` request without first receiving a
+    /// `SysResetPrepare` request. This can be used to detect a successful
+    /// reset.
+    SysResetTriggerWithoutPrepare,
 }
 
 impl fmt::Display for ResponseError {
@@ -122,6 +148,18 @@ impl fmt::Display for ResponseError {
             }
             ResponseError::IgnitionTargetDoesNotExist(target) => {
                 write!(f, "nonexistent ignition target {}", target)
+            }
+            ResponseError::UpdateInProgress { bytes_received } => {
+                write!(f, "update still in progress ({bytes_received} bytes received so far)")
+            }
+            ResponseError::InvalidUpdateChunk => {
+                write!(f, "invalid update chunk")
+            }
+            ResponseError::UpdateFailed(code) => {
+                write!(f, "update failed (code {})", code)
+            }
+            &ResponseError::SysResetTriggerWithoutPrepare => {
+                write!(f, "sys reset trigger requested without a preceding sys reset prepare")
             }
         }
     }
@@ -148,6 +186,97 @@ pub enum SpMessageKind {
     /// Data traveling from an SP-attached component (in practice, a CPU) on the
     /// component's serial console.
     SerialConsole(SerialConsole),
+}
+
+#[derive(
+    Debug,
+    Default,
+    Clone,
+    Copy,
+    PartialEq,
+    SerializedSize,
+    Serialize,
+    Deserialize,
+)]
+pub struct UpdateStart {
+    pub total_size: u32,
+    // TODO auth info? checksum/digest?
+    // TODO should we inline the first chunk?
+}
+
+#[derive(Debug, Clone, PartialEq, SerializedSize)]
+pub struct UpdateChunk {
+    /// Offset in bytes of this chunk from the beginning of the update data.
+    pub offset: u32,
+    /// Length in bytes of this chunk.
+    pub chunk_length: u16,
+    /// Data of this chunk; only the first `chunk_length` bytes should be used.
+    pub data: [u8; Self::MAX_CHUNK_SIZE],
+}
+
+mod update_chunk_serde {
+    use super::variable_packet::VariablePacket;
+    use super::*;
+
+    #[derive(Debug, Deserialize, Serialize)]
+    pub(crate) struct Header {
+        offset: u32,
+        chunk_length: u16,
+    }
+
+    impl VariablePacket for UpdateChunk {
+        type Header = Header;
+        type Element = u8;
+
+        const MAX_ELEMENTS: usize = Self::MAX_CHUNK_SIZE;
+        const DESERIALIZE_NAME: &'static str = "update chunk";
+
+        fn header(&self) -> Self::Header {
+            Header { offset: self.offset, chunk_length: self.chunk_length }
+        }
+
+        fn num_elements(&self) -> u16 {
+            self.chunk_length
+        }
+
+        fn elements(&self) -> &[Self::Element] {
+            &self.data
+        }
+
+        fn elements_mut(&mut self) -> &mut [Self::Element] {
+            &mut self.data
+        }
+
+        fn from_header(header: Self::Header) -> Self {
+            Self {
+                offset: header.offset,
+                chunk_length: header.chunk_length,
+                data: [0; Self::MAX_CHUNK_SIZE],
+            }
+        }
+    }
+
+    impl Serialize for UpdateChunk {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            VariablePacket::serialize(self, serializer)
+        }
+    }
+
+    impl<'de> Deserialize<'de> for UpdateChunk {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            VariablePacket::deserialize(deserializer)
+        }
+    }
+}
+
+impl UpdateChunk {
+    pub const MAX_CHUNK_SIZE: usize = 512;
 }
 
 #[derive(

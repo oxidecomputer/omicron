@@ -27,10 +27,13 @@ use slog::Logger;
 use std::io;
 use std::net::SocketAddrV6;
 use std::net::UdpSocket;
+use std::path::PathBuf;
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
+mod reset;
+mod update;
 mod usart;
 
 /// Command line program that can send MGS messages to a single SP.
@@ -48,7 +51,7 @@ struct Args {
     #[clap(long)]
     sp: SocketAddrV6,
 
-    #[clap(long, short, default_value = "3000")]
+    #[clap(long, short, default_value = "2000")]
     timeout_millis: u64,
 
     #[clap(subcommand)]
@@ -77,6 +80,12 @@ enum Commands {
         #[clap(long)]
         raw: bool,
     },
+
+    /// Upload a new image to the SP and have it swap banks (requires reset)
+    Update { image: PathBuf },
+
+    /// Instruct the SP to reset.
+    SysReset,
 }
 
 fn main() -> Result<()> {
@@ -98,8 +107,12 @@ fn main() -> Result<()> {
     let request_kind = match args.command {
         Commands::Discover => RequestKind::Discover,
         Commands::State => RequestKind::SpState,
+        Commands::SysReset => return reset::run(log, socket, args.sp),
         Commands::UsartAttach { raw } => {
             return usart::run(log, socket, args.sp, raw);
+        }
+        Commands::Update { image } => {
+            return update::run(log, socket, args.sp, &image);
         }
     };
 
@@ -151,7 +164,7 @@ fn send_request(
     let request = Request { version, request_id, kind };
 
     let mut buf = [0; Request::MAX_SIZE];
-    debug!(
+    trace!(
         log, "sending request to SP";
         "request" => ?request,
         "sp" => %addr,
@@ -180,12 +193,10 @@ fn recv_sp_message(
 ) -> Result<SpMessage, RecvError> {
     let mut resp = [0; SpMessage::MAX_SIZE];
 
-    let (n, _peer) = socket.recv_from(&mut resp[..])?;
+    let (n, peer) = socket.recv_from(&mut resp[..])?;
     let resp = &resp[..n];
-    trace!(log, "received packet"; "data" => ?resp);
-
     let (message, _) = gateway_messages::deserialize::<SpMessage>(resp)?;
-    debug!(log, "received response"; "response" => ?message);
+    trace!(log, "received response"; "response" => ?message, "peer" => %peer);
 
     if message.version == version::V1 {
         Ok(message)
@@ -194,5 +205,23 @@ fn recv_sp_message(
             expected: version::V1,
             got: message.version,
         })
+    }
+}
+
+fn recv_sp_message_ignoring_serial_console(
+    log: &Logger,
+    socket: &UdpSocket,
+) -> Result<(u32, Result<ResponseKind, ResponseError>), RecvError> {
+    loop {
+        let message = recv_sp_message(log, socket)?;
+        match message.kind {
+            SpMessageKind::Response { request_id, result } => {
+                return Ok((request_id, result));
+            }
+            SpMessageKind::SerialConsole(_) => {
+                debug!(log, "ignoring serial console packet from SP");
+                continue;
+            }
+        }
     }
 }
