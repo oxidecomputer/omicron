@@ -66,7 +66,7 @@ enum GetValueErrorRaw {
     MissingValue,
 }
 
-/// Error returned by [`Zfs:get_oxide_value`].
+/// Error returned by [`Zfs::get_oxide_value`].
 #[derive(thiserror::Error, Debug)]
 #[error("Failed to get value '{name}' from filesystem {filesystem}: {err}")]
 pub struct GetValueError {

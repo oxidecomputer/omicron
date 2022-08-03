@@ -32,7 +32,7 @@ use std::fmt::Debug;
 /// Trait to be implemented by structs representing a detachable collection.
 ///
 /// A blanket implementation is provided for traits that implement
-/// [`DatastoreAttachTarget`].
+/// [`crate::db::collection_attach::DatastoreAttachTarget`].
 pub trait DatastoreDetachTarget<ResourceType>:
     DatastoreAttachTargetConfig<ResourceType>
 {
