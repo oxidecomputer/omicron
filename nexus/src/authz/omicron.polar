@@ -436,3 +436,5 @@ has_permission(_actor: AuthenticatedActor, "query", _resource: Database);
 # The "db-init" user is the only one with the "init" role.
 has_permission(actor: AuthenticatedActor, "modify", _resource: Database)
 	if actor = USER_DB_INIT;
+has_permission(actor: AuthenticatedActor, "create_child", _resource: IpPoolList)
+	if actor = USER_DB_INIT;

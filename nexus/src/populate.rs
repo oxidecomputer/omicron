@@ -44,10 +44,13 @@
 
 use crate::context::OpContext;
 use crate::db::{self, DataStore};
+use crate::external_api::params;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use lazy_static::lazy_static;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::IdentityMetadataCreateParams;
+use omicron_common::api::external::Name;
 use omicron_common::backoff;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -279,6 +282,22 @@ impl Populator for PopulateRack {
             datastore
                 .rack_insert(opctx, &db::model::Rack::new(args.rack_id))
                 .await?;
+
+            let params = params::IpPoolCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "oxide-service-pool".parse::<Name>().unwrap(),
+                    description: String::from("IP Pool for Oxide Services"),
+                },
+                project: None,
+            };
+            datastore
+                .ip_pool_create(opctx, &params, Some(args.rack_id))
+                .await
+                .map(|_| ())
+                .or_else(|e| match e {
+                    Error::ObjectAlreadyExists { .. } => Ok(()),
+                    _ => Err(e),
+                })?;
             Ok(())
         }
         .boxed()
