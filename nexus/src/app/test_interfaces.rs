@@ -11,7 +11,7 @@ use sled_agent_client::Client as SledAgentClient;
 use std::sync::Arc;
 use uuid::Uuid;
 
-/// Exposes additional [`Nexus`] interfaces for use by the test suite
+/// Exposes additional [`super::Nexus`] interfaces for use by the test suite
 #[async_trait]
 pub trait TestInterfaces {
     /// Access the Rack ID of the currently executing Nexus.

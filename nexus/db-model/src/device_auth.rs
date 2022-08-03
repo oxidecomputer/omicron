@@ -3,8 +3,9 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Data structures and token generation routines for the OAuth 2.0
-//! Device Authorization Grant flow. See the module-level documentation
-//! on [`nexus::device_auth`] for an overview of how these are used.
+//! Device Authorization Grant flow. See the module-level documentation in
+//! [device_auth.rs](nexus/src/app/device_auth.rs) for an overview of how these are
+//! used.
 
 use crate::schema::{device_access_token, device_auth_request};
 

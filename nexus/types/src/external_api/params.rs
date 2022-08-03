@@ -326,7 +326,7 @@ pub struct ProjectPath {
 
 /// Create-time parameters for an IP Pool.
 ///
-/// See [`IpPool`](omicron_nexus::external_api::views::IpPool)
+/// See [`IpPool`](crate::external_api::views::IpPool)
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct IpPoolCreate {
     #[serde(flatten)]
@@ -762,7 +762,7 @@ pub struct Distribution {
 }
 
 /// Create-time parameters for an
-/// [`GlobalImage`](omicron_common::api::external::GlobalImage)
+/// [`GlobalImage`](crate::external_api::views::GlobalImage)
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct GlobalImageCreate {
     /// common identifying metadata
@@ -780,7 +780,7 @@ pub struct GlobalImageCreate {
 }
 
 /// Create-time parameters for an
-/// [`Image`](omicron_common::api::external::Image)
+/// [`Image`](crate::external_api::views::Image)
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ImageCreate {
     /// common identifying metadata
@@ -796,7 +796,7 @@ pub struct ImageCreate {
 
 // SNAPSHOTS
 
-/// Create-time parameters for a [`Snapshot`](omicron_common::api::external::Snapshot)
+/// Create-time parameters for a [`Snapshot`](crate::external_api::views::Snapshot)
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SnapshotCreate {
     /// common identifying metadata
@@ -813,7 +813,7 @@ pub struct SnapshotCreate {
 // for creating them internally as we use for types that can be created in the
 // external API.
 
-/// Create-time parameters for a [`UserBuiltin`](crate::db::model::UserBuiltin)
+/// Create-time parameters for a [`UserBuiltin`](crate::external_api::views::UserBuiltin)
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct UserBuiltinCreate {
     #[serde(flatten)]

@@ -1459,7 +1459,7 @@ pub struct VpcFirewallRule {
     pub vpc_id: Uuid,
 }
 
-/// Collection of a [`Vpc`]'s firewall rules
+/// Collection of a Vpc's firewall rules
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcFirewallRules {
     pub rules: Vec<VpcFirewallRule>,

@@ -173,7 +173,7 @@ impl<'a> RequestBuilder<'a> {
     /// Record that we expect to get status code `expected_status` in the
     /// response
     ///
-    /// If `expected_status` is not `None`, then [`execute()`] will check this
+    /// If `expected_status` is not `None`, then [`Self::execute()`] will check this
     /// and raise an error if a different status code is found.
     pub fn expect_status(
         mut self,
@@ -185,7 +185,7 @@ impl<'a> RequestBuilder<'a> {
 
     /// Record a list of header names allowed in the response
     ///
-    /// If this function is used, then [`execute()`] will check each header in
+    /// If this function is used, then [`Self::execute()`] will check each header in
     /// the response against this list and raise an error if a header name is
     /// found that's not in this list.
     pub fn expect_allowed_headers<
@@ -234,8 +234,8 @@ impl<'a> RequestBuilder<'a> {
     /// Make the HTTP request using the given `client`, verify the returned
     /// response, and make the response available to the caller
     ///
-    /// This function checks the returned status code (if [`expect_status()`]
-    /// was used), allowed headers (if [`allowed_headers()`] was used), and
+    /// This function checks the returned status code (if [`Self::expect_status()`]
+    /// was used), allowed headers (if [`Self::expect_allowed_headers()`] was used), and
     /// various other properties of the response.
     pub async fn execute(self) -> Result<TestResponse, anyhow::Error> {
         if let Some(error) = self.error {
@@ -468,12 +468,12 @@ pub struct NexusRequest<'a> {
 impl<'a> NexusRequest<'a> {
     /// Create a `NexusRequest` around `request_builder`
     ///
-    /// Most callers should use [`objects_post`], [`object_get`],
-    /// [`object_delete`], or the other wrapper constructors.  If you use this
+    /// Most callers should use [`Self::objects_post`], [`Self::object_get`],
+    /// [`Self::object_delete`], or the other wrapper constructors.  If you use this
     /// function directly, you should set up your `request_builder` first with
     /// whatever HTTP-level stuff you want (including any non-authentication
     /// headers), then call this function to get a `NexusRequest`, then use
-    /// [`authn_as()`] to configure authentication.
+    /// [`Self::authn_as()`] to configure authentication.
     pub fn new(request_builder: RequestBuilder<'a>) -> Self {
         NexusRequest { request_builder }
     }

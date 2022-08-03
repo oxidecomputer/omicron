@@ -41,7 +41,7 @@ pub struct DdmAdminClient {
 }
 
 impl DdmAdminClient {
-    /// Creates a new [`PeerMonitor`].
+    /// Creates a new [`DdmAdminClient`].
     pub fn new(log: Logger) -> Result<Self, DdmError> {
         let dur = std::time::Duration::from_secs(60);
         let ddmd_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, DDMD_PORT, 0, 0);
