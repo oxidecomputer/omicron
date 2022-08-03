@@ -1214,7 +1214,7 @@ CREATE UNIQUE INDEX ON omicron.public.saga (
 
 /*
  * TODO more indexes for Saga?
- * - Debugging and/or reporting: saga_template_name? creator?
+ * - Debugging and/or reporting: saga_name? creator?
  */
 /*
  * TODO: This is a data-carrying enum, see note on disk_state.

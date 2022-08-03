@@ -66,7 +66,7 @@ impl super::Nexus {
             })?
     }
 
-    /// Given a saga template and parameters, create a new saga and execute it.
+    /// Given a saga type and parameters, create a new saga and execute it.
     pub(crate) async fn execute_saga<N: NexusSaga>(
         self: &Arc<Self>,
         params: N::Params,

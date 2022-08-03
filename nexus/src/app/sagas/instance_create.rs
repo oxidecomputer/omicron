@@ -377,7 +377,7 @@ async fn sic_create_network_interface(
     }
 }
 
-/// Delete one network interface, by index.
+/// Delete one network interface, by interface id.
 async fn sic_create_network_interface_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
@@ -428,8 +428,7 @@ async fn sic_create_network_interface_undo(
     }
 }
 
-/// Create one custom (non-default) network interfaces for the provided
-/// instance.
+/// Create one custom (non-default) network interface for the provided instance.
 async fn sic_create_custom_network_interface(
     sagactx: &NexusActionContext,
     saga_params: &Params,

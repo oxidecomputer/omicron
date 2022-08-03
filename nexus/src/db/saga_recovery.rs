@@ -54,8 +54,7 @@ impl Future for CompletionTask {
 /// More specifically, this task queries the database to list all uncompleted
 /// sagas that are assigned to SEC `sec_id` and for each one:
 ///
-/// * finds the appropriate template in `templates`
-/// * loads the saga log from `datastore`
+/// * loads the saga DAG and log from `datastore`
 /// * uses [`steno::SecClient::saga_resume`] to prepare to resume execution of
 ///   the saga using the persistent saga log
 /// * resumes execution of each saga
