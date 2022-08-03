@@ -103,7 +103,7 @@ features = [ "max_level_trace", "release_max_level_debug" ]
 
 [dependencies.steno]
 git = "https://github.com/oxidecomputer/steno"
-branch = "ajs-experiments"
+branch = "main"
 
 [dependencies.tokio]
 version = "1.20"
