@@ -9,7 +9,7 @@ use syn::{parse_macro_input, ItemFn};
 ///
 /// Example usage:
 ///
-/// ```no_run
+/// ```ignore
 /// #[nexus_test]
 /// async fn test_my_test_case(cptestctx: &ControlPlaneTestContext) {
 ///   assert!(true);
