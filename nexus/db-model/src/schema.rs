@@ -144,6 +144,7 @@ table! {
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         project_id -> Nullable<Uuid>,
+        rack_id -> Nullable<Uuid>,
         rcgen -> Int8,
     }
 }

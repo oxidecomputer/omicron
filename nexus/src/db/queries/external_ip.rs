@@ -662,7 +662,8 @@ mod tests {
                     name: String::from(name).parse().unwrap(),
                     description: format!("ip pool {}", name),
                 },
-                None,
+                /* project_id= */ None,
+                /* rack_id= */ None,
             );
             pool.project_id = project_id;
 
