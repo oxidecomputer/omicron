@@ -8156,7 +8156,7 @@
         ]
       },
       "GlobalImageCreate": {
-        "description": "Create-time parameters for an [`GlobalImage`](omicron_common::api::external::GlobalImage)",
+        "description": "Create-time parameters for an [`GlobalImage`](crate::external_api::views::GlobalImage)",
         "type": "object",
         "properties": {
           "block_size": {
@@ -8478,7 +8478,7 @@
         ]
       },
       "ImageCreate": {
-        "description": "Create-time parameters for an [`Image`](omicron_common::api::external::Image)",
+        "description": "Create-time parameters for an [`Image`](crate::external_api::views::Image)",
         "type": "object",
         "properties": {
           "block_size": {
@@ -9010,7 +9010,7 @@
         ]
       },
       "IpPoolCreate": {
-        "description": "Create-time parameters for an IP Pool.\n\nSee [`IpPool`](omicron_nexus::external_api::views::IpPool)",
+        "description": "Create-time parameters for an IP Pool.\n\nSee [`IpPool`](crate::external_api::views::IpPool)",
         "type": "object",
         "properties": {
           "description": {
@@ -10674,7 +10674,7 @@
         ]
       },
       "SnapshotCreate": {
-        "description": "Create-time parameters for a [`Snapshot`](omicron_common::api::external::Snapshot)",
+        "description": "Create-time parameters for a [`Snapshot`](crate::external_api::views::Snapshot)",
         "type": "object",
         "properties": {
           "description": {
@@ -11533,7 +11533,7 @@
         ]
       },
       "VpcFirewallRules": {
-        "description": "Collection of a [`Vpc`]'s firewall rules",
+        "description": "Collection of a Vpc's firewall rules",
         "type": "object",
         "properties": {
           "rules": {
