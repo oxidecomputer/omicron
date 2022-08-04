@@ -98,6 +98,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "api_identity"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/omicron?branch=main#7a904e3a9da7c6d137d3dac629852fe9778d6fe1"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "arc-swap"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -818,7 +828,7 @@ dependencies = [
  "dropshot",
  "futures",
  "futures-core",
- "omicron-common",
+ "omicron-common 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
  "oximeter 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
  "oximeter-producer 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
  "rand 0.8.5",
@@ -1257,7 +1267,7 @@ checksum = "1435fa1053d8b2fbbe9be7e97eca7f33d37b28409959813daefc1446a14247f1"
 [[package]]
 name = "dropshot"
 version = "0.7.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#367501eb0f89b64f148e7d56e26d59c4f5514dbe"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#e57d3afe80093f145be42f6461241f5539cde026"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -1296,7 +1306,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.7.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#367501eb0f89b64f148e7d56e26d59c4f5514dbe"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#e57d3afe80093f145be42f6461241f5539cde026"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1751,7 +1761,7 @@ dependencies = [
  "futures",
  "gateway-client",
  "libc",
- "omicron-common",
+ "omicron-common 0.1.0",
  "slog",
  "slog-async",
  "slog-term",
@@ -1765,7 +1775,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "futures",
- "omicron-common",
+ "omicron-common 0.1.0",
  "progenitor",
  "reqwest",
  "serde",
@@ -1793,7 +1803,7 @@ dependencies = [
  "gateway-messages",
  "http",
  "hyper",
- "omicron-common",
+ "omicron-common 0.1.0",
  "omicron-test-utils",
  "once_cell",
  "ringbuffer",
@@ -2326,7 +2336,7 @@ dependencies = [
  "dropshot",
  "futures",
  "internal-dns",
- "omicron-common",
+ "omicron-common 0.1.0",
  "omicron-test-utils",
  "progenitor",
  "reqwest",
@@ -2719,7 +2729,7 @@ name = "nexus-client"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "omicron-common",
+ "omicron-common 0.1.0",
  "progenitor",
  "reqwest",
  "serde",
@@ -2731,10 +2741,10 @@ dependencies = [
 [[package]]
 name = "nexus-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#c458fddcb8660eeb78d4a0ffe34c9d21c2ebd3dc"
+source = "git+https://github.com/oxidecomputer/omicron?branch=main#7a904e3a9da7c6d137d3dac629852fe9778d6fe1"
 dependencies = [
  "chrono",
- "omicron-common",
+ "omicron-common 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
  "progenitor",
  "reqwest",
  "serde",
@@ -2757,7 +2767,7 @@ dependencies = [
  "newtype_derive",
  "nexus-defaults",
  "nexus-types",
- "omicron-common",
+ "omicron-common 0.1.0",
  "parse-display",
  "rand 0.8.5",
  "ref-cast",
@@ -2775,7 +2785,7 @@ version = "0.1.0"
 dependencies = [
  "ipnetwork",
  "lazy_static",
- "omicron-common",
+ "omicron-common 0.1.0",
  "rand 0.8.5",
  "serde_json",
 ]
@@ -2791,7 +2801,7 @@ dependencies = [
  "headers",
  "http",
  "hyper",
- "omicron-common",
+ "omicron-common 0.1.0",
  "omicron-nexus",
  "omicron-sled-agent",
  "omicron-test-utils",
@@ -2821,10 +2831,10 @@ name = "nexus-types"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "api_identity",
+ "api_identity 0.1.0",
  "base64",
  "chrono",
- "omicron-common",
+ "omicron-common 0.1.0",
  "openssl",
  "openssl-probe",
  "openssl-sys",
@@ -2955,7 +2965,7 @@ name = "omicron-common"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "api_identity",
+ "api_identity 0.1.0",
  "backoff",
  "chrono",
  "dropshot",
@@ -2975,6 +2985,41 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "serde_urlencoded",
+ "serde_with",
+ "slog",
+ "smf",
+ "steno",
+ "thiserror",
+ "tokio",
+ "tokio-postgres",
+ "toml",
+ "uuid",
+]
+
+[[package]]
+name = "omicron-common"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/omicron?branch=main#7a904e3a9da7c6d137d3dac629852fe9778d6fe1"
+dependencies = [
+ "anyhow",
+ "api_identity 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
+ "backoff",
+ "chrono",
+ "dropshot",
+ "futures",
+ "http",
+ "hyper",
+ "ipnetwork",
+ "macaddr",
+ "parse-display",
+ "progenitor",
+ "rand 0.8.5",
+ "reqwest",
+ "ring",
+ "schemars",
+ "serde",
+ "serde_derive",
+ "serde_json",
  "serde_with",
  "slog",
  "smf",
@@ -3016,7 +3061,7 @@ dependencies = [
  "hex",
  "http",
  "hyper",
- "omicron-common",
+ "omicron-common 0.1.0",
  "omicron-test-utils",
  "openapi-lint",
  "openapiv3",
@@ -3076,7 +3121,7 @@ dependencies = [
  "nexus-test-utils-macros",
  "nexus-types",
  "num-integer",
- "omicron-common",
+ "omicron-common 0.1.0",
  "omicron-rpaths",
  "omicron-test-utils",
  "openapi-lint",
@@ -3129,7 +3174,7 @@ dependencies = [
  "futures",
  "hex",
  "indicatif",
- "omicron-common",
+ "omicron-common 0.1.0",
  "omicron-sled-agent",
  "omicron-zone-package",
  "rayon",
@@ -3177,7 +3222,7 @@ dependencies = [
  "macaddr",
  "mockall",
  "nexus-client 0.1.0",
- "omicron-common",
+ "omicron-common 0.1.0",
  "omicron-test-utils",
  "openapi-lint",
  "openapiv3",
@@ -3230,7 +3275,7 @@ dependencies = [
  "expectorate",
  "futures",
  "libc",
- "omicron-common",
+ "omicron-common 0.1.0",
  "postgres-protocol",
  "signal-hook",
  "signal-hook-tokio",
@@ -3448,7 +3493,7 @@ dependencies = [
 [[package]]
 name = "oximeter"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#c458fddcb8660eeb78d4a0ffe34c9d21c2ebd3dc"
+source = "git+https://github.com/oxidecomputer/omicron?branch=main#7a904e3a9da7c6d137d3dac629852fe9778d6fe1"
 dependencies = [
  "bytes",
  "chrono",
@@ -3465,7 +3510,7 @@ name = "oximeter-client"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "omicron-common",
+ "omicron-common 0.1.0",
  "progenitor",
  "reqwest",
  "serde",
@@ -3482,7 +3527,7 @@ dependencies = [
  "expectorate",
  "internal-dns-client",
  "nexus-client 0.1.0",
- "omicron-common",
+ "omicron-common 0.1.0",
  "omicron-test-utils",
  "openapi-lint",
  "openapiv3",
@@ -3552,7 +3597,7 @@ dependencies = [
 [[package]]
 name = "oximeter-macro-impl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#c458fddcb8660eeb78d4a0ffe34c9d21c2ebd3dc"
+source = "git+https://github.com/oxidecomputer/omicron?branch=main#7a904e3a9da7c6d137d3dac629852fe9778d6fe1"
 dependencies = [
  "bytes",
  "proc-macro2",
@@ -3567,7 +3612,7 @@ dependencies = [
  "chrono",
  "dropshot",
  "nexus-client 0.1.0",
- "omicron-common",
+ "omicron-common 0.1.0",
  "oximeter 0.1.0",
  "reqwest",
  "schemars",
@@ -3582,12 +3627,12 @@ dependencies = [
 [[package]]
 name = "oximeter-producer"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#c458fddcb8660eeb78d4a0ffe34c9d21c2ebd3dc"
+source = "git+https://github.com/oxidecomputer/omicron?branch=main#7a904e3a9da7c6d137d3dac629852fe9778d6fe1"
 dependencies = [
  "chrono",
  "dropshot",
  "nexus-client 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "omicron-common",
+ "omicron-common 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
  "oximeter 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
  "reqwest",
  "schemars",
@@ -4081,7 +4126,7 @@ dependencies = [
 [[package]]
 name = "progenitor"
 version = "0.1.2-dev"
-source = "git+https://github.com/oxidecomputer/progenitor#ea5a6a5a79e741d3b3ed9ad4f0f489c6602cf358"
+source = "git+https://github.com/oxidecomputer/progenitor#ba002301766bb9f82c997cb92e661f6402dd9126"
 dependencies = [
  "anyhow",
  "clap 3.2.16",
@@ -4096,7 +4141,7 @@ dependencies = [
 [[package]]
 name = "progenitor-client"
 version = "0.1.2-dev"
-source = "git+https://github.com/oxidecomputer/progenitor#ea5a6a5a79e741d3b3ed9ad4f0f489c6602cf358"
+source = "git+https://github.com/oxidecomputer/progenitor#ba002301766bb9f82c997cb92e661f6402dd9126"
 dependencies = [
  "bytes",
  "futures-core",
@@ -4110,7 +4155,7 @@ dependencies = [
 [[package]]
 name = "progenitor-impl"
 version = "0.1.2-dev"
-source = "git+https://github.com/oxidecomputer/progenitor#ea5a6a5a79e741d3b3ed9ad4f0f489c6602cf358"
+source = "git+https://github.com/oxidecomputer/progenitor#ba002301766bb9f82c997cb92e661f6402dd9126"
 dependencies = [
  "getopts",
  "heck 0.4.0",
@@ -4132,7 +4177,7 @@ dependencies = [
 [[package]]
 name = "progenitor-macro"
 version = "0.1.2-dev"
-source = "git+https://github.com/oxidecomputer/progenitor#ea5a6a5a79e741d3b3ed9ad4f0f489c6602cf358"
+source = "git+https://github.com/oxidecomputer/progenitor#ba002301766bb9f82c997cb92e661f6402dd9126"
 dependencies = [
  "openapiv3",
  "proc-macro2",
@@ -5131,7 +5176,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
- "omicron-common",
+ "omicron-common 0.1.0",
  "progenitor",
  "regress",
  "reqwest",
@@ -5315,7 +5360,7 @@ dependencies = [
  "futures",
  "gateway-messages",
  "hex",
- "omicron-common",
+ "omicron-common 0.1.0",
  "serde",
  "slog",
  "slog-dtrace",
@@ -6145,7 +6190,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
 dependencies = [
  "cfg-if 0.1.10",
- "rand 0.8.5",
+ "rand 0.4.6",
  "static_assertions",
 ]
 
@@ -6158,7 +6203,7 @@ checksum = "dcf81ac59edc17cc8697ff311e8f5ef2d99fcbd9817b34cec66f90b6c3dfd987"
 [[package]]
 name = "typify"
 version = "0.0.10-dev"
-source = "git+https://github.com/oxidecomputer/typify#655d8d41fc4ff8d44d0051de40c8b6b67786a200"
+source = "git+https://github.com/oxidecomputer/typify#cba994a48a3010dd384a4c97667b3d19577ee935"
 dependencies = [
  "typify-impl",
  "typify-macro",
@@ -6167,7 +6212,7 @@ dependencies = [
 [[package]]
 name = "typify-impl"
 version = "0.0.10-dev"
-source = "git+https://github.com/oxidecomputer/typify#655d8d41fc4ff8d44d0051de40c8b6b67786a200"
+source = "git+https://github.com/oxidecomputer/typify#cba994a48a3010dd384a4c97667b3d19577ee935"
 dependencies = [
  "heck 0.4.0",
  "log",
@@ -6185,7 +6230,7 @@ dependencies = [
 [[package]]
 name = "typify-macro"
 version = "0.0.10-dev"
-source = "git+https://github.com/oxidecomputer/typify#655d8d41fc4ff8d44d0051de40c8b6b67786a200"
+source = "git+https://github.com/oxidecomputer/typify#cba994a48a3010dd384a4c97667b3d19577ee935"
 dependencies = [
  "proc-macro2",
  "quote",
