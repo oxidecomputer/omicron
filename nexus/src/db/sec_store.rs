@@ -44,7 +44,7 @@ impl steno::SecStore for CockroachDbSecStore {
     ) -> Result<(), anyhow::Error> {
         info!(&self.log, "creating saga";
             "saga_id" => create_params.id.to_string(),
-            "template_name" => &create_params.template_name,
+            "saga_name" => create_params.name.to_string(),
         );
         self.datastore
             .saga_create(&db::saga_types::Saga::new(self.sec_id, create_params))

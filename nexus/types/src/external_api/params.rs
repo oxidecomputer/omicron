@@ -474,7 +474,7 @@ impl UserData {
     where
         D: Deserializer<'de>,
     {
-        match base64::decode(<&str>::deserialize(deserializer)?) {
+        match base64::decode(<String>::deserialize(deserializer)?) {
             Ok(buf) => {
                 // if you change this, also update the stress test in crate::cidata
                 if buf.len() > MAX_USER_DATA_BYTES {

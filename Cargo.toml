@@ -89,6 +89,28 @@ opt-level = 3
 [profile.release]
 panic = "abort"
 
+# The following patch is needed to temporarily to resolve a cyclic dependency +
+# breaking change.
+#
+# Steno recently had a breaking change (steno#29).  omicron-common uses steno.
+# Almost all of the targets in this repo use the copy of omicron_common that is
+# itself in this repo.  That one has been updated to use a newer steno.
+# However, omicron-sled-agent (also in this repo) pulls in crucible, which pulls
+# in omicron-common _not_ from this repo (since it can't -- it's in another
+# repo) but rather from "main".  As a result, if we try to build everything in
+# this repo, we'll wind up with two copies of omicron-common.  One of them will
+# be updated to use the new steno.  The other one will not.  But both depend on
+# steno branch "main".
+#
+# The workaround here is that when we build crucible, we override its
+# omicron-common dependency to point to the local path one, which has been
+# updated for the new Steno.
+#
+# Once we land this onto "main", we can immediately remove this workaround
+# because any subsequent build will pick up the updated omicron-common.
+[patch."https://github.com/oxidecomputer/omicron"]
+omicron-common = { path = "./common" }
+
 #
 # It's common during development to use a local copy of dropshot, propolis
 # or steno in the parent directory.  If you want to use those, uncomment

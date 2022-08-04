@@ -28,16 +28,12 @@ impl DataStore {
     ) -> Result<(), Error> {
         use db::schema::saga::dsl;
 
-        let name = saga.template_name.clone();
         diesel::insert_into(dsl::saga)
             .values(saga.clone())
             .execute_async(self.pool())
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::Conflict(ResourceType::SagaDbg, &name),
-                )
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
             })?;
         Ok(())
     }

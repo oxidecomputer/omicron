@@ -1184,12 +1184,12 @@ CREATE TABLE omicron.public.saga (
     id UUID PRIMARY KEY,
     /* unique id of the creator */
     creator UUID NOT NULL,
-    /* name of the saga template name being run */
-    template_name STRING(127) NOT NULL,
     /* time the saga was started */
     time_created TIMESTAMPTZ NOT NULL,
-    /* saga parameters */
-    saga_params JSONB NOT NULL,
+    /* saga name */
+    name STRING(128) NOT NULL,
+    /* saga DAG (includes params and name) */
+    saga_dag JSONB NOT NULL,
 
     /*
      * TODO:
@@ -1214,7 +1214,7 @@ CREATE UNIQUE INDEX ON omicron.public.saga (
 
 /*
  * TODO more indexes for Saga?
- * - Debugging and/or reporting: saga_template_name? creator?
+ * - Debugging and/or reporting: saga_name? creator?
  */
 /*
  * TODO: This is a data-carrying enum, see note on disk_state.

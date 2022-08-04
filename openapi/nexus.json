@@ -9407,6 +9407,10 @@
           }
         }
       },
+      "NodeName": {
+        "description": "Unique name for a saga [`Node`]\n\nEach node requires a string name that's unique within its DAG.  The name is used to identify its output.  Nodes that depend on a given node (either directly or indirectly) can access the node's output using its name.",
+        "type": "string"
+      },
       "Organization": {
         "description": "Client view of an [`Organization`]",
         "type": "object",
@@ -10274,7 +10278,7 @@
                 "$ref": "#/components/schemas/SagaErrorInfo"
               },
               "error_node_name": {
-                "type": "string"
+                "$ref": "#/components/schemas/NodeName"
               },
               "state": {
                 "type": "string",

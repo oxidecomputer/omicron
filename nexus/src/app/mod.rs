@@ -215,7 +215,7 @@ impl Nexus {
             ))),
             db_datastore,
             Arc::clone(&sec_client),
-            &sagas::ALL_TEMPLATES,
+            sagas::ACTION_REGISTRY.clone(),
         );
 
         *nexus.recovery_task.lock().unwrap() = Some(recovery_task);

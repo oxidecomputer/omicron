@@ -98,16 +98,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "api_identity"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#c458fddcb8660eeb78d4a0ffe34c9d21c2ebd3dc"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
 name = "arc-swap"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -828,7 +818,7 @@ dependencies = [
  "dropshot",
  "futures",
  "futures-core",
- "omicron-common 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
+ "omicron-common",
  "oximeter 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
  "oximeter-producer 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
  "rand 0.8.5",
@@ -1005,36 +995,12 @@ dependencies = [
 
 [[package]]
 name = "darling"
-version = "0.13.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a01d95850c592940db9b8194bc39f4bc0e89dee5c4265e4b1807c34a9aba453c"
-dependencies = [
- "darling_core 0.13.4",
- "darling_macro 0.13.4",
-]
-
-[[package]]
-name = "darling"
 version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4529658bdda7fd6769b8614be250cdcfc3aeb0ee72fe66f9e41e5e5eb73eac02"
 dependencies = [
- "darling_core 0.14.1",
- "darling_macro 0.14.1",
-]
-
-[[package]]
-name = "darling_core"
-version = "0.13.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "859d65a907b6852c9361e3185c862aae7fafd2887876799fa55f5f99dc40d610"
-dependencies = [
- "fnv",
- "ident_case",
- "proc-macro2",
- "quote",
- "strsim",
- "syn",
+ "darling_core",
+ "darling_macro",
 ]
 
 [[package]]
@@ -1053,22 +1019,11 @@ dependencies = [
 
 [[package]]
 name = "darling_macro"
-version = "0.13.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c972679f83bdf9c42bd905396b6c3588a843a17f0f16dfcfa3e2c5d57441835"
-dependencies = [
- "darling_core 0.13.4",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "darling_macro"
 version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ddfc69c5bfcbd2fc09a0f38451d2daf0e372e367986a83906d1b0dbc88134fb5"
 dependencies = [
- "darling_core 0.14.1",
+ "darling_core",
  "quote",
  "syn",
 ]
@@ -1132,7 +1087,7 @@ version = "0.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1f91d4cfa921f1c05904dc3c57b4a32c38aed3340cce209f3a6fd1478babafc4"
 dependencies = [
- "darling 0.14.1",
+ "darling",
  "proc-macro2",
  "quote",
  "syn",
@@ -1171,7 +1126,7 @@ dependencies = [
  "byteorder",
  "chrono",
  "diesel_derives",
- "ipnetwork 0.20.0",
+ "ipnetwork",
  "itoa 1.0.2",
  "libc",
  "pq-sys",
@@ -1796,7 +1751,7 @@ dependencies = [
  "futures",
  "gateway-client",
  "libc",
- "omicron-common 0.1.0",
+ "omicron-common",
  "slog",
  "slog-async",
  "slog-term",
@@ -1810,7 +1765,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "futures",
- "omicron-common 0.1.0",
+ "omicron-common",
  "progenitor",
  "reqwest",
  "serde",
@@ -1838,12 +1793,12 @@ dependencies = [
  "gateway-messages",
  "http",
  "hyper",
- "omicron-common 0.1.0",
+ "omicron-common",
  "omicron-test-utils",
  "once_cell",
  "ringbuffer",
  "serde",
- "serde_with 2.0.0",
+ "serde_with",
  "slog",
  "thiserror",
  "tokio",
@@ -2371,7 +2326,7 @@ dependencies = [
  "dropshot",
  "futures",
  "internal-dns",
- "omicron-common 0.1.0",
+ "omicron-common",
  "omicron-test-utils",
  "progenitor",
  "reqwest",
@@ -2404,15 +2359,6 @@ name = "ipnet"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "879d54834c8c76457ef4293a689b2a8c59b076067ad77b15efafbb05f92a592b"
-
-[[package]]
-name = "ipnetwork"
-version = "0.18.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4088d739b183546b239688ddbc79891831df421773df95e236daf7867866d355"
-dependencies = [
- "serde",
-]
 
 [[package]]
 name = "ipnetwork"
@@ -2773,7 +2719,7 @@ name = "nexus-client"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "omicron-common 0.1.0",
+ "omicron-common",
  "progenitor",
  "reqwest",
  "serde",
@@ -2788,7 +2734,7 @@ version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/omicron?branch=main#c458fddcb8660eeb78d4a0ffe34c9d21c2ebd3dc"
 dependencies = [
  "chrono",
- "omicron-common 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
+ "omicron-common",
  "progenitor",
  "reqwest",
  "serde",
@@ -2806,12 +2752,12 @@ dependencies = [
  "db-macros",
  "diesel",
  "hex",
- "ipnetwork 0.20.0",
+ "ipnetwork",
  "macaddr",
  "newtype_derive",
  "nexus-defaults",
  "nexus-types",
- "omicron-common 0.1.0",
+ "omicron-common",
  "parse-display",
  "rand 0.8.5",
  "ref-cast",
@@ -2827,9 +2773,9 @@ dependencies = [
 name = "nexus-defaults"
 version = "0.1.0"
 dependencies = [
- "ipnetwork 0.20.0",
+ "ipnetwork",
  "lazy_static",
- "omicron-common 0.1.0",
+ "omicron-common",
  "rand 0.8.5",
  "serde_json",
 ]
@@ -2845,7 +2791,7 @@ dependencies = [
  "headers",
  "http",
  "hyper",
- "omicron-common 0.1.0",
+ "omicron-common",
  "omicron-nexus",
  "omicron-sled-agent",
  "omicron-test-utils",
@@ -2875,10 +2821,10 @@ name = "nexus-types"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "api_identity 0.1.0",
+ "api_identity",
  "base64",
  "chrono",
- "omicron-common 0.1.0",
+ "omicron-common",
  "openssl",
  "openssl-probe",
  "openssl-sys",
@@ -3009,7 +2955,7 @@ name = "omicron-common"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "api_identity 0.1.0",
+ "api_identity",
  "backoff",
  "chrono",
  "dropshot",
@@ -3017,7 +2963,7 @@ dependencies = [
  "futures",
  "http",
  "hyper",
- "ipnetwork 0.20.0",
+ "ipnetwork",
  "macaddr",
  "parse-display",
  "progenitor",
@@ -3029,7 +2975,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "serde_urlencoded",
- "serde_with 2.0.0",
+ "serde_with",
  "slog",
  "smf",
  "steno",
@@ -3037,40 +2983,6 @@ dependencies = [
  "tokio",
  "tokio-postgres",
  "toml",
- "uuid",
-]
-
-[[package]]
-name = "omicron-common"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#c458fddcb8660eeb78d4a0ffe34c9d21c2ebd3dc"
-dependencies = [
- "anyhow",
- "api_identity 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "backoff",
- "chrono",
- "dropshot",
- "futures",
- "http",
- "hyper",
- "ipnetwork 0.18.0",
- "macaddr",
- "parse-display",
- "progenitor",
- "rand 0.8.5",
- "reqwest",
- "ring",
- "schemars",
- "serde",
- "serde_derive",
- "serde_json",
- "serde_with 1.14.0",
- "slog",
- "smf",
- "steno",
- "thiserror",
- "tokio",
- "tokio-postgres",
  "uuid",
 ]
 
@@ -3104,7 +3016,7 @@ dependencies = [
  "hex",
  "http",
  "hyper",
- "omicron-common 0.1.0",
+ "omicron-common",
  "omicron-test-utils",
  "openapi-lint",
  "openapiv3",
@@ -3151,7 +3063,7 @@ dependencies = [
  "httptest",
  "hyper",
  "internal-dns-client",
- "ipnetwork 0.20.0",
+ "ipnetwork",
  "itertools",
  "lazy_static",
  "libc",
@@ -3164,7 +3076,7 @@ dependencies = [
  "nexus-test-utils-macros",
  "nexus-types",
  "num-integer",
- "omicron-common 0.1.0",
+ "omicron-common",
  "omicron-rpaths",
  "omicron-test-utils",
  "openapi-lint",
@@ -3190,7 +3102,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_urlencoded",
- "serde_with 2.0.0",
+ "serde_with",
  "sled-agent-client",
  "slog",
  "slog-dtrace",
@@ -3217,7 +3129,7 @@ dependencies = [
  "futures",
  "hex",
  "indicatif",
- "omicron-common 0.1.0",
+ "omicron-common",
  "omicron-sled-agent",
  "omicron-zone-package",
  "rayon",
@@ -3260,12 +3172,12 @@ dependencies = [
  "futures",
  "http",
  "internal-dns-client",
- "ipnetwork 0.20.0",
+ "ipnetwork",
  "libc",
  "macaddr",
  "mockall",
  "nexus-client 0.1.0",
- "omicron-common 0.1.0",
+ "omicron-common",
  "omicron-test-utils",
  "openapi-lint",
  "openapiv3",
@@ -3282,7 +3194,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "serde_with 2.0.0",
+ "serde_with",
  "serial_test",
  "sled-agent-client",
  "slog",
@@ -3318,7 +3230,7 @@ dependencies = [
  "expectorate",
  "futures",
  "libc",
- "omicron-common 0.1.0",
+ "omicron-common",
  "postgres-protocol",
  "signal-hook",
  "signal-hook-tokio",
@@ -3553,7 +3465,7 @@ name = "oximeter-client"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "omicron-common 0.1.0",
+ "omicron-common",
  "progenitor",
  "reqwest",
  "serde",
@@ -3570,7 +3482,7 @@ dependencies = [
  "expectorate",
  "internal-dns-client",
  "nexus-client 0.1.0",
- "omicron-common 0.1.0",
+ "omicron-common",
  "omicron-test-utils",
  "openapi-lint",
  "openapiv3",
@@ -3655,7 +3567,7 @@ dependencies = [
  "chrono",
  "dropshot",
  "nexus-client 0.1.0",
- "omicron-common 0.1.0",
+ "omicron-common",
  "oximeter 0.1.0",
  "reqwest",
  "schemars",
@@ -3675,7 +3587,7 @@ dependencies = [
  "chrono",
  "dropshot",
  "nexus-client 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "omicron-common 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
+ "omicron-common",
  "oximeter 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
  "reqwest",
  "schemars",
@@ -3868,6 +3780,8 @@ checksum = "e6d5014253a1331579ce62aa67443b4a658c5e7dd03d4bc6d302b94474888143"
 dependencies = [
  "fixedbitset",
  "indexmap",
+ "serde",
+ "serde_derive",
 ]
 
 [[package]]
@@ -5012,16 +4926,6 @@ dependencies = [
 
 [[package]]
 name = "serde_with"
-version = "1.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "678b5a069e50bf00ecd22d0cd8ddf7c236f68581b03db652061ed5eb13a312ff"
-dependencies = [
- "serde",
- "serde_with_macros 1.5.2",
-]
-
-[[package]]
-name = "serde_with"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "89df7a26519371a3cce44fbb914c2819c84d9b897890987fa3ab096491cc0ea8"
@@ -5032,20 +4936,8 @@ dependencies = [
  "indexmap",
  "serde",
  "serde_json",
- "serde_with_macros 2.0.0",
+ "serde_with_macros",
  "time 0.3.9",
-]
-
-[[package]]
-name = "serde_with_macros"
-version = "1.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e182d6ec6f05393cc0e5ed1bf81ad6db3a8feedf8ee515ecdd369809bcce8082"
-dependencies = [
- "darling 0.13.4",
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]
@@ -5054,7 +4946,7 @@ version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "de337f322382fcdfbb21a014f7c224ee041a23785651db67b9827403178f698f"
 dependencies = [
- "darling 0.14.1",
+ "darling",
  "proc-macro2",
  "quote",
  "syn",
@@ -5239,7 +5131,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
- "omicron-common 0.1.0",
+ "omicron-common",
  "progenitor",
  "regress",
  "reqwest",
@@ -5423,7 +5315,7 @@ dependencies = [
  "futures",
  "gateway-messages",
  "hex",
- "omicron-common 0.1.0",
+ "omicron-common",
  "serde",
  "slog",
  "slog-dtrace",
@@ -5549,13 +5441,14 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "steno"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/steno?branch=main#703cad54fdd70815ac84dcf08a439b54077e9600"
+version = "0.2.0"
+source = "git+https://github.com/oxidecomputer/steno?branch=main#faa20daa38c27ddb1b99ae0587a6657d023b4b32"
 dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
  "futures",
+ "lazy_static",
  "newtype_derive",
  "petgraph",
  "schemars",
@@ -6251,7 +6144,7 @@ version = "1.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
 dependencies = [
- "cfg-if 1.0.0",
+ "cfg-if 0.1.10",
  "rand 0.8.5",
  "static_assertions",
 ]
