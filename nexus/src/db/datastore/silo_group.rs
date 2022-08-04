@@ -36,30 +36,11 @@ impl DataStore {
         opctx.authorize(authz::Action::CreateChild, authz_silo).await?;
 
         use db::schema::silo_group::dsl;
-
-        // Without the on_conflict below, simultaneous attempts to ensure the
-        // same SiloGroup will see one of them fail. This can occur if two users
-        // are logging in at the same time, and both are part of IdP groups that
-        // do not yet exist in our database.
-        //
-        // Currently there is a unique partial index on silo_group, which
-        // because it is partial has a WHERE clause. diesel does not support
-        // creating queries that contain:
-        //
-        //   ON CONFLICT (...) WHERE ... DO NOTHING
-        //
-        // meaning we have to use `on_conflict_do_nothing`. In the future when
-        // diesel does support this, uncomment (and probably fix) the code
-        // below.
-        //
-        // Issue https://github.com/oxidecomputer/omicron/issues/1545 was opened
-        // to track this.
         Ok(diesel::insert_into(dsl::silo_group)
             .values(silo_group)
-            //.on_conflict((dsl::silo_id, dsl::external_id))
-            //  .where(dsl::time_deleted.is_null())
-            //.do_nothing()
-            .on_conflict_do_nothing()
+            .on_conflict((dsl::silo_id, dsl::external_id))
+            .filter_target(dsl::time_deleted.is_null())
+            .do_nothing()
             .returning(SiloGroup::as_returning()))
     }
 
