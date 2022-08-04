@@ -33,6 +33,7 @@ pub struct SamlIdentityProvider {
     pub technical_contact_email: String,
     pub public_cert: Option<String>,
     pub private_key: Option<String>,
+    pub group_attribute_name: Option<String>,
 }
 
 impl TryFrom<model::SamlIdentityProvider> for SamlIdentityProvider {
@@ -49,6 +50,7 @@ impl TryFrom<model::SamlIdentityProvider> for SamlIdentityProvider {
             technical_contact_email: model.technical_contact_email,
             public_cert: model.public_cert,
             private_key: model.private_key,
+            group_attribute_name: model.group_attribute_name,
         };
 
         // check that the idp metadata document string parses into an EntityDescriptor
@@ -389,14 +391,30 @@ impl SamlIdentityProvider {
         // Extract group membership attributes
         let mut groups = vec![];
 
-        if let Some(attribute_statements) = &assertion.attribute_statements {
-            for attribute_statement in attribute_statements {
-                for attribute in &attribute_statement.attributes {
-                    if let Some(name) = &attribute.name {
-                        if name == "groups" {
-                            for attribute_value in &attribute.values {
-                                if let Some(value) = &attribute_value.value {
-                                    groups.push(value.clone());
+        if let Some(group_attribute_name) = &self.group_attribute_name {
+            if let Some(attribute_statements) = &assertion.attribute_statements
+            {
+                for attribute_statement in attribute_statements {
+                    for attribute in &attribute_statement.attributes {
+                        if let Some(name) = &attribute.name {
+                            if name == group_attribute_name {
+                                for attribute_value in &attribute.values {
+                                    if let Some(value) = &attribute_value.value
+                                    {
+                                        // Read comma separated group names
+                                        for group in value.split(',') {
+                                            // Trim whitespace
+                                            let group =
+                                                group.trim().to_string();
+
+                                            // Skip empty groups
+                                            if group.len() == 0 {
+                                                continue;
+                                            }
+
+                                            groups.push(group);
+                                        }
+                                    }
                                 }
                             }
                         }

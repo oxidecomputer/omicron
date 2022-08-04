@@ -6,7 +6,7 @@
 
 use crate::context::OpContext;
 use crate::db;
-use crate::db::identity::Resource;
+use crate::db::identity::{Asset, Resource};
 use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
 use crate::db::model::SshKey;
@@ -31,8 +31,7 @@ impl super::Nexus {
         opctx: &OpContext,
         new_silo_params: params::SiloCreate,
     ) -> CreateResult<db::model::Silo> {
-        let silo = db::model::Silo::new(new_silo_params);
-        self.db_datastore.silo_create(opctx, silo).await
+        self.datastore().silo_create(&opctx, new_silo_params).await
     }
 
     pub async fn silos_list_by_name(
@@ -120,6 +119,7 @@ impl super::Nexus {
             .into_iter()
             .map(|r| r.try_into())
             .collect::<Result<Vec<_>, _>>()?;
+
         Ok(shared::Policy { role_assignments })
     }
 
@@ -147,6 +147,7 @@ impl super::Nexus {
     ) -> LookupResult<Option<db::model::SiloUser>> {
         // XXX create user permission?
         opctx.authorize(authz::Action::CreateChild, authz_silo).await?;
+        opctx.authorize(authz::Action::ListChildren, authz_silo).await?;
 
         let existing_silo_user = self
             .datastore()
@@ -157,11 +158,8 @@ impl super::Nexus {
             )
             .await?;
 
-        if let Some(existing_silo_user) = existing_silo_user {
-            // TODO once groups exist, add user to any new groups if the
-            // authenticated subject's group membership does not match the
-            // existing silo user's.
-            Ok(Some(existing_silo_user))
+        let silo_user = if let Some(existing_silo_user) = existing_silo_user {
+            existing_silo_user
         } else {
             // In this branch, no user exists for the authenticated subject
             // external id. The next action depends on the silo's user provision
@@ -169,25 +167,101 @@ impl super::Nexus {
             match db_silo.user_provision_type {
                 // If the user provision type is fixed, do not a new user if one
                 // does not exist.
-                db::model::UserProvisionType::Fixed => Ok(None),
+                db::model::UserProvisionType::Fixed => {
+                    return Ok(None);
+                }
 
-                // If the user provision type is JIT, then create the user if it
-                // does not exist.
+                // If the user provision type is JIT, then create the user if
+                // one does not exist
                 db::model::UserProvisionType::Jit => {
-                    let silo_user_id = Uuid::new_v4();
                     let silo_user = db::model::SiloUser::new(
                         authz_silo.id(),
-                        silo_user_id,
+                        Uuid::new_v4(),
                         authenticated_subject.external_id.clone(),
                     );
-                    let silo_user =
-                        self.db_datastore.silo_user_create(silo_user).await?;
 
-                    // TODO once groups exist, add user to groups
-                    // TODO what roles do JITed users get?
-
-                    Ok(Some(silo_user))
+                    self.db_datastore.silo_user_create(silo_user).await?
                 }
+            }
+        };
+
+        // Gather a list of groups that the user is part of based on what the
+        // IdP sent us. Also, if the silo user provision type is Jit, create
+        // silo groups if new groups from the IdP are seen.
+
+        let mut silo_user_group_ids: Vec<Uuid> =
+            Vec::with_capacity(authenticated_subject.groups.len());
+
+        for group in &authenticated_subject.groups {
+            let silo_group = match db_silo.user_provision_type {
+                db::model::UserProvisionType::Fixed => {
+                    self.db_datastore
+                        .silo_group_optional_lookup(
+                            opctx,
+                            &authz_silo,
+                            group.clone(),
+                        )
+                        .await?
+                }
+
+                db::model::UserProvisionType::Jit => {
+                    let silo_group = self
+                        .silo_group_lookup_or_create_by_name(
+                            opctx,
+                            &authz_silo,
+                            &group,
+                        )
+                        .await?;
+
+                    Some(silo_group)
+                }
+            };
+
+            if let Some(silo_group) = silo_group {
+                silo_user_group_ids.push(silo_group.id());
+            }
+        }
+
+        // Update the user's group memberships
+
+        self.db_datastore
+            .silo_group_membership_replace_for_user(
+                opctx,
+                silo_user.id(),
+                silo_user_group_ids,
+            )
+            .await?;
+
+        Ok(Some(silo_user))
+    }
+
+    // Silo groups
+
+    pub async fn silo_group_lookup_or_create_by_name(
+        &self,
+        opctx: &OpContext,
+        authz_silo: &authz::Silo,
+        external_id: &String,
+    ) -> LookupResult<db::model::SiloGroup> {
+        match self
+            .db_datastore
+            .silo_group_optional_lookup(opctx, authz_silo, external_id.clone())
+            .await?
+        {
+            Some(silo_group) => Ok(silo_group),
+
+            None => {
+                self.db_datastore
+                    .silo_group_ensure(
+                        opctx,
+                        authz_silo,
+                        db::model::SiloGroup::new(
+                            Uuid::new_v4(),
+                            authz_silo.id(),
+                            external_id.clone(),
+                        ),
+                    )
+                    .await
             }
         }
     }
@@ -361,6 +435,8 @@ impl super::Nexus {
                 .signing_keypair
                 .as_ref()
                 .map(|x| x.private_key.clone()),
+
+            group_attribute_name: params.group_attribute_name.clone(),
         };
 
         let _authn_provider: authn::silos::SamlIdentityProvider =

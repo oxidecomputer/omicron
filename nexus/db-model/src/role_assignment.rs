@@ -30,12 +30,14 @@ impl_enum_type!(
     // Enum values
     UserBuiltin => b"user_builtin"
     SiloUser => b"silo_user"
+    SiloGroup => b"silo_group"
 );
 
 impl From<shared::IdentityType> for IdentityType {
     fn from(other: shared::IdentityType) -> Self {
         match other {
             shared::IdentityType::SiloUser => IdentityType::SiloUser,
+            shared::IdentityType::SiloGroup => IdentityType::SiloGroup,
         }
     }
 }
@@ -49,6 +51,7 @@ impl TryFrom<IdentityType> for shared::IdentityType {
                 Err(anyhow!("unsupported db identity type: {:?}", other))
             }
             IdentityType::SiloUser => Ok(shared::IdentityType::SiloUser),
+            IdentityType::SiloGroup => Ok(shared::IdentityType::SiloGroup),
         }
     }
 }

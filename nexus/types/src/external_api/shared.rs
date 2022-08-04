@@ -87,6 +87,7 @@ pub struct RoleAssignment<AllowedRoles> {
 #[serde(rename_all = "snake_case")]
 pub enum IdentityType {
     SiloUser,
+    SiloGroup,
 }
 
 /// How users will be provisioned in a silo during authentication.
