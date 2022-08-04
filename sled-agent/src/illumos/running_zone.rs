@@ -53,7 +53,7 @@ pub enum EnsureAddressError {
     EnsureAddressError(#[from] crate::illumos::zone::EnsureAddressError),
 }
 
-/// Erros returned from [`RunningZone::get_zone`].
+/// Erros returned from [`RunningZone::get`].
 #[derive(thiserror::Error, Debug)]
 pub enum GetZoneError {
     #[error("While looking up zones with prefix '{prefix}', could not get zones: {err}")]

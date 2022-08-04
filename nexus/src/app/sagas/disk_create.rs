@@ -2,12 +2,15 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::saga_generate_uuid;
+use super::{
+    ActionRegistry, NexusActionContext, NexusSaga, SagaInitError,
+    ACTION_GENERATE_ID,
+};
+use crate::app::sagas::NexusAction;
 use crate::context::OpContext;
 use crate::db::identity::{Asset, Resource};
 use crate::db::lookup::LookupPath;
 use crate::external_api::params;
-use crate::saga_interface::SagaContext;
 use crate::{authn, authz, db};
 use anyhow::anyhow;
 use crucible_agent_client::{
@@ -25,21 +28,12 @@ use slog::warn;
 use slog::Logger;
 use std::convert::{TryFrom, TryInto};
 use std::sync::Arc;
-use steno::new_action_noop_undo;
-use steno::ActionContext;
 use steno::ActionError;
 use steno::ActionFunc;
-use steno::SagaTemplate;
-use steno::SagaTemplateBuilder;
-use steno::SagaType;
+use steno::{new_action_noop_undo, Node};
 use uuid::Uuid;
 
-pub const SAGA_NAME: &'static str = "disk-create";
-
-lazy_static! {
-    pub static ref SAGA_TEMPLATE: Arc<SagaTemplate<SagaDiskCreate>> =
-        Arc::new(saga_disk_create());
-}
+// disk create saga: input parameters
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Params {
@@ -48,72 +42,108 @@ pub struct Params {
     pub create_params: params::DiskCreate,
 }
 
+// disk create saga: actions
+
+lazy_static! {
+    static ref CREATE_DISK_RECORD: NexusAction = ActionFunc::new_action(
+        "disk-create.create-disk-record",
+        sdc_create_disk_record,
+        sdc_create_disk_record_undo
+    );
+    static ref REGIONS_ALLOC: NexusAction = ActionFunc::new_action(
+        "disk-create.regions-alloc",
+        sdc_alloc_regions,
+        sdc_alloc_regions_undo
+    );
+    static ref REGIONS_ENSURE: NexusAction = ActionFunc::new_action(
+        "disk-create.regions-ensure",
+        sdc_regions_ensure,
+        sdc_regions_ensure_undo
+    );
+    static ref CREATE_VOLUME_RECORD: NexusAction = ActionFunc::new_action(
+        "disk-create.create-volume-record",
+        sdc_create_volume_record,
+        sdc_create_volume_record_undo,
+    );
+    static ref FINALIZE_DISK_RECORD: NexusAction = new_action_noop_undo(
+        "disk-create.finalize-disk-record",
+        sdc_finalize_disk_record
+    );
+}
+
+// disk create saga: definition
+
 #[derive(Debug)]
 pub struct SagaDiskCreate;
-impl SagaType for SagaDiskCreate {
-    type SagaParamsType = Arc<Params>;
-    type ExecContextType = Arc<SagaContext>;
+impl NexusSaga for SagaDiskCreate {
+    const NAME: &'static str = "disk-create";
+    type Params = Params;
+
+    fn register_actions(registry: &mut ActionRegistry) {
+        registry.register(Arc::clone(&*CREATE_DISK_RECORD));
+        registry.register(Arc::clone(&*REGIONS_ALLOC));
+        registry.register(Arc::clone(&*REGIONS_ENSURE));
+        registry.register(Arc::clone(&*CREATE_VOLUME_RECORD));
+        registry.register(Arc::clone(&*FINALIZE_DISK_RECORD));
+    }
+
+    fn make_saga_dag(
+        _params: &Self::Params,
+        mut builder: steno::DagBuilder,
+    ) -> Result<steno::Dag, SagaInitError> {
+        builder.append(Node::action(
+            "disk_id",
+            "GenerateDiskId",
+            ACTION_GENERATE_ID.as_ref(),
+        ));
+
+        builder.append(Node::action(
+            "volume_id",
+            "GenerateVolumeId",
+            ACTION_GENERATE_ID.as_ref(),
+        ));
+
+        builder.append(Node::action(
+            "created_disk",
+            "CreateDiskRecord",
+            CREATE_DISK_RECORD.as_ref(),
+        ));
+
+        builder.append(Node::action(
+            "datasets_and_regions",
+            "RegionsAlloc",
+            REGIONS_ALLOC.as_ref(),
+        ));
+
+        builder.append(Node::action(
+            "regions_ensure",
+            "RegionsEnsure",
+            REGIONS_ENSURE.as_ref(),
+        ));
+
+        builder.append(Node::action(
+            "created_volume",
+            "CreateVolumeRecord",
+            CREATE_VOLUME_RECORD.as_ref(),
+        ));
+
+        builder.append(Node::action(
+            "disk_runtime",
+            "FinalizeDiskRecord",
+            FINALIZE_DISK_RECORD.as_ref(),
+        ));
+
+        Ok(builder.build()?)
+    }
 }
 
-fn saga_disk_create() -> SagaTemplate<SagaDiskCreate> {
-    let mut template_builder = SagaTemplateBuilder::new();
-
-    template_builder.append(
-        "disk_id",
-        "GenerateDiskId",
-        new_action_noop_undo(saga_generate_uuid),
-    );
-
-    template_builder.append(
-        "volume_id",
-        "GenerateVolumeId",
-        new_action_noop_undo(saga_generate_uuid),
-    );
-
-    template_builder.append(
-        "created_disk",
-        "CreateDiskRecord",
-        ActionFunc::new_action(
-            sdc_create_disk_record,
-            sdc_create_disk_record_undo,
-        ),
-    );
-
-    template_builder.append(
-        "datasets_and_regions",
-        "AllocRegions",
-        ActionFunc::new_action(sdc_alloc_regions, sdc_alloc_regions_undo),
-    );
-
-    template_builder.append(
-        "regions_ensure",
-        "RegionsEnsure",
-        ActionFunc::new_action(sdc_regions_ensure, sdc_regions_ensure_undo),
-    );
-
-    template_builder.append(
-        "created_volume",
-        "CreateVolumeRecord",
-        ActionFunc::new_action(
-            sdc_create_volume_record,
-            sdc_create_volume_record_undo,
-        ),
-    );
-
-    template_builder.append(
-        "disk_runtime",
-        "FinalizeDiskRecord",
-        new_action_noop_undo(sdc_finalize_disk_record),
-    );
-
-    template_builder.build()
-}
+// disk create saga: action implementations
 
 async fn sdc_create_disk_record(
-    sagactx: ActionContext<SagaDiskCreate>,
+    sagactx: NexusActionContext,
 ) -> Result<db::model::Disk, ActionError> {
     let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params();
+    let params = sagactx.saga_params::<Params>()?;
 
     let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
     // We admittedly reference the volume before it has been allocated,
@@ -183,7 +213,7 @@ async fn sdc_create_disk_record(
 }
 
 async fn sdc_create_disk_record_undo(
-    sagactx: ActionContext<SagaDiskCreate>,
+    sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
 
@@ -193,10 +223,10 @@ async fn sdc_create_disk_record_undo(
 }
 
 async fn sdc_alloc_regions(
-    sagactx: ActionContext<SagaDiskCreate>,
+    sagactx: NexusActionContext,
 ) -> Result<Vec<(db::model::Dataset, db::model::Region)>, ActionError> {
     let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params();
+    let params = sagactx.saga_params::<Params>()?;
     let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
     // Ensure the disk is backed by appropriate regions.
     //
@@ -219,7 +249,7 @@ async fn sdc_alloc_regions(
 }
 
 async fn sdc_alloc_regions_undo(
-    sagactx: ActionContext<SagaDiskCreate>,
+    sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
 
@@ -289,7 +319,7 @@ async fn ensure_region_in_dataset(
 const MAX_CONCURRENT_REGION_REQUESTS: usize = 3;
 
 async fn sdc_regions_ensure(
-    sagactx: ActionContext<SagaDiskCreate>,
+    sagactx: NexusActionContext,
 ) -> Result<String, ActionError> {
     let log = sagactx.user_data().log();
     let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
@@ -348,7 +378,7 @@ async fn sdc_regions_ensure(
 
     // If requested, back disk by image
     let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params();
+    let params = sagactx.saga_params::<Params>()?;
     let log = osagactx.log();
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
 
@@ -512,7 +542,7 @@ pub(super) async fn delete_regions(
 }
 
 async fn sdc_regions_ensure_undo(
-    sagactx: ActionContext<SagaDiskCreate>,
+    sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let datasets_and_regions = sagactx
         .lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
@@ -523,7 +553,7 @@ async fn sdc_regions_ensure_undo(
 }
 
 async fn sdc_create_volume_record(
-    sagactx: ActionContext<SagaDiskCreate>,
+    sagactx: NexusActionContext,
 ) -> Result<db::model::Volume, ActionError> {
     let osagactx = sagactx.user_data();
 
@@ -542,7 +572,7 @@ async fn sdc_create_volume_record(
 }
 
 async fn sdc_create_volume_record_undo(
-    sagactx: ActionContext<SagaDiskCreate>,
+    sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
 
@@ -552,10 +582,10 @@ async fn sdc_create_volume_record_undo(
 }
 
 async fn sdc_finalize_disk_record(
-    sagactx: ActionContext<SagaDiskCreate>,
+    sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params();
+    let params = sagactx.saga_params::<Params>()?;
     let datastore = osagactx.datastore();
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
 

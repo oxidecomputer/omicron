@@ -77,7 +77,7 @@ jobs:
     - name: Install Pre-Requisites
       run: ./tools/install_builder_prerequisites.sh -y
     - name: Test build documentation
-      run: cargo doc
+      run: RUSTDOCFLAGS="-Dwarnings" cargo doc
 
   build-and-test:
     env:

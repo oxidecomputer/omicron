@@ -263,12 +263,21 @@ impl Agent {
 
             return Ok(SledAgentResponse { id: server.id() });
         }
+
+        // TODO(https://github.com/oxidecomputer/omicron/issues/823):
+        // Currently, the prescence or abscence of RSS is our signal
+        // for "is this a scrimlet or not".
+        // Longer-term, we should make this call based on the underlying
+        // hardware.
+        let is_scrimlet = self.rss.lock().await.is_some();
+
         // Server does not exist, initialize it.
         let server = SledServer::start(
             &self.sled_config,
             self.parent_log.clone(),
             sled_address,
-            request.rack_id,
+            is_scrimlet,
+            request.clone(),
         )
         .await
         .map_err(|e| {
@@ -544,8 +553,12 @@ mod tests {
         let request = PersistentSledAgentRequest {
             request: Cow::Owned(SledAgentRequest {
                 id: Uuid::new_v4(),
-                subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
                 rack_id: Uuid::new_v4(),
+                gateway: crate::bootstrap::params::Gateway {
+                    address: None,
+                    mac: MacAddr6::nil(),
+                },
+                subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
             }),
             trust_quorum_share: Some(
                 ShareDistribution {

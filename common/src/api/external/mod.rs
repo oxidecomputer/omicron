@@ -901,7 +901,7 @@ impl From<steno::SagaView> for Saga {
 pub enum SagaState {
     Running,
     Succeeded,
-    Failed { error_node_name: String, error_info: SagaErrorInfo },
+    Failed { error_node_name: steno::NodeName, error_info: SagaErrorInfo },
 }
 
 #[derive(Clone, Debug, Serialize, JsonSchema)]
@@ -1459,7 +1459,7 @@ pub struct VpcFirewallRule {
     pub vpc_id: Uuid,
 }
 
-/// Collection of a [`Vpc`]'s firewall rules
+/// Collection of a Vpc's firewall rules
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcFirewallRules {
     pub rules: Vec<VpcFirewallRule>,

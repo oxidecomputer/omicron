@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! [`DataStore`] methods on [`Saga`]s.
+//! [`DataStore`] methods on [`db::saga_types::Saga`]s.
 
 use super::DataStore;
 use crate::db;
@@ -28,16 +28,12 @@ impl DataStore {
     ) -> Result<(), Error> {
         use db::schema::saga::dsl;
 
-        let name = saga.template_name.clone();
         diesel::insert_into(dsl::saga)
             .values(saga.clone())
             .execute_async(self.pool())
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::Conflict(ResourceType::SagaDbg, &name),
-                )
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
             })?;
         Ok(())
     }

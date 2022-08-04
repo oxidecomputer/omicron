@@ -367,17 +367,14 @@ impl OpContext {
         let (log, mut metadata) =
             OpContext::log_and_metadata_for_authn(osagactx.log(), &authn);
 
-        // TODO-debugging This would be a good place to put the saga template
-        // name, but we don't have it available here.  This log maybe should
-        // come from steno, prepopulated with useful metadata similar to the
-        // way dropshot::RequestContext does.
+        // TODO-debugging This would be a good place to put the saga name, but
+        // we don't have it available here.  This log maybe should come from
+        // steno, prepopulated with useful metadata similar to the way
+        // dropshot::RequestContext does.
         let log = log.new(o!(
-            "saga_node" => sagactx.node_label().to_string(),
+            "saga_node" => sagactx.node_label(),
         ));
-        metadata.insert(
-            String::from("saga_node"),
-            sagactx.node_label().to_string(),
-        );
+        metadata.insert(String::from("saga_node"), sagactx.node_label());
 
         OpContext {
             log,

@@ -31,6 +31,11 @@ pub struct IpPool {
     /// An optional ID of the project for which this pool is reserved.
     pub project_id: Option<Uuid>,
 
+    /// An optional ID of the rack for which this pool is reserved.
+    // TODO(https://github.com/oxidecomputer/omicron/issues/1276): This
+    // should probably point to an AZ or fleet, not a rack.
+    pub rack_id: Option<Uuid>,
+
     /// Child resource generation number, for optimistic concurrency control of
     /// the contained ranges.
     pub rcgen: i64,
@@ -40,6 +45,7 @@ impl IpPool {
     pub fn new(
         pool_identity: &external::IdentityMetadataCreateParams,
         project_id: Option<Uuid>,
+        rack_id: Option<Uuid>,
     ) -> Self {
         Self {
             identity: IpPoolIdentity::new(
@@ -47,6 +53,7 @@ impl IpPool {
                 pool_identity.clone(),
             ),
             project_id,
+            rack_id,
             rcgen: 0,
         }
     }
