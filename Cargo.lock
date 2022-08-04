@@ -98,6 +98,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "api_identity"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/omicron?branch=main#7a904e3a9da7c6d137d3dac629852fe9778d6fe1"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "arc-swap"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -818,7 +828,7 @@ dependencies = [
  "dropshot",
  "futures",
  "futures-core",
- "omicron-common",
+ "omicron-common 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
  "oximeter 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
  "oximeter-producer 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
  "rand 0.8.5",
@@ -1751,7 +1761,7 @@ dependencies = [
  "futures",
  "gateway-client",
  "libc",
- "omicron-common",
+ "omicron-common 0.1.0",
  "slog",
  "slog-async",
  "slog-term",
@@ -1765,7 +1775,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "futures",
- "omicron-common",
+ "omicron-common 0.1.0",
  "progenitor",
  "reqwest",
  "serde",
@@ -1793,7 +1803,7 @@ dependencies = [
  "gateway-messages",
  "http",
  "hyper",
- "omicron-common",
+ "omicron-common 0.1.0",
  "omicron-test-utils",
  "once_cell",
  "ringbuffer",
@@ -2326,7 +2336,7 @@ dependencies = [
  "dropshot",
  "futures",
  "internal-dns",
- "omicron-common",
+ "omicron-common 0.1.0",
  "omicron-test-utils",
  "progenitor",
  "reqwest",
@@ -2719,7 +2729,7 @@ name = "nexus-client"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "omicron-common",
+ "omicron-common 0.1.0",
  "progenitor",
  "reqwest",
  "serde",
@@ -2734,7 +2744,7 @@ version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/omicron?branch=main#c458fddcb8660eeb78d4a0ffe34c9d21c2ebd3dc"
 dependencies = [
  "chrono",
- "omicron-common",
+ "omicron-common 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
  "progenitor",
  "reqwest",
  "serde",
@@ -2757,7 +2767,7 @@ dependencies = [
  "newtype_derive",
  "nexus-defaults",
  "nexus-types",
- "omicron-common",
+ "omicron-common 0.1.0",
  "parse-display",
  "rand 0.8.5",
  "ref-cast",
@@ -2775,7 +2785,7 @@ version = "0.1.0"
 dependencies = [
  "ipnetwork",
  "lazy_static",
- "omicron-common",
+ "omicron-common 0.1.0",
  "rand 0.8.5",
  "serde_json",
 ]
@@ -2791,7 +2801,7 @@ dependencies = [
  "headers",
  "http",
  "hyper",
- "omicron-common",
+ "omicron-common 0.1.0",
  "omicron-nexus",
  "omicron-sled-agent",
  "omicron-test-utils",
@@ -2821,10 +2831,10 @@ name = "nexus-types"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "api_identity",
+ "api_identity 0.1.0",
  "base64",
  "chrono",
- "omicron-common",
+ "omicron-common 0.1.0",
  "openssl",
  "openssl-probe",
  "openssl-sys",
@@ -2955,7 +2965,7 @@ name = "omicron-common"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "api_identity",
+ "api_identity 0.1.0",
  "backoff",
  "chrono",
  "dropshot",
@@ -2975,6 +2985,41 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "serde_urlencoded",
+ "serde_with",
+ "slog",
+ "smf",
+ "steno",
+ "thiserror",
+ "tokio",
+ "tokio-postgres",
+ "toml",
+ "uuid",
+]
+
+[[package]]
+name = "omicron-common"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/omicron?branch=main#7a904e3a9da7c6d137d3dac629852fe9778d6fe1"
+dependencies = [
+ "anyhow",
+ "api_identity 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
+ "backoff",
+ "chrono",
+ "dropshot",
+ "futures",
+ "http",
+ "hyper",
+ "ipnetwork",
+ "macaddr",
+ "parse-display",
+ "progenitor",
+ "rand 0.8.5",
+ "reqwest",
+ "ring",
+ "schemars",
+ "serde",
+ "serde_derive",
+ "serde_json",
  "serde_with",
  "slog",
  "smf",
@@ -3016,7 +3061,7 @@ dependencies = [
  "hex",
  "http",
  "hyper",
- "omicron-common",
+ "omicron-common 0.1.0",
  "omicron-test-utils",
  "openapi-lint",
  "openapiv3",
@@ -3076,7 +3121,7 @@ dependencies = [
  "nexus-test-utils-macros",
  "nexus-types",
  "num-integer",
- "omicron-common",
+ "omicron-common 0.1.0",
  "omicron-rpaths",
  "omicron-test-utils",
  "openapi-lint",
@@ -3129,7 +3174,7 @@ dependencies = [
  "futures",
  "hex",
  "indicatif",
- "omicron-common",
+ "omicron-common 0.1.0",
  "omicron-sled-agent",
  "omicron-zone-package",
  "rayon",
@@ -3177,7 +3222,7 @@ dependencies = [
  "macaddr",
  "mockall",
  "nexus-client 0.1.0",
- "omicron-common",
+ "omicron-common 0.1.0",
  "omicron-test-utils",
  "openapi-lint",
  "openapiv3",
@@ -3230,7 +3275,7 @@ dependencies = [
  "expectorate",
  "futures",
  "libc",
- "omicron-common",
+ "omicron-common 0.1.0",
  "postgres-protocol",
  "signal-hook",
  "signal-hook-tokio",
@@ -3465,7 +3510,7 @@ name = "oximeter-client"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "omicron-common",
+ "omicron-common 0.1.0",
  "progenitor",
  "reqwest",
  "serde",
@@ -3482,7 +3527,7 @@ dependencies = [
  "expectorate",
  "internal-dns-client",
  "nexus-client 0.1.0",
- "omicron-common",
+ "omicron-common 0.1.0",
  "omicron-test-utils",
  "openapi-lint",
  "openapiv3",
@@ -3567,7 +3612,7 @@ dependencies = [
  "chrono",
  "dropshot",
  "nexus-client 0.1.0",
- "omicron-common",
+ "omicron-common 0.1.0",
  "oximeter 0.1.0",
  "reqwest",
  "schemars",
@@ -3587,7 +3632,7 @@ dependencies = [
  "chrono",
  "dropshot",
  "nexus-client 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "omicron-common",
+ "omicron-common 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
  "oximeter 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
  "reqwest",
  "schemars",
@@ -5131,7 +5176,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
- "omicron-common",
+ "omicron-common 0.1.0",
  "progenitor",
  "regress",
  "reqwest",
@@ -5315,7 +5360,7 @@ dependencies = [
  "futures",
  "gateway-messages",
  "hex",
- "omicron-common",
+ "omicron-common 0.1.0",
  "serde",
  "slog",
  "slog-dtrace",
