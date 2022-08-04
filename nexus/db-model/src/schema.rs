@@ -144,6 +144,7 @@ table! {
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         project_id -> Nullable<Uuid>,
+        rack_id -> Nullable<Uuid>,
         rcgen -> Int8,
     }
 }
@@ -297,9 +298,9 @@ table! {
     saga (id) {
         id -> Uuid,
         creator -> Uuid,
-        template_name -> Text,
         time_created -> Timestamptz,
-        saga_params -> Jsonb,
+        name -> Text,
+        saga_dag -> Jsonb,
         saga_state -> crate::saga_types::SagaCachedStateEnum,
         current_sec -> Nullable<Uuid>,
         adopt_generation -> Int8,

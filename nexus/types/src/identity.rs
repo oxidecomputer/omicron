@@ -19,7 +19,7 @@ use uuid::Uuid;
 /// For durable objects which do not require soft-deletion or descriptions,
 /// consider the [`Asset`] trait instead.
 ///
-/// May be derived from [`macro@db_macros::Resource`].
+/// May be derived from [`macro@db-macros::Resource`].
 pub trait Resource {
     fn id(&self) -> Uuid;
     fn name(&self) -> &Name;
@@ -44,7 +44,7 @@ pub trait Resource {
 /// These are objects similar to [`Resource`], but without
 /// names, descriptions, or soft deletions.
 ///
-/// May be derived from [`macro@db_macros::Asset`].
+/// May be derived from [`macro@db-macros::Asset`].
 pub trait Asset {
     fn id(&self) -> Uuid;
     fn time_created(&self) -> DateTime<Utc>;

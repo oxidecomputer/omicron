@@ -36,11 +36,11 @@ impl<DL: VnicSource + Clone> VnicAllocator<DL> {
     /// ranges of Vnic names, for example:
     ///
     /// VnicAllocator::new("Instance")
-    /// - oxGuestInstance[NNN]
-    /// - oxControlInstance[NNN]
+    /// - oxGuestInstance0
+    /// - oxControlInstance0
     ///
     /// VnicAllocator::new("Storage") produces
-    /// - oxControlStorage[NNN]
+    /// - oxControlStorage0
     pub fn new<S: AsRef<str>>(scope: S, data_link: DL) -> Self {
         Self {
             value: Arc::new(AtomicU64::new(0)),

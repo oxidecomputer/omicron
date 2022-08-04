@@ -1294,6 +1294,199 @@
         }
       }
     },
+    "/ip-pools-service/{rack_id}": {
+      "get": {
+        "tags": [
+          "ip-pools"
+        ],
+        "summary": "Fetch an IP pool used for Oxide services.",
+        "operationId": "ip_pool_service_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rack_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPool"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/ip-pools-service/{rack_id}/ranges": {
+      "get": {
+        "tags": [
+          "ip-pools"
+        ],
+        "summary": "List ranges for an IP pool used for Oxide services.",
+        "description": "Ranges are ordered by their first address.",
+        "operationId": "ip_pool_service_range_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rack_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPoolRangeResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      }
+    },
+    "/ip-pools-service/{rack_id}/ranges/add": {
+      "post": {
+        "tags": [
+          "ip-pools"
+        ],
+        "summary": "Add a range to an IP pool used for Oxide services.",
+        "operationId": "ip_pool_service_range_add",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rack_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IpRange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPoolRange"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/ip-pools-service/{rack_id}/ranges/remove": {
+      "post": {
+        "tags": [
+          "ip-pools"
+        ],
+        "summary": "Remove a range from an IP pool used for Oxide services.",
+        "operationId": "ip_pool_service_range_remove",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rack_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IpRange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/login": {
       "post": {
         "tags": [
@@ -7963,7 +8156,7 @@
         ]
       },
       "GlobalImageCreate": {
-        "description": "Create-time parameters for an [`GlobalImage`](omicron_common::api::external::GlobalImage)",
+        "description": "Create-time parameters for an [`GlobalImage`](crate::external_api::views::GlobalImage)",
         "type": "object",
         "properties": {
           "block_size": {
@@ -8285,7 +8478,7 @@
         ]
       },
       "ImageCreate": {
-        "description": "Create-time parameters for an [`Image`](omicron_common::api::external::Image)",
+        "description": "Create-time parameters for an [`Image`](crate::external_api::views::Image)",
         "type": "object",
         "properties": {
           "block_size": {
@@ -8817,7 +9010,7 @@
         ]
       },
       "IpPoolCreate": {
-        "description": "Create-time parameters for an IP Pool.\n\nSee [`IpPool`](omicron_nexus::external_api::views::IpPool)",
+        "description": "Create-time parameters for an IP Pool.\n\nSee [`IpPool`](crate::external_api::views::IpPool)",
         "type": "object",
         "properties": {
           "description": {
@@ -9213,6 +9406,10 @@
             ]
           }
         }
+      },
+      "NodeName": {
+        "description": "Unique name for a saga [`Node`]\n\nEach node requires a string name that's unique within its DAG.  The name is used to identify its output.  Nodes that depend on a given node (either directly or indirectly) can access the node's output using its name.",
+        "type": "string"
       },
       "Organization": {
         "description": "Client view of an [`Organization`]",
@@ -10081,7 +10278,7 @@
                 "$ref": "#/components/schemas/SagaErrorInfo"
               },
               "error_node_name": {
-                "type": "string"
+                "$ref": "#/components/schemas/NodeName"
               },
               "state": {
                 "type": "string",
@@ -10477,7 +10674,7 @@
         ]
       },
       "SnapshotCreate": {
-        "description": "Create-time parameters for a [`Snapshot`](omicron_common::api::external::Snapshot)",
+        "description": "Create-time parameters for a [`Snapshot`](crate::external_api::views::Snapshot)",
         "type": "object",
         "properties": {
           "description": {
@@ -11336,7 +11533,7 @@
         ]
       },
       "VpcFirewallRules": {
-        "description": "Collection of a [`Vpc`]'s firewall rules",
+        "description": "Collection of a Vpc's firewall rules",
         "type": "object",
         "properties": {
           "rules": {

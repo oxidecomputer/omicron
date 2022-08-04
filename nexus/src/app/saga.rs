@@ -4,6 +4,9 @@
 
 //! Saga management and execution
 
+use super::sagas::NexusSaga;
+use super::sagas::SagaInitError;
+use super::sagas::ACTION_REGISTRY;
 use crate::authz;
 use crate::context::OpContext;
 use crate::saga_interface::SagaContext;
@@ -17,10 +20,11 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
 use std::sync::Arc;
+use steno::DagBuilder;
+use steno::SagaDag;
 use steno::SagaId;
+use steno::SagaName;
 use steno::SagaResultOk;
-use steno::SagaTemplate;
-use steno::SagaType;
 use uuid::Uuid;
 
 impl super::Nexus {
@@ -53,7 +57,7 @@ impl super::Nexus {
     ) -> LookupResult<external::Saga> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         self.sec_client
-            .saga_get(steno::SagaId::from(id))
+            .saga_get(SagaId::from(id))
             .await
             .map(external::Saga::from)
             .map(Ok)
@@ -62,25 +66,23 @@ impl super::Nexus {
             })?
     }
 
-    /// Given a saga template and parameters, create a new saga and execute it.
-    pub(crate) async fn execute_saga<P, S>(
+    /// Given a saga type and parameters, create a new saga and execute it.
+    pub(crate) async fn execute_saga<N: NexusSaga>(
         self: &Arc<Self>,
-        saga_template: Arc<SagaTemplate<S>>,
-        template_name: &str,
-        saga_params: Arc<P>,
-    ) -> Result<SagaResultOk, Error>
-    where
-        S: SagaType<
-            ExecContextType = Arc<SagaContext>,
-            SagaParamsType = Arc<P>,
-        >,
-        // TODO-cleanup The bound `P: Serialize` should not be necessary because
-        // SagaParamsType must already impl Serialize.
-        P: serde::Serialize,
-    {
+        params: N::Params,
+    ) -> Result<SagaResultOk, Error> {
+        let saga = {
+            let builder = DagBuilder::new(SagaName::new(N::NAME));
+            let dag = N::make_saga_dag(&params, builder)?;
+            let params = serde_json::to_value(&params).map_err(|e| {
+                SagaInitError::SerializeError(String::from("saga params"), e)
+            })?;
+            SagaDag::new(dag, params)
+        };
+
         let saga_id = SagaId(Uuid::new_v4());
         let saga_logger =
-            self.log.new(o!("template_name" => template_name.to_owned()));
+            self.log.new(o!("saga_name" => saga.saga_name().to_string()));
         let saga_context = Arc::new(Arc::new(SagaContext::new(
             Arc::clone(self),
             saga_logger,
@@ -91,9 +93,8 @@ impl super::Nexus {
             .saga_create(
                 saga_id,
                 saga_context,
-                saga_template,
-                template_name.to_owned(),
-                saga_params,
+                Arc::new(saga),
+                ACTION_REGISTRY.clone(),
             )
             .await
             .context("creating saga")
@@ -112,10 +113,14 @@ impl super::Nexus {
 
         let result = future.await;
         result.kind.map_err(|saga_error| {
-            saga_error.error_source.convert::<Error>().unwrap_or_else(|e| {
-                // TODO-error more context would be useful
-                Error::InternalError { internal_message: e.to_string() }
-            })
+            saga_error
+                .error_source
+                .convert::<Error>()
+                .unwrap_or_else(|e| Error::internal_error(&e.to_string()))
+                .internal_context(format!(
+                    "saga error at node {:?}",
+                    saga_error.error_node_name
+                ))
         })
     }
 }

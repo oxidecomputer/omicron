@@ -135,7 +135,12 @@ impl Plan {
 
             (
                 bootstrap_addr,
-                SledAgentRequest { id: Uuid::new_v4(), subnet, rack_id },
+                SledAgentRequest {
+                    id: Uuid::new_v4(),
+                    subnet,
+                    gateway: config.gateway.clone(),
+                    rack_id
+                },
             )
         });
 

@@ -1,0 +1,18 @@
+[package]
+name = "faux-mgs"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "3.2", features = ["derive"] }
+crossbeam-channel = "0.5"
+mio = "0.8"
+slog = { version = "2.7", features = ["max_level_trace", "release_max_level_debug"] }
+slog-async = "2.6"
+slog-term = "2.9"
+termios = "0.3"
+thiserror = "1.0"
+
+gateway-messages = { path = "../../gateway-messages", features = ["std"] }

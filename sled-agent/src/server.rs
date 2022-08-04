@@ -7,6 +7,7 @@
 use super::config::Config;
 use super::http_entrypoints::api as http_api;
 use super::sled_agent::SledAgent;
+use crate::bootstrap::params::SledAgentRequest;
 use crate::nexus::LazyNexusClient;
 use omicron_common::backoff::{
     internal_service_policy_with_max, retry_notify, BackoffError,
@@ -39,7 +40,7 @@ impl Server {
         sled_id: Uuid,
         addr: SocketAddrV6,
         is_scrimlet: bool,
-        rack_id: Uuid,
+        request: SledAgentRequest,
     ) -> Result<Server, String> {
         info!(log, "setting up sled agent server");
 
@@ -54,7 +55,7 @@ impl Server {
             lazy_nexus_client.clone(),
             sled_id,
             addr,
-            rack_id,
+            request,
         )
         .await
         .map_err(|e| e.to_string())?;

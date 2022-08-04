@@ -19,20 +19,6 @@ zpools = [
 # $ dladm show-phys -p -o LINK
 # data_link = "igb0"
 
-# IP address of Internet gateway
-#
-# NOTE: In the lab, use "172.20.15.225"
-# gateway_address = "192.168.1.1"
-
-# MAC address of the internet gateway in the local network, i.e., of the above
-# IP address.
-#
-# NOTE: This is currently configured for the lab. Developers should override
-# this with whatever value they wish to provide inbound connectivity to guests
-# in their local network, using the current workaround methods in OPTE. See
-# how-to-run.adoc for details on how to determine the value for your network.
-gateway_mac = "00:0d:b9:54:fe:e4"
-
 [log]
 level = "info"
 mode = "file"

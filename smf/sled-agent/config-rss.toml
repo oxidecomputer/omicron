@@ -11,5 +11,20 @@ rack_subnet = "fd00:1122:3344:0100::"
 # For values less than 2, no rack secret will be generated.
 rack_secret_threshold = 1
 
+[gateway]
+# IP address of Internet gateway
+#
+# NOTE: In the lab, use "172.20.15.225"
+# address = "192.168.1.1"
+
+# MAC address of the internet gateway in the local network, i.e., of the above
+# IP address.
+#
+# NOTE: This is currently configured for the lab. Developers should override
+# this with whatever value they wish to provide inbound connectivity to guests
+# in their local network, using the current workaround methods in OPTE. See
+# how-to-run.adoc for details on how to determine the value for your network.
+mac = "00:0d:b9:54:fe:e4"
+
 # NOTE: In the lab, use "172.20.15.226"
 nexus_external_address = "192.168.1.20"

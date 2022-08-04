@@ -284,7 +284,7 @@ impl Agent {
             request.id,
             sled_address,
             is_scrimlet,
-            request.rack_id,
+            request.clone(),
         )
         .await
         .map_err(|e| {
@@ -560,8 +560,12 @@ mod tests {
         let request = PersistentSledAgentRequest {
             request: Cow::Owned(SledAgentRequest {
                 id: Uuid::new_v4(),
-                subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
                 rack_id: Uuid::new_v4(),
+                gateway: crate::bootstrap::params::Gateway {
+                    address: None,
+                    mac: MacAddr6::nil(),
+                },
+                subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
             }),
             trust_quorum_share: Some(
                 ShareDistribution {

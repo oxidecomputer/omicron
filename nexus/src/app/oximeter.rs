@@ -226,7 +226,7 @@ impl super::Nexus {
     /// be queried.
     /// * `criteria`: Any additional parameters to help narrow down the query
     /// selection further. These parameters are passed directly to
-    /// [oximeter::db::Client::select_timeseries_with].
+    /// [oximeter-db::client::select_timeseries_with].
     /// * `query_params`: Pagination parameter, identifying which page of
     /// results to return.
     /// * `limit`: The maximum number of results to return in a paginated

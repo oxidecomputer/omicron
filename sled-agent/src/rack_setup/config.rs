@@ -4,6 +4,7 @@
 
 //! Interfaces for working with RSS config.
 
+use crate::bootstrap::params::Gateway;
 use crate::config::ConfigError;
 use omicron_common::address::{
     get_64_subnet, Ipv6Subnet, AZ_PREFIX, RACK_PREFIX, SLED_PREFIX,
@@ -32,6 +33,9 @@ pub struct SetupServiceConfig {
     /// If this value is less than 2, no rack secret will be created on startup;
     /// this is the typical case for single-server test/development.
     pub rack_secret_threshold: usize,
+
+    /// Internet gateway information.
+    pub gateway: Gateway,
 
     /// The address on which Nexus should serve an external interface.
     // TODO(https://github.com/oxidecomputer/omicron/issues/1530): Eventually,
@@ -73,6 +77,7 @@ mod test {
         let cfg = SetupServiceConfig {
             rack_subnet: "fd00:1122:3344:0100::".parse().unwrap(),
             rack_secret_threshold: 0,
+            gateway: Gateway { address: None, mac: macaddr::MacAddr6::nil() },
             nexus_external_address: "192.168.1.20".parse().unwrap(),
         };
 
