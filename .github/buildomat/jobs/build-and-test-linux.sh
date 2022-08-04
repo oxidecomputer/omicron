@@ -1,8 +1,8 @@
 #!/bin/bash
 #:
-#: name = "build-and-test (helios)"
+#: name = "build-and-test (ubuntu-20.04)"
 #: variety = "basic"
-#: target = "helios-latest"
+#: target = "ubuntu-20.04"
 #: rust_toolchain = "nightly-2022-04-27"
 #: output_rules = [
 #:	"/var/tmp/omicron_tmp/*",
