@@ -1310,7 +1310,6 @@ async fn test_silo_delete_clean_up_groups(cptestctx: &ControlPlaneTestContext) {
         nexus.datastore().clone(),
     );
 
-    // Create an admin user
     let (authz_silo, db_silo) = LookupPath::new(&opctx, &nexus.datastore())
         .silo_name(&silo.identity.name.into())
         .fetch()
@@ -1362,4 +1361,57 @@ async fn test_silo_delete_clean_up_groups(cptestctx: &ControlPlaneTestContext) {
         .fetch()
         .await
         .expect_err("user found");
+}
+
+// Test ensuring the same group from different users
+#[nexus_test]
+async fn test_ensure_same_silo_group(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.apictx.nexus;
+
+    // Create a silo
+    let silo =
+        create_silo(&client, "test-silo", true, shared::UserProvisionType::Jit)
+            .await;
+
+    let opctx = OpContext::for_tests(
+        cptestctx.logctx.log.new(o!()),
+        nexus.datastore().clone(),
+    );
+
+    let (authz_silo, db_silo) = LookupPath::new(&opctx, &nexus.datastore())
+        .silo_name(&silo.identity.name.into())
+        .fetch()
+        .await
+        .unwrap();
+
+    // Add the first user with a group membership
+    let _silo_user_1 = nexus
+        .silo_user_from_authenticated_subject(
+            &nexus.opctx_external_authn(),
+            &authz_silo,
+            &db_silo,
+            &AuthenticatedSubject {
+                external_id: "user1@company.com".into(),
+                groups: vec!["sre".into()],
+            },
+        )
+        .await
+        .expect("silo_user_from_authenticated_subject 1")
+        .unwrap();
+
+    // Add the first user with a group membership
+    let _silo_user_2 = nexus
+        .silo_user_from_authenticated_subject(
+            &nexus.opctx_external_authn(),
+            &authz_silo,
+            &db_silo,
+            &AuthenticatedSubject {
+                external_id: "user2@company.com".into(),
+                groups: vec!["sre".into()],
+            },
+        )
+        .await
+        .expect("silo_user_from_authenticated_subject 2")
+        .unwrap();
 }
