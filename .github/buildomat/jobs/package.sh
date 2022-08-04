@@ -17,6 +17,7 @@ cargo --version
 rustc --version
 
 ptime -m ./tools/install_builder_prerequisites.sh -yp
+ptime -m ./tools/create_self_signed_cert.sh -yp
 
 ptime -m cargo run --locked --release --bin omicron-package -- package
 
