@@ -14,6 +14,7 @@ use crate::illumos::zone::AddressRequest;
 use crate::params::{ServiceEnsureBody, ServiceRequest, ServiceType};
 use crate::zone::Zones;
 use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
 use omicron_common::address::OXIMETER_PORT;
 use omicron_common::address::RACK_PREFIX;
@@ -579,6 +580,8 @@ impl ServiceManager {
                 }
                 ServiceType::Dendrite { asic } => {
                     info!(self.log, "Setting up dendrite service");
+
+                    let address = service.addresses[0];
                     running_zone
                         .run_cmd(&[
                             crate::illumos::zone::SVCCFG,
@@ -589,6 +592,23 @@ impl ServiceManager {
                         ])
                         .map_err(|err| Error::ZoneCommand {
                             intent: "set dendrite asic type".to_string(),
+                            err,
+                        })?;
+
+                    running_zone
+                        .run_cmd(&[
+                            crate::illumos::zone::SVCCFG,
+                            "-s",
+                            &smf_name,
+                            "setprop",
+                            &format!(
+                                "config/address=[{}]:{}",
+                                address, DENDRITE_PORT,
+                            ),
+                        ])
+                        .map_err(|err| Error::ZoneCommand {
+                            intent: "set dendrite API server listen address"
+                                .to_string(),
                             err,
                         })?;
 
