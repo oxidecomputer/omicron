@@ -279,7 +279,8 @@ the exact addresses that are available depends on the environment.
           "type": "attach",
           "name": "alpine"
         }
-      ]
+      ],
+      "external_ips": [{"type": "ephemeral"}]
     }
     EOF
 
