@@ -118,28 +118,24 @@ use uuid::Uuid;
 //
 // Once constructed, it looks like this:
 //
-//    Instance
-//        key: Key::Name(p, "instance1")
+//        Instance::Name(p, "instance1")
 //                       |
 //            +----------+
 //            |
 //            v
-//          Project
-//              key: Key::Name(o, "proj")
-//                             |
-//                  +----------+
+//          Project::Name(o, "proj")
+//                        |
+//                  +-----+
 //                  |
 //                  v
-//              Organization
-//                  key: Key::Name(r, "org1")
+//              Organization::Name(r, "org1")
 //                                 |
 //                      +----------+
 //                      |
 //                      v
-//                  Silo
-//                      key: Key::PrimaryKey(r, id)
-//                                           |
-//                      +--------------------+
+//                  Silo::PrimaryKey(r, id)
+//                                   |
+//                      +------------+
 //                      |
 //                      v
 //                  Root
@@ -193,7 +189,7 @@ impl<'a> LookupPath<'a> {
         'a: 'c,
         'b: 'c,
     {
-        let key = match self
+        match self
             .opctx
             .authn
             .silo_required()
@@ -201,34 +197,29 @@ impl<'a> LookupPath<'a> {
         {
             Ok(authz_silo) => {
                 let root = Root { lookup_root: self };
-                let silo_key = SiloKey::PrimaryKey(root, authz_silo.id());
-                OrganizationKey::Name(Silo { key: silo_key }, name)
+                let silo_key = Silo::PrimaryKey(root, authz_silo.id());
+                Organization::Name(silo_key, name)
             }
             Err(error) => {
                 let root = Root { lookup_root: self };
-                OrganizationKey::Error(root, error)
+                Organization::Error(root, error)
             }
-        };
-        Organization { key }
+        }
     }
 
     /// Select a resource of type Organization, identified by its id
     pub fn organization_id(self, id: Uuid) -> Organization<'a> {
-        Organization {
-            key: OrganizationKey::PrimaryKey(Root { lookup_root: self }, id),
-        }
+        Organization::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type Project, identified by its id
     pub fn project_id(self, id: Uuid) -> Project<'a> {
-        Project { key: ProjectKey::PrimaryKey(Root { lookup_root: self }, id) }
+        Project::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type Instance, identified by its id
     pub fn instance_id(self, id: Uuid) -> Instance<'a> {
-        Instance {
-            key: InstanceKey::PrimaryKey(Root { lookup_root: self }, id),
-        }
+        Instance::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type IpPool, identified by its name
@@ -237,65 +228,52 @@ impl<'a> LookupPath<'a> {
         'a: 'c,
         'b: 'c,
     {
-        IpPool { key: IpPoolKey::Name(Root { lookup_root: self }, name) }
+        IpPool::Name(Root { lookup_root: self }, name)
     }
 
     /// Select a resource of type IpPool, identified by its id
     pub fn ip_pool_id(self, id: Uuid) -> IpPool<'a> {
-        IpPool { key: IpPoolKey::PrimaryKey(Root { lookup_root: self }, id) }
+        IpPool::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type Disk, identified by its id
     pub fn disk_id(self, id: Uuid) -> Disk<'a> {
-        Disk { key: DiskKey::PrimaryKey(Root { lookup_root: self }, id) }
+        Disk::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type Image, identified by its id
     pub fn image_id(self, id: Uuid) -> Image<'a> {
-        Image { key: ImageKey::PrimaryKey(Root { lookup_root: self }, id) }
+        Image::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type Snapshot, identified by its id
     pub fn snapshot_id(self, id: Uuid) -> Snapshot<'a> {
-        Snapshot {
-            key: SnapshotKey::PrimaryKey(Root { lookup_root: self }, id),
-        }
+        Snapshot::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type NetworkInterface, identified by its id
     pub fn network_interface_id(self, id: Uuid) -> NetworkInterface<'a> {
-        NetworkInterface {
-            key: NetworkInterfaceKey::PrimaryKey(
-                Root { lookup_root: self },
-                id,
-            ),
-        }
+        NetworkInterface::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type Vpc, identified by its id
     pub fn vpc_id(self, id: Uuid) -> Vpc<'a> {
-        Vpc { key: VpcKey::PrimaryKey(Root { lookup_root: self }, id) }
+        Vpc::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type VpcSubnet, identified by its id
     pub fn vpc_subnet_id(self, id: Uuid) -> VpcSubnet<'a> {
-        VpcSubnet {
-            key: VpcSubnetKey::PrimaryKey(Root { lookup_root: self }, id),
-        }
+        VpcSubnet::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type VpcRouter, identified by its id
     pub fn vpc_router_id(self, id: Uuid) -> VpcRouter<'a> {
-        VpcRouter {
-            key: VpcRouterKey::PrimaryKey(Root { lookup_root: self }, id),
-        }
+        VpcRouter::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type RouterRoute, identified by its id
     pub fn router_route_id(self, id: Uuid) -> RouterRoute<'a> {
-        RouterRoute {
-            key: RouterRouteKey::PrimaryKey(Root { lookup_root: self }, id),
-        }
+        RouterRoute::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     // Fleet-level resources
@@ -309,12 +287,10 @@ impl<'a> LookupPath<'a> {
         'a: 'c,
         'b: 'c,
     {
-        ConsoleSession {
-            key: ConsoleSessionKey::PrimaryKey(
-                Root { lookup_root: self },
-                token.to_string(),
-            ),
-        }
+        ConsoleSession::PrimaryKey(
+            Root { lookup_root: self },
+            token.to_string(),
+        )
     }
 
     /// Select a resource of type DeviceAuthRequest, identified by its `user_code`
@@ -326,12 +302,10 @@ impl<'a> LookupPath<'a> {
         'a: 'c,
         'b: 'c,
     {
-        DeviceAuthRequest {
-            key: DeviceAuthRequestKey::PrimaryKey(
-                Root { lookup_root: self },
-                user_code.to_string(),
-            ),
-        }
+        DeviceAuthRequest::PrimaryKey(
+            Root { lookup_root: self },
+            user_code.to_string(),
+        )
     }
 
     /// Select a resource of type DeviceAccessToken, identified by its `token`
@@ -343,40 +317,36 @@ impl<'a> LookupPath<'a> {
         'a: 'c,
         'b: 'c,
     {
-        DeviceAccessToken {
-            key: DeviceAccessTokenKey::PrimaryKey(
-                Root { lookup_root: self },
-                token.to_string(),
-            ),
-        }
+        DeviceAccessToken::PrimaryKey(
+            Root { lookup_root: self },
+            token.to_string(),
+        )
     }
 
     /// Select a resource of type RoleBuiltin, identified by its `name`
     pub fn role_builtin_name(self, name: &str) -> RoleBuiltin<'a> {
         let parts = name.split_once('.');
-        let key = if let Some((resource_type, role_name)) = parts {
-            RoleBuiltinKey::PrimaryKey(
+        if let Some((resource_type, role_name)) = parts {
+            RoleBuiltin::PrimaryKey(
                 Root { lookup_root: self },
                 resource_type.to_string(),
                 role_name.to_string(),
             )
         } else {
             let root = Root { lookup_root: self };
-            RoleBuiltinKey::Error(
+            RoleBuiltin::Error(
                 root,
                 Error::ObjectNotFound {
                     type_name: ResourceType::RoleBuiltin,
                     lookup_type: LookupType::ByName(String::from(name)),
                 },
             )
-        };
-
-        RoleBuiltin { key }
+        }
     }
 
     /// Select a resource of type Silo, identified by its id
     pub fn silo_id(self, id: Uuid) -> Silo<'a> {
-        Silo { key: SiloKey::PrimaryKey(Root { lookup_root: self }, id) }
+        Silo::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type Silo, identified by its name
@@ -385,31 +355,27 @@ impl<'a> LookupPath<'a> {
         'a: 'c,
         'b: 'c,
     {
-        Silo { key: SiloKey::Name(Root { lookup_root: self }, name) }
+        Silo::Name(Root { lookup_root: self }, name)
     }
 
     /// Select a resource of type SiloUser, identified by its id
     pub fn silo_user_id(self, id: Uuid) -> SiloUser<'a> {
-        SiloUser {
-            key: SiloUserKey::PrimaryKey(Root { lookup_root: self }, id),
-        }
+        SiloUser::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type SiloGroup, identified by its id
     pub fn silo_group_id(self, id: Uuid) -> SiloGroup<'a> {
-        SiloGroup {
-            key: SiloGroupKey::PrimaryKey(Root { lookup_root: self }, id),
-        }
+        SiloGroup::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type Rack, identified by its id
     pub fn rack_id(self, id: Uuid) -> Rack<'a> {
-        Rack { key: RackKey::PrimaryKey(Root { lookup_root: self }, id) }
+        Rack::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type Sled, identified by its id
     pub fn sled_id(self, id: Uuid) -> Sled<'a> {
-        Sled { key: SledKey::PrimaryKey(Root { lookup_root: self }, id) }
+        Sled::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type UpdateAvailableArtifact, identified by its
@@ -420,14 +386,12 @@ impl<'a> LookupPath<'a> {
         version: i64,
         kind: UpdateArtifactKind,
     ) -> UpdateAvailableArtifact<'a> {
-        UpdateAvailableArtifact {
-            key: UpdateAvailableArtifactKey::PrimaryKey(
-                Root { lookup_root: self },
-                name.to_string(),
-                version,
-                kind,
-            ),
-        }
+        UpdateAvailableArtifact::PrimaryKey(
+            Root { lookup_root: self },
+            name.to_string(),
+            version,
+            kind,
+        )
     }
 
     /// Select a resource of type UserBuiltin, identified by its `name`
@@ -436,9 +400,7 @@ impl<'a> LookupPath<'a> {
         'a: 'c,
         'b: 'c,
     {
-        UserBuiltin {
-            key: UserBuiltinKey::Name(Root { lookup_root: self }, name),
-        }
+        UserBuiltin::Name(Root { lookup_root: self }, name)
     }
 
     /// Select a resource of type GlobalImage, identified by its name
@@ -447,9 +409,7 @@ impl<'a> LookupPath<'a> {
         'a: 'c,
         'b: 'c,
     {
-        GlobalImage {
-            key: GlobalImageKey::Name(Root { lookup_root: self }, name),
-        }
+        GlobalImage::Name(Root { lookup_root: self }, name)
     }
 
     /// Select a resource of type GlobalImage, identified by its id
@@ -457,14 +417,12 @@ impl<'a> LookupPath<'a> {
     where
         'a: 'b,
     {
-        GlobalImage {
-            key: GlobalImageKey::PrimaryKey(Root { lookup_root: self }, id),
-        }
+        GlobalImage::PrimaryKey(Root { lookup_root: self }, id)
     }
 }
 
 /// Represents the head of the selection path for a resource
-struct Root<'a> {
+pub struct Root<'a> {
     lookup_root: LookupPath<'a>,
 }
 
@@ -774,24 +732,16 @@ mod test {
             .project_name(&project_name)
             .instance_name(&instance_name);
         assert!(matches!(&leaf,
-            Instance {
-                key: super::InstanceKey::Name(Project {
-                    key: super::ProjectKey::Name(Organization {
-                        key: super::OrganizationKey::Name(_, o)
-                    }, p)
-                }, i)
-            }
+            Instance::Name(Project::Name(Organization::Name(_, o) , p) , i)
             if **o == org_name && **p == project_name && **i == instance_name));
 
         let org_id = "006f29d9-0ff0-e2d2-a022-87e152440122".parse().unwrap();
         let leaf = LookupPath::new(&opctx, &datastore)
             .organization_id(org_id)
             .project_name(&project_name);
-        assert!(matches!(&leaf, Project {
-            key: super::ProjectKey::Name(Organization {
-                key: super::OrganizationKey::PrimaryKey(_, o)
-            }, p)
-        } if *o == org_id && **p == project_name));
+        assert!(matches!(&leaf,
+            Project::Name(Organization::PrimaryKey(_, o), p)
+            if *o == org_id && **p == project_name));
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
