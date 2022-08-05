@@ -34,8 +34,6 @@ pub use crucible_agent_client;
 use external_api::http_entrypoints::external_api;
 use internal_api::http_entrypoints::internal_api;
 use slog::Logger;
-use std::net::SocketAddr;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 #[macro_use]
@@ -73,10 +71,8 @@ pub fn run_openapi_internal() -> Result<(), String> {
 pub struct Server {
     /// shared state used by API request handlers
     pub apictx: Arc<ServerContext>,
-    /// dropshot server for external API (encrypted)
-    pub https_server_external: Option<dropshot::HttpServer<Arc<ServerContext>>>,
-    /// dropshot server for external API (unencrypted)
-    pub http_server_external: dropshot::HttpServer<Arc<ServerContext>>,
+    /// dropshot servers for external API
+    pub http_servers_external: Vec<dropshot::HttpServer<Arc<ServerContext>>>,
     /// dropshot server for internal API
     pub http_server_internal: dropshot::HttpServer<Arc<ServerContext>>,
 }
@@ -96,98 +92,36 @@ impl Server {
             ServerContext::new(config.deployment.rack_id, ctxlog, &config)
                 .await?;
 
-        // Determine port choices
-
-        let (external_http_port, external_https_port, internal_http_port) =
-            match config.deployment.port_picker {
-                omicron_common::nexus_config::PortPicker::NexusChoice => {
-                    (80, 443, omicron_common::address::NEXUS_INTERNAL_PORT)
-                }
-                omicron_common::nexus_config::PortPicker::Zero => (0, 0, 0),
-            };
-
         // Launch the internal server.
-
-        let dropshot_internal_config = dropshot::ConfigDropshot {
-            bind_address: SocketAddr::new(
-                config.deployment.internal_ip,
-                internal_http_port,
-            ),
-            request_body_max_bytes: 1048576,
-            ..Default::default()
-        };
-        let http_server_starter_internal = dropshot::HttpServerStarter::new(
-            &dropshot_internal_config,
+        let server_starter_internal = dropshot::HttpServerStarter::new(
+            &config.deployment.dropshot_internal,
             internal_api(),
             Arc::clone(&apictx),
             &log.new(o!("component" => "dropshot_internal")),
         )
         .map_err(|error| format!("initializing internal server: {}", error))?;
-        let http_server_internal = http_server_starter_internal.start();
+        let http_server_internal = server_starter_internal.start();
 
         // Launch the external server(s).
-        //
-        // - The HTTP server is unconditionally started.
-        // - The HTTPS server is started if the necessary certificate files
-        // exist.
-        //
-        // TODO: Consider changing this disposition, making "HTTPS" the default,
-        // and returning an error if the certificates don't exist. Doing so
-        // would be the more secure long-term plan, but would make gradual
-        // deployment of this feature more difficult.
-
-        let cert_file = PathBuf::from("/var/nexus/certs/cert.pem");
-        let key_file = PathBuf::from("/var/nexus/certs/key.pem");
-
-        let https_server_external = if cert_file.exists() && key_file.exists() {
-            let dropshot_external_https_config = dropshot::ConfigDropshot {
-                bind_address: SocketAddr::new(
-                    config.deployment.external_ip,
-                    external_https_port,
-                ),
-                request_body_max_bytes: 1048576,
-                tls: Some(dropshot::ConfigTls { cert_file, key_file }),
-            };
-            let https_server_starter_external =
-                dropshot::HttpServerStarter::new(
-                    &dropshot_external_https_config,
+        let http_servers_external = config
+            .deployment
+            .dropshot_external
+            .iter()
+            .map(|cfg| {
+                let server_starter_external = dropshot::HttpServerStarter::new(
+                    &cfg,
                     external_api(),
                     Arc::clone(&apictx),
-                    &log.new(
-                        o!("component" => "dropshot_external (encrypted)"),
-                    ),
+                    &log.new(o!("component" => "dropshot_external")),
                 )
                 .map_err(|error| {
                     format!("initializing external server: {}", error)
                 })?;
-            Some(https_server_starter_external.start())
-        } else {
-            None
-        };
+                Ok(server_starter_external.start())
+            })
+            .collect::<Result<Vec<dropshot::HttpServer<_>>, String>>()?;
 
-        let dropshot_external_http_config = dropshot::ConfigDropshot {
-            bind_address: SocketAddr::new(
-                config.deployment.external_ip,
-                external_http_port,
-            ),
-            request_body_max_bytes: 1048576,
-            tls: None,
-        };
-        let http_server_starter_external = dropshot::HttpServerStarter::new(
-            &dropshot_external_http_config,
-            external_api(),
-            Arc::clone(&apictx),
-            &log.new(o!("component" => "dropshot_external (unencrypted)")),
-        )
-        .map_err(|error| format!("initializing external server: {}", error))?;
-        let http_server_external = http_server_starter_external.start();
-
-        Ok(Server {
-            apictx,
-            https_server_external,
-            http_server_external,
-            http_server_internal,
-        })
+        Ok(Server { apictx, http_servers_external, http_server_internal })
     }
 
     /// Wait for the given server to shut down
@@ -196,18 +130,20 @@ impl Server {
     /// immediately after calling `start()`, the program will block indefinitely
     /// or until something else initiates a graceful shutdown.
     pub async fn wait_for_finish(self) -> Result<(), String> {
-        let errors = vec![
-            self.http_server_external
-                .await
-                .map_err(|e| format!("external: {}", e)),
+        let mut errors = vec![];
+        for server in self.http_servers_external {
+            errors.push(server.await.map_err(|e| format!("external: {}", e)));
+        }
+        errors.push(
             self.http_server_internal
                 .await
                 .map_err(|e| format!("internal: {}", e)),
-        ]
-        .into_iter()
-        .filter(Result::is_err)
-        .map(|r| r.unwrap_err())
-        .collect::<Vec<String>>();
+        );
+        let errors = errors
+            .into_iter()
+            .filter(Result::is_err)
+            .map(|r| r.unwrap_err())
+            .collect::<Vec<String>>();
 
         if errors.len() > 0 {
             let msg = format!("errors shutting down: ({})", errors.join(", "));

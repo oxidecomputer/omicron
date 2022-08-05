@@ -14,6 +14,7 @@ use crate::illumos::zone::AddressRequest;
 use crate::params::{ServiceEnsureBody, ServiceRequest, ServiceType};
 use crate::zone::Zones;
 use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::NEXUS_INTERNAL_PORT;
 use omicron_common::address::OXIMETER_PORT;
 use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
@@ -24,7 +25,7 @@ use omicron_common::postgres_config::PostgresConfigWithUrl;
 use slog::Logger;
 use std::collections::HashSet;
 use std::iter::FromIterator;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use tokio::io::AsyncWriteExt;
@@ -400,14 +401,35 @@ impl ServiceManager {
                         }
                     }
 
+                    let cert_file = PathBuf::from("/var/nexus/certs/cert.pem");
+                    let key_file = PathBuf::from("/var/nexus/certs/key.pem");
+
                     // Nexus takes a separate config file for parameters which
                     // cannot be known at packaging time.
                     let deployment_config = NexusDeploymentConfig {
                         id: service.id,
                         rack_id: self.rack_id,
-                        external_ip,
-                        internal_ip: IpAddr::V6(internal_ip),
-                        port_picker: nexus_config::PortPicker::default(),
+
+                        // Request two dropshot servers: One for HTTP (port 80),
+                        // one for HTTPS (port 443).
+                        dropshot_external: vec![
+                            dropshot::ConfigDropshot {
+                                bind_address: SocketAddr::new(external_ip, 443),
+                                request_body_max_bytes: 1048576,
+                                tls: Some(dropshot::ConfigTls { cert_file, key_file }),
+                                ..Default::default()
+                            },
+                            dropshot::ConfigDropshot {
+                                bind_address: SocketAddr::new(external_ip, 80),
+                                request_body_max_bytes: 1048576,
+                                ..Default::default()
+                            },
+                        ],
+                        dropshot_internal: dropshot::ConfigDropshot {
+                            bind_address: SocketAddr::new(IpAddr::V6(internal_ip), NEXUS_INTERNAL_PORT),
+                            request_body_max_bytes: 1048576,
+                            ..Default::default()
+                        },
                         subnet: Ipv6Subnet::<RACK_PREFIX>::new(
                             self.underlay_address,
                         ),

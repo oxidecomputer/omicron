@@ -77,15 +77,36 @@ Supported config properties include:
 |Yes
 |URL identifying the CockroachDB instance(s) to connect to.  CockroachDB is used for all persistent data.
 
-|`external_ip`
-|`"127.0.0.1"`
+|`dropshot_external`
+|
 |Yes
-|Specifies that the server should bind to the given IP address for the **external** API (i.e., the one that operators and developers using the Oxide rack will use).
+|Dropshot configuration for the external server (i.e., the one that operators and developers using the Oxide rack will use).  Specific properties are documented below, but see the Dropshot README for details.
+| Note that this is an array of external address configurations; multiple may be supplied.
 
-|`internal_ip`
-|`"127.0.0.1"`
+|`dropshot_external.bind_address`
+|`"127.0.0.1:12220"`
 |Yes
-|Dropshot configuration for the internal server (i.e., the one used by the sled agent).
+|Specifies that the server should bind to the given IP address and TCP port for the **external** API (i.e., the one that operators and developers using the Oxide rack will use).  In general, servers can bind to more than one IP address and port, but this is not (yet?) supported.
+
+|`dropshot_external.request_body_max_bytes`
+|`1000`
+|Yes
+|Specifies the maximum request body size for the **external** API.
+
+|`dropshot_internal`
+|
+|Yes
+|Dropshot configuration for the internal server (i.e., the one used by the sled agent).  Specific properties are documented below, but see the Dropshot README for details.
+
+|`dropshot_internal.bind_address`
+|`"127.0.0.1:12220"`
+|Yes
+|Specifies that the server should bind to the given IP address and TCP port for the **internal** API (i.e., the one used by the sled agent).  In general, servers can bind to more than one IP address and port, but this is not (yet?) supported.
+
+|`dropshot_internal.request_body_max_bytes`
+|`1000`
+|Yes
+|Specifies the maximum request body size for the **internal** API.
 
 |`id`
 |`"e6bff1ff-24fb-49dc-a54e-c6a350cd4d6c"`

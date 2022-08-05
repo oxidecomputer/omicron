@@ -7,11 +7,11 @@
 
 use super::address::{Ipv6Subnet, RACK_PREFIX};
 use super::postgres_config::PostgresConfigWithUrl;
+use dropshot::ConfigDropshot;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use serde_with::DisplayFromStr;
 use std::fmt;
-use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
@@ -98,36 +98,19 @@ pub enum Database {
     },
 }
 
-/// Describes how ports are selected for dropshot's HTTP servers.
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PortPicker {
-    /// Use default values for ports, defined by Nexus.
-    NexusChoice,
-    /// Use port zero - this is avoids conflicts during tests,
-    /// by letting the OS pick free ports.
-    Zero,
-}
-
-impl Default for PortPicker {
-    fn default() -> Self {
-        PortPicker::NexusChoice
-    }
-}
-
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct DeploymentConfig {
     /// Uuid of the Nexus instance
     pub id: Uuid,
     /// Uuid of the Rack where Nexus is executing.
     pub rack_id: Uuid,
-    /// External address of Nexus.
-    pub external_ip: IpAddr,
-    /// Internal address of Nexus.
-    pub internal_ip: IpAddr,
-    /// Decides how ports are selected
-    #[serde(default)]
-    pub port_picker: PortPicker,
+    /// Dropshot configurations for external API server.
+    ///
+    /// Multiple configurations may be supplied to request
+    /// combinations of HTTP / HTTPS servers.
+    pub dropshot_external: Vec<ConfigDropshot>,
+    /// Dropshot configuration for internal API server.
+    pub dropshot_internal: ConfigDropshot,
     /// Portion of the IP space to be managed by the Rack.
     pub subnet: Ipv6Subnet<RACK_PREFIX>,
     /// DB configuration.
