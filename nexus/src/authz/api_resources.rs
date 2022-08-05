@@ -89,7 +89,8 @@ pub trait ApiResourceWithRoles: ApiResource {
 pub trait ApiResourceWithRolesType: ApiResourceWithRoles {
     type AllowedRoles: serde::Serialize
         + serde::de::DeserializeOwned
-        + db::model::DatabaseString;
+        + db::model::DatabaseString
+        + Clone;
 }
 
 impl<T: ApiResource + oso::ToPolar + Clone> AuthorizedResource for T {
@@ -770,6 +771,14 @@ impl db::model::DatabaseString for SiloRole {
 
 authz_resource! {
     name = "SiloUser",
+    parent = "Silo",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = Custom,
+}
+
+authz_resource! {
+    name = "SiloGroup",
     parent = "Silo",
     primary_key = Uuid,
     roles_allowed = false,

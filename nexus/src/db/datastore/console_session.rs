@@ -11,7 +11,6 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::lookup::LookupPath;
 use crate::db::model::ConsoleSession;
-use crate::db::model::IdentityType;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
@@ -123,12 +122,9 @@ impl DataStore {
         // to check, and if we add another type of Actor, we'll be forced here
         // to consider if they should be able to have console sessions and log
         // out of them.
-        let silo_user_id = match actor.actor_type() {
-            IdentityType::SiloUser => actor.actor_id(),
-            IdentityType::UserBuiltin => {
-                return Err(Error::invalid_request("not a Silo user"))
-            }
-        };
+        let silo_user_id = actor
+            .silo_user_id()
+            .ok_or_else(|| Error::invalid_request("not a Silo user"))?;
 
         use db::schema::console_session::dsl;
         diesel::delete(dsl::console_session)

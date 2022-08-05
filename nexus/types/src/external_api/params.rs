@@ -29,6 +29,15 @@ pub struct SiloCreate {
     pub discoverable: bool,
 
     pub user_provision_type: shared::UserProvisionType,
+
+    /// If set, this group will be created during Silo creation and granted the
+    /// "Silo Admin" role. Identity providers can assert that users belong to
+    /// this group and those users can log in and further initialize the Silo.
+    ///
+    /// Note that if configuring a SAML based identity provider,
+    /// group_attribute_name must be set for users to be considered part of a
+    /// group. See [`SamlIdentityProviderCreate`] for more information.
+    pub admin_group_name: Option<String>,
 }
 
 // Silo identity providers
@@ -176,6 +185,11 @@ pub struct SamlIdentityProviderCreate {
     /// optional request signing key pair
     #[serde(deserialize_with = "validate_key_pair")]
     pub signing_keypair: Option<DerEncodedKeyPair>,
+
+    /// If set, SAML attributes with this name will be considered to denote a
+    /// user's group membership, where the attribute value(s) should be a
+    /// comma-separated list of group names.
+    pub group_attribute_name: Option<String>,
 }
 
 /// sign some junk data and validate it with the key pair
