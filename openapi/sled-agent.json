@@ -302,6 +302,9 @@
           "lossy": {
             "type": "boolean"
           },
+          "read_only": {
+            "type": "boolean"
+          },
           "root_cert_pem": {
             "nullable": true,
             "type": "string"
@@ -316,6 +319,7 @@
         "required": [
           "id",
           "lossy",
+          "read_only",
           "target"
         ]
       },
