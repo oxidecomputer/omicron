@@ -100,7 +100,7 @@ dependencies = [
 [[package]]
 name = "api_identity"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#7a904e3a9da7c6d137d3dac629852fe9778d6fe1"
+source = "git+https://github.com/oxidecomputer/omicron?branch=main#44b326b9ab89a842df3d84fa5ac15b31eeabb9e5"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2741,7 +2741,7 @@ dependencies = [
 [[package]]
 name = "nexus-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#7a904e3a9da7c6d137d3dac629852fe9778d6fe1"
+source = "git+https://github.com/oxidecomputer/omicron?branch=main#44b326b9ab89a842df3d84fa5ac15b31eeabb9e5"
 dependencies = [
  "chrono",
  "omicron-common 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
@@ -2775,7 +2775,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sled-agent-client",
- "steno 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "steno",
  "uuid",
 ]
 
@@ -2988,7 +2988,7 @@ dependencies = [
  "serde_with",
  "slog",
  "smf",
- "steno 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "steno",
  "thiserror",
  "tokio",
  "tokio-postgres",
@@ -2999,7 +2999,7 @@ dependencies = [
 [[package]]
 name = "omicron-common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#7a904e3a9da7c6d137d3dac629852fe9778d6fe1"
+source = "git+https://github.com/oxidecomputer/omicron?branch=main#44b326b9ab89a842df3d84fa5ac15b31eeabb9e5"
 dependencies = [
  "anyhow",
  "api_identity 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
@@ -3023,7 +3023,7 @@ dependencies = [
  "serde_with",
  "slog",
  "smf",
- "steno 0.2.0 (git+https://github.com/oxidecomputer/steno?branch=main)",
+ "steno",
  "thiserror",
  "tokio",
  "tokio-postgres",
@@ -3151,7 +3151,7 @@ dependencies = [
  "sled-agent-client",
  "slog",
  "slog-dtrace",
- "steno 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "steno",
  "strum",
  "subprocess",
  "tempfile",
@@ -3493,7 +3493,7 @@ dependencies = [
 [[package]]
 name = "oximeter"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#7a904e3a9da7c6d137d3dac629852fe9778d6fe1"
+source = "git+https://github.com/oxidecomputer/omicron?branch=main#44b326b9ab89a842df3d84fa5ac15b31eeabb9e5"
 dependencies = [
  "bytes",
  "chrono",
@@ -3597,7 +3597,7 @@ dependencies = [
 [[package]]
 name = "oximeter-macro-impl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#7a904e3a9da7c6d137d3dac629852fe9778d6fe1"
+source = "git+https://github.com/oxidecomputer/omicron?branch=main#44b326b9ab89a842df3d84fa5ac15b31eeabb9e5"
 dependencies = [
  "bytes",
  "proc-macro2",
@@ -3627,7 +3627,7 @@ dependencies = [
 [[package]]
 name = "oximeter-producer"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#7a904e3a9da7c6d137d3dac629852fe9778d6fe1"
+source = "git+https://github.com/oxidecomputer/omicron?branch=main#44b326b9ab89a842df3d84fa5ac15b31eeabb9e5"
 dependencies = [
  "chrono",
  "dropshot",
@@ -5489,27 +5489,6 @@ name = "steno"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f695d04f2d9e08f3ed0c72acfa21cddc20eb76698a2ff0961a6758d3566454c2"
-dependencies = [
- "anyhow",
- "async-trait",
- "chrono",
- "futures",
- "lazy_static",
- "newtype_derive",
- "petgraph",
- "schemars",
- "serde",
- "serde_json",
- "slog",
- "thiserror",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "steno"
-version = "0.2.0"
-source = "git+https://github.com/oxidecomputer/steno?branch=main#faa20daa38c27ddb1b99ae0587a6657d023b4b32"
 dependencies = [
  "anyhow",
  "async-trait",
