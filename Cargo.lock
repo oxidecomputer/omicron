@@ -2775,7 +2775,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sled-agent-client",
- "steno",
+ "steno 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "uuid",
 ]
 
@@ -2988,7 +2988,7 @@ dependencies = [
  "serde_with",
  "slog",
  "smf",
- "steno",
+ "steno 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "thiserror",
  "tokio",
  "tokio-postgres",
@@ -3023,7 +3023,7 @@ dependencies = [
  "serde_with",
  "slog",
  "smf",
- "steno",
+ "steno 0.2.0 (git+https://github.com/oxidecomputer/steno?branch=main)",
  "thiserror",
  "tokio",
  "tokio-postgres",
@@ -3151,7 +3151,7 @@ dependencies = [
  "sled-agent-client",
  "slog",
  "slog-dtrace",
- "steno",
+ "steno 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "strum",
  "subprocess",
  "tempfile",
@@ -5483,6 +5483,28 @@ name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
+
+[[package]]
+name = "steno"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f695d04f2d9e08f3ed0c72acfa21cddc20eb76698a2ff0961a6758d3566454c2"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "futures",
+ "lazy_static",
+ "newtype_derive",
+ "petgraph",
+ "schemars",
+ "serde",
+ "serde_json",
+ "slog",
+ "thiserror",
+ "tokio",
+ "uuid",
+]
 
 [[package]]
 name = "steno"

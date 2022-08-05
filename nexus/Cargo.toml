@@ -52,6 +52,7 @@ serde_urlencoded = "0.7.1"
 serde_with = "2.0.0"
 sled-agent-client = { path = "../sled-agent-client" }
 slog-dtrace = "0.2"
+steno = "0.2"
 tempfile = "3.3"
 thiserror = "1.0"
 toml = "0.5.9"
@@ -100,10 +101,6 @@ features = [ "derive" ]
 [dependencies.slog]
 version = "2.7"
 features = [ "max_level_trace", "release_max_level_debug" ]
-
-[dependencies.steno]
-git = "https://github.com/oxidecomputer/steno"
-branch = "main"
 
 [dependencies.tokio]
 version = "1.20"
