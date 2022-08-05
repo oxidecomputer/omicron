@@ -471,6 +471,15 @@ impl ResponseKindExt for ResponseKind {
             ResponseKind::SerialConsoleWriteAck => {
                 response_kind_names::SERIAL_CONSOLE_WRITE_ACK
             }
+            ResponseKind::UpdateStartAck => {
+                response_kind_names::UPDATE_START_ACK
+            }
+            ResponseKind::UpdateChunkAck => {
+                response_kind_names::UPDATE_CHUNK_ACK
+            }
+            ResponseKind::SysResetPrepareAck => {
+                response_kind_names::SYS_RESET_PREPARE_ACK
+            }
         }
     }
 
@@ -545,4 +554,7 @@ mod response_kind_names {
     pub(super) const SP_STATE: &str = "sp_state";
     pub(super) const SERIAL_CONSOLE_WRITE_ACK: &str =
         "serial_console_write_ack";
+    pub(super) const UPDATE_START_ACK: &str = "update_start_ack";
+    pub(super) const UPDATE_CHUNK_ACK: &str = "update_chunk_ack";
+    pub(super) const SYS_RESET_PREPARE_ACK: &str = "sys_reset_prepare_ack";
 }
