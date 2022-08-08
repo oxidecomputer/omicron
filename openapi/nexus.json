@@ -9393,11 +9393,6 @@
             "nullable": true,
             "type": "string"
           },
-          "make_primary": {
-            "description": "Make a secondary interface the instance's primary interface.\n\nIf applied to a secondary interface, that interface will become the primary on the next reboot of the instance. Note that this may have implications for routing between instances, as the new primary interface will be on a distinct subnet from the previous primary interface.\n\nNote that this can only be used to select a new primary interface for an instance. Requests to change the primary interface into a secondary will return an error.",
-            "default": false,
-            "type": "boolean"
-          },
           "name": {
             "nullable": true,
             "allOf": [
@@ -9405,6 +9400,11 @@
                 "$ref": "#/components/schemas/Name"
               }
             ]
+          },
+          "primary": {
+            "description": "Make a secondary interface the instance's primary interface.\n\nIf applied to a secondary interface, that interface will become the primary on the next reboot of the instance. Note that this may have implications for routing between instances, as the new primary interface will be on a distinct subnet from the previous primary interface.\n\nNote that this can only be used to select a new primary interface for an instance. Requests to change the primary interface into a secondary will return an error.",
+            "default": false,
+            "type": "boolean"
           }
         }
       },
