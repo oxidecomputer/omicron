@@ -31,8 +31,7 @@ use std::net::SocketAddrV6;
 use std::process::Command;
 use uuid::Uuid;
 
-use crucible::VolumeConstructionRequest; // XXX why?
-                                         //use sled_agent_client::types::VolumeConstructionRequest;
+use propolis_client::api::VolumeConstructionRequest;
 
 #[cfg(not(test))]
 use crate::illumos::{dladm::Dladm, zfs::Zfs, zone::Zones};

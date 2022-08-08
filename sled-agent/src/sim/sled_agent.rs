@@ -22,9 +22,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::str::FromStr;
 
-// XXX why doesn't sled_agent_client::types::VolumeConstructionRequest work?
-//use sled_agent_client::types::VolumeConstructionRequest;
-use crucible::VolumeConstructionRequest;
+use propolis_client::api::VolumeConstructionRequest;
 
 use super::collection::SimCollection;
 use super::config::Config;

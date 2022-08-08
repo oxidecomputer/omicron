@@ -28,8 +28,7 @@ use uuid::Uuid;
 
 use super::sled_agent::SledAgent;
 
-use crucible::VolumeConstructionRequest; // XXX why?
-                                         //use sled_agent_client::types::VolumeConstructionRequest;
+use propolis_client::api::VolumeConstructionRequest;
 
 type SledApiDescription = ApiDescription<Arc<SledAgent>>;
 
