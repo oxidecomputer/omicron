@@ -8,6 +8,7 @@ use super::params::version;
 use super::params::Request;
 use super::params::RequestEnvelope;
 use super::params::SledAgentRequest;
+use super::trust_quorum::ShareDistribution;
 use super::views::SledAgentResponse;
 use crate::bootstrap::views::Response;
 use crate::bootstrap::views::ResponseEnvelope;
@@ -90,8 +91,12 @@ impl<'a> Client<'a> {
     pub(crate) async fn start_sled(
         &self,
         request: &SledAgentRequest,
+        trust_quorum_share: Option<ShareDistribution>,
     ) -> Result<SledAgentResponse, Error> {
-        let request = Request::SledAgentRequest(Cow::Borrowed(request));
+        let request = Request::SledAgentRequest(
+            Cow::Borrowed(request),
+            trust_quorum_share.map(Into::into),
+        );
 
         match self.request_response(request).await? {
             Response::SledAgentResponse(response) => Ok(response),
@@ -142,8 +147,11 @@ impl<'a> Client<'a> {
 
         // Build and serialize our request.
         let envelope = RequestEnvelope { version: version::V1, request };
-        let mut buf =
-            serde_json::to_vec(&envelope).map_err(Error::Serialize)?;
+
+        // "danger" note: `buf` contains a raw trust quorum share; we must not
+        // log or otherwise persist it! We only write it to `stream`.
+        let buf =
+            envelope.danger_serialize_as_json().map_err(Error::Serialize)?;
         let request_length = u32::try_from(buf.len())
             .expect("serialized bootstrap-agent request length overflowed u32");
 
@@ -163,7 +171,7 @@ impl<'a> Client<'a> {
             return Err(Error::BadResponseLength(response_length));
         }
 
-        buf.resize(response_length as usize, 0);
+        let mut buf = vec![0; response_length as usize];
         stream.read_exact(&mut buf).await.map_err(Error::ReadResponse)?;
 
         // Deserialize and handle the response.

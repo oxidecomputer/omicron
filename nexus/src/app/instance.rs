@@ -5,23 +5,28 @@
 //! Virtual Machine Instances
 
 use super::MAX_DISKS_PER_INSTANCE;
+use super::MAX_EXTERNAL_IPS_PER_INSTANCE;
+use super::MAX_NICS_PER_INSTANCE;
 use crate::app::sagas;
 use crate::authn;
 use crate::authz;
 use crate::authz::ApiResource;
+use crate::cidata::InstanceCiData;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::Resource;
 use crate::db::lookup::LookupPath;
-use crate::db::model::Name;
 use crate::db::queries::network_interface;
 use crate::external_api::params;
+use nexus_db_model::IpKind;
+use nexus_db_model::Name;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InstanceState;
+use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::UpdateResult;
@@ -29,6 +34,7 @@ use omicron_common::api::internal::nexus;
 use sled_agent_client::types::InstanceRuntimeStateMigrateParams;
 use sled_agent_client::types::InstanceRuntimeStateRequested;
 use sled_agent_client::types::InstanceStateRequested;
+use sled_agent_client::types::SourceNatConfig;
 use sled_agent_client::Client as SledAgentClient;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -55,6 +61,37 @@ impl super::Nexus {
                 "cannot attach more than {} disks to instance!",
                 MAX_DISKS_PER_INSTANCE
             )));
+        }
+        if params.external_ips.len() > MAX_EXTERNAL_IPS_PER_INSTANCE {
+            return Err(Error::invalid_request(&format!(
+                "An instance may not have more than {} external IP addresses",
+                MAX_EXTERNAL_IPS_PER_INSTANCE,
+            )));
+        }
+        if let params::InstanceNetworkInterfaceAttachment::Create(ref ifaces) =
+            params.network_interfaces
+        {
+            if ifaces.len() > MAX_NICS_PER_INSTANCE {
+                return Err(Error::invalid_request(&format!(
+                    "An instance may not have more than {} network interfaces",
+                    MAX_NICS_PER_INSTANCE,
+                )));
+            }
+            // Check that all VPC names are the same.
+            //
+            // This isn't strictly necessary, as the queries to create these
+            // interfaces would fail in the saga, but it's easier to handle here.
+            if ifaces
+                .iter()
+                .map(|iface| &iface.vpc_name)
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+                != 1
+            {
+                return Err(Error::invalid_request(
+                    "All interfaces must be in the same VPC",
+                ));
+            }
         }
 
         // Reject instances where the memory is not at least
@@ -83,26 +120,25 @@ impl super::Nexus {
             });
         }
 
-        let saga_params = Arc::new(sagas::instance_create::Params {
+        let saga_params = sagas::instance_create::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             organization_name: organization_name.clone().into(),
             project_name: project_name.clone().into(),
             project_id: authz_project.id(),
             create_params: params.clone(),
-        });
+        };
 
         let saga_outputs = self
-            .execute_saga(
-                Arc::clone(&sagas::instance_create::SAGA_TEMPLATE),
-                sagas::instance_create::SAGA_NAME,
+            .execute_saga::<sagas::instance_create::SagaInstanceCreate>(
                 saga_params,
             )
             .await?;
-        // TODO-error more context would be useful
-        let instance_id =
-            saga_outputs.lookup_output::<Uuid>("instance_id").map_err(|e| {
-                Error::InternalError { internal_message: e.to_string() }
-            })?;
+
+        let instance_id = saga_outputs
+            .lookup_node_output::<Uuid>("instance_id")
+            .map_err(|e| Error::internal_error(&format!("{:#}", &e)))
+            .internal_context("looking up output from instance create saga")?;
+
         // TODO-correctness TODO-robustness TODO-design It's not quite correct
         // to take this instance id and look it up again.  It's possible that
         // it's been modified or even deleted since the saga executed.  In that
@@ -178,6 +214,18 @@ impl super::Nexus {
         Ok(db_instance)
     }
 
+    pub async fn instance_fetch_by_id(
+        &self,
+        opctx: &OpContext,
+        instance_id: &Uuid,
+    ) -> LookupResult<db::model::Instance> {
+        let (.., db_instance) = LookupPath::new(opctx, &self.db_datastore)
+            .instance_id(*instance_id)
+            .fetch()
+            .await?;
+        Ok(db_instance)
+    }
+
     // This operation may only occur on stopped instances, which implies that
     // the attached disks do not have any running "upstairs" process running
     // within the sled.
@@ -199,7 +247,20 @@ impl super::Nexus {
                 .fetch()
                 .await?;
 
-        self.db_datastore.project_delete_instance(opctx, &authz_instance).await
+        self.db_datastore
+            .project_delete_instance(opctx, &authz_instance)
+            .await?;
+        self.db_datastore
+            .instance_delete_all_network_interfaces(opctx, &authz_instance)
+            .await?;
+        // Ignore the count of addresses deleted
+        self.db_datastore
+            .deallocate_instance_external_ip_by_instance_id(
+                opctx,
+                authz_instance.id(),
+            )
+            .await?;
+        Ok(())
     }
 
     pub async fn project_instance_migrate(
@@ -218,14 +279,12 @@ impl super::Nexus {
             .await?;
 
         // Kick off the migration saga
-        let saga_params = Arc::new(sagas::instance_migrate::Params {
+        let saga_params = sagas::instance_migrate::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             instance_id: authz_instance.id(),
             migrate_params: params,
-        });
-        self.execute_saga(
-            Arc::clone(&sagas::instance_migrate::SAGA_TEMPLATE),
-            sagas::instance_migrate::SAGA_NAME,
+        };
+        self.execute_saga::<sagas::instance_migrate::SagaInstanceMigrate>(
             saga_params,
         )
         .await?;
@@ -466,11 +525,47 @@ impl super::Nexus {
             .derive_guest_network_interface_info(&opctx, &authz_instance)
             .await?;
 
+        // Collect the external IPs for the instance.
+        // TODO-correctness: Handle Floating IPs, see
+        //  https://github.com/oxidecomputer/omicron/issues/1334
+        let (snat_ip, external_ips): (Vec<_>, Vec<_>) = self
+            .db_datastore
+            .instance_lookup_external_ips(&opctx, authz_instance.id())
+            .await?
+            .into_iter()
+            .partition(|ip| ip.kind == IpKind::SNat);
+
+        // Sanity checks on the number and kind of each IP address.
+        // TODO-correctness: Handle multiple IP addresses, see
+        //  https://github.com/oxidecomputer/omicron/issues/1467
+        if external_ips.len() > MAX_EXTERNAL_IPS_PER_INSTANCE {
+            return Err(Error::internal_error(
+                format!(
+                    "Expected the number of external IPs to be limited to \
+                    {}, but found {}",
+                    MAX_EXTERNAL_IPS_PER_INSTANCE,
+                    external_ips.len(),
+                )
+                .as_str(),
+            ));
+        }
+        let external_ips =
+            external_ips.into_iter().map(|model| model.ip.ip()).collect();
+        if snat_ip.len() != 1 {
+            return Err(Error::internal_error(
+                "Expected exactly one SNAT IP address for an instance",
+            ));
+        }
+        let source_nat =
+            SourceNatConfig::from(snat_ip.into_iter().next().unwrap());
+
         // Gather the SSH public keys of the actor make the request so
         // that they may be injected into the new image via cloud-init.
         // TODO-security: this should be replaced with a lookup based on
         // on `SiloUser` role assignments once those are in place.
-        let actor = opctx.authn.actor_required()?;
+        let actor = opctx.authn.actor_required().internal_context(
+            "loading current user's ssh keys for new Instance",
+        )?;
         let (.., authz_user) = LookupPath::new(opctx, &self.db_datastore)
             .silo_user_id(actor.actor_id())
             .lookup_for(authz::Action::ListChildren)
@@ -502,6 +597,8 @@ impl super::Nexus {
                 db_instance.runtime().clone(),
             ),
             nics,
+            source_nat,
+            external_ips,
             disks: disk_reqs,
             cloud_init_bytes: Some(base64::encode(
                 db_instance.generate_cidata(&public_keys)?,
@@ -755,6 +852,18 @@ impl super::Nexus {
             .project_name(project_name)
             .instance_name(instance_name)
             .network_interface_name(interface_name)
+            .fetch()
+            .await?;
+        Ok(db_interface)
+    }
+
+    pub async fn network_interface_fetch_by_id(
+        &self,
+        opctx: &OpContext,
+        interface_id: &Uuid,
+    ) -> LookupResult<db::model::NetworkInterface> {
+        let (.., db_interface) = LookupPath::new(opctx, &self.db_datastore)
+            .network_interface_id(*interface_id)
             .fetch()
             .await?;
         Ok(db_interface)

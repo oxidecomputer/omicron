@@ -9,6 +9,7 @@ use clap::{Parser, Subcommand};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use omicron_package::{parse, BuildCommand, DeployCommand};
+use omicron_sled_agent::cleanup_networking_resources;
 use omicron_sled_agent::zone;
 use omicron_zone_package::config::Config;
 use omicron_zone_package::config::ExternalPackage;
@@ -17,6 +18,10 @@ use omicron_zone_package::package::Package;
 use omicron_zone_package::package::Progress;
 use rayon::prelude::*;
 use ring::digest::{Context as DigestContext, Digest, SHA256};
+use slog::info;
+use slog::o;
+use slog::Drain;
+use slog::Logger;
 use std::env;
 use std::fs::create_dir_all;
 use std::path::{Path, PathBuf};
@@ -276,7 +281,12 @@ async fn do_package(config: &Config, output_directory: &Path) -> Result<()> {
                     .create_with_progress(&progress, &output_directory)
                     .await
                     .with_context(|| {
-                        format!("failed to create {package_name} in {output_directory:?}")
+                        let msg = format!("failed to create {package_name} in {output_directory:?}");
+                        if let Some(hint) = &package.setup_hint {
+                            format!("{msg}\nHint: {hint}")
+                        } else {
+                            msg
+                        }
                     })?;
                 progress.finish();
                 Ok(())
@@ -293,6 +303,7 @@ fn do_install(
     config: &Config,
     artifact_dir: &Path,
     install_dir: &Path,
+    log: &Logger,
 ) -> Result<()> {
     create_dir_all(&install_dir).map_err(|err| {
         anyhow!("Cannot create installation directory: {}", err)
@@ -318,18 +329,21 @@ fn do_install(
 
         let src = tarfile.as_path();
         let dst = install_dir.join(src.strip_prefix(artifact_dir)?);
-        println!(
-            "Installing Service: {} -> {}",
-            src.to_string_lossy(),
-            dst.to_string_lossy()
+        info!(
+            log,
+            "Installing service";
+            "src" => %src.to_string_lossy(),
+            "dst" => %dst.to_string_lossy(),
         );
         std::fs::copy(&src, &dst)?;
         Ok(())
     })?;
 
-    // Ensure we start from a clean slate - remove all zones & packages.
-    uninstall_all_packages(config);
-    uninstall_all_omicron_zones()?;
+    if env::var("OMICRON_NO_UNINSTALL").is_err() {
+        // Ensure we start from a clean slate - remove all zones & packages.
+        uninstall_all_packages(config);
+        uninstall_all_omicron_zones()?;
+    }
 
     // Extract all global zone services.
     let global_zone_service_names = config
@@ -341,10 +355,11 @@ fn do_install(
     for service_name in global_zone_service_names {
         let tar_path = install_dir.join(format!("{}.tar", service_name));
         let service_path = install_dir.join(service_name);
-        println!(
-            "Unpacking {} to {}",
-            tar_path.to_string_lossy(),
-            service_path.to_string_lossy()
+        info!(
+            log,
+            "Unpacking service tarball";
+            "tar_path" => %tar_path.to_string_lossy(),
+            "service_path" => %service_path.to_string_lossy(),
         );
 
         let tar_file = std::fs::File::open(&tar_path)?;
@@ -361,8 +376,9 @@ fn do_install(
             .join(&package.service_name)
             .join("pkg")
             .join("manifest.xml");
-        println!(
-            "Installing bootstrap service from {}",
+        info!(
+            log,
+            "Installing boostrap service from {}",
             manifest_path.to_string_lossy()
         );
         smf::Config::import().run(&manifest_path)?;
@@ -420,7 +436,11 @@ fn remove_all_unless_already_removed<P: AsRef<Path>>(path: P) -> Result<()> {
     Ok(())
 }
 
-fn remove_all_except<P: AsRef<Path>>(path: P, to_keep: &[&str]) -> Result<()> {
+fn remove_all_except<P: AsRef<Path>>(
+    path: P,
+    to_keep: &[&str],
+    log: &Logger,
+) -> Result<()> {
     let dir = match path.as_ref().read_dir() {
         Ok(dir) => dir,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -429,9 +449,9 @@ fn remove_all_except<P: AsRef<Path>>(path: P, to_keep: &[&str]) -> Result<()> {
     for entry in dir {
         let entry = entry?;
         if to_keep.contains(&&*(entry.file_name().to_string_lossy())) {
-            println!(" Keeping: '{}'", entry.path().to_string_lossy());
+            info!(log, "Keeping: '{}'", entry.path().to_string_lossy());
         } else {
-            println!(" Removing: '{}'", entry.path().to_string_lossy());
+            info!(log, "Removing: '{}'", entry.path().to_string_lossy());
             if entry.metadata()?.is_dir() {
                 remove_all_unless_already_removed(entry.path())?;
             } else {
@@ -442,27 +462,32 @@ fn remove_all_except<P: AsRef<Path>>(path: P, to_keep: &[&str]) -> Result<()> {
     Ok(())
 }
 
-fn do_uninstall(
+async fn do_uninstall(
     config: &Config,
     artifact_dir: &Path,
     install_dir: &Path,
+    log: &Logger,
 ) -> Result<()> {
-    println!("Removing all Omicron zones");
+    info!(log, "Removing all Omicron zones");
     uninstall_all_omicron_zones()?;
-    println!("Uninstalling all packages");
+    info!(log, "Uninstalling all packages");
     uninstall_all_packages(config);
-    println!("Removing artifacts in: {}", artifact_dir.to_string_lossy());
+    info!(log, "Removing artifacts in: {}", artifact_dir.to_string_lossy());
 
     const ARTIFACTS_TO_KEEP: &[&str] =
         &["clickhouse", "cockroachdb", "xde", "console-assets", "downloads"];
-    remove_all_except(artifact_dir, ARTIFACTS_TO_KEEP)?;
+    remove_all_except(artifact_dir, ARTIFACTS_TO_KEEP, log)?;
 
-    println!(
+    info!(
+        log,
         "Removing installed objects in: {}",
         install_dir.to_string_lossy()
     );
     const INSTALLED_OBJECTS_TO_KEEP: &[&str] = &["opte"];
-    remove_all_except(install_dir, INSTALLED_OBJECTS_TO_KEEP)?;
+    remove_all_except(install_dir, INSTALLED_OBJECTS_TO_KEEP, log)?;
+
+    cleanup_networking_resources(log).await?;
+
     Ok(())
 }
 
@@ -540,6 +565,11 @@ async fn main() -> Result<()> {
     let args = Args::try_parse()?;
     let config = parse::<_, Config>(&args.manifest)?;
 
+    let decorator = slog_term::TermDecorator::new().build();
+    let drain = slog_term::CompactFormat::new(decorator).build().fuse();
+    let drain = slog_async::Async::new(drain).build().fuse();
+    let log = slog::Logger::root(drain, o!());
+
     // Use a CWD that is the root of the Omicron repository.
     if let Ok(manifest) = env::var("CARGO_MANIFEST_DIR") {
         let manifest_dir = PathBuf::from(manifest);
@@ -556,13 +586,13 @@ async fn main() -> Result<()> {
             artifact_dir,
             install_dir,
         }) => {
-            do_install(&config, &artifact_dir, &install_dir)?;
+            do_install(&config, &artifact_dir, &install_dir, &log)?;
         }
         SubCommand::Deploy(DeployCommand::Uninstall {
             artifact_dir,
             install_dir,
         }) => {
-            do_uninstall(&config, &artifact_dir, &install_dir)?;
+            do_uninstall(&config, &artifact_dir, &install_dir, &log).await?;
         }
     }
 

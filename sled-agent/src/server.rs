@@ -7,13 +7,13 @@
 use super::config::Config;
 use super::http_entrypoints::api as http_api;
 use super::sled_agent::SledAgent;
-use crate::nexus::NexusClient;
+use crate::bootstrap::params::SledAgentRequest;
+use crate::nexus::LazyNexusClient;
 use omicron_common::backoff::{
-    internal_service_policy, retry_notify, BackoffError,
+    internal_service_policy_with_max, retry_notify, BackoffError,
 };
 use slog::Logger;
 use std::net::{SocketAddr, SocketAddrV6};
-use std::sync::Arc;
 use uuid::Uuid;
 
 /// Packages up a [`SledAgent`], running the sled agent API under a Dropshot
@@ -38,22 +38,22 @@ impl Server {
         config: &Config,
         log: Logger,
         addr: SocketAddrV6,
-        rack_id: Uuid,
+        is_scrimlet: bool,
+        request: SledAgentRequest,
     ) -> Result<Server, String> {
         info!(log, "setting up sled agent server");
 
         let client_log = log.new(o!("component" => "NexusClient"));
-        let nexus_client = Arc::new(NexusClient::new(
-            &format!("http://{}", config.nexus_address),
-            client_log,
-        ));
+
+        let lazy_nexus_client = LazyNexusClient::new(client_log, *addr.ip())
+            .map_err(|e| e.to_string())?;
 
         let sled_agent = SledAgent::new(
             &config,
             log.clone(),
-            nexus_client.clone(),
+            lazy_nexus_client.clone(),
             addr,
-            rack_id,
+            request,
         )
         .await
         .map_err(|e| e.to_string())?;
@@ -85,24 +85,37 @@ impl Server {
                     log,
                     "contacting server nexus, registering sled: {}", sled_id
                 );
+                let role = if is_scrimlet {
+                    nexus_client::types::SledRole::Scrimlet
+                } else {
+                    nexus_client::types::SledRole::Gimlet
+                };
+
+                let nexus_client = lazy_nexus_client
+                    .get()
+                    .await
+                    .map_err(|err| BackoffError::transient(err.to_string()))?;
                 nexus_client
-                    .cpapi_sled_agents_post(
+                    .sled_agent_put(
                         &sled_id,
                         &nexus_client::types::SledAgentStartupInfo {
                             sa_address: sled_address.to_string(),
+                            role,
                         },
                     )
                     .await
-                    .map_err(BackoffError::transient)
+                    .map_err(|err| BackoffError::transient(err.to_string()))
             };
-            let log_notification_failure = |_, delay| {
+            let log_notification_failure = |err, delay| {
                 warn!(
                     log,
-                    "failed to contact nexus, will retry in {:?}", delay;
+                    "failed to notify nexus about sled agent: {}, will retry in {:?}", err, delay;
                 );
             };
             retry_notify(
-                internal_service_policy(),
+                internal_service_policy_with_max(
+                    std::time::Duration::from_secs(1),
+                ),
                 notify_nexus,
                 log_notification_failure,
             )

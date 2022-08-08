@@ -104,9 +104,12 @@ pub struct DeploymentConfig {
     pub id: Uuid,
     /// Uuid of the Rack where Nexus is executing.
     pub rack_id: Uuid,
-    /// Dropshot configuration for external API server
-    pub dropshot_external: ConfigDropshot,
-    /// Dropshot configuration for internal API server
+    /// Dropshot configurations for external API server.
+    ///
+    /// Multiple configurations may be supplied to request
+    /// combinations of HTTP / HTTPS servers.
+    pub dropshot_external: Vec<ConfigDropshot>,
+    /// Dropshot configuration for internal API server.
     pub dropshot_internal: ConfigDropshot,
     /// Portion of the IP space to be managed by the Rack.
     pub subnet: Ipv6Subnet<RACK_PREFIX>,

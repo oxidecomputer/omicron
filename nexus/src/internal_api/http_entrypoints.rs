@@ -12,13 +12,13 @@ use super::params::{
 };
 use dropshot::endpoint;
 use dropshot::ApiDescription;
+use dropshot::FreeformBody;
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
-use http::{Response, StatusCode};
 use hyper::Body;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
@@ -36,7 +36,7 @@ type NexusApiDescription = ApiDescription<Arc<ServerContext>>;
 /// Returns a description of the internal nexus API
 pub fn internal_api() -> NexusApiDescription {
     fn register_endpoints(api: &mut NexusApiDescription) -> Result<(), String> {
-        api.register(cpapi_sled_agents_post)?;
+        api.register(sled_agent_put)?;
         api.register(rack_initialization_complete)?;
         api.register(zpool_put)?;
         api.register(dataset_put)?;
@@ -63,15 +63,11 @@ struct SledAgentPathParam {
 }
 
 /// Report that the sled agent for the specified sled has come online.
-// TODO: Should probably be "PUT", since:
-// 1. We're upserting the value
-// 2. The client supplies the UUID
-// 3. This call is idempotent (mod "time_modified").
 #[endpoint {
      method = POST,
-     path = "/sled_agents/{sled_id}",
+     path = "/sled-agents/{sled_id}",
  }]
-async fn cpapi_sled_agents_post(
+async fn sled_agent_put(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<SledAgentPathParam>,
     sled_info: TypedBody<SledAgentStartupInfo>,
@@ -79,10 +75,10 @@ async fn cpapi_sled_agents_post(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let si = sled_info.into_inner();
+    let info = sled_info.into_inner();
     let sled_id = &path.sled_id;
     let handler = async {
-        nexus.upsert_sled(*sled_id, si.sa_address).await?;
+        nexus.upsert_sled(*sled_id, info).await?;
         Ok(HttpResponseUpdatedNoContent())
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -99,7 +95,7 @@ struct RackPathParam {
 /// See RFD 278 for more details.
 #[endpoint {
      method = PUT,
-     path = "/racks/{rack_id}/initialization_complete",
+     path = "/racks/{rack_id}/initialization-complete",
  }]
 async fn rack_initialization_complete(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -127,7 +123,7 @@ struct ZpoolPathParam {
 /// Report that a pool for a specified sled has come online.
 #[endpoint {
      method = PUT,
-     path = "/sled_agents/{sled_id}/zpools/{zpool_id}",
+     path = "/sled-agents/{sled_id}/zpools/{zpool_id}",
  }]
 async fn zpool_put(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -299,7 +295,7 @@ async fn cpapi_metrics_collect(
 async fn cpapi_artifact_download(
     request_context: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<UpdateArtifact>,
-) -> Result<Response<Body>, HttpError> {
+) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
     let context = request_context.context();
     let nexus = &context.nexus;
     let opctx = OpContext::for_internal_api(&request_context).await;
@@ -307,5 +303,5 @@ async fn cpapi_artifact_download(
     let body =
         nexus.download_artifact(&opctx, path_params.into_inner()).await?;
 
-    Ok(Response::builder().status(StatusCode::OK).body(body.into())?)
+    Ok(HttpResponseOk(Body::from(body).into()))
 }

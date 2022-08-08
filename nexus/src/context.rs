@@ -16,10 +16,14 @@ use crate::saga_interface::SagaContext;
 use async_trait::async_trait;
 use authn::external::session_cookie::HttpAuthnSessionCookie;
 use authn::external::spoof::HttpAuthnSpoof;
+use authn::external::token::HttpAuthnToken;
 use authn::external::HttpAuthnScheme;
 use chrono::{DateTime, Duration, Utc};
+use internal_dns_client::names::{ServiceName, SRV};
+use omicron_common::address::{Ipv6Subnet, AZ_PREFIX, COCKROACH_PORT};
 use omicron_common::api::external::Error;
 use omicron_common::nexus_config;
+use omicron_common::postgres_config::PostgresConfigWithUrl;
 use oximeter::types::ProducerRegistry;
 use oximeter_instruments::http::{HttpService, LatencyTracker};
 use slog::Logger;
@@ -27,6 +31,7 @@ use std::collections::BTreeMap;
 use std::env;
 use std::fmt::Debug;
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
 use std::time::SystemTime;
@@ -68,7 +73,7 @@ pub struct ConsoleConfig {
 impl ServerContext {
     /// Create a new context with the given rack id and log.  This creates the
     /// underlying nexus as well.
-    pub fn new(
+    pub async fn new(
         rack_id: Uuid,
         log: Logger,
         config: &config::Config,
@@ -84,6 +89,7 @@ impl ServerContext {
                     config::SchemeName::SessionCookie => {
                         Box::new(HttpAuthnSessionCookie)
                     }
+                    config::SchemeName::AccessToken => Box::new(HttpAuthnToken),
                 }
             })
             .collect();
@@ -136,23 +142,44 @@ impl ServerContext {
         // like console index.html. leaving that out for now so we don't break
         // nexus in dev for everyone
 
+        // Set up DNS Client
+        let az_subnet =
+            Ipv6Subnet::<AZ_PREFIX>::new(config.deployment.subnet.net().ip());
+        info!(log, "Setting up resolver on subnet: {:?}", az_subnet);
+        let resolver =
+            internal_dns_client::multiclient::Resolver::new(&az_subnet)
+                .map_err(|e| format!("Failed to create DNS resolver: {}", e))?;
+
         // Set up DB pool
         let url = match &config.deployment.database {
             nexus_config::Database::FromUrl { url } => url.clone(),
             nexus_config::Database::FromDns => {
-                todo!("Not yet implemented");
+                info!(log, "Accessing DB url from DNS");
+                let address = resolver
+                    .lookup_ipv6(SRV::Service(ServiceName::Cockroach))
+                    .await
+                    .map_err(|e| format!("Failed to lookup IP: {}", e))?;
+                info!(log, "DB address: {}", address);
+                PostgresConfigWithUrl::from_str(&format!(
+                    "postgresql://root@[{}]:{}/omicron?sslmode=disable",
+                    address, COCKROACH_PORT
+                ))
+                .map_err(|e| format!("Cannot parse Postgres URL: {}", e))?
             }
         };
         let pool = db::Pool::new(&db::Config { url });
+        let nexus = Nexus::new_with_id(
+            rack_id,
+            log.new(o!("component" => "nexus")),
+            resolver,
+            pool,
+            config,
+            Arc::clone(&authz),
+        )
+        .await;
 
         Ok(Arc::new(ServerContext {
-            nexus: Nexus::new_with_id(
-                rack_id,
-                log.new(o!("component" => "nexus")),
-                pool,
-                config,
-                Arc::clone(&authz),
-            ),
+            nexus,
             log,
             external_authn,
             internal_authn,
@@ -288,16 +315,12 @@ impl OpContext {
 
         let log = if let Some(actor) = authn.actor() {
             let actor_id = actor.actor_id();
-            let actor_type = actor.actor_type();
             metadata
                 .insert(String::from("authenticated"), String::from("true"));
-            metadata.insert(
-                String::from("actor_type"),
-                format!("{:?}", actor_type),
-            );
-            metadata.insert(String::from("actor_id"), actor_id.to_string());
+            metadata.insert(String::from("actor"), format!("{:?}", actor));
+
             log.new(
-                o!("authenticated" => true, "actor" => actor_id.to_string()),
+                o!("authenticated" => true, "actor_id" => actor_id.to_string()),
             )
         } else {
             metadata
@@ -340,17 +363,14 @@ impl OpContext {
         let (log, mut metadata) =
             OpContext::log_and_metadata_for_authn(osagactx.log(), &authn);
 
-        // TODO-debugging This would be a good place to put the saga template
-        // name, but we don't have it available here.  This log maybe should
-        // come from steno, prepopulated with useful metadata similar to the
-        // way dropshot::RequestContext does.
+        // TODO-debugging This would be a good place to put the saga name, but
+        // we don't have it available here.  This log maybe should come from
+        // steno, prepopulated with useful metadata similar to the way
+        // dropshot::RequestContext does.
         let log = log.new(o!(
-            "saga_node" => sagactx.node_label().to_string(),
+            "saga_node" => sagactx.node_label(),
         ));
-        metadata.insert(
-            String::from("saga_node"),
-            sagactx.node_label().to_string(),
-        );
+        metadata.insert(String::from("saga_node"), sagactx.node_label());
 
         OpContext {
             log,
@@ -426,7 +446,7 @@ impl OpContext {
         resource: &Resource,
     ) -> Result<(), Error>
     where
-        Resource: AuthorizedResource + Debug + Clone,
+        Resource: AuthorizedResource + Debug + Clone + oso::PolarClass,
     {
         // TODO-cleanup In an ideal world, Oso would consume &Action and
         // &Resource.  Instead, it consumes owned types.  As a result, they're
@@ -514,13 +534,24 @@ mod test {
 }
 
 #[async_trait]
-impl authn::external::spoof::SpoofContext for Arc<ServerContext> {
+impl authn::external::SiloUserSilo for Arc<ServerContext> {
     async fn silo_user_silo(
         &self,
         silo_user_id: Uuid,
     ) -> Result<Uuid, authn::Reason> {
         let opctx = self.nexus.opctx_external_authn();
         self.nexus.lookup_silo_for_authn(opctx, silo_user_id).await
+    }
+}
+
+#[async_trait]
+impl authn::external::token::TokenContext for Arc<ServerContext> {
+    async fn token_actor(
+        &self,
+        token: String,
+    ) -> Result<authn::Actor, authn::Reason> {
+        let opctx = self.nexus.opctx_external_authn();
+        self.nexus.device_access_token_actor(opctx, token).await
     }
 }
 

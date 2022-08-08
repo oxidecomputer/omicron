@@ -10,12 +10,11 @@ use nexus_client::types::{
     InstanceRuntimeState, SledAgentStartupInfo, UpdateArtifactKind,
     ZpoolPutRequest, ZpoolPutResponse,
 };
-use reqwest::Response;
 use slog::Logger;
 use uuid::Uuid;
 
 type Result<T> = std::result::Result<
-    T,
+    progenitor::progenitor_client::ResponseValue<T>,
     progenitor::progenitor_client::Error<nexus_client::types::Error>,
 >;
 
@@ -24,7 +23,7 @@ mock! {
         pub fn new(server_addr: &str, log: Logger) -> Self;
         pub fn client(&self) -> reqwest::Client;
         pub fn baseurl(&self) -> &'static str;
-        pub async fn cpapi_sled_agents_post(
+        pub async fn sled_agent_put(
             &self,
             id: &Uuid,
             info: &SledAgentStartupInfo,
@@ -44,7 +43,7 @@ mock! {
             kind: UpdateArtifactKind,
             name: &str,
             version: i64,
-        ) -> Result<Response>;
+        ) -> Result<progenitor::progenitor_client::ByteStream>;
         pub async fn zpool_put(
             &self,
             sled_id: &Uuid,

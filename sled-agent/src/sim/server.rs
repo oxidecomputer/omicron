@@ -46,6 +46,7 @@ impl Server {
         let sled_agent = Arc::new(SledAgent::new_simulated_with_id(
             &config,
             sa_log,
+            config.nexus_address,
             Arc::clone(&nexus_client),
         ));
 
@@ -70,10 +71,11 @@ impl Server {
         let notify_nexus = || async {
             debug!(log, "contacting server nexus");
             (nexus_client
-                .cpapi_sled_agents_post(
+                .sled_agent_put(
                     &config.id,
                     &nexus_client::types::SledAgentStartupInfo {
                         sa_address: sa_address.to_string(),
+                        role: nexus_client::types::SledRole::Gimlet,
                     },
                 )
                 .await)

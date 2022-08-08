@@ -10,7 +10,7 @@ use crate::{Responsiveness, SimulatedSp};
 use anyhow::{anyhow, bail, Context, Result};
 use async_trait::async_trait;
 use futures::future;
-use gateway_messages::sp_impl::{SerialConsolePacketizer, SpHandler, SpServer};
+use gateway_messages::sp_impl::{SerialConsolePacketizer, SpHandler};
 use gateway_messages::version;
 use gateway_messages::DiscoverResponse;
 use gateway_messages::ResponseError;
@@ -416,7 +416,7 @@ impl UdpTask {
     }
 
     async fn run(mut self) -> Result<()> {
-        let mut server = SpServer::default();
+        let mut out_buf = [0; SpMessage::MAX_SIZE];
         let mut responsiveness = Responsiveness::Responsive;
         loop {
             select! {
@@ -424,7 +424,7 @@ impl UdpTask {
                     if let Some((resp, addr)) = server::handle_request(
                         &mut self.handler,
                         recv0,
-                        &mut server,
+                        &mut out_buf,
                         responsiveness,
                         SpPort::One,
                     ).await? {
@@ -436,7 +436,7 @@ impl UdpTask {
                     if let Some((resp, addr)) = server::handle_request(
                         &mut self.handler,
                         recv1,
-                        &mut server,
+                        &mut out_buf,
                         responsiveness,
                         SpPort::Two,
                     ).await? {

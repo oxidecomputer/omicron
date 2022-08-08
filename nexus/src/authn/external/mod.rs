@@ -7,10 +7,12 @@
 use crate::authn;
 use async_trait::async_trait;
 use authn::Reason;
+use uuid::Uuid;
 
 pub mod cookies;
 pub mod session_cookie;
 pub mod spoof;
+pub mod token;
 
 /// Authenticates incoming HTTP requests using schemes intended for use by the
 /// external API
@@ -109,6 +111,12 @@ pub enum SchemeResult {
     Authenticated(super::Details),
     /// The client tried and failed to authenticate
     Failed(Reason),
+}
+
+/// A context that can look up a Silo user's Silo.
+#[async_trait]
+pub trait SiloUserSilo {
+    async fn silo_user_silo(&self, silo_user_id: Uuid) -> Result<Uuid, Reason>;
 }
 
 #[cfg(test)]

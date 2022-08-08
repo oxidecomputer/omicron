@@ -45,10 +45,11 @@ pub struct UpdatesConfig {
     pub default_base_url: String,
 }
 
-/// Configuration for the timeseries database.
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+/// Optional configuration for the timeseries database.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct TimeseriesDbConfig {
-    pub address: SocketAddr,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub address: Option<SocketAddr>,
 }
 
 // A deserializable type that does no validation on the tunable parameters.
@@ -83,15 +84,17 @@ impl TryFrom<UnvalidatedTunables> for Tunables {
 
 impl Tunables {
     fn validate_ipv4_prefix(prefix: u8) -> Result<(), InvalidTunable> {
-        let absolute_max: u8 = 32_u8.checked_sub(
-            // Always need space for the reserved Oxide addresses, including the
-            // broadcast address at the end of the subnet.
-            ((crate::defaults::NUM_INITIAL_RESERVED_IP_ADDRESSES + 1) as f32)
+        let absolute_max: u8 = 32_u8
+            .checked_sub(
+                // Always need space for the reserved Oxide addresses, including the
+                // broadcast address at the end of the subnet.
+                ((nexus_defaults::NUM_INITIAL_RESERVED_IP_ADDRESSES + 1) as f32)
                 .log2() // Subnet size to bit prefix.
                 .ceil() // Round up to a whole number of bits.
-                as u8
-            ).expect("Invalid absolute maximum IPv4 subnet prefix");
-        if prefix >= crate::defaults::MIN_VPC_IPV4_SUBNET_PREFIX
+                as u8,
+            )
+            .expect("Invalid absolute maximum IPv4 subnet prefix");
+        if prefix >= nexus_defaults::MIN_VPC_IPV4_SUBNET_PREFIX
             && prefix <= absolute_max
         {
             Ok(())
@@ -132,7 +135,7 @@ pub struct PackageConfig {
     /// Authentication-related configuration
     pub authn: AuthnConfig,
     /// Timeseries database configuration.
-    // TODO: Should this be removed? Nexus needs to initialize it.
+    #[serde(default)]
     pub timeseries_db: TimeseriesDbConfig,
     /// Updates-related configuration. Updates APIs return 400 Bad Request when this is
     /// unconfigured.
@@ -179,6 +182,7 @@ impl Config {
 pub enum SchemeName {
     Spoof,
     SessionCookie,
+    AccessToken,
 }
 
 impl std::str::FromStr for SchemeName {
@@ -188,6 +192,7 @@ impl std::str::FromStr for SchemeName {
         match s {
             "spoof" => Ok(SchemeName::Spoof),
             "session_cookie" => Ok(SchemeName::SessionCookie),
+            "access_token" => Ok(SchemeName::AccessToken),
             _ => Err(anyhow!("unsupported authn scheme: {:?}", s)),
         }
     }
@@ -198,6 +203,7 @@ impl std::fmt::Display for SchemeName {
         f.write_str(match self {
             SchemeName::Spoof => "spoof",
             SchemeName::SessionCookie => "session_cookie",
+            SchemeName::AccessToken => "access_token",
         })
     }
 }
@@ -330,7 +336,7 @@ mod test {
             [deployment]
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
-            [deployment.dropshot_external]
+            [[deployment.dropshot_external]]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
             [deployment.dropshot_internal]
@@ -352,12 +358,12 @@ mod test {
                     rack_id: "38b90dc4-c22a-65ba-f49a-f051fe01208f"
                         .parse()
                         .unwrap(),
-                    dropshot_external: ConfigDropshot {
+                    dropshot_external: vec![ConfigDropshot {
                         bind_address: "10.1.2.3:4567"
                             .parse::<SocketAddr>()
                             .unwrap(),
                         ..Default::default()
-                    },
+                    },],
                     dropshot_internal: ConfigDropshot {
                         bind_address: "10.1.2.3:4568"
                             .parse::<SocketAddr>()
@@ -381,7 +387,7 @@ mod test {
                         path: "/nonexistent/path".to_string()
                     },
                     timeseries_db: TimeseriesDbConfig {
-                        address: "[::1]:8123".parse().unwrap()
+                        address: Some("[::1]:8123".parse().unwrap())
                     },
                     updates: Some(UpdatesConfig {
                         trusted_root: PathBuf::from("/path/to/root.json"),
@@ -412,7 +418,7 @@ mod test {
             [deployment]
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
-            [deployment.dropshot_external]
+            [[deployment.dropshot_external]]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
             [deployment.dropshot_internal]
@@ -454,7 +460,7 @@ mod test {
             [deployment]
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
-            [deployment.dropshot_external]
+            [[deployment.dropshot_external]]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
             [deployment.dropshot_internal]
@@ -510,7 +516,7 @@ mod test {
             [deployment]
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
-            [deployment.dropshot_external]
+            [[deployment.dropshot_external]]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
             [deployment.dropshot_internal]
@@ -533,5 +539,51 @@ mod test {
                 error
             );
         }
+    }
+
+    #[test]
+    fn test_repo_configs_are_valid() {
+        // The example config file should be valid.
+        let config_path = "examples/config.toml";
+        println!("checking {:?}", config_path);
+        let example_config = Config::from_file(config_path)
+            .expect("example config file is not valid");
+
+        // The config file used for the tests should also be valid.  The tests
+        // won't clear the runway anyway if this file isn't valid.  But it's
+        // helpful to verify this here explicitly as well.
+        let config_path = "examples/config.toml";
+        println!("checking {:?}", config_path);
+        let _ = Config::from_file(config_path)
+            .expect("test config file is not valid");
+
+        // The partial config file that's used to deploy Nexus must also be
+        // valid.  However, it's missing the "deployment" section because that's
+        // generated at deployment time.  We'll serialize this section from the
+        // example config file (loaded above), append it to the contents of this
+        // file, and verify the whole thing.
+        #[derive(serde::Serialize)]
+        struct DummyConfig {
+            deployment: DeploymentConfig,
+        }
+        let config_path = "../smf/nexus/config-partial.toml";
+        println!(
+            "checking {:?} with example deployment section added",
+            config_path
+        );
+        let mut contents = std::fs::read_to_string(config_path)
+            .expect("failed to read Nexus SMF config file");
+        contents.push_str(
+            "\n\n\n \
+            # !! content below added by test_repo_configs_are_valid()\n\
+            \n\n\n",
+        );
+        let example_deployment = toml::to_string_pretty(&DummyConfig {
+            deployment: example_config.deployment,
+        })
+        .unwrap();
+        contents.push_str(&example_deployment);
+        let _: Config = toml::from_str(&contents)
+            .expect("Nexus SMF config file is not valid");
     }
 }

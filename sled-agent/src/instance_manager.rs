@@ -6,13 +6,14 @@
 
 use crate::illumos::dladm::Etherstub;
 use crate::illumos::vnic::VnicAllocator;
-use crate::nexus::NexusClient;
-use crate::opte::OptePortAllocator;
+use crate::nexus::LazyNexusClient;
+use crate::opte::PortManager;
 use crate::params::{
     InstanceHardware, InstanceMigrateParams, InstanceRuntimeStateRequested,
     InstanceSerialConsoleData,
 };
 use crate::serial::ByteOffset;
+use macaddr::MacAddr6;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use slog::Logger;
 use std::collections::BTreeMap;
@@ -32,11 +33,14 @@ pub enum Error {
 
     #[error("No such instance ID: {0}")]
     NoSuchInstance(Uuid),
+
+    #[error("OPTE port management error: {0}")]
+    Opte(#[from] crate::opte::Error),
 }
 
 struct InstanceManagerInternal {
     log: Logger,
-    nexus_client: Arc<NexusClient>,
+    lazy_nexus_client: LazyNexusClient,
 
     // TODO: If we held an object representing an enum of "Created OR Running"
     // instance, we could avoid the methods within "instance.rs" that panic
@@ -44,9 +48,8 @@ struct InstanceManagerInternal {
     /// A mapping from a Sled Agent "Instance ID" to ("Propolis ID", [Instance]).
     instances: Mutex<BTreeMap<Uuid, (Uuid, Instance)>>,
 
-    vnic_allocator: VnicAllocator,
-    underlay_addr: Ipv6Addr,
-    port_allocator: OptePortAllocator,
+    vnic_allocator: VnicAllocator<Etherstub>,
+    port_manager: PortManager,
 }
 
 /// All instances currently running on the sled.
@@ -58,18 +61,22 @@ impl InstanceManager {
     /// Initializes a new [`InstanceManager`] object.
     pub fn new(
         log: Logger,
-        nexus_client: Arc<NexusClient>,
+        lazy_nexus_client: LazyNexusClient,
         etherstub: Etherstub,
-        underlay_addr: Ipv6Addr,
+        underlay_ip: Ipv6Addr,
+        gateway_mac: MacAddr6,
     ) -> InstanceManager {
         InstanceManager {
             inner: Arc::new(InstanceManagerInternal {
                 log: log.new(o!("component" => "InstanceManager")),
-                nexus_client,
+                lazy_nexus_client,
                 instances: Mutex::new(BTreeMap::new()),
                 vnic_allocator: VnicAllocator::new("Instance", etherstub),
-                underlay_addr,
-                port_allocator: OptePortAllocator::new(),
+                port_manager: PortManager::new(
+                    log.new(o!("component" => "PortManager")),
+                    underlay_ip,
+                    gateway_mac,
+                ),
             }),
         }
     }
@@ -120,11 +127,10 @@ impl InstanceManager {
                     let instance = Instance::new(
                         instance_log,
                         instance_id,
-                        self.inner.vnic_allocator.clone(),
-                        self.inner.underlay_addr,
-                        self.inner.port_allocator.clone(),
                         initial_hardware,
-                        self.inner.nexus_client.clone(),
+                        self.inner.vnic_allocator.clone(),
+                        self.inner.port_manager.clone(),
+                        self.inner.lazy_nexus_client.clone(),
                     )?;
                     let instance_clone = instance.clone();
                     let old_instance = instances
@@ -223,26 +229,23 @@ mod test {
     use crate::illumos::dladm::Etherstub;
     use crate::illumos::{dladm::MockDladm, zone::MockZones};
     use crate::instance::MockInstance;
-    use crate::mocks::MockNexusClient;
+    use crate::nexus::LazyNexusClient;
     use crate::params::InstanceStateRequested;
+    use crate::params::SourceNatConfig;
     use chrono::Utc;
+    use macaddr::MacAddr6;
     use omicron_common::api::external::{
         ByteCount, Generation, InstanceCpuCount, InstanceState,
     };
     use omicron_common::api::internal::nexus::InstanceRuntimeState;
+    use omicron_test_utils::dev::test_setup_log;
+    use std::net::IpAddr;
+    use std::net::Ipv4Addr;
 
     static INST_UUID_STR: &str = "e398c5d5-5059-4e55-beac-3a1071083aaa";
 
     fn test_uuid() -> Uuid {
         INST_UUID_STR.parse().unwrap()
-    }
-
-    fn logger() -> Logger {
-        dropshot::ConfigLogging::StderrTerminal {
-            level: dropshot::ConfigLoggingLevel::Info,
-        }
-        .to_logger("test-logger")
-        .unwrap()
     }
 
     fn new_initial_instance() -> InstanceHardware {
@@ -261,6 +264,12 @@ mod test {
                 time_updated: Utc::now(),
             },
             nics: vec![],
+            source_nat: SourceNatConfig {
+                ip: IpAddr::from(Ipv4Addr::new(10, 0, 0, 1)),
+                first_port: 0,
+                last_port: 1 << 14 - 1,
+            },
+            external_ips: vec![],
             disks: vec![],
             cloud_init_bytes: None,
         }
@@ -269,8 +278,11 @@ mod test {
     #[tokio::test]
     #[serial_test::serial]
     async fn ensure_instance() {
-        let log = logger();
-        let nexus_client = Arc::new(MockNexusClient::default());
+        let logctx = test_setup_log("ensure_instance");
+        let log = &logctx.log;
+        let lazy_nexus_client =
+            LazyNexusClient::new(log.clone(), std::net::Ipv6Addr::LOCALHOST)
+                .unwrap();
 
         // Creation of the instance manager incurs some "global" system
         // checks: cleanup of existing zones + vnics.
@@ -282,12 +294,13 @@ mod test {
         dladm_get_vnics_ctx.expect().return_once(|| Ok(vec![]));
 
         let im = InstanceManager::new(
-            log,
-            nexus_client,
+            log.clone(),
+            lazy_nexus_client,
             Etherstub("mylink".to_string()),
             std::net::Ipv6Addr::new(
                 0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
             ),
+            MacAddr6::from([0u8; 6]),
         );
 
         // Verify that no instances exist.
@@ -305,7 +318,7 @@ mod test {
         let ticket = Arc::new(std::sync::Mutex::new(None));
         let ticket_clone = ticket.clone();
         let instance_new_ctx = MockInstance::new_context();
-        instance_new_ctx.expect().return_once(move |_, _, _, _, _, _, _| {
+        instance_new_ctx.expect().return_once(move |_, _, _, _, _, _| {
             let mut inst = MockInstance::default();
             inst.expect_clone().return_once(move || {
                 let mut inst = MockInstance::default();
@@ -347,13 +360,18 @@ mod test {
         // the entry is automatically removed from the instance manager.
         ticket.lock().unwrap().take();
         assert_eq!(im.inner.instances.lock().unwrap().len(), 0);
+
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
     #[serial_test::serial]
     async fn ensure_instance_repeatedly() {
-        let log = logger();
-        let nexus_client = Arc::new(MockNexusClient::default());
+        let logctx = test_setup_log("ensure_instance_repeatedly");
+        let log = &logctx.log;
+        let lazy_nexus_client =
+            LazyNexusClient::new(log.clone(), std::net::Ipv6Addr::LOCALHOST)
+                .unwrap();
 
         // Instance Manager creation.
 
@@ -364,19 +382,20 @@ mod test {
         dladm_get_vnics_ctx.expect().return_once(|| Ok(vec![]));
 
         let im = InstanceManager::new(
-            log,
-            nexus_client,
+            log.clone(),
+            lazy_nexus_client,
             Etherstub("mylink".to_string()),
             std::net::Ipv6Addr::new(
                 0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
             ),
+            MacAddr6::from([0u8; 6]),
         );
 
         let ticket = Arc::new(std::sync::Mutex::new(None));
         let ticket_clone = ticket.clone();
         let instance_new_ctx = MockInstance::new_context();
         let mut seq = mockall::Sequence::new();
-        instance_new_ctx.expect().return_once(move |_, _, _, _, _, _, _| {
+        instance_new_ctx.expect().return_once(move |_, _, _, _, _, _| {
             let mut inst = MockInstance::default();
             // First call to ensure (start + transition).
             inst.expect_clone().times(1).in_sequence(&mut seq).return_once(
@@ -427,5 +446,7 @@ mod test {
         assert_eq!(im.inner.instances.lock().unwrap().len(), 1);
         ticket.lock().unwrap().take();
         assert_eq!(im.inner.instances.lock().unwrap().len(), 0);
+
+        logctx.cleanup_successful();
     }
 }

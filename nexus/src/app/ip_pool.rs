@@ -15,8 +15,10 @@ use ipnetwork::IpNetwork;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
+use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use uuid::Uuid;
 
@@ -26,7 +28,16 @@ impl super::Nexus {
         opctx: &OpContext,
         new_pool: &params::IpPoolCreate,
     ) -> CreateResult<db::model::IpPool> {
-        self.db_datastore.ip_pool_create(opctx, new_pool).await
+        self.db_datastore.ip_pool_create(opctx, new_pool, None).await
+    }
+
+    pub async fn ip_pool_services_create(
+        &self,
+        opctx: &OpContext,
+        new_pool: &params::IpPoolCreate,
+        rack_id: Uuid,
+    ) -> CreateResult<db::model::IpPool> {
+        self.db_datastore.ip_pool_create(opctx, new_pool, Some(rack_id)).await
     }
 
     pub async fn ip_pools_list_by_name(
@@ -91,10 +102,18 @@ impl super::Nexus {
         pool_name: &Name,
         pagparams: &DataPageParams<'_, IpNetwork>,
     ) -> ListResultVec<db::model::IpPoolRange> {
-        let (.., authz_pool) = LookupPath::new(opctx, &self.db_datastore)
-            .ip_pool_name(pool_name)
-            .lookup_for(authz::Action::ListChildren)
-            .await?;
+        let (.., authz_pool, db_pool) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .ip_pool_name(pool_name)
+                .fetch_for(authz::Action::ListChildren)
+                .await?;
+        if db_pool.rack_id.is_some() {
+            return Err(Error::not_found_by_name(
+                ResourceType::IpPool,
+                pool_name,
+            ));
+        }
+
         self.db_datastore
             .ip_pool_list_ranges(opctx, &authz_pool, pagparams)
             .await
@@ -106,11 +125,20 @@ impl super::Nexus {
         pool_name: &Name,
         range: &IpRange,
     ) -> UpdateResult<db::model::IpPoolRange> {
-        let (.., authz_pool) = LookupPath::new(opctx, &self.db_datastore)
-            .ip_pool_name(pool_name)
-            .lookup_for(authz::Action::Modify)
-            .await?;
-        self.db_datastore.ip_pool_add_range(opctx, &authz_pool, range).await
+        let (.., authz_pool, db_pool) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .ip_pool_name(pool_name)
+                .fetch_for(authz::Action::Modify)
+                .await?;
+        if db_pool.rack_id.is_some() {
+            return Err(Error::not_found_by_name(
+                ResourceType::IpPool,
+                pool_name,
+            ));
+        }
+        self.db_datastore
+            .ip_pool_add_range(opctx, &authz_pool, &db_pool, range)
+            .await
     }
 
     pub async fn ip_pool_delete_range(
@@ -119,10 +147,83 @@ impl super::Nexus {
         pool_name: &Name,
         range: &IpRange,
     ) -> DeleteResult {
-        let (.., authz_pool) = LookupPath::new(opctx, &self.db_datastore)
-            .ip_pool_name(pool_name)
-            .lookup_for(authz::Action::Modify)
+        let (.., authz_pool, db_pool) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .ip_pool_name(pool_name)
+                .fetch_for(authz::Action::Modify)
+                .await?;
+        if db_pool.rack_id.is_some() {
+            return Err(Error::not_found_by_name(
+                ResourceType::IpPool,
+                pool_name,
+            ));
+        }
+        self.db_datastore.ip_pool_delete_range(opctx, &authz_pool, range).await
+    }
+
+    // The "ip_pool_service_..." functions look up IP pools for Oxide service usage,
+    // rather than for VMs. As such, they're identified by rack UUID, not
+    // by pool names.
+    //
+    // TODO(https://github.com/oxidecomputer/omicron/issues/1276): Should be
+    // AZ UUID, probably.
+
+    pub async fn ip_pool_service_fetch(
+        &self,
+        opctx: &OpContext,
+        rack_id: Uuid,
+    ) -> LookupResult<db::model::IpPool> {
+        let (authz_pool, db_pool) = self
+            .db_datastore
+            .ip_pools_lookup_by_rack_id(opctx, rack_id)
             .await?;
+        opctx.authorize(authz::Action::Read, &authz_pool).await?;
+        Ok(db_pool)
+    }
+
+    pub async fn ip_pool_service_list_ranges(
+        &self,
+        opctx: &OpContext,
+        rack_id: Uuid,
+        pagparams: &DataPageParams<'_, IpNetwork>,
+    ) -> ListResultVec<db::model::IpPoolRange> {
+        let (authz_pool, ..) = self
+            .db_datastore
+            .ip_pools_lookup_by_rack_id(opctx, rack_id)
+            .await?;
+        opctx.authorize(authz::Action::Read, &authz_pool).await?;
+        self.db_datastore
+            .ip_pool_list_ranges(opctx, &authz_pool, pagparams)
+            .await
+    }
+
+    pub async fn ip_pool_service_add_range(
+        &self,
+        opctx: &OpContext,
+        rack_id: Uuid,
+        range: &IpRange,
+    ) -> UpdateResult<db::model::IpPoolRange> {
+        let (authz_pool, db_pool) = self
+            .db_datastore
+            .ip_pools_lookup_by_rack_id(opctx, rack_id)
+            .await?;
+        opctx.authorize(authz::Action::Modify, &authz_pool).await?;
+        self.db_datastore
+            .ip_pool_add_range(opctx, &authz_pool, &db_pool, range)
+            .await
+    }
+
+    pub async fn ip_pool_service_delete_range(
+        &self,
+        opctx: &OpContext,
+        rack_id: Uuid,
+        range: &IpRange,
+    ) -> DeleteResult {
+        let (authz_pool, ..) = self
+            .db_datastore
+            .ip_pools_lookup_by_rack_id(opctx, rack_id)
+            .await?;
+        opctx.authorize(authz::Action::Modify, &authz_pool).await?;
         self.db_datastore.ip_pool_delete_range(opctx, &authz_pool, range).await
     }
 }

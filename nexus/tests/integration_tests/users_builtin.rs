@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 async fn test_users_builtin(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
-    let mut users = NexusRequest::object_get(&testctx, "/users_builtin")
+    let mut users = NexusRequest::object_get(testctx, "/system/user")
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await

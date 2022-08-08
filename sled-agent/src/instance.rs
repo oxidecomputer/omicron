@@ -5,6 +5,7 @@
 //! API for controlling a single instance.
 
 use crate::common::instance::{Action as InstanceAction, InstanceStates};
+use crate::illumos::dladm::Etherstub;
 use crate::illumos::running_zone::{
     InstalledZone, RunCommandError, RunningZone,
 };
@@ -12,10 +13,11 @@ use crate::illumos::svc::wait_for_service;
 use crate::illumos::vnic::VnicAllocator;
 use crate::illumos::zone::{AddressRequest, PROPOLIS_ZONE_PREFIX};
 use crate::instance_manager::InstanceTicket;
-use crate::nexus::NexusClient;
-use crate::opte::OptePort;
-use crate::opte::OptePortAllocator;
+use crate::nexus::LazyNexusClient;
+use crate::opte::PortManager;
+use crate::opte::PortTicket;
 use crate::params::NetworkInterface;
+use crate::params::SourceNatConfig;
 use crate::params::{
     InstanceHardware, InstanceMigrateParams, InstanceRuntimeStateRequested,
     InstanceSerialConsoleData,
@@ -23,6 +25,7 @@ use crate::params::{
 use crate::serial::{ByteOffset, SerialConsoleBuffer};
 use anyhow::anyhow;
 use futures::lock::{Mutex, MutexGuard};
+use omicron_common::address::NEXUS_INTERNAL_PORT;
 use omicron_common::address::PROPOLIS_PORT;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::backoff;
@@ -30,7 +33,6 @@ use propolis_client::api::DiskRequest;
 use propolis_client::Client as PropolisClient;
 use slog::Logger;
 use std::net::IpAddr;
-use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::task::JoinHandle;
@@ -84,6 +86,9 @@ pub enum Error {
 
     #[error("Serial console buffer: {0}")]
     Serial(#[from] crate::serial::Error),
+
+    #[error("Error resolving DNS name: {0}")]
+    ResolveError(#[from] internal_dns_client::multiclient::ResolveError),
 }
 
 // Issues read-only, idempotent HTTP requests at propolis until it responds with
@@ -155,7 +160,9 @@ struct RunningState {
     // Connection to Propolis.
     client: Arc<PropolisClient>,
     // Object representing membership in the "instance manager".
-    ticket: InstanceTicket,
+    instance_ticket: InstanceTicket,
+    // Objects representing the instance's OPTE ports in the port manager
+    port_tickets: Option<Vec<PortTicket>>,
     // Handle to task monitoring for Propolis state changes.
     monitor_task: Option<JoinHandle<()>>,
     // Handle to the zone.
@@ -188,6 +195,7 @@ impl Drop for RunningState {
 struct PropolisSetup {
     client: Arc<PropolisClient>,
     running_zone: RunningZone,
+    port_tickets: Option<Vec<PortTicket>>,
 }
 
 struct InstanceInner {
@@ -203,12 +211,16 @@ struct InstanceInner {
     propolis_ip: IpAddr,
 
     // NIC-related properties
-    vnic_allocator: VnicAllocator,
+    vnic_allocator: VnicAllocator<Etherstub>,
 
-    // OPTE port related properties
-    underlay_addr: Ipv6Addr,
-    port_allocator: OptePortAllocator,
+    // Reference to the port manager for creating OPTE ports when starting the
+    // instance
+    port_manager: PortManager,
+
+    // Guest NIC and OPTE port information
     requested_nics: Vec<NetworkInterface>,
+    source_nat: SourceNatConfig,
+    external_ips: Vec<IpAddr>,
 
     // Disk related properties
     requested_disks: Vec<DiskRequest>,
@@ -222,7 +234,7 @@ struct InstanceInner {
     serial_tty_task: Option<SerialConsoleBuffer>,
 
     // Connection to Nexus
-    nexus_client: Arc<NexusClient>,
+    lazy_nexus_client: LazyNexusClient,
 }
 
 impl InstanceInner {
@@ -251,7 +263,9 @@ impl InstanceInner {
         );
 
         // Notify Nexus of the state change.
-        self.nexus_client
+        self.lazy_nexus_client
+            .get()
+            .await?
             .cpapi_instances_put(
                 self.id(),
                 &nexus_client::types::InstanceRuntimeState::from(
@@ -285,21 +299,20 @@ impl InstanceInner {
     async fn ensure(
         &mut self,
         instance: Instance,
-        ticket: InstanceTicket,
+        instance_ticket: InstanceTicket,
         setup: PropolisSetup,
         migrate: Option<InstanceMigrateParams>,
     ) -> Result<(), Error> {
-        let PropolisSetup { client, running_zone } = setup;
+        let PropolisSetup { client, running_zone, port_tickets } = setup;
 
-        let nics = self
-            .requested_nics
+        let nics = running_zone
+            .opte_ports()
             .iter()
-            .zip(running_zone.get_opte_ports().iter())
-            .map(|(nic, port)| propolis_client::api::NetworkInterfaceRequest {
+            .map(|port| propolis_client::api::NetworkInterfaceRequest {
                 // TODO-correctness: Remove `.vnic()` call when we use the port
                 // directly.
-                name: port.vnic().name().to_string(),
-                slot: propolis_client::api::Slot(nic.slot),
+                name: port.vnic_name().to_string(),
+                slot: propolis_client::api::Slot(port.slot()),
             })
             .collect();
 
@@ -347,7 +360,8 @@ impl InstanceInner {
 
         self.running_state = Some(RunningState {
             client,
-            ticket,
+            instance_ticket,
+            port_tickets,
             monitor_task,
             _running_zone: running_zone,
         });
@@ -398,15 +412,14 @@ mockall::mock! {
         pub fn new(
             log: Logger,
             id: Uuid,
-            vnic_allocator: VnicAllocator,
-            underlay_addr: Ipv6Addr,
-            port_allocator: OptePortAllocator,
             initial: InstanceHardware,
-            nexus_client: Arc<NexusClient>,
+            vnic_allocator: VnicAllocator<Etherstub>,
+            port_manager: PortManager,
+            lazy_nexus_client: LazyNexusClient,
         ) -> Result<Self, Error>;
         pub async fn start(
             &self,
-            ticket: InstanceTicket,
+            instance_ticket: InstanceTicket,
             migrate: Option<InstanceMigrateParams>,
         ) -> Result<(), Error>;
         pub async fn transition(
@@ -431,24 +444,21 @@ impl Instance {
     /// Arguments:
     /// * `log`: Logger for dumping debug information.
     /// * `id`: UUID of the instance to be created.
+    /// * `initial`: State of the instance at initialization time.
     /// * `vnic_allocator`: A unique (to the sled) ID generator to
     /// refer to a VNIC. (This exists because of a restriction on VNIC name
     /// lengths, otherwise the UUID would be used instead).
-    /// * `underlay_addr`: The IPv6 underlay address for the sled hosting this
-    /// instance.
-    /// * `port_allocator`: A unique (to the sled) ID generator to
-    /// refer to an OPTE port for the guest network interfaces.
-    /// * `initial`: State of the instance at initialization time.
-    /// * `nexus_client`: Connection to Nexus, used for sending notifications.
+    /// * `port_manager`: Handle to the object responsible for managing OPTE
+    /// ports.
+    /// * `lazy_nexus_client`: Connection to Nexus, used for sending notifications.
     // TODO: This arg list is getting a little long; can we clean this up?
     pub fn new(
         log: Logger,
         id: Uuid,
-        vnic_allocator: VnicAllocator,
-        underlay_addr: Ipv6Addr,
-        port_allocator: OptePortAllocator,
         initial: InstanceHardware,
-        nexus_client: Arc<NexusClient>,
+        vnic_allocator: VnicAllocator<Etherstub>,
+        port_manager: PortManager,
+        lazy_nexus_client: LazyNexusClient,
     ) -> Result<Self, Error> {
         info!(log, "Instance::new w/initial HW: {:?}", initial);
         let instance = InstanceInner {
@@ -469,14 +479,15 @@ impl Instance {
             propolis_id: initial.runtime.propolis_id,
             propolis_ip: initial.runtime.propolis_addr.unwrap().ip(),
             vnic_allocator,
-            underlay_addr,
-            port_allocator,
+            port_manager,
             requested_nics: initial.nics,
+            source_nat: initial.source_nat,
+            external_ips: initial.external_ips,
             requested_disks: initial.disks,
             cloud_init_bytes: initial.cloud_init_bytes,
             state: InstanceStates::new(initial.runtime),
             running_state: None,
-            nexus_client,
+            lazy_nexus_client,
             serial_tty_task: None,
         };
 
@@ -485,31 +496,28 @@ impl Instance {
         Ok(Instance { inner })
     }
 
-    fn create_opte_ports(
-        &self,
-        inner: &mut MutexGuard<'_, InstanceInner>,
-    ) -> Result<Vec<OptePort>, Error> {
-        let mut ports = Vec::with_capacity(inner.requested_nics.len());
-        for nic in inner.requested_nics.iter() {
-            let vni = crate::opte::Vni::new(nic.vni).expect("Invalid VNI");
-            let port = inner.port_allocator.new_port(
-                nic.ip,
-                *nic.mac,
-                ipnetwork::IpNetwork::from(nic.subnet),
-                vni,
-                inner.underlay_addr,
-            )?;
-            info!(inner.log, "created OPTE port for guest"; "port_info" => ?port);
-            ports.push(port);
-        }
-        Ok(ports)
-    }
-
     async fn setup_propolis_locked(
         &self,
         inner: &mut MutexGuard<'_, InstanceInner>,
     ) -> Result<PropolisSetup, Error> {
-        let opte_ports = self.create_opte_ports(inner)?;
+        // Create OPTE ports for the instance
+        let mut opte_ports = Vec::with_capacity(inner.requested_nics.len());
+        let mut port_tickets = Vec::with_capacity(inner.requested_nics.len());
+        for nic in inner.requested_nics.iter() {
+            let (snat, external_ips) = if nic.primary {
+                (Some(inner.source_nat), Some(inner.external_ips.clone()))
+            } else {
+                (None, None)
+            };
+            let port = inner.port_manager.create_port(
+                *inner.id(),
+                nic,
+                snat,
+                external_ips,
+            )?;
+            port_tickets.push(port.ticket());
+            opte_ports.push(port);
+        }
 
         // Create a zone for the propolis instance, using the previously
         // configured VNICs.
@@ -528,6 +536,8 @@ impl Instance {
                 zone::Device { name: "/dev/viona".to_string() },
             ],
             opte_ports,
+            // physical_nic=
+            None,
         )
         .await?;
 
@@ -536,8 +546,8 @@ impl Instance {
         let network = running_zone.ensure_address(addr_request).await?;
         info!(inner.log, "Created address {} for zone: {}", network, zname);
 
-        let gateway = inner.underlay_addr;
-        running_zone.add_default_route(gateway).await?;
+        let gateway = inner.port_manager.underlay_ip();
+        running_zone.add_default_route(*gateway).await?;
 
         // Run Propolis in the Zone.
         let smf_service_name = "svc:/system/illumos/propolis-server";
@@ -599,6 +609,24 @@ impl Instance {
             &format!("config/server_addr={}", server_addr),
         ])?;
 
+        let metric_addr = inner.lazy_nexus_client.get_ip().await.unwrap();
+        info!(
+            inner.log,
+            "Setting metric address property address [{}]:{}",
+            metric_addr,
+            NEXUS_INTERNAL_PORT,
+        );
+        running_zone.run_cmd(&[
+            crate::illumos::zone::SVCCFG,
+            "-s",
+            &smf_instance_name,
+            "setprop",
+            &format!(
+                "config/metric_addr=[{}]:{}",
+                metric_addr, NEXUS_INTERNAL_PORT
+            ),
+        ])?;
+
         info!(inner.log, "Refreshing instance");
         running_zone.run_cmd(&[
             crate::illumos::zone::SVCCFG,
@@ -637,13 +665,17 @@ impl Instance {
         // don't need to worry about initialization races.
         wait_for_http_server(&inner.log, &client).await?;
 
-        Ok(PropolisSetup { client, running_zone })
+        Ok(PropolisSetup {
+            client,
+            running_zone,
+            port_tickets: Some(port_tickets),
+        })
     }
 
     /// Begins the execution of the instance's service (Propolis).
     pub async fn start(
         &self,
-        ticket: InstanceTicket,
+        instance_ticket: InstanceTicket,
         migrate: Option<InstanceMigrateParams>,
     ) -> Result<(), Error> {
         let mut inner = self.inner.lock().await;
@@ -653,7 +685,7 @@ impl Instance {
 
         // Ensure the instance exists in the Propolis Server before we start
         // using it.
-        inner.ensure(self.clone(), ticket, setup, migrate).await?;
+        inner.ensure(self.clone(), instance_ticket, setup, migrate).await?;
 
         Ok(())
     }
@@ -666,7 +698,16 @@ impl Instance {
         warn!(inner.log, "Halting and removing zone: {}", zname);
         Zones::halt_and_remove_logged(&inner.log, &zname).unwrap();
 
-        inner.running_state.as_mut().unwrap().ticket.terminate();
+        // Remove ourselves from the instance manager's map of instances.
+        let running_state = inner.running_state.as_mut().unwrap();
+        running_state.instance_ticket.terminate();
+
+        // And remove the OPTE ports from the port manager
+        if let Some(tickets) = running_state.port_tickets.as_mut() {
+            for ticket in tickets.iter_mut() {
+                ticket.release()?;
+            }
+        }
 
         Ok(())
     }
@@ -756,14 +797,19 @@ impl Instance {
 mod test {
     use super::*;
     use crate::illumos::dladm::Etherstub;
-    use crate::mocks::MockNexusClient;
-    use crate::opte::OptePortAllocator;
+    use crate::nexus::LazyNexusClient;
+    use crate::opte::PortManager;
     use crate::params::InstanceStateRequested;
+    use crate::params::SourceNatConfig;
     use chrono::Utc;
+    use macaddr::MacAddr6;
     use omicron_common::api::external::{
         ByteCount, Generation, InstanceCpuCount, InstanceState,
     };
     use omicron_common::api::internal::nexus::InstanceRuntimeState;
+    use omicron_test_utils::dev::test_setup_log;
+    use std::net::IpAddr;
+    use std::net::Ipv4Addr;
 
     static INST_UUID_STR: &str = "e398c5d5-5059-4e55-beac-3a1071083aaa";
     static PROPOLIS_UUID_STR: &str = "ed895b13-55d5-4e0b-88e9-3f4e74d0d936";
@@ -774,14 +820,6 @@ mod test {
 
     fn test_propolis_uuid() -> Uuid {
         PROPOLIS_UUID_STR.parse().unwrap()
-    }
-
-    fn logger() -> Logger {
-        dropshot::ConfigLogging::StderrTerminal {
-            level: dropshot::ConfigLoggingLevel::Info,
-        }
-        .to_logger("test-logger")
-        .unwrap()
     }
 
     fn new_initial_instance() -> InstanceHardware {
@@ -800,6 +838,12 @@ mod test {
                 time_updated: Utc::now(),
             },
             nics: vec![],
+            source_nat: SourceNatConfig {
+                ip: IpAddr::from(Ipv4Addr::new(10, 0, 0, 1)),
+                first_port: 0,
+                last_port: 16_384,
+            },
+            external_ips: vec![],
             disks: vec![],
             cloud_init_bytes: None,
         }
@@ -823,26 +867,35 @@ mod test {
         expected = "Propolis client should be initialized before usage"
     )]
     async fn transition_before_start() {
-        let log = logger();
+        let logctx = test_setup_log("transition_before_start");
+        let log = &logctx.log;
         let vnic_allocator = VnicAllocator::new(
             "Test".to_string(),
             Etherstub("mylink".to_string()),
         );
-        let port_allocator = OptePortAllocator::new();
-        let nexus_client = MockNexusClient::default();
+        let underlay_ip = std::net::Ipv6Addr::new(
+            0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+        );
+        let mac = MacAddr6::from([0u8; 6]);
+        let port_manager =
+            PortManager::new(log.new(slog::o!()), underlay_ip, mac);
+        let lazy_nexus_client =
+            LazyNexusClient::new(log.clone(), std::net::Ipv6Addr::LOCALHOST)
+                .unwrap();
 
         let inst = Instance::new(
             log.clone(),
             test_uuid(),
-            vnic_allocator,
-            std::net::Ipv6Addr::new(
-                0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
-            ),
-            port_allocator,
             new_initial_instance(),
-            Arc::new(nexus_client),
+            vnic_allocator,
+            port_manager,
+            lazy_nexus_client,
         )
         .unwrap();
+
+        // Remove the logfile before we expect to panic, or it'll never be
+        // cleaned up.
+        logctx.cleanup_successful();
 
         // Trying to transition before the instance has been initialized will
         // result in a panic.

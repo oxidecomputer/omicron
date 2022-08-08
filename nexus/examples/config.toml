@@ -4,7 +4,7 @@
 
 [console]
 # Directory for static assets. Absolute path or relative to CWD.
-static_dir = "nexus/static" # TODO: figure out value
+static_dir = "out/console-assets"
 cache_control_max_age_minutes = 10
 session_idle_timeout_minutes = 60
 session_absolute_timeout_minutes = 480
@@ -15,7 +15,7 @@ session_absolute_timeout_minutes = 480
 # working on authentication or authorization.
 [authn]
 # TODO(https://github.com/oxidecomputer/omicron/issues/372): Remove "spoof".
-schemes_external = ["spoof", "session_cookie"]
+schemes_external = ["spoof", "session_cookie", "access_token"]
 
 [log]
 # Show log messages of this level and more severe
@@ -38,15 +38,15 @@ address = "[::1]:8123"
 id = "e6bff1ff-24fb-49dc-a54e-c6a350cd4d6c"
 rack_id = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc"
 
-[deployment.dropshot_external]
-# IP address and TCP port on which to listen for the external API
+[[deployment.dropshot_external]]
+# IP Address and TCP port on which to listen for the external API
 bind_address = "127.0.0.1:12220"
 # Allow larger request bodies (1MiB) to accomodate firewall endpoints (one
 # rule is ~500 bytes)
 request_body_max_bytes = 1048576
 
 [deployment.dropshot_internal]
-# IP address and TCP port on which to listen for the internal API
+# IP Address and TCP port on which to listen for the internal API
 bind_address = "127.0.0.1:12221"
 
 [deployment.subnet]

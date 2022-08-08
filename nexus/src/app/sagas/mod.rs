@@ -9,15 +9,14 @@
 // correctness, idempotence, etc.  The more constrained this interface is, the
 // easier it will be to test, version, and update in deployed systems.
 
-use crate::authn;
 use crate::saga_interface::SagaContext;
 use lazy_static::lazy_static;
-use std::collections::BTreeMap;
 use std::sync::Arc;
+use steno::new_action_noop_undo;
 use steno::ActionContext;
 use steno::ActionError;
-use steno::SagaTemplateGeneric;
 use steno::SagaType;
+use thiserror::Error;
 use uuid::Uuid;
 
 pub mod disk_create;
@@ -25,38 +24,77 @@ pub mod disk_delete;
 pub mod instance_create;
 pub mod instance_migrate;
 
-// We'll need a richer mechanism for registering sagas, but this works for now.
-lazy_static! {
-    pub static ref ALL_TEMPLATES: BTreeMap<&'static str, Arc<dyn SagaTemplateGeneric<Arc<SagaContext>>>> =
-        all_templates();
+#[derive(Debug)]
+pub struct NexusSagaType;
+impl steno::SagaType for NexusSagaType {
+    type ExecContextType = Arc<SagaContext>;
 }
 
-fn all_templates(
-) -> BTreeMap<&'static str, Arc<dyn SagaTemplateGeneric<Arc<SagaContext>>>> {
-    vec![
-        (
-            instance_create::SAGA_NAME,
-            Arc::clone(&instance_create::SAGA_TEMPLATE)
-                as Arc<dyn SagaTemplateGeneric<Arc<SagaContext>>>,
-        ),
-        (
-            instance_migrate::SAGA_NAME,
-            Arc::clone(&instance_migrate::SAGA_TEMPLATE)
-                as Arc<dyn SagaTemplateGeneric<Arc<SagaContext>>>,
-        ),
-        (
-            disk_create::SAGA_NAME,
-            Arc::clone(&disk_create::SAGA_TEMPLATE)
-                as Arc<dyn SagaTemplateGeneric<Arc<SagaContext>>>,
-        ),
-        (
-            disk_delete::SAGA_NAME,
-            Arc::clone(&disk_delete::SAGA_TEMPLATE)
-                as Arc<dyn SagaTemplateGeneric<Arc<SagaContext>>>,
-        ),
-    ]
-    .into_iter()
-    .collect()
+pub type ActionRegistry = steno::ActionRegistry<NexusSagaType>;
+pub type NexusAction = Arc<dyn steno::Action<NexusSagaType>>;
+pub type NexusActionContext = steno::ActionContext<NexusSagaType>;
+
+pub trait NexusSaga {
+    const NAME: &'static str;
+
+    type Params: serde::Serialize
+        + serde::de::DeserializeOwned
+        + std::fmt::Debug;
+
+    fn register_actions(registry: &mut ActionRegistry);
+
+    fn make_saga_dag(
+        params: &Self::Params,
+        builder: steno::DagBuilder,
+    ) -> Result<steno::Dag, SagaInitError>;
+}
+
+#[derive(Debug, Error)]
+pub enum SagaInitError {
+    #[error("internal error building saga graph: {0:#}")]
+    DagBuildError(steno::DagBuilderError),
+    #[error("failed to serialize {0:?}: {1:#}")]
+    SerializeError(String, serde_json::Error),
+}
+
+impl From<steno::DagBuilderError> for SagaInitError {
+    fn from(error: steno::DagBuilderError) -> Self {
+        SagaInitError::DagBuildError(error)
+    }
+}
+
+impl From<SagaInitError> for omicron_common::api::external::Error {
+    fn from(error: SagaInitError) -> Self {
+        // All of these errors reflect things that shouldn't be possible.
+        // They're basically bugs.
+        omicron_common::api::external::Error::internal_error(&format!(
+            "creating saga: {:#}",
+            error
+        ))
+    }
+}
+
+lazy_static! {
+    pub(super) static ref ACTION_GENERATE_ID: NexusAction =
+        new_action_noop_undo("common.uuid_generate", saga_generate_uuid);
+    pub static ref ACTION_REGISTRY: Arc<ActionRegistry> =
+        Arc::new(make_action_registry());
+}
+
+fn make_action_registry() -> ActionRegistry {
+    let mut registry = steno::ActionRegistry::new();
+    registry.register(Arc::clone(&*ACTION_GENERATE_ID));
+
+    <disk_create::SagaDiskCreate as NexusSaga>::register_actions(&mut registry);
+    <disk_delete::SagaDiskDelete as NexusSaga>::register_actions(&mut registry);
+    <instance_create::SagaInstanceCreate as NexusSaga>::register_actions(
+        &mut registry,
+    );
+    <instance_migrate::SagaInstanceMigrate as NexusSaga>::register_actions(
+        &mut registry,
+    );
+
+    registry
 }
 
 pub(super) async fn saga_generate_uuid<UserType: SagaType>(
@@ -64,27 +102,3 @@ pub(super) async fn saga_generate_uuid<UserType: SagaType>(
 ) -> Result<Uuid, ActionError> {
     Ok(Uuid::new_v4())
 }
-
-/// A trait for sagas with serialized authentication information.
-///
-/// This allows sharing code in different sagas which rely on some
-/// authentication information, for example when doing database lookups.
-pub(super) trait AuthenticatedSagaParams {
-    fn serialized_authn(&self) -> &authn::saga::Serialized;
-}
-
-/// A helper macro which implements the `AuthenticatedSagaParams` trait for saga
-/// parameter types which have a field called `serialized_authn`.
-macro_rules! impl_authenticated_saga_params {
-    ($typ:ty) => {
-        impl crate::app::sagas::AuthenticatedSagaParams
-            for <$typ as SagaType>::SagaParamsType
-        {
-            fn serialized_authn(&self) -> &authn::saga::Serialized {
-                &self.serialized_authn
-            }
-        }
-    };
-}
-
-pub(super) use impl_authenticated_saga_params;

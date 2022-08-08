@@ -379,7 +379,7 @@ impl Communicator {
     /// Query all online SPs.
     ///
     /// `ignition_state` should be the state returned by a (recent) call to
-    /// [`get_ignition_state_all()`].
+    /// [`crate::communicator::Communicator::get_ignition_state_all()`].
     ///
     /// All SPs included in `ignition_state` will be yielded by the returned
     /// stream. The order in which they are yielded is undefined; the offline

@@ -289,33 +289,7 @@ impl ServiceInner {
         &self,
         config: &Config,
         bootstrap_addrs: Vec<Ipv6Addr>,
-        member_device_id_certs: &[Ed25519Certificate],
     ) -> Result<HashMap<SocketAddrV6, SledAllocation>, SetupServiceError> {
-        // Create a rack secret, unless we're in the single-sled case.
-        let mut maybe_rack_secret_shares = generate_rack_secret(
-            config.rack_secret_threshold,
-            member_device_id_certs,
-            &self.log,
-        )?;
-
-        // Confirm that the returned iterator (if we got one) is the length we
-        // expect.
-        if let Some(rack_secret_shares) = maybe_rack_secret_shares.as_ref() {
-            // TODO-cleanup Asserting here seems fine as long as
-            // `member_device_id_certs` is hard-coded from a config file, but
-            // once we start collecting them over the management network we
-            // should probably attach them at the type level to the bootstrap
-            // addrs, which would remove the need for this assertion.
-            assert_eq!(
-                rack_secret_shares.len(),
-                bootstrap_addrs.len(),
-                concat!(
-                    "Number of trust quorum members does not match ",
-                    "number of bootstrap addresses"
-                )
-            );
-        }
-
         let bootstrap_addrs = bootstrap_addrs.into_iter().enumerate();
         let reserved_rack_subnet = ReservedRackSubnet::new(config.az_subnet());
         let dns_subnets = reserved_rack_subnet.get_dns_subnets();
@@ -382,15 +356,7 @@ impl ServiceInner {
                         id: Uuid::new_v4(),
                         subnet,
                         rack_id,
-                        trust_quorum_share: maybe_rack_secret_shares
-                            .as_mut()
-                            .map(|shares_iter| {
-                                // We asserted when creating
-                                // `maybe_rack_secret_shares` that it contained
-                                // exactly the number of shares as we have
-                                // bootstrap addrs, so we can unwrap here.
-                                shares_iter.next().unwrap()
-                            }),
+                        gateway: config.gateway.clone(),
                     },
                     services_request: request,
                 },
@@ -563,17 +529,45 @@ impl ServiceInner {
             plan
         } else {
             info!(self.log, "Creating new allocation plan");
-            self.create_plan(config, addrs, member_device_id_certs).await?
+            self.create_plan(config, addrs).await?
         };
+
+        // Generate our rack secret, unless we're in the single-sled case.
+        let mut maybe_rack_secret_shares = generate_rack_secret(
+            config.rack_secret_threshold,
+            member_device_id_certs,
+            &self.log,
+        )?;
+
+        // Confirm that the returned iterator (if we got one) is the length we
+        // expect.
+        if let Some(rack_secret_shares) = maybe_rack_secret_shares.as_ref() {
+            // TODO-cleanup Asserting here seems fine as long as
+            // `member_device_id_certs` is hard-coded from a config file, but
+            // once we start collecting them over the management network we
+            // should probably attach them at the type level to the bootstrap
+            // addrs, which would remove the need for this assertion.
+            assert_eq!(
+                rack_secret_shares.len(),
+                plan.len(),
+                concat!(
+                    "Number of trust quorum members does not match ",
+                    "number of sleds in the plan"
+                )
+            );
+        }
 
         // Forward the sled initialization requests to our sled-agent.
         local_bootstrap_agent
             .initialize_sleds(
                 plan.iter()
-                    .map(|(bootstrap_addr, allocation)| {
+                    .map(move |(bootstrap_addr, allocation)| {
                         (
                             *bootstrap_addr,
                             allocation.initialization_request.clone(),
+                            maybe_rack_secret_shares
+                                .as_mut()
+                                .map(|shares| shares.next().unwrap()),
                         )
                     })
                     .collect(),

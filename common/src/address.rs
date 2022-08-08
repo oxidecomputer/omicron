@@ -33,8 +33,10 @@ pub const SLED_AGENT_PORT: u16 = 12345;
 
 /// The port propolis-server listens on inside the propolis zone.
 pub const PROPOLIS_PORT: u16 = 12400;
+pub const COCKROACH_PORT: u16 = 32221;
 pub const CLICKHOUSE_PORT: u16 = 8123;
 pub const OXIMETER_PORT: u16 = 12223;
+pub const DENDRITE_PORT: u16 = 12224;
 
 pub const NEXUS_INTERNAL_PORT: u16 = 12221;
 
@@ -54,7 +56,9 @@ const GZ_ADDRESS_INDEX: usize = 2;
 pub const RSS_RESERVED_ADDRESSES: u16 = 10;
 
 /// Wraps an [`Ipv6Network`] with a compile-time prefix length.
-#[derive(Debug, Clone, Copy, JsonSchema, Serialize, Deserialize, PartialEq)]
+#[derive(
+    Debug, Clone, Copy, JsonSchema, Serialize, Deserialize, Hash, PartialEq, Eq,
+)]
 pub struct Ipv6Subnet<const N: u8> {
     net: Ipv6Net,
 }

@@ -46,7 +46,9 @@ pub struct ControlPlaneTestContext {
 
 impl ControlPlaneTestContext {
     pub async fn teardown(mut self) {
-        self.server.http_server_external.close().await.unwrap();
+        for server in self.server.http_servers_external {
+            server.close().await.unwrap();
+        }
         self.server.http_server_internal.close().await.unwrap();
         self.database.cleanup().await.unwrap();
         self.clickhouse.cleanup().await.unwrap();
@@ -101,7 +103,13 @@ pub async fn test_setup_with_config(
     // Store actual address/port information for the databases after they start.
     config.deployment.database =
         nexus_config::Database::FromUrl { url: database.pg_config().clone() };
-    config.pkg.timeseries_db.address.set_port(clickhouse.port());
+    config
+        .pkg
+        .timeseries_db
+        .address
+        .as_mut()
+        .expect("Tests expect to set a port of Clickhouse")
+        .set_port(clickhouse.port());
 
     let server =
         omicron_nexus::Server::start(&config, &logctx.log).await.unwrap();
@@ -113,7 +121,7 @@ pub async fn test_setup_with_config(
         .expect("Nexus never loaded users");
 
     let testctx_external = ClientTestContext::new(
-        server.http_server_external.local_addr(),
+        server.http_servers_external[0].local_addr(),
         logctx.log.new(o!("component" => "external client test context")),
     );
     let testctx_internal = ClientTestContext::new(
@@ -153,6 +161,7 @@ pub async fn test_setup_with_config(
     )
     .await
     .unwrap();
+    register_test_producer(&producer).unwrap();
 
     ControlPlaneTestContext {
         server,
@@ -247,6 +256,10 @@ impl oximeter::Producer for IntegrationProducer {
     }
 }
 
+/// Creates and starts a producer server.
+///
+/// Actual producers can be registered with the [`register_producer`]
+/// helper function.
 pub async fn start_producer_server(
     nexus_address: SocketAddr,
     id: Uuid,
@@ -275,9 +288,22 @@ pub async fn start_producer_server(
     };
     let server =
         ProducerServer::start(&config).await.map_err(|e| e.to_string())?;
+    Ok(server)
+}
 
+/// Registers an arbitrary producer with the test server.
+pub fn register_producer(
+    server: &ProducerServer,
+    producer: impl oximeter::Producer,
+) -> Result<(), String> {
+    server.registry().register_producer(producer).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Registers a sample-generating test-specific producer.
+pub fn register_test_producer(server: &ProducerServer) -> Result<(), String> {
     // Create and register an actual metric producer.
-    let producer = IntegrationProducer {
+    let test_producer = IntegrationProducer {
         target: IntegrationTarget {
             name: "integration-test-target".to_string(),
         },
@@ -286,8 +312,7 @@ pub async fn start_producer_server(
             datum: 0,
         },
     };
-    server.registry().register_producer(producer).map_err(|e| e.to_string())?;
-    Ok(server)
+    register_producer(server, test_producer)
 }
 
 /// Returns whether the two identity metadata objects are identical.

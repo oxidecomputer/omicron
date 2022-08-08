@@ -451,7 +451,7 @@ async fn sp_component_get(
 /// serial console.
 #[endpoint {
     method = GET,
-    path = "/sp/{type}/{slot}/component/{component}/serial_console/attach",
+    path = "/sp/{type}/{slot}/component/{component}/serial-console/attach",
 }]
 async fn sp_component_serial_console_attach(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -479,7 +479,7 @@ async fn sp_component_serial_console_attach(
 /// console, if such a connection exists.
 #[endpoint {
     method = POST,
-    path = "/sp/{type}/{slot}/component/{component}/serial_console/detach",
+    path = "/sp/{type}/{slot}/component/{component}/serial-console/detach",
 }]
 async fn sp_component_serial_console_detach(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -530,7 +530,7 @@ async fn sp_component_update(
 /// Components whose power state cannot be changed will always return an error.
 #[endpoint {
     method = POST,
-    path = "/sp/{type}/{slot}/component/{component}/power_on",
+    path = "/sp/{type}/{slot}/component/{component}/power-on",
 }]
 async fn sp_component_power_on(
     _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -545,7 +545,7 @@ async fn sp_component_power_on(
 /// Components whose power state cannot be changed will always return an error.
 #[endpoint {
     method = POST,
-    path = "/sp/{type}/{slot}/component/{component}/power_off",
+    path = "/sp/{type}/{slot}/component/{component}/power-off",
 }]
 async fn sp_component_power_off(
     _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -616,7 +616,7 @@ async fn ignition_get(
 /// Power on an SP via Ignition
 #[endpoint {
     method = POST,
-    path = "/sp/{type}/{slot}/power_on",
+    path = "/sp/{type}/{slot}/power-on",
 }]
 async fn ignition_power_on(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -641,7 +641,7 @@ async fn ignition_power_on(
 /// Power off an SP via Ignition
 #[endpoint {
     method = POST,
-    path = "/sp/{type}/{slot}/power_off",
+    path = "/sp/{type}/{slot}/power-off",
 }]
 async fn ignition_power_off(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,

@@ -4,6 +4,7 @@ members = [
     "ddm-admin-client",
     "deploy",
     "gateway",
+    "gateway/faux-mgs",
     "gateway-cli",
     "gateway-client",
     "gateway-messages",
@@ -11,16 +12,20 @@ members = [
     "internal-dns",
     "internal-dns-client",
     "nexus",
-    "nexus/src/authz/authz-macros",
-    "nexus/src/db/db-macros",
+    "nexus/authz-macros",
+    "nexus/db-macros",
+    "nexus/db-model",
+    "nexus/defaults",
     "nexus/test-utils",
     "nexus/test-utils-macros",
+    "nexus/types",
     "nexus-client",
     "package",
     "rpaths",
     "sled-agent",
     "sled-agent-client",
     "sp-sim",
+    "oxide-client",
     "oximeter/oximeter",
     "oximeter/collector",
     "oximeter/db",
@@ -36,6 +41,7 @@ default-members = [
     "ddm-admin-client",
     "deploy",
     "gateway",
+    "gateway/faux-mgs",
     "gateway-cli",
     "gateway-client",
     "gateway-messages",
@@ -43,13 +49,17 @@ default-members = [
     "internal-dns",
     "internal-dns-client",
     "nexus",
-    "nexus/src/authz/authz-macros",
-    "nexus/src/db/db-macros",
+    "nexus/authz-macros",
+    "nexus/db-macros",
+    "nexus/db-model",
+    "nexus/defaults",
+    "nexus/types",
     "package",
     "rpaths",
     "sled-agent",
     "sled-agent-client",
     "sp-sim",
+    "oxide-client",
     "oximeter/oximeter",
     "oximeter/collector",
     "oximeter/db",
@@ -64,26 +74,34 @@ resolver = "2"
 [profile.dev]
 panic = "abort"
 
+# `bindgen` is used by `samael`'s build script; building it with optimizations
+# makes that build script run ~5x faster, more than offsetting the additional
+# build time added to `bindgen` itself.
+[profile.dev.package.bindgen]
+opt-level = 3
+
+# `lalrpop` is used by `polar-core`'s build script; building it with
+# optimizations makes that build script run ~20x faster, more than offsetting
+# the additional build time added to `lalrpop` itself.
+[profile.dev.package.lalrpop]
+opt-level = 3
+
 [profile.release]
 panic = "abort"
 
 #
-# It's common during development to use a local copy of dropshot, propolis
-# or steno in the parent directory.  If you want to use those, uncomment
-# one of these blocks.
+# It's common during development to use a local copy of dropshot, propolis,
+# crucible, or steno in the parent directory.  If you want to use those,
+# uncomment one of these blocks.
 #
 #[patch."https://github.com/oxidecomputer/dropshot"]
 #dropshot = { path = "../dropshot/dropshot" }
 #[patch."https://github.com/oxidecomputer/steno"]
 #steno = { path = "../steno" }
 #[patch."https://github.com/oxidecomputer/propolis"]
-#propolis-client = { path = "../propolis/client" }
-#propolis-server = { path = "../propolis/server" }
+#propolis-client = { path = "../propolis/lib/propolis-client" }
 #[patch."https://github.com/oxidecomputer/crucible"]
-#crucible = { path = "../crucible/upstairs" }
-
-[patch."https://github.com/njaremko/samael"]
-samael = { git = "https://github.com/oxidecomputer/samael", branch = "dynamic" }
+#crucible-client-typess = { path = "../crucible/crucible-client-typess" }
 
 #
 # Local client generation during development.
