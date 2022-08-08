@@ -8,9 +8,11 @@ use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::datastore::RunnableQuery;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
+use crate::db::lookup::LookupPath;
 use crate::db::model::Generation;
 use crate::db::model::Name;
 use crate::db::model::Snapshot;
@@ -21,6 +23,7 @@ use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use nexus_types::identity::Resource;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -30,30 +33,43 @@ use omicron_common::bail_unless;
 use uuid::Uuid;
 
 impl DataStore {
-    pub async fn project_create_snapshot(
+    pub(super) async fn snapshot_ensure_query(
+        opctx: &OpContext,
+        authz_silo: &authz::Silo,
+        snapshot: Snapshot,
+    ) -> Result<impl RunnableQuery<Snapshot>, Error> {
+        opctx.authorize(authz::Action::CreateChild, authz_silo).await?;
+
+        use db::schema::snapshot::dsl;
+        Ok(diesel::insert_into(dsl::snapshot)
+            .values(snapshot)
+            .on_conflict((dsl::project_id, dsl::name))
+            .filter_target(dsl::time_deleted.is_null())
+            .do_nothing()
+            .returning(Snapshot::as_returning()))
+    }
+
+    pub async fn project_ensure_snapshot(
         &self,
         opctx: &OpContext,
         authz_silo: &authz::Silo,
         snapshot: Snapshot,
     ) -> CreateResult<Snapshot> {
-        opctx.authorize(authz::Action::CreateChild, authz_silo).await?;
-
-        use db::schema::snapshot::dsl;
-
+        let snapshot_id = snapshot.id();
         let gen = snapshot.gen;
-        let snapshot: Snapshot = diesel::insert_into(dsl::snapshot)
-            .values(snapshot)
-            .on_conflict(dsl::id)
-            .do_nothing()
-            .returning(Snapshot::as_returning())
-            .get_result_async(self.pool_authorized(opctx).await?)
+
+        DataStore::snapshot_ensure_query(opctx, authz_silo, snapshot)
+            .await?
+            .execute_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::Server,
-                )
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
             })?;
+
+        let (.., snapshot) = LookupPath::new(&opctx, self)
+            .snapshot_id(snapshot_id)
+            .fetch()
+            .await?;
 
         bail_unless!(
             snapshot.state == SnapshotState::Creating,

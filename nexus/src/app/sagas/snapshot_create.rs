@@ -273,7 +273,7 @@ async fn ssc_create_snapshot_record(
 
     let snapshot_created = osagactx
         .datastore()
-        .project_create_snapshot(&opctx, &authz_silo, snapshot)
+        .project_ensure_snapshot(&opctx, &authz_silo, snapshot)
         .await
         .map_err(ActionError::action_failed)?;
 

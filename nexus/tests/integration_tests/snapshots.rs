@@ -4,6 +4,7 @@
 
 //! Tests basic snapshot support in the API
 
+use chrono::Utc;
 use dropshot::test_util::ClientTestContext;
 use http::method::Method;
 use http::StatusCode;
@@ -18,6 +19,7 @@ use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
+use omicron_common::api::external;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -29,11 +31,9 @@ use omicron_nexus::db;
 use omicron_nexus::db::identity::Resource;
 use omicron_nexus::db::lookup::LookupPath;
 use omicron_nexus::external_api::params;
-use omicron_nexus::external_api::views;
 use omicron_nexus::external_api::shared;
-use omicron_common::api::external;
+use omicron_nexus::external_api::views;
 use uuid::Uuid;
-use chrono::Utc;
 
 use httptest::{matchers::*, responders::*, Expectation, ServerBuilder};
 
@@ -378,23 +378,26 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
 // Test that the code that Saga nodes call is idempotent
 
 #[nexus_test]
-async fn test_create_snapshot_record_idempotent(cptestctx: &ControlPlaneTestContext) {
+async fn test_create_snapshot_record_idempotent(
+    cptestctx: &ControlPlaneTestContext,
+) {
     let client = &cptestctx.external_client;
     let nexus = &cptestctx.server.apictx.nexus;
     let datastore = nexus.datastore();
 
     const SILO_NAME: &str = "snapshot-silo";
-    let silo = create_silo(
-        &client,
-        SILO_NAME,
-        true,
-        shared::UserProvisionType::Fixed,
-    ).await;
+    let silo =
+        create_silo(&client, SILO_NAME, true, shared::UserProvisionType::Fixed)
+            .await;
+
+    let project_id = create_org_and_project(&client).await;
 
     let snapshot = db::model::Snapshot {
         identity: db::model::SnapshotIdentity {
             id: Uuid::new_v4(),
-            name: external::Name::try_from("snapshot".to_string()).unwrap().into(),
+            name: external::Name::try_from("snapshot".to_string())
+                .unwrap()
+                .into(),
             description: "snapshot".into(),
 
             time_created: Utc::now(),
@@ -402,7 +405,7 @@ async fn test_create_snapshot_record_idempotent(cptestctx: &ControlPlaneTestCont
             time_deleted: None,
         },
 
-        project_id: Uuid::new_v4(),
+        project_id,
         disk_id: Uuid::new_v4(),
         volume_id: Uuid::new_v4(),
 
@@ -412,10 +415,8 @@ async fn test_create_snapshot_record_idempotent(cptestctx: &ControlPlaneTestCont
         size: external::ByteCount::try_from(1024u32).unwrap().into(),
     };
 
-    let opctx = OpContext::for_tests(
-        cptestctx.logctx.log.new(o!()),
-        datastore.clone(),
-    );
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
     let (authz_silo, ..) = LookupPath::new(&opctx, &datastore)
         .silo_id(silo.identity.id)
@@ -424,15 +425,14 @@ async fn test_create_snapshot_record_idempotent(cptestctx: &ControlPlaneTestCont
         .unwrap();
 
     let snapshot_created_1 = datastore
-        .project_create_snapshot(&opctx, &authz_silo, snapshot.clone())
+        .project_ensure_snapshot(&opctx, &authz_silo, snapshot.clone())
         .await
         .unwrap();
 
     let snapshot_created_2 = datastore
-        .project_create_snapshot(&opctx, &authz_silo, snapshot)
+        .project_ensure_snapshot(&opctx, &authz_silo, snapshot)
         .await
         .unwrap();
 
     assert_eq!(snapshot_created_1.id(), snapshot_created_2.id());
 }
-
