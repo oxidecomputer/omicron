@@ -32,7 +32,7 @@ use opte::oxide_vpc::api::RouterTarget;
 use opte::oxide_vpc::api::SNatCfg;
 use opte::oxide_vpc::api::SetFwRulesReq;
 use opte::oxide_vpc::api::{
-    Action, Address, Filters, FirewallRule, ProtoFilter,
+    Action, Address, Filters, FirewallRule, Ports, ProtoFilter,
 };
 use opte_ioctl::OpteHdl;
 use slog::debug;
@@ -522,7 +522,16 @@ fn opte_firewall_rules(rules: &[VpcFirewallRule]) -> Vec<FirewallRule> {
                                 }
                             }
                             _ => todo!("handle multiple protocol filters"),
-                        }); // XXX: .set_ports
+                        })
+                        .set_ports(match rule.filter_ports {
+                            None => Ports::Any,
+                            Some(ref ports) => Ports::PortList(
+                                ports.iter().flat_map(|range| {
+                                    (range.first.0.get()..=range.last.0.get())
+                                        .collect::<Vec<u16>>()
+                                }).collect::<Vec<u16>>()
+                            ),
+                        });
                     filters
                 },
                 action: match rule.action {
