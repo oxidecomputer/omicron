@@ -19,6 +19,7 @@ zone = true
 setup_hint = """
 - Run `./tools/ci_download_console` to download the web console assets
 - Run `pkg install library/postgresql-13` to download Postgres libraries
+- Run `./tools/create_self_signed_cert.sh` to generate a certificate
 """
 
 [[package.omicron-nexus.paths]]
@@ -30,6 +31,14 @@ to = "/var/svc/manifest/site/nexus"
 [[package.omicron-nexus.paths]]
 from = "out/console-assets"
 to = "/var/nexus/static"
+# Note, we could just map the whole "out/certs" directory, but this ensures
+# both files exist.
+[[package.omicron-nexus.paths]]
+from = "out/certs/cert.pem"
+to = "/var/nexus/certs/cert.pem"
+[[package.omicron-nexus.paths]]
+from = "out/certs/key.pem"
+to = "/var/nexus/certs/key.pem"
 
 [package.oximeter-collector]
 rust.binary_names = ["oximeter"]
