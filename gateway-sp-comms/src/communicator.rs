@@ -452,6 +452,12 @@ pub(crate) trait ResponseKindExt {
     fn try_into_sp_state(self) -> Result<SpState, BadResponseType>;
 
     fn try_into_serial_console_write_ack(self) -> Result<(), BadResponseType>;
+
+    fn try_into_update_start_ack(self) -> Result<(), BadResponseType>;
+
+    fn try_into_update_chunk_ack(self) -> Result<(), BadResponseType>;
+
+    fn try_into_sys_reset_prepare_ack(self) -> Result<(), BadResponseType>;
 }
 
 impl ResponseKindExt for ResponseKind {
@@ -540,6 +546,36 @@ impl ResponseKindExt for ResponseKind {
             ResponseKind::SerialConsoleWriteAck => Ok(()),
             other => Err(BadResponseType {
                 expected: response_kind_names::SP_STATE,
+                got: other.name(),
+            }),
+        }
+    }
+
+    fn try_into_update_start_ack(self) -> Result<(), BadResponseType> {
+        match self {
+            ResponseKind::UpdateStartAck => Ok(()),
+            other => Err(BadResponseType {
+                expected: response_kind_names::UPDATE_START_ACK,
+                got: other.name(),
+            }),
+        }
+    }
+
+    fn try_into_update_chunk_ack(self) -> Result<(), BadResponseType> {
+        match self {
+            ResponseKind::UpdateChunkAck => Ok(()),
+            other => Err(BadResponseType {
+                expected: response_kind_names::UPDATE_CHUNK_ACK,
+                got: other.name(),
+            }),
+        }
+    }
+
+    fn try_into_sys_reset_prepare_ack(self) -> Result<(), BadResponseType> {
+        match self {
+            ResponseKind::SysResetPrepareAck => Ok(()),
+            other => Err(BadResponseType {
+                expected: response_kind_names::SYS_RESET_PREPARE_ACK,
                 got: other.name(),
             }),
         }

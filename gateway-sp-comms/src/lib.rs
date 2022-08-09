@@ -15,6 +15,7 @@
 mod communicator;
 mod management_switch;
 mod recv_handler;
+pub mod single_sp;
 mod timeout;
 
 pub use usdt::register_probes;
