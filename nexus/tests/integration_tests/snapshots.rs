@@ -26,6 +26,7 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::Name;
+use omicron_nexus::authz;
 use omicron_nexus::context::OpContext;
 use omicron_nexus::db;
 use omicron_nexus::db::identity::Resource;
@@ -424,6 +425,8 @@ async fn test_create_snapshot_record_idempotent(
         .await
         .unwrap();
 
+    // Test project_ensure_snapshot is idempotent
+
     let snapshot_created_1 = datastore
         .project_ensure_snapshot(&opctx, &authz_silo, snapshot.clone())
         .await
@@ -435,4 +438,22 @@ async fn test_create_snapshot_record_idempotent(
         .unwrap();
 
     assert_eq!(snapshot_created_1.id(), snapshot_created_2.id());
+
+    // Test project_delete_snapshot is idempotent
+
+    let (.., authz_snapshot, db_snapshot) = LookupPath::new(&opctx, &datastore)
+        .snapshot_id(snapshot_created_1.id())
+        .fetch_for(authz::Action::Delete)
+        .await
+        .unwrap();
+
+    datastore
+        .project_delete_snapshot(&opctx, &authz_snapshot, &db_snapshot)
+        .await
+        .unwrap();
+
+    datastore
+        .project_delete_snapshot(&opctx, &authz_snapshot, &db_snapshot)
+        .await
+        .unwrap();
 }
