@@ -316,7 +316,7 @@ trait Authorizable: AuthorizedResource + std::fmt::Debug {
 
 impl<T> Authorizable for T
 where
-    T: ApiResource + AuthorizedResource + Clone,
+    T: ApiResource + AuthorizedResource + oso::PolarClass + Clone,
 {
     fn do_authorize<'a, 'b>(
         &'a self,
@@ -472,7 +472,7 @@ async fn create_users<T>(
     authz_resource: &T,
     users: &mut Vec<(String, Uuid)>,
 ) where
-    T: ApiResourceWithRolesType + Clone,
+    T: ApiResourceWithRolesType + oso::PolarClass + Clone,
     T::AllowedRoles: IntoEnumIterator,
 {
     for role in T::AllowedRoles::iter() {
@@ -480,9 +480,9 @@ async fn create_users<T>(
         let username = format!("{}-{}", resource_name, role_name);
         let user_id = make_uuid();
         println!("creating user: {}", &username);
-        users.push((username, user_id));
+        users.push((username.clone(), user_id));
 
-        let silo_user = db::model::SiloUser::new(silo_id, user_id);
+        let silo_user = db::model::SiloUser::new(silo_id, user_id, username);
         datastore
             .silo_user_create(silo_user)
             .await

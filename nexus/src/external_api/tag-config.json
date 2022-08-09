@@ -38,6 +38,12 @@
         "url": "http://oxide.computer/docs/#xxx"
       }
     },
+    "ip-pools": {
+      "description": "IP Pools contain external IP addresses that can be assigned to virtual machine Instances.",
+      "external_docs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
     "login": {
       "description": "Authentication endpoints",
       "external_docs": {
@@ -74,7 +80,7 @@
         "url": "http://oxide.computer/docs/#xxx"
       }
     },
-    "racks": {
+    "hardware": {
       "description": "These operations pertain to hardware inventory and management. Racks are the unit of expansion of an Oxide deployment. Racks are in turn composed of sleds, switches, power supplies, and a cabled backplane.",
       "external_docs": {
         "url": "http://oxide.computer/docs/#xxx"
@@ -104,20 +110,14 @@
         "url": "http://oxide.computer/docs/#xxx"
       }
     },
-    "sleds": {
-      "description": "This tag should be moved into hardware",
-      "external_docs": {
-        "url": "http://oxide.computer/docs/#xxx"
-      }
-    },
     "snapshots": {
       "description": "Snapshots of Virtual Disks at a particular point in time.",
       "external_docs": {
         "url": "http://oxide.computer/docs/#xxx"
       }
     },
-    "sshkeys": {
-      "description": "Public SSH keys for an individual user",
+    "session": {
+      "description": "Information pertaining to the current session.",
       "external_docs": {
         "url": "http://oxide.computer/docs/#xxx"
       }
@@ -128,14 +128,14 @@
         "url": "http://oxide.computer/docs/#xxx"
       }
     },
-    "updates": {
-      "description": "This tag should be moved into a operations tag",
+    "system": {
+      "description": "Internal system information",
       "external_docs": {
         "url": "http://oxide.computer/docs/#xxx"
       }
     },
-    "users": {
-      "description": "This tag should be moved into an IAM tag",
+    "updates": {
+      "description": "This tag should be moved into a operations tag",
       "external_docs": {
         "url": "http://oxide.computer/docs/#xxx"
       }

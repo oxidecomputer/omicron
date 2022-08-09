@@ -5,50 +5,9 @@
     "version": "v0.1.0"
   },
   "paths": {
-    "/delete-records": {
-      "put": {
-        "operationId": "dns_records_delete",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "title": "Array_of_DnsRecordKey",
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/DnsRecordKey"
-                }
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "title": "Null",
-                  "type": "string",
-                  "enum": [
-                    null
-                  ]
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/get-records": {
+    "/records": {
       "get": {
-        "operationId": "dns_records_get",
+        "operationId": "dns_records_list",
         "responses": {
           "200": {
             "description": "successful operation",
@@ -71,11 +30,9 @@
             "$ref": "#/components/responses/Error"
           }
         }
-      }
-    },
-    "/set-records": {
-      "put": {
-        "operationId": "dns_records_set",
+      },
+      "post": {
+        "operationId": "dns_records_create",
         "requestBody": {
           "content": {
             "application/json": {
@@ -91,19 +48,36 @@
           "required": true
         },
         "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "title": "Null",
-                  "type": "string",
-                  "enum": [
-                    null
-                  ]
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "dns_records_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "title": "Array_of_DnsRecordKey",
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/DnsRecordKey"
                 }
               }
             }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "successful deletion"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"

@@ -19,7 +19,7 @@ async fn do_full_setup() {
 // Wraps exclusively the CockroachDB portion of setup/teardown.
 async fn do_crdb_setup() {
     let cfg = nexus_test_utils::load_test_config();
-    let logctx = LogContext::new("crdb_setup", &cfg.log);
+    let logctx = LogContext::new("crdb_setup", &cfg.pkg.log);
     let mut db = test_setup_database(&logctx.log).await;
     db.cleanup().await.unwrap();
 }

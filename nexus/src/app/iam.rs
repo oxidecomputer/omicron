@@ -13,9 +13,11 @@ use crate::external_api::shared;
 use anyhow::Context;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::UpdateResult;
+use uuid::Uuid;
 
 impl super::Nexus {
     // Global (fleet-wide) policy
@@ -23,7 +25,7 @@ impl super::Nexus {
     pub async fn fleet_fetch_policy(
         &self,
         opctx: &OpContext,
-    ) -> LookupResult<shared::Policy<authz::FleetRoles>> {
+    ) -> LookupResult<shared::Policy<authz::FleetRole>> {
         let role_assignments = self
             .db_datastore
             .role_assignment_fetch_visible(opctx, &authz::FLEET)
@@ -38,8 +40,8 @@ impl super::Nexus {
     pub async fn fleet_update_policy(
         &self,
         opctx: &OpContext,
-        policy: &shared::Policy<authz::FleetRoles>,
-    ) -> UpdateResult<shared::Policy<authz::FleetRoles>> {
+        policy: &shared::Policy<authz::FleetRole>,
+    ) -> UpdateResult<shared::Policy<authz::FleetRole>> {
         let role_assignments = self
             .db_datastore
             .role_assignment_replace_visible(
@@ -52,6 +54,34 @@ impl super::Nexus {
             .map(|r| r.try_into())
             .collect::<Result<Vec<_>, _>>()?;
         Ok(shared::Policy { role_assignments })
+    }
+
+    // Silo users
+
+    pub async fn silo_users_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<db::model::SiloUser> {
+        let authz_silo = opctx
+            .authn
+            .silo_required()
+            .internal_context("listing current silo's users")?;
+        self.db_datastore
+            .silo_users_list_by_id(opctx, &authz_silo, pagparams)
+            .await
+    }
+
+    pub async fn silo_user_fetch_by_id(
+        &self,
+        opctx: &OpContext,
+        silo_user_id: &Uuid,
+    ) -> LookupResult<db::model::SiloUser> {
+        let (.., db_silo_user) = LookupPath::new(opctx, &self.db_datastore)
+            .silo_user_id(*silo_user_id)
+            .fetch()
+            .await?;
+        Ok(db_silo_user)
     }
 
     // Built-in users

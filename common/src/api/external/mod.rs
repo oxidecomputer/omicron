@@ -169,6 +169,12 @@ impl TryFrom<String> for Name {
             return Err(String::from("name cannot end with \"-\""));
         }
 
+        if Uuid::parse_str(&value).is_ok() {
+            return Err(String::from(
+                "name cannot be a UUID to avoid ambiguity with IDs",
+            ));
+        }
+
         Ok(Name(value))
     }
 }
@@ -200,37 +206,46 @@ where
     }
 }
 
-/// Custom JsonSchema implementation to encode the constraints on Name
-// TODO: 1. make this part of schemars w/ rename and maxlen annotations
-// TODO: 2. integrate the regex with `try_from`
+/// Custom JsonSchema implementation to encode the constraints on Name.
 impl JsonSchema for Name {
     fn schema_name() -> String {
         "Name".to_string()
     }
     fn json_schema(
-        _gen: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
-        schemars::schema::Schema::Object(schemars::schema::SchemaObject {
+        schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
-                title: Some("A name used in the API".to_string()),
+                title: Some(
+                    "A name unique within the parent collection".to_string(),
+                ),
                 description: Some(
                     "Names must begin with a lower case ASCII letter, be \
                      composed exclusively of lowercase ASCII, uppercase \
-                     ASCII, numbers, and '-', and may not end with a '-'."
+                     ASCII, numbers, and '-', and may not end with a '-'. \
+                     Names cannot be a UUID though they may contain a UUID."
                         .to_string(),
                 ),
                 ..Default::default()
             })),
-            instance_type: Some(schemars::schema::SingleOrVec::Single(
-                Box::new(schemars::schema::InstanceType::String),
-            )),
+            instance_type: Some(schemars::schema::InstanceType::String.into()),
             string: Some(Box::new(schemars::schema::StringValidation {
                 max_length: Some(63),
                 min_length: None,
-                pattern: Some("[a-z](|[a-zA-Z0-9-]*[a-zA-Z0-9])".to_string()),
+                pattern: Some(
+                    concat!(
+                        r#"^"#,
+                        // Cannot match a UUID
+                        r#"(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)"#,
+                        r#"^[a-z][a-z0-9-]*[a-zA-Z0-9]"#,
+                        r#"$"#,
+                    )
+                    .to_string(),
+                )
             })),
             ..Default::default()
-        })
+        }
+        .into()
     }
 }
 
@@ -286,14 +301,13 @@ impl RoleName {
     }
 }
 
-/// Custom JsonSchema implementation to encode the constraints on Name
-// TODO see TODOs on Name above
+/// Custom JsonSchema implementation to encode the constraints on RoleName
 impl JsonSchema for RoleName {
     fn schema_name() -> String {
         "RoleName".to_string()
     }
     fn json_schema(
-        _gen: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::Schema::Object(schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
@@ -514,10 +528,13 @@ pub enum ResourceType {
     Fleet,
     Silo,
     SiloUser,
+    SiloGroup,
     IdentityProvider,
     SamlIdentityProvider,
     SshKey,
     ConsoleSession,
+    DeviceAuthRequest,
+    DeviceAccessToken,
     GlobalImage,
     Organization,
     Project,
@@ -525,6 +542,7 @@ pub enum ResourceType {
     Disk,
     Image,
     Instance,
+    IpPool,
     NetworkInterface,
     Rack,
     Service,
@@ -867,44 +885,15 @@ impl DiskState {
 // These are currently only intended for observability by developers.  We will
 // eventually want to flesh this out into something more observable for end
 // users.
-#[derive(ObjectIdentity, Clone, Debug, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, JsonSchema)]
 pub struct Saga {
     pub id: Uuid,
     pub state: SagaState,
-    // TODO-cleanup This object contains a fake `IdentityMetadata`.  Why?  We
-    // want to paginate these objects.  http_pagination.rs provides a bunch of
-    // useful facilities -- notably `PaginatedById`.  `PaginatedById`
-    // requires being able to take an arbitrary object in the result set and get
-    // its id.  To do that, it uses the `ObjectIdentity` trait, which expects
-    // to be able to return an `IdentityMetadata` reference from an object.
-    // Finally, the pagination facilities just pull the `id` out of that.
-    //
-    // In this case (as well as others, like sleds and racks), we have ids, and
-    // we want to be able to paginate by id, but we don't have full identity
-    // metadata.  (Or we do, but it's similarly faked up.)  What we should
-    // probably do is create a new trait, say `ObjectId`, that returns _just_
-    // an id.  We can provide a blanket impl for anything that impls
-    // IdentityMetadata.  We can define one-off impls for structs like this
-    // one.  Then the id-only pagination interfaces can require just
-    // `ObjectId`.
-    #[serde(skip)]
-    pub identity: IdentityMetadata,
 }
 
 impl From<steno::SagaView> for Saga {
     fn from(s: steno::SagaView) -> Self {
-        Saga {
-            id: Uuid::from(s.id),
-            state: SagaState::from(s.state),
-            identity: IdentityMetadata {
-                // TODO-cleanup See the note in Saga above.
-                id: Uuid::from(s.id),
-                name: format!("saga-{}", s.id).parse().unwrap(),
-                description: format!("saga {}", s.id),
-                time_created: Utc::now(),
-                time_modified: Utc::now(),
-            },
-        }
+        Saga { id: Uuid::from(s.id), state: SagaState::from(s.state) }
     }
 }
 
@@ -913,7 +902,7 @@ impl From<steno::SagaView> for Saga {
 pub enum SagaState {
     Running,
     Succeeded,
-    Failed { error_node_name: String, error_info: SagaErrorInfo },
+    Failed { error_node_name: steno::NodeName, error_info: SagaErrorInfo },
 }
 
 #[derive(Clone, Debug, Serialize, JsonSchema)]
@@ -995,39 +984,58 @@ impl JsonSchema for Ipv4Net {
     fn json_schema(
         _: &mut schemars::gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
-        schemars::schema::Schema::Object(
-            schemars::schema::SchemaObject {
-                metadata: Some(Box::new(schemars::schema::Metadata {
-                    title: Some("An IPv4 subnet".to_string()),
-                    description: Some("An IPv4 subnet, including prefix and subnet mask".to_string()),
-                    examples: vec!["192.168.1.0/24".into()],
-                    ..Default::default()
-                })),
-                instance_type: Some(schemars::schema::SingleOrVec::Single(Box::new(schemars::schema::InstanceType::String))),
-                string: Some(Box::new(schemars::schema::StringValidation {
-                    // Fully-specified IPv4 address. Up to 15 chars for address, plus slash and up to 2 subnet digits.
-                    max_length: Some(18),
-                    min_length: None,
-                    // Addresses must be from an RFC 1918 private address space
-                    pattern: Some(
-                        concat!(
-                            // 10.x.x.x/8
-                            r#"(^(10\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9]\.){2}(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])/(1[0-9]|2[0-8]|[8-9]))$)|"#,
-                            // 172.16.x.x/12
-                            r#"(^(172\.16\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])/(1[2-9]|2[0-8]))$)|"#,
-                            // 192.168.x.x/16
-                            r#"(^(192\.168\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])\.(25[0-5]|[1-2][0-4][0-9]|[1-9][0-9]|[0-9])/(1[6-9]|2[0-8]))$)"#,
-                        ).to_string(),
-                    ),
-                })),
+        schemars::schema::SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                title: Some("An IPv4 subnet".to_string()),
+                description: Some(
+                    "An IPv4 subnet, including prefix and subnet mask"
+                        .to_string(),
+                ),
+                examples: vec!["192.168.1.0/24".into()],
                 ..Default::default()
-            }
-        )
+            })),
+            instance_type: Some(schemars::schema::InstanceType::String.into()),
+            string: Some(Box::new(schemars::schema::StringValidation {
+                // Addresses must be from an RFC 1918 private address space
+                pattern: Some(
+                    concat!(
+                        r#"^("#,
+                        // 10.0.0.0/8 (10.0.0.0 .. 10.255.255.255)
+                        r#"10\."#,
+                        r#"([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])"#,
+                        r#"\."#,
+                        r#"([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])"#,
+                        r#"\."#,
+                        r#"([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])"#,
+                        r#"\/([8-9]|1[0-9]|2[0-9]|3[0-2])|"#,
+                        // 172.16.0.0/12 (172.16.0.0 .. 172.31.255.255)
+                        r#"172\."#,
+                        r#"(1[6-9]|2[0-9]|3[0-1])"#,
+                        r#"\."#,
+                        r#"([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])"#,
+                        r#"\."#,
+                        r#"([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])"#,
+                        r#"\/(1[2-9]|2[0-9]|3[0-2])|"#,
+                        // 192.168.0.0/16 (192.168.0.0 .. 192.168.255.255)
+                        r#"192\.168\."#,
+                        r#"([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])"#,
+                        r#"\."#,
+                        r#"([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])"#,
+                        r#"\/(1[6-9]|2[0-9]|3[0-2])"#,
+                        r#")$"#,
+                    )
+                    .to_string(),
+                ),
+                ..Default::default()
+            })),
+            ..Default::default()
+        }
+        .into()
     }
 }
 
 /// An `Ipv6Net` represents a IPv6 subnetwork, including the address and network mask.
-#[derive(Clone, Copy, Debug, Deserialize, Hash, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Hash, PartialEq, Eq, Serialize)]
 pub struct Ipv6Net(pub ipnetwork::Ipv6Network);
 
 impl Ipv6Net {
@@ -1089,30 +1097,34 @@ impl JsonSchema for Ipv6Net {
     fn json_schema(
         _: &mut schemars::gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
-        schemars::schema::Schema::Object(
-            schemars::schema::SchemaObject {
-                metadata: Some(Box::new(schemars::schema::Metadata {
-                    title: Some("An IPv6 subnet".to_string()),
-                    description: Some("An IPv6 subnet, including prefix and subnet mask".to_string()),
-                    examples: vec!["fd12:3456::/64".into()],
-                    ..Default::default()
-                })),
-                instance_type: Some(schemars::schema::SingleOrVec::Single(Box::new(schemars::schema::InstanceType::String))),
-                string: Some(Box::new(schemars::schema::StringValidation {
-                    // Fully-specified IPv6 address. 4 hex chars per segment, 8 segments, 7
-                    // ":"-separators, slash and up to 3 subnet digits
-                    max_length: Some(43),
-                    min_length: None,
-                    pattern: Some(
-                        // Conforming to unique local addressing scheme, `fd00::/8`.
-                        concat!(
-                            r#"^(fd|FD)[0-9a-fA-F]{2}:((([0-9a-fA-F]{1,4}\:){6}[0-9a-fA-F]{1,4})|(([0-9a-fA-F]{1,4}:){1,6}:))/(6[4-9]|[7-9][0-9]|1[0-1][0-9]|12[0-6])$"#,
-                        ).to_string(),
-                    ),
-                })),
+        schemars::schema::SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                title: Some("An IPv6 subnet".to_string()),
+                description: Some(
+                    "An IPv6 subnet, including prefix and subnet mask"
+                        .to_string(),
+                ),
+                examples: vec!["fd12:3456::/64".into()],
                 ..Default::default()
-            }
-        )
+            })),
+            instance_type: Some(schemars::schema::InstanceType::String.into()),
+            string: Some(Box::new(schemars::schema::StringValidation {
+                pattern: Some(
+                    // Conforming to unique local addressing scheme,
+                    // `fd00::/8`.
+                    concat!(
+                        r#"^([fF][dD])[0-9a-fA-F]{2}:("#,
+                        r#"([0-9a-fA-F]{1,4}:){6}[0-9a-fA-F]{1,4}"#,
+                        r#"|([0-9a-fA-F]{1,4}:){1,6}:)"#,
+                        r#"\/([1-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$"#,
+                    )
+                    .to_string(),
+                ),
+                ..Default::default()
+            })),
+            ..Default::default()
+        }
+        .into()
     }
 }
 
@@ -1121,6 +1133,51 @@ impl JsonSchema for Ipv6Net {
 pub enum IpNet {
     V4(Ipv4Net),
     V6(Ipv6Net),
+}
+
+impl IpNet {
+    /// Return the first address in this subnet
+    pub fn first_address(&self) -> IpAddr {
+        match self {
+            IpNet::V4(inner) => IpAddr::from(inner.iter().next().unwrap()),
+            IpNet::V6(inner) => IpAddr::from(inner.iter().next().unwrap()),
+        }
+    }
+
+    /// Return the last address in this subnet.
+    ///
+    /// For a subnet of size 1, e.g., a /32, this is the same as the first
+    /// address.
+    // NOTE: This is a workaround for the fact that the `ipnetwork` crate's
+    // iterator provides only the `Iterator::next()` method. That means that
+    // finding the last address is linear in the size of the subnet, which is
+    // completely untenable and totally avoidable with some addition. In the
+    // long term, we should either put up a patch to the `ipnetwork` crate or
+    // move the `ipnet` crate, which does provide an efficient iterator
+    // implementation.
+    pub fn last_address(&self) -> IpAddr {
+        match self {
+            IpNet::V4(inner) => {
+                let base: u32 = inner.network().into();
+                let size = inner.size() - 1;
+                std::net::IpAddr::V4(std::net::Ipv4Addr::from(base + size))
+            }
+            IpNet::V6(inner) => {
+                let base: u128 = inner.network().into();
+                let size = inner.size() - 1;
+                std::net::IpAddr::V6(std::net::Ipv6Addr::from(base + size))
+            }
+        }
+    }
+}
+
+impl From<ipnetwork::IpNetwork> for IpNet {
+    fn from(n: ipnetwork::IpNetwork) -> Self {
+        match n {
+            ipnetwork::IpNetwork::V4(v4) => IpNet::V4(Ipv4Net(v4)),
+            ipnetwork::IpNetwork::V6(v6) => IpNet::V6(Ipv6Net(v6)),
+        }
+    }
 }
 
 impl From<Ipv4Net> for IpNet {
@@ -1212,19 +1269,13 @@ impl JsonSchema for IpNet {
         gen: &mut schemars::gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::SchemaObject {
-            metadata: Some(
-                schemars::schema::Metadata { ..Default::default() }.into(),
-            ),
-            subschemas: Some(
-                schemars::schema::SubschemaValidation {
-                    one_of: Some(vec![
-                        label_schema("v4", gen.subschema_for::<Ipv4Net>()),
-                        label_schema("v6", gen.subschema_for::<Ipv6Net>()),
-                    ]),
-                    ..Default::default()
-                }
-                .into(),
-            ),
+            subschemas: Some(Box::new(schemars::schema::SubschemaValidation {
+                one_of: Some(vec![
+                    label_schema("v4", gen.subschema_for::<Ipv4Net>()),
+                    label_schema("v6", gen.subschema_for::<Ipv6Net>()),
+                ]),
+                ..Default::default()
+            })),
             ..Default::default()
         }
         .into()
@@ -1234,7 +1285,10 @@ impl JsonSchema for IpNet {
 /// Insert another level of schema indirection in order to provide an
 /// additional title for a subschema. This allows generators to infer a better
 /// variant name for an "untagged" enum.
-fn label_schema(
+// TODO-cleanup: We should move IpNet and this to
+// `omicron_nexus::external_api::shared`. It's public now because `IpRange`,
+// which is defined there, uses it.
+pub fn label_schema(
     label: &str,
     schema: schemars::schema::Schema,
 ) -> schemars::schema::Schema {
@@ -1406,7 +1460,7 @@ pub struct VpcFirewallRule {
     pub vpc_id: Uuid,
 }
 
-/// Collection of a [`Vpc`]'s firewall rules
+/// Collection of a Vpc's firewall rules
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcFirewallRules {
     pub rules: Vec<VpcFirewallRule>,
@@ -1608,7 +1662,7 @@ pub struct L4PortRange {
 impl FromStr for L4PortRange {
     type Err = String;
     fn from_str(range: &str) -> Result<Self, Self::Err> {
-        const INVALID_PORT_NUMBER_MSG: &'static str = "invalid port number";
+        const INVALID_PORT_NUMBER_MSG: &str = "invalid port number";
 
         match range.split_once('-') {
             None => {
@@ -1659,7 +1713,7 @@ impl JsonSchema for L4PortRange {
     fn json_schema(
         _: &mut schemars::gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
-        schemars::schema::Schema::Object(schemars::schema::SchemaObject {
+        schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
                 title: Some("A range of IP ports".to_string()),
                 description: Some(
@@ -1670,9 +1724,9 @@ impl JsonSchema for L4PortRange {
                 examples: vec!["22".into(), "6667-7000".into()],
                 ..Default::default()
             })),
-            instance_type: Some(schemars::schema::SingleOrVec::Single(
-                Box::new(schemars::schema::InstanceType::String),
-            )),
+            instance_type: Some(
+                schemars::schema::InstanceType::String.into()
+            ),
             string: Some(Box::new(schemars::schema::StringValidation {
                 max_length: Some(11),  // 5 digits for each port and the dash
                 min_length: Some(1),
@@ -1681,7 +1735,7 @@ impl JsonSchema for L4PortRange {
                 ),
             })),
             ..Default::default()
-        })
+        }.into()
     }
 }
 
@@ -1694,11 +1748,17 @@ impl JsonSchema for L4PortRange {
 )]
 pub struct MacAddr(pub macaddr::MacAddr6);
 
+impl From<macaddr::MacAddr6> for MacAddr {
+    fn from(mac: macaddr::MacAddr6) -> Self {
+        Self(mac)
+    }
+}
+
 impl FromStr for MacAddr {
     type Err = macaddr::ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        s.parse().map(|addr| MacAddr(addr))
+        s.parse().map(MacAddr)
     }
 }
 
@@ -1731,7 +1791,7 @@ impl JsonSchema for MacAddr {
     fn json_schema(
         _: &mut schemars::gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
-        schemars::schema::Schema::Object(schemars::schema::SchemaObject {
+        schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
                 title: Some("A MAC address".to_string()),
                 description: Some(
@@ -1741,9 +1801,7 @@ impl JsonSchema for MacAddr {
                 examples: vec!["ff:ff:ff:ff:ff:ff".into()],
                 ..Default::default()
             })),
-            instance_type: Some(schemars::schema::SingleOrVec::Single(
-                Box::new(schemars::schema::InstanceType::String),
-            )),
+            instance_type: Some(schemars::schema::InstanceType::String.into()),
             string: Some(Box::new(schemars::schema::StringValidation {
                 max_length: Some(17), // 12 hex characters and 5 ":"-separators
                 min_length: Some(17),
@@ -1752,7 +1810,8 @@ impl JsonSchema for MacAddr {
                 ),
             })),
             ..Default::default()
-        })
+        }
+        .into()
     }
 }
 
@@ -1941,6 +2000,10 @@ mod test {
                 "name contains invalid character: \"\u{00e9}\" (allowed \
                  characters are lowercase ASCII, digits, and \"-\")",
             ),
+            (
+                "a7e55044-10b1-426f-9247-bb680e5fe0c8",
+                "name cannot be a UUID to avoid ambiguity with IDs",
+            ),
         ];
 
         for (input, expected_message) in error_cases {
@@ -1949,8 +2012,14 @@ mod test {
         }
 
         // Success cases
-        let valid_names: Vec<&str> =
-            vec!["abc", "abc-123", "a123", &long_name[0..63]];
+        let valid_names: Vec<&str> = vec![
+            "abc",
+            "abc-123",
+            "a123",
+            "ok-a7e55044-10b1-426f-9247-bb680e5fe0c8",
+            "a7e55044-10b1-426f-9247-bb680e5fe0c8-ok",
+            &long_name[0..63],
+        ];
 
         for name in valid_names {
             eprintln!("check name \"{}\" (should be valid)", name);
@@ -2448,5 +2517,53 @@ mod test {
         assert_eq!(format!(r#""{}""#, net_str), ser);
         let net_des = serde_json::from_str::<IpNet>(&ser).unwrap();
         assert_eq!(net, net_des);
+    }
+
+    #[test]
+    fn test_ipnet_first_last_address() {
+        use std::net::IpAddr;
+        use std::net::Ipv4Addr;
+        use std::net::Ipv6Addr;
+        let net: IpNet = "fd00::/128".parse().unwrap();
+        assert_eq!(
+            net.first_address(),
+            IpAddr::from(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0)),
+        );
+        assert_eq!(
+            net.last_address(),
+            IpAddr::from(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0)),
+        );
+
+        let net: IpNet = "fd00::/64".parse().unwrap();
+        assert_eq!(
+            net.first_address(),
+            IpAddr::from(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0)),
+        );
+        assert_eq!(
+            net.last_address(),
+            IpAddr::from(Ipv6Addr::new(
+                0xfd00, 0, 0, 0, 0xffff, 0xffff, 0xffff, 0xffff
+            )),
+        );
+
+        let net: IpNet = "10.0.0.0/16".parse().unwrap();
+        assert_eq!(
+            net.first_address(),
+            IpAddr::from(Ipv4Addr::new(10, 0, 0, 0)),
+        );
+        assert_eq!(
+            net.last_address(),
+            IpAddr::from(Ipv4Addr::new(10, 0, 255, 255)),
+        );
+
+        let net: IpNet = "10.0.0.0/32".parse().unwrap();
+        assert_eq!(
+            net.first_address(),
+            IpAddr::from(Ipv4Addr::new(10, 0, 0, 0)),
+        );
+        assert_eq!(
+            net.last_address(),
+            IpAddr::from(Ipv4Addr::new(10, 0, 0, 0)),
+        );
     }
 }

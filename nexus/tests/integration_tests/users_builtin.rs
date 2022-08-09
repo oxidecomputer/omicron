@@ -6,27 +6,30 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 use omicron_nexus::authn;
-use omicron_nexus::external_api::views::User;
+use omicron_nexus::external_api::views::UserBuiltin;
 use std::collections::BTreeMap;
 
 #[nexus_test]
 async fn test_users_builtin(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
-    let mut users = NexusRequest::object_get(&testctx, "/users")
+    let mut users = NexusRequest::object_get(testctx, "/system/user")
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
         .unwrap()
-        .parsed_body::<ResultsPage<User>>()
+        .parsed_body::<ResultsPage<UserBuiltin>>()
         .unwrap()
         .items
         .into_iter()
         .map(|u| (u.identity.name.to_string(), u))
-        .collect::<BTreeMap<String, User>>();
+        .collect::<BTreeMap<String, UserBuiltin>>();
 
     let u = users.remove(&authn::USER_DB_INIT.name.to_string()).unwrap();
     assert_eq!(u.identity.id, authn::USER_DB_INIT.id);
+    let u =
+        users.remove(&authn::USER_SERVICE_BALANCER.name.to_string()).unwrap();
+    assert_eq!(u.identity.id, authn::USER_SERVICE_BALANCER.id);
     let u = users.remove(&authn::USER_INTERNAL_API.name.to_string()).unwrap();
     assert_eq!(u.identity.id, authn::USER_INTERNAL_API.id);
     let u = users.remove(&authn::USER_INTERNAL_READ.name.to_string()).unwrap();

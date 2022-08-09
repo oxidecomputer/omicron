@@ -12,6 +12,7 @@ use dropshot::ResultsPage;
 use headers::authorization::Credentials;
 use omicron_nexus::authn::external::spoof;
 use omicron_nexus::db::identity::Asset;
+use serde_urlencoded;
 use std::convert::TryInto;
 use std::fmt::Debug;
 
@@ -59,6 +60,7 @@ pub struct RequestBuilder<'a> {
     headers: http::HeaderMap<http::header::HeaderValue>,
     body: hyper::Body,
     error: Option<anyhow::Error>,
+    allow_non_dropshot_errors: bool,
 
     expected_status: Option<http::StatusCode>,
     allowed_headers: Option<Vec<http::header::HeaderName>>,
@@ -83,6 +85,7 @@ impl<'a> RequestBuilder<'a> {
             expected_status: None,
             allowed_headers: Some(vec![
                 http::header::CACHE_CONTROL,
+                http::header::CONTENT_ENCODING,
                 http::header::CONTENT_LENGTH,
                 http::header::CONTENT_TYPE,
                 http::header::DATE,
@@ -92,6 +95,7 @@ impl<'a> RequestBuilder<'a> {
             ]),
             expected_response_headers: http::HeaderMap::new(),
             error: None,
+            allow_non_dropshot_errors: false,
         }
     }
 
@@ -114,6 +118,17 @@ impl<'a> RequestBuilder<'a> {
         self
     }
 
+    /// Set the outgoing request body
+    ///
+    /// If `body` is `None`, the request body will be empty.
+    pub fn raw_body(mut self, body: Option<String>) -> Self {
+        match body {
+            Some(body) => self.body = hyper::Body::from(body),
+            None => self.body = hyper::Body::empty(),
+        };
+        self
+    }
+
     /// Set the outgoing request body to the result of serializing `body`
     ///
     /// If `body` is `None`, the request body will be empty.
@@ -132,10 +147,33 @@ impl<'a> RequestBuilder<'a> {
         self
     }
 
+    /// Set the outgoing request body using URL encoding
+    /// and set the content type appropriately
+    ///
+    /// If `body` is `None`, the request body will be empty.
+    pub fn body_urlencoded<RequestBodyType: serde::Serialize>(
+        mut self,
+        body: Option<&RequestBodyType>,
+    ) -> Self {
+        let new_body = body.map(|b| {
+            serde_urlencoded::to_string(b)
+                .context("failed to URL-encode request body")
+        });
+        match new_body {
+            Some(Err(error)) => self.error = Some(error),
+            Some(Ok(new_body)) => self.body = hyper::Body::from(new_body),
+            None => self.body = hyper::Body::empty(),
+        };
+        self.header(
+            http::header::CONTENT_TYPE,
+            "application/x-www-form-urlencoded",
+        )
+    }
+
     /// Record that we expect to get status code `expected_status` in the
     /// response
     ///
-    /// If `expected_status` is not `None`, then [`execute()`] will check this
+    /// If `expected_status` is not `None`, then [`Self::execute()`] will check this
     /// and raise an error if a different status code is found.
     pub fn expect_status(
         mut self,
@@ -147,7 +185,7 @@ impl<'a> RequestBuilder<'a> {
 
     /// Record a list of header names allowed in the response
     ///
-    /// If this function is used, then [`execute()`] will check each header in
+    /// If this function is used, then [`Self::execute()`] will check each header in
     /// the response against this list and raise an error if a header name is
     /// found that's not in this list.
     pub fn expect_allowed_headers<
@@ -186,11 +224,18 @@ impl<'a> RequestBuilder<'a> {
         self
     }
 
+    /// Allow non-dropshot error responses, i.e., errors that are not compatible
+    /// with `dropshot::HttpErrorResponseBody`.
+    pub fn allow_non_dropshot_errors(mut self) -> Self {
+        self.allow_non_dropshot_errors = true;
+        self
+    }
+
     /// Make the HTTP request using the given `client`, verify the returned
     /// response, and make the response available to the caller
     ///
-    /// This function checks the returned status code (if [`expect_status()`]
-    /// was used), allowed headers (if [`allowed_headers()`] was used), and
+    /// This function checks the returned status code (if [`Self::expect_status()`]
+    /// was used), allowed headers (if [`Self::expect_allowed_headers()`] was used), and
     /// various other properties of the response.
     pub async fn execute(self) -> Result<TestResponse, anyhow::Error> {
         if let Some(error) = self.error {
@@ -336,14 +381,16 @@ impl<'a> RequestBuilder<'a> {
             headers: response.headers().clone(),
             body: response_body,
         };
-        if status.is_client_error() || status.is_server_error() {
+        if (status.is_client_error() || status.is_server_error())
+            && !self.allow_non_dropshot_errors
+        {
             let error_body = test_response
                 .parsed_body::<dropshot::HttpErrorResponseBody>()
                 .context("parsing error body")?;
             ensure!(
                 error_body.request_id == request_id_header,
                 "expected error response body to have request id {:?} \
-                (to match request-id header), bout found {:?}",
+                (to match request-id header), but found {:?}",
                 request_id_header,
                 error_body.request_id
             );
@@ -380,7 +427,7 @@ where
 }
 
 /// Represents a response from an HTTP server
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TestResponse {
     pub status: http::StatusCode,
     pub headers: http::HeaderMap,
@@ -421,12 +468,12 @@ pub struct NexusRequest<'a> {
 impl<'a> NexusRequest<'a> {
     /// Create a `NexusRequest` around `request_builder`
     ///
-    /// Most callers should use [`objects_post`], [`object_get`],
-    /// [`object_delete`], or the other wrapper constructors.  If you use this
+    /// Most callers should use [`Self::objects_post`], [`Self::object_get`],
+    /// [`Self::object_delete`], or the other wrapper constructors.  If you use this
     /// function directly, you should set up your `request_builder` first with
     /// whatever HTTP-level stuff you want (including any non-authentication
     /// headers), then call this function to get a `NexusRequest`, then use
-    /// [`authn_as()`] to configure authentication.
+    /// [`Self::authn_as()`] to configure authentication.
     pub fn new(request_builder: RequestBuilder<'a>) -> Self {
         NexusRequest { request_builder }
     }

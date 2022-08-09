@@ -4,14 +4,17 @@
 
 //! Rack Setup Service implementation
 
-use super::config::{SetupServiceConfig as Config, SledRequest};
+use super::config::{HardcodedSledRequest, SetupServiceConfig as Config};
 use crate::bootstrap::config::BOOTSTRAP_AGENT_PORT;
-use crate::bootstrap::discovery::PeerMonitorObserver;
+use crate::bootstrap::ddm_admin_client::{DdmAdminClient, DdmError};
 use crate::bootstrap::params::SledAgentRequest;
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
 use crate::bootstrap::trust_quorum::{RackSecret, ShareDistribution};
-use crate::params::ServiceRequest;
-use omicron_common::address::{get_sled_address, ReservedRackSubnet};
+use crate::params::{ServiceRequest, ServiceType};
+use internal_dns_client::multiclient::{DnsError, Updater as DnsUpdater};
+use omicron_common::address::{
+    get_sled_address, ReservedRackSubnet, DNS_PORT, DNS_SERVER_PORT,
+};
 use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
 };
@@ -19,10 +22,12 @@ use serde::{Deserialize, Serialize};
 use slog::Logger;
 use sprockets_host::Ed25519Certificate;
 use std::collections::{HashMap, HashSet};
+use std::iter;
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::path::PathBuf;
 use thiserror::Error;
-use tokio::sync::Mutex;
+use tokio::sync::OnceCell;
+use uuid::Uuid;
 
 /// Describes errors which may occur while operating the setup service.
 #[derive(Error, Debug)]
@@ -40,6 +45,9 @@ pub enum SetupServiceError {
     #[error("Error making HTTP request to Sled Agent: {0}")]
     SledApi(#[from] sled_agent_client::Error<sled_agent_client::types::Error>),
 
+    #[error("Error contacting ddmd: {0}")]
+    DdmError(#[from] DdmError),
+
     #[error("Cannot deserialize TOML file at {path}: {err}")]
     Toml { path: PathBuf, err: toml::de::Error },
 
@@ -51,13 +59,16 @@ pub enum SetupServiceError {
 
     #[error("Failed to split rack secret: {0:?}")]
     SplitRackSecret(vsss_rs::Error),
+
+    #[error("Failed to access DNS servers: {0}")]
+    Dns(#[from] DnsError),
 }
 
 // The workload / information allocated to a single sled.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 struct SledAllocation {
     initialization_request: SledAgentRequest,
-    services_request: SledRequest,
+    services_request: HardcodedSledRequest,
 }
 
 /// The interface to the Rack Setup Service.
@@ -79,7 +90,6 @@ impl Service {
     pub(crate) fn new(
         log: Logger,
         config: Config,
-        peer_monitor: PeerMonitorObserver,
         local_bootstrap_agent: BootstrapAgentHandle,
         // TODO-cleanup: We should be collecting the device ID certs of all
         // trust quorum members over the management network. Currently we don't
@@ -88,7 +98,7 @@ impl Service {
         member_device_id_certs: Vec<Ed25519Certificate>,
     ) -> Self {
         let handle = tokio::task::spawn(async move {
-            let svc = ServiceInner::new(log.clone(), peer_monitor);
+            let svc = ServiceInner::new(log.clone());
             if let Err(e) = svc
                 .inject_rack_setup_requests(
                     &config,
@@ -144,12 +154,12 @@ enum PeerExpectation {
 /// The implementation of the Rack Setup Service.
 struct ServiceInner {
     log: Logger,
-    peer_monitor: Mutex<PeerMonitorObserver>,
+    dns_servers: OnceCell<DnsUpdater>,
 }
 
 impl ServiceInner {
-    fn new(log: Logger, peer_monitor: PeerMonitorObserver) -> Self {
-        ServiceInner { log, peer_monitor: Mutex::new(peer_monitor) }
+    fn new(log: Logger) -> Self {
+        ServiceInner { log, dns_servers: OnceCell::new() }
     }
 
     async fn initialize_datasets(
@@ -203,7 +213,7 @@ impl ServiceInner {
     async fn initialize_services(
         &self,
         sled_address: SocketAddr,
-        services: &Vec<crate::params::ServiceRequest>,
+        services: &Vec<ServiceRequest>,
     ) -> Result<(), SetupServiceError> {
         let dur = std::time::Duration::from_secs(60);
         let client = reqwest::ClientBuilder::new()
@@ -279,33 +289,7 @@ impl ServiceInner {
         &self,
         config: &Config,
         bootstrap_addrs: Vec<Ipv6Addr>,
-        member_device_id_certs: &[Ed25519Certificate],
     ) -> Result<HashMap<SocketAddrV6, SledAllocation>, SetupServiceError> {
-        // Create a rack secret, unless we're in the single-sled case.
-        let mut maybe_rack_secret_shares = generate_rack_secret(
-            config.rack_secret_threshold,
-            member_device_id_certs,
-            &self.log,
-        )?;
-
-        // Confirm that the returned iterator (if we got one) is the length we
-        // expect.
-        if let Some(rack_secret_shares) = maybe_rack_secret_shares.as_ref() {
-            // TODO-cleanup Asserting here seems fine as long as
-            // `member_device_id_certs` is hard-coded from a config file, but
-            // once we start collecting them over the management network we
-            // should probably attach them at the type level to the bootstrap
-            // addrs, which would remove the need for this assertion.
-            assert_eq!(
-                rack_secret_shares.len(),
-                bootstrap_addrs.len(),
-                concat!(
-                    "Number of trust quorum members does not match ",
-                    "number of bootstrap addresses"
-                )
-            );
-        }
-
         let bootstrap_addrs = bootstrap_addrs.into_iter().enumerate();
         let reserved_rack_subnet = ReservedRackSubnet::new(config.az_subnet());
         let dns_subnets = reserved_rack_subnet.get_dns_subnets();
@@ -321,24 +305,38 @@ impl ServiceInner {
                     if idx < config.requests.len() {
                         config.requests[idx].clone()
                     } else {
-                        SledRequest::default()
+                        HardcodedSledRequest::default()
                     }
                 };
 
-                // The first enumerated addresses get assigned the additional
+                // The first enumerated sleds get assigned the additional
                 // responsibility of being internal DNS servers.
                 if idx < dns_subnets.len() {
                     let dns_subnet = &dns_subnets[idx];
+                    let dns_addr = dns_subnet.dns_address().ip();
                     request.dns_services.push(ServiceRequest {
+                        id: Uuid::new_v4(),
                         name: "internal-dns".to_string(),
-                        addresses: vec![dns_subnet.dns_address().ip()],
+                        addresses: vec![dns_addr],
                         gz_addresses: vec![dns_subnet.gz_address().ip()],
+                        service_type: ServiceType::InternalDns {
+                            server_address: SocketAddrV6::new(
+                                dns_addr,
+                                DNS_SERVER_PORT,
+                                0,
+                                0,
+                            ),
+                            dns_address: SocketAddrV6::new(
+                                dns_addr, DNS_PORT, 0, 0,
+                            ),
+                        },
                     });
                 }
 
                 (request, (idx, bootstrap_addr))
             });
 
+        let rack_id = Uuid::new_v4();
         let allocations = requests_and_sleds.map(|(request, sled)| {
             let (idx, bootstrap_addr) = sled;
             info!(
@@ -355,16 +353,10 @@ impl ServiceInner {
                 bootstrap_addr,
                 SledAllocation {
                     initialization_request: SledAgentRequest {
+                        id: Uuid::new_v4(),
                         subnet,
-                        trust_quorum_share: maybe_rack_secret_shares
-                            .as_mut()
-                            .map(|shares_iter| {
-                                // We asserted when creating
-                                // `maybe_rack_secret_shares` that it contained
-                                // exactly the number of shares as we have
-                                // bootstrap addrs, so we can unwrap here.
-                                shares_iter.next().unwrap()
-                            }),
+                        rack_id,
+                        gateway: config.gateway.clone(),
                     },
                     services_request: request,
                 },
@@ -379,8 +371,10 @@ impl ServiceInner {
         }
 
         // Once we've constructed a plan, write it down to durable storage.
-        let serialized_plan = toml::Value::try_from(&plan)
-            .expect("Cannot serialize configuration");
+        let serialized_plan =
+            toml::Value::try_from(&plan).unwrap_or_else(|e| {
+                panic!("Cannot serialize configuration: {:#?}: {}", plan, e)
+            });
         let plan_str = toml::to_string(&serialized_plan)
             .expect("Cannot turn config to string");
 
@@ -402,42 +396,67 @@ impl ServiceInner {
     async fn wait_for_peers(
         &self,
         expectation: PeerExpectation,
-    ) -> Result<Vec<Ipv6Addr>, SetupServiceError> {
-        let mut peer_monitor = self.peer_monitor.lock().await;
-        let (mut all_addrs, mut peer_rx) = peer_monitor.subscribe().await;
-        all_addrs.insert(peer_monitor.our_address());
+        our_bootstrap_address: Ipv6Addr,
+    ) -> Result<Vec<Ipv6Addr>, DdmError> {
+        let ddm_admin_client = DdmAdminClient::new(self.log.clone())?;
+        let addrs = retry_notify(
+            // TODO-correctness `internal_service_policy()` has potentially-long
+            // exponential backoff, which is probably not what we want. See
+            // https://github.com/oxidecomputer/omicron/issues/1270
+            internal_service_policy(),
+            || async {
+                let peer_addrs =
+                    ddm_admin_client.peer_addrs().await.map_err(|err| {
+                        BackoffError::transient(format!(
+                            "Failed getting peers from mg-ddm: {err}"
+                        ))
+                    })?;
 
-        loop {
-            {
+                let all_addrs = peer_addrs
+                    .chain(iter::once(our_bootstrap_address))
+                    .collect::<HashSet<_>>();
+
                 match expectation {
                     PeerExpectation::LoadOldPlan(ref expected) => {
                         if all_addrs.is_superset(expected) {
-                            return Ok(all_addrs
-                                .into_iter()
-                                .collect::<Vec<Ipv6Addr>>());
+                            Ok(all_addrs.into_iter().collect())
+                        } else {
+                            Err(BackoffError::transient(
+                                concat!(
+                                    "Waiting for a LoadOldPlan set ",
+                                    "of peers not found yet."
+                                )
+                                .to_string(),
+                            ))
                         }
-                        info!(self.log, "Waiting for a LoadOldPlan set of peers; not found yet.");
                     }
                     PeerExpectation::CreateNewPlan(wanted_peer_count) => {
                         if all_addrs.len() >= wanted_peer_count {
-                            return Ok(all_addrs
-                                .into_iter()
-                                .collect::<Vec<Ipv6Addr>>());
+                            Ok(all_addrs.into_iter().collect())
+                        } else {
+                            Err(BackoffError::transient(format!(
+                                "Waiting for {} peers (currently have {})",
+                                wanted_peer_count,
+                                all_addrs.len()
+                            )))
                         }
-                        info!(
-                            self.log,
-                            "Waiting for {} peers (currently have {})",
-                            wanted_peer_count,
-                            all_addrs.len(),
-                        );
                     }
                 }
-            }
+            },
+            |message, duration| {
+                info!(
+                    self.log,
+                    "{} (will retry after {:?})", message, duration
+                );
+            },
+        )
+        // `internal_service_policy()` retries indefinitely on transient errors
+        // (the only kind we produce), allowing us to `.unwrap()` without
+        // panicking
+        .await
+        .unwrap();
 
-            info!(self.log, "Waiting for more peers");
-            let new_peer = peer_rx.recv().await?;
-            all_addrs.insert(new_peer);
-        }
+        Ok(addrs)
     }
 
     // In lieu of having an operator send requests to all sleds via an
@@ -494,7 +513,9 @@ impl ServiceInner {
         } else {
             PeerExpectation::CreateNewPlan(config.requests.len())
         };
-        let addrs = self.wait_for_peers(expectation).await?;
+        let addrs = self
+            .wait_for_peers(expectation, local_bootstrap_agent.our_address())
+            .await?;
         info!(self.log, "Enough peers exist to enact RSS plan");
 
         // If we created a plan, reuse it. Otherwise, create a new plan.
@@ -508,17 +529,45 @@ impl ServiceInner {
             plan
         } else {
             info!(self.log, "Creating new allocation plan");
-            self.create_plan(config, addrs, member_device_id_certs).await?
+            self.create_plan(config, addrs).await?
         };
+
+        // Generate our rack secret, unless we're in the single-sled case.
+        let mut maybe_rack_secret_shares = generate_rack_secret(
+            config.rack_secret_threshold,
+            member_device_id_certs,
+            &self.log,
+        )?;
+
+        // Confirm that the returned iterator (if we got one) is the length we
+        // expect.
+        if let Some(rack_secret_shares) = maybe_rack_secret_shares.as_ref() {
+            // TODO-cleanup Asserting here seems fine as long as
+            // `member_device_id_certs` is hard-coded from a config file, but
+            // once we start collecting them over the management network we
+            // should probably attach them at the type level to the bootstrap
+            // addrs, which would remove the need for this assertion.
+            assert_eq!(
+                rack_secret_shares.len(),
+                plan.len(),
+                concat!(
+                    "Number of trust quorum members does not match ",
+                    "number of sleds in the plan"
+                )
+            );
+        }
 
         // Forward the sled initialization requests to our sled-agent.
         local_bootstrap_agent
             .initialize_sleds(
                 plan.iter()
-                    .map(|(bootstrap_addr, allocation)| {
+                    .map(move |(bootstrap_addr, allocation)| {
                         (
                             *bootstrap_addr,
                             allocation.initialization_request.clone(),
+                            maybe_rack_secret_shares
+                                .as_mut()
+                                .map(|shares| shares.next().unwrap()),
                         )
                     })
                     .collect(),
@@ -551,6 +600,15 @@ impl ServiceInner {
         .into_iter()
         .collect::<Result<_, SetupServiceError>>()?;
 
+        let dns_servers = DnsUpdater::new(
+            &config.az_subnet(),
+            self.log.new(o!("client" => "DNS")),
+        );
+        self.dns_servers
+            .set(dns_servers)
+            .map_err(|_| ())
+            .expect("DNS servers should only be set once");
+
         // Issue the dataset initialization requests to all sleds.
         futures::future::join_all(plan.iter().map(
             |(_, allocation)| async move {
@@ -562,6 +620,19 @@ impl ServiceInner {
                     &allocation.services_request.datasets,
                 )
                 .await?;
+
+                let mut records = HashMap::new();
+                for dataset in &allocation.services_request.datasets {
+                    records
+                        .entry(dataset.srv())
+                        .or_insert_with(Vec::new)
+                        .push((dataset.aaaa(), dataset.address()));
+                }
+                self.dns_servers
+                    .get()
+                    .expect("DNS servers must be initialized first")
+                    .insert_dns_records(&records)
+                    .await?;
                 Ok(())
             },
         ))
@@ -591,6 +662,19 @@ impl ServiceInner {
                     .collect::<Vec<_>>();
 
                 self.initialize_services(sled_address, &all_services).await?;
+
+                let mut records = HashMap::new();
+                for service in &all_services {
+                    records
+                        .entry(service.srv())
+                        .or_insert_with(Vec::new)
+                        .push((service.aaaa(), service.address()));
+                }
+                self.dns_servers
+                    .get()
+                    .expect("DNS servers must be initialized first")
+                    .insert_dns_records(&records)
+                    .await?;
                 Ok(())
             },
         ))

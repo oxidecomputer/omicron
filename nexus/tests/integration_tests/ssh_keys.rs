@@ -11,6 +11,9 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_nexus::external_api::params::SshKeyCreate;
 use omicron_nexus::external_api::views::SshKey;
 
+// Note: we use UnprivilegedUser in this test because unlike most tests, all the
+// endpoints here _can_ be accessed by that user and we want to explicitly
+// verify that behavior.
 #[nexus_test]
 async fn test_ssh_keys(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
@@ -28,7 +31,7 @@ async fn test_ssh_keys(cptestctx: &ControlPlaneTestContext) {
         Method::GET,
         "/session/me/sshkeys/nonexistent",
     )
-    .authn_as(AuthnMode::PrivilegedUser)
+    .authn_as(AuthnMode::UnprivilegedUser)
     .execute()
     .await
     .expect("failed to make GET request");
@@ -51,7 +54,7 @@ async fn test_ssh_keys(cptestctx: &ControlPlaneTestContext) {
                 public_key: public_key.to_string(),
             },
         )
-        .authn_as(AuthnMode::PrivilegedUser)
+        .authn_as(AuthnMode::UnprivilegedUser)
         .execute()
         .await
         .expect("failed to make POST request")
@@ -62,12 +65,38 @@ async fn test_ssh_keys(cptestctx: &ControlPlaneTestContext) {
         assert_eq!(new_key.public_key, *public_key);
     }
 
+    // Verify what happens if we try to create one with a conflicting name.
+    let error: dropshot::HttpErrorResponseBody =
+        NexusRequest::expect_failure_with_body(
+            client,
+            http::StatusCode::BAD_REQUEST,
+            http::Method::POST,
+            "/session/me/sshkeys",
+            &SshKeyCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "key1".parse().unwrap(),
+                    description: String::from("a fourth public key"),
+                },
+                public_key: String::from("ssh-test DDDDDDDD"),
+            },
+        )
+        .authn_as(AuthnMode::UnprivilegedUser)
+        .execute()
+        .await
+        .expect(
+            "unexpected failure trying to create ssh key with conflicting name",
+        )
+        .parsed_body()
+        .unwrap();
+    assert_eq!(error.error_code, Some(String::from("ObjectAlreadyExists")));
+    assert_eq!(error.message, "already exists: ssh-key \"key1\"");
+
     // Ensure we can GET one of the keys we just posted.
     let key1: SshKey = NexusRequest::object_get(
         client,
         &format!("/session/me/sshkeys/{}", new_keys[0].0),
     )
-    .authn_as(AuthnMode::PrivilegedUser)
+    .authn_as(AuthnMode::UnprivilegedUser)
     .execute()
     .await
     .expect("failed to make GET request")
@@ -79,15 +108,17 @@ async fn test_ssh_keys(cptestctx: &ControlPlaneTestContext) {
 
     // Ensure we can GET the list of keys we just posted.
     // TODO-coverage: pagination
-    let keys: Vec<SshKey> = NexusRequest::iter_collection_authn(
+    let keys: Vec<SshKey> = NexusRequest::object_get(
         client,
-        "/session/me/sshkeys",
-        "sort_by=name_ascending",
-        Some(new_keys.len()),
+        "/session/me/sshkeys?sort_by=name_ascending",
     )
+    .authn_as(AuthnMode::UnprivilegedUser)
+    .execute()
     .await
-    .expect("failed to list keys")
-    .all_items;
+    .expect("fetching ssh keys")
+    .parsed_body::<dropshot::ResultsPage<SshKey>>()
+    .expect("parsing list of ssh keys")
+    .items;
     assert_eq!(keys.len(), new_keys.len());
     for (key, (name, description, public_key)) in
         keys.iter().zip(new_keys.iter())
@@ -103,7 +134,7 @@ async fn test_ssh_keys(cptestctx: &ControlPlaneTestContext) {
         client,
         &format!("/session/me/sshkeys/{}", deleted_key_name),
     )
-    .authn_as(AuthnMode::PrivilegedUser)
+    .authn_as(AuthnMode::UnprivilegedUser)
     .execute()
     .await
     .expect("failed to DELETE key");
@@ -115,7 +146,7 @@ async fn test_ssh_keys(cptestctx: &ControlPlaneTestContext) {
         Method::GET,
         &format!("/session/me/sshkeys/{}", deleted_key_name),
     )
-    .authn_as(AuthnMode::PrivilegedUser)
+    .authn_as(AuthnMode::UnprivilegedUser)
     .execute()
     .await
     .expect("failed to make GET request");

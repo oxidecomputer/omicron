@@ -9,10 +9,10 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
-use crate::defaults;
 use crate::external_api::params;
 use crate::external_api::shared;
 use anyhow::Context;
+use nexus_defaults as defaults;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -88,6 +88,18 @@ impl super::Nexus {
         Ok(db_project)
     }
 
+    pub async fn project_fetch_by_id(
+        &self,
+        opctx: &OpContext,
+        project_id: &Uuid,
+    ) -> LookupResult<db::model::Project> {
+        let (.., db_project) = LookupPath::new(opctx, &self.db_datastore)
+            .project_id(*project_id)
+            .fetch()
+            .await?;
+        Ok(db_project)
+    }
+
     pub async fn projects_list_by_name(
         &self,
         opctx: &OpContext,
@@ -156,7 +168,7 @@ impl super::Nexus {
         opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
-    ) -> LookupResult<shared::Policy<authz::ProjectRoles>> {
+    ) -> LookupResult<shared::Policy<authz::ProjectRole>> {
         let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
             .organization_name(organization_name)
             .project_name(project_name)
@@ -178,8 +190,8 @@ impl super::Nexus {
         opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
-        policy: &shared::Policy<authz::ProjectRoles>,
-    ) -> UpdateResult<shared::Policy<authz::ProjectRoles>> {
+        policy: &shared::Policy<authz::ProjectRole>,
+    ) -> UpdateResult<shared::Policy<authz::ProjectRole>> {
         let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
             .organization_name(organization_name)
             .project_name(project_name)

@@ -42,6 +42,18 @@ impl super::Nexus {
         Ok(db_organization)
     }
 
+    pub async fn organization_fetch_by_id(
+        &self,
+        opctx: &OpContext,
+        organization_id: &Uuid,
+    ) -> LookupResult<db::model::Organization> {
+        let (.., db_organization) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_id(*organization_id)
+            .fetch()
+            .await?;
+        Ok(db_organization)
+    }
+
     pub async fn organizations_list_by_name(
         &self,
         opctx: &OpContext,
@@ -97,7 +109,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         organization_name: &Name,
-    ) -> LookupResult<shared::Policy<authz::OrganizationRoles>> {
+    ) -> LookupResult<shared::Policy<authz::OrganizationRole>> {
         let (.., authz_org) = LookupPath::new(opctx, &self.db_datastore)
             .organization_name(organization_name)
             .lookup_for(authz::Action::ReadPolicy)
@@ -117,8 +129,8 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         organization_name: &Name,
-        policy: &shared::Policy<authz::OrganizationRoles>,
-    ) -> UpdateResult<shared::Policy<authz::OrganizationRoles>> {
+        policy: &shared::Policy<authz::OrganizationRole>,
+    ) -> UpdateResult<shared::Policy<authz::OrganizationRole>> {
         let (.., authz_org) = LookupPath::new(opctx, &self.db_datastore)
             .organization_name(organization_name)
             .lookup_for(authz::Action::ModifyPolicy)

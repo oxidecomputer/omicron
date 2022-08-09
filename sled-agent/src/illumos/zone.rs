@@ -16,7 +16,7 @@ use crate::illumos::{execute, PFEXEC};
 use omicron_common::address::SLED_PREFIX;
 
 const DLADM: &str = "/usr/sbin/dladm";
-const IPADM: &str = "/usr/sbin/ipadm";
+pub const IPADM: &str = "/usr/sbin/ipadm";
 pub const SVCADM: &str = "/usr/sbin/svcadm";
 pub const SVCCFG: &str = "/usr/sbin/svccfg";
 pub const ZLOGIN: &str = "/usr/sbin/zlogin";
@@ -101,8 +101,8 @@ pub struct EnsureAddressError {
 #[derive(thiserror::Error, Debug)]
 #[error("Failed to create address {address} with name {name} in the GZ on {link:?}: {err}. Note to developers: {extra_note}")]
 pub struct EnsureGzAddressError {
-    address: Ipv6Addr,
-    link: EtherstubVnic,
+    address: IpAddr,
+    link: String,
     name: String,
     #[source]
     err: anyhow::Error,
@@ -424,7 +424,7 @@ impl Zones {
         let prefix =
             if let Some(zone) = zone { vec![ZLOGIN, zone] } else { vec![] };
 
-        let interface = format!("{}/", addrobj.interface());
+        let interface = format!("{}", addrobj);
         let show_addr_args =
             &[IPADM, "show-addr", "-p", "-o", "TYPE", &interface];
 
@@ -580,8 +580,8 @@ impl Zones {
             Ok(())
         }(link.clone(), address, name)
         .map_err(|err| EnsureGzAddressError {
-            address,
-            link,
+            address: IpAddr::V6(address),
+            link: link.0.clone(),
             name: name.to_string(),
             err,
             extra_note:

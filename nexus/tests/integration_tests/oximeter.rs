@@ -111,7 +111,7 @@ async fn test_oximeter_reregistration() {
     let timeseries_name = "integration_target:integration_metric";
     let retrieve_timeseries = || async {
         match client
-            .select_timeseries_with(timeseries_name, &[], None, None)
+            .select_timeseries_with(timeseries_name, &[], None, None, None)
             .await
         {
             Ok(maybe_series) => {
@@ -121,7 +121,7 @@ async fn test_oximeter_reregistration() {
                     Ok(maybe_series)
                 }
             }
-            Err(oximeter_db::Error::QueryError(_)) => {
+            Err(oximeter_db::Error::TimeseriesNotFound(_)) => {
                 Err(CondCheckError::NotYet)
             }
             Err(e) => Err(CondCheckError::from(e)),
@@ -204,6 +204,8 @@ async fn test_oximeter_reregistration() {
     )
     .await
     .expect("Failed to restart metric producer server");
+    nexus_test_utils::register_test_producer(&context.producer)
+        .expect("Failed to register producer");
 
     // Run the verification in a loop using wait_for_condition, waiting until there is more data,
     // or failing the test otherwise.
@@ -274,6 +276,7 @@ async fn test_oximeter_reregistration() {
 
     // Restart oximeter again, and verify that we have even more new data.
     context.oximeter = nexus_test_utils::start_oximeter(
+        context.logctx.log.new(o!("component" => "oximeter")),
         context.server.http_server_internal.local_addr(),
         context.clickhouse.port(),
         oximeter_id,

@@ -182,14 +182,13 @@ impl SerialConsoleBuffer {
             match connect_future.await {
                 Ok((mut websocket, _)) => loop {
                     match websocket.next().await {
-                        None => {
-                            warn!(log, "Nothing read from {}", &ws_uri);
-                        }
+                        None => break,
                         Some(Err(e)) => {
                             error!(
                                 log,
                                 "Reading TTY from {}: {:?}", &ws_uri, e
                             );
+                            break;
                         }
                         Some(Ok(Message::Close(details))) => {
                             info!(
@@ -202,6 +201,7 @@ impl SerialConsoleBuffer {
                                     String::new()
                                 }
                             );
+                            break;
                         }
                         Some(Ok(Message::Text(text))) => {
                             data_inner.write().await.consume(text.into_bytes());

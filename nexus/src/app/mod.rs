@@ -4,12 +4,14 @@
 
 //! Nexus, the service that operates much of the control plane in an Oxide fleet
 
+use crate::app::oximeter::LazyTimeseriesClient;
 use crate::authn;
 use crate::authz;
 use crate::config;
 use crate::context::OpContext;
 use crate::db;
 use crate::populate::populate_start;
+use crate::populate::PopulateArgs;
 use crate::populate::PopulateStatus;
 use crate::saga_interface::SagaContext;
 use anyhow::anyhow;
@@ -20,10 +22,13 @@ use uuid::Uuid;
 
 // The implementation of Nexus is large, and split into a number of submodules
 // by resource.
+mod device_auth;
 mod disk;
+mod external_ip;
 mod iam;
 mod image;
 mod instance;
+mod ip_pool;
 mod organization;
 mod oximeter;
 mod project;
@@ -47,21 +52,21 @@ mod sagas;
 
 pub(crate) const MAX_DISKS_PER_INSTANCE: u32 = 8;
 
-pub(crate) const MAX_NICS_PER_INSTANCE: u32 = 8;
+pub(crate) const MAX_NICS_PER_INSTANCE: usize = 8;
+
+// TODO-completness: Support multiple external IPs
+pub(crate) const MAX_EXTERNAL_IPS_PER_INSTANCE: usize = 1;
 
 /// Manages an Oxide fleet -- the heart of the control plane
 pub struct Nexus {
     /// uuid for this nexus instance.
     id: Uuid,
 
-    /// uuid for this rack (TODO should also be in persistent storage)
+    /// uuid for this rack
     rack_id: Uuid,
 
     /// general server log
     log: Logger,
-
-    /// cached rack identity metadata
-    api_rack_identity: db::model::RackIdentity,
 
     /// persistent storage for resources in the control plane
     db_datastore: Arc<db::DataStore>,
@@ -79,7 +84,7 @@ pub struct Nexus {
     populate_status: tokio::sync::watch::Receiver<PopulateStatus>,
 
     /// Client to the timeseries database.
-    timeseries_client: oximeter_db::Client,
+    timeseries_client: LazyTimeseriesClient,
 
     /// Contents of the trusted root role for the TUF repository.
     updates_config: Option<config::UpdatesConfig>,
@@ -92,6 +97,14 @@ pub struct Nexus {
 
     /// Operational context used for external request authentication
     opctx_external_authn: OpContext,
+
+    /// Max issue delay for samael crate - used only for testing
+    // the samael crate has an extra check (beyond the check against the SAML
+    // response NotOnOrAfter) that fails if the issue instant was too long ago.
+    // this amount of time is called "max issue delay" and we have to set that
+    // in order for our integration tests that POST static SAML responses to
+    // Nexus to not all fail.
+    samael_max_issue_delay: std::sync::Mutex<Option<chrono::Duration>>,
 }
 
 // TODO Is it possible to make some of these operations more generic?  A
@@ -104,15 +117,16 @@ pub struct Nexus {
 impl Nexus {
     /// Create a new Nexus instance for the given rack id `rack_id`
     // TODO-polish revisit rack metadata
-    pub fn new_with_id(
+    pub async fn new_with_id(
         rack_id: Uuid,
         log: Logger,
+        resolver: internal_dns_client::multiclient::Resolver,
         pool: db::Pool,
         config: &config::Config,
         authz: Arc<authz::Authz>,
     ) -> Arc<Nexus> {
         let pool = Arc::new(pool);
-        let my_sec_id = db::SecId::from(config.id);
+        let my_sec_id = db::SecId::from(config.deployment.id);
         let db_datastore = Arc::new(db::DataStore::new(Arc::clone(&pool)));
         let sec_store = Arc::new(db::CockroachDbSecStore::new(
             my_sec_id,
@@ -126,8 +140,16 @@ impl Nexus {
             )),
             sec_store,
         ));
+
+        // Connect to clickhouse - but do so lazily.
+        // Clickhouse may not be executing when Nexus starts.
         let timeseries_client =
-            oximeter_db::Client::new(config.timeseries_db.address, &log);
+            if let Some(address) = &config.pkg.timeseries_db.address {
+                // If an address was provided, use it instead of DNS.
+                LazyTimeseriesClient::new_from_address(log.clone(), *address)
+            } else {
+                LazyTimeseriesClient::new_from_dns(log.clone(), resolver)
+            };
 
         // TODO-cleanup We may want a first-class subsystem for managing startup
         // background tasks.  It could use a Future for each one, a status enum
@@ -139,22 +161,26 @@ impl Nexus {
             authn::Context::internal_db_init(),
             Arc::clone(&db_datastore),
         );
-        let populate_status =
-            populate_start(populate_ctx, Arc::clone(&db_datastore));
+
+        let populate_args = PopulateArgs::new(rack_id);
+        let populate_status = populate_start(
+            populate_ctx,
+            Arc::clone(&db_datastore),
+            populate_args,
+        );
 
         let nexus = Nexus {
-            id: config.id,
+            id: config.deployment.id,
             rack_id,
             log: log.new(o!()),
-            api_rack_identity: db::model::RackIdentity::new(rack_id),
             db_datastore: Arc::clone(&db_datastore),
             authz: Arc::clone(&authz),
             sec_client: Arc::clone(&sec_client),
             recovery_task: std::sync::Mutex::new(None),
             populate_status,
             timeseries_client,
-            updates_config: config.updates.clone(),
-            tunables: config.tunables.clone(),
+            updates_config: config.pkg.updates.clone(),
+            tunables: config.pkg.tunables.clone(),
             opctx_alloc: OpContext::for_background(
                 log.new(o!("component" => "InstanceAllocator")),
                 Arc::clone(&authz),
@@ -167,6 +193,7 @@ impl Nexus {
                 authn::Context::external_authn(),
                 Arc::clone(&db_datastore),
             ),
+            samael_max_issue_delay: std::sync::Mutex::new(None),
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
@@ -188,7 +215,7 @@ impl Nexus {
             ))),
             db_datastore,
             Arc::clone(&sec_client),
-            &sagas::ALL_TEMPLATES,
+            sagas::ACTION_REGISTRY.clone(),
         );
 
         *nexus.recovery_task.lock().unwrap() = Some(recovery_task);
@@ -220,6 +247,16 @@ impl Nexus {
     /// Returns an [`OpContext`] used for authenticating external requests
     pub fn opctx_external_authn(&self) -> &OpContext {
         &self.opctx_external_authn
+    }
+
+    /// Returns an [`OpContext`] used for balancing services.
+    pub fn opctx_for_service_balancer(&self) -> OpContext {
+        OpContext::for_background(
+            self.log.new(o!("component" => "ServiceBalancer")),
+            Arc::clone(&self.authz),
+            authn::Context::internal_service_balancer(),
+            Arc::clone(&self.db_datastore),
+        )
     }
 
     /// Used as the body of a "stub" endpoint -- one that's currently
@@ -411,6 +448,11 @@ impl Nexus {
 
     pub fn datastore(&self) -> &Arc<db::DataStore> {
         &self.db_datastore
+    }
+
+    pub fn samael_max_issue_delay(&self) -> Option<chrono::Duration> {
+        let mid = self.samael_max_issue_delay.lock().unwrap();
+        *mid
     }
 }
 

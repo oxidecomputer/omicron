@@ -8,6 +8,7 @@ license = "MPL-2.0"
 [dependencies]
 clap = { version = "3.2", features = ["derive"] }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
+internal-dns-client = { path = "../../internal-dns-client" }
 nexus-client = { path = "../../nexus-client" }
 omicron-common = { path = "../../common" }
 oximeter = { path = "../oximeter" }
@@ -17,7 +18,7 @@ serde = { version = "1", features = [ "derive" ] }
 slog = { version = "2.5", features = [ "max_level_trace", "release_max_level_debug" ] }
 slog-dtrace = "0.2"
 thiserror = "1.0.31"
-tokio = "1.18"
+tokio = "1.20"
 toml = "0.5.9"
 uuid = { version = "1.1.0", features = [ "v4", "serde" ] }
 
@@ -25,7 +26,7 @@ uuid = { version = "1.1.0", features = [ "v4", "serde" ] }
 expectorate = "1.0.5"
 omicron-test-utils = { path = "../../test-utils" }
 openapiv3 = "1.0"
-serde_json = "1.0.79"
+serde_json = "1.0.82"
 subprocess = "0.2.9"
 
 [dev-dependencies.openapi-lint]

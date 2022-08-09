@@ -18,6 +18,7 @@ use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
@@ -68,8 +69,8 @@ impl super::Nexus {
                     });
                 }
 
-                // Reject disks where the MIN_DISK_SIZE_BYTES doesn't evenly divide
-                // the size
+                // Reject disks where the MIN_DISK_SIZE_BYTES doesn't evenly
+                // divide the size
                 if (params.size.to_bytes() % params::MIN_DISK_SIZE_BYTES as u64)
                     != 0
                 {
@@ -145,8 +146,8 @@ impl super::Nexus {
                     });
                 }
 
-                // Reject disks where the MIN_DISK_SIZE_BYTES doesn't evenly divide
-                // the size
+                // Reject disks where the MIN_DISK_SIZE_BYTES doesn't evenly
+                // divide the size
                 if (params.size.to_bytes() % params::MIN_DISK_SIZE_BYTES as u64)
                     != 0
                 {
@@ -161,23 +162,18 @@ impl super::Nexus {
             }
         }
 
-        let saga_params = Arc::new(sagas::disk_create::Params {
+        let saga_params = sagas::disk_create::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             project_id: authz_project.id(),
             create_params: params.clone(),
-        });
+        };
         let saga_outputs = self
-            .execute_saga(
-                Arc::clone(&sagas::disk_create::SAGA_TEMPLATE),
-                sagas::disk_create::SAGA_NAME,
-                saga_params,
-            )
+            .execute_saga::<sagas::disk_create::SagaDiskCreate>(saga_params)
             .await?;
         let disk_created = saga_outputs
-            .lookup_output::<db::model::Disk>("created_disk")
-            .map_err(|e| Error::InternalError {
-                internal_message: e.to_string(),
-            })?;
+            .lookup_node_output::<db::model::Disk>("created_disk")
+            .map_err(|e| Error::internal_error(&format!("{:#}", &e)))
+            .internal_context("looking up output from disk create saga")?;
         Ok(disk_created)
     }
 
@@ -209,6 +205,18 @@ impl super::Nexus {
             .organization_name(organization_name)
             .project_name(project_name)
             .disk_name(disk_name)
+            .fetch()
+            .await?;
+        Ok(db_disk)
+    }
+
+    pub async fn disk_fetch_by_id(
+        &self,
+        opctx: &OpContext,
+        disk_id: &Uuid,
+    ) -> LookupResult<db::model::Disk> {
+        let (.., db_disk) = LookupPath::new(opctx, &self.db_datastore)
+            .disk_id(*disk_id)
             .fetch()
             .await?;
         Ok(db_disk)
@@ -329,14 +337,9 @@ impl super::Nexus {
             .await?;
 
         let saga_params =
-            Arc::new(sagas::disk_delete::Params { disk_id: authz_disk.id() });
-        self.execute_saga(
-            Arc::clone(&sagas::disk_delete::SAGA_TEMPLATE),
-            sagas::disk_delete::SAGA_NAME,
-            saga_params,
-        )
-        .await?;
-
+            sagas::disk_delete::Params { disk_id: authz_disk.id() };
+        self.execute_saga::<sagas::disk_delete::SagaDiskDelete>(saga_params)
+            .await?;
         Ok(())
     }
 
@@ -380,6 +383,18 @@ impl super::Nexus {
         snapshot_name: &Name,
     ) -> LookupResult<db::model::Snapshot> {
         let lookup_type = LookupType::ByName(snapshot_name.to_string());
+        let not_found_error =
+            lookup_type.into_not_found(ResourceType::Snapshot);
+        let unimp = Unimpl::ProtectedLookup(not_found_error);
+        Err(self.unimplemented_todo(opctx, unimp).await)
+    }
+
+    pub async fn snapshot_fetch_by_id(
+        &self,
+        opctx: &OpContext,
+        snapshot_id: &Uuid,
+    ) -> LookupResult<db::model::Snapshot> {
+        let lookup_type = LookupType::ById(*snapshot_id);
         let not_found_error =
             lookup_type.into_not_found(ResourceType::Snapshot);
         let unimp = Unimpl::ProtectedLookup(not_found_error);

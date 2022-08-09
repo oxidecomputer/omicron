@@ -6,7 +6,8 @@ use anyhow::Context;
 use async_trait::async_trait;
 use cookie::{Cookie, CookieJar, ParseError};
 use dropshot::{
-    Extractor, ExtractorMetadata, HttpError, RequestContext, ServerContext,
+    ApiEndpointBodyContentType, Extractor, ExtractorMetadata, HttpError,
+    RequestContext, ServerContext,
 };
 use std::sync::Arc;
 
@@ -44,7 +45,9 @@ impl Extractor for Cookies {
         Ok(cookies.into())
     }
 
-    fn metadata() -> ExtractorMetadata {
+    fn metadata(
+        _body_content_type: ApiEndpointBodyContentType,
+    ) -> ExtractorMetadata {
         ExtractorMetadata { paginated: false, parameters: vec![] }
     }
 }

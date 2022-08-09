@@ -71,6 +71,17 @@ impl super::Nexus {
         Err(self.unimplemented_todo(opctx, unimp).await)
     }
 
+    pub async fn project_image_fetch_by_id(
+        &self,
+        opctx: &OpContext,
+        image_id: &Uuid,
+    ) -> LookupResult<db::model::Image> {
+        let lookup_type = LookupType::ById(*image_id);
+        let not_found_error = lookup_type.into_not_found(ResourceType::Image);
+        let unimp = Unimpl::ProtectedLookup(not_found_error);
+        Err(self.unimplemented_todo(opctx, unimp).await)
+    }
+
     pub async fn project_delete_image(
         self: &Arc<Self>,
         opctx: &OpContext,
@@ -101,16 +112,14 @@ impl super::Nexus {
                     message: format!("block_size is invalid: {}", e),
                 })?;
 
-                let volume_construction_request = sled_agent_client::types::VolumeConstructionRequest::Volume {
-                    block_size: db_block_size.to_bytes().into(),
-                    sub_volumes: vec![
-                        sled_agent_client::types::VolumeConstructionRequest::Url {
-                            block_size: db_block_size.to_bytes().into(),
-                            url: url.clone(),
-                        }
-                    ],
-                    read_only_parent: None,
-                };
+                let global_image_id = Uuid::new_v4();
+
+                let volume_construction_request =
+                    sled_agent_client::types::VolumeConstructionRequest::Url {
+                        id: global_image_id,
+                        block_size: db_block_size.to_bytes().into(),
+                        url: url.clone(),
+                    };
 
                 let volume_data =
                     serde_json::to_string(&volume_construction_request)?;
@@ -196,7 +205,7 @@ impl super::Nexus {
 
                 db::model::GlobalImage {
                     identity: db::model::GlobalImageIdentity::new(
-                        Uuid::new_v4(),
+                        global_image_id,
                         params.identity.clone(),
                     ),
                     volume_id: volume.id(),
@@ -223,16 +232,15 @@ impl super::Nexus {
                 let db_block_size = db::model::BlockSize::Traditional;
                 let block_size: u64 = db_block_size.to_bytes() as u64;
 
-                let volume_construction_request = sled_agent_client::types::VolumeConstructionRequest::Volume {
-                    block_size,
-                    sub_volumes: vec![
-                        sled_agent_client::types::VolumeConstructionRequest::File {
-                            block_size,
-                            path: "/opt/oxide/propolis-server/blob/alpine.iso".into(),
-                        }
-                    ],
-                    read_only_parent: None,
-                };
+                let global_image_id = Uuid::new_v4();
+
+                let volume_construction_request =
+                    sled_agent_client::types::VolumeConstructionRequest::File {
+                        id: global_image_id,
+                        block_size,
+                        path: "/opt/oxide/propolis-server/blob/alpine.iso"
+                            .into(),
+                    };
 
                 let volume_data =
                     serde_json::to_string(&volume_construction_request)?;
@@ -255,7 +263,7 @@ impl super::Nexus {
 
                 db::model::GlobalImage {
                     identity: db::model::GlobalImageIdentity::new(
-                        Uuid::new_v4(),
+                        global_image_id,
                         params.identity.clone(),
                     ),
                     volume_id: volume.id(),
@@ -294,6 +302,18 @@ impl super::Nexus {
             .fetch()
             .await?;
         Ok(db_disk)
+    }
+
+    pub async fn global_image_fetch_by_id(
+        &self,
+        opctx: &OpContext,
+        global_image_id: &Uuid,
+    ) -> LookupResult<db::model::GlobalImage> {
+        let (.., db_global_image) = LookupPath::new(opctx, &self.db_datastore)
+            .global_image_id(*global_image_id)
+            .fetch()
+            .await?;
+        Ok(db_global_image)
     }
 
     pub async fn global_image_delete(

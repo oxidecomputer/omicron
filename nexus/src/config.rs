@@ -5,15 +5,15 @@
 //! Interfaces for parsing configuration files and working with a nexus server
 //! configuration
 
-use crate::db;
 use anyhow::anyhow;
-use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
+use omicron_common::nexus_config::{
+    DeploymentConfig, InvalidTunable, LoadError,
+};
 use serde::Deserialize;
 use serde::Serialize;
 use serde_with::DeserializeFromStr;
 use serde_with::SerializeDisplay;
-use std::fmt;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
@@ -45,10 +45,11 @@ pub struct UpdatesConfig {
     pub default_base_url: String,
 }
 
-/// Configuration for the timeseries database.
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+/// Optional configuration for the timeseries database.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct TimeseriesDbConfig {
-    pub address: SocketAddr,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub address: Option<SocketAddr>,
 }
 
 // A deserializable type that does no validation on the tunable parameters.
@@ -83,15 +84,17 @@ impl TryFrom<UnvalidatedTunables> for Tunables {
 
 impl Tunables {
     fn validate_ipv4_prefix(prefix: u8) -> Result<(), InvalidTunable> {
-        let absolute_max: u8 = 32_u8.checked_sub(
-            // Always need space for the reserved Oxide addresses, including the
-            // broadcast address at the end of the subnet.
-            ((crate::defaults::NUM_INITIAL_RESERVED_IP_ADDRESSES + 1) as f32)
+        let absolute_max: u8 = 32_u8
+            .checked_sub(
+                // Always need space for the reserved Oxide addresses, including the
+                // broadcast address at the end of the subnet.
+                ((nexus_defaults::NUM_INITIAL_RESERVED_IP_ADDRESSES + 1) as f32)
                 .log2() // Subnet size to bit prefix.
                 .ceil() // Round up to a whole number of bits.
-                as u8
-            ).expect("Invalid absolute maximum IPv4 subnet prefix");
-        if prefix >= crate::defaults::MIN_VPC_IPV4_SUBNET_PREFIX
+                as u8,
+            )
+            .expect("Invalid absolute maximum IPv4 subnet prefix");
+        if prefix >= nexus_defaults::MIN_VPC_IPV4_SUBNET_PREFIX
             && prefix <= absolute_max
         {
             Ok(())
@@ -124,22 +127,15 @@ impl Default for Tunables {
 
 /// Configuration for a nexus server
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct Config {
-    /// Dropshot configuration for external API server
-    pub dropshot_external: ConfigDropshot,
-    /// Dropshot configuration for internal API server
-    pub dropshot_internal: ConfigDropshot,
-    /// Identifier for this instance of Nexus
-    pub id: uuid::Uuid,
+pub struct PackageConfig {
     /// Console-related tunables
     pub console: ConsoleConfig,
     /// Server-wide logging configuration.
     pub log: ConfigLogging,
-    /// Database parameters
-    pub database: db::Config,
     /// Authentication-related configuration
     pub authn: AuthnConfig,
     /// Timeseries database configuration.
+    #[serde(default)]
     pub timeseries_db: TimeseriesDbConfig,
     /// Updates-related configuration. Updates APIs return 400 Bad Request when this is
     /// unconfigured.
@@ -150,74 +146,28 @@ pub struct Config {
     pub tunables: Tunables,
 }
 
-#[derive(Debug)]
-pub struct InvalidTunable {
-    tunable: String,
-    message: String,
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct Config {
+    /// Configuration parameters known at compile-time.
+    #[serde(flatten)]
+    pub pkg: PackageConfig,
+
+    /// A variety of configuration parameters only known at deployment time.
+    pub deployment: DeploymentConfig,
 }
 
-impl std::fmt::Display for InvalidTunable {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "invalid \"{}\": \"{}\"", self.tunable, self.message)
-    }
-}
-
-impl std::error::Error for InvalidTunable {}
-
-#[derive(Debug)]
-pub struct LoadError {
-    path: PathBuf,
-    kind: LoadErrorKind,
-}
-#[derive(Debug)]
-pub enum LoadErrorKind {
-    Io(std::io::Error),
-    Parse(toml::de::Error),
-    InvalidTunable(InvalidTunable),
-}
-
-impl From<(PathBuf, std::io::Error)> for LoadError {
-    fn from((path, err): (PathBuf, std::io::Error)) -> Self {
-        LoadError { path, kind: LoadErrorKind::Io(err) }
-    }
-}
-
-impl From<(PathBuf, toml::de::Error)> for LoadError {
-    fn from((path, err): (PathBuf, toml::de::Error)) -> Self {
-        LoadError { path, kind: LoadErrorKind::Parse(err) }
-    }
-}
-
-impl std::error::Error for LoadError {}
-
-impl fmt::Display for LoadError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match &self.kind {
-            LoadErrorKind::Io(e) => {
-                write!(f, "read \"{}\": {}", self.path.display(), e)
-            }
-            LoadErrorKind::Parse(e) => {
-                write!(f, "parse \"{}\": {}", self.path.display(), e)
-            }
-            LoadErrorKind::InvalidTunable(inner) => {
-                write!(
-                    f,
-                    "invalid tunable \"{}\": {}",
-                    self.path.display(),
-                    inner,
-                )
-            }
-        }
-    }
-}
-
-impl std::cmp::PartialEq<std::io::Error> for LoadError {
-    fn eq(&self, other: &std::io::Error) -> bool {
-        if let LoadErrorKind::Io(e) = &self.kind {
-            e.kind() == other.kind()
-        } else {
-            false
-        }
+impl Config {
+    /// Load a `Config` from the given TOML file
+    ///
+    /// This config object can then be used to create a new `Nexus`.
+    /// The format is described in the README.
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, LoadError> {
+        let path = path.as_ref();
+        let file_contents = std::fs::read_to_string(path)
+            .map_err(|e| (path.to_path_buf(), e))?;
+        let config_parsed: Self = toml::from_str(&file_contents)
+            .map_err(|e| (path.to_path_buf(), e))?;
+        Ok(config_parsed)
     }
 }
 
@@ -232,6 +182,7 @@ impl std::cmp::PartialEq<std::io::Error> for LoadError {
 pub enum SchemeName {
     Spoof,
     SessionCookie,
+    AccessToken,
 }
 
 impl std::str::FromStr for SchemeName {
@@ -241,6 +192,7 @@ impl std::str::FromStr for SchemeName {
         match s {
             "spoof" => Ok(SchemeName::Spoof),
             "session_cookie" => Ok(SchemeName::SessionCookie),
+            "access_token" => Ok(SchemeName::AccessToken),
             _ => Err(anyhow!("unsupported authn scheme: {:?}", s)),
         }
     }
@@ -251,22 +203,8 @@ impl std::fmt::Display for SchemeName {
         f.write_str(match self {
             SchemeName::Spoof => "spoof",
             SchemeName::SessionCookie => "session_cookie",
+            SchemeName::AccessToken => "access_token",
         })
-    }
-}
-
-impl Config {
-    /// Load a `Config` from the given TOML file
-    ///
-    /// This config object can then be used to create a new `Nexus`.
-    /// The format is described in the README.
-    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Config, LoadError> {
-        let path = path.as_ref();
-        let file_contents = std::fs::read_to_string(path)
-            .map_err(|e| (path.to_path_buf(), e))?;
-        let config_parsed: Config = toml::from_str(&file_contents)
-            .map_err(|e| (path.to_path_buf(), e))?;
-        Ok(config_parsed)
     }
 }
 
@@ -274,17 +212,20 @@ impl Config {
 mod test {
     use super::Tunables;
     use super::{
-        AuthnConfig, Config, ConsoleConfig, LoadError, LoadErrorKind,
+        AuthnConfig, Config, ConsoleConfig, LoadError, PackageConfig,
         SchemeName, TimeseriesDbConfig, UpdatesConfig,
     };
-    use crate::db;
     use dropshot::ConfigDropshot;
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingIfExists;
     use dropshot::ConfigLoggingLevel;
     use libc;
+    use omicron_common::address::{Ipv6Subnet, RACK_PREFIX};
+    use omicron_common::nexus_config::{
+        Database, DeploymentConfig, LoadErrorKind,
+    };
     use std::fs;
-    use std::net::SocketAddr;
+    use std::net::{Ipv6Addr, SocketAddr};
     use std::path::Path;
     use std::path::PathBuf;
 
@@ -355,7 +296,7 @@ mod test {
         let error = read_config("empty", "").expect_err("expected failure");
         if let LoadErrorKind::Parse(error) = &error.kind {
             assert_eq!(error.line_col(), None);
-            assert_eq!(error.to_string(), "missing field `dropshot_external`");
+            assert_eq!(error.to_string(), "missing field `deployment`");
         } else {
             panic!(
                 "Got an unexpected error, expected Parse but got {:?}",
@@ -373,7 +314,6 @@ mod test {
         let config = read_config(
             "valid",
             r##"
-            id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             [console]
             static_dir = "tests/static"
             cache_control_max_age_minutes = 10
@@ -381,14 +321,6 @@ mod test {
             session_absolute_timeout_minutes = 480
             [authn]
             schemes_external = []
-            [dropshot_external]
-            bind_address = "10.1.2.3:4567"
-            request_body_max_bytes = 1024
-            [dropshot_internal]
-            bind_address = "10.1.2.3:4568"
-            request_body_max_bytes = 1024
-            [database]
-            url = "postgresql://127.0.0.1?sslmode=disable"
             [log]
             mode = "file"
             level = "debug"
@@ -401,6 +333,19 @@ mod test {
             default_base_url = "http://example.invalid/"
             [tunables]
             max_vpc_ipv4_subnet_prefix = 27
+            [deployment]
+            id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
+            rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
+            [[deployment.dropshot_external]]
+            bind_address = "10.1.2.3:4567"
+            request_body_max_bytes = 1024
+            [deployment.dropshot_internal]
+            bind_address = "10.1.2.3:4568"
+            request_body_max_bytes = 1024
+            [deployment.subnet]
+            net = "::/56"
+            [deployment.database]
+            type = "from_dns"
             "##,
         )
         .unwrap();
@@ -408,51 +353,54 @@ mod test {
         assert_eq!(
             config,
             Config {
-                id: "28b90dc4-c22a-65ba-f49a-f051fe01208f".parse().unwrap(),
-                console: ConsoleConfig {
-                    static_dir: "tests/static".parse().unwrap(),
-                    cache_control_max_age_minutes: 10,
-                    session_idle_timeout_minutes: 60,
-                    session_absolute_timeout_minutes: 480
-                },
-                authn: AuthnConfig { schemes_external: Vec::new() },
-                dropshot_external: ConfigDropshot {
-                    bind_address: "10.1.2.3:4567"
-                        .parse::<SocketAddr>()
-                        .unwrap(),
-                    ..Default::default()
-                },
-                dropshot_internal: ConfigDropshot {
-                    bind_address: "10.1.2.3:4568"
-                        .parse::<SocketAddr>()
-                        .unwrap(),
-                    ..Default::default()
-                },
-                log: ConfigLogging::File {
-                    level: ConfigLoggingLevel::Debug,
-                    if_exists: ConfigLoggingIfExists::Fail,
-                    path: "/nonexistent/path".to_string()
-                },
-                database: db::Config {
-                    url: "postgresql://127.0.0.1?sslmode=disable"
+                deployment: DeploymentConfig {
+                    id: "28b90dc4-c22a-65ba-f49a-f051fe01208f".parse().unwrap(),
+                    rack_id: "38b90dc4-c22a-65ba-f49a-f051fe01208f"
                         .parse()
-                        .unwrap()
+                        .unwrap(),
+                    dropshot_external: vec![ConfigDropshot {
+                        bind_address: "10.1.2.3:4567"
+                            .parse::<SocketAddr>()
+                            .unwrap(),
+                        ..Default::default()
+                    },],
+                    dropshot_internal: ConfigDropshot {
+                        bind_address: "10.1.2.3:4568"
+                            .parse::<SocketAddr>()
+                            .unwrap(),
+                        ..Default::default()
+                    },
+                    subnet: Ipv6Subnet::<RACK_PREFIX>::new(Ipv6Addr::LOCALHOST),
+                    database: Database::FromDns,
                 },
-                timeseries_db: TimeseriesDbConfig {
-                    address: "[::1]:8123".parse().unwrap()
+                pkg: PackageConfig {
+                    console: ConsoleConfig {
+                        static_dir: "tests/static".parse().unwrap(),
+                        cache_control_max_age_minutes: 10,
+                        session_idle_timeout_minutes: 60,
+                        session_absolute_timeout_minutes: 480
+                    },
+                    authn: AuthnConfig { schemes_external: Vec::new() },
+                    log: ConfigLogging::File {
+                        level: ConfigLoggingLevel::Debug,
+                        if_exists: ConfigLoggingIfExists::Fail,
+                        path: "/nonexistent/path".to_string()
+                    },
+                    timeseries_db: TimeseriesDbConfig {
+                        address: Some("[::1]:8123".parse().unwrap())
+                    },
+                    updates: Some(UpdatesConfig {
+                        trusted_root: PathBuf::from("/path/to/root.json"),
+                        default_base_url: "http://example.invalid/".into(),
+                    }),
+                    tunables: Tunables { max_vpc_ipv4_subnet_prefix: 27 },
                 },
-                updates: Some(UpdatesConfig {
-                    trusted_root: PathBuf::from("/path/to/root.json"),
-                    default_base_url: "http://example.invalid/".into(),
-                }),
-                tunables: Tunables { max_vpc_ipv4_subnet_prefix: 27 },
             }
         );
 
         let config = read_config(
             "valid",
             r##"
-            id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             [console]
             static_dir = "tests/static"
             cache_control_max_age_minutes = 10
@@ -460,14 +408,6 @@ mod test {
             session_absolute_timeout_minutes = 480
             [authn]
             schemes_external = [ "spoof", "session_cookie" ]
-            [dropshot_external]
-            bind_address = "10.1.2.3:4567"
-            request_body_max_bytes = 1024
-            [dropshot_internal]
-            bind_address = "10.1.2.3:4568"
-            request_body_max_bytes = 1024
-            [database]
-            url = "postgresql://127.0.0.1?sslmode=disable"
             [log]
             mode = "file"
             level = "debug"
@@ -475,12 +415,25 @@ mod test {
             if_exists = "fail"
             [timeseries_db]
             address = "[::1]:8123"
+            [deployment]
+            id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
+            rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
+            [[deployment.dropshot_external]]
+            bind_address = "10.1.2.3:4567"
+            request_body_max_bytes = 1024
+            [deployment.dropshot_internal]
+            bind_address = "10.1.2.3:4568"
+            request_body_max_bytes = 1024
+            [deployment.subnet]
+            net = "::/56"
+            [deployment.database]
+            type = "from_dns"
             "##,
         )
         .unwrap();
 
         assert_eq!(
-            config.authn.schemes_external,
+            config.pkg.authn.schemes_external,
             vec![SchemeName::Spoof, SchemeName::SessionCookie],
         );
     }
@@ -490,7 +443,6 @@ mod test {
         let error = read_config(
             "bad authn.schemes_external",
             r##"
-            id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             [console]
             static_dir = "tests/static"
             cache_control_max_age_minutes = 10
@@ -498,14 +450,6 @@ mod test {
             session_absolute_timeout_minutes = 480
             [authn]
             schemes_external = ["trust-me"]
-            [dropshot_external]
-            bind_address = "10.1.2.3:4567"
-            request_body_max_bytes = 1024
-            [dropshot_internal]
-            bind_address = "10.1.2.3:4568"
-            request_body_max_bytes = 1024
-            [database]
-            url = "postgresql://127.0.0.1?sslmode=disable"
             [log]
             mode = "file"
             level = "debug"
@@ -513,14 +457,30 @@ mod test {
             if_exists = "fail"
             [timeseries_db]
             address = "[::1]:8123"
+            [deployment]
+            id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
+            rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
+            [[deployment.dropshot_external]]
+            bind_address = "10.1.2.3:4567"
+            request_body_max_bytes = 1024
+            [deployment.dropshot_internal]
+            bind_address = "10.1.2.3:4568"
+            request_body_max_bytes = 1024
+            [deployment.subnet]
+            net = "::/56"
+            [deployment.database]
+            type = "from_dns"
             "##,
         )
         .expect_err("expected failure");
         if let LoadErrorKind::Parse(error) = &error.kind {
-            assert!(error.to_string().starts_with(
-                "unsupported authn scheme: \"trust-me\" \
-                for key `authn.schemes_external`"
-            ));
+            assert!(
+                error
+                    .to_string()
+                    .starts_with("unsupported authn scheme: \"trust-me\""),
+                "error = {}",
+                error.to_string()
+            );
         } else {
             panic!(
                 "Got an unexpected error, expected Parse but got {:?}",
@@ -534,7 +494,6 @@ mod test {
         let error = read_config(
             "invalid_ipv4_prefix_tunable",
             r##"
-            id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             [console]
             static_dir = "tests/static"
             cache_control_max_age_minutes = 10
@@ -542,14 +501,6 @@ mod test {
             session_absolute_timeout_minutes = 480
             [authn]
             schemes_external = []
-            [dropshot_external]
-            bind_address = "10.1.2.3:4567"
-            request_body_max_bytes = 1024
-            [dropshot_internal]
-            bind_address = "10.1.2.3:4568"
-            request_body_max_bytes = 1024
-            [database]
-            url = "postgresql://127.0.0.1?sslmode=disable"
             [log]
             mode = "file"
             level = "debug"
@@ -562,6 +513,19 @@ mod test {
             default_base_url = "http://example.invalid/"
             [tunables]
             max_vpc_ipv4_subnet_prefix = 100
+            [deployment]
+            id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
+            rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
+            [[deployment.dropshot_external]]
+            bind_address = "10.1.2.3:4567"
+            request_body_max_bytes = 1024
+            [deployment.dropshot_internal]
+            bind_address = "10.1.2.3:4568"
+            request_body_max_bytes = 1024
+            [deployment.subnet]
+            net = "::/56"
+            [deployment.database]
+            type = "from_dns"
             "##,
         )
         .expect_err("Expected failure");
@@ -575,5 +539,51 @@ mod test {
                 error
             );
         }
+    }
+
+    #[test]
+    fn test_repo_configs_are_valid() {
+        // The example config file should be valid.
+        let config_path = "examples/config.toml";
+        println!("checking {:?}", config_path);
+        let example_config = Config::from_file(config_path)
+            .expect("example config file is not valid");
+
+        // The config file used for the tests should also be valid.  The tests
+        // won't clear the runway anyway if this file isn't valid.  But it's
+        // helpful to verify this here explicitly as well.
+        let config_path = "examples/config.toml";
+        println!("checking {:?}", config_path);
+        let _ = Config::from_file(config_path)
+            .expect("test config file is not valid");
+
+        // The partial config file that's used to deploy Nexus must also be
+        // valid.  However, it's missing the "deployment" section because that's
+        // generated at deployment time.  We'll serialize this section from the
+        // example config file (loaded above), append it to the contents of this
+        // file, and verify the whole thing.
+        #[derive(serde::Serialize)]
+        struct DummyConfig {
+            deployment: DeploymentConfig,
+        }
+        let config_path = "../smf/nexus/config-partial.toml";
+        println!(
+            "checking {:?} with example deployment section added",
+            config_path
+        );
+        let mut contents = std::fs::read_to_string(config_path)
+            .expect("failed to read Nexus SMF config file");
+        contents.push_str(
+            "\n\n\n \
+            # !! content below added by test_repo_configs_are_valid()\n\
+            \n\n\n",
+        );
+        let example_deployment = toml::to_string_pretty(&DummyConfig {
+            deployment: example_config.deployment,
+        })
+        .unwrap();
+        contents.push_str(&example_deployment);
+        let _: Config = toml::from_str(&contents)
+            .expect("Nexus SMF config file is not valid");
     }
 }

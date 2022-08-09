@@ -5,7 +5,7 @@
 //! API for controlling a single instance.
 
 use crate::illumos::dladm::{
-    CreateVnicError, DeleteVnicError, Etherstub, VNIC_PREFIX,
+    CreateVnicError, DeleteVnicError, VnicSource, VNIC_PREFIX,
     VNIC_PREFIX_CONTROL, VNIC_PREFIX_GUEST,
 };
 use omicron_common::api::external::MacAddr;
@@ -23,29 +23,29 @@ use crate::illumos::dladm::MockDladm as Dladm;
 /// May be used to allocate runtime-unique IDs for objects
 /// which have naming constraints - such as VNICs.
 #[derive(Clone, Debug)]
-pub struct VnicAllocator {
+pub struct VnicAllocator<DL: VnicSource + 'static> {
     value: Arc<AtomicU64>,
     scope: String,
-    data_link: Etherstub,
+    data_link: DL,
 }
 
-impl VnicAllocator {
+impl<DL: VnicSource + Clone> VnicAllocator<DL> {
     /// Creates a new Vnic name allocator with a particular scope.
     ///
     /// The intent with varying scopes is to create non-overlapping
     /// ranges of Vnic names, for example:
     ///
     /// VnicAllocator::new("Instance")
-    /// - oxGuestInstance[NNN]
-    /// - oxControlInstance[NNN]
+    /// - oxGuestInstance0
+    /// - oxControlInstance0
     ///
     /// VnicAllocator::new("Storage") produces
-    /// - oxControlStorage[NNN]
-    pub fn new<S: AsRef<str>>(scope: S, etherstub: Etherstub) -> Self {
+    /// - oxControlStorage0
+    pub fn new<S: AsRef<str>>(scope: S, data_link: DL) -> Self {
         Self {
             value: Arc::new(AtomicU64::new(0)),
             scope: scope.as_ref().to_string(),
-            data_link: etherstub,
+            data_link,
         }
     }
 
@@ -167,6 +167,7 @@ impl Drop for Vnic {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::illumos::dladm::Etherstub;
 
     #[test]
     fn test_allocate() {

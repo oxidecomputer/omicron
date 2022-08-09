@@ -1,0 +1,28 @@
+= Faux MGS
+
+This directory contains a command-line application that acts like MGS. It is
+intended to be a development tool for working with the SP.
+
+== Examples
+
+Sending the MGS discovery packet:
+
+```
+% cargo run --bin faux-mgs -- --sp '[fe80::c1d:7dff:feef:9f1d%2]:11111' discover
+Ok(Discover(DiscoverResponse { sp_port: One }))
+```
+
+Asking an SP for its state (as of this writing, the state only contains the SP's
+serial number):
+
+```
+% cargo run --bin faux-mgs -- --sp '[fe80::c1d:7dff:feef:9f1d%2]:11111' state
+Ok(SpState(SpState { serial_number: [0, 68, 0, 26, 51, 48, 81, 17, 48, 51, 56, 55, 0, 0, 0, 0] }))
+```
+
+Attaching to the SP's usart (this forwards stdin to the SP, and prints anything
+the SP sends to stdout):
+
+```
+% cargo run --bin faux-mgs -- --sp '[fe80::c1d:7dff:feef:9f1d%2]:11111' usart-attach
+```

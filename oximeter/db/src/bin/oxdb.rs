@@ -14,6 +14,7 @@ use oximeter::{
 };
 use oximeter_db::{query, Client, DbWrite};
 use slog::{debug, info, o, Drain, Level, Logger};
+use std::net::IpAddr;
 use std::net::SocketAddr;
 use uuid::Uuid;
 
@@ -53,6 +54,10 @@ fn level_from_str(s: &str) -> Result<Level, anyhow::Error> {
 /// Tools for developing with the Oximeter timeseries database.
 #[derive(Debug, Parser)]
 struct OxDb {
+    /// IP address at which to connect to the database
+    #[clap(short, long, default_value = "::1")]
+    address: IpAddr,
+
     /// Port on which to connect to the database
     #[clap(short, long, default_value = "8123", action)]
     port: u16,
@@ -135,8 +140,12 @@ enum Subcommand {
     },
 }
 
-async fn make_client(port: u16, log: &Logger) -> Result<Client, anyhow::Error> {
-    let address = SocketAddr::new("::1".parse().unwrap(), port);
+async fn make_client(
+    address: IpAddr,
+    port: u16,
+    log: &Logger,
+) -> Result<Client, anyhow::Error> {
+    let address = SocketAddr::new(address, port);
     let client = Client::new(address, &log);
     client
         .init_db()
@@ -199,12 +208,13 @@ async fn insert_samples(
 }
 
 async fn populate(
+    address: IpAddr,
     port: u16,
     log: Logger,
     args: PopulateArgs,
 ) -> Result<(), anyhow::Error> {
     info!(log, "populating Oximeter database");
-    let client = make_client(port, &log).await?;
+    let client = make_client(address, port, &log).await?;
     let n_timeseries = args.n_projects * args.n_instances * args.n_cpus;
     debug!(
         log,
@@ -251,12 +261,17 @@ async fn populate(
     Ok(())
 }
 
-async fn wipe_db(port: u16, log: Logger) -> Result<(), anyhow::Error> {
-    let client = make_client(port, &log).await?;
+async fn wipe_db(
+    address: IpAddr,
+    port: u16,
+    log: Logger,
+) -> Result<(), anyhow::Error> {
+    let client = make_client(address, port, &log).await?;
     client.wipe_db().await.context("Failed to wipe database")
 }
 
 async fn query(
+    address: IpAddr,
     port: u16,
     log: Logger,
     timeseries_name: String,
@@ -264,7 +279,7 @@ async fn query(
     start: Option<query::Timestamp>,
     end: Option<query::Timestamp>,
 ) -> Result<(), anyhow::Error> {
-    let client = make_client(port, &log).await?;
+    let client = make_client(address, port, &log).await?;
     let filters = filters.iter().map(|s| s.as_str()).collect::<Vec<_>>();
     let timeseries = client
         .select_timeseries_with(
@@ -272,6 +287,7 @@ async fn query(
             filters.as_slice(),
             start,
             end,
+            None,
         )
         .await?;
     println!("{}", serde_json::to_string(&timeseries).unwrap());
@@ -291,9 +307,13 @@ async fn main() {
     match args.cmd {
         Subcommand::Describe => describe_data(),
         Subcommand::Populate { populate_args } => {
-            populate(args.port, log, populate_args).await.unwrap();
+            populate(args.address, args.port, log, populate_args)
+                .await
+                .unwrap();
         }
-        Subcommand::Wipe => wipe_db(args.port, log).await.unwrap(),
+        Subcommand::Wipe => {
+            wipe_db(args.address, args.port, log).await.unwrap()
+        }
         Subcommand::Query {
             timeseries_name,
             filters,
@@ -312,9 +332,17 @@ async fn main() {
                 (_, Some(end)) => Some(query::Timestamp::Exclusive(end)),
                 (None, None) => None,
             };
-            query(args.port, log, timeseries_name, filters, start, end)
-                .await
-                .unwrap();
+            query(
+                args.address,
+                args.port,
+                log,
+                timeseries_name,
+                filters,
+                start,
+                end,
+            )
+            .await
+            .unwrap();
         }
     }
 }

@@ -4,19 +4,43 @@
 
 //! Support for miscellaneous services managed by the sled.
 
-use crate::illumos::dladm::{Etherstub, EtherstubVnic};
+use crate::bootstrap::ddm_admin_client::{DdmAdminClient, DdmError};
+use crate::common::underlay;
+use crate::illumos::dladm::{Etherstub, EtherstubVnic, PhysicalLink};
 use crate::illumos::running_zone::{InstalledZone, RunningZone};
 use crate::illumos::vnic::VnicAllocator;
+use crate::illumos::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use crate::illumos::zone::AddressRequest;
-use crate::params::{ServiceEnsureBody, ServiceRequest};
+use crate::params::{ServiceEnsureBody, ServiceRequest, ServiceType};
 use crate::zone::Zones;
-use omicron_common::address::{DNS_PORT, DNS_SERVER_PORT};
+use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::DENDRITE_PORT;
+use omicron_common::address::NEXUS_INTERNAL_PORT;
+use omicron_common::address::OXIMETER_PORT;
+use omicron_common::address::RACK_PREFIX;
+use omicron_common::address::SLED_PREFIX;
+use omicron_common::nexus_config::{
+    self, DeploymentConfig as NexusDeploymentConfig,
+};
+use omicron_common::postgres_config::PostgresConfigWithUrl;
 use slog::Logger;
 use std::collections::HashSet;
 use std::iter::FromIterator;
-use std::net::{IpAddr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
+use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
+use uuid::Uuid;
+
+// The filename of ServiceManager's internal storage.
+const SERVICE_CONFIG_FILENAME: &str = "service.toml";
+// The filename of a half-completed config, in need of parameters supplied at
+// runtime.
+const PARTIAL_CONFIG_FILENAME: &str = "config-partial.toml";
+// The filename of a completed config, merging the partial config with
+// additional appended parameters known at runtime.
+const COMPLETE_CONFIG_FILENAME: &str = "config.toml";
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -45,6 +69,15 @@ pub enum Error {
     #[error(transparent)]
     ZoneInstall(#[from] crate::illumos::running_zone::InstallZoneError),
 
+    #[error("Error contacting ddmd: {0}")]
+    DdmError(#[from] DdmError),
+
+    #[error("Failed to access underlay device: {0}")]
+    Underlay(#[from] underlay::Error),
+
+    #[error("Failed to create Vnic for Nexus: {0}")]
+    NexusVnicCreation(crate::illumos::dladm::CreateVnicError),
+
     #[error("Failed to add GZ addresses: {message}: {err}")]
     GzAddress {
         message: String,
@@ -69,17 +102,50 @@ impl From<Error> for omicron_common::api::external::Error {
 /// The default path to service configuration, if one is not
 /// explicitly provided.
 pub fn default_services_config_path() -> PathBuf {
-    Path::new(omicron_common::OMICRON_CONFIG_PATH).join("services.toml")
+    Path::new(omicron_common::OMICRON_CONFIG_PATH).join(SERVICE_CONFIG_FILENAME)
+}
+
+/// Configuration parameters which modify the [`ServiceManager`]'s behavior.
+pub struct Config {
+    /// An optional internet gateway address for external services.
+    pub gateway_address: Option<Ipv4Addr>,
+
+    /// The path for the ServiceManager to store information about
+    /// all running services.
+    pub all_svcs_config_path: PathBuf,
+
+    /// A function which returns the path the directory holding the
+    /// service's configuration file.
+    pub get_svc_config_dir: Box<dyn Fn(&str, &str) -> PathBuf + Send + Sync>,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            gateway_address: None,
+            all_svcs_config_path: default_services_config_path(),
+            get_svc_config_dir: Box::new(|zone_name: &str, svc_name: &str| {
+                PathBuf::from(ZONE_ZFS_DATASET_MOUNTPOINT)
+                    .join(PathBuf::from(zone_name))
+                    .join("root")
+                    .join(format!("var/svc/manifest/site/{}", svc_name))
+            }),
+        }
+    }
 }
 
 /// Manages miscellaneous Sled-local services.
 pub struct ServiceManager {
     log: Logger,
-    config_path: Option<PathBuf>,
+    config: Config,
     zones: Mutex<Vec<RunningZone>>,
-    vnic_allocator: VnicAllocator,
+    vnic_allocator: VnicAllocator<Etherstub>,
+    physical_link_vnic_allocator: VnicAllocator<PhysicalLink>,
     underlay_vnic: EtherstubVnic,
     underlay_address: Ipv6Addr,
+    rack_id: Uuid,
+    ddmd_client: DdmAdminClient,
+    advertised_prefixes: Mutex<HashSet<Ipv6Subnet<SLED_PREFIX>>>,
 }
 
 impl ServiceManager {
@@ -98,16 +164,29 @@ impl ServiceManager {
         etherstub: Etherstub,
         underlay_vnic: EtherstubVnic,
         underlay_address: Ipv6Addr,
-        config_path: Option<PathBuf>,
+        config: Config,
+        physical_link: PhysicalLink,
+        rack_id: Uuid,
     ) -> Result<Self, Error> {
         debug!(log, "Creating new ServiceManager");
+        let log = log.new(o!("component" => "ServiceManager"));
         let mgr = Self {
-            log: log.new(o!("component" => "ServiceManager")),
-            config_path,
+            log: log.clone(),
+            config,
             zones: Mutex::new(vec![]),
             vnic_allocator: VnicAllocator::new("Service", etherstub),
+            physical_link_vnic_allocator: VnicAllocator::new(
+                "Public",
+                // NOTE: Right now, we only use a connection to one of the Chelsio
+                // links. Longer-term, when we we use OPTE, we'll be able to use both
+                // connections.
+                physical_link,
+            ),
             underlay_vnic,
             underlay_address,
+            rack_id,
+            ddmd_client: DdmAdminClient::new(log)?,
+            advertised_prefixes: Mutex::new(HashSet::new()),
         };
 
         let config_path = mgr.services_config_path();
@@ -143,10 +222,18 @@ impl ServiceManager {
     // Returns either the path to the explicitly provided config path, or
     // chooses the default one.
     fn services_config_path(&self) -> PathBuf {
-        if let Some(path) = &self.config_path {
-            path.clone()
-        } else {
-            default_services_config_path()
+        self.config.all_svcs_config_path.clone()
+    }
+
+    // Advertise the /64 prefix of `address`, unless we already have.
+    //
+    // This method only blocks long enough to check our HashSet of
+    // already-advertised prefixes; the actual request to ddmd to advertise the
+    // prefix is spawned onto a background task.
+    async fn advertise_prefix_of_address(&self, address: Ipv6Addr) {
+        let subnet = Ipv6Subnet::new(address);
+        if self.advertised_prefixes.lock().await.insert(subnet) {
+            self.ddmd_client.advertise_prefix(subnet);
         }
     }
 
@@ -160,11 +247,11 @@ impl ServiceManager {
         existing_zones: &mut Vec<RunningZone>,
         services: &Vec<ServiceRequest>,
     ) -> Result<(), Error> {
-        info!(self.log, "Ensuring services are initialized: {:?}", services);
         // TODO(https://github.com/oxidecomputer/omicron/issues/726):
         // As long as we ensure the requests don't overlap, we could
         // parallelize this request.
         for service in services {
+            info!(self.log, "Ensuring service is initialized: {:?}", service);
             // Before we bother allocating anything for this request, check if
             // this service has already been created.
             let expected_zone_name =
@@ -176,6 +263,18 @@ impl ServiceManager {
                 info!(self.log, "Service {} does not yet exist", service.name);
             }
 
+            // TODO: Remove once Nexus traffic is transmitted over OPTE.
+            let physical_nic = match service.service_type {
+                ServiceType::Nexus { .. } => {
+                    let vnic = self
+                        .physical_link_vnic_allocator
+                        .new_control(None)
+                        .map_err(|e| Error::NexusVnicCreation(e))?;
+                    Some(vnic)
+                }
+                _ => None,
+            };
+
             let installed_zone = InstalledZone::install(
                 &self.log,
                 &self.vnic_allocator,
@@ -186,8 +285,10 @@ impl ServiceManager {
                 &[],
                 // devices=
                 &[],
-                // vnics=
+                // opte_ports=
                 vec![],
+                // physical_nic=
+                physical_nic,
             )
             .await?;
 
@@ -206,7 +307,7 @@ impl ServiceManager {
             }
 
             info!(self.log, "GZ addresses: {:#?}", service.gz_addresses);
-            for addr in &service.gz_addresses {
+            for &addr in &service.gz_addresses {
                 info!(
                     self.log,
                     "Ensuring GZ address {} exists",
@@ -216,7 +317,7 @@ impl ServiceManager {
                 let addr_name = service.name.replace(&['-', '_'][..], "");
                 Zones::ensure_has_global_zone_v6_address(
                     self.underlay_vnic.clone(),
-                    *addr,
+                    addr,
                     &addr_name,
                 )
                 .map_err(|err| Error::GzAddress {
@@ -226,6 +327,10 @@ impl ServiceManager {
                     ),
                     err,
                 })?;
+
+                // If this address is in a new ipv6 prefix, notify maghemite so
+                // it can advertise it to other sleds.
+                self.advertise_prefix_of_address(addr).await;
             }
 
             let gateway = if !service.gz_addresses.is_empty() {
@@ -233,7 +338,7 @@ impl ServiceManager {
                 //
                 // This is currently being used for the DNS service.
                 //
-                // TODO: consider limitng the number of GZ addresses which
+                // TODO: consider limiting the number of GZ addresses which
                 // can be supplied - now that we're actively using it, we
                 // aren't really handling the "many GZ addresses" case, and it
                 // doesn't seem necessary now.
@@ -268,16 +373,112 @@ impl ServiceManager {
             let smf_name = format!("svc:/system/illumos/{}", service.name);
             let default_smf_name = format!("{}:default", smf_name);
 
-            match service.name.as_str() {
-                "internal-dns" => {
-                    info!(self.log, "Setting up internal-dns service");
-                    let address =
-                        service.addresses.get(0).ok_or_else(|| {
-                            Error::BadServiceRequest {
-                                service: service.name.clone(),
-                                message: "Not enough addresses".to_string(),
-                            }
+            match service.service_type {
+                ServiceType::Nexus { internal_ip, external_ip } => {
+                    info!(self.log, "Setting up Nexus service");
+
+                    // The address of Nexus' external interface is a special
+                    // case; it may be an IPv4 address.
+                    let addr_request =
+                        AddressRequest::new_static(external_ip, None);
+                    running_zone
+                        .ensure_external_address_with_name(
+                            addr_request,
+                            "public",
+                        )
+                        .await?;
+
+                    if let IpAddr::V4(_public_addr4) = external_ip {
+                        // If requested, create a default route back through
+                        // the internet gateway.
+                        if let Some(ref gateway) = self.config.gateway_address {
+                            running_zone
+                                .add_default_route4(*gateway)
+                                .await
+                                .map_err(|err| Error::ZoneCommand {
+                                    intent: "Adding Route".to_string(),
+                                    err,
+                                })?;
+                        }
+                    }
+
+                    let cert_file = PathBuf::from("/var/nexus/certs/cert.pem");
+                    let key_file = PathBuf::from("/var/nexus/certs/key.pem");
+
+                    // Nexus takes a separate config file for parameters which
+                    // cannot be known at packaging time.
+                    let deployment_config = NexusDeploymentConfig {
+                        id: service.id,
+                        rack_id: self.rack_id,
+
+                        // Request two dropshot servers: One for HTTP (port 80),
+                        // one for HTTPS (port 443).
+                        dropshot_external: vec![
+                            dropshot::ConfigDropshot {
+                                bind_address: SocketAddr::new(external_ip, 443),
+                                request_body_max_bytes: 1048576,
+                                tls: Some(dropshot::ConfigTls { cert_file, key_file }),
+                            },
+                            dropshot::ConfigDropshot {
+                                bind_address: SocketAddr::new(external_ip, 80),
+                                request_body_max_bytes: 1048576,
+                                ..Default::default()
+                            },
+                        ],
+                        dropshot_internal: dropshot::ConfigDropshot {
+                            bind_address: SocketAddr::new(IpAddr::V6(internal_ip), NEXUS_INTERNAL_PORT),
+                            request_body_max_bytes: 1048576,
+                            ..Default::default()
+                        },
+                        subnet: Ipv6Subnet::<RACK_PREFIX>::new(
+                            self.underlay_address,
+                        ),
+                        // TODO: Switch to inferring this URL by DNS.
+                        database: nexus_config::Database::FromUrl {
+                            url: PostgresConfigWithUrl::from_str(
+                                "postgresql://root@[fd00:1122:3344:0101::2]:32221/omicron?sslmode=disable"
+                            ).unwrap(),
+                        }
+                    };
+
+                    // Copy the partial config file to the expected location.
+                    let config_dir = (self.config.get_svc_config_dir)(
+                        running_zone.name(),
+                        &service.name,
+                    );
+                    let partial_config_path =
+                        config_dir.join(PARTIAL_CONFIG_FILENAME);
+                    let config_path = config_dir.join(COMPLETE_CONFIG_FILENAME);
+                    tokio::fs::copy(partial_config_path, &config_path)
+                        .await
+                        .map_err(|err| Error::Io {
+                            path: config_path.clone(),
+                            err,
                         })?;
+
+                    // Serialize the configuration and append it into the file.
+                    let serialized_cfg =
+                        toml::Value::try_from(&deployment_config)
+                            .expect("Cannot serialize config");
+                    let mut map = toml::map::Map::new();
+                    map.insert("deployment".to_string(), serialized_cfg);
+                    let config_str = toml::to_string(&map).map_err(|err| {
+                        Error::TomlSerialize { path: config_path.clone(), err }
+                    })?;
+                    let mut file = tokio::fs::OpenOptions::new()
+                        .append(true)
+                        .open(&config_path)
+                        .await
+                        .map_err(|err| Error::Io {
+                            path: config_path.clone(),
+                            err,
+                        })?;
+                    file.write_all(config_str.as_bytes()).await.map_err(
+                        |err| Error::Io { path: config_path.clone(), err },
+                    )?;
+                }
+                ServiceType::InternalDns { server_address, dns_address } => {
+                    info!(self.log, "Setting up internal-dns service");
                     running_zone
                         .run_cmd(&[
                             crate::illumos::zone::SVCCFG,
@@ -286,14 +487,12 @@ impl ServiceManager {
                             "setprop",
                             &format!(
                                 "config/server_address=[{}]:{}",
-                                address, DNS_SERVER_PORT
+                                server_address.ip(),
+                                server_address.port(),
                             ),
                         ])
                         .map_err(|err| Error::ZoneCommand {
-                            intent: format!(
-                                "Setting DNS server address [{}]:{}",
-                                address, DNS_SERVER_PORT
-                            ),
+                            intent: "set server address".to_string(),
                             err,
                         })?;
 
@@ -305,14 +504,12 @@ impl ServiceManager {
                             "setprop",
                             &format!(
                                 "config/dns_address=[{}]:{}",
-                                address, DNS_PORT
+                                dns_address.ip(),
+                                dns_address.port(),
                             ),
                         ])
                         .map_err(|err| Error::ZoneCommand {
-                            intent: format!(
-                                "Setting DNS address [{}]:{}",
-                                address, DNS_SERVER_PORT
-                            ),
+                            intent: "Set DNS address".to_string(),
                             err,
                         })?;
 
@@ -327,17 +524,108 @@ impl ServiceManager {
                         ])
                         .map_err(|err| Error::ZoneCommand {
                             intent: format!(
-                                "Refreshing DNS service config for {}",
+                                "Refresh SMF manifest {}",
                                 default_smf_name
                             ),
                             err,
                         })?;
                 }
-                _ => {
-                    info!(
-                        self.log,
-                        "Service name {} did not match", service.name
-                    );
+                ServiceType::Oximeter => {
+                    info!(self.log, "Setting up oximeter service");
+
+                    let address = service.addresses[0];
+                    running_zone
+                        .run_cmd(&[
+                            crate::illumos::zone::SVCCFG,
+                            "-s",
+                            &smf_name,
+                            "setprop",
+                            &format!("config/id={}", service.id),
+                        ])
+                        .map_err(|err| Error::ZoneCommand {
+                            intent: "set server ID".to_string(),
+                            err,
+                        })?;
+
+                    running_zone
+                        .run_cmd(&[
+                            crate::illumos::zone::SVCCFG,
+                            "-s",
+                            &smf_name,
+                            "setprop",
+                            &format!(
+                                "config/address=[{}]:{}",
+                                address, OXIMETER_PORT,
+                            ),
+                        ])
+                        .map_err(|err| Error::ZoneCommand {
+                            intent: "set server address".to_string(),
+                            err,
+                        })?;
+
+                    running_zone
+                        .run_cmd(&[
+                            crate::illumos::zone::SVCCFG,
+                            "-s",
+                            &default_smf_name,
+                            "refresh",
+                        ])
+                        .map_err(|err| Error::ZoneCommand {
+                            intent: format!(
+                                "Refresh SMF manifest {}",
+                                default_smf_name
+                            ),
+                            err,
+                        })?;
+                }
+                ServiceType::Dendrite { asic } => {
+                    info!(self.log, "Setting up dendrite service");
+
+                    let address = service.addresses[0];
+                    running_zone
+                        .run_cmd(&[
+                            crate::illumos::zone::SVCCFG,
+                            "-s",
+                            &smf_name,
+                            "setprop",
+                            &format!("config/asic={}", asic),
+                        ])
+                        .map_err(|err| Error::ZoneCommand {
+                            intent: "set dendrite asic type".to_string(),
+                            err,
+                        })?;
+
+                    running_zone
+                        .run_cmd(&[
+                            crate::illumos::zone::SVCCFG,
+                            "-s",
+                            &smf_name,
+                            "setprop",
+                            &format!(
+                                "config/address=[{}]:{}",
+                                address, DENDRITE_PORT,
+                            ),
+                        ])
+                        .map_err(|err| Error::ZoneCommand {
+                            intent: "set dendrite API server listen address"
+                                .to_string(),
+                            err,
+                        })?;
+
+                    running_zone
+                        .run_cmd(&[
+                            crate::illumos::zone::SVCCFG,
+                            "-s",
+                            &default_smf_name,
+                            "refresh",
+                        ])
+                        .map_err(|err| Error::ZoneCommand {
+                            intent: format!(
+                                "Refresh SMF manifest {}",
+                                default_smf_name
+                            ),
+                            err,
+                        })?;
                 }
             }
 
@@ -396,7 +684,7 @@ impl ServiceManager {
                     // that removal implicitly.
                     warn!(
                         self.log,
-                        "Cannot request services on this sled, differing configurations: {:?}",
+                        "Cannot request services on this sled, differing configurations: {:#?}",
                         known_set.symmetric_difference(&requested_set)
                     );
                     return Err(Error::ServicesAlreadyConfigured);
@@ -438,7 +726,9 @@ mod test {
         svc,
         zone::MockZones,
     };
+    use std::net::Ipv6Addr;
     use std::os::unix::process::ExitStatusExt;
+    use uuid::Uuid;
 
     const SVC_NAME: &str = "my_svc";
     const EXPECTED_ZONE_NAME: &str = "oxz_my_svc";
@@ -465,12 +755,20 @@ mod test {
             assert_eq!(name, EXPECTED_ZONE_NAME);
             Ok(())
         });
+
+        // Ensure the address exists
+        let ensure_address_ctx = MockZones::ensure_address_context();
+        ensure_address_ctx.expect().return_once(|_, _, _| {
+            Ok(ipnetwork::IpNetwork::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 64)
+                .unwrap())
+        });
+
         // Wait for the networking service.
         let wait_ctx = svc::wait_for_service_context();
         wait_ctx.expect().return_once(|_, _| Ok(()));
         // Import the manifest, enable the service
         let execute_ctx = crate::illumos::execute_context();
-        execute_ctx.expect().times(3).returning(|_| {
+        execute_ctx.expect().times(..).returning(|_| {
             Ok(std::process::Output {
                 status: std::process::ExitStatus::from_raw(0),
                 stdout: vec![],
@@ -482,20 +780,23 @@ mod test {
             Box::new(create_vnic_ctx),
             Box::new(install_ctx),
             Box::new(boot_ctx),
+            Box::new(ensure_address_ctx),
             Box::new(wait_ctx),
             Box::new(execute_ctx),
         ]
     }
 
     // Prepare to call "ensure" for a new service, then actually call "ensure".
-    async fn ensure_new_service(mgr: &ServiceManager) {
+    async fn ensure_new_service(mgr: &ServiceManager, id: Uuid) {
         let _expectations = expect_new_service();
 
         mgr.ensure(ServiceEnsureBody {
             services: vec![ServiceRequest {
+                id,
                 name: SVC_NAME.to_string(),
-                addresses: vec![],
+                addresses: vec![Ipv6Addr::LOCALHOST],
                 gz_addresses: vec![],
+                service_type: ServiceType::Oximeter,
             }],
         })
         .await
@@ -504,12 +805,14 @@ mod test {
 
     // Prepare to call "ensure" for a service which already exists. We should
     // return the service without actually installing a new zone.
-    async fn ensure_existing_service(mgr: &ServiceManager) {
+    async fn ensure_existing_service(mgr: &ServiceManager, id: Uuid) {
         mgr.ensure(ServiceEnsureBody {
             services: vec![ServiceRequest {
+                id,
                 name: SVC_NAME.to_string(),
-                addresses: vec![],
+                addresses: vec![Ipv6Addr::LOCALHOST],
                 gz_addresses: vec![],
+                service_type: ServiceType::Oximeter,
             }],
         })
         .await
@@ -533,26 +836,59 @@ mod test {
         drop(mgr);
     }
 
+    struct TestConfig {
+        config_dir: tempfile::TempDir,
+    }
+
+    impl TestConfig {
+        async fn new() -> Self {
+            let config_dir = tempfile::TempDir::new().unwrap();
+            tokio::fs::File::create(
+                config_dir.path().join(PARTIAL_CONFIG_FILENAME),
+            )
+            .await
+            .unwrap();
+            Self { config_dir }
+        }
+
+        fn make_config(&self) -> Config {
+            let all_svcs_config_path =
+                self.config_dir.path().join(SERVICE_CONFIG_FILENAME);
+            let svc_config_dir = self.config_dir.path().to_path_buf();
+            Config {
+                all_svcs_config_path,
+                get_svc_config_dir: Box::new(
+                    move |_zone_name: &str, _svc_name: &str| {
+                        svc_config_dir.clone()
+                    },
+                ),
+                ..Default::default()
+            }
+        }
+    }
+
     #[tokio::test]
     #[serial_test::serial]
     async fn test_ensure_service() {
         let logctx =
             omicron_test_utils::dev::test_setup_log("test_ensure_service");
         let log = logctx.log.clone();
+        let test_config = TestConfig::new().await;
 
-        let config_dir = tempfile::TempDir::new().unwrap();
-        let config = config_dir.path().join("services.toml");
         let mgr = ServiceManager::new(
             log,
             Etherstub(ETHERSTUB_NAME.to_string()),
             EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
             Ipv6Addr::LOCALHOST,
-            Some(config),
+            test_config.make_config(),
+            PhysicalLink("link".to_string()),
+            Uuid::new_v4(),
         )
         .await
         .unwrap();
 
-        ensure_new_service(&mgr).await;
+        let id = Uuid::new_v4();
+        ensure_new_service(&mgr, id).await;
         drop_service_manager(mgr);
 
         logctx.cleanup_successful();
@@ -565,21 +901,23 @@ mod test {
             "test_ensure_service_which_already_exists",
         );
         let log = logctx.log.clone();
+        let test_config = TestConfig::new().await;
 
-        let config_dir = tempfile::TempDir::new().unwrap();
-        let config = config_dir.path().join("services.toml");
         let mgr = ServiceManager::new(
             log,
             Etherstub(ETHERSTUB_NAME.to_string()),
             EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
             Ipv6Addr::LOCALHOST,
-            Some(config),
+            test_config.make_config(),
+            PhysicalLink("link".to_string()),
+            Uuid::new_v4(),
         )
         .await
         .unwrap();
 
-        ensure_new_service(&mgr).await;
-        ensure_existing_service(&mgr).await;
+        let id = Uuid::new_v4();
+        ensure_new_service(&mgr, id).await;
+        ensure_existing_service(&mgr, id).await;
         drop_service_manager(mgr);
 
         logctx.cleanup_successful();
@@ -591,9 +929,7 @@ mod test {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_services_are_recreated_on_reboot",
         );
-
-        let config_dir = tempfile::TempDir::new().unwrap();
-        let config = config_dir.path().join("services.toml");
+        let test_config = TestConfig::new().await;
 
         // First, spin up a ServiceManager, create a new service, and tear it
         // down.
@@ -602,11 +938,15 @@ mod test {
             Etherstub(ETHERSTUB_NAME.to_string()),
             EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
             Ipv6Addr::LOCALHOST,
-            Some(config.clone()),
+            test_config.make_config(),
+            PhysicalLink("link".to_string()),
+            Uuid::new_v4(),
         )
         .await
         .unwrap();
-        ensure_new_service(&mgr).await;
+
+        let id = Uuid::new_v4();
+        ensure_new_service(&mgr, id).await;
         drop_service_manager(mgr);
 
         // Before we re-create the service manager - notably, using the same
@@ -617,7 +957,9 @@ mod test {
             Etherstub(ETHERSTUB_NAME.to_string()),
             EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
             Ipv6Addr::LOCALHOST,
-            Some(config.clone()),
+            test_config.make_config(),
+            PhysicalLink("link".to_string()),
+            Uuid::new_v4(),
         )
         .await
         .unwrap();
@@ -632,9 +974,7 @@ mod test {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_services_do_not_persist_without_config",
         );
-
-        let config_dir = tempfile::TempDir::new().unwrap();
-        let config = config_dir.path().join("services.toml");
+        let test_config = TestConfig::new().await;
 
         // First, spin up a ServiceManager, create a new service, and tear it
         // down.
@@ -643,16 +983,20 @@ mod test {
             Etherstub(ETHERSTUB_NAME.to_string()),
             EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
             Ipv6Addr::LOCALHOST,
-            Some(config.clone()),
+            test_config.make_config(),
+            PhysicalLink("link".to_string()),
+            Uuid::new_v4(),
         )
         .await
         .unwrap();
-        ensure_new_service(&mgr).await;
+        let id = Uuid::new_v4();
+        ensure_new_service(&mgr, id).await;
         drop_service_manager(mgr);
 
         // Next, delete the config. This means the service we just created will
         // not be remembered on the next initialization.
-        std::fs::remove_file(&config).unwrap();
+        let config = test_config.make_config();
+        std::fs::remove_file(&config.all_svcs_config_path).unwrap();
 
         // Observe that the old service is not re-initialized.
         let mgr = ServiceManager::new(
@@ -660,7 +1004,9 @@ mod test {
             Etherstub(ETHERSTUB_NAME.to_string()),
             EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
             Ipv6Addr::LOCALHOST,
-            Some(config.clone()),
+            config,
+            PhysicalLink("link".to_string()),
+            Uuid::new_v4(),
         )
         .await
         .unwrap();

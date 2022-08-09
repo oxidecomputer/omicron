@@ -43,9 +43,8 @@ pub enum Error {
         actual: BTreeMap<String, FieldType>,
     },
 
-    /// An error querying or filtering data
-    #[error("Invalid query or data filter: {0}")]
-    QueryError(String),
+    #[error("Timeseries not found for: {0}")]
+    TimeseriesNotFound(String),
 
     #[error("The field comparison operation '{op}' is not valid for field '{field_name}' with type {field_type}")]
     InvalidSelectionOp { op: String, field_name: String, field_type: FieldType },
@@ -98,9 +97,9 @@ impl JsonSchema for TimeseriesName {
     }
 
     fn json_schema(
-        _gen: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
-        schemars::schema::Schema::Object(schemars::schema::SchemaObject {
+        schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
                 title: Some("The name of a timeseries".to_string()),
                 description: Some(
@@ -112,15 +111,14 @@ impl JsonSchema for TimeseriesName {
                 ),
                 ..Default::default()
             })),
-            instance_type: Some(schemars::schema::SingleOrVec::Single(
-                Box::new(schemars::schema::InstanceType::String),
-            )),
+            instance_type: Some(schemars::schema::InstanceType::String.into()),
             string: Some(Box::new(schemars::schema::StringValidation {
                 pattern: Some(TIMESERIES_NAME_REGEX.to_string()),
                 ..Default::default()
             })),
             ..Default::default()
-        })
+        }
+        .into()
     }
 }
 

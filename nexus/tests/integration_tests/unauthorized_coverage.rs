@@ -81,6 +81,8 @@ fn test_unauthorized_coverage() {
     );
     for v in &*VERIFY_ENDPOINTS {
         for m in &v.allowed_methods {
+            // Remove the method and path from the list of operations if there's
+            // a VerifyEndpoint for it.
             let method_string = m.http_method().to_string().to_uppercase();
             let found = spec_operations.iter().find(|(op, regex)| {
                 op.method.to_uppercase() == method_string
@@ -95,7 +97,7 @@ fn test_unauthorized_coverage() {
                 spec_operations.remove(&op);
             } else {
                 unexpected_endpoints
-                    .push_str(&format!("{:6} {:?}", method_string, v.url));
+                    .push_str(&format!("{:6} {:?}\n", method_string, v.url));
             }
         }
     }

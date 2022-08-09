@@ -10,7 +10,7 @@ use crate::illumos::vnic::VnicAllocator;
 use crate::illumos::zone::AddressRequest;
 use crate::illumos::zpool::ZpoolName;
 use crate::illumos::{zfs::Mountpoint, zone::ZONE_PREFIX, zpool::ZpoolInfo};
-use crate::nexus::NexusClient;
+use crate::nexus::LazyNexusClient;
 use crate::params::DatasetKind;
 use futures::stream::FuturesOrdered;
 use futures::FutureExt;
@@ -456,7 +456,7 @@ impl DatasetInfo {
 // Ensures that a zone backing a particular dataset is running.
 async fn ensure_running_zone(
     log: &Logger,
-    vnic_allocator: &VnicAllocator,
+    vnic_allocator: &VnicAllocator<Etherstub>,
     dataset_info: &DatasetInfo,
     dataset_name: &DatasetName,
     do_format: bool,
@@ -488,6 +488,7 @@ async fn ensure_running_zone(
                 &[zone::Dataset { name: dataset_name.full() }],
                 &[],
                 vec![],
+                None,
             )
             .await?;
 
@@ -522,9 +523,7 @@ async fn ensure_running_zone(
     }
 }
 
-type NotifyFut = dyn futures::Future<
-        Output = Result<(), nexus_client::Error<nexus_client::types::Error>>,
-    > + Send;
+type NotifyFut = dyn futures::Future<Output = Result<(), String>> + Send;
 
 #[derive(Debug)]
 struct NewFilesystemRequest {
@@ -538,11 +537,11 @@ struct NewFilesystemRequest {
 struct StorageWorker {
     log: Logger,
     sled_id: Uuid,
-    nexus_client: Arc<NexusClient>,
+    lazy_nexus_client: LazyNexusClient,
     pools: Arc<Mutex<HashMap<ZpoolName, Pool>>>,
     new_pools_rx: mpsc::Receiver<ZpoolName>,
     new_filesystems_rx: mpsc::Receiver<NewFilesystemRequest>,
-    vnic_allocator: VnicAllocator,
+    vnic_allocator: VnicAllocator<Etherstub>,
     underlay_address: Ipv6Addr,
 }
 
@@ -631,21 +630,23 @@ impl StorageWorker {
         size: ByteCount,
     ) {
         let sled_id = self.sled_id;
-        let nexus = self.nexus_client.clone();
+        let lazy_nexus_client = self.lazy_nexus_client.clone();
         let notify_nexus = move || {
             let zpool_request = ZpoolPutRequest { size: size.into() };
-            let nexus = nexus.clone();
+            let lazy_nexus_client = lazy_nexus_client.clone();
             async move {
-                nexus
+                lazy_nexus_client
+                    .get()
+                    .await
+                    .map_err(|e| {
+                        backoff::BackoffError::transient(e.to_string())
+                    })?
                     .zpool_put(&sled_id, &pool_id, &zpool_request)
                     .await
-                    .map_err(backoff::BackoffError::transient)?;
-                Ok::<
-                    (),
-                    backoff::BackoffError<
-                        nexus_client::Error<nexus_client::types::Error>,
-                    >,
-                >(())
+                    .map_err(|e| {
+                        backoff::BackoffError::transient(e.to_string())
+                    })?;
+                Ok(())
             }
         };
         let log = self.log.clone();
@@ -673,28 +674,25 @@ impl StorageWorker {
         datasets: Vec<(Uuid, SocketAddrV6, DatasetKind)>,
         pool_id: Uuid,
     ) {
-        let nexus = self.nexus_client.clone();
+        let lazy_nexus_client = self.lazy_nexus_client.clone();
         let notify_nexus = move || {
-            let nexus = nexus.clone();
+            let lazy_nexus_client = lazy_nexus_client.clone();
             let datasets = datasets.clone();
             async move {
+                let nexus = lazy_nexus_client.get().await.map_err(|e| {
+                    backoff::BackoffError::transient(e.to_string())
+                })?;
+
                 for (id, address, kind) in datasets {
                     let request = DatasetPutRequest {
                         address: address.to_string(),
                         kind: kind.into(),
                     };
-                    nexus
-                        .dataset_put(&pool_id, &id, &request)
-                        .await
-                        .map_err(backoff::BackoffError::transient)?;
+                    nexus.dataset_put(&pool_id, &id, &request).await.map_err(
+                        |e| backoff::BackoffError::transient(e.to_string()),
+                    )?;
                 }
-
-                Ok::<
-                    (),
-                    backoff::BackoffError<
-                        nexus_client::Error<nexus_client::types::Error>,
-                    >,
-                >(())
+                Ok(())
             }
         };
         let log = self.log.clone();
@@ -904,7 +902,7 @@ impl StorageManager {
     pub async fn new(
         log: &Logger,
         sled_id: Uuid,
-        nexus_client: Arc<NexusClient>,
+        lazy_nexus_client: LazyNexusClient,
         etherstub: Etherstub,
         underlay_address: Ipv6Addr,
     ) -> Self {
@@ -915,7 +913,7 @@ impl StorageManager {
         let mut worker = StorageWorker {
             log,
             sled_id,
-            nexus_client,
+            lazy_nexus_client,
             pools: pools.clone(),
             new_pools_rx,
             new_filesystems_rx,
