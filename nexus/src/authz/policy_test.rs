@@ -18,7 +18,6 @@
 //! - review remaining XXX-dap
 //! - clean up, document test
 //! - figure out what other types to add
-//! - is there a way to verify coverage of all authz types?
 
 use super::ApiResource;
 use super::ApiResourceWithRoles;
@@ -37,6 +36,8 @@ use nexus_test_utils::db::test_setup_database;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
 use omicron_test_utils::dev;
+use oso::PolarClass;
+use std::collections::BTreeSet;
 use std::io::Cursor;
 use std::io::Write;
 use std::sync::Arc;
@@ -44,12 +45,15 @@ use strum::IntoEnumIterator;
 use uuid::Uuid;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_iam_roles() {
+async fn test_iam_roles_behavior() {
     let logctx = dev::test_setup_log("test_iam_roles");
     let mut db = test_setup_database(&logctx.log).await;
     let (opctx, datastore) = db::datastore::datastore_test(&logctx, &db).await;
 
-    let test_resources = make_resources();
+    let mut coverage = Coverage::new(&logctx.log);
+    let test_resources = make_resources(&mut coverage);
+    coverage.verify();
+
     let silo1_id = test_resources.silo1.resource_id();
     let mut users: Vec<(String, Uuid)> = Vec::new();
 
@@ -154,6 +158,128 @@ async fn test_iam_roles() {
 
     db.cleanup().await.unwrap();
     logctx.cleanup_successful();
+}
+
+struct Coverage {
+    log: slog::Logger,
+    class_names: BTreeSet<String>,
+    exempted: BTreeSet<String>,
+    covered: BTreeSet<String>,
+}
+
+impl Coverage {
+    fn new(log: &slog::Logger) -> Coverage {
+        let log = log.new(o!("component" => "IamTestCoverage"));
+        let authz = authz::Authz::new(&log);
+        let class_names = authz.into_class_names();
+
+        // Class names should be added to this exemption list when their Polar
+        // code snippets and authz behavior is identical to another class.  This
+        // is primarily for performance reasons because this test takes a long
+        // time.  But with every exemption comes the risk of a security issue!
+        //
+        // PLEASE: instead of adding a class to this list, consider updating
+        // this test to create an instance of the class and then test it.
+        let exempted = [
+            // Non-resources
+            super::Action::get_polar_class(),
+            super::actor::AnyActor::get_polar_class(),
+            super::actor::AuthenticatedActor::get_polar_class(),
+            // XXX-dap TODO-coverage Not yet implemented, but not exempted for a
+            // good reason.
+            super::IpPoolList::get_polar_class(),
+            super::GlobalImageList::get_polar_class(),
+            super::ConsoleSessionList::get_polar_class(),
+            super::DeviceAuthRequestList::get_polar_class(),
+            super::IpPool::get_polar_class(),
+            super::NetworkInterface::get_polar_class(),
+            super::VpcRouter::get_polar_class(),
+            super::RouterRoute::get_polar_class(),
+            super::ConsoleSession::get_polar_class(),
+            super::DeviceAuthRequest::get_polar_class(),
+            super::DeviceAccessToken::get_polar_class(),
+            super::Rack::get_polar_class(),
+            super::RoleBuiltin::get_polar_class(),
+            super::SshKey::get_polar_class(),
+            super::SiloUser::get_polar_class(),
+            super::SiloGroup::get_polar_class(),
+            super::IdentityProvider::get_polar_class(),
+            super::SamlIdentityProvider::get_polar_class(),
+            super::Sled::get_polar_class(),
+            super::UpdateAvailableArtifact::get_polar_class(),
+            super::UserBuiltin::get_polar_class(),
+            super::GlobalImage::get_polar_class(),
+        ]
+        .into_iter()
+        .map(|c| c.name.clone())
+        .collect();
+
+        Coverage { log, class_names, exempted, covered: BTreeSet::new() }
+    }
+
+    fn covered<T: oso::PolarClass>(&mut self, _covered: &T) {
+        self.covered_class(T::get_polar_class())
+    }
+
+    fn covered_class(&mut self, class: oso::Class) {
+        let class_name = class.name.clone();
+        debug!(&self.log, "covering"; "class_name" => &class_name);
+        self.covered.insert(class_name);
+    }
+
+    fn verify(&self) {
+        let mut uncovered = Vec::new();
+        let mut bad_exemptions = Vec::new();
+
+        for class_name in &self.class_names {
+            let class_name = class_name.as_str();
+            let exempted = self.exempted.contains(class_name);
+            let covered = self.covered.contains(class_name);
+
+            match (exempted, covered) {
+                (true, false) => {
+                    // XXX-dap consider checking whether the Polar snippet
+                    // exactly matches that of another class?
+                    debug!(&self.log, "exempt"; "class_name" => class_name);
+                }
+                (false, true) => {
+                    debug!(&self.log, "covered"; "class_name" => class_name);
+                }
+                (true, true) => {
+                    error!(
+                        &self.log,
+                        "bad exemption (class was covered)";
+                        "class_name" => class_name
+                    );
+                    bad_exemptions.push(class_name);
+                }
+                (false, false) => {
+                    error!(
+                        &self.log,
+                        "uncovered class";
+                        "class_name" => class_name
+                    );
+                    uncovered.push(class_name);
+                }
+            };
+        }
+
+        if !bad_exemptions.is_empty() {
+            panic!(
+                "these classes were covered by the tests and should \
+                    not have been part of the exemption list: {}",
+                bad_exemptions.join(", ")
+            );
+        }
+
+        if !uncovered.is_empty() {
+            panic!(
+                "these classes were not covered by the IAM role \
+                    policy test: {}",
+                uncovered.join(", ")
+            );
+        }
+    }
 }
 
 async fn run_test_operations<W: Write>(
@@ -312,6 +438,8 @@ trait Authorizable: AuthorizedResource + std::fmt::Debug {
     ) -> BoxFuture<'a, Result<(), Error>>
     where
         'b: 'a;
+
+    fn polar_class(&self) -> oso::Class;
 }
 
 impl<T> Authorizable for T
@@ -340,6 +468,10 @@ where
 
         format!("{:?} {}", self.resource_type(), my_ident)
     }
+
+    fn polar_class(&self) -> oso::Class {
+        T::get_polar_class()
+    }
 }
 
 impl Authorizable for authz::oso_generic::Database {
@@ -357,6 +489,10 @@ impl Authorizable for authz::oso_generic::Database {
     {
         opctx.authorize(action, self).boxed()
     }
+
+    fn polar_class(&self) -> oso::Class {
+        authz::oso_generic::Database::get_polar_class()
+    }
 }
 
 // XXX-dap make this deterministic
@@ -366,23 +502,30 @@ fn make_uuid() -> Uuid {
     Uuid::new_v4()
 }
 
-fn make_resources() -> Resources {
+fn make_resources(coverage: &mut Coverage) -> Resources {
+    // "Database" and "Fleet" are implicitly included by virtue of being
+    // returned by the iterator.
+    coverage.covered(&authz::DATABASE);
+    coverage.covered(&authz::FLEET);
+
     let silo1_id = make_uuid();
     let silo1 = authz::Silo::new(
         authz::FLEET,
         silo1_id,
         LookupType::ByName(String::from("silo1")),
     );
+    coverage.covered(&silo1);
 
     let silo1_org1 = authz::Organization::new(
         silo1.clone(),
         make_uuid(),
         LookupType::ByName(String::from("silo1-org1")),
     );
+    coverage.covered(&silo1_org1);
     let (silo1_org1_proj1, silo1_org1_proj1_children) =
-        make_project(&silo1_org1, "silo1-org1-proj1");
+        make_project(coverage, &silo1_org1, "silo1-org1-proj1");
     let (silo1_org1_proj2, silo1_org1_proj2_children) =
-        make_project(&silo1_org1, "silo1-org1-proj2");
+        make_project(coverage, &silo1_org1, "silo1-org1-proj2");
 
     let silo1_org2 = authz::Organization::new(
         silo1.clone(),
@@ -390,7 +533,7 @@ fn make_resources() -> Resources {
         LookupType::ByName(String::from("silo1-org2")),
     );
     let (silo1_org2_proj1, silo1_org2_proj1_children) =
-        make_project(&silo1_org2, "silo1-org2-proj1");
+        make_project(coverage, &silo1_org2, "silo1-org2-proj1");
 
     let silo2_id = make_uuid();
     let silo2 = authz::Silo::new(
@@ -405,7 +548,7 @@ fn make_resources() -> Resources {
         LookupType::ByName(String::from("silo2-org1")),
     );
     let (silo2_org1_proj1, silo2_org1_proj1_children) =
-        make_project(&silo2_org1, "silo2-org1-proj1");
+        make_project(coverage, &silo2_org1, "silo2-org1-proj1");
 
     Resources {
         silo1,
@@ -425,6 +568,7 @@ fn make_resources() -> Resources {
 }
 
 fn make_project(
+    coverage: &mut Coverage,
     organization: &authz::Organization,
     project_name: &str,
 ) -> (authz::Project, Vec<Arc<dyn Authorizable>>) {
@@ -433,6 +577,7 @@ fn make_project(
         make_uuid(),
         LookupType::ByName(project_name.to_string()),
     );
+    coverage.covered(&project);
 
     let vpc1_name = format!("{}-vpc1", project_name);
     let vpc1 = authz::Vpc::new(
@@ -440,6 +585,7 @@ fn make_project(
         make_uuid(),
         LookupType::ByName(vpc1_name.clone()),
     );
+    coverage.covered(&vpc1);
     let children: Vec<Arc<dyn Authorizable>> = vec![
         // XXX-dap TODO-coverage add more different kinds of children
         Arc::new(authz::Disk::new(
@@ -460,6 +606,9 @@ fn make_project(
             LookupType::ByName(format!("{}-subnet1", vpc1_name)),
         )),
     ];
+    for c in &children {
+        coverage.covered_class(c.polar_class());
+    }
 
     (project, children)
 }

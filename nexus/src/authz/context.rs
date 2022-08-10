@@ -50,6 +50,11 @@ impl Authz {
     {
         self.oso.is_allowed(actor.clone(), action, resource.clone())
     }
+
+    #[cfg(test)]
+    pub fn into_class_names(self) -> BTreeSet<String> {
+        self.class_names
+    }
 }
 
 /// Operation-specific authorization context
