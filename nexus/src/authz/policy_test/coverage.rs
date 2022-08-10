@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::authz;
+use crate::authz::AuthorizedResource;
 use oso::PolarClass;
 use std::collections::BTreeSet;
 
@@ -68,8 +69,8 @@ impl Coverage {
         Coverage { log, class_names, exempted, covered: BTreeSet::new() }
     }
 
-    pub fn covered<T: oso::PolarClass>(&mut self, _covered: &T) {
-        self.covered_class(T::get_polar_class())
+    pub fn covered(&mut self, covered: &dyn AuthorizedResource) {
+        self.covered_class(covered.polar_class())
     }
 
     pub fn covered_class(&mut self, class: oso::Class) {

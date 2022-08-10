@@ -19,14 +19,11 @@
 //! - clean up, document test
 //! - figure out what other types to add
 
-use super::ApiResourceWithRolesType;
+use self::resources::Authorizable;
 use crate::authn;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
-use crate::db::model::DatabaseString;
-use crate::external_api::shared;
-use authz::ApiResourceWithRoles;
 use futures::StreamExt;
 use nexus_test_utils::db::test_setup_database;
 use omicron_common::api::external::Error;
@@ -39,7 +36,6 @@ use uuid::Uuid;
 
 mod coverage;
 mod resources;
-use self::resources::Authorizable;
 use coverage::Coverage;
 use resources::Resources;
 
@@ -50,56 +46,15 @@ async fn test_iam_roles_behavior() {
     let (opctx, datastore) = db::datastore::datastore_test(&logctx, &db).await;
 
     let mut coverage = Coverage::new(&logctx.log);
-    let test_resources = resources::make_resources(&mut coverage);
+    let silo1_id = *resources::SILO1_ID;
+    let test_resources =
+        Resources::new(&opctx, &datastore, &mut coverage, silo1_id).await;
     coverage.verify();
-
-    let silo1_id = test_resources.silo1.resource_id();
-    let mut users: Vec<(String, Uuid)> = Vec::new();
-
-    create_users(
-        &opctx,
-        &*datastore,
-        "fleet",
-        silo1_id,
-        &authz::FLEET,
-        &mut users,
-    )
-    .await;
-
-    create_users(
-        &opctx,
-        &*datastore,
-        "silo1",
-        silo1_id,
-        &test_resources.silo1,
-        &mut users,
-    )
-    .await;
-
-    create_users(
-        &opctx,
-        &*datastore,
-        "silo1-org1",
-        silo1_id,
-        &test_resources.silo1_org1,
-        &mut users,
-    )
-    .await;
-
-    create_users(
-        &opctx,
-        &*datastore,
-        "silo1-org1-proj1",
-        silo1_id,
-        &test_resources.silo1_org1_proj1,
-        &mut users,
-    )
-    .await;
 
     // Create an OpContext for each user for testing.
     let authz = Arc::new(authz::Authz::new(&logctx.log));
-    let mut user_contexts: Vec<Arc<(String, OpContext)>> = users
-        .iter()
+    let mut user_contexts: Vec<Arc<(String, OpContext)>> = test_resources
+        .users()
         .map(|(username, user_id)| {
             let user_id = *user_id;
             let user_log = logctx.log.new(o!(
@@ -168,7 +123,7 @@ async fn run_test_operations<W: Write>(
     let mut futures = futures::stream::FuturesOrdered::new();
 
     // Run the per-resource tests in parallel.
-    for resource in test_resources.all_resources() {
+    for resource in test_resources.resources() {
         let log = log.new(o!("resource" => format!("{:?}", resource)));
         futures.push(test_one_resource(
             log,
@@ -240,54 +195,6 @@ async fn test_one_resource(
         task.await.expect("failed to wait for task");
     let result_str = result.expect("failed to write to string buffer");
     String::from_utf8(result_str).expect("unexpected non-UTF8 output")
-}
-
-async fn create_users<T>(
-    opctx: &OpContext,
-    datastore: &db::DataStore,
-    resource_name: &str,
-    silo_id: Uuid,
-    authz_resource: &T,
-    users: &mut Vec<(String, Uuid)>,
-) where
-    T: ApiResourceWithRolesType + oso::PolarClass + Clone,
-    T::AllowedRoles: IntoEnumIterator,
-{
-    for role in T::AllowedRoles::iter() {
-        let role_name = role.to_database_string();
-        let username = format!("{}-{}", resource_name, role_name);
-        let user_id = make_uuid();
-        println!("creating user: {}", &username);
-        users.push((username.clone(), user_id));
-
-        let silo_user = db::model::SiloUser::new(silo_id, user_id, username);
-        datastore
-            .silo_user_create(silo_user)
-            .await
-            .expect("failed to create silo user");
-
-        let old_role_assignments = datastore
-            .role_assignment_fetch_visible(opctx, authz_resource)
-            .await
-            .expect("fetching policy");
-        let new_role_assignments = old_role_assignments
-            .into_iter()
-            .map(|r| r.try_into().unwrap())
-            .chain(std::iter::once(shared::RoleAssignment {
-                identity_type: shared::IdentityType::SiloUser,
-                identity_id: user_id,
-                role_name: role,
-            }))
-            .collect::<Vec<_>>();
-        datastore
-            .role_assignment_replace_visible(
-                opctx,
-                authz_resource,
-                &new_role_assignments,
-            )
-            .await
-            .expect("failed to assign role");
-    }
 }
 
 fn action_abbreviation(action: authz::Action) -> &'static str {
