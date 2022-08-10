@@ -678,8 +678,8 @@ lazy_static! {
         },
         VerifyEndpoint {
             url: "/policy",
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::ReadOnly,
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Put(
