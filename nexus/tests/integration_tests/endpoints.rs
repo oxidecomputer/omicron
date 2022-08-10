@@ -40,7 +40,7 @@ lazy_static! {
         format!("/hardware/sleds/{}", SLED_AGENT_UUID);
 
     // Global policy
-    pub static ref POLICY_URL: &'static str = "/policy";
+    pub static ref POLICY_URL: &'static str = "/global/policy";
 
     // Silo used for testing
     pub static ref DEMO_SILO_NAME: Name = "demo-silo".parse().unwrap();

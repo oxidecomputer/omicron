@@ -97,6 +97,26 @@ impl super::Nexus {
         Ok(shared::Policy { role_assignments })
     }
 
+    pub async fn silo_fetch_policy_by_id(
+        &self,
+        opctx: &OpContext,
+        silo_id: Uuid,
+    ) -> LookupResult<shared::Policy<authz::SiloRole>> {
+        let (.., authz_silo) = LookupPath::new(opctx, &self.db_datastore)
+            .silo_id(silo_id)
+            .lookup_for(authz::Action::ReadPolicy)
+            .await?;
+        let role_assignments = self
+            .db_datastore
+            .role_assignment_fetch_visible(opctx, &authz_silo)
+            .await?
+            .into_iter()
+            .map(|r| r.try_into().context("parsing database role assignment"))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| Error::internal_error(&format!("{:#}", error)))?;
+        Ok(shared::Policy { role_assignments })
+    }
+
     pub async fn silo_update_policy(
         &self,
         opctx: &OpContext,
@@ -105,6 +125,32 @@ impl super::Nexus {
     ) -> UpdateResult<shared::Policy<authz::SiloRole>> {
         let (.., authz_silo) = LookupPath::new(opctx, &self.db_datastore)
             .silo_name(silo_name)
+            .lookup_for(authz::Action::ModifyPolicy)
+            .await?;
+
+        let role_assignments = self
+            .db_datastore
+            .role_assignment_replace_visible(
+                opctx,
+                &authz_silo,
+                &policy.role_assignments,
+            )
+            .await?
+            .into_iter()
+            .map(|r| r.try_into())
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(shared::Policy { role_assignments })
+    }
+
+    pub async fn silo_update_policy_by_id(
+        &self,
+        opctx: &OpContext,
+        silo_id: Uuid,
+        policy: &shared::Policy<authz::SiloRole>,
+    ) -> UpdateResult<shared::Policy<authz::SiloRole>> {
+        let (.., authz_silo) = LookupPath::new(opctx, &self.db_datastore)
+            .silo_id(silo_id)
             .lookup_for(authz::Action::ModifyPolicy)
             .await?;
 

@@ -569,6 +569,68 @@
         }
       }
     },
+    "/global/policy": {
+      "get": {
+        "tags": [
+          "policy"
+        ],
+        "summary": "Fetch the top-level IAM policy",
+        "operationId": "global_policy_view",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetRolePolicy"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "policy"
+        ],
+        "summary": "Update the top-level IAM policy",
+        "operationId": "global_policy_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FleetRolePolicy"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetRolePolicy"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/hardware/racks": {
       "get": {
         "tags": [
@@ -5912,9 +5974,9 @@
     "/policy": {
       "get": {
         "tags": [
-          "policy"
+          "silos"
         ],
-        "summary": "Fetch the top-level IAM policy",
+        "summary": "Fetch current silo's IAM policy",
         "operationId": "policy_view",
         "responses": {
           "200": {
@@ -5922,7 +5984,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FleetRolePolicy"
+                  "$ref": "#/components/schemas/SiloRolePolicy"
                 }
               }
             }
@@ -5937,15 +5999,15 @@
       },
       "put": {
         "tags": [
-          "policy"
+          "silos"
         ],
-        "summary": "Update the top-level IAM policy",
+        "summary": "Update current silo's IAM policy",
         "operationId": "policy_update",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FleetRolePolicy"
+                "$ref": "#/components/schemas/SiloRolePolicy"
               }
             }
           },
@@ -5957,7 +6019,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FleetRolePolicy"
+                  "$ref": "#/components/schemas/SiloRolePolicy"
                 }
               }
             }
