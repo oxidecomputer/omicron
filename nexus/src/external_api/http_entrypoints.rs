@@ -386,7 +386,7 @@ pub async fn policy_view(
             .internal_context("loading current silo")?;
         let policy =
             nexus.silo_fetch_policy_by_id(&opctx, authz_silo.id()).await?;
-        Ok(HttpResponseOk(policy.into()))
+        Ok(HttpResponseOk(policy))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
