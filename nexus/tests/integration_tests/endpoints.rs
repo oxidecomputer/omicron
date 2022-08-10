@@ -40,7 +40,7 @@ lazy_static! {
         format!("/hardware/sleds/{}", SLED_AGENT_UUID);
 
     // Global policy
-    pub static ref POLICY_URL: &'static str = "/global/policy";
+    pub static ref GLOBAL_POLICY_URL: &'static str = "/global/policy";
 
     // Silo used for testing
     pub static ref DEMO_SILO_NAME: Name = "demo-silo".parse().unwrap();
@@ -520,7 +520,7 @@ lazy_static! {
     pub static ref VERIFY_ENDPOINTS: Vec<VerifyEndpoint> = vec![
         // Global IAM policy
         VerifyEndpoint {
-            url: *POLICY_URL,
+            url: *GLOBAL_POLICY_URL,
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
@@ -663,6 +663,21 @@ lazy_static! {
         },
         VerifyEndpoint {
             url: &*DEMO_SILO_POLICY_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Put(
+                    serde_json::to_value(
+                        &shared::Policy::<authz::SiloRole> {
+                            role_assignments: vec![]
+                        }
+                    ).unwrap()
+                ),
+            ],
+        },
+        VerifyEndpoint {
+            url: "/policy",
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
