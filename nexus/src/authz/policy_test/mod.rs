@@ -20,6 +20,7 @@
 //! - figure out what other types to add
 
 use self::resources::Authorizable;
+use self::resources::ResourceBuilder;
 use crate::authn;
 use crate::authz;
 use crate::context::OpContext;
@@ -27,6 +28,7 @@ use crate::db;
 use futures::StreamExt;
 use nexus_test_utils::db::test_setup_database;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::LookupType;
 use omicron_test_utils::dev;
 use std::io::Cursor;
 use std::io::Write;
@@ -47,8 +49,9 @@ async fn test_iam_roles_behavior() {
 
     let mut coverage = Coverage::new(&logctx.log);
     let silo1_id = *resources::SILO1_ID;
-    let test_resources =
-        Resources::new(&opctx, &datastore, &mut coverage, silo1_id).await;
+    let builder =
+        ResourceBuilder::new(&opctx, &datastore, &mut coverage, silo1_id);
+    let test_resources = make_resources(builder).await;
     coverage.verify();
 
     // Create an OpContext for each user for testing.
@@ -112,6 +115,111 @@ async fn test_iam_roles_behavior() {
 
     db.cleanup().await.unwrap();
     logctx.cleanup_successful();
+}
+
+// The hierarchy looks like this:
+// fleet
+// fleet/s1
+// fleet/s1/o1
+// fleet/s1/o1/p1
+// fleet/s1/o1/p1/vpc1
+// fleet/s1/o1/p2
+// fleet/s1/o1/p2/vpc1
+// fleet/s1/o2
+// fleet/s1/o2/p1
+// fleet/s1/o2/p1/vpc1
+// fleet/s2
+// fleet/s2/o1
+// fleet/s2/o1/p1
+// fleet/s2/o1/p1/vpc1
+async fn make_resources<'a>(mut builder: ResourceBuilder<'a>) -> Resources {
+    builder.new_resource(authz::DATABASE.clone());
+    builder.new_resource_with_roles(authz::FLEET.clone()).await;
+
+    let silo1 = authz::Silo::new(
+        authz::FLEET,
+        *resources::SILO1_ID,
+        LookupType::ByName(String::from("silo1")),
+    );
+    builder.new_resource_with_roles(silo1.clone()).await;
+
+    let silo1_org1 = authz::Organization::new(
+        silo1.clone(),
+        make_uuid(),
+        LookupType::ByName(String::from("silo1-org1")),
+    );
+    builder.new_resource_with_roles(silo1_org1.clone()).await;
+
+    make_project(&mut builder, &silo1_org1, "silo1-org1-proj1", true).await;
+    make_project(&mut builder, &silo1_org1, "silo1-org1-proj2", false).await;
+
+    let silo1_org2 = authz::Organization::new(
+        silo1.clone(),
+        make_uuid(),
+        LookupType::ByName(String::from("silo1-org2")),
+    );
+    builder.new_resource(silo1_org2.clone());
+    make_project(&mut builder, &silo1_org2, "silo1-org2-proj1", false).await;
+
+    let silo2 = authz::Silo::new(
+        authz::FLEET,
+        make_uuid(),
+        LookupType::ByName(String::from("silo2")),
+    );
+    builder.new_resource(silo2.clone());
+    let silo2_org1 = authz::Organization::new(
+        silo2.clone(),
+        make_uuid(),
+        LookupType::ByName(String::from("silo2-org1")),
+    );
+    builder.new_resource(silo2_org1.clone());
+    make_project(&mut builder, &silo2_org1, "silo2-org1-proj1", false).await;
+
+    builder.build()
+}
+
+async fn make_project(
+    builder: &mut ResourceBuilder<'_>,
+    organization: &authz::Organization,
+    project_name: &str,
+    with_roles: bool,
+) {
+    let project = authz::Project::new(
+        organization.clone(),
+        make_uuid(),
+        LookupType::ByName(project_name.to_string()),
+    );
+    if with_roles {
+        builder.new_resource_with_roles(project.clone()).await;
+    } else {
+        builder.new_resource(project.clone());
+    }
+
+    let vpc1_name = format!("{}-vpc1", project_name);
+    let vpc1 = authz::Vpc::new(
+        project.clone(),
+        make_uuid(),
+        LookupType::ByName(vpc1_name.clone()),
+    );
+
+    // XXX-dap TODO-coverage add more different kinds of children
+    builder.new_resource(authz::Disk::new(
+        project.clone(),
+        make_uuid(),
+        LookupType::ByName(format!("{}-disk1", project_name)),
+    ));
+    builder.new_resource(authz::Instance::new(
+        project.clone(),
+        make_uuid(),
+        LookupType::ByName(format!("{}-instance1", project_name)),
+    ));
+    builder.new_resource(vpc1.clone());
+    // Test a resource nested two levels below Project
+    builder.new_resource(authz::VpcSubnet::new(
+        vpc1,
+        make_uuid(),
+        LookupType::ByName(format!("{}-subnet1", vpc1_name)),
+    ));
 }
 
 async fn run_test_operations<W: Write>(
