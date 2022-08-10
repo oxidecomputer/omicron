@@ -16,7 +16,6 @@ use futures::FutureExt;
 use lazy_static::lazy_static;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
-use oso::PolarClass;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -100,8 +99,6 @@ pub trait Authorizable: AuthorizedResource + std::fmt::Debug {
     ) -> BoxFuture<'a, Result<(), Error>>
     where
         'b: 'a;
-
-    fn polar_class(&self) -> oso::Class;
 }
 
 impl<T> Authorizable for T
@@ -130,10 +127,6 @@ where
 
         format!("{:?} {}", self.resource_type(), my_ident)
     }
-
-    fn polar_class(&self) -> oso::Class {
-        T::get_polar_class()
-    }
 }
 
 impl Authorizable for authz::oso_generic::Database {
@@ -150,10 +143,6 @@ impl Authorizable for authz::oso_generic::Database {
         'b: 'a,
     {
         opctx.authorize(action, self).boxed()
-    }
-
-    fn polar_class(&self) -> oso::Class {
-        authz::oso_generic::Database::get_polar_class()
     }
 }
 

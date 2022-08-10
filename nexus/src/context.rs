@@ -446,7 +446,7 @@ impl OpContext {
         resource: &Resource,
     ) -> Result<(), Error>
     where
-        Resource: AuthorizedResource + Debug + Clone + oso::PolarClass,
+        Resource: AuthorizedResource + Debug + Clone,
     {
         // TODO-cleanup In an ideal world, Oso would consume &Action and
         // &Resource.  Instead, it consumes owned types.  As a result, they're

@@ -289,6 +289,10 @@ impl AuthorizedResource for Database {
     ) -> Error {
         error
     }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
 }
 
 #[cfg(test)]

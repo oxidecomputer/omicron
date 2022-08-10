@@ -86,7 +86,7 @@ impl Context {
         resource: Resource,
     ) -> Result<(), Error>
     where
-        Resource: AuthorizedResource + oso::PolarClass + Clone,
+        Resource: AuthorizedResource + Clone,
     {
         // If we're given a resource whose PolarClass was never registered with
         // Oso, then the call to `is_allowed()` below will always return false
@@ -102,7 +102,7 @@ impl Context {
         // of a programmer error than an operational error.  But unlike most
         // programmer errors, the nature of the problem and the blast radius are
         // well understood, so we may as well avoid crashing.)
-        let class_name = &Resource::get_polar_class().name;
+        let class_name = &resource.polar_class().name;
         bail_unless!(
             self.authz.class_names.contains(class_name),
             "attempted authz check on unregistered resource: {:?}",
@@ -186,6 +186,9 @@ pub trait AuthorizedResource: oso::ToPolar + Send + Sync + 'static {
         actor: AnyActor,
         action: Action,
     ) -> Error;
+
+    /// Returns the Polar class that implements this resource
+    fn polar_class(&self) -> oso::Class;
 }
 
 #[cfg(test)]
@@ -252,6 +255,10 @@ mod test {
             ) -> Error {
                 // authorize() shouldn't get far enough to call this.
                 unimplemented!();
+            }
+
+            fn polar_class(&self) -> oso::Class {
+                Self::get_polar_class()
             }
         }
 
