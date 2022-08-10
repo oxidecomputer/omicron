@@ -5976,7 +5976,7 @@
         "tags": [
           "silos"
         ],
-        "summary": "Fetch current silo's IAM policy",
+        "summary": "Fetch the current silo's IAM policy",
         "operationId": "policy_view",
         "responses": {
           "200": {
@@ -6001,7 +6001,7 @@
         "tags": [
           "silos"
         ],
-        "summary": "Update current silo's IAM policy",
+        "summary": "Update the current silo's IAM policy",
         "operationId": "policy_update",
         "requestBody": {
           "content": {
