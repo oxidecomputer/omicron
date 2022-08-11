@@ -2,231 +2,177 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Structures and functions related to the resources created for the IAM role
-//! policy test
+//! Concrete list of resources created for the IAM policy test
 
-use super::coverage::Coverage;
+use super::resource_builder::ResourceBuilder;
+use super::resource_builder::ResourceSet;
 use crate::authz;
-use crate::authz::ApiResourceWithRolesType;
-use crate::authz::AuthorizedResource;
-use crate::context::OpContext;
-use crate::db;
-use crate::db::fixed_data::FLEET_ID;
-use authz::ApiResource;
-use futures::future::BoxFuture;
-use futures::FutureExt;
-use nexus_db_model::DatabaseString;
-use nexus_types::external_api::shared;
-use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
-use std::sync::Arc;
-use strum::IntoEnumIterator;
 use uuid::Uuid;
 
-/// Manages the construction of the resource hierarchy used in the test, plus
-/// associated users and role assignments
-pub struct ResourceBuilder<'a> {
-    // Inputs
-    /// opcontext used for creating users and role assignments
-    opctx: &'a OpContext,
-    /// datastore used for creating users and role assignments
-    datastore: &'a db::DataStore,
-    /// used to verify test coverage of all authz resources
-    coverage: &'a mut Coverage,
-    /// id of the "main" silo -- this is the one that users are created in
+/// Assemble the set of resources that we'll test
+// The main hierarchy looks like this:
+//
+//     fleet
+//     fleet/s1
+//     fleet/s1/o1
+//     fleet/s1/o1/p1
+//     fleet/s1/o1/p1/vpc1
+//     fleet/s1/o1/p2
+//     fleet/s1/o1/p2/vpc1
+//     fleet/s1/o2
+//     fleet/s1/o2/p1
+//     fleet/s1/o2/p1/vpc1
+//     fleet/s2
+//     fleet/s2/o1
+//     fleet/s2/o1/p1
+//     fleet/s2/o1/p1/vpc1
+//
+// For one branch of the hierarchy, for each resource that supports roles, for
+// each supported role, we will create one user with that role on that resource.
+// Concretely, we'll create users like fleet-admin, silo1-admin,
+// silo1-org1-viewer, silo1-org1-proj1-viewer, etc.  This is enough to check
+// what privileges are granted by that role (i.e., privileges on that resource)
+// as well as verify that those privileges are _not_ granted on resources in the
+// other branches. We don't need to explicitly create users to test silo2 or
+// silo1-org2 or silo1-org1-proj2 (for examples) because those cases are
+// identical.
+//
+// IF YOU WANT TO ADD A NEW RESOURCE TO THIS TEST: the goal is to have this test
+// show exactly what roles grant what permissions on your resource.  Generally,
+// that means you'll need to create more than one instance of the resource, with
+// different levels of access by different users.  This is probably easier than
+// it sounds!
+//
+// - If your resource is NOT a collection, you only need to modify the function
+//   that creates the parent collection to create an instance of your resource.
+//   That's likely `make_project()`, `make_organization()`, `make_silo()`, etc.
+//   If your resource is essentially a global singleton (like "Fleet"), you can
+//   modify `make_resources()` directly.
+//
+// - If your resource is a collection, then you want to create a new function
+//   similar to the other functions that make collections (`make_project()`,
+//   `make_organization()`, etc.)  You'll likely need the `first_branch`
+//   argument that says whether to create users and how many child hierarchies
+//   to create.
+pub async fn make_resources<'a>(
+    mut builder: ResourceBuilder<'a>,
     main_silo_id: Uuid,
+) -> ResourceSet {
+    builder.new_resource(authz::DATABASE.clone());
+    builder.new_resource_with_users(authz::FLEET.clone()).await;
 
-    // Outputs
-    /// list of resources created so far
-    resources: Vec<Arc<dyn DynAuthorizedResource>>,
-    /// list of users created so far
-    users: Vec<(String, Uuid)>,
+    make_silo(&mut builder, "silo1", main_silo_id, true).await;
+    make_silo(&mut builder, "silo2", Uuid::new_v4(), false).await;
+
+    builder.build()
 }
 
-impl<'a> ResourceBuilder<'a> {
-    /// Begin constructing a resource hierarchy and associated users and role
-    /// assignments
-    ///
-    /// The users and role assignments will be created in silo `main_silo_id`
-    /// using OpContext `opctx` and datastore `datastore`.  `coverage` is used
-    /// to verify test coverage of authz resource types.
-    pub fn new(
-        opctx: &'a OpContext,
-        datastore: &'a db::DataStore,
-        coverage: &'a mut Coverage,
-        main_silo_id: Uuid,
-    ) -> ResourceBuilder<'a> {
-        ResourceBuilder {
-            opctx,
-            coverage,
-            datastore,
-            resources: Vec::new(),
-            main_silo_id,
-            users: Vec::new(),
-        }
+/// Helper for `make_resources()` that constructs a small Silo hierarchy
+async fn make_silo(
+    builder: &mut ResourceBuilder<'_>,
+    silo_name: &str,
+    silo_id: Uuid,
+    first_branch: bool,
+) {
+    let silo1 = authz::Silo::new(
+        authz::FLEET,
+        silo_id,
+        LookupType::ByName(silo_name.to_string()),
+    );
+    if first_branch {
+        builder.new_resource_with_users(silo1.clone()).await;
+    } else {
+        builder.new_resource(silo1.clone());
     }
 
-    /// Register a new resource for later testing, with no associated users or
-    /// role assignments
-    pub fn new_resource<T: DynAuthorizedResource>(&mut self, resource: T) {
-        self.coverage.covered(&resource);
-        self.resources.push(Arc::new(resource));
-    }
-
-    /// Register a new resource for later testing and also: for each supported
-    /// role on this resource, create a user that has that role on this resource
-    pub async fn new_resource_with_users<T>(&mut self, resource: T)
-    where
-        T: DynAuthorizedResource
-            + ApiResourceWithRolesType
-            + AuthorizedResource
-            + Clone,
-        T::AllowedRoles: IntoEnumIterator,
-    {
-        self.new_resource(resource.clone());
-
-        let resource_name = match resource.lookup_type() {
-            LookupType::ByName(name) => name,
-            LookupType::ById(id) if *id == *FLEET_ID => "fleet",
-            LookupType::ById(_)
-            | LookupType::BySessionToken(_)
-            | LookupType::ByCompositeId(_) => {
-                panic!("test resources must be given names");
-            }
-        };
-        let silo_id = self.main_silo_id;
-
-        let opctx = self.opctx;
-        let datastore = self.datastore;
-        for role in T::AllowedRoles::iter() {
-            let role_name = role.to_database_string();
-            let username = format!("{}-{}", resource_name, role_name);
-            let user_id = Uuid::new_v4();
-            println!("creating user: {}", &username);
-            self.users.push((username.clone(), user_id));
-
-            let silo_user =
-                db::model::SiloUser::new(silo_id, user_id, username);
-            datastore
-                .silo_user_create(silo_user)
-                .await
-                .expect("failed to create silo user");
-
-            let old_role_assignments = datastore
-                .role_assignment_fetch_visible(opctx, &resource)
-                .await
-                .expect("fetching policy");
-            let new_role_assignments = old_role_assignments
-                .into_iter()
-                .map(|r| r.try_into().unwrap())
-                .chain(std::iter::once(shared::RoleAssignment {
-                    identity_type: shared::IdentityType::SiloUser,
-                    identity_id: user_id,
-                    role_name: role,
-                }))
-                .collect::<Vec<_>>();
-            datastore
-                .role_assignment_replace_visible(
-                    opctx,
-                    &resource,
-                    &new_role_assignments,
-                )
-                .await
-                .expect("failed to assign role");
-        }
-    }
-
-    /// Returns an immutable view of the resources and users created
-    pub fn build(self) -> Resources {
-        Resources { resources: self.resources, users: self.users }
+    let norganizations = if first_branch { 2 } else { 1 };
+    for i in 0..norganizations {
+        let organization_name = format!("{}-org{}", silo_name, i + 1);
+        let org_first_branch = first_branch && i == 0;
+        make_organization(
+            builder,
+            &silo1,
+            &organization_name,
+            org_first_branch,
+        )
+        .await;
     }
 }
 
-/// Describes the hierarchy of resources that were registered and the users that
-/// were created with specific roles on those resources
-pub struct Resources {
-    resources: Vec<Arc<dyn DynAuthorizedResource>>,
-    users: Vec<(String, Uuid)>,
-}
-
-impl Resources {
-    /// Iterate the resources to be tested
-    pub fn resources(
-        &self,
-    ) -> impl std::iter::Iterator<Item = Arc<dyn DynAuthorizedResource>> + '_
-    {
-        self.resources.iter().cloned()
+/// Helper for `make_resources()` that constructs a small Organization hierarchy
+async fn make_organization(
+    builder: &mut ResourceBuilder<'_>,
+    silo: &authz::Silo,
+    organization_name: &str,
+    first_branch: bool,
+) {
+    let organization = authz::Organization::new(
+        silo.clone(),
+        Uuid::new_v4(),
+        LookupType::ByName(organization_name.to_string()),
+    );
+    if first_branch {
+        builder.new_resource_with_users(organization.clone()).await;
+    } else {
+        builder.new_resource(organization.clone());
     }
 
-    /// Iterate the users that were created as `(username, user_id)` pairs
-    pub fn users(
-        &self,
-    ) -> impl std::iter::Iterator<Item = &(String, Uuid)> + '_ {
-        self.users.iter()
-    }
-}
-
-/// Dynamically-dispatched version of `AuthorizedResource`
-///
-/// This is needed because calling [`OpContext::authorize()`] requires knowing
-/// at compile time exactly which resource you're authorizing.  But we want to
-/// put many different resource types into a collection and do authz checks on
-/// all of them.  (We could also change `authorize()` to be dynamically-
-/// dispatched.  This would be a much more sprawling change.  And it's not clear
-/// that our use case has much application outside of a test like this.)
-pub trait DynAuthorizedResource: AuthorizedResource + std::fmt::Debug {
-    fn do_authorize<'a, 'b>(
-        &'a self,
-        opctx: &'b OpContext,
-        action: authz::Action,
-    ) -> BoxFuture<'a, Result<(), Error>>
-    where
-        'b: 'a;
-
-    fn resource_name(&self) -> String;
-}
-
-impl<T> DynAuthorizedResource for T
-where
-    T: ApiResource + AuthorizedResource + oso::PolarClass + Clone,
-{
-    fn do_authorize<'a, 'b>(
-        &'a self,
-        opctx: &'b OpContext,
-        action: authz::Action,
-    ) -> BoxFuture<'a, Result<(), Error>>
-    where
-        'b: 'a,
-    {
-        opctx.authorize(action, self).boxed()
-    }
-
-    fn resource_name(&self) -> String {
-        let my_ident = match self.lookup_type() {
-            LookupType::ByName(name) => format!("{:?}", name),
-            LookupType::ById(id) => format!("id {:?}", id.to_string()),
-            LookupType::BySessionToken(_) | LookupType::ByCompositeId(_) => {
-                unimplemented!()
-            }
-        };
-
-        format!("{:?} {}", self.resource_type(), my_ident)
+    let nprojects = if first_branch { 2 } else { 1 };
+    for i in 0..nprojects {
+        let project_name = format!("{}-proj{}", organization_name, i + 1);
+        let create_project_users = first_branch && i == 0;
+        make_project(
+            builder,
+            &organization,
+            &project_name,
+            create_project_users,
+        )
+        .await;
     }
 }
 
-impl DynAuthorizedResource for authz::oso_generic::Database {
-    fn resource_name(&self) -> String {
-        String::from("DATABASE")
+/// Helper for `make_resources()` that constructs a small Project hierarchy
+async fn make_project(
+    builder: &mut ResourceBuilder<'_>,
+    organization: &authz::Organization,
+    project_name: &str,
+    first_branch: bool,
+) {
+    let project = authz::Project::new(
+        organization.clone(),
+        Uuid::new_v4(),
+        LookupType::ByName(project_name.to_string()),
+    );
+    if first_branch {
+        builder.new_resource_with_users(project.clone()).await;
+    } else {
+        builder.new_resource(project.clone());
     }
 
-    fn do_authorize<'a, 'b>(
-        &'a self,
-        opctx: &'b OpContext,
-        action: authz::Action,
-    ) -> BoxFuture<'a, Result<(), Error>>
-    where
-        'b: 'a,
-    {
-        opctx.authorize(action, self).boxed()
-    }
+    let vpc1_name = format!("{}-vpc1", project_name);
+    let vpc1 = authz::Vpc::new(
+        project.clone(),
+        Uuid::new_v4(),
+        LookupType::ByName(vpc1_name.clone()),
+    );
+
+    // XXX-dap TODO-coverage add more different kinds of children
+    builder.new_resource(authz::Disk::new(
+        project.clone(),
+        Uuid::new_v4(),
+        LookupType::ByName(format!("{}-disk1", project_name)),
+    ));
+    builder.new_resource(authz::Instance::new(
+        project.clone(),
+        Uuid::new_v4(),
+        LookupType::ByName(format!("{}-instance1", project_name)),
+    ));
+    builder.new_resource(vpc1.clone());
+    // Test a resource nested two levels below Project
+    builder.new_resource(authz::VpcSubnet::new(
+        vpc1,
+        Uuid::new_v4(),
+        LookupType::ByName(format!("{}-subnet1", vpc1_name)),
+    ));
 }
