@@ -163,7 +163,6 @@ async fn make_project(
         LookupType::ByName(vpc1_name.clone()),
     );
 
-    // XXX-dap TODO-coverage add more different kinds of children
     builder.new_resource(authz::Disk::new(
         project.clone(),
         Uuid::new_v4(),
