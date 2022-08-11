@@ -4,7 +4,6 @@
 
 use crate::authz;
 use crate::authz::AuthorizedResource;
-use oso::PolarClass;
 use std::collections::BTreeSet;
 
 /// Helper for identifying authz resources not covered by the IAM role policy
@@ -20,78 +19,27 @@ pub struct Coverage {
 }
 
 impl Coverage {
-    pub fn new(log: &slog::Logger) -> Coverage {
+    pub fn new(log: &slog::Logger, exempted: BTreeSet<String>) -> Coverage {
         let log = log.new(o!("component" => "IamTestCoverage"));
-        let authz = authz::Authz::new(&log);
-        let class_names = authz.into_class_names();
-
-        // Exemption list for this coverage test
-        //
-        // There are two possible reasons for a resource to appear on this list:
-        //
-        // (1) because its behavior is identical to that of some other resource
-        //     that we are testing (i.e., same Polar snippet and identical
-        //     configuration for the authz type).  There aren't any examples of
-        //     this today, but it might be reasonable to do this for resources
-        //     that are indistinguishable to the authz subsystem (e.g., Disks,
-        //     Instances, Vpcs, and other things nested directly below Project)
-        //
-        // (2) because we have not yet gotten around to adding the type to this
-        //     test.  We don't want to expand this list if we can avoid it!
-        let exempted = [
-            // Non-resources:
-            authz::Action::get_polar_class(),
-            authz::actor::AnyActor::get_polar_class(),
-            authz::actor::AuthenticatedActor::get_polar_class(),
-            // Resources whose behavior should be identical to an existing type
-            // and we don't want to do the test twice for performance reasons:
-            // none yet.
-            //
-            // TODO-coverage Resources that we should test, but for which we
-            // have not yet added a test.  PLEASE: instead of adding something
-            // to this list, modify `make_resources()` to test it instead.  This
-            // should be pretty straightforward in most cases.  Adding a new
-            // class to this list makes it harder to catch security flaws!
-            authz::IpPoolList::get_polar_class(),
-            authz::GlobalImageList::get_polar_class(),
-            authz::ConsoleSessionList::get_polar_class(),
-            authz::DeviceAuthRequestList::get_polar_class(),
-            authz::IpPool::get_polar_class(),
-            authz::NetworkInterface::get_polar_class(),
-            authz::VpcRouter::get_polar_class(),
-            authz::RouterRoute::get_polar_class(),
-            authz::ConsoleSession::get_polar_class(),
-            authz::DeviceAuthRequest::get_polar_class(),
-            authz::DeviceAccessToken::get_polar_class(),
-            authz::Rack::get_polar_class(),
-            authz::RoleBuiltin::get_polar_class(),
-            authz::SshKey::get_polar_class(),
-            authz::SiloUser::get_polar_class(),
-            authz::SiloGroup::get_polar_class(),
-            authz::IdentityProvider::get_polar_class(),
-            authz::SamlIdentityProvider::get_polar_class(),
-            authz::Sled::get_polar_class(),
-            authz::UpdateAvailableArtifact::get_polar_class(),
-            authz::UserBuiltin::get_polar_class(),
-            authz::GlobalImage::get_polar_class(),
-        ]
-        .into_iter()
-        .map(|c| c.name.clone())
-        .collect();
-
+        let class_names = authz::Authz::new(&log).into_class_names();
         Coverage { log, class_names, exempted, covered: BTreeSet::new() }
     }
 
+    /// Record that the Polar class associated with `covered` is covered by the
+    /// test
     pub fn covered(&mut self, covered: &dyn AuthorizedResource) {
         self.covered_class(covered.polar_class())
     }
 
+    /// Record that type `class` is covered by the test
     pub fn covered_class(&mut self, class: oso::Class) {
         let class_name = class.name.clone();
         debug!(&self.log, "covering"; "class_name" => &class_name);
         self.covered.insert(class_name);
     }
 
+    /// Checks coverage and panics if any non-exempt types were _not_ covered or
+    /// if any exempt types _were_ covered
     pub fn verify(&self) {
         let mut uncovered = Vec::new();
         let mut bad_exemptions = Vec::new();
@@ -103,11 +51,6 @@ impl Coverage {
 
             match (exempted, covered) {
                 (true, false) => {
-                    // TODO-coverage It would be nice if we could verify that
-                    // the Polar snippet and authz_resource! configuration were
-                    // identical to that of an existing class.  Then it would be
-                    // safer to exclude types that are truly duplicative of
-                    // some other type.
                     warn!(&self.log, "exempt"; "class_name" => class_name);
                 }
                 (false, true) => {

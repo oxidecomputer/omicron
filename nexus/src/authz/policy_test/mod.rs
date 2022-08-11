@@ -32,7 +32,6 @@ use omicron_test_utils::dev;
 use resource_builder::DynAuthorizedResource;
 use resource_builder::ResourceBuilder;
 use resource_builder::ResourceSet;
-use resources::make_resources;
 use std::io::Cursor;
 use std::io::Write;
 use std::sync::Arc;
@@ -66,11 +65,12 @@ async fn test_iam_roles_behavior() {
     // these resources, create the users and role assignments needed for the
     // exhaustive test.  `Coverage` is used to help verify that all resources
     // are tested or explicitly opted out.
-    let mut coverage = Coverage::new(&logctx.log);
+    let exemptions = resources::exempted_authz_classes();
+    let mut coverage = Coverage::new(&logctx.log, exemptions);
     let main_silo_id = Uuid::new_v4();
     let builder =
         ResourceBuilder::new(&opctx, &datastore, &mut coverage, main_silo_id);
-    let test_resources = make_resources(builder, main_silo_id).await;
+    let test_resources = resources::make_resources(builder, main_silo_id).await;
     coverage.verify();
 
     // For each user that was created, create an OpContext that we'll use to
