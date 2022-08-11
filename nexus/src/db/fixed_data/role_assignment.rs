@@ -24,14 +24,6 @@ lazy_static! {
                 *FLEET_ID,
                 role_builtin::FLEET_ADMIN.role_name,
             ),
-            // XXX-dap remove this one?
-            RoleAssignment::new(
-                IdentityType::UserBuiltin,
-                user_builtin::USER_SERVICE_BALANCER.id,
-                role_builtin::FLEET_ADMIN.resource_type,
-                *FLEET_ID,
-                role_builtin::FLEET_ADMIN.role_name,
-            ),
 
             // The "internal-read" user gets the "viewer" role on the sole
             // Fleet.  This will grant them the ability to read various control
