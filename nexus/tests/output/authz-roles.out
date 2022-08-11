@@ -185,6 +185,23 @@ resource: Instance "silo1-org1-proj1-instance1"
   silo1-org1-proj1-viewer          ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !  !
 
+resource: NetworkInterface "silo1-org1-proj1-instance1-nic1"
+
+  USER                             Q  R LC RP  M MP CC  D LP
+  fleet-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔  ✘
+  fleet-collaborator               ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔  ✘
+  fleet-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔  ✘
+  silo1-collaborator               ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔  ✘
+  silo1-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-admin                 ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔  ✘
+  silo1-org1-collaborator          ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔  ✘
+  silo1-org1-viewer                ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-proj1-admin           ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔  ✘
+  silo1-org1-proj1-collaborator    ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔  ✘
+  silo1-org1-proj1-viewer          ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !  !
+
 resource: Vpc "silo1-org1-proj1-vpc1"
 
   USER                             Q  R LC RP  M MP CC  D LP
@@ -254,6 +271,23 @@ resource: Disk "silo1-org1-proj2-disk1"
   unauthenticated                  !  !  !  !  !  !  !  !  !
 
 resource: Instance "silo1-org1-proj2-instance1"
+
+  USER                             Q  R LC RP  M MP CC  D LP
+  fleet-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔  ✘
+  fleet-collaborator               ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔  ✘
+  fleet-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔  ✘
+  silo1-collaborator               ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔  ✘
+  silo1-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-admin                 ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔  ✘
+  silo1-org1-collaborator          ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔  ✘
+  silo1-org1-viewer                ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !  !
+
+resource: NetworkInterface "silo1-org1-proj2-instance1-nic1"
 
   USER                             Q  R LC RP  M MP CC  D LP
   fleet-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔  ✘
@@ -356,6 +390,23 @@ resource: Disk "silo1-org2-proj1-disk1"
   unauthenticated                  !  !  !  !  !  !  !  !  !
 
 resource: Instance "silo1-org2-proj1-instance1"
+
+  USER                             Q  R LC RP  M MP CC  D LP
+  fleet-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔  ✘
+  fleet-collaborator               ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔  ✘
+  fleet-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔  ✘
+  silo1-collaborator               ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔  ✘
+  silo1-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !  !
+
+resource: NetworkInterface "silo1-org2-proj1-instance1-nic1"
 
   USER                             Q  R LC RP  M MP CC  D LP
   fleet-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔  ✘
@@ -491,6 +542,23 @@ resource: Instance "silo2-org1-proj1-instance1"
   silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !  !
 
+resource: NetworkInterface "silo2-org1-proj1-instance1-nic1"
+
+  USER                             Q  R LC RP  M MP CC  D LP
+  fleet-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔  ✘
+  fleet-collaborator               ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔  ✘
+  fleet-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !  !
+
 resource: Vpc "silo2-org1-proj1-vpc1"
 
   USER                             Q  R LC RP  M MP CC  D LP
@@ -513,6 +581,40 @@ resource: VpcSubnet "silo2-org1-proj1-vpc1-subnet1"
   USER                             Q  R LC RP  M MP CC  D LP
   fleet-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔  ✘
   fleet-collaborator               ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔  ✘
+  fleet-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !  !
+
+resource: Rack id "c037e882-8b6d-c8b5-bef4-97e848eb0a50"
+
+  USER                             Q  R LC RP  M MP CC  D LP
+  fleet-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔  ✘
+  fleet-collaborator               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘  ✘
+  fleet-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !  !
+
+resource: Sled id "8a785566-adaf-c8d8-e886-bee7f9b73ca7"
+
+  USER                             Q  R LC RP  M MP CC  D LP
+  fleet-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔  ✘
+  fleet-collaborator               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘  ✘
   fleet-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘  ✘
   silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘

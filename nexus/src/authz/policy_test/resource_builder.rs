@@ -11,7 +11,6 @@ use crate::authz::ApiResourceWithRolesType;
 use crate::authz::AuthorizedResource;
 use crate::context::OpContext;
 use crate::db;
-use crate::db::fixed_data::FLEET_ID;
 use authz::ApiResource;
 use futures::future::BoxFuture;
 use futures::FutureExt;
@@ -86,16 +85,18 @@ impl<'a> ResourceBuilder<'a> {
         self.new_resource(resource.clone());
 
         let resource_name = match resource.lookup_type() {
-            LookupType::ByName(name) => name,
-            LookupType::ById(id) if *id == *FLEET_ID => "fleet",
-            LookupType::ById(_)
-            | LookupType::BySessionToken(_)
-            | LookupType::ByCompositeId(_) => {
+            LookupType::ByName(name) => name.clone(),
+            LookupType::ById(_) => {
+                // For resources identified only by id, we only have one of them
+                // in our test suite and it's more convenient to omit the id
+                // (e.g., "fleet").
+                resource.resource_type().to_string().to_lowercase()
+            }
+            LookupType::BySessionToken(_) | LookupType::ByCompositeId(_) => {
                 panic!("test resources must be given names");
             }
         };
         let silo_id = self.main_silo_id;
-
         let opctx = self.opctx;
         let datastore = self.datastore;
         for role in T::AllowedRoles::iter() {

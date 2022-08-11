@@ -61,6 +61,7 @@ pub async fn make_resources<'a>(
     mut builder: ResourceBuilder<'a>,
     main_silo_id: Uuid,
 ) -> ResourceSet {
+    // Global resources
     builder.new_resource(authz::DATABASE.clone());
     builder.new_resource_with_users(authz::FLEET.clone()).await;
     builder.new_resource(authz::CONSOLE_SESSION_LIST.clone());
@@ -68,8 +69,24 @@ pub async fn make_resources<'a>(
     builder.new_resource(authz::GLOBAL_IMAGE_LIST.clone());
     builder.new_resource(authz::IP_POOL_LIST.clone());
 
+    // Silo/organization/project hierarchy
     make_silo(&mut builder, "silo1", main_silo_id, true).await;
     make_silo(&mut builder, "silo2", Uuid::new_v4(), false).await;
+
+    // Various other resources
+    let rack_id = "c037e882-8b6d-c8b5-bef4-97e848eb0a50".parse().unwrap();
+    builder.new_resource(authz::Rack::new(
+        authz::FLEET.clone(),
+        Uuid::new_v4(),
+        LookupType::ById(rack_id),
+    ));
+
+    let sled_id = "8a785566-adaf-c8d8-e886-bee7f9b73ca7".parse().unwrap();
+    builder.new_resource(authz::Sled::new(
+        authz::FLEET.clone(),
+        Uuid::new_v4(),
+        LookupType::ById(sled_id),
+    ));
 
     builder.build()
 }
@@ -163,15 +180,22 @@ async fn make_project(
         LookupType::ByName(vpc1_name.clone()),
     );
 
+    let instance_name = format!("{}-instance1", project_name);
+    let instance = authz::Instance::new(
+        project.clone(),
+        Uuid::new_v4(),
+        LookupType::ByName(instance_name.clone()),
+    );
     builder.new_resource(authz::Disk::new(
         project.clone(),
         Uuid::new_v4(),
         LookupType::ByName(format!("{}-disk1", project_name)),
     ));
-    builder.new_resource(authz::Instance::new(
-        project.clone(),
+    builder.new_resource(instance.clone());
+    builder.new_resource(authz::NetworkInterface::new(
+        instance,
         Uuid::new_v4(),
-        LookupType::ByName(format!("{}-instance1", project_name)),
+        LookupType::ByName(format!("{}-nic1", instance_name)),
     ));
     builder.new_resource(vpc1.clone());
     // Test a resource nested two levels below Project
@@ -209,7 +233,8 @@ pub fn exempted_authz_classes() -> BTreeSet<String> {
         authz::actor::AuthenticatedActor::get_polar_class(),
         // Resources whose behavior should be identical to an existing type
         // and we don't want to do the test twice for performance reasons:
-        authz::NetworkInterface::get_polar_class(),
+        // none yet.
+        //
         // TODO-coverage Resources that we should test, but for which we
         // have not yet added a test.  PLEASE: instead of adding something
         // to this list, modify `make_resources()` to test it instead.  This
@@ -221,14 +246,12 @@ pub fn exempted_authz_classes() -> BTreeSet<String> {
         authz::ConsoleSession::get_polar_class(),
         authz::DeviceAuthRequest::get_polar_class(),
         authz::DeviceAccessToken::get_polar_class(),
-        authz::Rack::get_polar_class(),
         authz::RoleBuiltin::get_polar_class(),
         authz::SshKey::get_polar_class(),
         authz::SiloUser::get_polar_class(),
         authz::SiloGroup::get_polar_class(),
         authz::IdentityProvider::get_polar_class(),
         authz::SamlIdentityProvider::get_polar_class(),
-        authz::Sled::get_polar_class(),
         authz::UpdateAvailableArtifact::get_polar_class(),
         authz::UserBuiltin::get_polar_class(),
         authz::GlobalImage::get_polar_class(),
