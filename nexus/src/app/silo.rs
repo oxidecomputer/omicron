@@ -77,15 +77,13 @@ impl super::Nexus {
 
     // Role assignments
 
-    pub async fn silo_fetch_policy(
+    async fn silo_fetch_policy(
         &self,
         opctx: &OpContext,
-        silo_name: &Name,
+        silo_lookup: db::lookup::Silo<'_>,
     ) -> LookupResult<shared::Policy<authz::SiloRole>> {
-        let (.., authz_silo) = LookupPath::new(opctx, &self.db_datastore)
-            .silo_name(silo_name)
-            .lookup_for(authz::Action::ReadPolicy)
-            .await?;
+        let (.., authz_silo) =
+            silo_lookup.lookup_for(authz::Action::ReadPolicy).await?;
         let role_assignments = self
             .db_datastore
             .role_assignment_fetch_visible(opctx, &authz_silo)
@@ -97,24 +95,24 @@ impl super::Nexus {
         Ok(shared::Policy { role_assignments })
     }
 
+    pub async fn silo_fetch_policy_by_name(
+        &self,
+        opctx: &OpContext,
+        silo_name: &Name,
+    ) -> LookupResult<shared::Policy<authz::SiloRole>> {
+        let lookup =
+            LookupPath::new(opctx, &self.db_datastore).silo_name(silo_name);
+        self.silo_fetch_policy(opctx, lookup).await
+    }
+
     pub async fn silo_fetch_policy_by_id(
         &self,
         opctx: &OpContext,
         silo_id: Uuid,
     ) -> LookupResult<shared::Policy<authz::SiloRole>> {
-        let (.., authz_silo) = LookupPath::new(opctx, &self.db_datastore)
-            .silo_id(silo_id)
-            .lookup_for(authz::Action::ReadPolicy)
-            .await?;
-        let role_assignments = self
-            .db_datastore
-            .role_assignment_fetch_visible(opctx, &authz_silo)
-            .await?
-            .into_iter()
-            .map(|r| r.try_into().context("parsing database role assignment"))
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| Error::internal_error(&format!("{:#}", error)))?;
-        Ok(shared::Policy { role_assignments })
+        let lookup =
+            LookupPath::new(opctx, &self.db_datastore).silo_id(silo_id);
+        self.silo_fetch_policy(opctx, lookup).await
     }
 
     pub async fn silo_update_policy(

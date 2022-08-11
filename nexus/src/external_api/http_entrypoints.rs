@@ -560,7 +560,7 @@ async fn silo_policy_view(
 
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let policy = nexus.silo_fetch_policy(&opctx, silo_name).await?;
+        let policy = nexus.silo_fetch_policy_by_name(&opctx, silo_name).await?;
         Ok(HttpResponseOk(policy))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
