@@ -384,8 +384,9 @@ pub async fn policy_view(
             .authn
             .silo_required()
             .internal_context("loading current silo")?;
-        let policy =
-            nexus.silo_fetch_policy_by_id(&opctx, authz_silo.id()).await?;
+
+        let lookup = nexus.db_lookup(&opctx).silo_id(authz_silo.id());
+        let policy = nexus.silo_fetch_policy(&opctx, lookup).await?;
         Ok(HttpResponseOk(policy))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -414,9 +415,9 @@ async fn policy_update(
             .authn
             .silo_required()
             .internal_context("loading current silo")?;
-        let policy = nexus
-            .silo_update_policy_by_id(&opctx, authz_silo.id(), &new_policy)
-            .await?;
+        let lookup = nexus.db_lookup(&opctx).silo_id(authz_silo.id());
+        let policy =
+            nexus.silo_update_policy(&opctx, lookup, &new_policy).await?;
         Ok(HttpResponseOk(policy))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -560,7 +561,8 @@ async fn silo_policy_view(
 
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let policy = nexus.silo_fetch_policy_by_name(&opctx, silo_name).await?;
+        let lookup = nexus.db_lookup(&opctx).silo_name(silo_name);
+        let policy = nexus.silo_fetch_policy(&opctx, lookup).await?;
         Ok(HttpResponseOk(policy))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -588,8 +590,9 @@ async fn silo_policy_update(
         // This should have been validated during parsing.
         bail_unless!(nasgns <= shared::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE);
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let lookup = nexus.db_lookup(&opctx).silo_name(silo_name);
         let policy =
-            nexus.silo_update_policy(&opctx, silo_name, &new_policy).await?;
+            nexus.silo_update_policy(&opctx, lookup, &new_policy).await?;
         Ok(HttpResponseOk(policy))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

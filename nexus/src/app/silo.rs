@@ -77,7 +77,7 @@ impl super::Nexus {
 
     // Role assignments
 
-    async fn silo_fetch_policy(
+    pub async fn silo_fetch_policy(
         &self,
         opctx: &OpContext,
         silo_lookup: db::lookup::Silo<'_>,
@@ -95,62 +95,14 @@ impl super::Nexus {
         Ok(shared::Policy { role_assignments })
     }
 
-    pub async fn silo_fetch_policy_by_name(
-        &self,
-        opctx: &OpContext,
-        silo_name: &Name,
-    ) -> LookupResult<shared::Policy<authz::SiloRole>> {
-        let lookup =
-            LookupPath::new(opctx, &self.db_datastore).silo_name(silo_name);
-        self.silo_fetch_policy(opctx, lookup).await
-    }
-
-    pub async fn silo_fetch_policy_by_id(
-        &self,
-        opctx: &OpContext,
-        silo_id: Uuid,
-    ) -> LookupResult<shared::Policy<authz::SiloRole>> {
-        let lookup =
-            LookupPath::new(opctx, &self.db_datastore).silo_id(silo_id);
-        self.silo_fetch_policy(opctx, lookup).await
-    }
-
     pub async fn silo_update_policy(
         &self,
         opctx: &OpContext,
-        silo_name: &Name,
+        silo_lookup: db::lookup::Silo<'_>,
         policy: &shared::Policy<authz::SiloRole>,
     ) -> UpdateResult<shared::Policy<authz::SiloRole>> {
-        let (.., authz_silo) = LookupPath::new(opctx, &self.db_datastore)
-            .silo_name(silo_name)
-            .lookup_for(authz::Action::ModifyPolicy)
-            .await?;
-
-        let role_assignments = self
-            .db_datastore
-            .role_assignment_replace_visible(
-                opctx,
-                &authz_silo,
-                &policy.role_assignments,
-            )
-            .await?
-            .into_iter()
-            .map(|r| r.try_into())
-            .collect::<Result<Vec<_>, _>>()?;
-
-        Ok(shared::Policy { role_assignments })
-    }
-
-    pub async fn silo_update_policy_by_id(
-        &self,
-        opctx: &OpContext,
-        silo_id: Uuid,
-        policy: &shared::Policy<authz::SiloRole>,
-    ) -> UpdateResult<shared::Policy<authz::SiloRole>> {
-        let (.., authz_silo) = LookupPath::new(opctx, &self.db_datastore)
-            .silo_id(silo_id)
-            .lookup_for(authz::Action::ModifyPolicy)
-            .await?;
+        let (.., authz_silo) =
+            silo_lookup.lookup_for(authz::Action::ModifyPolicy).await?;
 
         let role_assignments = self
             .db_datastore
