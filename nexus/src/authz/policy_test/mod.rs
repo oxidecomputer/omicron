@@ -9,12 +9,6 @@
 //! (including the Oso policy file).  They do not verify HTTP endpoint behavior.
 //! The integration tests verify HTTP endpoint behavior but are not nearly so
 //! exhaustive in testing the policy itself.
-//!
-//! XXX-dap TODO:
-//! - add test for other policies: that the policy reflects the privileges that
-//!   we expect (e.g., ordinary users don't have internal roles)
-//! - figure out what other types to add
-//! - review remaining XXX-dap
 
 mod coverage;
 mod resource_builder;
