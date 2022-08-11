@@ -53,6 +53,13 @@ This script requires Omicron be uninstalled, e.g., with `pfexec
 that is not the case. The script will then remove the file-based vdevs and the
 VNICs created by `create_virtual_hardware.sh`.
 
+=== Make me a certificate!
+
+Nexus's external interface will typically be served using public-facing x.509
+certificate. While we are still configuring the mechanism to integrate this real
+certificate into the package system, `./tools/create_self_signed_cert.sh` can be
+used to generate an equivalent self-signed certificate.
+
 == Deploying Omicron
 
 The control plane repository contains a packaging tool which bundles binaries
@@ -78,7 +85,7 @@ Transformation Engine (OPTE, the kernel module which provides the private
 virtual networking to guests). To make this work, OPTE needs to know about the
 local networking configuration, in this case the MAC address of the local
 internet gateway. To be able to get into your instances, you _must_ specify this
-in the `gateway_mac` field of the config file `smf/sled-agent/config.toml`.
+in the `gateway.mac` field of the config file `smf/sled-agent/config-rss.toml`.
 
 The value there is correct for the lab environment, so if you're running there,
 no changes are needed. If you're running elsewhere, you find the value with:
@@ -174,7 +181,7 @@ be set as a default route for the Nexus zone.
 | Crucible Downstairs 3      | `[fd00:1122:3344:0101::8]:32345`
 | Internal DNS Service       | `[fd00:1122:3344:0001::1]:5353`
 | Nexus: External API        | `192.168.1.20:80`
-| Internet Gateway           | None, but can be set in `smf/sled-agent/config.toml`
+| Internet Gateway           | None, but can be set in `smf/sled-agent/config-rss.toml`
 |===================================================================================================
 
 Note that Sled Agent runs in the global zone and is the one responsible for bringing up all the other
@@ -279,7 +286,8 @@ the exact addresses that are available depends on the environment.
           "type": "attach",
           "name": "alpine"
         }
-      ]
+      ],
+      "external_ips": [{"type": "ephemeral"}]
     }
     EOF
 

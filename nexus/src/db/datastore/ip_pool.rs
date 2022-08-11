@@ -32,6 +32,7 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
+use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
@@ -49,6 +50,7 @@ impl DataStore {
             .authorize(authz::Action::ListChildren, &authz::IP_POOL_LIST)
             .await?;
         paginated(dsl::ip_pool, dsl::name, pagparams)
+            .filter(dsl::rack_id.is_null())
             .filter(dsl::time_deleted.is_null())
             .select(db::model::IpPool::as_select())
             .get_results_async(self.pool_authorized(opctx).await?)
@@ -67,6 +69,7 @@ impl DataStore {
             .authorize(authz::Action::ListChildren, &authz::IP_POOL_LIST)
             .await?;
         paginated(dsl::ip_pool, dsl::id, pagparams)
+            .filter(dsl::rack_id.is_null())
             .filter(dsl::time_deleted.is_null())
             .select(db::model::IpPool::as_select())
             .get_results_async(self.pool_authorized(opctx).await?)
@@ -74,10 +77,63 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
+    /// Looks up an IP pool by a particular Rack ID.
+    ///
+    /// An index exists to look up pools by rack ID, but it is not a primary
+    /// key, which requires this lookup function to be used instead of the
+    /// [`LookupPath`] utility.
+    pub async fn ip_pools_lookup_by_rack_id(
+        &self,
+        opctx: &OpContext,
+        rack_id: Uuid,
+    ) -> LookupResult<(authz::IpPool, IpPool)> {
+        use db::schema::ip_pool::dsl;
+
+        // Ensure the caller has the ability to look up these IP pools.
+        // If they don't, return "not found" instead of "forbidden".
+        opctx
+            .authorize(authz::Action::ListChildren, &authz::IP_POOL_LIST)
+            .await
+            .map_err(|e| match e {
+                Error::Forbidden => {
+                    LookupType::ByCompositeId(format!("Rack ID: {rack_id}"))
+                        .into_not_found(ResourceType::IpPool)
+                }
+                _ => e,
+            })?;
+
+        // Look up this IP pool by rack ID.
+        let (authz_pool, pool) = dsl::ip_pool
+            .filter(dsl::rack_id.eq(Some(rack_id)))
+            .filter(dsl::time_deleted.is_null())
+            .select(IpPool::as_select())
+            .get_result_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map(|ip_pool| {
+                (
+                    authz::IpPool::new(
+                        authz::FLEET,
+                        ip_pool.id(),
+                        LookupType::ByCompositeId(format!(
+                            "Rack ID: {rack_id}"
+                        )),
+                    ),
+                    ip_pool,
+                )
+            })?;
+        Ok((authz_pool, pool))
+    }
+
+    /// Creates a new IP pool.
+    ///
+    /// - If `rack_id` is provided, this IP pool is used for Oxide
+    /// services.
     pub async fn ip_pool_create(
         &self,
         opctx: &OpContext,
         new_pool: &params::IpPoolCreate,
+        rack_id: Option<Uuid>,
     ) -> CreateResult<IpPool> {
         use db::schema::ip_pool::dsl;
         opctx
@@ -86,6 +142,12 @@ impl DataStore {
         let project_id = match new_pool.project.clone() {
             None => None,
             Some(project) => {
+                if let Some(_) = &rack_id {
+                    return Err(Error::invalid_request(
+                        "Internal Service IP pools cannot be project-scoped",
+                    ));
+                }
+
                 let (.., authz_project) = LookupPath::new(opctx, self)
                     .organization_name(&Name(project.organization))
                     .project_name(&Name(project.project))
@@ -94,7 +156,7 @@ impl DataStore {
                 Some(authz_project.id())
             }
         };
-        let pool = IpPool::new(&new_pool.identity, project_id);
+        let pool = IpPool::new(&new_pool.identity, project_id, rack_id);
         let pool_name = pool.name().as_str().to_string();
         diesel::insert_into(dsl::ip_pool)
             .values(pool)
@@ -143,6 +205,7 @@ impl DataStore {
         // in between the above check for children and this query.
         let now = Utc::now();
         let updated_rows = diesel::update(dsl::ip_pool)
+            .filter(dsl::rack_id.is_null())
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(authz_pool.id()))
             .filter(dsl::rcgen.eq(db_pool.rcgen))
@@ -174,6 +237,7 @@ impl DataStore {
         use db::schema::ip_pool::dsl;
         opctx.authorize(authz::Action::Modify, authz_pool).await?;
         diesel::update(dsl::ip_pool)
+            .filter(dsl::rack_id.is_null())
             .filter(dsl::id.eq(authz_pool.id()))
             .filter(dsl::time_deleted.is_null())
             .set(updates)

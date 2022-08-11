@@ -78,6 +78,9 @@ CREATE TABLE omicron.public.sled (
     /* FK into the Rack table */
     rack_id UUID NOT NULL,
 
+    /* Idenfities if this Sled is a Scrimlet */
+    is_scrimlet BOOL NOT NULL,
+
     /* The IP address and bound port of the sled agent server. */
     ip INET NOT NULL,
     port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
@@ -241,7 +244,7 @@ CREATE TYPE omicron.public.user_provision_type AS ENUM (
 CREATE TABLE omicron.public.silo (
     /* Identity metadata */
     id UUID PRIMARY KEY,
-    name STRING(128) NOT NULL,
+    name STRING(63) NOT NULL,
     description STRING(512) NOT NULL,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
@@ -279,17 +282,54 @@ CREATE UNIQUE INDEX ON omicron.public.silo_user (
 ) WHERE
     time_deleted IS NULL;
 
-CREATE TYPE omicron.public.provider_type AS ENUM (
-  'saml'
+/*
+ * Silo groups
+ */
+
+CREATE TABLE omicron.public.silo_group (
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+
+    silo_id UUID NOT NULL,
+    external_id TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX ON omicron.public.silo_group (
+    silo_id,
+    external_id
+) WHERE
+    time_deleted IS NULL;
+
+/*
+ * Silo group membership
+ */
+
+CREATE TABLE omicron.public.silo_group_membership (
+    silo_group_id UUID NOT NULL,
+    silo_user_id UUID NOT NULL,
+
+    PRIMARY KEY (silo_group_id, silo_user_id)
+);
+
+CREATE INDEX ON omicron.public.silo_group_membership (
+    silo_user_id,
+    silo_group_id
 );
 
 /*
  * Silo identity provider list
  */
+
+CREATE TYPE omicron.public.provider_type AS ENUM (
+  'saml'
+);
+
 CREATE TABLE omicron.public.identity_provider (
     /* Identity metadata */
     id UUID PRIMARY KEY,
-    name STRING(128) NOT NULL,
+    name STRING(63) NOT NULL,
     description STRING(512) NOT NULL,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
@@ -317,7 +357,7 @@ CREATE INDEX ON omicron.public.identity_provider (
 CREATE TABLE omicron.public.saml_identity_provider (
     /* Identity metadata */
     id UUID PRIMARY KEY,
-    name STRING(128) NOT NULL,
+    name STRING(63) NOT NULL,
     description STRING(512) NOT NULL,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
@@ -334,7 +374,9 @@ CREATE TABLE omicron.public.saml_identity_provider (
     technical_contact_email TEXT NOT NULL,
 
     public_cert TEXT,
-    private_key TEXT
+    private_key TEXT,
+
+    group_attribute_name TEXT
 );
 
 CREATE INDEX ON omicron.public.saml_identity_provider (
@@ -702,7 +744,7 @@ CREATE TABLE omicron.public.metric_producer (
     oximeter_id UUID NOT NULL
 );
 
-CREATE INDEX ON omicron.public.metric_producer (
+CREATE UNIQUE INDEX ON omicron.public.metric_producer (
     oximeter_id,
     id
 );
@@ -737,7 +779,10 @@ CREATE TABLE omicron.public.vpc (
 
     /* Used to ensure that two requests do not concurrently modify the
        VPC's firewall */
-    firewall_gen INT NOT NULL
+    firewall_gen INT NOT NULL,
+
+    /* Child-resource generation number for VPC Subnets. */
+    subnet_gen INT8 NOT NULL
 );
 
 CREATE UNIQUE INDEX ON omicron.public.vpc (
@@ -761,6 +806,8 @@ CREATE TABLE omicron.public.vpc_subnet (
     /* Indicates that the object has been deleted */
     time_deleted TIMESTAMPTZ,
     vpc_id UUID NOT NULL,
+    /* Child resource creation generation number */
+    rcgen INT8 NOT NULL,
     ipv4_block INET NOT NULL,
     ipv6_block INET NOT NULL
 );
@@ -977,6 +1024,14 @@ CREATE TABLE omicron.public.ip_pool (
     /* Optional ID of the project for which this pool is reserved. */
     project_id UUID,
 
+    /*
+     * Optional rack ID, indicating this is a reserved pool for internal
+     * services on a specific rack.
+     * TODO(https://github.com/oxidecomputer/omicron/issues/1276): This
+     * should probably point to an AZ or fleet, not a rack.
+     */
+    rack_id UUID,
+
     /* The collection's child-resource generation number */
     rcgen INT8 NOT NULL
 );
@@ -987,6 +1042,15 @@ CREATE TABLE omicron.public.ip_pool (
 CREATE UNIQUE INDEX ON omicron.public.ip_pool (
     name
 ) WHERE
+    time_deleted IS NULL;
+
+/*
+ * Index ensuring uniqueness of IP pools by rack ID
+ */
+CREATE UNIQUE INDEX ON omicron.public.ip_pool (
+    rack_id
+) WHERE
+    rack_id IS NOT NULL AND
     time_deleted IS NULL;
 
 /*
@@ -1068,7 +1132,7 @@ CREATE TABLE omicron.public.instance_external_ip (
     id UUID PRIMARY KEY,
 
     /* Name for floating IPs. See the constraints below. */
-    name STRING(128),
+    name STRING(63),
 
     /* Description for floating IPs. See the constraints below. */
     description STRING(512),
@@ -1146,8 +1210,9 @@ CREATE UNIQUE INDEX ON omicron.public.instance_external_ip (
 )
     WHERE time_deleted IS NULL;
 
-CREATE INDEX ON omicron.public.instance_external_ip (
-    instance_id
+CREATE UNIQUE INDEX ON omicron.public.instance_external_ip (
+    instance_id,
+    id
 )
     WHERE instance_id IS NOT NULL AND time_deleted IS NULL;
 
@@ -1174,12 +1239,12 @@ CREATE TABLE omicron.public.saga (
     id UUID PRIMARY KEY,
     /* unique id of the creator */
     creator UUID NOT NULL,
-    /* name of the saga template name being run */
-    template_name STRING(127) NOT NULL,
     /* time the saga was started */
     time_created TIMESTAMPTZ NOT NULL,
-    /* saga parameters */
-    saga_params JSONB NOT NULL,
+    /* saga name */
+    name STRING(128) NOT NULL,
+    /* saga DAG (includes params and name) */
+    saga_dag JSONB NOT NULL,
 
     /*
      * TODO:
@@ -1204,7 +1269,7 @@ CREATE UNIQUE INDEX ON omicron.public.saga (
 
 /*
  * TODO more indexes for Saga?
- * - Debugging and/or reporting: saga_template_name? creator?
+ * - Debugging and/or reporting: saga_name? creator?
  */
 /*
  * TODO: This is a data-carrying enum, see note on disk_state.
@@ -1432,7 +1497,8 @@ CREATE TABLE omicron.public.role_builtin (
 
 CREATE TYPE omicron.public.identity_type AS ENUM (
   'user_builtin',
-  'silo_user'
+  'silo_user',
+  'silo_group'
 );
 
 CREATE TABLE omicron.public.role_assignment (

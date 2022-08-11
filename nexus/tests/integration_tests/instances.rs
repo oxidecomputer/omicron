@@ -27,7 +27,7 @@ use omicron_common::api::external::NetworkInterface;
 use omicron_nexus::external_api::shared::IpKind;
 use omicron_nexus::external_api::shared::IpRange;
 use omicron_nexus::external_api::shared::Ipv4Range;
-use omicron_nexus::external_api::views::ExternalIp;
+use omicron_nexus::external_api::views;
 use omicron_nexus::TestInterfaces as _;
 use omicron_nexus::{external_api::params, Nexus};
 use sled_agent_client::TestInterfaces as _;
@@ -36,7 +36,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use dropshot::test_util::ClientTestContext;
-use dropshot::HttpErrorResponseBody;
+use dropshot::{HttpErrorResponseBody, ResultsPage};
 
 use nexus_test_utils::identity_eq;
 use nexus_test_utils::resource_helpers::{
@@ -208,7 +208,7 @@ async fn test_instances_create_reboot_halt(
     assert_eq!(network_interfaces[0].instance_id, instance.identity.id);
     assert_eq!(
         network_interfaces[0].identity.name,
-        omicron_nexus::defaults::DEFAULT_PRIMARY_NIC_NAME
+        nexus_defaults::DEFAULT_PRIMARY_NIC_NAME
     );
 
     // Now, simulate completion of instance boot and check the state reported.
@@ -1280,7 +1280,7 @@ async fn test_instance_update_network_interfaces(
             name: Some(new_name.clone()),
             description: Some(new_description.clone()),
         },
-        make_primary: false,
+        primary: false,
     };
 
     // Verify we fail to update the NIC when the instance is running
@@ -1351,13 +1351,13 @@ async fn test_instance_update_network_interfaces(
     verify_unchanged_attributes(&primary_iface, &updated_primary_iface);
 
     // Try with the same request again, but this time only changing
-    // `make_primary`. This should have no effect.
+    // `primary`. This should have no effect.
     let updates = params::NetworkInterfaceUpdate {
         identity: IdentityMetadataUpdateParams {
             name: None,
             description: None,
         },
-        make_primary: true,
+        primary: true,
     };
     let updated_primary_iface1 = NexusRequest::object_put(
         client,
@@ -1454,7 +1454,7 @@ async fn test_instance_update_network_interfaces(
             name: None,
             description: None,
         },
-        make_primary: true,
+        primary: true,
     };
     let new_primary_iface = NexusRequest::object_put(
         client,
@@ -2500,13 +2500,13 @@ async fn test_instance_ephemeral_ip_from_correct_project(
         .execute()
         .await
         .expect("Failed to fetch external IPs")
-        .parsed_body::<Vec<ExternalIp>>()
+        .parsed_body::<ResultsPage<views::ExternalIp>>()
         .expect("Failed to parse external IPs");
-    assert_eq!(ips.len(), 1);
-    assert_eq!(ips[0].kind, IpKind::Ephemeral);
+    assert_eq!(ips.items.len(), 1);
+    assert_eq!(ips.items[0].kind, IpKind::Ephemeral);
     assert!(
-        ips[0].ip >= second_range.first_address()
-            && ips[0].ip <= second_range.last_address(),
+        ips.items[0].ip >= second_range.first_address()
+            && ips.items[0].ip <= second_range.last_address(),
         "Expected the Ephemeral IP to come from the second address \
         range, since the first is reserved for a project different from \
         the instance's project."
@@ -2537,12 +2537,13 @@ async fn instances_list(
 }
 
 /// Convenience function for starting, stopping, or rebooting an instance.
-enum InstanceOp {
+pub enum InstanceOp {
     Start,
     Stop,
     Reboot,
 }
-async fn instance_post(
+
+pub async fn instance_post(
     client: &ClientTestContext,
     instance_url: &str,
     which: InstanceOp,
@@ -2590,7 +2591,7 @@ fn instances_eq(instance1: &Instance, instance2: &Instance) {
 /// have to look up the instance, then get the sled agent associated with that
 /// instance, and then tell it to finish simulating whatever async transition is
 /// going on.
-async fn instance_simulate(nexus: &Arc<Nexus>, id: &Uuid) {
+pub async fn instance_simulate(nexus: &Arc<Nexus>, id: &Uuid) {
     let sa = nexus.instance_sled_by_id(id).await.unwrap();
     sa.instance_finish_transition(id.clone()).await;
 }

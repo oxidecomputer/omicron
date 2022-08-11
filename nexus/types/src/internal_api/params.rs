@@ -13,11 +13,28 @@ use std::net::SocketAddrV6;
 use std::str::FromStr;
 use uuid::Uuid;
 
+/// Describes the role of the sled within the rack.
+///
+/// Note that this may change if the sled is physically moved
+/// within the rack.
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SledRole {
+    /// The sled is a general compute sled.
+    Gimlet,
+    /// The sled is attached to the network switch, and has additional
+    /// responsibilities.
+    Scrimlet,
+}
+
 /// Sent by a sled agent on startup to Nexus to request further instruction
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct SledAgentStartupInfo {
-    /// the address of the sled agent's API endpoint
+    /// The address of the sled agent's API endpoint
     pub sa_address: SocketAddrV6,
+
+    /// Describes the responsibilities of the sled
+    pub role: SledRole,
 }
 
 /// Sent by a sled agent on startup to Nexus to request further instruction

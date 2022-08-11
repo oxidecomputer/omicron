@@ -12,8 +12,8 @@ use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
 use crate::db::model::VpcSubnet;
 use crate::db::queries::vpc_subnet::SubnetError;
-use crate::defaults;
 use crate::external_api::params;
+use nexus_defaults as defaults;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -261,14 +261,17 @@ impl super::Nexus {
         vpc_name: &Name,
         subnet_name: &Name,
     ) -> DeleteResult {
-        let (.., authz_subnet) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .vpc_name(vpc_name)
-            .vpc_subnet_name(subnet_name)
-            .lookup_for(authz::Action::Delete)
-            .await?;
-        self.db_datastore.vpc_delete_subnet(opctx, &authz_subnet).await
+        let (.., authz_subnet, db_subnet) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .organization_name(organization_name)
+                .project_name(project_name)
+                .vpc_name(vpc_name)
+                .vpc_subnet_name(subnet_name)
+                .fetch_for(authz::Action::Delete)
+                .await?;
+        self.db_datastore
+            .vpc_delete_subnet(opctx, &db_subnet, &authz_subnet)
+            .await
     }
 
     pub async fn subnet_list_network_interfaces(

@@ -18,6 +18,43 @@ set -o pipefail
 set -o xtrace
 
 #
+# If we fail, try to collect some debugging information
+#
+_exit_trap() {
+	local status=$?
+	[[ $status -eq 0 ]] && exit 0
+
+	set +o errexit
+	set -o xtrace
+	banner evidence
+	zoneadm list -civ
+	pfexec dladm show-phys -m
+	pfexec dladm show-link
+	pfexec dladm show-vnic
+	pfexec ipadm
+	pfexec netstat -rncva
+	pfexec netstat -anu
+	pfexec arp -an
+	pfexec zfs list
+	pfexec zpool list
+	pfexec fmdump -eVp
+	pfexec ptree -z global
+	pfexec svcs -xv
+	for z in $(zoneadm list -n); do
+		banner "${z/oxz_/}"
+		pfexec svcs -xv -z "$z"
+		pfexec ptree -z "$z"
+		pfexec zlogin "$z" ipadm
+		pfexec zlogin "$z" netstat -rncva
+		pfexec zlogin "$z" netstat -anu
+		pfexec zlogin "$z" arp -an
+	done
+
+	exit $status
+}
+trap _exit_trap EXIT
+
+#
 # XXX work around 14537 (UFS should not allow directories to be unlinked) which
 # is probably not yet fixed in xde branch?  Once the xde branch merges from
 # master to include that fix, this can go.
@@ -102,48 +139,17 @@ set +o xtrace
 
 start=$SECONDS
 while :; do
-	if (( $SECONDS - $start > 60 )); then
+	if (( SECONDS - start > 60 )); then
 		printf 'FAILURE: NEXUS DID NOT BECOME AVAILABLE\n' >&2
+		exit 1
+	fi
+
+	if curl --max-time 1 --fail-with-body -i http://192.168.1.20/spoof_login; then
+		printf 'ok; nexus became available!\n'
 		break
 	fi
-
-	#
-	# XXX This is an extremely basic test, which should be replaced with
-	# something more complete.
-	#
-	if curl --fail-with-body -i http://192.168.1.20/spoof_login; then
-		printf 'ok; nexus became available!\n'
-		exit 0
-	fi
-
-	sleep 1
 done
 
 #
-# Try to collect some debugging information:
+# XXX add tests here!
 #
-set +o errexit
-set -o xtrace
-banner evidence
-zoneadm list -civ
-pfexec dladm show-phys -m
-pfexec dladm show-link
-pfexec dladm show-vnic
-pfexec ipadm
-pfexec netstat -rncva
-pfexec netstat -anu
-pfexec arp -an
-pfexec zfs list
-pfexec zpool list
-pfexec fmdump -eVp
-pfexec ptree -z global
-pfexec svcs -xv
-for z in $(zoneadm list -n); do
-	banner "${z/oxz_/}"
-	pfexec svcs -xv -z $z
-	pfexec ptree -z $z
-	pfexec zlogin $z ipadm
-	pfexec zlogin $z netstat -rncva
-	pfexec zlogin $z netstat -anu
-	pfexec zlogin $z arp -an
-done

@@ -20,6 +20,7 @@ lazy_static! {
             },
             discoverable: false,
             user_provision_type: shared::UserProvisionType::Fixed,
+            admin_group_name: None,
         }
     );
 }

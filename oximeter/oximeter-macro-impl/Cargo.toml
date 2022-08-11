@@ -9,11 +9,11 @@ license = "MPL-2.0"
 proc-macro = true
 
 [dependencies.bytes]
-version = "1.0.1"
+version = "1.2.1"
 features = ["serde"]
 
 [dependencies.proc-macro2]
-version = "1.0.40"
+version = "1.0.42"
 
 [dependencies.quote]
 version = "1.0.20"

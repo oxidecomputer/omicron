@@ -258,6 +258,7 @@ mod test {
         ByteCount, Generation, InstanceCpuCount, InstanceState,
     };
     use omicron_common::api::internal::nexus::InstanceRuntimeState;
+    use omicron_test_utils::dev::test_setup_log;
     use std::net::IpAddr;
     use std::net::Ipv4Addr;
 
@@ -265,14 +266,6 @@ mod test {
 
     fn test_uuid() -> Uuid {
         INST_UUID_STR.parse().unwrap()
-    }
-
-    fn logger() -> Logger {
-        dropshot::ConfigLogging::StderrTerminal {
-            level: dropshot::ConfigLoggingLevel::Info,
-        }
-        .to_logger("test-logger")
-        .unwrap()
     }
 
     fn new_initial_instance() -> InstanceHardware {
@@ -305,7 +298,8 @@ mod test {
     #[tokio::test]
     #[serial_test::serial]
     async fn ensure_instance() {
-        let log = logger();
+        let logctx = test_setup_log("ensure_instance");
+        let log = &logctx.log;
         let lazy_nexus_client =
             LazyNexusClient::new(log.clone(), std::net::Ipv6Addr::LOCALHOST)
                 .unwrap();
@@ -320,7 +314,7 @@ mod test {
         dladm_get_vnics_ctx.expect().return_once(|| Ok(vec![]));
 
         let im = InstanceManager::new(
-            log,
+            log.clone(),
             lazy_nexus_client,
             Etherstub("mylink".to_string()),
             std::net::Ipv6Addr::new(
@@ -386,12 +380,15 @@ mod test {
         // the entry is automatically removed from the instance manager.
         ticket.lock().unwrap().take();
         assert_eq!(im.inner.instances.lock().unwrap().len(), 0);
+
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
     #[serial_test::serial]
     async fn ensure_instance_repeatedly() {
-        let log = logger();
+        let logctx = test_setup_log("ensure_instance_repeatedly");
+        let log = &logctx.log;
         let lazy_nexus_client =
             LazyNexusClient::new(log.clone(), std::net::Ipv6Addr::LOCALHOST)
                 .unwrap();
@@ -405,7 +402,7 @@ mod test {
         dladm_get_vnics_ctx.expect().return_once(|| Ok(vec![]));
 
         let im = InstanceManager::new(
-            log,
+            log.clone(),
             lazy_nexus_client,
             Etherstub("mylink".to_string()),
             std::net::Ipv6Addr::new(
@@ -469,5 +466,7 @@ mod test {
         assert_eq!(im.inner.instances.lock().unwrap().len(), 1);
         ticket.lock().unwrap().take();
         assert_eq!(im.inner.instances.lock().unwrap().len(), 0);
+
+        logctx.cleanup_successful();
     }
 }

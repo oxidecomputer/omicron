@@ -834,6 +834,7 @@ mod test {
         ByteCount, Generation, InstanceCpuCount, InstanceState,
     };
     use omicron_common::api::internal::nexus::InstanceRuntimeState;
+    use omicron_test_utils::dev::test_setup_log;
     use std::net::IpAddr;
     use std::net::Ipv4Addr;
 
@@ -846,14 +847,6 @@ mod test {
 
     fn test_propolis_uuid() -> Uuid {
         PROPOLIS_UUID_STR.parse().unwrap()
-    }
-
-    fn logger() -> Logger {
-        dropshot::ConfigLogging::StderrTerminal {
-            level: dropshot::ConfigLoggingLevel::Info,
-        }
-        .to_logger("test-logger")
-        .unwrap()
     }
 
     fn new_initial_instance() -> InstanceHardware {
@@ -901,7 +894,8 @@ mod test {
         expected = "Propolis client should be initialized before usage"
     )]
     async fn transition_before_start() {
-        let log = logger();
+        let logctx = test_setup_log("transition_before_start");
+        let log = &logctx.log;
         let vnic_allocator = VnicAllocator::new(
             "Test".to_string(),
             Etherstub("mylink".to_string()),
@@ -925,6 +919,10 @@ mod test {
             lazy_nexus_client,
         )
         .unwrap();
+
+        // Remove the logfile before we expect to panic, or it'll never be
+        // cleaned up.
+        logctx.cleanup_successful();
 
         // Trying to transition before the instance has been initialized will
         // result in a panic.

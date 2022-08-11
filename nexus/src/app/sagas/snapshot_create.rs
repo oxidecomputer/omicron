@@ -81,12 +81,15 @@
 //! TODO this is currently unimplemented
 //!
 
-use super::saga_generate_uuid;
+use super::{
+    ActionRegistry, NexusActionContext, NexusSaga, SagaInitError,
+    ACTION_GENERATE_ID,
+};
+use crate::app::sagas::NexusAction;
 use crate::context::OpContext;
 use crate::db::identity::{Asset, Resource};
 use crate::db::lookup::LookupPath;
 use crate::external_api::params;
-use crate::saga_interface::SagaContext;
 use crate::{authn, authz, db};
 use anyhow::anyhow;
 use crucible_agent_client::{types::RegionId, Client as CrucibleAgentClient};
@@ -102,20 +105,12 @@ use slog::info;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use steno::new_action_noop_undo;
-use steno::ActionContext;
 use steno::ActionError;
 use steno::ActionFunc;
-use steno::SagaTemplate;
-use steno::SagaTemplateBuilder;
-use steno::SagaType;
+use steno::Node;
 use uuid::Uuid;
 
-pub const SAGA_NAME: &'static str = "snapshot-create";
-
-lazy_static! {
-    pub static ref SAGA_TEMPLATE: Arc<SagaTemplate<SagaSnapshotCreate>> =
-        Arc::new(saga_snapshot_create());
-}
+// snapshot create saga: input parameters
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Params {
@@ -126,109 +121,146 @@ pub struct Params {
     pub create_params: params::SnapshotCreate,
 }
 
-#[derive(Debug)]
-pub struct SagaSnapshotCreate;
-impl SagaType for SagaSnapshotCreate {
-    type SagaParamsType = Arc<Params>;
-    type ExecContextType = Arc<SagaContext>;
-}
+// snapshot create saga: actions
 
 /// A no-op action used because if saga nodes fail their undo action isn't run!
-async fn ssc_noop(
-    _sagactx: ActionContext<SagaSnapshotCreate>,
-) -> Result<(), ActionError> {
+async fn ssc_noop(_sagactx: NexusActionContext) -> Result<(), ActionError> {
     Ok(())
 }
 
-fn saga_snapshot_create() -> SagaTemplate<SagaSnapshotCreate> {
-    let mut template_builder = SagaTemplateBuilder::new();
-
-    // Generate IDs
-    template_builder.append(
-        "snapshot_id",
-        "GenerateSnapshotId",
-        new_action_noop_undo(saga_generate_uuid),
+lazy_static! {
+    static ref CREATE_SNAPSHOT_RECORD: NexusAction = ActionFunc::new_action(
+        "snapshot-create.create-snapshot-record",
+        ssc_create_snapshot_record,
+        ssc_create_snapshot_record_undo,
     );
-
-    template_builder.append(
-        "volume_id",
-        "GenerateVolumeId",
-        new_action_noop_undo(saga_generate_uuid),
+    static ref SEND_SNAPSHOT_REQUEST: NexusAction = ActionFunc::new_action(
+        "snapshot-create.send-snapshot-request",
+        ssc_send_snapshot_request,
+        ssc_send_snapshot_request_undo,
     );
-
-    // Create the Snapshot DB object
-    template_builder.append(
-        "created_snapshot",
-        "CreateSnapshotRecord",
+    static ref NOOP_FOR_START_RUNNING_SNAPSHOT: NexusAction =
         ActionFunc::new_action(
-            ssc_create_snapshot_record,
-            ssc_create_snapshot_record_undo,
-        ),
+            "snapshot-create.noop-for-start-running-snapshot",
+            ssc_noop,
+            ssc_start_running_snapshot_undo,
+        );
+    static ref START_RUNNING_SNAPSHOT: NexusAction = new_action_noop_undo(
+        "snapshot-create.start-running-snapshot",
+        ssc_start_running_snapshot,
     );
-
-    // Send a snapshot request to a sled-agent
-    template_builder.append(
-        "snapshot_request",
-        "SendSnapshotRequest",
-        ActionFunc::new_action(
-            ssc_send_snapshot_request,
-            ssc_send_snapshot_request_undo,
-        ),
+    static ref CREATE_VOLUME_RECORD: NexusAction = ActionFunc::new_action(
+        "snapshot-create.create-volume-record",
+        ssc_create_volume_record,
+        ssc_create_volume_record_undo,
     );
-
-    // The following saga action iterates over the datasets and regions for a
-    // disk and make requests for each tuple, and this violates the saga's
-    // mental model where actions should do one thing at a time and be
-    // idempotent + atomic. If only a few of the requests succeed, the saga will
-    // leave things in a partial state because the undo function of a node is
-    // not run when the action fails.
-    //
-    // Use a noop action and an undo, followed by an action + no undo, to work
-    // around this:
-    //
-    // - [noop, undo function]
-    // - [action function, noop]
-    //
-    // With this, if the action function fails, the undo function will run.
-
-    // Validate with crucible agent and start snapshot downstairs
-    template_builder.append(
-        "noop_for_replace_sockets_map",
-        "NoopForStartRunningSnapshot",
-        ActionFunc::new_action(ssc_noop, ssc_start_running_snapshot_undo),
+    static ref FINALIZE_SNAPSHOT_RECORD: NexusAction = new_action_noop_undo(
+        "snapshot-create.finalize-snapshot-record",
+        ssc_finalize_snapshot_record,
     );
-    template_builder.append(
-        "replace_sockets_map",
-        "StartRunningSnapshot",
-        new_action_noop_undo(ssc_start_running_snapshot),
-    );
-
-    // Copy and modify the disk volume construction request to point to the new
-    // running snapshot
-    template_builder.append(
-        "created_volume",
-        "CreateVolumeRecord",
-        ActionFunc::new_action(
-            ssc_create_volume_record,
-            ssc_create_volume_record_undo,
-        ),
-    );
-
-    template_builder.append(
-        "finalized_snapshot",
-        "FinalizeSnapshotRecord",
-        new_action_noop_undo(ssc_finalize_snapshot_record),
-    );
-
-    template_builder.build()
 }
 
+// snapshot create saga: definition
+
+#[derive(Debug)]
+pub struct SagaSnapshotCreate;
+impl NexusSaga for SagaSnapshotCreate {
+    const NAME: &'static str = "snapshot-create";
+    type Params = Params;
+
+    fn register_actions(registry: &mut ActionRegistry) {
+        registry.register(Arc::clone(&*CREATE_SNAPSHOT_RECORD));
+        registry.register(Arc::clone(&*SEND_SNAPSHOT_REQUEST));
+        registry.register(Arc::clone(&*NOOP_FOR_START_RUNNING_SNAPSHOT));
+        registry.register(Arc::clone(&*START_RUNNING_SNAPSHOT));
+        registry.register(Arc::clone(&*CREATE_VOLUME_RECORD));
+        registry.register(Arc::clone(&*FINALIZE_SNAPSHOT_RECORD));
+    }
+
+    fn make_saga_dag(
+        _params: &Self::Params,
+        mut builder: steno::DagBuilder,
+    ) -> Result<steno::Dag, SagaInitError> {
+        // Generate IDs
+        builder.append(Node::action(
+            "snapshot_id",
+            "GenerateSnapshotId",
+            ACTION_GENERATE_ID.as_ref(),
+        ));
+
+        builder.append(Node::action(
+            "volume_id",
+            "GenerateVolumeId",
+            ACTION_GENERATE_ID.as_ref(),
+        ));
+
+        // Create the Snapshot DB object
+        builder.append(Node::action(
+            "created_snapshot",
+            "CreateSnapshotRecord",
+            CREATE_SNAPSHOT_RECORD.as_ref(),
+        ));
+
+        // Send a snapshot request to a sled-agent
+        builder.append(Node::action(
+            "snapshot_request",
+            "SendSnapshotRequest",
+            SEND_SNAPSHOT_REQUEST.as_ref(),
+        ));
+
+        // The following saga action iterates over the datasets and regions for a
+        // disk and make requests for each tuple, and this violates the saga's
+        // mental model where actions should do one thing at a time and be
+        // idempotent + atomic. If only a few of the requests succeed, the saga will
+        // leave things in a partial state because the undo function of a node is
+        // not run when the action fails.
+        //
+        // Use a noop action and an undo, followed by an action + no undo, to work
+        // around this:
+        //
+        // - [noop, undo function]
+        // - [action function, noop]
+        //
+        // With this, if the action function fails, the undo function will run.
+
+        // Validate with crucible agent and start snapshot downstairs
+        builder.append(Node::action(
+            "noop_for_replace_sockets_map",
+            "NoopForStartRunningSnapshot",
+            NOOP_FOR_START_RUNNING_SNAPSHOT.as_ref(),
+        ));
+        builder.append(Node::action(
+            "replace_sockets_map",
+            "StartRunningSnapshot",
+            START_RUNNING_SNAPSHOT.as_ref(),
+        ));
+
+        // Copy and modify the disk volume construction request to point to the new
+        // running snapshot
+        builder.append(Node::action(
+            "created_volume",
+            "CreateVolumeRecord",
+            CREATE_VOLUME_RECORD.as_ref(),
+        ));
+
+        builder.append(Node::action(
+            "finalized_snapshot",
+            "FinalizeSnapshotRecord",
+            FINALIZE_SNAPSHOT_RECORD.as_ref(),
+        ));
+
+        Ok(builder.build()?)
+    }
+}
+
+// snapshot create saga: action implementations
+
 async fn ssc_create_snapshot_record(
-    sagactx: ActionContext<SagaSnapshotCreate>,
+    sagactx: NexusActionContext,
 ) -> Result<db::model::Snapshot, ActionError> {
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params();
+    let params = sagactx.saga_params::<Params>()?;
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
 
     let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
@@ -283,11 +315,11 @@ async fn ssc_create_snapshot_record(
 }
 
 async fn ssc_create_snapshot_record_undo(
-    sagactx: ActionContext<SagaSnapshotCreate>,
+    sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params();
+    let params = sagactx.saga_params::<Params>()?;
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
 
     let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
@@ -309,11 +341,11 @@ async fn ssc_create_snapshot_record_undo(
 }
 
 async fn ssc_send_snapshot_request(
-    sagactx: ActionContext<SagaSnapshotCreate>,
+    sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params();
+    let params = sagactx.saga_params::<Params>()?;
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
 
     let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
@@ -411,11 +443,11 @@ async fn ssc_send_snapshot_request(
 }
 
 async fn ssc_send_snapshot_request_undo(
-    sagactx: ActionContext<SagaSnapshotCreate>,
+    sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params();
+    let params = sagactx.saga_params::<Params>()?;
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
 
     let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
@@ -455,11 +487,11 @@ async fn ssc_send_snapshot_request_undo(
 }
 
 async fn ssc_start_running_snapshot(
-    sagactx: ActionContext<SagaSnapshotCreate>,
+    sagactx: NexusActionContext,
 ) -> Result<BTreeMap<String, String>, ActionError> {
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params();
+    let params = sagactx.saga_params::<Params>()?;
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
 
     let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
@@ -537,11 +569,11 @@ async fn ssc_start_running_snapshot(
 }
 
 async fn ssc_start_running_snapshot_undo(
-    sagactx: ActionContext<SagaSnapshotCreate>,
+    sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params();
+    let params = sagactx.saga_params::<Params>()?;
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
 
     let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
@@ -587,11 +619,11 @@ async fn ssc_start_running_snapshot_undo(
 }
 
 async fn ssc_create_volume_record(
-    sagactx: ActionContext<SagaSnapshotCreate>,
+    sagactx: NexusActionContext,
 ) -> Result<db::model::Volume, ActionError> {
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params();
+    let params = sagactx.saga_params::<Params>()?;
 
     let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
 
@@ -659,7 +691,7 @@ async fn ssc_create_volume_record(
 }
 
 async fn ssc_create_volume_record_undo(
-    sagactx: ActionContext<SagaSnapshotCreate>,
+    sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
@@ -671,11 +703,11 @@ async fn ssc_create_volume_record_undo(
 }
 
 async fn ssc_finalize_snapshot_record(
-    sagactx: ActionContext<SagaSnapshotCreate>,
+    sagactx: NexusActionContext,
 ) -> Result<db::model::Snapshot, ActionError> {
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params();
+    let params = sagactx.saga_params::<Params>()?;
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
 
     info!(log, "snapshot final lookup...");

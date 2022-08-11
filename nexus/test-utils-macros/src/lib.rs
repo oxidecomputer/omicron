@@ -9,10 +9,12 @@ use syn::{parse_macro_input, ItemFn};
 ///
 /// Example usage:
 ///
-/// // #[nexus_test]
-/// // async fn test_my_test_case(cptestctx: &ControlPlaneTestContext) {
-/// //   assert!(true);
-/// // }
+/// ```ignore
+/// #[nexus_test]
+/// async fn test_my_test_case(cptestctx: &ControlPlaneTestContext) {
+///   assert!(true);
+/// }
+/// ```
 ///
 /// We use this instead of implementing Drop on ControlPlaneTestContext because
 /// we want the teardown to only happen when the test doesn't fail (which causes

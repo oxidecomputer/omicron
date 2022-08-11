@@ -84,15 +84,17 @@ impl TryFrom<UnvalidatedTunables> for Tunables {
 
 impl Tunables {
     fn validate_ipv4_prefix(prefix: u8) -> Result<(), InvalidTunable> {
-        let absolute_max: u8 = 32_u8.checked_sub(
-            // Always need space for the reserved Oxide addresses, including the
-            // broadcast address at the end of the subnet.
-            ((crate::defaults::NUM_INITIAL_RESERVED_IP_ADDRESSES + 1) as f32)
+        let absolute_max: u8 = 32_u8
+            .checked_sub(
+                // Always need space for the reserved Oxide addresses, including the
+                // broadcast address at the end of the subnet.
+                ((nexus_defaults::NUM_INITIAL_RESERVED_IP_ADDRESSES + 1) as f32)
                 .log2() // Subnet size to bit prefix.
                 .ceil() // Round up to a whole number of bits.
-                as u8
-            ).expect("Invalid absolute maximum IPv4 subnet prefix");
-        if prefix >= crate::defaults::MIN_VPC_IPV4_SUBNET_PREFIX
+                as u8,
+            )
+            .expect("Invalid absolute maximum IPv4 subnet prefix");
+        if prefix >= nexus_defaults::MIN_VPC_IPV4_SUBNET_PREFIX
             && prefix <= absolute_max
         {
             Ok(())
@@ -334,7 +336,7 @@ mod test {
             [deployment]
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
-            [deployment.dropshot_external]
+            [[deployment.dropshot_external]]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
             [deployment.dropshot_internal]
@@ -356,12 +358,12 @@ mod test {
                     rack_id: "38b90dc4-c22a-65ba-f49a-f051fe01208f"
                         .parse()
                         .unwrap(),
-                    dropshot_external: ConfigDropshot {
+                    dropshot_external: vec![ConfigDropshot {
                         bind_address: "10.1.2.3:4567"
                             .parse::<SocketAddr>()
                             .unwrap(),
                         ..Default::default()
-                    },
+                    },],
                     dropshot_internal: ConfigDropshot {
                         bind_address: "10.1.2.3:4568"
                             .parse::<SocketAddr>()
@@ -416,7 +418,7 @@ mod test {
             [deployment]
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
-            [deployment.dropshot_external]
+            [[deployment.dropshot_external]]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
             [deployment.dropshot_internal]
@@ -458,7 +460,7 @@ mod test {
             [deployment]
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
-            [deployment.dropshot_external]
+            [[deployment.dropshot_external]]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
             [deployment.dropshot_internal]
@@ -514,7 +516,7 @@ mod test {
             [deployment]
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
-            [deployment.dropshot_external]
+            [[deployment.dropshot_external]]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
             [deployment.dropshot_internal]

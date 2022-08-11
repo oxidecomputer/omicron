@@ -8,6 +8,8 @@ use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::collection_insert::AsyncInsertError;
+use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
@@ -16,6 +18,7 @@ use crate::db::model::Instance;
 use crate::db::model::Name;
 use crate::db::model::NetworkInterface;
 use crate::db::model::NetworkInterfaceUpdate;
+use crate::db::model::VpcSubnet;
 use crate::db::pagination::paginated;
 use crate::db::queries::network_interface;
 use async_bb8_diesel::AsyncConnection;
@@ -27,6 +30,8 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
+use omicron_common::api::external::LookupType;
+use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use sled_agent_client::types as sled_client_types;
 
@@ -56,19 +61,31 @@ impl DataStore {
         interface: IncompleteNetworkInterface,
     ) -> Result<NetworkInterface, network_interface::InsertError> {
         use db::schema::network_interface::dsl;
+        let subnet_id = interface.subnet.identity.id;
         let query = network_interface::InsertQuery::new(interface.clone());
-        diesel::insert_into(dsl::network_interface)
-            .values(query)
-            .returning(NetworkInterface::as_returning())
-            .get_result_async(
-                self.pool_authorized(opctx)
-                    .await
-                    .map_err(network_interface::InsertError::External)?,
-            )
-            .await
-            .map_err(|e| {
+        VpcSubnet::insert_resource(
+            subnet_id,
+            diesel::insert_into(dsl::network_interface).values(query),
+        )
+        .insert_and_get_result_async(
+            self.pool_authorized(opctx)
+                .await
+                .map_err(network_interface::InsertError::External)?,
+        )
+        .await
+        .map_err(|e| match e {
+            AsyncInsertError::CollectionNotFound => {
+                network_interface::InsertError::External(
+                    Error::ObjectNotFound {
+                        type_name: ResourceType::VpcSubnet,
+                        lookup_type: LookupType::ById(subnet_id),
+                    },
+                )
+            }
+            AsyncInsertError::DatabaseError(e) => {
                 network_interface::InsertError::from_pool(e, &interface)
-            })
+            }
+        })
     }
 
     /// Delete all network interfaces attached to the given instance.
@@ -274,7 +291,7 @@ impl DataStore {
             db::model::InstanceState::new(external::InstanceState::Stopped);
 
         // This is the actual query to update the target interface.
-        let make_primary = matches!(updates.make_primary, Some(true));
+        let primary = matches!(updates.primary, Some(true));
         let update_target_query = diesel::update(dsl::network_interface)
             .filter(dsl::id.eq(interface_id))
             .filter(dsl::time_deleted.is_null())
@@ -290,7 +307,7 @@ impl DataStore {
         type TxnError = TransactionError<NetworkInterfaceUpdateError>;
 
         let pool = self.pool_authorized(opctx).await?;
-        if make_primary {
+        if primary {
             pool.transaction(move |conn| {
                 let instance_state =
                     instance_query.get_result(conn)?.runtime_state.state;
@@ -325,7 +342,7 @@ impl DataStore {
             })
         } else {
             // In this case, we can just directly apply the updates. By
-            // construction, `updates.make_primary` is `None`, so nothing will
+            // construction, `updates.primary` is `None`, so nothing will
             // be done there. The other columns always need to be updated, and
             // we're only hitting a single row. Note that we still need to
             // verify the instance is stopped.

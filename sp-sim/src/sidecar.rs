@@ -42,6 +42,8 @@ use tokio::sync::oneshot;
 use tokio::task;
 use tokio::task::JoinHandle;
 
+const SIM_SIDECAR_VERSION: u32 = 1;
+
 pub struct Sidecar {
     rot: Mutex<RotSprocket>,
     manufacturing_public_key: Ed25519PublicKey,
@@ -407,7 +409,10 @@ impl SpHandler for Handler {
         sender: SocketAddrV6,
         port: SpPort,
     ) -> Result<SpState, ResponseError> {
-        let state = SpState { serial_number: self.serial_number };
+        let state = SpState {
+            serial_number: self.serial_number,
+            version: SIM_SIDECAR_VERSION,
+        };
         debug!(
             &self.log, "received state request";
             "sender" => %sender,
@@ -415,5 +420,64 @@ impl SpHandler for Handler {
             "reply-state" => ?state,
         );
         Ok(state)
+    }
+
+    fn update_start(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+        update: gateway_messages::UpdateStart,
+    ) -> Result<(), ResponseError> {
+        warn!(
+            &self.log,
+            "received update start request; not supported by simulated sidecar";
+            "sender" => %sender,
+            "port" => ?port,
+            "update" => ?update,
+        );
+        Err(ResponseError::RequestUnsupportedForSp)
+    }
+
+    fn update_chunk(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+        chunk: gateway_messages::UpdateChunk,
+    ) -> Result<(), ResponseError> {
+        warn!(
+            &self.log,
+            "received update chunk; not supported by simulated sidecar";
+            "sender" => %sender,
+            "port" => ?port,
+            "offset" => chunk.offset,
+            "length" => chunk.chunk_length,
+        );
+        Err(ResponseError::RequestUnsupportedForSp)
+    }
+
+    fn sys_reset_prepare(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+    ) -> Result<(), ResponseError> {
+        warn!(
+            &self.log, "received sys-reset prepare request; not supported by simulated sidecar";
+            "sender" => %sender,
+            "port" => ?port,
+        );
+        Err(ResponseError::RequestUnsupportedForSp)
+    }
+
+    fn sys_reset_trigger(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+    ) -> Result<std::convert::Infallible, ResponseError> {
+        warn!(
+            &self.log, "received sys-reset trigger request; not supported by simulated sidecar";
+            "sender" => %sender,
+            "port" => ?port,
+        );
+        Err(ResponseError::RequestUnsupportedForSp)
     }
 }

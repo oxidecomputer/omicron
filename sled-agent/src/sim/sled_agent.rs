@@ -15,11 +15,11 @@ use omicron_common::api::external::{Error, ResourceType};
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use slog::Logger;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use uuid::Uuid;
 
 use std::collections::HashMap;
-use std::net::SocketAddr;
 use std::str::FromStr;
 
 use propolis_client::api::VolumeConstructionRequest;
@@ -43,6 +43,7 @@ pub struct SledAgent {
     /// collection of simulated disks, indexed by disk uuid
     disks: Arc<SimCollection<SimDisk>>,
     storage: Mutex<Storage>,
+    nexus_address: SocketAddr,
     pub nexus_client: Arc<NexusClient>,
     disk_id_to_region_ids: Mutex<HashMap<String, Vec<Uuid>>>,
 }
@@ -92,6 +93,7 @@ impl SledAgent {
     pub fn new_simulated_with_id(
         config: &Config,
         log: Logger,
+        nexus_address: SocketAddr,
         nexus_client: Arc<NexusClient>,
     ) -> SledAgent {
         let id = config.id;
@@ -119,6 +121,7 @@ impl SledAgent {
                 config.storage.ip,
                 storage_log,
             )),
+            nexus_address,
             nexus_client,
             disk_id_to_region_ids: Mutex::new(HashMap::new()),
         }
@@ -191,6 +194,29 @@ impl SledAgent {
         initial_hardware: InstanceHardware,
         target: InstanceRuntimeStateRequested,
     ) -> Result<InstanceRuntimeState, Error> {
+        for disk in &initial_hardware.disks {
+            let initial_state = DiskRuntimeState {
+                disk_state: omicron_common::api::external::DiskState::Attached(
+                    instance_id,
+                ),
+                gen: omicron_common::api::external::Generation::new(),
+                time_updated: chrono::Utc::now(),
+            };
+            let target = DiskStateRequested::Attached(instance_id);
+
+            let id = match disk.volume_construction_request {
+                crucible_client_types::VolumeConstructionRequest::Volume {
+                    id,
+                    ..
+                } => id,
+                _ => panic!("Unexpected construction type"),
+            };
+            self.disks.sim_ensure(&id, initial_state, target).await?;
+            self.disks
+                .sim_ensure_producer(&id, (self.nexus_address, id))
+                .await?;
+        }
+
         let instance_run_time_state = self
             .instances
             .sim_ensure(&instance_id, initial_hardware.runtime, target)

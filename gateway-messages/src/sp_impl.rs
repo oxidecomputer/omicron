@@ -19,6 +19,9 @@ use crate::SpMessage;
 use crate::SpMessageKind;
 use crate::SpPort;
 use crate::SpState;
+use crate::UpdateChunk;
+use crate::UpdateStart;
+use core::convert::Infallible;
 use hubpack::SerializedSize;
 
 #[cfg(feature = "std")]
@@ -65,6 +68,20 @@ pub trait SpHandler {
         port: SpPort,
     ) -> Result<SpState, ResponseError>;
 
+    fn update_start(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+        update: UpdateStart,
+    ) -> Result<(), ResponseError>;
+
+    fn update_chunk(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+        chunk: UpdateChunk,
+    ) -> Result<(), ResponseError>;
+
     // TODO Should we return "number of bytes written" here, or is it sufficient
     // to say "all or none"? Would be nice for the caller to not have to resend
     // UDP chunks; can SP ensure it writes all data locally?
@@ -74,6 +91,19 @@ pub trait SpHandler {
         port: SpPort,
         packet: SerialConsole,
     ) -> Result<(), ResponseError>;
+
+    fn sys_reset_prepare(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+    ) -> Result<(), ResponseError>;
+
+    // On success, this method cannot return (it should perform a reset).
+    fn sys_reset_trigger(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+    ) -> Result<Infallible, ResponseError>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -217,9 +247,28 @@ pub fn handle_message<H: SpHandler>(
         RequestKind::SpState => {
             handler.sp_state(sender, port).map(ResponseKind::SpState)
         }
+        RequestKind::UpdateStart(update) => handler
+            .update_start(sender, port, update)
+            .map(|()| ResponseKind::UpdateStartAck),
+        RequestKind::UpdateChunk(chunk) => handler
+            .update_chunk(sender, port, chunk)
+            .map(|()| ResponseKind::UpdateChunkAck),
         RequestKind::SerialConsoleWrite(packet) => handler
             .serial_console_write(sender, port, packet)
             .map(|()| ResponseKind::SerialConsoleWriteAck),
+        RequestKind::SysResetPrepare => handler
+            .sys_reset_prepare(sender, port)
+            .map(|()| ResponseKind::SysResetPrepareAck),
+        RequestKind::SysResetTrigger => {
+            handler.sys_reset_trigger(sender, port).map(|infallible| {
+                // A bit of type system magic here; `sys_reset_trigger`'s
+                // success type (`Infallible`) cannot be instantiated. We can
+                // provide an empty match to teach the type system that an
+                // `Infallible` (which can't exist) can be converted to a
+                // `ResponseKind` (or any other type!).
+                match infallible {}
+            })
+        }
     };
 
     // we control `SpMessage` and know all cases can successfully serialize

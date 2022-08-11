@@ -9,7 +9,7 @@ path = "../rpaths"
 
 [dependencies]
 anyhow = "1.0"
-async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "ab1f49e0b3f95557aa96bf593282199fafeef4bd" }
+async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "51de79fe02b334899be5d5fd8b469f9d140ea887" }
 async-trait = "0.1.56"
 base64 = "0.13.0"
 bb8 = "0.8.0"
@@ -25,7 +25,7 @@ hex = "0.4.3"
 http = "0.2.7"
 hyper = "0.14"
 internal-dns-client = { path = "../internal-dns-client" }
-ipnetwork = "0.18"
+ipnetwork = "0.20"
 lazy_static = "1.4.0"
 libc = "0.2.126"
 macaddr = { version = "1.0.1", features = [ "serde_std" ]}
@@ -52,6 +52,7 @@ serde_urlencoded = "0.7.1"
 serde_with = "2.0.0"
 sled-agent-client = { path = "../sled-agent-client" }
 slog-dtrace = "0.2"
+steno = "0.2"
 tempfile = "3.3"
 thiserror = "1.0"
 toml = "0.5.9"
@@ -60,6 +61,8 @@ usdt = "0.3.1"
 
 authz-macros = { path = "authz-macros" }
 db-macros = { path = "db-macros" }
+nexus-defaults = { path = "defaults" }
+nexus-db-model = { path = "db-model" }
 nexus-types = { path = "types" }
 
 [dependencies.chrono]
@@ -98,10 +101,6 @@ features = [ "derive" ]
 [dependencies.slog]
 version = "2.7"
 features = [ "max_level_trace", "release_max_level_debug" ]
-
-[dependencies.steno]
-git = "https://github.com/oxidecomputer/steno"
-branch = "main"
 
 [dependencies.tokio]
 version = "1.20"

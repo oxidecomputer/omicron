@@ -59,6 +59,7 @@ mod role;
 mod saga;
 mod service;
 mod silo;
+mod silo_group;
 mod silo_user;
 mod sled;
 mod snapshot;
@@ -77,19 +78,23 @@ const REGION_REDUNDANCY_THRESHOLD: usize = 3;
 // This helper trait lets the statement either be executed or explained.
 //
 // U: The output type of executing the statement.
-trait RunnableQuery<U>:
-    RunQueryDsl<DbConnection>
-    + QueryFragment<Pg>
-    + LoadQuery<'static, DbConnection, U>
-    + QueryId
+pub trait RunnableQueryNoReturn:
+    RunQueryDsl<DbConnection> + QueryFragment<Pg> + QueryId
+{
+}
+
+impl<T> RunnableQueryNoReturn for T where
+    T: RunQueryDsl<DbConnection> + QueryFragment<Pg> + QueryId
+{
+}
+
+pub trait RunnableQuery<U>:
+    RunnableQueryNoReturn + LoadQuery<'static, DbConnection, U>
 {
 }
 
 impl<U, T> RunnableQuery<U> for T where
-    T: RunQueryDsl<DbConnection>
-        + QueryFragment<Pg>
-        + LoadQuery<'static, DbConnection, U>
-        + QueryId
+    T: RunnableQueryNoReturn + LoadQuery<'static, DbConnection, U>
 {
 }
 
@@ -432,7 +437,8 @@ mod test {
         );
         let rack_id = Uuid::new_v4();
         let sled_id = Uuid::new_v4();
-        let sled = Sled::new(sled_id, bogus_addr.clone(), rack_id);
+        let is_scrimlet = false;
+        let sled = Sled::new(sled_id, bogus_addr.clone(), is_scrimlet, rack_id);
         datastore.sled_upsert(sled).await.unwrap();
         sled_id
     }
@@ -791,12 +797,13 @@ mod test {
         let rack_id = Uuid::new_v4();
         let addr1 = "[fd00:1de::1]:12345".parse().unwrap();
         let sled1_id = "0de4b299-e0b4-46f0-d528-85de81a7095f".parse().unwrap();
-        let sled1 = db::model::Sled::new(sled1_id, addr1, rack_id);
+        let is_scrimlet = false;
+        let sled1 = db::model::Sled::new(sled1_id, addr1, is_scrimlet, rack_id);
         datastore.sled_upsert(sled1).await.unwrap();
 
         let addr2 = "[fd00:1df::1]:12345".parse().unwrap();
         let sled2_id = "66285c18-0c79-43e0-e54f-95271f271314".parse().unwrap();
-        let sled2 = db::model::Sled::new(sled2_id, addr2, rack_id);
+        let sled2 = db::model::Sled::new(sled2_id, addr2, is_scrimlet, rack_id);
         datastore.sled_upsert(sled2).await.unwrap();
 
         let ip = datastore.next_ipv6_address(&opctx, sled1_id).await.unwrap();

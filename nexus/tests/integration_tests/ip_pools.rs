@@ -679,6 +679,98 @@ async fn test_ip_range_delete_with_allocated_external_ip_fails(
     );
 }
 
+#[nexus_test]
+async fn test_ip_pool_service(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let ip_pool_url =
+        format!("/ip-pools-service/{}", nexus_test_utils::RACK_UUID);
+    let ip_pool_ranges_url = format!("{}/ranges", ip_pool_url);
+    let ip_pool_add_range_url = format!("{}/add", ip_pool_ranges_url);
+    let ip_pool_remove_range_url = format!("{}/remove", ip_pool_ranges_url);
+
+    // View the pool, which should exist without explicit creation.
+    let fetched_pool: IpPool = NexusRequest::object_get(client, &ip_pool_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap()
+        .parsed_body()
+        .unwrap();
+    assert_eq!(fetched_pool.identity.name, "oxide-service-pool");
+    assert_eq!(fetched_pool.identity.description, "IP Pool for Oxide Services");
+
+    // Add some ranges. Pagination is tested more explicitly in the IP pool
+    // implementation, but we just check that these endpoints work here.
+    let ranges = [
+        IpRange::V4(
+            Ipv4Range::new(
+                std::net::Ipv4Addr::new(10, 0, 0, 1),
+                std::net::Ipv4Addr::new(10, 0, 0, 2),
+            )
+            .unwrap(),
+        ),
+        IpRange::V6(
+            Ipv6Range::new(
+                std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0),
+                std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 10),
+            )
+            .unwrap(),
+        ),
+    ];
+
+    let mut expected_ranges = Vec::with_capacity(ranges.len());
+    for range in ranges.iter() {
+        let created_range: IpPoolRange =
+            NexusRequest::objects_post(client, &ip_pool_add_range_url, &range)
+                .authn_as(AuthnMode::PrivilegedUser)
+                .execute()
+                .await
+                .unwrap()
+                .parsed_body()
+                .unwrap();
+        assert_eq!(range.first_address(), created_range.range.first_address());
+        assert_eq!(range.last_address(), created_range.range.last_address());
+        expected_ranges.push(created_range);
+    }
+    expected_ranges
+        .sort_by(|a, b| a.range.first_address().cmp(&b.range.first_address()));
+
+    // List the ranges.
+    let first_page =
+        objects_list_page_authz::<IpPoolRange>(client, &ip_pool_ranges_url)
+            .await;
+    assert_eq!(first_page.items.len(), ranges.len());
+
+    let actual_ranges = first_page.items.iter();
+    for (expected_range, actual_range) in
+        expected_ranges.iter().zip(actual_ranges)
+    {
+        assert_ranges_eq(expected_range, actual_range);
+    }
+
+    // Remove both ranges, observe that the IP Pool is empty.
+    for range in ranges.iter() {
+        NexusRequest::new(
+            RequestBuilder::new(
+                client,
+                Method::POST,
+                &ip_pool_remove_range_url,
+            )
+            .body(Some(&range))
+            .expect_status(Some(StatusCode::NO_CONTENT)),
+        )
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Failed to delete IP range from a pool");
+    }
+
+    let first_page =
+        objects_list_page_authz::<IpPoolRange>(client, &ip_pool_ranges_url)
+            .await;
+    assert!(first_page.items.is_empty());
+}
+
 fn assert_pools_eq(first: &IpPool, second: &IpPool) {
     assert_eq!(first.identity, second.identity);
 }

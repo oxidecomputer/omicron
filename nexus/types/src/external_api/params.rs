@@ -5,6 +5,7 @@
 //! Params define the request bodies of API endpoints for creating or updating resources.
 
 use crate::external_api::shared;
+use chrono::{DateTime, Utc};
 use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
     InstanceCpuCount, Ipv4Net, Ipv6Net, Name,
@@ -28,6 +29,15 @@ pub struct SiloCreate {
     pub discoverable: bool,
 
     pub user_provision_type: shared::UserProvisionType,
+
+    /// If set, this group will be created during Silo creation and granted the
+    /// "Silo Admin" role. Identity providers can assert that users belong to
+    /// this group and those users can log in and further initialize the Silo.
+    ///
+    /// Note that if configuring a SAML based identity provider,
+    /// group_attribute_name must be set for users to be considered part of a
+    /// group. See [`SamlIdentityProviderCreate`] for more information.
+    pub admin_group_name: Option<String>,
 }
 
 // Silo identity providers
@@ -175,6 +185,11 @@ pub struct SamlIdentityProviderCreate {
     /// optional request signing key pair
     #[serde(deserialize_with = "validate_key_pair")]
     pub signing_keypair: Option<DerEncodedKeyPair>,
+
+    /// If set, SAML attributes with this name will be considered to denote a
+    /// user's group membership, where the attribute value(s) should be a
+    /// comma-separated list of group names.
+    pub group_attribute_name: Option<String>,
 }
 
 /// sign some junk data and validate it with the key pair
@@ -310,7 +325,7 @@ pub struct NetworkInterfaceUpdate {
     // change in the primary interface will result in changes to the DNS records
     // for the instance, though not the name.
     #[serde(default)]
-    pub make_primary: bool,
+    pub primary: bool,
 }
 
 // IP POOLS
@@ -325,7 +340,7 @@ pub struct ProjectPath {
 
 /// Create-time parameters for an IP Pool.
 ///
-/// See [`IpPool`](omicron_nexus::external_api::views::IpPool)
+/// See [`IpPool`](crate::external_api::views::IpPool)
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct IpPoolCreate {
     #[serde(flatten)]
@@ -473,7 +488,7 @@ impl UserData {
     where
         D: Deserializer<'de>,
     {
-        match base64::decode(<&str>::deserialize(deserializer)?) {
+        match base64::decode(<String>::deserialize(deserializer)?) {
             Ok(buf) => {
                 // if you change this, also update the stress test in crate::cidata
                 if buf.len() > MAX_USER_DATA_BYTES {
@@ -761,7 +776,7 @@ pub struct Distribution {
 }
 
 /// Create-time parameters for an
-/// [`GlobalImage`](omicron_common::api::external::GlobalImage)
+/// [`GlobalImage`](crate::external_api::views::GlobalImage)
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct GlobalImageCreate {
     /// common identifying metadata
@@ -779,7 +794,7 @@ pub struct GlobalImageCreate {
 }
 
 /// Create-time parameters for an
-/// [`Image`](omicron_common::api::external::Image)
+/// [`Image`](crate::external_api::views::Image)
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ImageCreate {
     /// common identifying metadata
@@ -795,7 +810,7 @@ pub struct ImageCreate {
 
 // SNAPSHOTS
 
-/// Create-time parameters for a [`Snapshot`](omicron_common::api::external::Snapshot)
+/// Create-time parameters for a [`Snapshot`](crate::external_api::views::Snapshot)
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SnapshotCreate {
     /// common identifying metadata
@@ -812,7 +827,7 @@ pub struct SnapshotCreate {
 // for creating them internally as we use for types that can be created in the
 // external API.
 
-/// Create-time parameters for a [`UserBuiltin`](crate::db::model::UserBuiltin)
+/// Create-time parameters for a [`UserBuiltin`](crate::external_api::views::UserBuiltin)
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct UserBuiltinCreate {
     #[serde(flatten)]
@@ -833,6 +848,17 @@ pub struct SshKeyCreate {
 
     /// SSH public key, e.g., `"ssh-ed25519 AAAAC3NzaC..."`
     pub public_key: String,
+}
+
+// METRICS
+
+/// Query parameters common to resource metrics endpoints.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ResourceMetrics {
+    /// An inclusive start time of metrics.
+    pub start_time: DateTime<Utc>,
+    /// An exclusive end time of metrics.
+    pub end_time: DateTime<Utc>,
 }
 
 #[cfg(test)]

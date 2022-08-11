@@ -11,14 +11,15 @@ use crate::app::sagas;
 use crate::authn;
 use crate::authz;
 use crate::authz::ApiResource;
+use crate::cidata::InstanceCiData;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::Resource;
 use crate::db::lookup::LookupPath;
-use crate::db::model::IpKind;
-use crate::db::model::Name;
 use crate::db::queries::network_interface;
 use crate::external_api::params;
+use nexus_db_model::IpKind;
+use nexus_db_model::Name;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -119,26 +120,25 @@ impl super::Nexus {
             });
         }
 
-        let saga_params = Arc::new(sagas::instance_create::Params {
+        let saga_params = sagas::instance_create::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             organization_name: organization_name.clone().into(),
             project_name: project_name.clone().into(),
             project_id: authz_project.id(),
             create_params: params.clone(),
-        });
+        };
 
         let saga_outputs = self
-            .execute_saga(
-                Arc::clone(&sagas::instance_create::SAGA_TEMPLATE),
-                sagas::instance_create::SAGA_NAME,
+            .execute_saga::<sagas::instance_create::SagaInstanceCreate>(
                 saga_params,
             )
             .await?;
-        // TODO-error more context would be useful
-        let instance_id =
-            saga_outputs.lookup_output::<Uuid>("instance_id").map_err(|e| {
-                Error::InternalError { internal_message: e.to_string() }
-            })?;
+
+        let instance_id = saga_outputs
+            .lookup_node_output::<Uuid>("instance_id")
+            .map_err(|e| Error::internal_error(&format!("{:#}", &e)))
+            .internal_context("looking up output from instance create saga")?;
+
         // TODO-correctness TODO-robustness TODO-design It's not quite correct
         // to take this instance id and look it up again.  It's possible that
         // it's been modified or even deleted since the saga executed.  In that
@@ -279,14 +279,12 @@ impl super::Nexus {
             .await?;
 
         // Kick off the migration saga
-        let saga_params = Arc::new(sagas::instance_migrate::Params {
+        let saga_params = sagas::instance_migrate::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             instance_id: authz_instance.id(),
             migrate_params: params,
-        });
-        self.execute_saga(
-            Arc::clone(&sagas::instance_migrate::SAGA_TEMPLATE),
-            sagas::instance_migrate::SAGA_NAME,
+        };
+        self.execute_saga::<sagas::instance_migrate::SagaInstanceMigrate>(
             saga_params,
         )
         .await?;

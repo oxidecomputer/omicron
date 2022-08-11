@@ -8,8 +8,13 @@ use uuid::Uuid;
 
 pub use nexus_types::external_api::params::MAX_USER_DATA_BYTES;
 
-impl Instance {
-    pub fn generate_cidata(
+pub trait InstanceCiData {
+    fn generate_cidata(&self, public_keys: &[String])
+        -> Result<Vec<u8>, Error>;
+}
+
+impl InstanceCiData for Instance {
+    fn generate_cidata(
         &self,
         public_keys: &[String],
     ) -> Result<Vec<u8>, Error> {

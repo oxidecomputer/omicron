@@ -8,6 +8,7 @@
 //! THERE ARE NO TESTS IN THIS FILE.
 
 use crate::integration_tests::unauthorized::HTTP_SERVER;
+use chrono::Utc;
 use http::method::Method;
 use lazy_static::lazy_static;
 use nexus_test_utils::RACK_UUID;
@@ -55,6 +56,7 @@ lazy_static! {
             },
             discoverable: true,
             user_provision_type: shared::UserProvisionType::Fixed,
+            admin_group_name: None,
         };
 
     // Organization used for testing
@@ -177,6 +179,13 @@ lazy_static! {
             disk_source: params::DiskSource::Blank { block_size: params::BlockSize::try_from(4096).unwrap() },
             size: ByteCount::from_gibibytes_u32(16),
         };
+    pub static ref DEMO_DISK_METRICS_URL: String =
+        format!(
+            "{}/metrics/activated?start_time={:?}&end_time={:?}",
+            *DEMO_DISK_URL,
+            Utc::now(),
+            Utc::now(),
+        );
 
     // Instance used for testing
     pub static ref DEMO_INSTANCE_NAME: Name = "demo-instance".parse().unwrap();
@@ -222,7 +231,7 @@ lazy_static! {
 
     // The instance needs a network interface, too.
     pub static ref DEMO_INSTANCE_NIC_NAME: Name =
-        omicron_nexus::defaults::DEFAULT_PRIMARY_NIC_NAME.parse().unwrap();
+        nexus_defaults::DEFAULT_PRIMARY_NIC_NAME.parse().unwrap();
     pub static ref DEMO_INSTANCE_NIC_URL: String =
         format!("{}/{}", *DEMO_INSTANCE_NICS_URL, *DEMO_INSTANCE_NIC_NAME);
     pub static ref DEMO_INSTANCE_NIC_CREATE: params::NetworkInterfaceCreate =
@@ -241,7 +250,7 @@ lazy_static! {
                 name: None,
                 description: Some(String::from("an updated description")),
             },
-            make_primary: false,
+            primary: false,
         }
     };
 }
@@ -307,6 +316,13 @@ lazy_static! {
     pub static ref DEMO_IP_POOL_RANGES_ADD_URL: String = format!("{}/add", *DEMO_IP_POOL_RANGES_URL);
     pub static ref DEMO_IP_POOL_RANGES_DEL_URL: String = format!("{}/remove", *DEMO_IP_POOL_RANGES_URL);
 
+    // IP Pools (Services)
+    pub static ref DEMO_IP_POOLS_SERVICE_URL: &'static str = "/ip-pools-service";
+    pub static ref DEMO_IP_POOL_SERVICE_URL: String = format!("{}/{}", *DEMO_IP_POOLS_SERVICE_URL, RACK_UUID);
+    pub static ref DEMO_IP_POOL_SERVICE_RANGES_URL: String = format!("{}/ranges", *DEMO_IP_POOL_SERVICE_URL);
+    pub static ref DEMO_IP_POOL_SERVICE_RANGES_ADD_URL: String = format!("{}/add", *DEMO_IP_POOL_SERVICE_RANGES_URL);
+    pub static ref DEMO_IP_POOL_SERVICE_RANGES_DEL_URL: String = format!("{}/remove", *DEMO_IP_POOL_SERVICE_RANGES_URL);
+
     // Snapshots
     pub static ref DEMO_SNAPSHOT_NAME: Name = "demo-snapshot".parse().unwrap();
     pub static ref DEMO_SNAPSHOT_URL: String =
@@ -360,6 +376,8 @@ lazy_static! {
             technical_contact_email: "technical@fake".to_string(),
 
             signing_keypair: None,
+
+            group_attribute_name: None,
         };
 }
 
@@ -569,6 +587,50 @@ lazy_static! {
         // IP Pool ranges/delete endpoint
         VerifyEndpoint {
             url: &*DEMO_IP_POOL_RANGES_DEL_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_IP_POOL_RANGE).unwrap()
+                ),
+            ],
+        },
+
+        // IP Pool endpoint (Oxide services)
+        VerifyEndpoint {
+            url: &*DEMO_IP_POOL_SERVICE_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get
+            ],
+        },
+
+        // IP Pool ranges endpoint (Oxide services)
+        VerifyEndpoint {
+            url: &*DEMO_IP_POOL_SERVICE_RANGES_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get
+            ],
+        },
+
+        // IP Pool ranges/add endpoint (Oxide services)
+        VerifyEndpoint {
+            url: &*DEMO_IP_POOL_SERVICE_RANGES_ADD_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_IP_POOL_RANGE).unwrap()
+                ),
+            ],
+        },
+
+        // IP Pool ranges/delete endpoint (Oxide services)
+        VerifyEndpoint {
+            url: &*DEMO_IP_POOL_SERVICE_RANGES_DEL_URL,
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
@@ -967,6 +1029,15 @@ lazy_static! {
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Delete,
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &*DEMO_DISK_METRICS_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get,
             ],
         },
 

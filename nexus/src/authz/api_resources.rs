@@ -89,7 +89,8 @@ pub trait ApiResourceWithRoles: ApiResource {
 pub trait ApiResourceWithRolesType: ApiResourceWithRoles {
     type AllowedRoles: serde::Serialize
         + serde::de::DeserializeOwned
-        + db::model::DatabaseString;
+        + db::model::DatabaseString
+        + Clone;
 }
 
 impl<T: ApiResource + oso::ToPolar + Clone> AuthorizedResource for T {
@@ -777,6 +778,14 @@ authz_resource! {
 }
 
 authz_resource! {
+    name = "SiloGroup",
+    parent = "Silo",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = Custom,
+}
+
+authz_resource! {
     name = "IdentityProvider",
     parent = "Silo",
     primary_key = Uuid,
@@ -838,7 +847,7 @@ mod test {
     use super::OrganizationRole;
     use super::ProjectRole;
     use super::SiloRole;
-    use crate::db::model::test_database_string_impl;
+    use crate::db::test_database_string_impl;
 
     #[test]
     fn test_roles_database_strings() {
