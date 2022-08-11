@@ -231,6 +231,14 @@ async fn test_silo_admin_group(cptestctx: &ControlPlaneTestContext) {
         },
     )
     .await;
+    grant_iam(
+        &client,
+        "/silos/silo-name",
+        SiloRole::Admin,
+        USER_TEST_PRIVILEGED.id(),
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
 
     let authn_opctx = nexus.opctx_external_authn();
 
@@ -507,6 +515,14 @@ async fn test_saml_idp_metadata_data_valid(
 
     create_silo(&client, "blahblah", true, shared::UserProvisionType::Fixed)
         .await;
+    grant_iam(
+        &client,
+        "/silos/blahblah",
+        SiloRole::Admin,
+        USER_TEST_PRIVILEGED.id(),
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
 
     let silo_saml_idp: SamlIdentityProvider = object_create(
         client,
@@ -568,6 +584,14 @@ async fn test_saml_idp_metadata_data_truncated(
 
     create_silo(&client, "blahblah", true, shared::UserProvisionType::Fixed)
         .await;
+    grant_iam(
+        &client,
+        "/silos/blahblah",
+        SiloRole::Admin,
+        USER_TEST_PRIVILEGED.id(),
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
 
     NexusRequest::new(
         RequestBuilder::new(
@@ -621,6 +645,14 @@ async fn test_saml_idp_metadata_data_invalid(
     const SILO_NAME: &str = "saml-silo";
     create_silo(&client, SILO_NAME, true, shared::UserProvisionType::Fixed)
         .await;
+    grant_iam(
+        &client,
+        &format!("/silos/{}", SILO_NAME),
+        SiloRole::Admin,
+        USER_TEST_PRIVILEGED.id(),
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
 
     NexusRequest::new(
         RequestBuilder::new(
@@ -765,6 +797,14 @@ async fn test_silo_user_fetch_by_external_id(
         "test-silo",
         true,
         shared::UserProvisionType::Fixed,
+    )
+    .await;
+    grant_iam(
+        &client,
+        "/silos/test-silo",
+        SiloRole::Admin,
+        USER_TEST_PRIVILEGED.id(),
+        AuthnMode::PrivilegedUser,
     )
     .await;
 
@@ -1304,6 +1344,14 @@ async fn test_silo_delete_clean_up_groups(cptestctx: &ControlPlaneTestContext) {
     let silo =
         create_silo(&client, "test-silo", true, shared::UserProvisionType::Jit)
             .await;
+    grant_iam(
+        &client,
+        "/silos/test-silo",
+        SiloRole::Admin,
+        USER_TEST_PRIVILEGED.id(),
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
 
     let opctx = OpContext::for_tests(
         cptestctx.logctx.log.new(o!()),

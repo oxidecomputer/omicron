@@ -14,12 +14,17 @@ use omicron_nexus::TestInterfaces;
 
 use http::method::Method;
 use http::StatusCode;
-use nexus_test_utils::resource_helpers::{create_silo, object_create};
+use nexus_test_utils::resource_helpers::{
+    create_silo, grant_iam, object_create,
+};
 
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 
 use httptest::{matchers::*, responders::*, Expectation, Server};
+use omicron_nexus::authn::USER_TEST_PRIVILEGED;
+use omicron_nexus::authz::SiloRole;
+use omicron_nexus::db::identity::Asset;
 
 // Valid SAML IdP entity descriptor from https://en.wikipedia.org/wiki/SAML_metadata#Identity_provider_metadata
 // note: no signing keys
@@ -34,6 +39,14 @@ async fn test_create_a_saml_idp(cptestctx: &ControlPlaneTestContext) {
     const SILO_NAME: &str = "saml-silo";
     create_silo(&client, SILO_NAME, true, shared::UserProvisionType::Fixed)
         .await;
+    grant_iam(
+        &client,
+        &format!("/silos/{}", SILO_NAME),
+        SiloRole::Admin,
+        USER_TEST_PRIVILEGED.id(),
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
 
     let silo: Silo =
         NexusRequest::object_get(&client, &format!("/silos/{}", SILO_NAME,))
@@ -152,6 +165,14 @@ async fn test_create_a_saml_idp_invalid_descriptor_truncated(
     const SILO_NAME: &str = "saml-silo";
     create_silo(&client, SILO_NAME, true, shared::UserProvisionType::Fixed)
         .await;
+    grant_iam(
+        &client,
+        &format!("/silos/{}", SILO_NAME),
+        SiloRole::Admin,
+        USER_TEST_PRIVILEGED.id(),
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
 
     let saml_idp_descriptor = {
         let mut saml_idp_descriptor = SAML_IDP_DESCRIPTOR.to_string();
@@ -212,6 +233,14 @@ async fn test_create_a_saml_idp_invalid_descriptor_no_redirect_binding(
     const SILO_NAME: &str = "saml-silo";
     create_silo(&client, SILO_NAME, true, shared::UserProvisionType::Fixed)
         .await;
+    grant_iam(
+        &client,
+        &format!("/silos/{}", SILO_NAME),
+        SiloRole::Admin,
+        USER_TEST_PRIVILEGED.id(),
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
 
     let saml_idp_descriptor = {
         let saml_idp_descriptor = SAML_IDP_DESCRIPTOR.to_string();
@@ -282,6 +311,14 @@ async fn test_create_a_hidden_silo_saml_idp(
 
     create_silo(&client, "hidden", false, shared::UserProvisionType::Fixed)
         .await;
+    grant_iam(
+        &client,
+        "/silos/hidden",
+        SiloRole::Admin,
+        USER_TEST_PRIVILEGED.id(),
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
 
     // Valid IdP descriptor
     let saml_idp_descriptor = SAML_IDP_DESCRIPTOR.to_string();
@@ -351,6 +388,14 @@ async fn test_saml_idp_metadata_url_404(cptestctx: &ControlPlaneTestContext) {
     const SILO_NAME: &str = "saml-silo";
     create_silo(&client, SILO_NAME, true, shared::UserProvisionType::Fixed)
         .await;
+    grant_iam(
+        &client,
+        &format!("/silos/{}", SILO_NAME),
+        SiloRole::Admin,
+        USER_TEST_PRIVILEGED.id(),
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
 
     let server = Server::run();
     server.expect(
@@ -405,6 +450,14 @@ async fn test_saml_idp_metadata_url_invalid(
     const SILO_NAME: &str = "saml-silo";
     create_silo(&client, SILO_NAME, true, shared::UserProvisionType::Fixed)
         .await;
+    grant_iam(
+        &client,
+        &format!("/silos/{}", SILO_NAME),
+        SiloRole::Admin,
+        USER_TEST_PRIVILEGED.id(),
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
 
     NexusRequest::new(
         RequestBuilder::new(
@@ -561,6 +614,14 @@ async fn test_saml_idp_rsa_keypair_ok(cptestctx: &ControlPlaneTestContext) {
     const SILO_NAME: &str = "saml-silo";
     create_silo(&client, SILO_NAME, true, shared::UserProvisionType::Fixed)
         .await;
+    grant_iam(
+        &client,
+        &format!("/silos/{}", SILO_NAME),
+        SiloRole::Admin,
+        USER_TEST_PRIVILEGED.id(),
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
 
     NexusRequest::new(
         RequestBuilder::new(
@@ -932,6 +993,14 @@ async fn test_post_saml_response(cptestctx: &ControlPlaneTestContext) {
 
     const SILO_NAME: &str = "saml-silo";
     create_silo(&client, SILO_NAME, true, shared::UserProvisionType::Jit).await;
+    grant_iam(
+        &client,
+        &format!("/silos/{}", SILO_NAME),
+        SiloRole::Admin,
+        USER_TEST_PRIVILEGED.id(),
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
 
     let _silo_saml_idp: views::SamlIdentityProvider = object_create(
         client,
@@ -1025,6 +1094,14 @@ async fn test_post_saml_response_with_relay_state(
 
     const SILO_NAME: &str = "saml-silo";
     create_silo(&client, SILO_NAME, true, shared::UserProvisionType::Jit).await;
+    grant_iam(
+        &client,
+        &format!("/silos/{}", SILO_NAME),
+        SiloRole::Admin,
+        USER_TEST_PRIVILEGED.id(),
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
 
     let _silo_saml_idp: views::SamlIdentityProvider = object_create(
         client,
