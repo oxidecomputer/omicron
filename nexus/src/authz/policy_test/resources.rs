@@ -113,13 +113,8 @@ async fn make_silo(
     for i in 0..norganizations {
         let organization_name = format!("{}-org{}", silo_name, i + 1);
         let org_first_branch = first_branch && i == 0;
-        make_organization(
-            builder,
-            &silo,
-            &organization_name,
-            org_first_branch,
-        )
-        .await;
+        make_organization(builder, &silo, &organization_name, org_first_branch)
+            .await;
     }
 }
 
