@@ -663,7 +663,7 @@ async fn ssc_create_volume_record(
     let snapshot_volume_construction_request: VolumeConstructionRequest =
         create_snapshot_from_disk(
             &disk_volume_construction_request,
-            &replace_sockets_map,
+            Some(&replace_sockets_map),
         )
         .map_err(|e| {
             ActionError::action_failed(Error::internal_error(&e.to_string()))
@@ -742,7 +742,7 @@ async fn ssc_finalize_snapshot_record(
 /// VolumeConstructionRequest and modifying it accordingly.
 fn create_snapshot_from_disk(
     disk: &VolumeConstructionRequest,
-    socket_map: &BTreeMap<String, String>,
+    socket_map: Option<&BTreeMap<String, String>>,
 ) -> anyhow::Result<VolumeConstructionRequest> {
     // When copying a disk's VolumeConstructionRequest to turn it into a
     // snapshot:
@@ -767,7 +767,16 @@ fn create_snapshot_from_disk(
                     create_snapshot_from_disk(&subvol, socket_map)
                 })
                 .collect::<anyhow::Result<Vec<VolumeConstructionRequest>>>()?,
-            read_only_parent: read_only_parent.clone(),
+            read_only_parent:
+                if let Some(read_only_parent) = read_only_parent {
+                    Some(Box::new(create_snapshot_from_disk(
+                        read_only_parent,
+                        // no socket modification required for read-only parents
+                        None,
+                    )?))
+                } else {
+                    None
+                }
         }),
 
         VolumeConstructionRequest::Url { id: _id, block_size, url } => {
@@ -781,13 +790,15 @@ fn create_snapshot_from_disk(
         VolumeConstructionRequest::Region { block_size, opts, gen } => {
             let mut opts = opts.clone();
 
-            for target in &mut opts.target {
-                *target = socket_map
-                    .get(target)
-                    .ok_or_else(|| {
-                        anyhow!("target {} not found in map!", target)
-                    })?
-                    .clone();
+            if let Some(socket_map) = socket_map {
+                for target in &mut opts.target {
+                    *target = socket_map
+                        .get(target)
+                        .ok_or_else(|| {
+                            anyhow!("target {} not found in map!", target)
+                        })?
+                        .clone();
+                }
             }
 
             opts.id = Uuid::new_v4();
@@ -808,5 +819,258 @@ fn create_snapshot_from_disk(
                 path: path.clone(),
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    use sled_agent_client::types::CrucibleOpts;
+
+    #[test]
+    fn test_create_snapshot_from_disk_modify_request() {
+        let disk = VolumeConstructionRequest::Volume {
+            block_size: 512,
+            id: Uuid::new_v4(),
+            read_only_parent: Some(
+                Box::new(VolumeConstructionRequest::Volume {
+                    block_size: 512,
+                    id: Uuid::new_v4(),
+                    read_only_parent: Some(
+                        Box::new(VolumeConstructionRequest::Url {
+                            id: Uuid::new_v4(),
+                            block_size: 512,
+                            url: "http://[fd01:1122:3344:101::15]/crucible-tester-sparse.img".into(),
+                        })
+                    ),
+                    sub_volumes: vec![
+                        VolumeConstructionRequest::Region {
+                            block_size: 512,
+                            gen: 1,
+                            opts: CrucibleOpts {
+                                id: Uuid::new_v4(),
+                                key: Some("tkBksPOA519q11jvLCCX5P8t8+kCX4ZNzr+QP8M+TSg=".into()),
+                                lossy: false,
+                                read_only: true,
+                                target: vec![
+                                    "[fd00:1122:3344:101::8]:19001".into(),
+                                    "[fd00:1122:3344:101::7]:19001".into(),
+                                    "[fd00:1122:3344:101::6]:19001".into(),
+                                ],
+                                cert_pem: None,
+                                key_pem: None,
+                                root_cert_pem: None,
+                                flush_timeout: None,
+                                control: None,
+                            }
+                        },
+                    ]
+                }),
+            ),
+            sub_volumes: vec![
+                VolumeConstructionRequest::Region {
+                    block_size: 512,
+                    gen: 100,
+                    opts: CrucibleOpts {
+                        id: Uuid::new_v4(),
+                        key: Some("jVex5Zfm+avnFMyezI6nCVPRPs53EWwYMN844XETDBM=".into()),
+                        lossy: false,
+                        read_only: false,
+                        target: vec![
+                            "[fd00:1122:3344:101::8]:19002".into(),
+                            "[fd00:1122:3344:101::7]:19002".into(),
+                            "[fd00:1122:3344:101::6]:19002".into(),
+                        ],
+                        cert_pem: None,
+                        key_pem: None,
+                        root_cert_pem: None,
+                        flush_timeout: None,
+                        control: Some("127.0.0.1:12345".into()),
+                    }
+                },
+            ],
+        };
+
+        let mut replace_sockets: BTreeMap<String, String> = BTreeMap::new();
+
+        // Replacements for top level Region only
+        replace_sockets.insert(
+            "[fd00:1122:3344:101::6]:19002".into(), 
+            "[XXXX:1122:3344:101::6]:9000".into(),
+        );
+        replace_sockets.insert(
+            "[fd00:1122:3344:101::7]:19002".into(), 
+            "[XXXX:1122:3344:101::7]:9000".into(),
+        );
+        replace_sockets.insert(
+            "[fd00:1122:3344:101::8]:19002".into(), 
+            "[XXXX:1122:3344:101::8]:9000".into(),
+        );
+
+        let snapshot = create_snapshot_from_disk(&disk, Some(&replace_sockets)).unwrap();
+
+        eprintln!("{:?}", serde_json::to_string(&snapshot).unwrap());
+
+        // validate that each ID changed
+
+        let snapshot_id_1 = match &snapshot {
+            VolumeConstructionRequest::Volume { id, .. } => id,
+            _ => panic!("enum changed shape!"),
+        };
+
+        let disk_id_1 = match &disk {
+            VolumeConstructionRequest::Volume { id, .. } => id,
+            _ => panic!("enum changed shape!"),
+        };
+
+        assert_ne!(snapshot_id_1, disk_id_1);
+
+        let snapshot_first_opts = match &snapshot {
+            VolumeConstructionRequest::Volume { sub_volumes, .. } => {
+                match &sub_volumes[0] {
+                    VolumeConstructionRequest::Region { opts, .. } => opts,
+                    _ => panic!("enum changed shape!"),
+                }
+            },
+            _ => panic!("enum changed shape!"),
+        };
+
+        let disk_first_opts = match &disk {
+            VolumeConstructionRequest::Volume { sub_volumes, .. } => {
+                match &sub_volumes[0] {
+                    VolumeConstructionRequest::Region { opts, .. } => opts,
+                    _ => panic!("enum changed shape!"),
+                }
+            },
+            _ => panic!("enum changed shape!"),
+        };
+
+        assert_ne!(snapshot_first_opts.id, disk_first_opts.id);
+
+        let snapshot_id_3 = match &snapshot {
+            VolumeConstructionRequest::Volume { read_only_parent, .. } => {
+                match read_only_parent.as_ref().unwrap().as_ref() {
+                    VolumeConstructionRequest::Volume { id, .. } => id,
+                    _ => panic!("enum changed shape!"),
+                }
+            },
+            _ => panic!("enum changed shape!"),
+        };
+
+        let disk_id_3 = match &disk {
+            VolumeConstructionRequest::Volume { read_only_parent, .. } => {
+                match read_only_parent.as_ref().unwrap().as_ref() {
+                    VolumeConstructionRequest::Volume { id, .. } => id,
+                    _ => panic!("enum changed shape!"),
+                }
+            },
+            _ => panic!("enum changed shape!"),
+        };
+
+        assert_ne!(snapshot_id_3, disk_id_3);
+
+        let snapshot_second_opts = match &snapshot {
+            VolumeConstructionRequest::Volume { read_only_parent, .. } => {
+                match read_only_parent.as_ref().unwrap().as_ref() {
+                    VolumeConstructionRequest::Volume { sub_volumes, .. } => {
+                        match &sub_volumes[0] {
+                            VolumeConstructionRequest::Region { opts, .. } => opts,
+                            _ => panic!("enum changed shape!"),
+                        }
+                    },
+                    _ => panic!("enum changed shape!"),
+                }
+            },
+            _ => panic!("enum changed shape!"),
+        };
+
+        let disk_second_opts = match &disk {
+            VolumeConstructionRequest::Volume { read_only_parent, .. } => {
+                match read_only_parent.as_ref().unwrap().as_ref() {
+                    VolumeConstructionRequest::Volume { sub_volumes, .. } => {
+                        match &sub_volumes[0] {
+                            VolumeConstructionRequest::Region { opts, .. } => opts,
+                            _ => panic!("enum changed shape!"),
+                        }
+                    },
+                    _ => panic!("enum changed shape!"),
+                }
+            },
+            _ => panic!("enum changed shape!"),
+        };
+
+        assert_ne!(snapshot_second_opts.id, disk_second_opts.id);
+
+        // validate generation numbers were bumped
+
+        let snapshot_gen_1 = match &snapshot {
+            VolumeConstructionRequest::Volume { sub_volumes, .. } => {
+                match &sub_volumes[0] {
+                    VolumeConstructionRequest::Region { gen, .. } => gen,
+                    _ => panic!("enum changed shape!"),
+                }
+            },
+            _ => panic!("enum changed shape!"),
+        };
+
+        let disk_gen_1 = match &disk {
+            VolumeConstructionRequest::Volume { sub_volumes, .. } => {
+                match &sub_volumes[0] {
+                    VolumeConstructionRequest::Region { gen, .. } => gen,
+                    _ => panic!("enum changed shape!"),
+                }
+            },
+            _ => panic!("enum changed shape!"),
+        };
+
+        assert_eq!(*snapshot_gen_1, *disk_gen_1 + 1);
+
+        let snapshot_gen_2 = match &snapshot {
+            VolumeConstructionRequest::Volume { read_only_parent, .. } => {
+                match read_only_parent.as_ref().unwrap().as_ref() {
+                    VolumeConstructionRequest::Volume { sub_volumes, .. } => {
+                        match &sub_volumes[0] {
+                            VolumeConstructionRequest::Region { gen, .. } => gen,
+                            _ => panic!("enum changed shape!"),
+                        }
+                    },
+                    _ => panic!("enum changed shape!"),
+                }
+            },
+            _ => panic!("enum changed shape!"),
+        };
+
+        let disk_gen_2 = match &disk {
+            VolumeConstructionRequest::Volume { read_only_parent, .. } => {
+                match read_only_parent.as_ref().unwrap().as_ref() {
+                    VolumeConstructionRequest::Volume { sub_volumes, .. } => {
+                        match &sub_volumes[0] {
+                            VolumeConstructionRequest::Region { gen, .. } => gen,
+                            _ => panic!("enum changed shape!"),
+                        }
+                    },
+                    _ => panic!("enum changed shape!"),
+                }
+            },
+            _ => panic!("enum changed shape!"),
+        };
+
+        assert_eq!(*snapshot_gen_2, disk_gen_2 + 1);
+
+        // validate only the top level targets were changed
+
+        assert_ne!(snapshot_first_opts.target, disk_first_opts.target);
+        assert_eq!(snapshot_second_opts.target, disk_second_opts.target);
+
+        // validate that read_only was set correctly
+
+        assert_eq!(snapshot_first_opts.read_only, true);
+        assert_eq!(disk_first_opts.read_only, false);
+
+        // validate control socket was removed
+
+        assert!(snapshot_first_opts.control.is_none());
+        assert!(disk_first_opts.control.is_some());
     }
 }
