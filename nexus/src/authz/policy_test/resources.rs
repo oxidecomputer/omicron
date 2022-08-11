@@ -6,7 +6,6 @@
 //! policy test
 
 use super::coverage::Coverage;
-use super::make_uuid;
 use crate::authz;
 use crate::authz::ApiResourceWithRolesType;
 use crate::authz::AuthorizedResource;
@@ -16,7 +15,6 @@ use crate::db::fixed_data::FLEET_ID;
 use authz::ApiResource;
 use futures::future::BoxFuture;
 use futures::FutureExt;
-use lazy_static::lazy_static;
 use nexus_db_model::DatabaseString;
 use nexus_types::external_api::shared;
 use omicron_common::api::external::Error;
@@ -24,10 +22,6 @@ use omicron_common::api::external::LookupType;
 use std::sync::Arc;
 use strum::IntoEnumIterator;
 use uuid::Uuid;
-
-lazy_static! {
-    pub static ref SILO1_ID: Uuid = make_uuid();
-}
 
 /// Manages the construction of the resource hierarchy used in the test, plus
 /// associated users and role assignments
@@ -85,7 +79,7 @@ impl<'a> ResourceBuilder<'a> {
         for role in T::AllowedRoles::iter() {
             let role_name = role.to_database_string();
             let username = format!("{}-{}", resource_name, role_name);
-            let user_id = make_uuid();
+            let user_id = Uuid::new_v4();
             println!("creating user: {}", &username);
             self.users.push((username.clone(), user_id));
 
