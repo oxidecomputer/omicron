@@ -6,6 +6,7 @@ mod bulk_state_get;
 mod config;
 mod context;
 mod error;
+mod serial_console;
 
 pub mod http_entrypoints; // TODO pub only for testing - is this right?
 

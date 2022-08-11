@@ -75,12 +75,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c5d78ce20460b82d3fa150275ed9d55e21064fc7951177baacf86a145c4a4b1f"
 
 [[package]]
-name = "array-init"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6945cc5422176fc5e602e590c2878d2c2acd9a4fe20a4baa7c28022521698ec6"
-
-[[package]]
 name = "ascii-canvas"
 version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1706,21 +1700,16 @@ version = "0.1.0"
 dependencies = [
  "futures",
  "gateway-messages",
- "http",
- "hyper",
  "omicron-common",
  "omicron-test-utils",
  "once_cell",
- "ringbuffer",
  "serde",
  "serde_with",
  "slog",
  "thiserror",
  "tokio",
  "tokio-stream",
- "tokio-tungstenite",
  "usdt",
- "uuid",
 ]
 
 [[package]]
@@ -2905,7 +2894,6 @@ dependencies = [
  "omicron-test-utils",
  "openapi-lint",
  "openapiv3",
- "ringbuffer",
  "schemars",
  "serde",
  "serde_json",
@@ -4327,15 +4315,6 @@ dependencies = [
  "untrusted",
  "web-sys",
  "winapi",
-]
-
-[[package]]
-name = "ringbuffer"
-version = "0.8.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b30a00730a27595dcf899dce512aa031dd650f86aafcb132fd8dd9f409b369d0"
-dependencies = [
- "array-init",
 ]
 
 [[package]]

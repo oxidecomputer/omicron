@@ -5,19 +5,13 @@
 // Copyright 2022 Oxide Computer Company
 
 use super::SpIdentifier;
-use super::SpSocket;
 use super::SwitchPort;
-use crate::communicator::ResponseKindExt;
 use crate::error::StartupError;
-use crate::recv_handler::RecvHandler;
-use crate::Timeout;
+use crate::single_sp::SingleSp;
 use futures::stream::FuturesUnordered;
 use futures::Stream;
 use futures::StreamExt;
-use gateway_messages::RequestKind;
 use gateway_messages::SpPort;
-use omicron_common::backoff;
-use omicron_common::backoff::Backoff;
 use serde::Deserialize;
 use serde::Serialize;
 use slog::debug;
@@ -26,10 +20,8 @@ use slog::Logger;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::convert::TryFrom;
-use std::net::SocketAddr;
+use std::net::SocketAddrV6;
 use std::sync::Arc;
-use std::time::Duration;
-use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 use tokio_stream::wrappers::ReceiverStream;
@@ -40,14 +32,14 @@ pub struct SwitchPortConfig {
     /// Data link addresses; this is the address on which we should bind a
     /// socket, which will be tagged with the appropriate VLAN for this switch
     /// port (see RFD 250).
-    pub data_link_addr: SocketAddr,
+    pub data_link_addr: SocketAddrV6,
 
     /// Multicast address used to find the SP connected to this port.
     // TODO: The multicast address used should be a single address, not a
     // per-port address. For now we configure it per-port to make dev/test on a
     // single system easier; we can run multiple simulated SPs that all listen
     // to different multicast addresses on one host.
-    pub multicast_addr: SocketAddr,
+    pub multicast_addr: SocketAddrV6,
 
     /// Map defining the logical identifier of the SP connected to this port for
     /// each of the possible locations where MGS is running (see
@@ -93,25 +85,10 @@ pub(super) struct LocationMap {
 }
 
 impl LocationMap {
-    // For unit tests we don't want to have to run discovery, so allow
-    // construction of a canned `LocationMap`.
-    #[cfg(test)]
-    pub(super) fn new_raw(
-        location_name: String,
-        port_to_id: HashMap<SwitchPort, SpIdentifier>,
-    ) -> Self {
-        let mut id_to_port = HashMap::with_capacity(port_to_id.len());
-        for (&port, &id) in port_to_id.iter() {
-            id_to_port.insert(id, port);
-        }
-        Self { location_name, port_to_id, id_to_port }
-    }
-
     pub(super) async fn run_discovery(
         config: LocationConfig,
         ports: HashMap<SwitchPort, SwitchPortConfig>,
-        sockets: Arc<HashMap<SwitchPort, UdpSocket>>,
-        recv_handler: Arc<RecvHandler>,
+        sockets: Arc<HashMap<SwitchPort, SingleSp>>,
         deadline: Instant,
         log: &Logger,
     ) -> Result<Self, StartupError> {
@@ -132,7 +109,6 @@ impl LocationMap {
                 discover_sps(
                     &sockets,
                     ports,
-                    &recv_handler,
                     location_determination,
                     refined_locations_tx,
                     &log,
@@ -358,63 +334,28 @@ impl TryFrom<(&'_ HashMap<SwitchPort, SwitchPortConfig>, LocationConfig)>
 /// and the list of locations we could be in based on the SP's response on that
 /// port. Our spawner is responsible for collecting/using those messages.
 async fn discover_sps(
-    sockets: &HashMap<SwitchPort, UdpSocket>,
+    sockets: &HashMap<SwitchPort, SingleSp>,
     port_config: HashMap<SwitchPort, SwitchPortConfig>,
-    recv_handler: &RecvHandler,
     mut location_determination: Vec<ValidatedLocationDeterminationConfig>,
     refined_locations: mpsc::Sender<(SwitchPort, HashSet<String>)>,
     log: &Logger,
 ) {
-    // Build a collection of futures that sends discovery packets on every port;
-    // each future runs until it hears back from an SP (possibly running forever
-    // if there is no SP listening on the other end of that port's connection).
+    // Build a collection of futures representing the results of discovering the
+    // SP address for each switch port in `sockets`.
     let mut futs = FuturesUnordered::new();
-    for (port, config) in port_config {
+    for (switch_port, _config) in port_config {
         futs.push(async move {
-            // construct a socket pointed to a multicast addr instead of a
-            // specific, known addr
-            let socket = SpSocket {
-                location_map: None,
-                port,
-                addr: config.multicast_addr,
-                // all ports in `port_config` also get sockets bound to them;
-                // unwrapping this lookup is fine
-                socket: sockets.get(&port).unwrap(),
-            };
+            // all ports in `port_config` also get sockets bound to them;
+            // unwrapping this lookup is fine
+            let sp = sockets.get(&switch_port).unwrap();
 
-            let mut backoff = backoff::internal_service_policy();
+            let mut addr_watch = sp.sp_addr_watch().clone();
             loop {
-                let duration = backoff
-                    .next_backoff()
-                    .expect("internal backoff policy gave up");
-                tokio::time::sleep(duration).await;
-
-                let result = socket
-                    .request_response(
-                        &recv_handler,
-                        RequestKind::Discover,
-                        ResponseKindExt::expect_discover,
-                        // TODO should this timeout be configurable or itself
-                        // have some kind of backoff? we're inside a
-                        // `backoff::retry()` loop, but if an SP is alive but
-                        // slow (i.e., taking longer than this timeout to reply)
-                        // we'll never hear it - the response will show up late
-                        // and we'll ignore it. For now just leave it at some
-                        // reasonably large number; this may solve itself when
-                        // we move to some kind of authenticated comms channel.
-                        Some(Timeout::from_now(Duration::from_secs(5))),
-                        &log,
-                    )
-                    .await;
-
-                match result {
-                    Ok(response) => return (port, response),
-                    Err(err) => {
-                        debug!(
-                            log, "discovery failed; will retry";
-                            "port" => ?port,
-                            "err" => %err,
-                        );
+                let current = *addr_watch.borrow();
+                match current {
+                    Some((_addr, sp_port)) => return (switch_port, sp_port),
+                    None => {
+                        addr_watch.changed().await.unwrap();
                     }
                 }
             }
@@ -422,25 +363,25 @@ async fn discover_sps(
     }
 
     // Wait for responses.
-    while let Some((port, response)) = futs.next().await {
+    while let Some((switch_port, sp_port)) = futs.next().await {
         // See if this port can participate in location determination.
         let pos = match location_determination
             .iter()
-            .position(|d| d.switch_port == port)
+            .position(|d| d.switch_port == switch_port)
         {
             Some(pos) => pos,
             None => {
                 info!(
                     log, "received discovery response (not used for location)";
-                    "port" => ?port,
-                    "response" => ?response,
+                    "switch_port" => ?switch_port,
+                    "sp_port" => ?sp_port,
                 );
                 continue;
             }
         };
         let determination = location_determination.remove(pos);
 
-        let refined = match response.sp_port {
+        let refined = match sp_port {
             SpPort::One => determination.sp_port_1,
             SpPort::Two => determination.sp_port_2,
         };
@@ -448,7 +389,7 @@ async fn discover_sps(
         // the only failure possible here is that the receiver is gone; that's
         // harmless for us (e.g., maybe it's already fully determined the
         // location and doesn't care about more messages)
-        let _ = refined_locations.send((port, refined)).await;
+        let _ = refined_locations.send((switch_port, refined)).await;
     }
 
     // TODO If we're exiting, we've now heard from an SP on every port. Is there
@@ -532,8 +473,8 @@ mod tests {
         let bad_ports = HashMap::from([(
             SwitchPort(0),
             SwitchPortConfig {
-                data_link_addr: "127.0.0.1:0".parse().unwrap(),
-                multicast_addr: "127.0.0.1:0".parse().unwrap(),
+                data_link_addr: "[::1]:0".parse().unwrap(),
+                multicast_addr: "[::1]:0".parse().unwrap(),
                 location: HashMap::from([
                     (String::from("a"), SpIdentifier::new(SpType::Sled, 0)),
                     // missing "b", has extraneous "c"
@@ -600,8 +541,8 @@ mod tests {
         let good_ports = HashMap::from([(
             SwitchPort(0),
             SwitchPortConfig {
-                data_link_addr: "127.0.0.1:0".parse().unwrap(),
-                multicast_addr: "127.0.0.1:0".parse().unwrap(),
+                data_link_addr: "[::1]:0".parse().unwrap(),
+                multicast_addr: "[::1]:0".parse().unwrap(),
                 location: HashMap::from([
                     (String::from("a"), SpIdentifier::new(SpType::Sled, 0)),
                     (String::from("b"), SpIdentifier::new(SpType::Sled, 1)),

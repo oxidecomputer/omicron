@@ -14,11 +14,10 @@ pub struct ServerContext {
     pub sp_comms: Arc<Communicator>,
     pub bulk_sp_state_requests: BulkSpStateRequests,
     pub timeouts: Timeouts,
+    pub log: Logger,
 }
 
 pub struct Timeouts {
-    pub ignition_controller: Duration,
-    pub sp_request: Duration,
     pub bulk_request_default: Duration,
     pub bulk_request_max: Duration,
     pub bulk_request_page: Duration,
@@ -28,10 +27,6 @@ pub struct Timeouts {
 impl From<&'_ crate::config::Timeouts> for Timeouts {
     fn from(timeouts: &'_ crate::config::Timeouts) -> Self {
         Self {
-            ignition_controller: Duration::from_millis(
-                timeouts.ignition_controller_millis,
-            ),
-            sp_request: Duration::from_millis(timeouts.sp_request_millis),
             bulk_request_default: Duration::from_millis(
                 timeouts.bulk_request_default_millis,
             ),
@@ -63,6 +58,7 @@ impl ServerContext {
             sp_comms: Arc::clone(&comms),
             bulk_sp_state_requests: BulkSpStateRequests::new(comms, log),
             timeouts: Timeouts::from(&timeouts),
+            log: log.clone(),
         }))
     }
 }

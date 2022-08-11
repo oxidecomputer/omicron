@@ -6,7 +6,15 @@
 
 //! Interface for communicating with a single SP.
 
+use crate::communicator::ResponseKindExt;
+use crate::error::BadResponseType;
+use crate::error::SerialConsoleAlreadyAttached;
+use crate::error::SpCommunicationError;
+use crate::error::UpdateError;
 use gateway_messages::version;
+use gateway_messages::BulkIgnitionState;
+use gateway_messages::IgnitionCommand;
+use gateway_messages::IgnitionState;
 use gateway_messages::Request;
 use gateway_messages::RequestKind;
 use gateway_messages::ResponseError;
@@ -28,11 +36,10 @@ use slog::trace;
 use slog::warn;
 use slog::Logger;
 use std::convert::TryInto;
-use std::io;
 use std::net::Ipv6Addr;
+use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use std::time::Duration;
-use thiserror::Error;
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
@@ -40,9 +47,6 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tokio::time;
 use tokio::time::timeout;
-
-use crate::communicator::ResponseKindExt;
-use crate::error::BadResponseType;
 
 pub const DISCOVERY_MULTICAST_ADDR: Ipv6Addr =
     Ipv6Addr::new(0xff15, 0, 0, 0, 0, 0, 0x1de, 0);
@@ -53,35 +57,7 @@ pub const DISCOVERY_MULTICAST_ADDR: Ipv6Addr =
 // TODO-correctness/TODO-security What do we do if the SP address changes?
 const DISCOVERY_INTERVAL_IDLE: Duration = Duration::from_secs(60);
 
-#[derive(Debug, Error)]
-pub enum Error {
-    #[error("failed to send UDP packet to {addr}: {err}")]
-    UdpSendTo { addr: SocketAddrV6, err: io::Error },
-    #[error("failed to recv UDP packet: {0}")]
-    UdpRecv(io::Error),
-    #[error("failed to deserialize SP message from {peer}: {err}")]
-    Deserialize { peer: SocketAddrV6, err: gateway_messages::HubpackError },
-    #[error("RPC call failed (gave up after {0} attempts)")]
-    ExhaustedNumAttempts(usize),
-    #[error("serial console already attached")]
-    SerialConsoleAlreadyAttached,
-    #[error(transparent)]
-    BadResponseType(#[from] BadResponseType),
-    #[error("Error response from SP: {0}")]
-    SpError(#[from] ResponseError),
-}
-
-#[derive(Debug, Error)]
-pub enum UpdateError {
-    #[error("update image is too large")]
-    ImageTooLarge,
-    #[error("error starting update: {0}")]
-    Start(Error),
-    #[error("error updating chunk at offset {offset}: {err}")]
-    Chunk { offset: u32, err: Error },
-}
-
-type Result<T, E = Error> = std::result::Result<T, E>;
+type Result<T, E = SpCommunicationError> = std::result::Result<T, E>;
 
 #[derive(Debug)]
 pub struct SingleSp {
@@ -137,6 +113,43 @@ impl SingleSp {
         &self,
     ) -> &watch::Receiver<Option<(SocketAddrV6, SpPort)>> {
         &self.sp_addr_rx
+    }
+
+    /// Request the state of an ignition target.
+    ///
+    /// This will fail if this SP is not connected to an ignition controller.
+    pub async fn ignition_state(&self, target: u8) -> Result<IgnitionState> {
+        self.rpc(RequestKind::IgnitionState { target }).await.and_then(
+            |(_peer, response)| {
+                response.expect_ignition_state().map_err(Into::into)
+            },
+        )
+    }
+
+    /// Request the state of all ignition targets.
+    ///
+    /// This will fail if this SP is not connected to an ignition controller.
+    pub async fn bulk_ignition_state(&self) -> Result<BulkIgnitionState> {
+        self.rpc(RequestKind::BulkIgnitionState).await.and_then(
+            |(_peer, response)| {
+                response.expect_bulk_ignition_state().map_err(Into::into)
+            },
+        )
+    }
+
+    /// Send an ignition command to the given target.
+    ///
+    /// This will fail if this SP is not connected to an ignition controller.
+    pub async fn ignition_command(
+        &self,
+        target: u8,
+        command: IgnitionCommand,
+    ) -> Result<()> {
+        self.rpc(RequestKind::IgnitionCommand { target, command })
+            .await
+            .and_then(|(_peer, response)| {
+                response.expect_ignition_command_ack().map_err(Into::into)
+            })
     }
 
     /// Request the state of the SP.
@@ -239,12 +252,12 @@ impl SingleSp {
         // SP wasn't expecting a reset trigger (because it has reset!).
         match self.rpc(RequestKind::SysResetTrigger).await {
             Ok((_peer, response)) => {
-                Err(Error::BadResponseType(BadResponseType {
+                Err(SpCommunicationError::BadResponseType(BadResponseType {
                     expected: "system-reset",
                     got: response.name(),
                 }))
             }
-            Err(Error::SpError(
+            Err(SpCommunicationError::SpError(
                 ResponseError::SysResetTriggerWithoutPrepare,
             )) => Ok(()),
             Err(other) => Err(other),
@@ -253,23 +266,32 @@ impl SingleSp {
 
     /// "Attach" to the serial console, setting up a tokio channel for all
     /// incoming serial console packets from the SP.
-    pub async fn serial_console_attach(&self) -> Result<AttachedSerialConsole> {
+    pub async fn serial_console_attach(
+        &self,
+    ) -> Result<AttachedSerialConsole, SerialConsoleAlreadyAttached> {
         let (tx, rx) = oneshot::channel();
 
         // `Inner::run()` doesn't exit until we are dropped, so unwrapping here
         // only panics if it itself panicked.
         self.cmds_tx.send(InnerCommand::SerialConsoleAttach(tx)).await.unwrap();
 
-        let rx = rx.await.unwrap()?;
+        let attachment = rx.await.unwrap()?;
 
-        Ok(AttachedSerialConsole { rx, inner_tx: self.cmds_tx.clone() })
+        Ok(AttachedSerialConsole {
+            key: attachment.key,
+            rx: attachment.incoming,
+            inner_tx: self.cmds_tx.clone(),
+        })
     }
 
-    /// Detach an existing attached serial console connection.
+    /// Detach any existing attached serial console connection.
     pub async fn serial_console_detach(&self) {
         // `Inner::run()` doesn't exit until we are dropped, so unwrapping here
         // only panics if it itself panicked.
-        self.cmds_tx.send(InnerCommand::SerialConsoleDetach).await.unwrap();
+        self.cmds_tx
+            .send(InnerCommand::SerialConsoleDetach(None))
+            .await
+            .unwrap();
     }
 
     pub(crate) async fn rpc(
@@ -298,6 +320,7 @@ async fn rpc(
 
 #[derive(Debug)]
 pub struct AttachedSerialConsole {
+    key: u64,
     rx: mpsc::Receiver<SerialConsole>,
     inner_tx: mpsc::Sender<InnerCommand>,
 }
@@ -307,7 +330,10 @@ impl AttachedSerialConsole {
         self,
     ) -> (AttachedSerialConsoleSend, AttachedSerialConsoleRecv) {
         (
-            AttachedSerialConsoleSend { inner_tx: self.inner_tx },
+            AttachedSerialConsoleSend {
+                key: self.key,
+                inner_tx: self.inner_tx,
+            },
             AttachedSerialConsoleRecv { rx: self.rx },
         )
     }
@@ -315,6 +341,7 @@ impl AttachedSerialConsole {
 
 #[derive(Debug)]
 pub struct AttachedSerialConsoleSend {
+    key: u64,
     inner_tx: mpsc::Sender<InnerCommand>,
 }
 
@@ -326,6 +353,14 @@ impl AttachedSerialConsoleSend {
             .and_then(|(_peer, response)| {
                 response.expect_serial_console_write_ack().map_err(Into::into)
             })
+    }
+
+    /// Detach this serial console connection.
+    pub async fn detach(&self) {
+        self.inner_tx
+            .send(InnerCommand::SerialConsoleDetach(Some(self.key)))
+            .await
+            .unwrap();
     }
 }
 
@@ -351,13 +386,28 @@ struct RpcRequest {
 }
 
 #[derive(Debug)]
+struct SerialConsoleAttachment {
+    key: u64,
+    incoming: mpsc::Receiver<SerialConsole>,
+}
+
+#[derive(Debug)]
 // `Rpc` is the large variant, which is by far the most common, so silence
 // clippy's warning that recommends boxing it.
 #[allow(clippy::large_enum_variant)]
 enum InnerCommand {
     Rpc(RpcRequest),
-    SerialConsoleAttach(oneshot::Sender<Result<mpsc::Receiver<SerialConsole>>>),
-    SerialConsoleDetach,
+    SerialConsoleAttach(
+        oneshot::Sender<
+            Result<SerialConsoleAttachment, SerialConsoleAlreadyAttached>,
+        >,
+    ),
+    // The associated value is the connection key; if `Some(_)`, only detach if
+    // the currently-attached key number matches. If `None`, detach any current
+    // connection. These correspond to "detach the current session" (performed
+    // automatically when a connection is closed) and "force-detach any session"
+    // (performed by a user).
+    SerialConsoleDetach(Option<u64>),
 }
 
 struct Inner {
@@ -370,6 +420,7 @@ struct Inner {
     serial_console_tx: Option<mpsc::Sender<SerialConsole>>,
     cmds_rx: mpsc::Receiver<InnerCommand>,
     request_id: u32,
+    serial_console_connection_key: u64,
 }
 
 impl Inner {
@@ -392,6 +443,7 @@ impl Inner {
             serial_console_tx: None,
             cmds_rx,
             request_id: 0,
+            serial_console_connection_key: 0,
         }
     }
 
@@ -519,16 +571,24 @@ impl Inner {
             }
             InnerCommand::SerialConsoleAttach(response_tx) => {
                 let resp = if self.serial_console_tx.is_some() {
-                    Err(Error::SerialConsoleAlreadyAttached)
+                    Err(SerialConsoleAlreadyAttached)
                 } else {
                     let (tx, rx) = mpsc::channel(SERIAL_CONSOLE_CHANNEL_DEPTH);
                     self.serial_console_tx = Some(tx);
-                    Ok(rx)
+                    self.serial_console_connection_key += 1;
+                    Ok(SerialConsoleAttachment {
+                        key: self.serial_console_connection_key,
+                        incoming: rx,
+                    })
                 };
                 response_tx.send(resp).unwrap();
             }
-            InnerCommand::SerialConsoleDetach => {
-                self.serial_console_tx = None;
+            InnerCommand::SerialConsoleDetach(key) => {
+                if key.is_none()
+                    || key == Some(self.serial_console_connection_key)
+                {
+                    self.serial_console_tx = None;
+                }
             }
         }
     }
@@ -619,7 +679,7 @@ impl Inner {
             }
         }
 
-        Err(Error::ExhaustedNumAttempts(self.max_attempts))
+        Err(SpCommunicationError::ExhaustedNumAttempts(self.max_attempts))
     }
 
     async fn rpc_call_one_attempt(
@@ -714,11 +774,11 @@ async fn send(
     socket: &UdpSocket,
     addr: SocketAddrV6,
     data: &[u8],
-) -> Result<(), Error> {
+) -> Result<()> {
     let n = socket
         .send_to(data, addr)
         .await
-        .map_err(|err| Error::UdpSendTo { addr, err })?;
+        .map_err(|err| SpCommunicationError::UdpSendTo { addr, err })?;
 
     // `send_to` should never write a partial packet; this is UDP.
     assert_eq!(data.len(), n, "partial UDP packet sent to {}?!", addr);
@@ -730,15 +790,19 @@ async fn recv(
     socket: &UdpSocket,
     incoming_buf: &mut [u8; SpMessage::MAX_SIZE],
     log: &Logger,
-) -> Result<(SocketAddrV6, SpMessage), Error> {
+) -> Result<(SocketAddrV6, SpMessage)> {
     let (n, peer) = socket
         .recv_from(&mut incoming_buf[..])
         .await
-        .map_err(Error::UdpRecv)?;
+        .map_err(SpCommunicationError::UdpRecv)?;
+
+    probes::recv_packet!(|| {
+        (peer, incoming_buf.as_ptr() as usize as u64, n as u64)
+    });
 
     let peer = match peer {
-        std::net::SocketAddr::V6(addr) => addr,
-        std::net::SocketAddr::V4(_) => {
+        SocketAddr::V6(addr) => addr,
+        SocketAddr::V4(_) => {
             // We're exclusively using IPv6; we can't get a response from an
             // IPv4 peer.
             unreachable!()
@@ -747,7 +811,7 @@ async fn recv(
 
     let (message, _n) =
         gateway_messages::deserialize::<SpMessage>(&incoming_buf[..n])
-            .map_err(|err| Error::Deserialize { peer, err })?;
+            .map_err(|err| SpCommunicationError::Deserialize { peer, err })?;
 
     trace!(
         log, "received message from SP";
@@ -769,5 +833,15 @@ fn sp_busy_policy() -> backoff::ExponentialBackoff {
         max_interval: MAX_INTERVAL,
         max_elapsed_time: None,
         ..Default::default()
+    }
+}
+
+#[usdt::provider(provider = "gateway_sp_comms")]
+mod probes {
+    fn recv_packet(
+        _source: &SocketAddr,
+        _data: u64, // TODO actually a `*const u8`, but that isn't allowed by usdt
+        _len: u64,
+    ) {
     }
 }
