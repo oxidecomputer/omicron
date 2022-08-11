@@ -98,15 +98,15 @@ async fn make_silo(
     silo_id: Uuid,
     first_branch: bool,
 ) {
-    let silo1 = authz::Silo::new(
+    let silo = authz::Silo::new(
         authz::FLEET,
         silo_id,
         LookupType::ByName(silo_name.to_string()),
     );
     if first_branch {
-        builder.new_resource_with_users(silo1.clone()).await;
+        builder.new_resource_with_users(silo.clone()).await;
     } else {
-        builder.new_resource(silo1.clone());
+        builder.new_resource(silo.clone());
     }
 
     let norganizations = if first_branch { 2 } else { 1 };
@@ -115,7 +115,7 @@ async fn make_silo(
         let org_first_branch = first_branch && i == 0;
         make_organization(
             builder,
-            &silo1,
+            &silo,
             &organization_name,
             org_first_branch,
         )
