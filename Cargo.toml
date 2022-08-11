@@ -51,6 +51,7 @@ default-members = [
     "nexus/db-model",
     "nexus/defaults",
     "nexus/types",
+    "nexus-client",
     "package",
     "rpaths",
     "sled-agent",
