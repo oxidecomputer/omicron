@@ -25,20 +25,33 @@ impl Coverage {
         let authz = authz::Authz::new(&log);
         let class_names = authz.into_class_names();
 
-        // Class names should be added to this exemption list when their Polar
-        // code snippets and authz behavior is identical to another class.  This
-        // is primarily for performance reasons because this test takes a long
-        // time.  But with every exemption comes the risk of a security issue!
+        // Exemption list for this coverage test
         //
-        // PLEASE: instead of adding a class to this list, consider updating
-        // this test to create an instance of the class and then test it.
+        // There are two possible reasons for a resource to appear on this list:
+        //
+        // (1) because its behavior is identical to that of some other resource
+        //     that we are testing (i.e., same Polar snippet and identical
+        //     configuration for the authz type).  There aren't any examples of
+        //     this today, but it might be reasonable to do this for resources
+        //     that are indistinguishable to the authz subsystem (e.g., Disks,
+        //     Instances, Vpcs, and other things nested directly below Project)
+        //
+        // (2) because we have not yet gotten around to adding the type to this
+        //     test.  We don't want to expand this list if we can avoid it!
         let exempted = [
-            // Non-resources
+            // Non-resources:
             authz::Action::get_polar_class(),
             authz::actor::AnyActor::get_polar_class(),
             authz::actor::AuthenticatedActor::get_polar_class(),
-            // XXX-dap TODO-coverage Not yet implemented, but not exempted for a
-            // good reason.
+            // Resources whose behavior should be identical to an existing type
+            // and we don't want to do the test twice for performance reasons:
+            // none yet.
+            //
+            // TODO-coverage Resources that we should test, but for which we
+            // have not yet added a test.  PLEASE: instead of adding something
+            // to this list, modify `make_resources()` to test it instead.  This
+            // should be pretty straightforward in most cases.  Adding a new
+            // class to this list makes it harder to catch security flaws!
             authz::IpPoolList::get_polar_class(),
             authz::GlobalImageList::get_polar_class(),
             authz::ConsoleSessionList::get_polar_class(),
@@ -90,9 +103,12 @@ impl Coverage {
 
             match (exempted, covered) {
                 (true, false) => {
-                    // XXX-dap consider checking whether the Polar snippet
-                    // exactly matches that of another class?
-                    debug!(&self.log, "exempt"; "class_name" => class_name);
+                    // TODO-coverage It would be nice if we could verify that
+                    // the Polar snippet and authz_resource! configuration were
+                    // identical to that of an existing class.  Then it would be
+                    // safer to exclude types that are truly duplicative of
+                    // some other type.
+                    warn!(&self.log, "exempt"; "class_name" => class_name);
                 }
                 (false, true) => {
                     debug!(&self.log, "covered"; "class_name" => class_name);

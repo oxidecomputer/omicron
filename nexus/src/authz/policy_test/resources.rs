@@ -26,16 +26,30 @@ use uuid::Uuid;
 /// Manages the construction of the resource hierarchy used in the test, plus
 /// associated users and role assignments
 pub struct ResourceBuilder<'a> {
+    // Inputs
+    /// opcontext used for creating users and role assignments
     opctx: &'a OpContext,
-    coverage: &'a mut Coverage,
+    /// datastore used for creating users and role assignments
     datastore: &'a db::DataStore,
-    resources: Vec<Arc<dyn Authorizable>>,
+    /// used to verify test coverage of all authz resources
+    coverage: &'a mut Coverage,
+    /// id of the "main" silo -- this is the one that users are created in
     main_silo_id: Uuid,
+
+    // Outputs
+    /// list of resources created so far
+    resources: Vec<Arc<dyn DynAuthorizedResource>>,
+    /// list of users created so far
     users: Vec<(String, Uuid)>,
 }
 
-// XXX-dap TODO-doc
 impl<'a> ResourceBuilder<'a> {
+    /// Begin constructing a resource hierarchy and associated users and role
+    /// assignments
+    ///
+    /// The users and role assignments will be created in silo `main_silo_id`
+    /// using OpContext `opctx` and datastore `datastore`.  `coverage` is used
+    /// to verify test coverage of authz resource types.
     pub fn new(
         opctx: &'a OpContext,
         datastore: &'a db::DataStore,
@@ -52,17 +66,25 @@ impl<'a> ResourceBuilder<'a> {
         }
     }
 
-    pub fn new_resource<T: Authorizable>(&mut self, resource: T) {
+    /// Register a new resource for later testing, with no associated users or
+    /// role assignments
+    pub fn new_resource<T: DynAuthorizedResource>(&mut self, resource: T) {
         self.coverage.covered(&resource);
         self.resources.push(Arc::new(resource));
     }
 
-    pub async fn new_resource_with_roles<T>(&mut self, resource: T)
+    /// Register a new resource for later testing and also: for each supported
+    /// role on this resource, create a user that has that role on this resource
+    pub async fn new_resource_with_users<T>(&mut self, resource: T)
     where
-        T: Authorizable + ApiResourceWithRolesType + AuthorizedResource + Clone,
+        T: DynAuthorizedResource
+            + ApiResourceWithRolesType
+            + AuthorizedResource
+            + Clone,
         T::AllowedRoles: IntoEnumIterator,
     {
         self.new_resource(resource.clone());
+
         let resource_name = match resource.lookup_type() {
             LookupType::ByName(name) => name,
             LookupType::ById(id) if *id == *FLEET_ID => "fleet",
@@ -114,24 +136,29 @@ impl<'a> ResourceBuilder<'a> {
         }
     }
 
+    /// Returns an immutable view of the resources and users created
     pub fn build(self) -> Resources {
         Resources { resources: self.resources, users: self.users }
     }
 }
 
-/// Describes the hierarchy of resources used in our RBAC test
+/// Describes the hierarchy of resources that were registered and the users that
+/// were created with specific roles on those resources
 pub struct Resources {
-    resources: Vec<Arc<dyn Authorizable>>,
+    resources: Vec<Arc<dyn DynAuthorizedResource>>,
     users: Vec<(String, Uuid)>,
 }
 
 impl Resources {
+    /// Iterate the resources to be tested
     pub fn resources(
         &self,
-    ) -> impl std::iter::Iterator<Item = Arc<dyn Authorizable>> + '_ {
+    ) -> impl std::iter::Iterator<Item = Arc<dyn DynAuthorizedResource>> + '_
+    {
         self.resources.iter().cloned()
     }
 
+    /// Iterate the users that were created as `(username, user_id)` pairs
     pub fn users(
         &self,
     ) -> impl std::iter::Iterator<Item = &(String, Uuid)> + '_ {
@@ -139,9 +166,15 @@ impl Resources {
     }
 }
 
-pub trait Authorizable: AuthorizedResource + std::fmt::Debug {
-    fn resource_name(&self) -> String;
-
+/// Dynamically-dispatched version of `AuthorizedResource`
+///
+/// This is needed because calling [`OpContext::authorize()`] requires knowing
+/// at compile time exactly which resource you're authorizing.  But we want to
+/// put many different resource types into a collection and do authz checks on
+/// all of them.  (We could also change `authorize()` to be dynamically-
+/// dispatched.  This would be a much more sprawling change.  And it's not clear
+/// that our use case has much application outside of a test like this.)
+pub trait DynAuthorizedResource: AuthorizedResource + std::fmt::Debug {
     fn do_authorize<'a, 'b>(
         &'a self,
         opctx: &'b OpContext,
@@ -149,9 +182,11 @@ pub trait Authorizable: AuthorizedResource + std::fmt::Debug {
     ) -> BoxFuture<'a, Result<(), Error>>
     where
         'b: 'a;
+
+    fn resource_name(&self) -> String;
 }
 
-impl<T> Authorizable for T
+impl<T> DynAuthorizedResource for T
 where
     T: ApiResource + AuthorizedResource + oso::PolarClass + Clone,
 {
@@ -179,7 +214,7 @@ where
     }
 }
 
-impl Authorizable for authz::oso_generic::Database {
+impl DynAuthorizedResource for authz::oso_generic::Database {
     fn resource_name(&self) -> String {
         String::from("DATABASE")
     }

@@ -30,7 +30,7 @@ use nexus_test_utils::db::test_setup_database;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
 use omicron_test_utils::dev;
-use resources::Authorizable;
+use resources::DynAuthorizedResource;
 use resources::ResourceBuilder;
 use resources::Resources;
 use std::io::Cursor;
@@ -173,55 +173,101 @@ async fn test_iam_roles_behavior() {
 // other branches. We don't need to explicitly create users to test silo2 or
 // silo1-org2 or silo1-org1-proj2 (for examples) because those cases are
 // identical.
+//
+// IF YOU WANT TO ADD A NEW RESOURCE TO THIS TEST: the goal is to have this test
+// show exactly what roles grant what permissions on your resource.  Generally,
+// that means you'll need to create more than one instance of the resource, with
+// different levels of access by different users.  This is probably easier than
+// it sounds!
+//
+// - If your resource is NOT a collection, you only need to modify the function
+//   that creates the parent collection to create an instance of your resource.
+//   That's likely `make_project()`, `make_organization()`, `make_silo()`, etc.
+//   If your resource is essentially a global singleton (like "Fleet"), you can
+//   modify `make_resources()` directly.
+//
+// - If your resource is a collection, then you want to create a new function
+//   similar to the other functions that make collections (`make_project()`,
+//   `make_organization()`, etc.)  You'll likely need the `first_branch`
+//   argument that says whether to create users and how many child hierarchies
+//   to create.
+// XXX-dap put this in a separate module
+// XXX-dap abstract better?
 async fn make_resources<'a>(
     mut builder: ResourceBuilder<'a>,
     main_silo_id: Uuid,
 ) -> Resources {
     builder.new_resource(authz::DATABASE.clone());
-    builder.new_resource_with_roles(authz::FLEET.clone()).await;
+    builder.new_resource_with_users(authz::FLEET.clone()).await;
 
-    // Create the "silo1" hierarchy.
-    let silo1 = authz::Silo::new(
-        authz::FLEET,
-        main_silo_id,
-        LookupType::ByName(String::from("silo1")),
-    );
-    builder.new_resource_with_roles(silo1.clone()).await;
-
-    let silo1_org1 = authz::Organization::new(
-        silo1.clone(),
-        Uuid::new_v4(),
-        LookupType::ByName(String::from("silo1-org1")),
-    );
-    builder.new_resource_with_roles(silo1_org1.clone()).await;
-
-    make_project(&mut builder, &silo1_org1, "silo1-org1-proj1", true).await;
-    make_project(&mut builder, &silo1_org1, "silo1-org1-proj2", false).await;
-
-    let silo1_org2 = authz::Organization::new(
-        silo1.clone(),
-        Uuid::new_v4(),
-        LookupType::ByName(String::from("silo1-org2")),
-    );
-    builder.new_resource(silo1_org2.clone());
-    make_project(&mut builder, &silo1_org2, "silo1-org2-proj1", false).await;
-
-    // Create the "silo2" hierarchy.
-    let silo2 = authz::Silo::new(
-        authz::FLEET,
-        Uuid::new_v4(),
-        LookupType::ByName(String::from("silo2")),
-    );
-    builder.new_resource(silo2.clone());
-    let silo2_org1 = authz::Organization::new(
-        silo2.clone(),
-        Uuid::new_v4(),
-        LookupType::ByName(String::from("silo2-org1")),
-    );
-    builder.new_resource(silo2_org1.clone());
-    make_project(&mut builder, &silo2_org1, "silo2-org1-proj1", false).await;
+    make_silo(&mut builder, "silo1", main_silo_id, true).await;
+    make_silo(&mut builder, "silo2", Uuid::new_v4(), false).await;
 
     builder.build()
+}
+
+/// Helper for `make_resources()` that constructs a small Silo hierarchy
+async fn make_silo(
+    builder: &mut ResourceBuilder<'_>,
+    silo_name: &str,
+    silo_id: Uuid,
+    first_branch: bool,
+) {
+    let silo1 = authz::Silo::new(
+        authz::FLEET,
+        silo_id,
+        LookupType::ByName(silo_name.to_string()),
+    );
+    if first_branch {
+        builder.new_resource_with_users(silo1.clone()).await;
+    } else {
+        builder.new_resource(silo1.clone());
+    }
+
+    let norganizations = if first_branch { 2 } else { 1 };
+    for i in 0..norganizations {
+        let organization_name = format!("{}-org{}", silo_name, i + 1);
+        let org_first_branch = first_branch && i == 0;
+        make_organization(
+            builder,
+            &silo1,
+            &organization_name,
+            org_first_branch,
+        )
+        .await;
+    }
+}
+
+/// Helper for `make_resources()` that constructs a small Organization hierarchy
+async fn make_organization(
+    builder: &mut ResourceBuilder<'_>,
+    silo: &authz::Silo,
+    organization_name: &str,
+    first_branch: bool,
+) {
+    let organization = authz::Organization::new(
+        silo.clone(),
+        Uuid::new_v4(),
+        LookupType::ByName(organization_name.to_string()),
+    );
+    if first_branch {
+        builder.new_resource_with_users(organization.clone()).await;
+    } else {
+        builder.new_resource(organization.clone());
+    }
+
+    let nprojects = if first_branch { 2 } else { 1 };
+    for i in 0..nprojects {
+        let project_name = format!("{}-proj{}", organization_name, i + 1);
+        let create_project_users = first_branch && i == 0;
+        make_project(
+            builder,
+            &organization,
+            &project_name,
+            create_project_users,
+        )
+        .await;
+    }
 }
 
 /// Helper for `make_resources()` that constructs a small Project hierarchy
@@ -229,15 +275,15 @@ async fn make_project(
     builder: &mut ResourceBuilder<'_>,
     organization: &authz::Organization,
     project_name: &str,
-    with_roles: bool,
+    first_branch: bool,
 ) {
     let project = authz::Project::new(
         organization.clone(),
         Uuid::new_v4(),
         LookupType::ByName(project_name.to_string()),
     );
-    if with_roles {
-        builder.new_resource_with_roles(project.clone()).await;
+    if first_branch {
+        builder.new_resource_with_users(project.clone()).await;
     } else {
         builder.new_resource(project.clone());
     }
@@ -313,7 +359,7 @@ async fn authorize_everything<W: Write>(
 async fn authorize_one_resource(
     log: slog::Logger,
     user_contexts: Vec<Arc<(String, OpContext)>>,
-    resource: Arc<dyn Authorizable>,
+    resource: Arc<dyn DynAuthorizedResource>,
 ) -> String {
     let task = tokio::spawn(async move {
         let mut buffer = Vec::new();
