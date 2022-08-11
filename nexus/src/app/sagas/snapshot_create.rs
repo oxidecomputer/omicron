@@ -72,9 +72,9 @@
 //! request. The read-only parent will stay the same, and the sub-volume's
 //! region addresses will change to point to the new read-only downstairs
 //! process' addresses. This is done by creating a map of old -> new addresses,
-//! and passing that into a `replace_sockets` function. This new volume
-//! construction request will be used as a read only parent when creating other
-//! disks using this snapshot as a disk source.
+//! and passing that into a `create_snapshot_from_disk` function. This new
+//! volume construction request will be used as a read only parent when creating
+//! other disks using this snapshot as a disk source.
 //!
 //! # Taking a snapshot of a detached disk
 //!
@@ -628,8 +628,8 @@ async fn ssc_create_volume_record(
     // launched through this saga.
     let replace_sockets_map =
         sagactx.lookup::<BTreeMap<String, String>>("replace_sockets_map")?;
-    let volume_construction_request: VolumeConstructionRequest =
-        replace_sockets(
+    let snapshot_volume_construction_request: VolumeConstructionRequest =
+        create_snapshot_from_disk(
             &disk_volume_construction_request,
             &replace_sockets_map,
         )
@@ -638,10 +638,12 @@ async fn ssc_create_volume_record(
         })?;
 
     // Create the volume record for this snapshot
-    let volume_data: String =
-        serde_json::to_string(&volume_construction_request).map_err(|e| {
-            ActionError::action_failed(Error::internal_error(&e.to_string()))
-        })?;
+    let volume_data: String = serde_json::to_string(
+        &snapshot_volume_construction_request,
+    )
+    .map_err(|e| {
+        ActionError::action_failed(Error::internal_error(&e.to_string()))
+    })?;
     info!(log, "snapshot volume construction request {}", volume_data);
     let volume = db::model::Volume::new(volume_id, volume_data);
 
@@ -704,31 +706,41 @@ async fn ssc_finalize_snapshot_record(
     Ok(snapshot)
 }
 
-fn replace_sockets(
-    input: &VolumeConstructionRequest,
-    map: &BTreeMap<String, String>,
+/// Create a Snapshot VolumeConstructionRequest by copying a disk's
+/// VolumeConstructionRequest and modifying it accordingly.
+fn create_snapshot_from_disk(
+    disk: &VolumeConstructionRequest,
+    socket_map: &BTreeMap<String, String>,
 ) -> anyhow::Result<VolumeConstructionRequest> {
-    match input {
+    // When copying a disk's VolumeConstructionRequest to turn it into a
+    // snapshot:
+    //
+    // - generation new IDs for each layer
+    // - bump any generation numbers
+    // - set read-only
+    // - remove any control sockets
+
+    match disk {
         VolumeConstructionRequest::Volume {
-            id,
+            id: _id,
             block_size,
             sub_volumes,
             read_only_parent,
         } => Ok(VolumeConstructionRequest::Volume {
-            id: *id,
+            id: Uuid::new_v4(),
             block_size: *block_size,
             sub_volumes: sub_volumes
                 .iter()
                 .map(|subvol| -> anyhow::Result<VolumeConstructionRequest> {
-                    replace_sockets(&subvol, map)
+                    create_snapshot_from_disk(&subvol, socket_map)
                 })
                 .collect::<anyhow::Result<Vec<VolumeConstructionRequest>>>()?,
             read_only_parent: read_only_parent.clone(),
         }),
 
-        VolumeConstructionRequest::Url { id, block_size, url } => {
+        VolumeConstructionRequest::Url { id: _id, block_size, url } => {
             Ok(VolumeConstructionRequest::Url {
-                id: *id,
+                id: Uuid::new_v4(),
                 block_size: *block_size,
                 url: url.clone(),
             })
@@ -738,7 +750,7 @@ fn replace_sockets(
             let mut opts = opts.clone();
 
             for target in &mut opts.target {
-                *target = map
+                *target = socket_map
                     .get(target)
                     .ok_or_else(|| {
                         anyhow!("target {} not found in map!", target)
@@ -746,20 +758,23 @@ fn replace_sockets(
                     .clone();
             }
 
+            opts.id = Uuid::new_v4();
+            opts.read_only = true;
+            opts.control = None;
+
             Ok(VolumeConstructionRequest::Region {
                 block_size: *block_size,
                 opts,
-                gen: *gen,
+                gen: gen + 1,
             })
         }
 
-        VolumeConstructionRequest::File { id, block_size, path } => {
+        VolumeConstructionRequest::File { id: _id, block_size, path } => {
             Ok(VolumeConstructionRequest::File {
-                id: *id,
+                id: Uuid::new_v4(),
                 block_size: *block_size,
                 path: path.clone(),
             })
         }
     }
 }
-
