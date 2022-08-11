@@ -1,4 +1,4 @@
-resource: DATABASE
+resource: authz::oso_generic::Database
 
   USER                             Q  R LC RP  M MP CC  D LP
   fleet-admin                      ✔  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
@@ -21,6 +21,74 @@ resource: Fleet id "001de000-1334-4000-8000-000000000000"
   fleet-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔  ✘
   fleet-collaborator               ✘  ✔  ✔  ✔  ✘  ✘  ✔  ✘  ✘
   fleet-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !  !
+
+resource: authz::ConsoleSessionList
+
+  USER                             Q  R LC RP  M MP CC  D LP
+  fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !  !
+
+resource: authz::DeviceAuthRequestList
+
+  USER                             Q  R LC RP  M MP CC  D LP
+  fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !  !
+
+resource: authz::GlobalImageList
+
+  USER                             Q  R LC RP  M MP CC  D LP
+  fleet-admin                      ✘  ✘  ✔  ✘  ✔  ✔  ✔  ✔  ✘
+  fleet-collaborator               ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-viewer                     ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-collaborator               ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                     ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-admin                 ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-collaborator          ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-viewer                ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-proj1-admin           ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-proj1-collaborator    ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-proj1-viewer          ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !  !
+
+resource: authz::IpPoolList
+
+  USER                             Q  R LC RP  M MP CC  D LP
+  fleet-admin                      ✘  ✘  ✔  ✘  ✔  ✔  ✔  ✔  ✘
+  fleet-collaborator               ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-viewer                     ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘

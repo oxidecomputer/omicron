@@ -63,6 +63,10 @@ pub async fn make_resources<'a>(
 ) -> ResourceSet {
     builder.new_resource(authz::DATABASE.clone());
     builder.new_resource_with_users(authz::FLEET.clone()).await;
+    builder.new_resource(authz::CONSOLE_SESSION_LIST.clone());
+    builder.new_resource(authz::DEVICE_AUTH_REQUEST_LIST.clone());
+    builder.new_resource(authz::GLOBAL_IMAGE_LIST.clone());
+    builder.new_resource(authz::IP_POOL_LIST.clone());
 
     make_silo(&mut builder, "silo1", main_silo_id, true).await;
     make_silo(&mut builder, "silo2", Uuid::new_v4(), false).await;
@@ -187,7 +191,7 @@ pub fn exempted_authz_classes() -> BTreeSet<String> {
     //
     // (1) because its behavior is identical to that of some other resource
     //     that we are testing (i.e., same Polar snippet and identical
-    //     configuration for the authz type).  There aren't any examples of
+    //     configuration for the authz type).  There aren't many examples of
     //     this today, but it might be reasonable to do this for resources
     //     that are indistinguishable to the authz subsystem (e.g., Disks,
     //     Instances, Vpcs, and other things nested directly below Project)
@@ -206,19 +210,13 @@ pub fn exempted_authz_classes() -> BTreeSet<String> {
         authz::actor::AuthenticatedActor::get_polar_class(),
         // Resources whose behavior should be identical to an existing type
         // and we don't want to do the test twice for performance reasons:
-        // none yet.
-        //
+        authz::NetworkInterface::get_polar_class(),
         // TODO-coverage Resources that we should test, but for which we
         // have not yet added a test.  PLEASE: instead of adding something
         // to this list, modify `make_resources()` to test it instead.  This
         // should be pretty straightforward in most cases.  Adding a new
         // class to this list makes it harder to catch security flaws!
-        authz::IpPoolList::get_polar_class(),
-        authz::GlobalImageList::get_polar_class(),
-        authz::ConsoleSessionList::get_polar_class(),
-        authz::DeviceAuthRequestList::get_polar_class(),
         authz::IpPool::get_polar_class(),
-        authz::NetworkInterface::get_polar_class(),
         authz::VpcRouter::get_polar_class(),
         authz::RouterRoute::get_polar_class(),
         authz::ConsoleSession::get_polar_class(),

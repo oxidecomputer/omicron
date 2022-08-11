@@ -214,19 +214,29 @@ where
     }
 }
 
-impl DynAuthorizedResource for authz::oso_generic::Database {
-    fn resource_name(&self) -> String {
-        String::from("DATABASE")
-    }
+macro_rules! impl_dyn_authorized_resource_for_global {
+    ($t:ty) => {
+        impl DynAuthorizedResource for $t {
+            fn resource_name(&self) -> String {
+                String::from(stringify!($t))
+            }
 
-    fn do_authorize<'a, 'b>(
-        &'a self,
-        opctx: &'b OpContext,
-        action: authz::Action,
-    ) -> BoxFuture<'a, Result<(), Error>>
-    where
-        'b: 'a,
-    {
-        opctx.authorize(action, self).boxed()
-    }
+            fn do_authorize<'a, 'b>(
+                &'a self,
+                opctx: &'b OpContext,
+                action: authz::Action,
+            ) -> BoxFuture<'a, Result<(), Error>>
+            where
+                'b: 'a,
+            {
+                opctx.authorize(action, self).boxed()
+            }
+        }
+    };
 }
+
+impl_dyn_authorized_resource_for_global!(authz::oso_generic::Database);
+impl_dyn_authorized_resource_for_global!(authz::ConsoleSessionList);
+impl_dyn_authorized_resource_for_global!(authz::GlobalImageList);
+impl_dyn_authorized_resource_for_global!(authz::IpPoolList);
+impl_dyn_authorized_resource_for_global!(authz::DeviceAuthRequestList);
