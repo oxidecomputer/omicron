@@ -31,7 +31,14 @@ impl super::Nexus {
         opctx: &OpContext,
         new_silo_params: params::SiloCreate,
     ) -> CreateResult<db::model::Silo> {
-        self.datastore().silo_create(&opctx, new_silo_params).await
+        // Silo group creation happens as Nexus's "external authn" context,
+        // not the user's context here.  The user may not have permission to
+        // create arbitrary groups in the Silo, but we allow them to create
+        // this one in this case.
+        let external_authn_opctx = self.opctx_external_authn();
+        self.datastore()
+            .silo_create(&opctx, &external_authn_opctx, new_silo_params)
+            .await
     }
 
     pub async fn silos_list_by_name(
