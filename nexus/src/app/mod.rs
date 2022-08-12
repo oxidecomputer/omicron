@@ -454,6 +454,16 @@ impl Nexus {
         let mid = self.samael_max_issue_delay.lock().unwrap();
         *mid
     }
+
+    // Convenience function that exists solely because writing
+    // LookupPath::new(&opctx, &nexus.datastore()) in an endpoint handler feels
+    // like too much
+    pub fn db_lookup<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+    ) -> db::lookup::LookupPath {
+        db::lookup::LookupPath::new(opctx, &self.db_datastore)
+    }
 }
 
 /// For unimplemented endpoints, indicates whether the resource identified
