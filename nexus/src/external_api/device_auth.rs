@@ -73,17 +73,16 @@ pub async fn device_auth_request(
     let handler = async {
         let opctx = nexus.opctx_external_authn();
         let request = rqctx.request.lock().await;
-        let host = match request.headers().get(header::HOST) {
-            None => {
-                return build_oauth_response(
-                    StatusCode::BAD_REQUEST,
-                    &serde_json::json!({
-                        "error": "invalid_request",
-                        "error_description": "missing Host header",
-                    }),
-                )
-            }
-            Some(host) => match host.to_str() {
+
+        let host = if request.version() > hyper::Version::HTTP_11 {
+            request.uri().authority().map(|a| a.as_str())
+        } else {
+            let host = request
+                .headers()
+                .get(header::HOST)
+                .map(|h| h.to_str())
+                .transpose();
+            match host {
                 Ok(host) => host,
                 Err(e) => {
                     return build_oauth_response(
@@ -94,7 +93,19 @@ pub async fn device_auth_request(
                         }),
                     )
                 }
-            },
+            }
+        };
+        let host = match host {
+            Some(host) => host,
+            None => {
+                return build_oauth_response(
+                    StatusCode::BAD_REQUEST,
+                    &serde_json::json!({
+                        "error": "invalid_request",
+                        "error_description": "missing Host header",
+                    }),
+                )
+            }
         };
 
         let model =
