@@ -99,8 +99,8 @@ organization_view_by_id                  /by-id/organizations/{id}
 
 API operations found with tag "policy"
 OPERATION ID                             URL PATH
-policy_update                            /policy
-policy_view                              /policy
+global_policy_update                     /global/policy
+global_policy_view                       /global/policy
 
 API operations found with tag "projects"
 OPERATION ID                             URL PATH
@@ -132,6 +132,8 @@ session_sshkey_view                      /session/me/sshkeys/{ssh_key_name}
 
 API operations found with tag "silos"
 OPERATION ID                             URL PATH
+policy_update                            /policy
+policy_view                              /policy
 silo_create                              /silos
 silo_delete                              /silos/{silo_name}
 silo_identity_provider_create            /silos/{silo_name}/saml-identity-providers

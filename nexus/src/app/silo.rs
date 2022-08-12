@@ -80,12 +80,10 @@ impl super::Nexus {
     pub async fn silo_fetch_policy(
         &self,
         opctx: &OpContext,
-        silo_name: &Name,
+        silo_lookup: db::lookup::Silo<'_>,
     ) -> LookupResult<shared::Policy<authz::SiloRole>> {
-        let (.., authz_silo) = LookupPath::new(opctx, &self.db_datastore)
-            .silo_name(silo_name)
-            .lookup_for(authz::Action::ReadPolicy)
-            .await?;
+        let (.., authz_silo) =
+            silo_lookup.lookup_for(authz::Action::ReadPolicy).await?;
         let role_assignments = self
             .db_datastore
             .role_assignment_fetch_visible(opctx, &authz_silo)
@@ -100,13 +98,11 @@ impl super::Nexus {
     pub async fn silo_update_policy(
         &self,
         opctx: &OpContext,
-        silo_name: &Name,
+        silo_lookup: db::lookup::Silo<'_>,
         policy: &shared::Policy<authz::SiloRole>,
     ) -> UpdateResult<shared::Policy<authz::SiloRole>> {
-        let (.., authz_silo) = LookupPath::new(opctx, &self.db_datastore)
-            .silo_name(silo_name)
-            .lookup_for(authz::Action::ModifyPolicy)
-            .await?;
+        let (.., authz_silo) =
+            silo_lookup.lookup_for(authz::Action::ModifyPolicy).await?;
 
         let role_assignments = self
             .db_datastore

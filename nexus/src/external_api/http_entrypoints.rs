@@ -80,6 +80,9 @@ type NexusApiDescription = ApiDescription<Arc<ServerContext>>;
 /// Returns a description of the external nexus API
 pub fn external_api() -> NexusApiDescription {
     fn register_endpoints(api: &mut NexusApiDescription) -> Result<(), String> {
+        api.register(global_policy_view)?;
+        api.register(global_policy_update)?;
+
         api.register(policy_view)?;
         api.register(policy_update)?;
 
@@ -316,10 +319,10 @@ pub fn external_api() -> NexusApiDescription {
 /// Fetch the top-level IAM policy
 #[endpoint {
     method = GET,
-    path = "/policy",
+    path = "/global/policy",
     tags = ["policy"],
 }]
-async fn policy_view(
+async fn global_policy_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::FleetRole>>, HttpError> {
     let apictx = rqctx.context();
@@ -342,10 +345,10 @@ struct ByIdPathParams {
 /// Update the top-level IAM policy
 #[endpoint {
     method = PUT,
-    path = "/policy",
+    path = "/global/policy",
     tags = ["policy"],
 }]
-async fn policy_update(
+async fn global_policy_update(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     new_policy: TypedBody<shared::Policy<authz::FleetRole>>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::FleetRole>>, HttpError> {
@@ -359,6 +362,62 @@ async fn policy_update(
         bail_unless!(nasgns <= shared::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE);
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let policy = nexus.fleet_update_policy(&opctx, &new_policy).await?;
+        Ok(HttpResponseOk(policy))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch the current silo's IAM policy
+#[endpoint {
+    method = GET,
+    path = "/policy",
+    tags = ["silos"],
+ }]
+pub async fn policy_view(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+) -> Result<HttpResponseOk<shared::Policy<authz::SiloRole>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let authz_silo = opctx
+            .authn
+            .silo_required()
+            .internal_context("loading current silo")?;
+
+        let lookup = nexus.db_lookup(&opctx).silo_id(authz_silo.id());
+        let policy = nexus.silo_fetch_policy(&opctx, lookup).await?;
+        Ok(HttpResponseOk(policy))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Update the current silo's IAM policy
+#[endpoint {
+    method = PUT,
+    path = "/policy",
+    tags = ["silos"],
+}]
+async fn policy_update(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    new_policy: TypedBody<shared::Policy<authz::SiloRole>>,
+) -> Result<HttpResponseOk<shared::Policy<authz::SiloRole>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let new_policy = new_policy.into_inner();
+
+    let handler = async {
+        let nasgns = new_policy.role_assignments.len();
+        // This should have been validated during parsing.
+        bail_unless!(nasgns <= shared::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE);
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let authz_silo = opctx
+            .authn
+            .silo_required()
+            .internal_context("loading current silo")?;
+        let lookup = nexus.db_lookup(&opctx).silo_id(authz_silo.id());
+        let policy =
+            nexus.silo_update_policy(&opctx, lookup, &new_policy).await?;
         Ok(HttpResponseOk(policy))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -502,7 +561,8 @@ async fn silo_policy_view(
 
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let policy = nexus.silo_fetch_policy(&opctx, silo_name).await?;
+        let lookup = nexus.db_lookup(&opctx).silo_name(silo_name);
+        let policy = nexus.silo_fetch_policy(&opctx, lookup).await?;
         Ok(HttpResponseOk(policy))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -530,8 +590,9 @@ async fn silo_policy_update(
         // This should have been validated during parsing.
         bail_unless!(nasgns <= shared::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE);
         let opctx = OpContext::for_external_api(&rqctx).await?;
+        let lookup = nexus.db_lookup(&opctx).silo_name(silo_name);
         let policy =
-            nexus.silo_update_policy(&opctx, silo_name, &new_policy).await?;
+            nexus.silo_update_policy(&opctx, lookup, &new_policy).await?;
         Ok(HttpResponseOk(policy))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
