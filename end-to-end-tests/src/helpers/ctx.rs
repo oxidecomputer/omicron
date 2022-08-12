@@ -76,7 +76,7 @@ pub fn build_client() -> Result<oxide_client::Client> {
 
     let client = reqwest::ClientBuilder::new()
         .default_headers(headers)
-        .connect_timeout(Duration::from_secs(5))
+        .connect_timeout(Duration::from_secs(15))
         .timeout(Duration::from_secs(60))
         .build()?;
     Ok(Client::new_with_client(&get_base_url(), client))
