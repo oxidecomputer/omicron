@@ -24,6 +24,7 @@ use omicron_common::backoff::{self, BackoffError};
 use rand::{rngs::StdRng, RngCore, SeedableRng};
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_client::types::{CrucibleOpts, VolumeConstructionRequest};
 use slog::warn;
 use slog::Logger;
 use std::convert::{TryFrom, TryInto};
@@ -384,151 +385,166 @@ async fn sdc_regions_ensure(
     let log = osagactx.log();
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
 
-    let read_only_parent: Option<
-        Box<sled_agent_client::types::VolumeConstructionRequest>,
-    > = match &params.create_params.disk_source {
-        params::DiskSource::Blank { block_size: _ } => None,
-        params::DiskSource::Snapshot { snapshot_id } => {
-            debug!(log, "grabbing snapshot {}", snapshot_id);
+    let mut read_only_parent: Option<Box<VolumeConstructionRequest>> =
+        match &params.create_params.disk_source {
+            params::DiskSource::Blank { block_size: _ } => None,
+            params::DiskSource::Snapshot { snapshot_id } => {
+                debug!(log, "grabbing snapshot {}", snapshot_id);
 
-            let (.., db_snapshot) =
-                LookupPath::new(&opctx, &osagactx.datastore())
-                    .snapshot_id(*snapshot_id)
-                    .fetch()
+                let (.., db_snapshot) =
+                    LookupPath::new(&opctx, &osagactx.datastore())
+                        .snapshot_id(*snapshot_id)
+                        .fetch()
+                        .await
+                        .map_err(ActionError::action_failed)?;
+
+                debug!(
+                    log,
+                    "grabbing snapshot {} volume {}",
+                    db_snapshot.id(),
+                    db_snapshot.volume_id,
+                );
+
+                let volume = osagactx
+                    .datastore()
+                    .volume_get(db_snapshot.volume_id)
                     .await
                     .map_err(ActionError::action_failed)?;
 
-            debug!(
-                log,
-                "grabbing snapshot {} volume {}",
-                db_snapshot.id(),
-                db_snapshot.volume_id,
-            );
+                debug!(
+                    log,
+                    "grabbed volume {}, with data {}",
+                    volume.id(),
+                    volume.data()
+                );
 
-            let volume = osagactx
-                .datastore()
-                .volume_get(db_snapshot.volume_id)
-                .await
-                .map_err(ActionError::action_failed)?;
+                Some(Box::new(serde_json::from_str(volume.data()).map_err(
+                    |e| {
+                        ActionError::action_failed(Error::internal_error(
+                            &format!(
+                                "failed to deserialize volume data: {}",
+                                e,
+                            ),
+                        ))
+                    },
+                )?))
+            }
+            params::DiskSource::Image { image_id: _ } => {
+                // Until we implement project images, do not allow disks to be
+                // created from a project image.
+                return Err(ActionError::action_failed(Error::InvalidValue {
+                    label: String::from("image"),
+                    message: String::from(
+                        "project image are not yet supported",
+                    ),
+                }));
+            }
+            params::DiskSource::GlobalImage { image_id } => {
+                debug!(log, "grabbing image {}", image_id);
 
-            debug!(
-                log,
-                "grabbed volume {}, with data {}",
-                volume.id(),
-                volume.data()
-            );
+                let (.., global_image) =
+                    LookupPath::new(&opctx, &osagactx.datastore())
+                        .global_image_id(*image_id)
+                        .fetch()
+                        .await
+                        .map_err(ActionError::action_failed)?;
 
-            Some(Box::new(serde_json::from_str(volume.data()).map_err(
-                |e| {
-                    ActionError::action_failed(Error::internal_error(&format!(
-                        "failed to deserialize volume data: {}",
-                        e,
-                    )))
-                },
-            )?))
-        }
-        params::DiskSource::Image { image_id: _ } => {
-            // Until we implement project images, do not allow disks to be
-            // created from a project image.
-            return Err(ActionError::action_failed(Error::InvalidValue {
-                label: String::from("image"),
-                message: String::from("project image are not yet supported"),
-            }));
-        }
-        params::DiskSource::GlobalImage { image_id } => {
-            debug!(log, "grabbing image {}", image_id);
+                debug!(log, "retrieved global image {}", global_image.id());
 
-            let (.., global_image) =
-                LookupPath::new(&opctx, &osagactx.datastore())
-                    .global_image_id(*image_id)
-                    .fetch()
+                debug!(
+                    log,
+                    "grabbing global image {} volume {}",
+                    global_image.id(),
+                    global_image.volume_id
+                );
+
+                let volume = osagactx
+                    .datastore()
+                    .volume_get(global_image.volume_id)
                     .await
                     .map_err(ActionError::action_failed)?;
 
-            debug!(log, "retrieved global image {}", global_image.id());
+                debug!(
+                    log,
+                    "grabbed volume {}, with data {}",
+                    volume.id(),
+                    volume.data()
+                );
 
-            debug!(
-                log,
-                "grabbing global image {} volume {}",
-                global_image.id(),
-                global_image.volume_id
-            );
+                Some(Box::new(serde_json::from_str(volume.data()).map_err(
+                    |e| {
+                        ActionError::action_failed(Error::internal_error(
+                            &format!(
+                                "failed to deserialize volume data: {}",
+                                e,
+                            ),
+                        ))
+                    },
+                )?))
+            }
+        };
 
-            let volume = osagactx
-                .datastore()
-                .volume_get(global_image.volume_id)
-                .await
-                .map_err(ActionError::action_failed)?;
-
-            debug!(
-                log,
-                "grabbed volume {}, with data {}",
-                volume.id(),
-                volume.data()
-            );
-
-            Some(Box::new(serde_json::from_str(volume.data()).map_err(
-                |e| {
+    // Each ID should be unique to this disk
+    if let Some(read_only_parent) = &mut read_only_parent {
+        *read_only_parent = Box::new(
+            randomize_volume_construction_request_ids(&read_only_parent)
+                .map_err(|e| {
                     ActionError::action_failed(Error::internal_error(&format!(
-                        "failed to deserialize volume data: {}",
+                        "failed to randomize ids: {}",
                         e,
                     )))
-                },
-            )?))
-        }
-    };
+                })?,
+        );
+    }
 
     // Store volume details in db
     let mut rng = StdRng::from_entropy();
-    let volume_construction_request =
-        sled_agent_client::types::VolumeConstructionRequest::Volume {
-            id: disk_id,
+    let volume_construction_request = VolumeConstructionRequest::Volume {
+        id: disk_id,
+        block_size,
+        sub_volumes: vec![VolumeConstructionRequest::Region {
             block_size,
-            sub_volumes: vec![
-                sled_agent_client::types::VolumeConstructionRequest::Region {
-                    block_size,
-                    // gen of 0 is here, these regions were just allocated.
-                    gen: 0,
-                    opts: sled_agent_client::types::CrucibleOpts {
-                        id: disk_id,
-                        target: datasets_and_regions
-                            .iter()
-                            .map(|(dataset, region)| {
-                                dataset
-                                    .address_with_port(region.port_number)
-                                    .to_string()
-                            })
-                            .collect(),
+            // gen of 0 is here, these regions were just allocated.
+            gen: 0,
+            opts: CrucibleOpts {
+                id: disk_id,
+                target: datasets_and_regions
+                    .iter()
+                    .map(|(dataset, region)| {
+                        dataset
+                            .address_with_port(region.port_number)
+                            .to_string()
+                    })
+                    .collect(),
 
-                        lossy: false,
-                        flush_timeout: None,
+                lossy: false,
+                flush_timeout: None,
 
-                        // all downstairs will expect encrypted blocks
-                        key: Some(base64::encode({
-                            // TODO the current encryption key
-                            // requirement is 32 bytes, what if that
-                            // changes?
-                            let mut random_bytes: [u8; 32] = [0; 32];
-                            rng.fill_bytes(&mut random_bytes);
-                            random_bytes
-                        })),
+                // all downstairs will expect encrypted blocks
+                key: Some(base64::encode({
+                    // TODO the current encryption key
+                    // requirement is 32 bytes, what if that
+                    // changes?
+                    let mut random_bytes: [u8; 32] = [0; 32];
+                    rng.fill_bytes(&mut random_bytes);
+                    random_bytes
+                })),
 
-                        // TODO TLS, which requires sending X509 stuff during
-                        // downstairs region allocation too.
-                        cert_pem: None,
-                        key_pem: None,
-                        root_cert_pem: None,
+                // TODO TLS, which requires sending X509 stuff during
+                // downstairs region allocation too.
+                cert_pem: None,
+                key_pem: None,
+                root_cert_pem: None,
 
-                        // TODO open a control socket for the whole volume, not
-                        // in the sub volumes
-                        control: None,
+                // TODO open a control socket for the whole volume, not
+                // in the sub volumes
+                control: None,
 
-                        read_only: false,
-                    },
-                },
-            ],
-            read_only_parent,
-        };
+                read_only: false,
+            },
+        }],
+        read_only_parent,
+    };
 
     let volume_data = serde_json::to_string(&volume_construction_request)
         .map_err(|e| {
@@ -650,4 +666,63 @@ async fn sdc_finalize_disk_record(
         .await
         .map_err(ActionError::action_failed)?;
     Ok(())
+}
+
+// helper functions
+
+/// Generate new IDs for each layer
+fn randomize_volume_construction_request_ids(
+    input: &VolumeConstructionRequest,
+) -> anyhow::Result<VolumeConstructionRequest> {
+    match input {
+        VolumeConstructionRequest::Volume {
+            id: _,
+            block_size,
+            sub_volumes,
+            read_only_parent,
+        } => Ok(VolumeConstructionRequest::Volume {
+            id: Uuid::new_v4(),
+            block_size: *block_size,
+            sub_volumes: sub_volumes
+                .iter()
+                .map(|subvol| -> anyhow::Result<VolumeConstructionRequest> {
+                    randomize_volume_construction_request_ids(&subvol)
+                })
+                .collect::<anyhow::Result<Vec<VolumeConstructionRequest>>>()?,
+            read_only_parent: if let Some(read_only_parent) = read_only_parent {
+                Some(Box::new(randomize_volume_construction_request_ids(
+                    read_only_parent,
+                )?))
+            } else {
+                None
+            },
+        }),
+
+        VolumeConstructionRequest::Url { id: _, block_size, url } => {
+            Ok(VolumeConstructionRequest::Url {
+                id: Uuid::new_v4(),
+                block_size: *block_size,
+                url: url.clone(),
+            })
+        }
+
+        VolumeConstructionRequest::Region { block_size, opts, gen } => {
+            let mut opts = opts.clone();
+            opts.id = Uuid::new_v4();
+
+            Ok(VolumeConstructionRequest::Region {
+                block_size: *block_size,
+                opts,
+                gen: *gen,
+            })
+        }
+
+        VolumeConstructionRequest::File { id: _, block_size, path } => {
+            Ok(VolumeConstructionRequest::File {
+                id: Uuid::new_v4(),
+                block_size: *block_size,
+                path: path.clone(),
+            })
+        }
+    }
 }

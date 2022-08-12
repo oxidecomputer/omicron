@@ -747,14 +747,14 @@ fn create_snapshot_from_disk(
     // When copying a disk's VolumeConstructionRequest to turn it into a
     // snapshot:
     //
-    // - generation new IDs for each layer
+    // - generate new IDs for each layer
     // - bump any generation numbers
     // - set read-only
     // - remove any control sockets
 
     match disk {
         VolumeConstructionRequest::Volume {
-            id: _id,
+            id: _,
             block_size,
             sub_volumes,
             read_only_parent,
@@ -767,19 +767,18 @@ fn create_snapshot_from_disk(
                     create_snapshot_from_disk(&subvol, socket_map)
                 })
                 .collect::<anyhow::Result<Vec<VolumeConstructionRequest>>>()?,
-            read_only_parent:
-                if let Some(read_only_parent) = read_only_parent {
-                    Some(Box::new(create_snapshot_from_disk(
-                        read_only_parent,
-                        // no socket modification required for read-only parents
-                        None,
-                    )?))
-                } else {
-                    None
-                }
+            read_only_parent: if let Some(read_only_parent) = read_only_parent {
+                Some(Box::new(create_snapshot_from_disk(
+                    read_only_parent,
+                    // no socket modification required for read-only parents
+                    None,
+                )?))
+            } else {
+                None
+            },
         }),
 
-        VolumeConstructionRequest::Url { id: _id, block_size, url } => {
+        VolumeConstructionRequest::Url { id: _, block_size, url } => {
             Ok(VolumeConstructionRequest::Url {
                 id: Uuid::new_v4(),
                 block_size: *block_size,
@@ -812,7 +811,7 @@ fn create_snapshot_from_disk(
             })
         }
 
-        VolumeConstructionRequest::File { id: _id, block_size, path } => {
+        VolumeConstructionRequest::File { id: _, block_size, path } => {
             Ok(VolumeConstructionRequest::File {
                 id: Uuid::new_v4(),
                 block_size: *block_size,
@@ -896,19 +895,20 @@ mod test {
 
         // Replacements for top level Region only
         replace_sockets.insert(
-            "[fd00:1122:3344:101::6]:19002".into(), 
+            "[fd00:1122:3344:101::6]:19002".into(),
             "[XXXX:1122:3344:101::6]:9000".into(),
         );
         replace_sockets.insert(
-            "[fd00:1122:3344:101::7]:19002".into(), 
+            "[fd00:1122:3344:101::7]:19002".into(),
             "[XXXX:1122:3344:101::7]:9000".into(),
         );
         replace_sockets.insert(
-            "[fd00:1122:3344:101::8]:19002".into(), 
+            "[fd00:1122:3344:101::8]:19002".into(),
             "[XXXX:1122:3344:101::8]:9000".into(),
         );
 
-        let snapshot = create_snapshot_from_disk(&disk, Some(&replace_sockets)).unwrap();
+        let snapshot =
+            create_snapshot_from_disk(&disk, Some(&replace_sockets)).unwrap();
 
         eprintln!("{:?}", serde_json::to_string(&snapshot).unwrap());
 
@@ -932,7 +932,7 @@ mod test {
                     VolumeConstructionRequest::Region { opts, .. } => opts,
                     _ => panic!("enum changed shape!"),
                 }
-            },
+            }
             _ => panic!("enum changed shape!"),
         };
 
@@ -942,7 +942,7 @@ mod test {
                     VolumeConstructionRequest::Region { opts, .. } => opts,
                     _ => panic!("enum changed shape!"),
                 }
-            },
+            }
             _ => panic!("enum changed shape!"),
         };
 
@@ -954,7 +954,7 @@ mod test {
                     VolumeConstructionRequest::Volume { id, .. } => id,
                     _ => panic!("enum changed shape!"),
                 }
-            },
+            }
             _ => panic!("enum changed shape!"),
         };
 
@@ -964,7 +964,7 @@ mod test {
                     VolumeConstructionRequest::Volume { id, .. } => id,
                     _ => panic!("enum changed shape!"),
                 }
-            },
+            }
             _ => panic!("enum changed shape!"),
         };
 
@@ -973,30 +973,30 @@ mod test {
         let snapshot_second_opts = match &snapshot {
             VolumeConstructionRequest::Volume { read_only_parent, .. } => {
                 match read_only_parent.as_ref().unwrap().as_ref() {
-                    VolumeConstructionRequest::Volume { sub_volumes, .. } => {
-                        match &sub_volumes[0] {
-                            VolumeConstructionRequest::Region { opts, .. } => opts,
-                            _ => panic!("enum changed shape!"),
-                        }
+                    VolumeConstructionRequest::Volume {
+                        sub_volumes, ..
+                    } => match &sub_volumes[0] {
+                        VolumeConstructionRequest::Region { opts, .. } => opts,
+                        _ => panic!("enum changed shape!"),
                     },
                     _ => panic!("enum changed shape!"),
                 }
-            },
+            }
             _ => panic!("enum changed shape!"),
         };
 
         let disk_second_opts = match &disk {
             VolumeConstructionRequest::Volume { read_only_parent, .. } => {
                 match read_only_parent.as_ref().unwrap().as_ref() {
-                    VolumeConstructionRequest::Volume { sub_volumes, .. } => {
-                        match &sub_volumes[0] {
-                            VolumeConstructionRequest::Region { opts, .. } => opts,
-                            _ => panic!("enum changed shape!"),
-                        }
+                    VolumeConstructionRequest::Volume {
+                        sub_volumes, ..
+                    } => match &sub_volumes[0] {
+                        VolumeConstructionRequest::Region { opts, .. } => opts,
+                        _ => panic!("enum changed shape!"),
                     },
                     _ => panic!("enum changed shape!"),
                 }
-            },
+            }
             _ => panic!("enum changed shape!"),
         };
 
@@ -1010,7 +1010,7 @@ mod test {
                     VolumeConstructionRequest::Region { gen, .. } => gen,
                     _ => panic!("enum changed shape!"),
                 }
-            },
+            }
             _ => panic!("enum changed shape!"),
         };
 
@@ -1020,7 +1020,7 @@ mod test {
                     VolumeConstructionRequest::Region { gen, .. } => gen,
                     _ => panic!("enum changed shape!"),
                 }
-            },
+            }
             _ => panic!("enum changed shape!"),
         };
 
@@ -1029,30 +1029,30 @@ mod test {
         let snapshot_gen_2 = match &snapshot {
             VolumeConstructionRequest::Volume { read_only_parent, .. } => {
                 match read_only_parent.as_ref().unwrap().as_ref() {
-                    VolumeConstructionRequest::Volume { sub_volumes, .. } => {
-                        match &sub_volumes[0] {
-                            VolumeConstructionRequest::Region { gen, .. } => gen,
-                            _ => panic!("enum changed shape!"),
-                        }
+                    VolumeConstructionRequest::Volume {
+                        sub_volumes, ..
+                    } => match &sub_volumes[0] {
+                        VolumeConstructionRequest::Region { gen, .. } => gen,
+                        _ => panic!("enum changed shape!"),
                     },
                     _ => panic!("enum changed shape!"),
                 }
-            },
+            }
             _ => panic!("enum changed shape!"),
         };
 
         let disk_gen_2 = match &disk {
             VolumeConstructionRequest::Volume { read_only_parent, .. } => {
                 match read_only_parent.as_ref().unwrap().as_ref() {
-                    VolumeConstructionRequest::Volume { sub_volumes, .. } => {
-                        match &sub_volumes[0] {
-                            VolumeConstructionRequest::Region { gen, .. } => gen,
-                            _ => panic!("enum changed shape!"),
-                        }
+                    VolumeConstructionRequest::Volume {
+                        sub_volumes, ..
+                    } => match &sub_volumes[0] {
+                        VolumeConstructionRequest::Region { gen, .. } => gen,
+                        _ => panic!("enum changed shape!"),
                     },
                     _ => panic!("enum changed shape!"),
                 }
-            },
+            }
             _ => panic!("enum changed shape!"),
         };
 
