@@ -156,15 +156,16 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
 /// There's currently just one enum of Actions for all of Omicron.  We expect
 /// most objects to support mostly the same set of actions.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(test, derive(strum::EnumIter))]
 pub enum Action {
     Query, // only used for [`Database`]
     Read,
+    ListChildren,
     ReadPolicy,
     Modify,
     ModifyPolicy,
-    Delete,
-    ListChildren,
     CreateChild,
+    Delete,
     ListIdentityProviders, // only used during [`Nexus::identity_provider_list`]
 }
 
@@ -287,6 +288,10 @@ impl AuthorizedResource for Database {
         _: Action,
     ) -> Error {
         error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
     }
 }
 

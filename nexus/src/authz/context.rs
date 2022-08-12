@@ -50,6 +50,11 @@ impl Authz {
     {
         self.oso.is_allowed(actor.clone(), action, resource.clone())
     }
+
+    #[cfg(test)]
+    pub fn into_class_names(self) -> BTreeSet<String> {
+        self.class_names
+    }
 }
 
 /// Operation-specific authorization context
@@ -81,7 +86,7 @@ impl Context {
         resource: Resource,
     ) -> Result<(), Error>
     where
-        Resource: AuthorizedResource + oso::PolarClass + Clone,
+        Resource: AuthorizedResource + Clone,
     {
         // If we're given a resource whose PolarClass was never registered with
         // Oso, then the call to `is_allowed()` below will always return false
@@ -97,7 +102,7 @@ impl Context {
         // of a programmer error than an operational error.  But unlike most
         // programmer errors, the nature of the problem and the blast radius are
         // well understood, so we may as well avoid crashing.)
-        let class_name = &Resource::get_polar_class().name;
+        let class_name = &resource.polar_class().name;
         bail_unless!(
             self.authz.class_names.contains(class_name),
             "attempted authz check on unregistered resource: {:?}",
@@ -181,23 +186,17 @@ pub trait AuthorizedResource: oso::ToPolar + Send + Sync + 'static {
         actor: AnyActor,
         action: Action,
     ) -> Error;
+
+    /// Returns the Polar class that implements this resource
+    fn polar_class(&self) -> oso::Class;
 }
 
 #[cfg(test)]
 mod test {
-    // These are essentially unit tests for the policy itself.
-    // TODO-coverage This is just a start.  But we need better support for role
-    // assignments for non-built-in users to do more here.
-    // TODO If this gets any more complicated, we could consider automatically
-    // generating the test cases.  We could precreate a bunch of resources and
-    // some users with different roles.  Then we could run through a table that
-    // says exactly which users should be able to do what to each resource.
     use crate::authn;
     use crate::authz::Action;
     use crate::authz::Authz;
     use crate::authz::Context;
-    use crate::authz::DATABASE;
-    use crate::authz::FLEET;
     use crate::db::DataStore;
     use nexus_test_utils::db::test_setup_database;
     use omicron_test_utils::dev;
@@ -210,102 +209,6 @@ mod test {
     ) -> Context {
         let authz = Authz::new(log);
         Context::new(Arc::new(authn), Arc::new(authz), datastore)
-    }
-
-    fn authz_context_noauth(
-        log: &slog::Logger,
-        datastore: Arc<DataStore>,
-    ) -> Context {
-        let authn = authn::Context::internal_unauthenticated();
-        let authz = Authz::new(log);
-        Context::new(Arc::new(authn), Arc::new(authz), datastore)
-    }
-
-    #[tokio::test]
-    async fn test_database() {
-        let logctx = dev::test_setup_log("test_database");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) =
-            crate::db::datastore::datastore_test(&logctx, &db).await;
-        let authz_privileged = authz_context_for_actor(
-            &logctx.log,
-            authn::Context::privileged_test_user(),
-            Arc::clone(&datastore),
-        );
-        authz_privileged
-            .authorize(&opctx, Action::Query, DATABASE)
-            .await
-            .expect("expected privileged user to be able to query database");
-        let error = authz_privileged
-            .authorize(&opctx, Action::Modify, DATABASE)
-            .await
-            .expect_err(
-                "expected privileged test user not to be able to modify \
-                database",
-            );
-        assert!(matches!(
-            error,
-            omicron_common::api::external::Error::Forbidden
-        ));
-        let authz_nobody = authz_context_for_actor(
-            &logctx.log,
-            authn::Context::unprivileged_test_user(),
-            Arc::clone(&datastore),
-        );
-        authz_nobody
-            .authorize(&opctx, Action::Query, DATABASE)
-            .await
-            .expect("expected unprivileged user to be able to query database");
-        let authz_noauth = authz_context_noauth(&logctx.log, datastore);
-        authz_noauth
-            .authorize(&opctx, Action::Query, DATABASE)
-            .await
-            .expect_err(
-            "expected unauthenticated user not to be able to query database",
-        );
-        db.cleanup().await.unwrap();
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn test_organization() {
-        let logctx = dev::test_setup_log("test_organization");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) =
-            crate::db::datastore::datastore_test(&logctx, &db).await;
-
-        let authz_privileged = authz_context_for_actor(
-            &logctx.log,
-            authn::Context::privileged_test_user(),
-            Arc::clone(&datastore),
-        );
-        authz_privileged
-            .authorize(&opctx, Action::CreateChild, FLEET)
-            .await
-            .expect(
-                "expected privileged user to be able to create organization",
-            );
-        let authz_nobody = authz_context_for_actor(
-            &logctx.log,
-            authn::Context::unprivileged_test_user(),
-            Arc::clone(&datastore),
-        );
-        authz_nobody
-            .authorize(&opctx, Action::CreateChild, FLEET)
-            .await
-            .expect_err(
-            "expected unprivileged user not to be able to create organization",
-        );
-        let authz_noauth = authz_context_noauth(&logctx.log, datastore);
-        authz_noauth
-            .authorize(&opctx, Action::Query, DATABASE)
-            .await
-            .expect_err(
-                "expected unauthenticated user not to be able \
-            to create organization",
-            );
-        db.cleanup().await.unwrap();
-        logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -352,6 +255,10 @@ mod test {
             ) -> Error {
                 // authorize() shouldn't get far enough to call this.
                 unimplemented!();
+            }
+
+            fn polar_class(&self) -> oso::Class {
+                Self::get_polar_class()
             }
         }
 

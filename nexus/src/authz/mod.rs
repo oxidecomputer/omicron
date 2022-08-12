@@ -182,3 +182,6 @@ pub use oso_generic::Action;
 pub use oso_generic::DATABASE;
 
 mod roles;
+
+#[cfg(test)]
+mod policy_test;

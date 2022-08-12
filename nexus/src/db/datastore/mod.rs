@@ -401,7 +401,7 @@ mod test {
         let silo_user_opctx = OpContext::for_background(
             logctx.log.new(o!()),
             Arc::new(authz::Authz::new(&logctx.log)),
-            authn::Context::test_silo_user(*SILO_ID, silo_user_id),
+            authn::Context::for_test_user(silo_user_id, *SILO_ID),
             Arc::clone(&datastore),
         );
         let delete = datastore
