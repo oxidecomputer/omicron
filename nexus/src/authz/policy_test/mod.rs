@@ -14,14 +14,19 @@ mod coverage;
 mod resource_builder;
 mod resources;
 
+use super::SiloRole;
 use crate::authn;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
+use authn::USER_TEST_PRIVILEGED;
 use coverage::Coverage;
 use futures::StreamExt;
 use nexus_test_utils::db::test_setup_database;
+use nexus_types::external_api::shared;
+use nexus_types::identity::Asset;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::LookupType;
 use omicron_test_utils::dev;
 use resource_builder::DynAuthorizedResource;
 use resource_builder::ResourceBuilder;
@@ -55,13 +60,34 @@ async fn test_iam_roles_behavior() {
     let mut db = test_setup_database(&logctx.log).await;
     let (opctx, datastore) = db::datastore::datastore_test(&logctx, &db).await;
 
+    // Before we can create the resources, users, and role assignments that we
+    // need, we must grant the "test-privileged" user privileges to fetch and
+    // modify policies inside the "main" Silo (the one we create users in).
+    let main_silo_id = Uuid::new_v4();
+    let main_silo = authz::Silo::new(
+        authz::FLEET,
+        main_silo_id,
+        LookupType::ById(main_silo_id),
+    );
+    datastore
+        .role_assignment_replace_visible(
+            &opctx,
+            &main_silo,
+            &[shared::RoleAssignment {
+                identity_type: shared::IdentityType::SiloUser,
+                identity_id: USER_TEST_PRIVILEGED.id(),
+                role_name: SiloRole::Admin,
+            }],
+        )
+        .await
+        .unwrap();
+
     // Assemble the list of resources that we'll use for testing.  As we create
     // these resources, create the users and role assignments needed for the
     // exhaustive test.  `Coverage` is used to help verify that all resources
     // are tested or explicitly opted out.
     let exemptions = resources::exempted_authz_classes();
     let mut coverage = Coverage::new(&logctx.log, exemptions);
-    let main_silo_id = Uuid::new_v4();
     let builder =
         ResourceBuilder::new(&opctx, &datastore, &mut coverage, main_silo_id);
     let test_resources = resources::make_resources(builder, main_silo_id).await;

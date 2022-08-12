@@ -71,6 +71,7 @@ impl DataStore {
     pub async fn silo_create(
         &self,
         opctx: &OpContext,
+        group_opctx: &OpContext,
         new_silo_params: params::SiloCreate,
     ) -> CreateResult<Silo> {
         let silo_id = Uuid::new_v4();
@@ -90,7 +91,7 @@ impl DataStore {
         {
             let silo_admin_group_ensure_query =
                 DataStore::silo_group_ensure_query(
-                    opctx,
+                    &group_opctx,
                     &authz_silo,
                     db::model::SiloGroup::new(
                         silo_group_id,
