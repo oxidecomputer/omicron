@@ -165,8 +165,10 @@ impl CrucibleDataInner {
         let map =
             self.running_snapshots.entry(id).or_insert_with(|| HashMap::new());
 
-        if map.contains_key(&name.to_string()) {
-            bail!("already running region {} snapshot {}", id, name);
+        // If a running snapshot exists already, return it - this endpoint must
+        // be idempotent.
+        if let Some(running_snapshot) = map.get(&name.to_string()) {
+            return Ok(running_snapshot.clone());
         }
 
         let running_snapshot = RunningSnapshot {
@@ -193,8 +195,9 @@ impl CrucibleDataInner {
         let map =
             self.running_snapshots.entry(id).or_insert_with(|| HashMap::new());
 
+        // If the running snapshot was already deleted, then return Ok
         if !map.contains_key(&name.to_string()) {
-            bail!("no running region {} snapshot {}", id, name);
+            return Ok(());
         }
 
         map.remove(&name.to_string());
