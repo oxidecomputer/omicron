@@ -2102,7 +2102,7 @@ dependencies = [
 [[package]]
 name = "illumos-ddi-dki"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=52176b99cc578f5b7b90f9bae8935013f961086c#52176b99cc578f5b7b90f9bae8935013f961086c"
+source = "git+https://github.com/oxidecomputer/opte?rev=de829c931997558eccdf001d108d29e8e516b257#de829c931997558eccdf001d108d29e8e516b257"
 dependencies = [
  "illumos-sys-hdrs",
 ]
@@ -2110,7 +2110,7 @@ dependencies = [
 [[package]]
 name = "illumos-sys-hdrs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=52176b99cc578f5b7b90f9bae8935013f961086c#52176b99cc578f5b7b90f9bae8935013f961086c"
+source = "git+https://github.com/oxidecomputer/opte?rev=de829c931997558eccdf001d108d29e8e516b257#de829c931997558eccdf001d108d29e8e516b257"
 
 [[package]]
 name = "impl-trait-for-tuples"
@@ -3030,8 +3030,8 @@ dependencies = [
  "omicron-test-utils",
  "openapi-lint",
  "openapiv3",
- "opte",
  "opte-ioctl",
+ "oxide-vpc",
  "oximeter",
  "oximeter-producer",
  "p256",
@@ -3206,7 +3206,7 @@ dependencies = [
 [[package]]
 name = "opte"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=52176b99cc578f5b7b90f9bae8935013f961086c#52176b99cc578f5b7b90f9bae8935013f961086c"
+source = "git+https://github.com/oxidecomputer/opte?rev=de829c931997558eccdf001d108d29e8e516b257#de829c931997558eccdf001d108d29e8e516b257"
 dependencies = [
  "anymap",
  "cfg-if 0.1.10",
@@ -3223,11 +3223,12 @@ dependencies = [
 [[package]]
 name = "opte-ioctl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=52176b99cc578f5b7b90f9bae8935013f961086c#52176b99cc578f5b7b90f9bae8935013f961086c"
+source = "git+https://github.com/oxidecomputer/opte?rev=de829c931997558eccdf001d108d29e8e516b257#de829c931997558eccdf001d108d29e8e516b257"
 dependencies = [
  "libc",
  "libnet",
  "opte",
+ "oxide-vpc",
  "postcard",
  "serde",
  "thiserror",
@@ -3277,6 +3278,20 @@ dependencies = [
  "serde",
  "serde_json",
  "uuid",
+]
+
+[[package]]
+name = "oxide-vpc"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/opte?rev=de829c931997558eccdf001d108d29e8e516b257#de829c931997558eccdf001d108d29e8e516b257"
+dependencies = [
+ "cfg-if 0.1.10",
+ "cstr_core",
+ "illumos-sys-hdrs",
+ "opte",
+ "serde",
+ "smoltcp",
+ "zerocopy 0.6.1",
 ]
 
 [[package]]

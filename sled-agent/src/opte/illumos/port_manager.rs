@@ -16,14 +16,14 @@ use crate::params::NetworkInterface;
 use crate::params::SourceNatConfig;
 use ipnetwork::IpNetwork;
 use macaddr::MacAddr6;
-use opte::api::IpCidr;
-use opte::api::Ipv4Cidr;
-use opte::api::Ipv4PrefixLen;
-use opte::api::MacAddr;
-use opte::oxide_vpc::api::AddRouterEntryIpv4Req;
-use opte::oxide_vpc::api::RouterTarget;
-use opte::oxide_vpc::api::SNatCfg;
 use opte_ioctl::OpteHdl;
+use oxide_vpc::api::AddRouterEntryIpv4Req;
+use oxide_vpc::api::IpCidr;
+use oxide_vpc::api::Ipv4Cidr;
+use oxide_vpc::api::Ipv4PrefixLen;
+use oxide_vpc::api::MacAddr;
+use oxide_vpc::api::RouterTarget;
+use oxide_vpc::api::SNatCfg;
 use slog::debug;
 use slog::info;
 use slog::warn;
@@ -380,7 +380,8 @@ impl PortManager {
                             e
                         ))
                     })?;
-                let cidr = Ipv4Cidr::new(opte::api::Ipv4Addr::from(ip), prefix);
+                let cidr =
+                    Ipv4Cidr::new(oxide_vpc::api::Ipv4Addr::from(ip), prefix);
                 let route = AddRouterEntryIpv4Req {
                     port_name: port_name.clone(),
                     dest: cidr,
