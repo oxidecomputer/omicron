@@ -219,7 +219,7 @@ impl From<model::DbTimeseriesSchema> for TimeseriesSchema {
 }
 
 /// The target identifies the resource or component about which metric data is produced.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct Target {
     pub name: String,
     pub fields: Vec<Field>,
@@ -233,13 +233,24 @@ pub struct Metric {
     pub datum_type: DatumType,
 }
 
+pub type PaginationKey = (TimeseriesKey, DateTime<Utc>);
+
 /// A list of timestamped measurements from a single timeseries.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct Timeseries {
     pub timeseries_name: String,
+    pub timeseries_key: TimeseriesKey,
     pub target: Target,
     pub metric: Metric,
     pub measurements: Vec<Measurement>,
+}
+
+impl Timeseries {
+    pub fn pagination_key(&self) -> Option<PaginationKey> {
+        self.measurements
+            .last()
+            .map(|last| (self.timeseries_key, last.timestamp()))
+    }
 }
 
 /// The source from which a field is derived, the target or metric.
@@ -322,7 +333,7 @@ pub struct TimeseriesPageSelector {
     pub offset: NonZeroU32,
 }
 
-pub(crate) type TimeseriesKey = u64;
+pub type TimeseriesKey = u64;
 
 pub(crate) fn timeseries_key(sample: &Sample) -> TimeseriesKey {
     timeseries_key_for(&sample.target_fields(), &sample.metric_fields())

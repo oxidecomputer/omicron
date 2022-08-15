@@ -128,6 +128,8 @@ pub fn external_api() -> NexusApiDescription {
         api.register(disk_delete)?;
         api.register(disk_metrics_list)?;
 
+        api.register(metric_list)?;
+
         api.register(instance_list)?;
         api.register(instance_create)?;
         api.register(instance_view)?;
@@ -1707,6 +1709,45 @@ async fn disk_metrics_list(
                 query,
                 limit,
             )
+            .await?;
+
+        Ok(HttpResponseOk(result))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+// Metrics
+
+/// Fetch metrics
+#[endpoint {
+    method = GET,
+    path = "/metrics/{metric_name}",
+}]
+async fn metric_list(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<params::MetricName>,
+    query_params: Query<
+        PaginationParams<
+            params::ResourceMetricQuery,
+            params::TimeseriesPageSelector,
+        >,
+    >,
+) -> Result<HttpResponseOk<ResultsPage<oximeter_db::Timeseries>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+
+    let metric_name = path_params.into_inner();
+    let query = query_params.into_inner();
+    let limit = rqctx.page_limit(&query)?;
+
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+
+        // TODO:
+        // - Expand the result options!
+
+        let result = nexus
+            .select_timeseries2(&opctx, &metric_name, query, limit)
             .await?;
 
         Ok(HttpResponseOk(result))

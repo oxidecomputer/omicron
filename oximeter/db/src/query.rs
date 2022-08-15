@@ -37,6 +37,7 @@ pub struct SelectQueryBuilder {
     time_range: TimeRange,
     limit: Option<NonZeroU32>,
     offset: Option<u32>,
+    last: Option<(u64, DateTime<Utc>)>,
 }
 
 impl SelectQueryBuilder {
@@ -48,6 +49,7 @@ impl SelectQueryBuilder {
             time_range: TimeRange { start: None, end: None },
             limit: None,
             offset: None,
+            last: None,
         }
     }
 
@@ -60,6 +62,12 @@ impl SelectQueryBuilder {
     /// Set the end time for measurements selected from the query.
     pub fn end_time(mut self, end: Option<Timestamp>) -> Self {
         self.time_range.end = end;
+        self
+    }
+
+    /// Set pagination parameters to move past the last page of results.
+    pub fn last(mut self, last: Option<(u64, DateTime<Utc>)>) -> Self {
+        self.last = last;
         self
     }
 
@@ -253,6 +261,7 @@ impl SelectQueryBuilder {
             time_range: self.time_range,
             limit: self.limit,
             offset: self.offset,
+            last: self.last,
         }
     }
 }
@@ -479,6 +488,7 @@ pub struct SelectQuery {
     time_range: TimeRange,
     limit: Option<NonZeroU32>,
     offset: Option<u32>,
+    last: Option<(u64, DateTime<Utc>)>,
 }
 
 fn create_join_on_condition(columns: &[&str], current: usize) -> String {
@@ -598,11 +608,26 @@ impl SelectQuery {
     /// timeseries keys. If no keys are specified, then a query selecting the all timeseries with
     /// the given name will be returned. (This is probably not what you want.)
     pub fn measurement_query(&self, keys: &[TimeseriesKey]) -> String {
-        let key_clause = if keys.is_empty() {
+        let last_clause = if let Some((last_key, last_timestamp)) =
+            self.last.clone()
+        {
+            format!(
+                " AND ( \
+                  ((timeseries_key == '{last_key}') AND (timestamp > '{last_timestamp}')) OR \
+                  (timeseries_key > '{last_key}') \
+                ) ",
+                last_key = last_key,
+                last_timestamp = last_timestamp.format(crate::DATABASE_TIMESTAMP_FORMAT),
+            )
+        } else {
             String::from(" ")
+        };
+
+        let key_clause = if keys.is_empty() {
+            String::from("")
         } else {
             format!(
-                " AND timeseries_key IN ({timeseries_keys}) ",
+                "AND timeseries_key IN ({timeseries_keys}) ",
                 timeseries_keys = keys
                     .iter()
                     .map(|key| key.to_string())
@@ -626,6 +651,7 @@ impl SelectQuery {
                 "FROM {db_name}.{table_name} ",
                 "WHERE ",
                 "timeseries_name = '{timeseries_name}'",
+                "{last_clause}",
                 "{key_clause}",
                 "{timestamp_clause}",
                 "ORDER BY (timeseries_name, timeseries_key, timestamp) ",
@@ -636,6 +662,7 @@ impl SelectQuery {
             table_name =
                 measurement_table_name(self.timeseries_schema.datum_type),
             timeseries_name = self.timeseries_schema.timeseries_name,
+            last_clause = last_clause,
             key_clause = key_clause,
             timestamp_clause = self.time_range.as_query(),
             pagination_clause = pagination_clause,

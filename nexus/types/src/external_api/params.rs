@@ -10,6 +10,7 @@ use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
     InstanceCpuCount, Ipv4Net, Ipv6Net, Name,
 };
+use parse_display::Display;
 use schemars::JsonSchema;
 use serde::{
     de::{self, Visitor},
@@ -851,6 +852,55 @@ pub struct SshKeyCreate {
 }
 
 // METRICS
+
+#[derive(Display, Deserialize, JsonSchema)]
+#[display(style = "snake_case")]
+#[serde(rename_all = "snake_case")]
+pub enum MetricName {
+    DiskRead,
+    DiskWrite,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct Key(pub String);
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct Value(pub String);
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub enum Predicate {
+    Eq,
+    Ne,
+    Ge,
+    Gt,
+    Le,
+    Lt,
+    Like,
+}
+
+/// Query parameters common to resource metrics endpoints.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ResourceMetricQuery {
+    /// Describes a logically AND-ed group of filters to apply to metric
+    /// selection.
+    pub filters: Vec<(Key, Predicate, Value)>,
+
+    /// An inclusive start time of metrics.
+    // TODO: Make this optional?
+    pub start_time: DateTime<Utc>,
+
+    /// An exclusive end time of metrics.
+    // TODO: Make this optional?
+    pub end_time: DateTime<Utc>,
+}
+
+pub type TimeseriesPaginationKey = (u64, DateTime<Utc>);
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct TimeseriesPageSelector {
+    pub query: ResourceMetricQuery,
+    pub last: TimeseriesPaginationKey,
+}
 
 /// Query parameters common to resource metrics endpoints.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]

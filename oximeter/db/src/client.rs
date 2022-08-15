@@ -9,7 +9,7 @@ use crate::{
     model, query, Error, Metric, Target, Timeseries, TimeseriesPageSelector,
     TimeseriesScanParams, TimeseriesSchema,
 };
-use crate::{TimeseriesKey, TimeseriesName};
+use crate::{PaginationKey, TimeseriesKey, TimeseriesName};
 use async_trait::async_trait;
 use dropshot::{EmptyScanParams, ResultsPage, WhichPage};
 use oximeter::types::Sample;
@@ -60,6 +60,8 @@ impl Client {
     }
 
     /// Select timeseries from criteria on the fields and start/end timestamps.
+    //
+    // TODO: Consider a builder interface - lots of optional fields.
     pub async fn select_timeseries_with(
         &self,
         timeseries_name: &str,
@@ -67,6 +69,7 @@ impl Client {
         start_time: Option<query::Timestamp>,
         end_time: Option<query::Timestamp>,
         limit: Option<NonZeroU32>,
+        last: Option<PaginationKey>,
     ) -> Result<Vec<Timeseries>, Error> {
         // Querying uses up to three queries to the database:
         //  1. Retrieve the schema
@@ -88,11 +91,12 @@ impl Client {
             .start_time(start_time)
             .end_time(end_time);
 
-        let mut query_builder = if let Some(limit) = limit {
+        let query_builder = if let Some(limit) = limit {
             query_builder.limit(limit)
         } else {
             query_builder
         };
+        let mut query_builder = query_builder.last(last);
 
         for criterion in criteria.iter() {
             query_builder = query_builder.filter_raw(criterion)?;
@@ -311,6 +315,7 @@ impl Client {
                         .clone();
                     Timeseries {
                         timeseries_name: schema.timeseries_name.to_string(),
+                        timeseries_key: key,
                         target,
                         metric,
                         measurements: Vec::new(),
@@ -839,6 +844,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
             )
             .await
             .unwrap();
@@ -1004,6 +1010,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
             )
             .await
             .expect("Failed to select test samples");
@@ -1034,6 +1041,13 @@ mod tests {
     }
 
     const SELECT_TEST_ID: &str = "4fa827ea-38bb-c37e-ac2d-f8432ca9c76e";
+
+    // Total number of timeseries created by `setup_select_test`.
+    const TIMESERIES_COUNT: usize = 12;
+
+    // Total number of samples per timeseries created by `setup_select_test`.
+    const SAMPLE_COUNT: usize = 2;
+
     fn setup_select_test() -> (Service, Vec<RequestLatency>, Vec<Sample>) {
         // One target
         let id = SELECT_TEST_ID.parse().unwrap();
@@ -1046,6 +1060,9 @@ mod tests {
 
         // Two samples each
         let n_timeseries = routes.len() * methods.len() * status_codes.len();
+        // We use this constant in some tests; ensure that it gets updated.
+        assert_eq!(TIMESERIES_COUNT, n_timeseries);
+
         let mut metrics = Vec::with_capacity(n_timeseries);
         let mut samples = Vec::with_capacity(n_timeseries * 2);
         for (route, method, status_code) in
@@ -1057,8 +1074,9 @@ mod tests {
                 status_code: *status_code,
                 latency: 0.0,
             };
-            samples.push(Sample::new(&target, &metric));
-            samples.push(Sample::new(&target, &metric));
+            for _ in 0..SAMPLE_COUNT {
+                samples.push(Sample::new(&target, &metric));
+            }
             metrics.push(metric);
         }
         (target, metrics, samples)
@@ -1092,6 +1110,7 @@ mod tests {
                 criteria,
                 start_time,
                 end_time,
+                None,
                 None,
             )
             .await
@@ -1350,6 +1369,7 @@ mod tests {
                 Some(query::Timestamp::Exclusive(start_time)),
                 None,
                 None,
+                None,
             )
             .await
             .expect("Failed to select timeseries");
@@ -1367,6 +1387,7 @@ mod tests {
         db.cleanup().await.expect("Failed to cleanup database");
     }
 
+    // Tests setting limits within a single timeseries.
     #[tokio::test]
     async fn test_select_timeseries_with_limit() {
         let (_, _, samples) = setup_select_test();
@@ -1387,11 +1408,19 @@ mod tests {
         let timeseries_name = "service:request_latency";
 
         // First, query without a limit. We should see all the results.
-        let all_measurements = &client
-            .select_timeseries_with(timeseries_name, &[], None, None, None)
+        let criteria = vec!["route==/a", "method==GET", "status_code==200"];
+        let all_timeseries = &client
+            .select_timeseries_with(
+                timeseries_name,
+                criteria.as_slice(),
+                None,
+                None,
+                None,
+                None,
+            )
             .await
-            .expect("Failed to select timeseries")[0]
-            .measurements;
+            .expect("Failed to select timeseries");
+        let all_measurements = &all_timeseries[0].measurements;
 
         // Check some constraints on the number of measurements - we
         // can change these, but these assumptions make the test simpler.
@@ -1408,10 +1437,11 @@ mod tests {
         let timeseries = &client
             .select_timeseries_with(
                 timeseries_name,
-                &[],
+                criteria.as_slice(),
                 None,
                 None,
                 Some(limit),
+                None,
             )
             .await
             .expect("Failed to select timeseries")[0];
@@ -1425,12 +1455,13 @@ mod tests {
         let timeseries = &client
             .select_timeseries_with(
                 timeseries_name,
-                &[],
+                criteria.as_slice(),
                 Some(query::Timestamp::Exclusive(
                     timeseries.measurements.last().unwrap().timestamp(),
                 )),
                 None,
                 Some(limit),
+                None,
             )
             .await
             .expect("Failed to select timeseries")[0];
@@ -1439,6 +1470,114 @@ mod tests {
             all_measurements[all_measurements.len() / 2..],
             timeseries.measurements
         );
+
+        db.cleanup().await.expect("Failed to cleanup database");
+    }
+
+    // Tests that limits work across multiple timeseries.
+    #[tokio::test]
+    async fn test_select_multiple_timeseries_with_limit() {
+        let (_, _, samples) = setup_select_test();
+        let mut db = ClickHouseInstance::new(0)
+            .await
+            .expect("Failed to start ClickHouse");
+        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
+        let log = Logger::root(slog::Discard, o!());
+        let client = Client::new(address, &log);
+        client
+            .init_db()
+            .await
+            .expect("Failed to initialize timeseries database");
+        client
+            .insert_samples(&samples)
+            .await
+            .expect("Failed to insert samples");
+        let timeseries_name = "service:request_latency";
+
+        // First, query without a limit. We should see all the results.
+        let all_timeseries = &client
+            .select_timeseries_with(
+                timeseries_name,
+                &[],
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("Failed to select timeseries");
+        assert_eq!(all_timeseries.len(), TIMESERIES_COUNT);
+        for timeseries in all_timeseries {
+            assert_eq!(timeseries.measurements.len(), SAMPLE_COUNT);
+        }
+
+        // We expect the results to be ordered by timeseries (not absolute
+        // timestamp!).
+        //
+        // Requesting all the samples from the first timeseries will only
+        // return measurements from that timeseries.
+        let limit =
+            NonZeroU32::new(u32::try_from(SAMPLE_COUNT).unwrap()).unwrap();
+        let observed_timeseries = &client
+            .select_timeseries_with(
+                timeseries_name,
+                &[],
+                None,
+                None,
+                Some(limit),
+                None,
+            )
+            .await
+            .expect("Failed to select timeseries");
+        assert_eq!(observed_timeseries.len(), 1);
+        assert_eq!(observed_timeseries[0].measurements.len(), SAMPLE_COUNT);
+        assert_eq!(observed_timeseries[0], all_timeseries[0]);
+
+        // Requesting any more measurements will return all previous
+        // measurements, plus cross over to the next timeseries.
+        let limit =
+            NonZeroU32::new(u32::try_from(SAMPLE_COUNT + 1).unwrap()).unwrap();
+        let observed_timeseries = &client
+            .select_timeseries_with(
+                timeseries_name,
+                &[],
+                None,
+                None,
+                Some(limit),
+                None,
+            )
+            .await
+            .expect("Failed to select timeseries");
+        assert_eq!(observed_timeseries.len(), 2);
+        assert_eq!(observed_timeseries[0].measurements.len(), SAMPLE_COUNT);
+        assert_eq!(observed_timeseries[1].measurements.len(), 1);
+
+        // We can use the "last" argument to keep going where we left off.
+        let last =
+            observed_timeseries.last().unwrap().pagination_key().unwrap();
+        let next_timeseries = &client
+            .select_timeseries_with(
+                timeseries_name,
+                &[],
+                None,
+                None,
+                Some(limit),
+                Some(last),
+            )
+            .await
+            .expect("Failed to select timeseries");
+        assert_eq!(next_timeseries.len(), 2);
+
+        let mut combined_measurements = vec![];
+        // From original query. First half of this timeseries.
+        combined_measurements
+            .append(&mut observed_timeseries[1].measurements.clone());
+        // From the next query. Second half of the previous timeseries.
+        combined_measurements
+            .append(&mut next_timeseries[0].measurements.clone());
+        assert_eq!(combined_measurements, all_timeseries[1].measurements,);
+        assert_eq!(next_timeseries[0].measurements.len(), SAMPLE_COUNT - 1);
+        assert_eq!(next_timeseries[1].measurements.len(), 2);
 
         db.cleanup().await.expect("Failed to cleanup database");
     }

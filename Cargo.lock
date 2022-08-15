@@ -2677,6 +2677,7 @@ dependencies = [
  "openssl",
  "openssl-probe",
  "openssl-sys",
+ "parse-display",
  "schemars",
  "serde",
  "serde_json",
