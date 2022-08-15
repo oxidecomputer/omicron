@@ -376,6 +376,269 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
 }
 
+// Test the various ways Nexus can reject a disk created from a snapshot
+#[nexus_test]
+async fn test_reject_creating_disk_from_snapshot(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.apictx.nexus;
+    let datastore = nexus.datastore();
+
+    const SILO_NAME: &str = "snapshot-silo";
+    let silo =
+        create_silo(&client, SILO_NAME, true, shared::UserProvisionType::Fixed)
+            .await;
+
+    let project_id = create_org_and_project(&client).await;
+
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    let (authz_silo, ..) = LookupPath::new(&opctx, &datastore)
+        .silo_id(silo.identity.id)
+        .fetch()
+        .await
+        .unwrap();
+
+    let snapshot = datastore
+        .project_ensure_snapshot(
+            &opctx,
+            &authz_silo,
+            db::model::Snapshot {
+                identity: db::model::SnapshotIdentity {
+                    id: Uuid::new_v4(),
+                    name: external::Name::try_from("snapshot".to_string())
+                        .unwrap()
+                        .into(),
+                    description: "snapshot".into(),
+
+                    time_created: Utc::now(),
+                    time_modified: Utc::now(),
+                    time_deleted: None,
+                },
+
+                project_id,
+                disk_id: Uuid::new_v4(),
+                volume_id: Uuid::new_v4(),
+
+                gen: db::model::Generation::new(),
+                state: db::model::SnapshotState::Creating,
+                block_size: db::model::BlockSize::AdvancedFormat,
+
+                size: external::ByteCount::try_from(
+                    2 * params::MIN_DISK_SIZE_BYTES,
+                )
+                .unwrap()
+                .into(),
+            }
+            .into(),
+        )
+        .await
+        .unwrap();
+
+    let disks_url = get_disks_url();
+
+    // Reject where block size doesn't evenly divide total size
+    let error = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&params::DiskCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "bad-disk".parse().unwrap(),
+                    description: String::from("bad disk"),
+                },
+
+                disk_source: params::DiskSource::Snapshot {
+                    snapshot_id: snapshot.id(),
+                },
+
+                size: ByteCount::try_from(
+                    2 * params::MIN_DISK_SIZE_BYTES
+                        + db::model::BlockSize::Traditional.to_bytes(),
+                )
+                .unwrap(),
+            }))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<dropshot::HttpErrorResponseBody>()
+    .unwrap();
+    assert_eq!(
+        error.message,
+        "unsupported value for \"size and block_size\": total size must be a multiple of snapshot's block size",
+    );
+
+    // Reject where size of snapshot is greater than the disk's
+    let error = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&params::DiskCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "bad-disk".parse().unwrap(),
+                    description: String::from("bad disk"),
+                },
+
+                disk_source: params::DiskSource::Snapshot {
+                    snapshot_id: snapshot.id(),
+                },
+
+                size: ByteCount::try_from(1 * params::MIN_DISK_SIZE_BYTES)
+                    .unwrap(),
+            }))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<dropshot::HttpErrorResponseBody>()
+    .unwrap();
+    assert_eq!(
+        error.message,
+        format!(
+            "disk size {} must be greater than or equal to snapshot size {}",
+            1 * params::MIN_DISK_SIZE_BYTES,
+            2 * params::MIN_DISK_SIZE_BYTES,
+        )
+    );
+
+    // Reject disks where the MIN_DISK_SIZE_BYTES doesn't evenly divide
+    // the size
+    let error = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&params::DiskCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "bad-disk".parse().unwrap(),
+                    description: String::from("bad disk"),
+                },
+
+                disk_source: params::DiskSource::Snapshot {
+                    snapshot_id: snapshot.id(),
+                },
+
+                size: ByteCount::try_from(
+                    2 * params::MIN_DISK_SIZE_BYTES
+                        + db::model::BlockSize::AdvancedFormat.to_bytes(),
+                )
+                .unwrap(),
+            }))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<dropshot::HttpErrorResponseBody>()
+    .unwrap();
+    assert_eq!(
+        error.message,
+        "unsupported value for \"size\": total size must be a multiple of 1 GiB",
+    );
+}
+
+#[nexus_test]
+async fn test_reject_creating_disk_from_illegal_snapshot(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.apictx.nexus;
+    let datastore = nexus.datastore();
+
+    const SILO_NAME: &str = "snapshot-silo";
+    let silo =
+        create_silo(&client, SILO_NAME, true, shared::UserProvisionType::Fixed)
+            .await;
+
+    let project_id = create_org_and_project(&client).await;
+
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    let (authz_silo, ..) = LookupPath::new(&opctx, &datastore)
+        .silo_id(silo.identity.id)
+        .fetch()
+        .await
+        .unwrap();
+
+    let snapshot = datastore
+        .project_ensure_snapshot(
+            &opctx,
+            &authz_silo,
+            db::model::Snapshot {
+                identity: db::model::SnapshotIdentity {
+                    id: Uuid::new_v4(),
+                    name: external::Name::try_from("snapshot".to_string())
+                        .unwrap()
+                        .into(),
+                    description: "snapshot".into(),
+
+                    time_created: Utc::now(),
+                    time_modified: Utc::now(),
+                    time_deleted: None,
+                },
+
+                project_id,
+                disk_id: Uuid::new_v4(),
+                volume_id: Uuid::new_v4(),
+
+                gen: db::model::Generation::new(),
+                state: db::model::SnapshotState::Creating,
+                block_size: db::model::BlockSize::AdvancedFormat,
+
+                size: external::ByteCount::try_from(
+                    db::model::BlockSize::AdvancedFormat.to_bytes(),
+                )
+                .unwrap()
+                .into(),
+            }
+            .into(),
+        )
+        .await
+        .unwrap();
+
+    let disks_url = get_disks_url();
+
+    // Reject where the size isn't at least MIN_DISK_SIZE_BYTES
+    //
+    // If there is a check that the disk must be larger than the snapshot, there
+    // doesn't seem to be a scenario where this could happen - snapshots are
+    // created from disks, and disks can't be less than MIN_DISK_SIZE_BYTES.
+    // But it would be wrong to remove the check from Nexus, right? So put an
+    // illegally sized snapshot in above, and make sure that we can't create
+    // this anyway.
+    let error = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&params::DiskCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "bad-disk".parse().unwrap(),
+                    description: String::from("bad disk"),
+                },
+
+                disk_source: params::DiskSource::Snapshot {
+                    snapshot_id: snapshot.id(),
+                },
+
+                size: ByteCount::try_from(
+                    db::model::BlockSize::AdvancedFormat.to_bytes() * 2,
+                )
+                .unwrap(),
+            }))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<dropshot::HttpErrorResponseBody>()
+    .unwrap();
+    assert_eq!(
+        error.message,
+        "unsupported value for \"size\": total size must be at least 1 GiB",
+    );
+}
+
 // Test that the code that Saga nodes call is idempotent
 
 #[nexus_test]
