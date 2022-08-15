@@ -39,15 +39,6 @@ async fn test_create_a_saml_idp(cptestctx: &ControlPlaneTestContext) {
     const SILO_NAME: &str = "saml-silo";
     create_silo(&client, SILO_NAME, true, shared::UserProvisionType::Fixed)
         .await;
-    grant_iam(
-        &client,
-        &format!("/silos/{}", SILO_NAME),
-        SiloRole::Admin,
-        USER_TEST_PRIVILEGED.id(),
-        AuthnMode::PrivilegedUser,
-    )
-    .await;
-
     let silo: Silo =
         NexusRequest::object_get(&client, &format!("/silos/{}", SILO_NAME,))
             .authn_as(AuthnMode::PrivilegedUser)

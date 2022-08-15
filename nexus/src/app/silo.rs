@@ -343,8 +343,9 @@ impl super::Nexus {
             .silo_name(silo_name)
             .fetch()
             .await?;
+        let authz_idp_list = authz::SiloIdentityProviderList::new(authz_silo);
         self.db_datastore
-            .identity_provider_list(opctx, &authz_silo, pagparams)
+            .identity_provider_list(opctx, &authz_idp_list, pagparams)
             .await
     }
 
@@ -358,16 +359,24 @@ impl super::Nexus {
     ) -> CreateResult<db::model::SamlIdentityProvider> {
         let (authz_silo, db_silo) = LookupPath::new(opctx, &self.db_datastore)
             .silo_name(silo_name)
-            .fetch_for(authz::Action::CreateChild)
+            .fetch()
             .await?;
+        let authz_idp_list = authz::SiloIdentityProviderList::new(authz_silo);
+
+        // This check is not strictly necessary yet.  We'll check this
+        // permission in the DataStore when we actually update the list.
+        // But we check now to protect the code that fetches the descriptor from
+        // an external source.
+        opctx.authorize(authz::Action::CreateChild, &authz_idp_list).await?;
 
         let idp_metadata_document_string = match &params.idp_metadata_source {
             params::IdpMetadataSource::Url { url } => {
-                // Download the SAML IdP descriptor, and write it into the DB. This is
-                // so that it can be deserialized later.
+                // Download the SAML IdP descriptor, and write it into the DB.
+                // This is so that it can be deserialized later.
                 //
-                // Importantly, do this only once and store it. It would introduce
-                // attack surface to download it each time it was required.
+                // Importantly, do this only once and store it. It would
+                // introduce attack surface to download it each time it was
+                // required.
                 let dur = std::time::Duration::from_secs(5);
                 let client = reqwest::ClientBuilder::new()
                     .connect_timeout(dur)
@@ -450,7 +459,7 @@ impl super::Nexus {
                 Error::invalid_request(&e.to_string()))?;
 
         self.db_datastore
-            .saml_identity_provider_create(opctx, &authz_silo, provider)
+            .saml_identity_provider_create(opctx, &authz_idp_list, provider)
             .await
     }
 
