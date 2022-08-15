@@ -109,6 +109,8 @@ async fn make_silo(
         builder.new_resource(silo.clone());
     }
 
+    builder.new_resource(authz::SiloIdentityProviderList::new(silo.clone()));
+
     let norganizations = if first_branch { 2 } else { 1 };
     for i in 0..norganizations {
         let organization_name = format!("{}-org{}", silo_name, i + 1);
