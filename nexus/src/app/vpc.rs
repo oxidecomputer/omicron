@@ -420,6 +420,15 @@ impl super::Nexus {
                                 )
                                 .into(),
                             )),
+                            db::model::VpcFirewallRuleHostFilter(
+                                external::VpcFirewallRuleHostFilter::IpNet(
+                                    external::IpNet::V4(external::Ipv4Net(
+                                        network,
+                                    )),
+                                ),
+                            ) => Some(sled_agent_client::types::IpNet::V4(
+                                external::Ipv4Net(network.clone()).into(),
+                            )),
                             _ => None, // XXX
                         })
                         .collect()
