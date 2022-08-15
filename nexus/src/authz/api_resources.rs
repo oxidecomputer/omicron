@@ -499,7 +499,7 @@ impl AuthorizedResource for DeviceAuthRequestList {
     }
 }
 
-/// Synthetic resource describign the list of Identity Providers associated with
+/// Synthetic resource describing the list of Identity Providers associated with
 /// a Silo
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SiloIdentityProviderList(Silo);
