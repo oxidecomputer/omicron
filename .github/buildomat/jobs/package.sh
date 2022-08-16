@@ -16,10 +16,6 @@ set -o xtrace
 cargo --version
 rustc --version
 
-sed -e '/\[gateway\]/,/\[request\]/ s/^.*address =.*$/address = "192.168.1.199"/' \
-	-e 's/^mac =.*$/mac = "18:c0:4d:0d:9f:b2"/' \
-	-i smf/sled-agent/config-rss.toml
-
 ptime -m ./tools/install_builder_prerequisites.sh -yp
 ptime -m ./tools/create_self_signed_cert.sh -yp
 
