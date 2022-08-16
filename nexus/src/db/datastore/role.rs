@@ -6,10 +6,14 @@
 
 use super::DataStore;
 use crate::authz;
+use crate::authz::AuthorizedResource;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::datastore::RunnableQuery;
+use crate::db::datastore::RunnableQueryNoReturn;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
+use crate::db::error::TransactionError;
 use crate::db::fixed_data::role_assignment::BUILTIN_ROLE_ASSIGNMENTS;
 use crate::db::fixed_data::role_builtin::BUILTIN_ROLES;
 use crate::db::model::DatabaseString;
@@ -134,13 +138,38 @@ impl DataStore {
         // exposed via an external API right now but someone could still put us
         // into some hurt by assigning loads of roles to someone and having that
         // person attempt to access anything.
-        dsl::role_assignment
-            .filter(dsl::identity_type.eq(identity_type))
-            .filter(dsl::identity_id.eq(identity_id))
-            .filter(dsl::resource_type.eq(resource_type.to_string()))
-            .filter(dsl::resource_id.eq(resource_id))
-            .select(RoleAssignment::as_select())
-            .load_async::<RoleAssignment>(self.pool_authorized(opctx).await?)
+
+        self.pool_authorized(opctx).await?
+            .transaction(move |conn| {
+                let mut role_assignments = dsl::role_assignment
+                    .filter(dsl::identity_type.eq(identity_type.clone()))
+                    .filter(dsl::identity_id.eq(identity_id))
+                    .filter(dsl::resource_type.eq(resource_type.to_string()))
+                    .filter(dsl::resource_id.eq(resource_id))
+                    .select(RoleAssignment::as_select())
+                    .load::<RoleAssignment>(conn)?;
+
+                // Return the roles that a silo user has from their group memberships
+                if identity_type == IdentityType::SiloUser {
+                    use db::schema::silo_group_membership;
+
+                    let mut group_role_assignments = dsl::role_assignment
+                        .filter(dsl::identity_type.eq(IdentityType::SiloGroup))
+                        .filter(dsl::identity_id.eq_any(
+                            silo_group_membership::dsl::silo_group_membership
+                                .filter(silo_group_membership::dsl::silo_user_id.eq(identity_id))
+                                .select(silo_group_membership::dsl::silo_group_id)
+                        ))
+                        .filter(dsl::resource_type.eq(resource_type.to_string()))
+                        .filter(dsl::resource_id.eq(resource_id))
+                        .select(RoleAssignment::as_select())
+                        .load::<RoleAssignment>(conn)?;
+
+                    role_assignments.append(&mut group_role_assignments);
+                }
+
+                Ok(role_assignments)
+            })
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
@@ -157,7 +186,7 @@ impl DataStore {
     // is mitigated because we cap the number of role assignments per resource
     // pretty tightly.
     pub async fn role_assignment_fetch_visible<
-        T: authz::ApiResourceWithRoles + Clone + oso::PolarClass,
+        T: authz::ApiResourceWithRoles + AuthorizedResource + Clone,
     >(
         &self,
         opctx: &OpContext,
@@ -203,11 +232,62 @@ impl DataStore {
         new_assignments: &[shared::RoleAssignment<T::AllowedRoles>],
     ) -> ListResultVec<db::model::RoleAssignment>
     where
-        T: authz::ApiResourceWithRolesType + Clone + oso::PolarClass,
+        T: authz::ApiResourceWithRolesType + AuthorizedResource + Clone,
     {
         // TODO-security We should carefully review what permissions are
         // required for modifying the policy of a resource.
         opctx.authorize(authz::Action::ModifyPolicy, authz_resource).await?;
+
+        let authz_resource = authz_resource.clone();
+        let new_assignments = new_assignments.to_vec().clone();
+
+        let queries = DataStore::role_assignment_replace_visible_queries(
+            opctx,
+            &authz_resource,
+            &new_assignments,
+        )
+        .await?;
+
+        let (delete_old_query, insert_new_query) = queries;
+
+        // TODO-scalability: Ideally this would be a batched transaction so we
+        // don't need to hold a transaction open across multiple roundtrips from
+        // the database, but for now we're using a transaction due to the
+        // severely decreased legibility of CTEs via diesel right now.
+        // We might instead want to first-class the idea of Policies in the
+        // database so that we can build up a whole new Policy in batches and
+        // then flip the resource over to using it.
+        self.pool_authorized(opctx)
+            .await?
+            .transaction(move |conn| {
+                delete_old_query.execute(conn)?;
+                Ok(insert_new_query.get_results(conn)?)
+            })
+            .await
+            .map_err(|e| match e {
+                TransactionError::CustomError(e) => e,
+                TransactionError::Pool(e) => {
+                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                }
+            })
+    }
+
+    pub async fn role_assignment_replace_visible_queries<T>(
+        opctx: &OpContext,
+        authz_resource: &T,
+        new_assignments: &[shared::RoleAssignment<T::AllowedRoles>],
+    ) -> Result<
+        (
+            impl RunnableQueryNoReturn,
+            impl RunnableQuery<db::model::RoleAssignment>,
+        ),
+        Error,
+    >
+    where
+        T: authz::ApiResourceWithRolesType + AuthorizedResource + Clone,
+    {
+        opctx.authorize(authz::Action::ModifyPolicy, authz_resource).await?;
+
         bail_unless!(
             new_assignments.len() <= shared::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE
         );
@@ -237,28 +317,16 @@ impl DataStore {
         });
 
         use db::schema::role_assignment::dsl;
+
         let delete_old_query = diesel::delete(dsl::role_assignment)
             .filter(dsl::resource_id.eq(resource_id))
             .filter(dsl::resource_type.eq(resource_type.to_string()))
             .filter(dsl::identity_type.ne(IdentityType::UserBuiltin));
+
         let insert_new_query = diesel::insert_into(dsl::role_assignment)
             .values(new_assignments)
             .returning(RoleAssignment::as_returning());
 
-        // TODO-scalability: Ideally this would be a batched transaction so we
-        // don't need to hold a transaction open across multiple roundtrips from
-        // the database, but for now we're using a transaction due to the
-        // severely decreased legibility of CTEs via diesel right now.
-        // We might instead want to first-class the idea of Policies in the
-        // database so that we can build up a whole new Policy in batches and
-        // then flip the resource over to using it.
-        self.pool_authorized(opctx)
-            .await?
-            .transaction(move |conn| {
-                delete_old_query.execute(conn)?;
-                Ok(insert_new_query.get_results(conn)?)
-            })
-            .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+        Ok((delete_old_query, insert_new_query))
     }
 }

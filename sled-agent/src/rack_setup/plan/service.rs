@@ -8,7 +8,7 @@ use crate::params::{DatasetEnsureBody, ServiceRequest, ServiceType};
 use crate::rack_setup::config::SetupServiceConfig as Config;
 use omicron_common::address::{
     get_sled_address, ReservedRackSubnet, DNS_PORT, DNS_SERVER_PORT,
-    NEXUS_EXTERNAL_PORT, NEXUS_INTERNAL_PORT, RSS_RESERVED_ADDRESSES,
+    RSS_RESERVED_ADDRESSES,
 };
 use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
@@ -19,7 +19,7 @@ use sled_agent_client::{
 };
 use slog::Logger;
 use std::collections::HashMap;
-use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
+use std::net::{Ipv6Addr, SocketAddrV6};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 use uuid::Uuid;
@@ -187,16 +187,14 @@ impl Plan {
                     addresses: vec![address],
                     gz_addresses: vec![],
                     service_type: ServiceType::Nexus {
-                        internal_address: SocketAddrV6::new(
-                            address,
-                            NEXUS_INTERNAL_PORT,
-                            0,
-                            0,
-                        ),
-                        external_address: SocketAddr::new(
-                            config.nexus_external_address,
-                            NEXUS_EXTERNAL_PORT,
-                        ),
+                        internal_ip: address,
+//                            NEXUS_INTERNAL_PORT,
+//                            0,
+//                            0,
+                        external_ip: config.nexus_external_address,
+                       //     config.nexus_external_address,
+//                            NEXUS_EXTERNAL_PORT,
+//                        ),
                     },
                 })
             }

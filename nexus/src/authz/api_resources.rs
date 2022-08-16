@@ -46,6 +46,7 @@ use futures::future::BoxFuture;
 use futures::FutureExt;
 use lazy_static::lazy_static;
 use omicron_common::api::external::{Error, LookupType, ResourceType};
+use oso::PolarClass;
 use parse_display::Display;
 use parse_display::FromStr;
 use schemars::JsonSchema;
@@ -89,10 +90,11 @@ pub trait ApiResourceWithRoles: ApiResource {
 pub trait ApiResourceWithRolesType: ApiResourceWithRoles {
     type AllowedRoles: serde::Serialize
         + serde::de::DeserializeOwned
-        + db::model::DatabaseString;
+        + db::model::DatabaseString
+        + Clone;
 }
 
-impl<T: ApiResource + oso::ToPolar + Clone> AuthorizedResource for T {
+impl<T: ApiResource + oso::PolarClass + Clone> AuthorizedResource for T {
     fn load_roles<'a, 'b, 'c, 'd, 'e, 'f>(
         &'a self,
         opctx: &'b OpContext,
@@ -133,6 +135,10 @@ impl<T: ApiResource + oso::ToPolar + Clone> AuthorizedResource for T {
             Ok(false) => self.not_found(),
             Ok(true) => error,
         }
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
     }
 }
 
@@ -298,6 +304,10 @@ impl AuthorizedResource for ConsoleSessionList {
     ) -> Error {
         error
     }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -358,6 +368,10 @@ impl AuthorizedResource for GlobalImageList {
         _: Action,
     ) -> Error {
         error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
     }
 }
 
@@ -421,6 +435,10 @@ impl AuthorizedResource for IpPoolList {
     ) -> Error {
         error
     }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -474,6 +492,10 @@ impl AuthorizedResource for DeviceAuthRequestList {
         _: Action,
     ) -> Error {
         error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
     }
 }
 
@@ -770,6 +792,14 @@ impl db::model::DatabaseString for SiloRole {
 
 authz_resource! {
     name = "SiloUser",
+    parent = "Silo",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = Custom,
+}
+
+authz_resource! {
+    name = "SiloGroup",
     parent = "Silo",
     primary_key = Uuid,
     roles_allowed = false,

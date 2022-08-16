@@ -77,7 +77,7 @@ impl From<DbBool> for Datum {
 //
 // Note that the fields are renamed so that ClickHouse interprets them as correctly referring to
 // the nested column names.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub(crate) struct DbFieldList {
     #[serde(rename = "fields.name")]
     pub names: Vec<String>,
@@ -138,7 +138,7 @@ impl From<TimeseriesSchema> for DbTimeseriesSchema {
     }
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
 pub enum DbFieldType {
     String,
     I64,
@@ -169,7 +169,7 @@ impl From<FieldType> for DbFieldType {
         }
     }
 }
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
 pub enum DbDatumType {
     Bool,
     I64,
@@ -191,7 +191,7 @@ impl From<DatumType> for DbDatumType {
             DatumType::String => DbDatumType::String,
             DatumType::Bytes => DbDatumType::Bytes,
             DatumType::CumulativeI64 => DbDatumType::CumulativeI64,
-            DatumType::CumulativeF64 => DbDatumType::CumulativeI64,
+            DatumType::CumulativeF64 => DbDatumType::CumulativeF64,
             DatumType::HistogramI64 => DbDatumType::HistogramI64,
             DatumType::HistogramF64 => DbDatumType::HistogramF64,
         }
@@ -207,7 +207,7 @@ impl From<DbDatumType> for DatumType {
             DbDatumType::String => DatumType::String,
             DbDatumType::Bytes => DatumType::Bytes,
             DbDatumType::CumulativeI64 => DatumType::CumulativeI64,
-            DbDatumType::CumulativeF64 => DatumType::CumulativeI64,
+            DbDatumType::CumulativeF64 => DatumType::CumulativeF64,
             DbDatumType::HistogramI64 => DatumType::HistogramI64,
             DbDatumType::HistogramF64 => DatumType::HistogramF64,
         }
@@ -889,6 +889,68 @@ mod tests {
     #[should_panic]
     fn test_db_bool_bad() {
         let _ = bool::from(DbBool { inner: 10 });
+    }
+
+    #[test]
+    fn test_db_field_type_conversion() {
+        macro_rules! check_conversion {
+            ($variant:path, $db_variant:path) => {
+                assert_eq!(DbFieldType::from($variant), $db_variant);
+                assert_eq!(FieldType::from($db_variant), $variant);
+            };
+        }
+        check_conversion!(FieldType::String, DbFieldType::String);
+        check_conversion!(FieldType::I64, DbFieldType::I64);
+        check_conversion!(FieldType::IpAddr, DbFieldType::IpAddr);
+        check_conversion!(FieldType::Uuid, DbFieldType::Uuid);
+        check_conversion!(FieldType::Bool, DbFieldType::Bool);
+    }
+
+    #[test]
+    fn test_db_datum_type_conversion() {
+        macro_rules! check_conversion {
+            ($variant:path, $db_variant:path) => {
+                assert_eq!(DbDatumType::from($variant), $db_variant);
+                assert_eq!(DatumType::from($db_variant), $variant);
+            };
+        }
+        check_conversion!(DatumType::Bool, DbDatumType::Bool);
+        check_conversion!(DatumType::I64, DbDatumType::I64);
+        check_conversion!(DatumType::F64, DbDatumType::F64);
+        check_conversion!(DatumType::String, DbDatumType::String);
+        check_conversion!(DatumType::Bytes, DbDatumType::Bytes);
+        check_conversion!(DatumType::CumulativeI64, DbDatumType::CumulativeI64);
+        check_conversion!(DatumType::CumulativeF64, DbDatumType::CumulativeF64);
+        check_conversion!(DatumType::HistogramI64, DbDatumType::HistogramI64);
+        check_conversion!(DatumType::HistogramF64, DbDatumType::HistogramF64);
+    }
+
+    #[test]
+    fn test_db_field_list_conversion() {
+        let db_list = DbFieldList {
+            names: vec![String::from("field0"), String::from("field1")],
+            types: vec![DbFieldType::I64, DbFieldType::IpAddr],
+            sources: vec![DbFieldSource::Target, DbFieldSource::Metric],
+        };
+
+        let list = vec![
+            FieldSchema {
+                name: String::from("field0"),
+                ty: FieldType::I64,
+                source: FieldSource::Target,
+            },
+            FieldSchema {
+                name: String::from("field1"),
+                ty: FieldType::IpAddr,
+                source: FieldSource::Metric,
+            },
+        ];
+
+        assert_eq!(DbFieldList::from(list.clone()), db_list);
+        assert_eq!(db_list, list.clone().into());
+        let round_trip: Vec<FieldSchema> =
+            DbFieldList::from(list.clone()).into();
+        assert_eq!(round_trip, list);
     }
 
     #[test]

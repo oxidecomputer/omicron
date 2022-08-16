@@ -62,6 +62,7 @@ mod role;
 mod saga;
 mod service;
 mod silo;
+mod silo_group;
 mod silo_user;
 mod sled;
 mod ssh_key;
@@ -79,19 +80,23 @@ const REGION_REDUNDANCY_THRESHOLD: usize = 3;
 // This helper trait lets the statement either be executed or explained.
 //
 // U: The output type of executing the statement.
-trait RunnableQuery<U>:
-    RunQueryDsl<DbConnection>
-    + QueryFragment<Pg>
-    + LoadQuery<'static, DbConnection, U>
-    + QueryId
+pub trait RunnableQueryNoReturn:
+    RunQueryDsl<DbConnection> + QueryFragment<Pg> + QueryId
+{
+}
+
+impl<T> RunnableQueryNoReturn for T where
+    T: RunQueryDsl<DbConnection> + QueryFragment<Pg> + QueryId
+{
+}
+
+pub trait RunnableQuery<U>:
+    RunnableQueryNoReturn + LoadQuery<'static, DbConnection, U>
 {
 }
 
 impl<U, T> RunnableQuery<U> for T where
-    T: RunQueryDsl<DbConnection>
-        + QueryFragment<Pg>
-        + LoadQuery<'static, DbConnection, U>
-        + QueryId
+    T: RunnableQueryNoReturn + LoadQuery<'static, DbConnection, U>
 {
 }
 
@@ -438,7 +443,7 @@ mod test {
         let silo_user_opctx = OpContext::for_background(
             logctx.log.new(o!()),
             Arc::new(authz::Authz::new(&logctx.log)),
-            authn::Context::test_silo_user(*SILO_ID, silo_user_id),
+            authn::Context::for_test_user(silo_user_id, *SILO_ID),
             Arc::clone(&datastore),
         );
         let delete = datastore

@@ -3,7 +3,9 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use internal_dns_client::names::{BackendName, ServiceName, AAAA, SRV};
-use omicron_common::address::{DENDRITE_PORT, OXIMETER_PORT};
+use omicron_common::address::{
+    DENDRITE_PORT, NEXUS_INTERNAL_PORT, OXIMETER_PORT,
+};
 use omicron_common::api::external;
 use omicron_common::api::internal::nexus::{
     DiskRuntimeState, InstanceRuntimeState,
@@ -347,7 +349,7 @@ impl From<DatasetEnsureBody> for sled_agent_client::types::DatasetEnsureBody {
 )]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServiceType {
-    Nexus { internal_address: SocketAddrV6, external_address: SocketAddr },
+    Nexus { internal_ip: Ipv6Addr, external_ip: IpAddr },
     InternalDns { server_address: SocketAddrV6, dns_address: SocketAddrV6 },
     Oximeter,
     Dendrite { asic: DendriteAsic },
@@ -359,10 +361,9 @@ impl From<ServiceType> for sled_agent_client::types::ServiceType {
         use ServiceType as St;
 
         match s {
-            St::Nexus { internal_address, external_address } => AutoSt::Nexus {
-                internal_address: internal_address.to_string(),
-                external_address: external_address.to_string(),
-            },
+            St::Nexus { internal_ip, external_ip } => {
+                AutoSt::Nexus { internal_ip, external_ip }
+            }
             St::InternalDns { server_address, dns_address } => {
                 AutoSt::InternalDns {
                     server_address: server_address.to_string(),
@@ -420,7 +421,9 @@ impl ServiceRequest {
     pub fn address(&self) -> SocketAddrV6 {
         match self.service_type {
             ServiceType::InternalDns { server_address, .. } => server_address,
-            ServiceType::Nexus { internal_address, .. } => internal_address,
+            ServiceType::Nexus { internal_ip, .. } => {
+                SocketAddrV6::new(internal_ip, NEXUS_INTERNAL_PORT, 0, 0)
+            }
             ServiceType::Oximeter => {
                 SocketAddrV6::new(self.addresses[0], OXIMETER_PORT, 0, 0)
             }

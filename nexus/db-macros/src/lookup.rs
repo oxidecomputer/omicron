@@ -22,7 +22,7 @@ pub struct Input {
     /// Name of the resource
     ///
     /// This is taken as the name of the database model type in
-    /// `omicron_nexus::db::model`, the name of the authz type in
+    /// `omicron_nexus::db_model`, the name of the authz type in
     /// `omicron_nexus::authz`, and will be the name of the new type created by
     /// this macro.  The snake case version of the name is taken as the name of
     /// the Diesel table interface in `db::schema`.
@@ -70,9 +70,6 @@ pub struct Config {
     /// This resource is nested under the Silo hierarchy
     siloed: bool,
 
-    /// Name of the enum describing how we're looking up this resource
-    lookup_enum: syn::Ident,
-
     // The path to the resource
     /// list of type names for this resource and its parents
     /// (e.g., [`Organization`, `Project`])
@@ -102,7 +99,6 @@ pub struct Config {
 impl Config {
     fn for_input(input: Input) -> Config {
         let resource = Resource::for_name(&input.name);
-        let lookup_enum = format_ident!("{}Key", resource.name);
 
         let mut path_types: Vec<_> =
             input.ancestors.iter().map(|a| format_ident!("{}", a)).collect();
@@ -124,7 +120,6 @@ impl Config {
         Config {
             resource,
             siloed,
-            lookup_enum,
             path_types,
             path_authz_names,
             parent,
@@ -203,7 +198,6 @@ fn generate_struct(config: &Config) -> TokenStream {
         config.primary_key_columns.iter().map(|c| c.rust_type.deref());
 
     /* configure the lookup enum */
-    let lookup_enum = &config.lookup_enum;
     let name_variant = if config.lookup_by_name {
         let root_sym = format_ident!("Root");
         let parent_resource_name = config
@@ -222,12 +216,7 @@ fn generate_struct(config: &Config) -> TokenStream {
 
     quote! {
         #[doc = #doc_struct]
-        pub struct #resource_name<'a> {
-            key: #lookup_enum<'a>
-        }
-
-        /// Describes how we're looking up this resource
-        enum #lookup_enum<'a>{
+        pub enum #resource_name<'a>{
             /// An error occurred while selecting the resource
             ///
             /// This error will be returned by any lookup/fetch attempts.
@@ -251,11 +240,6 @@ fn generate_struct(config: &Config) -> TokenStream {
 fn generate_child_selectors(config: &Config) -> TokenStream {
     let child_resource_types: Vec<_> =
         config.child_resources.iter().map(|c| format_ident!("{}", c)).collect();
-    let child_resource_key_types: Vec<_> = config
-        .child_resources
-        .iter()
-        .map(|c| format_ident!("{}Key", c))
-        .collect();
     let child_selector_fn_names: Vec<_> = config
         .child_resources
         .iter()
@@ -284,9 +268,7 @@ fn generate_child_selectors(config: &Config) -> TokenStream {
                 'a: 'c,
                 'b: 'c,
             {
-                #child_resource_types {
-                    key: #child_resource_key_types::Name(self, name),
-                }
+                #child_resource_types::Name(self, name)
             }
         )*
     }
@@ -299,10 +281,9 @@ fn generate_misc_helpers(config: &Config) -> TokenStream {
     let resource_name_str = resource_name.to_string();
     let parent_resource_name =
         config.parent.as_ref().map(|p| &p.name).unwrap_or(&fleet_name);
-    let lookup_enum = &config.lookup_enum;
 
     let name_variant = if config.lookup_by_name {
-        quote! { #lookup_enum::Name(parent, _) => parent.lookup_root(), }
+        quote! { #resource_name::Name(parent, _) => parent.lookup_root(), }
     } else {
         quote! {}
     };
@@ -405,12 +386,12 @@ fn generate_misc_helpers(config: &Config) -> TokenStream {
         /// point, we need the `OpContext` and `DataStore` that are being
         /// used for this lookup.
         fn lookup_root(&self) -> &LookupPath<'a> {
-            match &self.key {
-                #lookup_enum::Error(root, ..) => root.lookup_root(),
+            match &self {
+                #resource_name::Error(root, ..) => root.lookup_root(),
 
                 #name_variant
 
-                #lookup_enum::PrimaryKey(root, ..) => root.lookup_root(),
+                #resource_name::PrimaryKey(root, ..) => root.lookup_root(),
             }
         }
 
@@ -425,7 +406,6 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
     let path_authz_names = &config.path_authz_names;
     let resource_name = &config.resource.name;
     let resource_authz_name = &config.resource.authz_name;
-    let lookup_enum = &config.lookup_enum;
     let pkey_names: Vec<_> = config
         .primary_key_columns
         .iter()
@@ -450,7 +430,7 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
     // Generate the by-name branch of the match arm in "fetch_for()"
     let fetch_for_name_variant = if config.lookup_by_name {
         quote! {
-            #lookup_enum::Name(parent, name) => {
+            #resource_name::Name(parent, name) => {
                 #ancestors_authz_names_assign
                 let (#resource_authz_name, db_row) = Self::fetch_by_name_for(
                     opctx,
@@ -469,7 +449,7 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
     // Generate the by-name branch of the match arm in "lookup()"
     let lookup_name_variant = if config.lookup_by_name {
         quote! {
-            #lookup_enum::Name(parent, name) => {
+            #resource_name::Name(parent, name) => {
                 // When doing a by-name lookup, we have to look up the
                 // parent first.  Since this is recursive, we wind up
                 // hitting the database once for each item in the path,
@@ -537,6 +517,13 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
             self.fetch_for(authz::Action::Read).await
         }
 
+        /// Turn the Result<T, E> of [`fetch`] into a Result<Option<T>, E>.
+        pub async fn optional_fetch(
+            &self,
+        ) -> LookupResult<Option<(#(authz::#path_types,)* nexus_db_model::#resource_name)>> {
+            self.optional_fetch_for(authz::Action::Read).await
+        }
+
         /// Fetch the record corresponding to the selected resource and
         /// check whether the caller is allowed to do the specified `action`
         ///
@@ -554,12 +541,12 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
             let opctx = &lookup.opctx;
             let datastore = &lookup.datastore;
 
-            match &self.key {
-                #lookup_enum::Error(_, error) => Err(error.clone()),
+            match &self {
+                #resource_name::Error(_, error) => Err(error.clone()),
 
                 #fetch_for_name_variant
 
-                #lookup_enum::PrimaryKey(_, #(#pkey_names,)*) => {
+                #resource_name::PrimaryKey(_, #(#pkey_names,)*) => {
                     Self::fetch_by_id_for(
                         opctx,
                         datastore,
@@ -569,6 +556,25 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
                 }
             }
             #silo_check_fetch
+        }
+
+        /// Turn the Result<T, E> of [`fetch_for`] into a Result<Option<T>, E>.
+        pub async fn optional_fetch_for(
+            &self,
+            action: authz::Action,
+        ) -> LookupResult<Option<(#(authz::#path_types,)* nexus_db_model::#resource_name)>> {
+            let result = self.fetch_for(action).await;
+
+            match result {
+                Err(Error::ObjectNotFound {
+                    type_name: _,
+                    lookup_type: _,
+                }) => Ok(None),
+
+                _ => {
+                    Ok(Some(result?))
+                }
+            }
         }
 
         /// Fetch an `authz` object for the selected resource and check
@@ -592,6 +598,25 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
             #silo_check_lookup
         }
 
+        /// Turn the Result<T, E> of [`lookup_for`] into a Result<Option<T>, E>.
+        pub async fn optional_lookup_for(
+            &self,
+            action: authz::Action,
+        ) -> LookupResult<Option<(#(authz::#path_types,)*)>> {
+            let result = self.lookup_for(action).await;
+
+            match result {
+                Err(Error::ObjectNotFound {
+                    type_name: _,
+                    lookup_type: _,
+                }) => Ok(None),
+
+                _ => {
+                    Ok(Some(result?))
+                }
+            }
+        }
+
         /// Fetch the "authz" objects for the selected resource and all its
         /// parents
         ///
@@ -607,12 +632,12 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
             let opctx = &lookup.opctx;
             let datastore = &lookup.datastore;
 
-            match &self.key {
-                #lookup_enum::Error(_, error) => Err(error.clone()),
+            match &self {
+                #resource_name::Error(_, error) => Err(error.clone()),
 
                 #lookup_name_variant
 
-                #lookup_enum::PrimaryKey(_, #(#pkey_names,)*) => {
+                #resource_name::PrimaryKey(_, #(#pkey_names,)*) => {
                     // When doing a by-id lookup, we start directly with the
                     // resource we're looking up.  But we still want to
                     // return a full path of authz objects.  So we look up

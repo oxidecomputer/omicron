@@ -661,7 +661,7 @@ impl StorageWorker {
                 "failed to notify nexus about zpool, will retry in {:?}", delay;
             );
         };
-        nexus_notifications.push(
+        nexus_notifications.push_back(
             backoff::retry_notify(
                 backoff::internal_service_policy_with_max(
                     std::time::Duration::from_secs(1),

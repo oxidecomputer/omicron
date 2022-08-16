@@ -90,19 +90,18 @@ opt-level = 3
 panic = "abort"
 
 #
-# It's common during development to use a local copy of dropshot, propolis
-# or steno in the parent directory.  If you want to use those, uncomment
-# one of these blocks.
+# It's common during development to use a local copy of dropshot, propolis,
+# crucible, or steno in the parent directory.  If you want to use those,
+# uncomment one of these blocks.
 #
 #[patch."https://github.com/oxidecomputer/dropshot"]
 #dropshot = { path = "../dropshot/dropshot" }
 #[patch."https://github.com/oxidecomputer/steno"]
 #steno = { path = "../steno" }
 #[patch."https://github.com/oxidecomputer/propolis"]
-#propolis-client = { path = "../propolis/client" }
-#propolis-server = { path = "../propolis/server" }
+#propolis-client = { path = "../propolis/lib/propolis-client" }
 #[patch."https://github.com/oxidecomputer/crucible"]
-#crucible = { path = "../crucible/upstairs" }
+#crucible-client-typess = { path = "../crucible/crucible-client-typess" }
 
 #
 # Local client generation during development.

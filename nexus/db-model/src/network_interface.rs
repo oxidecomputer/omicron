@@ -85,17 +85,17 @@ pub struct NetworkInterfaceUpdate {
     pub description: Option<String>,
     pub time_modified: DateTime<Utc>,
     #[diesel(column_name = is_primary)]
-    pub make_primary: Option<bool>,
+    pub primary: Option<bool>,
 }
 
 impl From<params::NetworkInterfaceUpdate> for NetworkInterfaceUpdate {
     fn from(params: params::NetworkInterfaceUpdate) -> Self {
-        let make_primary = if params.make_primary { Some(true) } else { None };
+        let primary = if params.primary { Some(true) } else { None };
         Self {
             name: params.identity.name.map(|n| n.into()),
             description: params.identity.description,
             time_modified: Utc::now(),
-            make_primary,
+            primary,
         }
     }
 }

@@ -102,7 +102,10 @@ impl SledAgent {
             let target = DiskStateRequested::Attached(instance_id);
 
             let id = match disk.volume_construction_request {
-                crucible::VolumeConstructionRequest::Volume { id, .. } => id,
+                crucible_client_types::VolumeConstructionRequest::Volume {
+                    id,
+                    ..
+                } => id,
                 _ => panic!("Unexpected construction type"),
             };
             self.disks.sim_ensure(&id, initial_state, target).await?;

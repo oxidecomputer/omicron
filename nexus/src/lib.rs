@@ -114,8 +114,8 @@ impl<'a> InternalServer<'a> {
 pub struct Server {
     /// shared state used by API request handlers
     pub apictx: Arc<ServerContext>,
-    /// dropshot server for external API
-    pub http_server_external: dropshot::HttpServer<Arc<ServerContext>>,
+    /// dropshot servers for external API
+    pub http_servers_external: Vec<dropshot::HttpServer<Arc<ServerContext>>>,
     /// dropshot server for internal API
     pub http_server_internal: dropshot::HttpServer<Arc<ServerContext>>,
 }
@@ -137,16 +137,26 @@ impl Server {
             apictx.nexus.start_background_tasks().map_err(|e| e.to_string())?;
         }
 
-        let http_server_starter_external = dropshot::HttpServerStarter::new(
-            &config.deployment.dropshot_external,
-            external_api(),
-            Arc::clone(&apictx),
-            &log.new(o!("component" => "dropshot_external")),
-        )
-        .map_err(|error| format!("initializing external server: {}", error))?;
-        let http_server_external = http_server_starter_external.start();
+        // Launch the external server(s).
+        let http_servers_external = config
+            .deployment
+            .dropshot_external
+            .iter()
+            .map(|cfg| {
+                let server_starter_external = dropshot::HttpServerStarter::new(
+                    &cfg,
+                    external_api(),
+                    Arc::clone(&apictx),
+                    &log.new(o!("component" => "dropshot_external")),
+                )
+                .map_err(|error| {
+                    format!("initializing external server: {}", error)
+                })?;
+                Ok(server_starter_external.start())
+            })
+            .collect::<Result<Vec<dropshot::HttpServer<_>>, String>>()?;
 
-        Ok(Server { apictx, http_server_external, http_server_internal })
+        Ok(Server { apictx, http_servers_external, http_server_internal })
     }
 
     /// Wait for the given server to shut down
@@ -155,18 +165,20 @@ impl Server {
     /// immediately after calling `start()`, the program will block indefinitely
     /// or until something else initiates a graceful shutdown.
     pub async fn wait_for_finish(self) -> Result<(), String> {
-        let errors = vec![
-            self.http_server_external
-                .await
-                .map_err(|e| format!("external: {}", e)),
+        let mut errors = vec![];
+        for server in self.http_servers_external {
+            errors.push(server.await.map_err(|e| format!("external: {}", e)));
+        }
+        errors.push(
             self.http_server_internal
                 .await
                 .map_err(|e| format!("internal: {}", e)),
-        ]
-        .into_iter()
-        .filter(Result::is_err)
-        .map(|r| r.unwrap_err())
-        .collect::<Vec<String>>();
+        );
+        let errors = errors
+            .into_iter()
+            .filter(Result::is_err)
+            .map(|r| r.unwrap_err())
+            .collect::<Vec<String>>();
 
         if errors.len() > 0 {
             let msg = format!("errors shutting down: ({})", errors.join(", "));

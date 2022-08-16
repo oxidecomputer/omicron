@@ -18,15 +18,14 @@ use crate::db::model::Sled;
 use crate::db::model::Zpool;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use omicron_common::address::{
-    DnsSubnet, DNS_PORT, DNS_REDUNDANCY, DNS_SERVER_PORT, NEXUS_EXTERNAL_PORT,
-    NEXUS_INTERNAL_PORT,
+    DnsSubnet, DNS_PORT, DNS_REDUNDANCY, DNS_SERVER_PORT,
 };
 use omicron_common::api::external::Error;
 use sled_agent_client::types as SledAgentTypes;
 use slog::Logger;
 use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
-use std::net::{Ipv6Addr, SocketAddrV6};
+use std::net::{IpAddr, Ipv6Addr, SocketAddrV6};
 use std::sync::Arc;
 
 // Policy for the number of services to be provisioned.
@@ -216,22 +215,9 @@ where
             ServiceKind::Nexus => (
                 "nexus".to_string(),
                 SledAgentTypes::ServiceType::Nexus {
-                    internal_address: SocketAddrV6::new(
-                        address,
-                        NEXUS_INTERNAL_PORT,
-                        0,
-                        0,
-                    )
-                    .to_string(),
-
+                    internal_ip: address,
                     // TODO: This is wrong! needs a separate address for Nexus
-                    external_address: SocketAddrV6::new(
-                        address,
-                        NEXUS_EXTERNAL_PORT,
-                        0,
-                        0,
-                    )
-                    .to_string(),
+                    external_ip: IpAddr::V6(address),
                 },
             ),
             ServiceKind::InternalDNS => (
@@ -837,22 +823,15 @@ mod test {
                     assert_eq!(requests[0].name, "nexus");
                     match &requests[0].service_type {
                         SledAgentTypes::ServiceType::Nexus {
-                            internal_address,
-                            external_address,
+                            internal_ip,
+                            external_ip,
                         } => {
-                            let internal_address = internal_address
-                                .parse::<SocketAddrV6>()
-                                .unwrap();
-                            let external_address = external_address
-                                .parse::<SocketAddrV6>()
-                                .unwrap();
-
                             // TODO: This is currently failing! We need to make
                             // the Nexus external IP come from an IP pool for
                             // external addresses.
                             assert_ne!(
-                                internal_address.ip(),
-                                external_address.ip()
+                                internal_ip,
+                                external_ip,
                             );
 
                             // TODO: check ports too, maybe?

@@ -335,7 +335,7 @@ mod test {
             [deployment]
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
-            [deployment.dropshot_external]
+            [[deployment.dropshot_external]]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
             [deployment.dropshot_internal]
@@ -357,12 +357,12 @@ mod test {
                     rack_id: "38b90dc4-c22a-65ba-f49a-f051fe01208f"
                         .parse()
                         .unwrap(),
-                    dropshot_external: ConfigDropshot {
+                    dropshot_external: vec![ConfigDropshot {
                         bind_address: "10.1.2.3:4567"
                             .parse::<SocketAddr>()
                             .unwrap(),
                         ..Default::default()
-                    },
+                    },],
                     dropshot_internal: ConfigDropshot {
                         bind_address: "10.1.2.3:4568"
                             .parse::<SocketAddr>()
@@ -420,7 +420,7 @@ mod test {
             [deployment]
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
-            [deployment.dropshot_external]
+            [[deployment.dropshot_external]]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
             [deployment.dropshot_internal]
@@ -462,7 +462,7 @@ mod test {
             [deployment]
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
-            [deployment.dropshot_external]
+            [[deployment.dropshot_external]]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
             [deployment.dropshot_internal]
@@ -518,7 +518,7 @@ mod test {
             [deployment]
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
-            [deployment.dropshot_external]
+            [[deployment.dropshot_external]]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
             [deployment.dropshot_internal]

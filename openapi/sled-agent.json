@@ -329,6 +329,9 @@
           "lossy": {
             "type": "boolean"
           },
+          "read_only": {
+            "type": "boolean"
+          },
           "root_cert_pem": {
             "nullable": true,
             "type": "string"
@@ -343,6 +346,7 @@
         "required": [
           "id",
           "lossy",
+          "read_only",
           "target"
         ]
       },
@@ -1163,11 +1167,13 @@
           {
             "type": "object",
             "properties": {
-              "external_address": {
-                "type": "string"
+              "external_ip": {
+                "type": "string",
+                "format": "ip"
               },
-              "internal_address": {
-                "type": "string"
+              "internal_ip": {
+                "type": "string",
+                "format": "ipv6"
               },
               "type": {
                 "type": "string",
@@ -1177,8 +1183,8 @@
               }
             },
             "required": [
-              "external_address",
-              "internal_address",
+              "external_ip",
+              "internal_ip",
               "type"
             ]
           },

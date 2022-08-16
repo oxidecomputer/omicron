@@ -61,7 +61,7 @@ has_role(actor: AuthenticatedActor, role: String, resource: Resource)
 #
 # - fleet.admin           (superuser for the whole system)
 # - fleet.collaborator    (can manage Silos)
-# - fleet.viewer          (can read most resources in the system)
+# - fleet.viewer          (can read most non-siloed resources in the system)
 # - silo.admin            (superuser for the silo)
 # - silo.collaborator     (can create and own Organizations)
 # - silo.viewer           (can read most resources within the Silo)
@@ -132,10 +132,16 @@ resource Silo {
 	"create_child" if "collaborator";
 	"modify" if "admin";
 
-	# Roles implied by roles on this resource's parent (Fleet)
+	# Permissions implied by roles on this resource's parent (Fleet).  Fleet
+	# privileges allow a user to see and potentially administer the Silo,
+	# but they do not give anyone permission to look at anything inside the
+	# Silo.  To achieve this, we use permission rules here.  (If we granted
+	# Fleet administrators _roles_ on the Silo, then those would cascade
+	# into the Silo as well.)
 	relations = { parent_fleet: Fleet };
-	"admin" if "collaborator" on "parent_fleet";
-	"viewer" if "viewer" on "parent_fleet";
+	"read" if "viewer" on "parent_fleet";
+	"list_identity_providers" if "viewer" on "parent_fleet";
+	"modify" if "collaborator" on "parent_fleet";
 
 	# external authenticator has to create silo users
 	"list_children" if "external-authenticator" on "parent_fleet";
@@ -248,6 +254,23 @@ has_relation(silo: Silo, "parent_silo", user: SiloUser)
 # authenticated actors have all permissions on themselves
 has_permission(actor: AuthenticatedActor, _perm: String, silo_user: SiloUser)
     if actor.equals_silo_user(silo_user);
+
+resource SiloGroup {
+	permissions = [
+	    "list_children",
+	    "modify",
+	    "read",
+	    "create_child",
+	];
+
+	relations = { parent_silo: Silo };
+	"list_children" if "viewer" on "parent_silo";
+	"read" if "viewer" on "parent_silo";
+	"modify" if "admin" on "parent_silo";
+	"create_child" if "admin" on "parent_silo";
+}
+has_relation(silo: Silo, "parent_silo", group: SiloGroup)
+	if group.silo = silo;
 
 resource SshKey {
 	permissions = [ "read", "modify" ];
@@ -375,6 +398,12 @@ has_permission(actor: AuthenticatedActor, "read", silo: Silo)
 	if has_role(actor, "external-authenticator", silo.fleet);
 has_permission(actor: AuthenticatedActor, "read", user: SiloUser)
 	if has_role(actor, "external-authenticator", user.silo.fleet);
+has_permission(actor: AuthenticatedActor, "modify", user: SiloUser)
+	if has_role(actor, "external-authenticator", user.silo.fleet);
+has_permission(actor: AuthenticatedActor, "read", group: SiloGroup)
+	if has_role(actor, "external-authenticator", group.silo.fleet);
+has_permission(actor: AuthenticatedActor, "modify", group: SiloGroup)
+	if has_role(actor, "external-authenticator", group.silo.fleet);
 
 has_permission(actor: AuthenticatedActor, "read", session: ConsoleSession)
 	if has_role(actor, "external-authenticator", session.fleet);
@@ -433,8 +462,6 @@ resource Database {
 # All authenticated users have the "query" permission on the database.
 has_permission(_actor: AuthenticatedActor, "query", _resource: Database);
 
-# The "db-init" user is the only one with the "init" role.
-has_permission(actor: AuthenticatedActor, "modify", _resource: Database)
-	if actor = USER_DB_INIT;
-has_permission(actor: AuthenticatedActor, "create_child", _resource: IpPoolList)
-	if actor = USER_DB_INIT;
+# The "db-init" user is the only one with the "modify" permission.
+has_permission(USER_DB_INIT: AuthenticatedActor, "modify", _resource: Database);
+has_permission(USER_DB_INIT: AuthenticatedActor, "create_child", _resource: IpPoolList);

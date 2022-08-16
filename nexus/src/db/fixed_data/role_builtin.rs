@@ -41,6 +41,11 @@ lazy_static! {
             role_name: "collaborator",
             description: "Organization Collaborator",
         };
+    pub static ref SILO_ADMIN: RoleBuiltinConfig = RoleBuiltinConfig {
+        resource_type: api::external::ResourceType::Silo,
+        role_name: "admin",
+        description: "Silo Administrator",
+    };
     pub static ref BUILTIN_ROLES: Vec<RoleBuiltinConfig> = vec![
         FLEET_ADMIN.clone(),
         FLEET_AUTHENTICATOR.clone(),
@@ -50,11 +55,7 @@ lazy_static! {
             role_name: "collaborator",
             description: "Fleet Collaborator",
         },
-        RoleBuiltinConfig {
-            resource_type: api::external::ResourceType::Silo,
-            role_name: "admin",
-            description: "Silo Administrator",
-        },
+        SILO_ADMIN.clone(),
         RoleBuiltinConfig {
             resource_type: api::external::ResourceType::Silo,
             role_name: "collaborator",

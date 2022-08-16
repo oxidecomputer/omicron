@@ -40,7 +40,7 @@ lazy_static! {
         format!("/hardware/sleds/{}", SLED_AGENT_UUID);
 
     // Global policy
-    pub static ref POLICY_URL: &'static str = "/policy";
+    pub static ref GLOBAL_POLICY_URL: &'static str = "/global/policy";
 
     // Silo used for testing
     pub static ref DEMO_SILO_NAME: Name = "demo-silo".parse().unwrap();
@@ -56,6 +56,7 @@ lazy_static! {
             },
             discoverable: true,
             user_provision_type: shared::UserProvisionType::Fixed,
+            admin_group_name: None,
         };
 
     // Organization used for testing
@@ -249,7 +250,7 @@ lazy_static! {
                 name: None,
                 description: Some(String::from("an updated description")),
             },
-            make_primary: false,
+            primary: false,
         }
     };
 }
@@ -375,6 +376,8 @@ lazy_static! {
             technical_contact_email: "technical@fake".to_string(),
 
             signing_keypair: None,
+
+            group_attribute_name: None,
         };
 }
 
@@ -517,7 +520,7 @@ lazy_static! {
     pub static ref VERIFY_ENDPOINTS: Vec<VerifyEndpoint> = vec![
         // Global IAM policy
         VerifyEndpoint {
-            url: *POLICY_URL,
+            url: *GLOBAL_POLICY_URL,
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
@@ -662,6 +665,21 @@ lazy_static! {
             url: &*DEMO_SILO_POLICY_URL,
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Put(
+                    serde_json::to_value(
+                        &shared::Policy::<authz::SiloRole> {
+                            role_assignments: vec![]
+                        }
+                    ).unwrap()
+                ),
+            ],
+        },
+        VerifyEndpoint {
+            url: "/policy",
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::ReadOnly,
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Put(

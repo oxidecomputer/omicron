@@ -13,8 +13,9 @@ use crate::illumos::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use crate::illumos::zone::AddressRequest;
 use crate::params::{ServiceEnsureBody, ServiceRequest, ServiceType};
 use crate::zone::Zones;
-use dropshot::ConfigDropshot;
 use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::DENDRITE_PORT;
+use omicron_common::address::NEXUS_INTERNAL_PORT;
 use omicron_common::address::OXIMETER_PORT;
 use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
@@ -371,13 +372,13 @@ impl ServiceManager {
             let default_smf_name = format!("{}:default", smf_name);
 
             match service.service_type {
-                ServiceType::Nexus { internal_address, external_address } => {
+                ServiceType::Nexus { internal_ip, external_ip } => {
                     info!(self.log, "Setting up Nexus service");
 
                     // The address of Nexus' external interface is a special
                     // case; it may be an IPv4 address.
                     let addr_request =
-                        AddressRequest::new_static(external_address.ip(), None);
+                        AddressRequest::new_static(external_ip, None);
                     running_zone
                         .ensure_external_address_with_name(
                             addr_request,
@@ -385,7 +386,7 @@ impl ServiceManager {
                         )
                         .await?;
 
-                    if let IpAddr::V4(_public_addr4) = external_address.ip() {
+                    if let IpAddr::V4(_public_addr4) = external_ip {
                         // If requested, create a default route back through
                         // the internet gateway.
                         if let Some(ref gateway) = self.config.gateway_address {
@@ -399,18 +400,31 @@ impl ServiceManager {
                         }
                     }
 
+                    let cert_file = PathBuf::from("/var/nexus/certs/cert.pem");
+                    let key_file = PathBuf::from("/var/nexus/certs/key.pem");
+
                     // Nexus takes a separate config file for parameters which
                     // cannot be known at packaging time.
                     let deployment_config = NexusDeploymentConfig {
                         id: service.id,
                         rack_id: self.rack_id,
-                        dropshot_external: ConfigDropshot {
-                            bind_address: external_address,
-                            request_body_max_bytes: 1048576,
-                            ..Default::default()
-                        },
-                        dropshot_internal: ConfigDropshot {
-                            bind_address: SocketAddr::V6(internal_address),
+
+                        // Request two dropshot servers: One for HTTP (port 80),
+                        // one for HTTPS (port 443).
+                        dropshot_external: vec![
+                            dropshot::ConfigDropshot {
+                                bind_address: SocketAddr::new(external_ip, 443),
+                                request_body_max_bytes: 1048576,
+                                tls: Some(dropshot::ConfigTls { cert_file, key_file }),
+                            },
+                            dropshot::ConfigDropshot {
+                                bind_address: SocketAddr::new(external_ip, 80),
+                                request_body_max_bytes: 1048576,
+                                ..Default::default()
+                            },
+                        ],
+                        dropshot_internal: dropshot::ConfigDropshot {
+                            bind_address: SocketAddr::new(IpAddr::V6(internal_ip), NEXUS_INTERNAL_PORT),
                             request_body_max_bytes: 1048576,
                             ..Default::default()
                         },
@@ -559,6 +573,8 @@ impl ServiceManager {
                 }
                 ServiceType::Dendrite { asic } => {
                     info!(self.log, "Setting up dendrite service");
+
+                    let address = service.addresses[0];
                     running_zone
                         .run_cmd(&[
                             crate::illumos::zone::SVCCFG,
@@ -569,6 +585,23 @@ impl ServiceManager {
                         ])
                         .map_err(|err| Error::ZoneCommand {
                             intent: "set dendrite asic type".to_string(),
+                            err,
+                        })?;
+
+                    running_zone
+                        .run_cmd(&[
+                            crate::illumos::zone::SVCCFG,
+                            "-s",
+                            &smf_name,
+                            "setprop",
+                            &format!(
+                                "config/address=[{}]:{}",
+                                address, DENDRITE_PORT,
+                            ),
+                        ])
+                        .map_err(|err| Error::ZoneCommand {
+                            intent: "set dendrite API server listen address"
+                                .to_string(),
                             err,
                         })?;
 

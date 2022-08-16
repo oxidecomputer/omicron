@@ -53,6 +53,13 @@ This script requires Omicron be uninstalled, e.g., with `pfexec
 that is not the case. The script will then remove the file-based vdevs and the
 VNICs created by `create_virtual_hardware.sh`.
 
+=== Make me a certificate!
+
+Nexus's external interface will typically be served using public-facing x.509
+certificate. While we are still configuring the mechanism to integrate this real
+certificate into the package system, `./tools/create_self_signed_cert.sh` can be
+used to generate an equivalent self-signed certificate.
+
 == Deploying Omicron
 
 The control plane repository contains a packaging tool which bundles binaries
@@ -270,7 +277,8 @@ the exact addresses that are available depends on the environment.
           "type": "attach",
           "name": "alpine"
         }
-      ]
+      ],
+      "external_ips": [{"type": "ephemeral"}]
     }
     EOF
 

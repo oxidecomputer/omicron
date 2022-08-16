@@ -37,6 +37,12 @@ impl<T> From<DieselError> for TransactionError<T> {
     }
 }
 
+impl From<PublicError> for TransactionError<PublicError> {
+    fn from(err: PublicError) -> Self {
+        TransactionError::CustomError(err)
+    }
+}
+
 /// Summarizes details provided with a database error.
 fn format_database_error(
     kind: DieselErrorKind,

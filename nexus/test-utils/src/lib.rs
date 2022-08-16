@@ -46,7 +46,9 @@ pub struct ControlPlaneTestContext {
 
 impl ControlPlaneTestContext {
     pub async fn teardown(mut self) {
-        self.server.http_server_external.close().await.unwrap();
+        for server in self.server.http_servers_external {
+            server.close().await.unwrap();
+        }
         self.server.http_server_internal.close().await.unwrap();
         self.database.cleanup().await.unwrap();
         self.clickhouse.cleanup().await.unwrap();
@@ -146,7 +148,7 @@ pub async fn test_setup_with_config(
     let server = omicron_nexus::Server::start(internal_server).await.unwrap();
 
     let testctx_external = ClientTestContext::new(
-        server.http_server_external.local_addr(),
+        server.http_servers_external[0].local_addr(),
         logctx.log.new(o!("component" => "external client test context")),
     );
     let testctx_internal = ClientTestContext::new(
