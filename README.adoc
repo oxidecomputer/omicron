@@ -80,7 +80,7 @@ Supported config properties include:
 |`dropshot_external`
 |
 |Yes
-|Dropshot configuration for the external server (i.e., the one that operators and developers using the Oxide rack will use).  Specific properties are documented below, but see the Dropshot README for details.
+|Dropshot configuration for the external server (i.e., the one that operators and developers using the Oxide rack will use).  Specific properties are documented below, but see the Dropshot README for details. Note that this is an array of external address configurations; multiple may be supplied.
 
 |`dropshot_external.bind_address`
 |`"127.0.0.1:12220"`

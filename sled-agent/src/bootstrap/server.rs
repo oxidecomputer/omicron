@@ -12,6 +12,8 @@ use super::params::RequestEnvelope;
 use super::trust_quorum::ShareDistribution;
 use super::views::Response;
 use super::views::ResponseEnvelope;
+use crate::bootstrap::maghemite;
+use crate::common::underlay;
 use crate::config::Config as SledConfig;
 use crate::sp::AsyncReadWrite;
 use crate::sp::SpHandle;
@@ -62,6 +64,24 @@ impl Server {
         } else {
             debug!(log, "registered DTrace probes");
         }
+
+        // Find address objects to pass to maghemite.
+        let mg_addr_objs = underlay::find_nics().map_err(|err| {
+            format!("Failed to find address objects for maghemite: {err}")
+        })?;
+        if mg_addr_objs.is_empty() {
+            return Err(
+                "underlay::find_nics() returned 0 address objects".to_string()
+            );
+        }
+
+        // Turn on the maghemite routing service.
+        // TODO-correctness Eventually we need mg-ddm to listen on multiple
+        // interfaces (link-local addresses of both NICs).
+        info!(log, "Starting mg-ddm service");
+        maghemite::enable_mg_ddm_service(log.clone(), mg_addr_objs[0].clone())
+            .await
+            .map_err(|err| format!("Failed to start mg-ddm: {err}"))?;
 
         info!(log, "detecting (real or simulated) SP");
         let sp = SpHandle::detect(
@@ -250,16 +270,20 @@ async fn serve_request_before_quorum_initialization(
     .map_err(|err| format!("Failed to establish sprockets session: {err}"))?;
 
     let response = match read_request(&mut stream).await? {
-        Request::SledAgentRequest(request) => {
-            match bootstrap_agent.request_agent(&*request).await {
+        Request::SledAgentRequest(request, trust_quorum_share) => {
+            let trust_quorum_share =
+                trust_quorum_share.map(ShareDistribution::from);
+            match bootstrap_agent
+                .request_agent(&*request, &trust_quorum_share)
+                .await
+            {
                 Ok(response) => {
                     // If this send fails, it means our caller already received
                     // our share from a different
                     // `serve_request_before_quorum_initialization()` task
                     // (i.e., from another incoming request from RSS). We'll
                     // ignore such failures.
-                    let _ =
-                        tx_share.send(request.trust_quorum_share.clone()).await;
+                    let _ = tx_share.send(trust_quorum_share).await;
 
                     Ok(Response::SledAgentResponse(response))
                 }
@@ -300,7 +324,7 @@ async fn serve_request_after_quorum_initialization(
     .map_err(|err| format!("Failed to establish sprockets session: {err}"))?;
 
     let response = match read_request(&mut stream).await? {
-        Request::SledAgentRequest(request) => {
+        Request::SledAgentRequest(request, _trust_quorum_share) => {
             warn!(
                 log, "Received sled agent request after we're initialized";
                 "request" => ?request,

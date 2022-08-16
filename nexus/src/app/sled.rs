@@ -10,13 +10,15 @@ use crate::db::identity::Asset;
 use crate::db::lookup::LookupPath;
 use crate::db::model::DatasetKind;
 use crate::db::model::ServiceKind;
-use crate::internal_api::params::ZpoolPutRequest;
+use crate::internal_api::params::{
+    SledAgentStartupInfo, SledRole, ZpoolPutRequest,
+};
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use sled_agent_client::Client as SledAgentClient;
-use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
+use std::net::{Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -28,10 +30,21 @@ impl super::Nexus {
     pub async fn upsert_sled(
         &self,
         id: Uuid,
-        address: SocketAddrV6,
+        info: SledAgentStartupInfo,
     ) -> Result<(), Error> {
         info!(self.log, "registered sled agent"; "sled_uuid" => id.to_string());
-        let sled = db::model::Sled::new(id, address);
+
+        let is_scrimlet = match info.role {
+            SledRole::Gimlet => false,
+            SledRole::Scrimlet => true,
+        };
+
+        let sled = db::model::Sled::new(
+            id,
+            info.sa_address,
+            is_scrimlet,
+            self.rack_id,
+        );
         self.db_datastore.sled_upsert(sled).await?;
         Ok(())
     }

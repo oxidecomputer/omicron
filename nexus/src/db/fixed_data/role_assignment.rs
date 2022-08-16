@@ -14,7 +14,7 @@ lazy_static! {
     pub static ref BUILTIN_ROLE_ASSIGNMENTS: Vec<RoleAssignment> =
         vec![
             // The "internal-api" user gets the "admin" role on the sole Fleet.
-            // This will grant them (nearly) all permissions on all resources.
+            // This is a pretty elevated privilege.
             // TODO-security We should scope this down (or, really, figure out a
             // better internal authn/authz story).
             RoleAssignment::new(

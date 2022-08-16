@@ -61,12 +61,21 @@ pub trait Simulatable: fmt::Debug + Send + Sync {
     /// transitions to intermediate states.
     type RequestedState: Send + Clone + fmt::Debug;
 
+    /// Arguments to start a producer on the simulated object.
+    type ProducerArgs: Send + Clone + fmt::Debug;
+
     /// Represents an action that should be taken by the Sled Agent.
     /// Generated in response to a state change, either requested or observed.
     type Action: Send + Clone + fmt::Debug;
 
     /// Creates a new Simulatable object.
     fn new(current: Self::CurrentState) -> Self;
+
+    /// Sets the producer based on the provided arguments.
+    async fn set_producer(
+        &mut self,
+        args: Self::ProducerArgs,
+    ) -> Result<(), Error>;
 
     /// Requests that the simulated object transition to a new target.
     ///

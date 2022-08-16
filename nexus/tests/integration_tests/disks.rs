@@ -4,17 +4,22 @@
 
 //! Tests basic disk support in the API
 
+use chrono::Utc;
 use crucible_agent_client::types::State as RegionState;
 use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
+use dropshot::ResultsPage;
 use http::method::Method;
 use http::StatusCode;
 use nexus_test_utils::http_testing::AuthnMode;
+use nexus_test_utils::http_testing::Collection;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::identity_eq;
 use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::create_instance;
+use nexus_test_utils::resource_helpers::create_instance_with;
+use nexus_test_utils::resource_helpers::create_ip_pool;
 use nexus_test_utils::resource_helpers::create_organization;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
@@ -27,10 +32,11 @@ use omicron_common::api::external::DiskState;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::Name;
-use omicron_common::api::external::Saga;
-use omicron_common::api::external::SagaState;
+use omicron_common::backoff;
 use omicron_nexus::TestInterfaces as _;
 use omicron_nexus::{external_api::params, Nexus};
+use oximeter::types::Datum;
+use oximeter::types::Measurement;
 use sled_agent_client::TestInterfaces as _;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -65,6 +71,7 @@ fn get_disk_detach_url(instance_name: &str) -> String {
 }
 
 async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
+    create_ip_pool(&client, "p0", None, None).await;
     create_organization(&client, ORG_NAME).await;
     let project = create_project(client, ORG_NAME, PROJECT_NAME).await;
     project.identity.id
@@ -964,28 +971,6 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
     .await
     .expect("unexpected success");
 
-    // Wait for the disk delete saga to be done, otherwise size will not be
-    // freed up!
-    for i in 0..5 {
-        let sagas =
-            objects_list_page_authz::<Saga>(client, "/sagas").await.items;
-
-        if sagas.is_empty() {
-            panic!("no saga?!");
-        }
-
-        if !sagas.iter().any(|x| x.state == SagaState::Running) {
-            // all sagas are done - either they succeeded or failed
-            break;
-        }
-
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-
-        if i == 4 {
-            panic!("waited too long!");
-        }
-    }
-
     // Ask for a 10 gibibyte disk.
     let disk_size = ByteCount::try_from(10u64 * 1024 * 1024 * 1024).unwrap();
     let disk_three = params::DiskCreate {
@@ -1008,6 +993,146 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
     .execute()
     .await
     .unwrap();
+}
+
+async fn create_instance_with_disk(client: &ClientTestContext) {
+    create_instance_with(
+        &client,
+        ORG_NAME,
+        PROJECT_NAME,
+        INSTANCE_NAME,
+        &params::InstanceNetworkInterfaceAttachment::Default,
+        vec![params::InstanceDiskAttachment::Attach(
+            params::InstanceDiskAttach { name: DISK_NAME.parse().unwrap() },
+        )],
+    )
+    .await;
+}
+
+const ALL_METRICS: [&'static str; 6] =
+    ["activated", "read", "write", "read_bytes", "write_bytes", "flush"];
+
+async fn query_for_metrics_until_they_exist(
+    client: &ClientTestContext,
+    path: &str,
+) -> ResultsPage<Measurement> {
+    backoff::retry_notify(
+        backoff::internal_service_policy(),
+        || async {
+            let measurements: ResultsPage<Measurement> =
+                objects_list_page_authz(client, path).await;
+
+            if measurements.items.is_empty() {
+                return Err(backoff::BackoffError::transient("No metrics yet"));
+            }
+            Ok(measurements)
+        },
+        |_, _| {},
+    )
+    .await
+    .expect("Failed to query for measurements")
+}
+
+#[nexus_test]
+async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    DiskTest::new(&cptestctx).await;
+    create_org_and_project(client).await;
+    create_disk(&client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
+
+    // Whenever we grab this URL, get the surrounding few seconds of metrics.
+    let metric_url = |metric_type: &str| {
+        let disk_url = format!("{}/{}", get_disks_url(), DISK_NAME);
+        format!(
+            "{disk_url}/metrics/{metric_type}?start_time={:?}&end_time={:?}",
+            Utc::now() - chrono::Duration::seconds(2),
+            Utc::now() + chrono::Duration::seconds(2),
+        )
+    };
+
+    // Try accessing metrics before we attach the disk to an instance.
+    //
+    // Observe that no metrics exist yet; no "upstairs" should have been
+    // instantiated on a sled.
+    let measurements: ResultsPage<Measurement> =
+        objects_list_page_authz(client, &metric_url("read")).await;
+    assert!(measurements.items.is_empty());
+
+    // Create an instance, attach the disk to it.
+    create_instance_with_disk(client).await;
+
+    for metric in &ALL_METRICS {
+        let measurements =
+            query_for_metrics_until_they_exist(client, &metric_url(metric))
+                .await;
+
+        assert!(!measurements.items.is_empty());
+        for item in &measurements.items {
+            let cumulative = match item.datum() {
+                Datum::CumulativeI64(c) => c,
+                _ => panic!("Unexpected datum type {:?}", item.datum()),
+            };
+            assert!(cumulative.start_time() <= item.timestamp());
+        }
+    }
+}
+
+#[nexus_test]
+async fn test_disk_metrics_paginated(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    DiskTest::new(&cptestctx).await;
+    create_org_and_project(client).await;
+    create_disk(&client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
+    create_instance_with_disk(client).await;
+
+    for metric in &ALL_METRICS {
+        let collection_url =
+            format!("{}/{DISK_NAME}/metrics/{metric}", get_disks_url());
+        let initial_params = format!(
+            "start_time={:?}&end_time={:?}",
+            Utc::now() - chrono::Duration::seconds(2),
+            Utc::now() + chrono::Duration::seconds(2),
+        );
+
+        query_for_metrics_until_they_exist(
+            client,
+            &format!("{collection_url}?{initial_params}"),
+        )
+        .await;
+
+        let measurements_paginated: Collection<Measurement> =
+            NexusRequest::iter_collection_authn(
+                client,
+                &collection_url,
+                &initial_params,
+                Some(10),
+            )
+            .await
+            .expect("failed to iterate over metrics");
+        assert!(!measurements_paginated.all_items.is_empty());
+
+        let mut last_timestamp = None;
+        let mut last_value = None;
+        for item in &measurements_paginated.all_items {
+            let cumulative = match item.datum() {
+                Datum::CumulativeI64(c) => c,
+                _ => panic!("Unexpected datum type {:?}", item.datum()),
+            };
+            assert!(cumulative.start_time() <= item.timestamp());
+
+            // Validate that the timestamps are non-decreasing.
+            if let Some(last_ts) = last_timestamp {
+                assert!(last_ts <= item.timestamp());
+            }
+            // Validate that the values increase.
+            if let Some(last_value) = last_value {
+                assert!(last_value < cumulative.value());
+            }
+
+            last_timestamp = Some(item.timestamp());
+            last_value = Some(cumulative.value());
+        }
+    }
 }
 
 async fn disk_get(client: &ClientTestContext, disk_url: &str) -> Disk {

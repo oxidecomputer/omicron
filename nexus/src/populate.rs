@@ -43,13 +43,17 @@
 //! each populator behaves as expected in the above ways.
 
 use crate::context::OpContext;
-use crate::db::DataStore;
+use crate::db::{self, DataStore};
+use crate::external_api::params;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use lazy_static::lazy_static;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::IdentityMetadataCreateParams;
+use omicron_common::api::external::Name;
 use omicron_common::backoff;
 use std::sync::Arc;
+use uuid::Uuid;
 
 #[derive(Clone, Debug)]
 pub enum PopulateStatus {
@@ -58,14 +62,26 @@ pub enum PopulateStatus {
     Failed(String),
 }
 
+/// Auxiliary data necessary to populate the database.
+pub struct PopulateArgs {
+    rack_id: Uuid,
+}
+
+impl PopulateArgs {
+    pub fn new(rack_id: Uuid) -> Self {
+        Self { rack_id }
+    }
+}
+
 pub fn populate_start(
     opctx: OpContext,
     datastore: Arc<DataStore>,
+    args: PopulateArgs,
 ) -> tokio::sync::watch::Receiver<PopulateStatus> {
     let (tx, rx) = tokio::sync::watch::channel(PopulateStatus::NotDone);
 
     tokio::spawn(async move {
-        let result = populate(&opctx, &datastore).await;
+        let result = populate(&opctx, &datastore, &args).await;
         if let Err(error) = tx.send(match result {
             Ok(()) => PopulateStatus::Done,
             Err(message) => PopulateStatus::Failed(message),
@@ -80,17 +96,19 @@ pub fn populate_start(
 async fn populate(
     opctx: &OpContext,
     datastore: &DataStore,
+    args: &PopulateArgs,
 ) -> Result<(), String> {
     for p in *ALL_POPULATORS {
         let db_result = backoff::retry_notify(
             backoff::internal_service_policy(),
             || async {
-                p.populate(opctx, datastore).await.map_err(|error| match &error
-                {
-                    Error::ServiceUnavailable { .. } => {
-                        backoff::BackoffError::transient(error)
+                p.populate(opctx, datastore, args).await.map_err(|error| {
+                    match &error {
+                        Error::ServiceUnavailable { .. } => {
+                            backoff::BackoffError::transient(error)
+                        }
+                        _ => backoff::BackoffError::Permanent(error),
                     }
-                    _ => backoff::BackoffError::Permanent(error),
                 })
             },
             |error, delay| {
@@ -130,6 +148,7 @@ trait Populator: std::fmt::Debug + Send + Sync {
         &self,
         opctx: &'a OpContext,
         datastore: &'a DataStore,
+        args: &'a PopulateArgs,
     ) -> BoxFuture<'b, Result<(), Error>>
     where
         'a: 'b;
@@ -143,6 +162,7 @@ impl Populator for PopulateBuiltinUsers {
         &self,
         opctx: &'a OpContext,
         datastore: &'a DataStore,
+        _args: &'a PopulateArgs,
     ) -> BoxFuture<'b, Result<(), Error>>
     where
         'a: 'b,
@@ -159,6 +179,7 @@ impl Populator for PopulateBuiltinRoles {
         &self,
         opctx: &'a OpContext,
         datastore: &'a DataStore,
+        _args: &'a PopulateArgs,
     ) -> BoxFuture<'b, Result<(), Error>>
     where
         'a: 'b,
@@ -175,6 +196,7 @@ impl Populator for PopulateBuiltinRoleAssignments {
         &self,
         opctx: &'a OpContext,
         datastore: &'a DataStore,
+        _args: &'a PopulateArgs,
     ) -> BoxFuture<'b, Result<(), Error>>
     where
         'a: 'b,
@@ -192,6 +214,7 @@ impl Populator for PopulateBuiltinSilos {
         &self,
         opctx: &'a OpContext,
         datastore: &'a DataStore,
+        _args: &'a PopulateArgs,
     ) -> BoxFuture<'b, Result<(), Error>>
     where
         'a: 'b,
@@ -214,6 +237,7 @@ impl Populator for PopulateSiloUsers {
         &self,
         opctx: &'a OpContext,
         datastore: &'a DataStore,
+        _args: &'a PopulateArgs,
     ) -> BoxFuture<'b, Result<(), Error>>
     where
         'a: 'b,
@@ -230,6 +254,7 @@ impl Populator for PopulateSiloUserRoleAssignments {
         &self,
         opctx: &'a OpContext,
         datastore: &'a DataStore,
+        _args: &'a PopulateArgs,
     ) -> BoxFuture<'b, Result<(), Error>>
     where
         'a: 'b,
@@ -241,19 +266,59 @@ impl Populator for PopulateSiloUserRoleAssignments {
     }
 }
 
+#[derive(Debug)]
+struct PopulateRack;
+impl Populator for PopulateRack {
+    fn populate<'a, 'b>(
+        &self,
+        opctx: &'a OpContext,
+        datastore: &'a DataStore,
+        args: &'a PopulateArgs,
+    ) -> BoxFuture<'b, Result<(), Error>>
+    where
+        'a: 'b,
+    {
+        async {
+            datastore
+                .rack_insert(opctx, &db::model::Rack::new(args.rack_id))
+                .await?;
+
+            let params = params::IpPoolCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "oxide-service-pool".parse::<Name>().unwrap(),
+                    description: String::from("IP Pool for Oxide Services"),
+                },
+                project: None,
+            };
+            datastore
+                .ip_pool_create(opctx, &params, Some(args.rack_id))
+                .await
+                .map(|_| ())
+                .or_else(|e| match e {
+                    Error::ObjectAlreadyExists { .. } => Ok(()),
+                    _ => Err(e),
+                })?;
+            Ok(())
+        }
+        .boxed()
+    }
+}
+
 lazy_static! {
-    static ref ALL_POPULATORS: [&'static dyn Populator; 6] = [
+    static ref ALL_POPULATORS: [&'static dyn Populator; 7] = [
         &PopulateBuiltinUsers,
         &PopulateBuiltinRoles,
         &PopulateBuiltinRoleAssignments,
         &PopulateBuiltinSilos,
         &PopulateSiloUsers,
         &PopulateSiloUserRoleAssignments,
+        &PopulateRack,
     ];
 }
 
 #[cfg(test)]
 mod test {
+    use super::PopulateArgs;
     use super::Populator;
     use super::ALL_POPULATORS;
     use crate::authn;
@@ -265,6 +330,7 @@ mod test {
     use omicron_common::api::external::Error;
     use omicron_test_utils::dev;
     use std::sync::Arc;
+    use uuid::Uuid;
 
     #[tokio::test]
     async fn test_populators() {
@@ -287,16 +353,18 @@ mod test {
         );
         let log = &logctx.log;
 
+        let args = PopulateArgs::new(Uuid::new_v4());
+
         // Running each populator once under normal conditions should work.
         info!(&log, "populator {:?}, run 1", p);
-        p.populate(&opctx, &datastore)
+        p.populate(&opctx, &datastore, &args)
             .await
             .with_context(|| format!("populator {:?} (try 1)", p))
             .unwrap();
 
         // It should also work fine to run it again.
         info!(&log, "populator {:?}, run 2 (idempotency check)", p);
-        p.populate(&opctx, &datastore)
+        p.populate(&opctx, &datastore, &args)
             .await
             .with_context(|| {
                 format!(
@@ -331,7 +399,7 @@ mod test {
         );
 
         info!(&log, "populator {:?}, with database offline", p);
-        match p.populate(&opctx, &datastore).await {
+        match p.populate(&opctx, &datastore, &args).await {
             Err(Error::ServiceUnavailable { .. }) => (),
             Ok(_) => panic!(
                 "populator {:?}: unexpectedly succeeded with no database",

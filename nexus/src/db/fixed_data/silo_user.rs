@@ -18,20 +18,29 @@ lazy_static! {
         db::model::SiloUser::new(
             *db::fixed_data::silo::SILO_ID,
             // "4007" looks a bit like "root".
-            "001de000-05e4-4000-8000-000000004007".parse().unwrap()
+            "001de000-05e4-4000-8000-000000004007".parse().unwrap(),
+            "privileged".into(),
         );
 
     /// Role assignments needed for the privileged user
     pub static ref ROLE_ASSIGNMENTS_PRIVILEGED:
         Vec<db::model::RoleAssignment> = vec![
             // The "test-privileged" user gets the "admin" role on the sole
-            // Fleet.  This will grant them all permissions on all resources.
+            // Fleet as well as the default Silo.
             db::model::RoleAssignment::new(
                 db::model::IdentityType::SiloUser,
                 USER_TEST_PRIVILEGED.id(),
                 role_builtin::FLEET_ADMIN.resource_type,
                 *db::fixed_data::FLEET_ID,
                 role_builtin::FLEET_ADMIN.role_name,
+            ),
+
+            db::model::RoleAssignment::new(
+                db::model::IdentityType::SiloUser,
+                USER_TEST_PRIVILEGED.id(),
+                role_builtin::SILO_ADMIN.resource_type,
+                *db::fixed_data::silo::SILO_ID,
+                role_builtin::SILO_ADMIN.role_name,
             ),
         ];
 
@@ -43,7 +52,8 @@ lazy_static! {
         db::model::SiloUser::new(
             *db::fixed_data::silo::SILO_ID,
             // 60001 is the decimal uid for "nobody" on Helios.
-            "001de000-05e4-4000-8000-000000060001".parse().unwrap()
+            "001de000-05e4-4000-8000-000000060001".parse().unwrap(),
+            "unprivileged".into(),
         );
 }
 

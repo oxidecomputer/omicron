@@ -1,0 +1,25 @@
+#
+# Oxide API: partial configuration file
+#
+
+[console]
+# Directory for static assets. Absolute path or relative to CWD.
+static_dir = "/var/nexus/static"
+cache_control_max_age_minutes = 10
+session_idle_timeout_minutes = 60
+session_absolute_timeout_minutes = 480
+
+[authn]
+# TODO(https://github.com/oxidecomputer/omicron/issues/372): Remove "spoof".
+schemes_external = ["spoof", "session_cookie", "access_token"]
+
+[log]
+# Show log messages of this level and more severe
+level = "info"
+mode = "file"
+path = "/dev/stdout"
+if_exists = "append"
+
+# Configuration for interacting with the timeseries database
+[timeseries_db]
+address = "[fd00:1122:3344:0101::5]:8123"

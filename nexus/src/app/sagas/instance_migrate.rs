@@ -3,12 +3,13 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::instance_create::allocate_sled_ipv6;
-use super::{impl_authenticated_saga_params, saga_generate_uuid};
+use super::{NexusActionContext, NexusSaga, ACTION_GENERATE_ID};
+use crate::app::sagas::NexusAction;
 use crate::authn;
 use crate::context::OpContext;
 use crate::db::identity::Resource;
+use crate::db::model::IpKind;
 use crate::external_api::params;
-use crate::saga_interface::SagaContext;
 use lazy_static::lazy_static;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
@@ -20,23 +21,15 @@ use sled_agent_client::types::InstanceMigrateParams;
 use sled_agent_client::types::InstanceRuntimeStateMigrateParams;
 use sled_agent_client::types::InstanceRuntimeStateRequested;
 use sled_agent_client::types::InstanceStateRequested;
+use sled_agent_client::types::SourceNatConfig;
 use std::net::Ipv6Addr;
 use std::sync::Arc;
-use steno::new_action_noop_undo;
-use steno::ActionContext;
 use steno::ActionError;
-use steno::SagaTemplate;
-use steno::SagaTemplateBuilder;
-use steno::SagaType;
+use steno::{new_action_noop_undo, Node};
 use uuid::Uuid;
 
-pub const SAGA_NAME: &'static str = "instance-migrate";
-lazy_static! {
-    pub static ref SAGA_TEMPLATE: Arc<SagaTemplate<SagaInstanceMigrate>> =
-        Arc::new(saga_instance_migrate());
-}
+// instance migrate saga: input parameters
 
-// "Migrate Instance" saga template
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Params {
     pub serialized_authn: authn::saga::Serialized,
@@ -44,64 +37,94 @@ pub struct Params {
     pub migrate_params: params::InstanceMigrate,
 }
 
-#[derive(Debug)]
-pub struct SagaInstanceMigrate;
-impl SagaType for SagaInstanceMigrate {
-    type SagaParamsType = Arc<Params>;
-    type ExecContextType = Arc<SagaContext>;
-}
-impl_authenticated_saga_params!(SagaInstanceMigrate);
+// instance migrate saga: actions
 
-fn saga_instance_migrate() -> SagaTemplate<SagaInstanceMigrate> {
-    let mut template_builder = SagaTemplateBuilder::new();
-
-    template_builder.append(
-        "migrate_id",
-        "GenerateMigrateId",
-        new_action_noop_undo(saga_generate_uuid),
+lazy_static! {
+    static ref ALLOCATE_PROPOLIS_IP: NexusAction = new_action_noop_undo(
+        "instance-migrate.allocate-propolis-ip",
+        sim_allocate_propolis_ip
     );
-
-    template_builder.append(
-        "dst_propolis_id",
-        "GeneratePropolisId",
-        new_action_noop_undo(saga_generate_uuid),
+    static ref MIGRATE_PREP: NexusAction = new_action_noop_undo(
+        "instance-migrate.migrate-prep",
+        sim_migrate_prep,
     );
-
-    template_builder.append(
-        "dst_propolis_ip",
-        "AllocatePropolisIp",
-        new_action_noop_undo(sim_allocate_propolis_ip),
-    );
-
-    template_builder.append(
-        "migrate_instance",
-        "MigratePrep",
-        new_action_noop_undo(sim_migrate_prep),
-    );
-
-    template_builder.append(
-        "instance_migrate",
-        "InstanceMigrate",
+    static ref INSTANCE_MIGRATE: NexusAction = new_action_noop_undo(
+        "instance-migrate.instance-migrate",
         // TODO robustness: This needs an undo action
-        new_action_noop_undo(sim_instance_migrate),
+        sim_instance_migrate,
     );
-
-    template_builder.append(
-        "cleanup_source",
-        "CleanupSource",
+    static ref CLEANUP_SOURCE: NexusAction = new_action_noop_undo(
+        "instance-migrate.cleanup-source",
         // TODO robustness: This needs an undo action. Is it even possible
         // to undo at this point?
-        new_action_noop_undo(sim_cleanup_source),
+        sim_cleanup_source,
     );
+}
 
-    template_builder.build()
+// instance migrate saga: definition
+
+#[derive(Debug)]
+pub struct SagaInstanceMigrate;
+impl NexusSaga for SagaInstanceMigrate {
+    const NAME: &'static str = "instance-migrate";
+    type Params = Params;
+
+    fn register_actions(registry: &mut super::ActionRegistry) {
+        registry.register(Arc::clone(&*ALLOCATE_PROPOLIS_IP));
+        registry.register(Arc::clone(&*MIGRATE_PREP));
+        registry.register(Arc::clone(&*INSTANCE_MIGRATE));
+        registry.register(Arc::clone(&*CLEANUP_SOURCE));
+    }
+
+    fn make_saga_dag(
+        _params: &Self::Params,
+        mut builder: steno::DagBuilder,
+    ) -> Result<steno::Dag, super::SagaInitError> {
+        builder.append(Node::action(
+            "migrate_id",
+            "GenerateMigrateId",
+            ACTION_GENERATE_ID.as_ref(),
+        ));
+
+        builder.append(Node::action(
+            "dst_propolis_id",
+            "GeneratePropolisId",
+            ACTION_GENERATE_ID.as_ref(),
+        ));
+
+        builder.append(Node::action(
+            "dst_propolis_ip",
+            "AllocatePropolisIp",
+            ALLOCATE_PROPOLIS_IP.as_ref(),
+        ));
+
+        builder.append(Node::action(
+            "migrate_instance",
+            "MigratePrep",
+            MIGRATE_PREP.as_ref(),
+        ));
+
+        builder.append(Node::action(
+            "instance_migrate",
+            "InstanceMigrate",
+            INSTANCE_MIGRATE.as_ref(),
+        ));
+
+        builder.append(Node::action(
+            "cleanup_source",
+            "CleanupSource",
+            CLEANUP_SOURCE.as_ref(),
+        ));
+
+        Ok(builder.build()?)
+    }
 }
 
 async fn sim_migrate_prep(
-    sagactx: ActionContext<SagaInstanceMigrate>,
+    sagactx: NexusActionContext,
 ) -> Result<(Uuid, InstanceRuntimeState), ActionError> {
     let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params();
+    let params = sagactx.saga_params::<Params>()?;
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
 
     let migrate_uuid = sagactx.lookup::<Uuid>("migrate_id")?;
@@ -128,16 +151,18 @@ async fn sim_migrate_prep(
 
 // Allocate an IP address on the destination sled for the Propolis server.
 async fn sim_allocate_propolis_ip(
-    sagactx: ActionContext<SagaInstanceMigrate>,
+    sagactx: NexusActionContext,
 ) -> Result<Ipv6Addr, ActionError> {
-    allocate_sled_ipv6(sagactx, "dst_sled_uuid").await
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    allocate_sled_ipv6(&opctx, sagactx, "dst_sled_uuid").await
 }
 
 async fn sim_instance_migrate(
-    sagactx: ActionContext<SagaInstanceMigrate>,
+    sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params();
+    let params = sagactx.saga_params::<Params>()?;
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
 
     let migration_id = sagactx.lookup::<Uuid>("migrate_id")?;
@@ -162,10 +187,46 @@ async fn sim_instance_migrate(
         )),
         ..old_runtime
     };
+
+    // Collect the external IPs for the instance.
+    //  https://github.com/oxidecomputer/omicron/issues/1467
+    // TODO-correctness: Handle Floating IPs, see
+    //  https://github.com/oxidecomputer/omicron/issues/1334
+    let (snat_ip, external_ips): (Vec<_>, Vec<_>) = osagactx
+        .datastore()
+        .instance_lookup_external_ips(&opctx, instance_id)
+        .await
+        .map_err(ActionError::action_failed)?
+        .into_iter()
+        .partition(|ip| ip.kind == IpKind::SNat);
+
+    // Sanity checks on the number and kind of each IP address.
+    if external_ips.len() > crate::app::MAX_EXTERNAL_IPS_PER_INSTANCE {
+        return Err(ActionError::action_failed(Error::internal_error(
+            format!(
+                "Expected the number of external IPs to be limited to \
+                {}, but found {}",
+                crate::app::MAX_EXTERNAL_IPS_PER_INSTANCE,
+                external_ips.len(),
+            )
+            .as_str(),
+        )));
+    }
+    let external_ips =
+        external_ips.into_iter().map(|model| model.ip.ip()).collect();
+    if snat_ip.len() != 1 {
+        return Err(ActionError::action_failed(Error::internal_error(
+            "Expected exactly one SNAT IP address for an instance",
+        )));
+    }
+    let source_nat = SourceNatConfig::from(snat_ip.into_iter().next().unwrap());
+
     let instance_hardware = InstanceHardware {
         runtime: runtime.into(),
         // TODO: populate NICs
         nics: vec![],
+        source_nat,
+        external_ips,
         // TODO: populate disks
         disks: vec![],
         // TODO: populate cloud init bytes
@@ -219,8 +280,9 @@ async fn sim_instance_migrate(
 }
 
 async fn sim_cleanup_source(
-    _sagactx: ActionContext<SagaInstanceMigrate>,
+    _sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
-    // TODO: clean up the previous instance whether it's on the same sled or a different one
+    // TODO: clean up the previous instance whether it's on the same sled or a
+    // different one
     Ok(())
 }

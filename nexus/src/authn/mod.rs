@@ -35,6 +35,7 @@ pub use crate::db::fixed_data::user_builtin::USER_EXTERNAL_AUTHN;
 pub use crate::db::fixed_data::user_builtin::USER_INTERNAL_API;
 pub use crate::db::fixed_data::user_builtin::USER_INTERNAL_READ;
 pub use crate::db::fixed_data::user_builtin::USER_SAGA_RECOVERY;
+pub use crate::db::fixed_data::user_builtin::USER_SERVICE_BALANCER;
 use crate::db::model::ConsoleSession;
 
 use crate::authz;
@@ -170,6 +171,11 @@ impl Context {
         Context::context_for_builtin_user(USER_DB_INIT.id)
     }
 
+    /// Returns an authenticated context for Nexus-driven service balancing.
+    pub fn internal_service_balancer() -> Context {
+        Context::context_for_builtin_user(USER_SERVICE_BALANCER.id)
+    }
+
     fn context_for_builtin_user(user_builtin_id: Uuid) -> Context {
         Context {
             kind: Kind::Authenticated(Details {
@@ -186,7 +192,7 @@ impl Context {
         Context {
             kind: Kind::Authenticated(Details {
                 actor: Actor::SiloUser {
-                    silo_user_id: USER_TEST_PRIVILEGED.identity().id,
+                    silo_user_id: USER_TEST_PRIVILEGED.id(),
                     silo_id: USER_TEST_PRIVILEGED.silo_id,
                 },
             }),
@@ -198,12 +204,18 @@ impl Context {
     /// (for testing only)
     #[cfg(test)]
     pub fn unprivileged_test_user() -> Context {
+        Context::for_test_user(
+            USER_TEST_UNPRIVILEGED.id(),
+            USER_TEST_UNPRIVILEGED.silo_id,
+        )
+    }
+
+    /// Returns an authenticated context for the specific Silo user.
+    #[cfg(test)]
+    pub fn for_test_user(silo_user_id: Uuid, silo_id: Uuid) -> Context {
         Context {
             kind: Kind::Authenticated(Details {
-                actor: Actor::SiloUser {
-                    silo_user_id: USER_TEST_UNPRIVILEGED.identity().id,
-                    silo_id: USER_TEST_UNPRIVILEGED.silo_id,
-                },
+                actor: Actor::SiloUser { silo_user_id, silo_id },
             }),
             schemes_tried: Vec::new(),
         }
@@ -217,6 +229,7 @@ mod test {
     use super::USER_INTERNAL_API;
     use super::USER_INTERNAL_READ;
     use super::USER_SAGA_RECOVERY;
+    use super::USER_SERVICE_BALANCER;
     use super::USER_TEST_PRIVILEGED;
     use super::USER_TEST_UNPRIVILEGED;
     use crate::db::fixed_data::user_builtin::USER_EXTERNAL_AUTHN;
@@ -251,6 +264,10 @@ mod test {
         let actor = authn.actor().unwrap();
         assert_eq!(actor.actor_id(), USER_DB_INIT.id);
 
+        let authn = Context::internal_service_balancer();
+        let actor = authn.actor().unwrap();
+        assert_eq!(actor.actor_id(), USER_SERVICE_BALANCER.id);
+
         let authn = Context::internal_saga_recovery();
         let actor = authn.actor().unwrap();
         assert_eq!(actor.actor_id(), USER_SAGA_RECOVERY.id);
@@ -265,10 +282,10 @@ mod test {
 /// that's specific to whether they're authenticated (or not)
 #[derive(Clone, Debug, Deserialize, Serialize)]
 enum Kind {
-    /// Client successfully authenticated
-    Authenticated(Details),
     /// Client did not attempt to authenticate
     Unauthenticated,
+    /// Client successfully authenticated
+    Authenticated(Details),
 }
 
 /// Describes the actor that was authenticated
@@ -289,13 +306,6 @@ pub enum Actor {
 }
 
 impl Actor {
-    pub fn actor_type(&self) -> db::model::IdentityType {
-        match self {
-            Actor::UserBuiltin { .. } => db::model::IdentityType::UserBuiltin,
-            Actor::SiloUser { .. } => db::model::IdentityType::SiloUser,
-        }
-    }
-
     pub fn actor_id(&self) -> Uuid {
         match self {
             Actor::UserBuiltin { user_builtin_id, .. } => *user_builtin_id,
@@ -307,6 +317,22 @@ impl Actor {
         match self {
             Actor::UserBuiltin { .. } => None,
             Actor::SiloUser { silo_id, .. } => Some(*silo_id),
+        }
+    }
+
+    pub fn silo_user_id(&self) -> Option<Uuid> {
+        match self {
+            Actor::UserBuiltin { .. } => None,
+            Actor::SiloUser { silo_user_id, .. } => Some(*silo_user_id),
+        }
+    }
+}
+
+impl From<&Actor> for db::model::IdentityType {
+    fn from(actor: &Actor) -> db::model::IdentityType {
+        match actor {
+            Actor::UserBuiltin { .. } => db::model::IdentityType::UserBuiltin,
+            Actor::SiloUser { .. } => db::model::IdentityType::SiloUser,
         }
     }
 }

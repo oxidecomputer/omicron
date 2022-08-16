@@ -21,9 +21,9 @@ use http::header::HeaderValue;
 use omicron_nexus::authn::external::session_cookie;
 use omicron_nexus::authn::external::spoof;
 use omicron_nexus::authn::external::spoof::HttpAuthnSpoof;
-use omicron_nexus::authn::external::spoof::SpoofContext;
 use omicron_nexus::authn::external::spoof::SPOOF_SCHEME_NAME;
 use omicron_nexus::authn::external::HttpAuthnScheme;
+use omicron_nexus::authn::external::SiloUserSilo;
 use omicron_nexus::db::fixed_data::silo::SILO_ID;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -277,7 +277,7 @@ async fn start_whoami_server(
     sessions: HashMap<String, FakeSession>,
 ) -> TestContext<WhoamiServerState> {
     let config = nexus_test_utils::load_test_config();
-    let logctx = LogContext::new(test_name, &config.log);
+    let logctx = LogContext::new(test_name, &config.pkg.log);
 
     let whoami_api = {
         let mut whoami_api = ApiDescription::new();
@@ -299,7 +299,7 @@ async fn start_whoami_server(
     TestContext::new(
         whoami_api,
         server_state,
-        &config.dropshot_external,
+        &config.deployment.dropshot_external[0],
         Some(logctx),
         log,
     )
@@ -311,7 +311,7 @@ struct WhoamiServerState {
 }
 
 #[async_trait]
-impl SpoofContext for WhoamiServerState {
+impl SiloUserSilo for WhoamiServerState {
     async fn silo_user_silo(
         &self,
         silo_user_id: Uuid,

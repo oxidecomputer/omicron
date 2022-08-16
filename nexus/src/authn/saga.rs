@@ -15,7 +15,7 @@ use serde::Serialize;
 /// Serialized form of an `OpContext`
 // NOTE: This structure must be versioned carefully.  (That's true of all saga
 // structures, but this one has a particularly large blast radius.)
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Serialized {
     kind: authn::Kind,
 }

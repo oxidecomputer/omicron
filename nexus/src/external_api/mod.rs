@@ -3,7 +3,9 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 pub mod console_api;
+pub mod device_auth;
 pub mod http_entrypoints;
-pub mod params;
-pub mod shared;
-pub mod views;
+
+pub use nexus_types::external_api::params;
+pub use nexus_types::external_api::shared;
+pub use nexus_types::external_api::views;

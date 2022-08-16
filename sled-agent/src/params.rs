@@ -2,6 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use internal_dns_client::names::{BackendName, ServiceName, AAAA, SRV};
+use omicron_common::address::{
+    DENDRITE_PORT, NEXUS_INTERNAL_PORT, OXIMETER_PORT,
+};
 use omicron_common::api::external;
 use omicron_common::api::internal::nexus::{
     DiskRuntimeState, InstanceRuntimeState,
@@ -9,9 +13,7 @@ use omicron_common::api::internal::nexus::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Display, Formatter, Result as FormatResult};
-use std::net::IpAddr;
-use std::net::Ipv6Addr;
-use std::net::{SocketAddr, SocketAddrV6};
+use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use uuid::Uuid;
 
 /// Information required to construct a virtual network interface for a guest
@@ -22,7 +24,20 @@ pub struct NetworkInterface {
     pub mac: external::MacAddr,
     pub subnet: external::IpNet,
     pub vni: external::Vni,
+    pub primary: bool,
     pub slot: u8,
+}
+
+/// An IP address and port range used for instance source NAT, i.e., making
+/// outbound network connections from guests.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, JsonSchema)]
+pub struct SourceNatConfig {
+    /// The external address provided to the instance
+    pub ip: IpAddr,
+    /// The first port used for instance NAT, inclusive.
+    pub first_port: u16,
+    /// The last port used for instance NAT, also inclusive.
+    pub last_port: u16,
 }
 
 /// Used to request a Disk state change
@@ -63,6 +78,10 @@ pub struct DiskEnsureBody {
 pub struct InstanceHardware {
     pub runtime: InstanceRuntimeState,
     pub nics: Vec<NetworkInterface>,
+    pub source_nat: SourceNatConfig,
+    /// Zero or more external IP addresses (either floating or ephemeral),
+    /// provided to an instance to allow inbound connectivity.
+    pub external_ips: Vec<IpAddr>,
     pub disks: Vec<propolis_client::api::DiskRequest>,
     pub cloud_init_bytes: Option<String>,
 }
@@ -186,6 +205,41 @@ pub struct InstanceSerialConsoleData {
     pub last_byte_offset: u64,
 }
 
+// The type of networking 'ASIC' the Dendrite service is expected to manage
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Copy, Hash,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum DendriteAsic {
+    TofinoAsic,
+    TofinoStub,
+    Softnpu,
+}
+
+impl std::fmt::Display for DendriteAsic {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                DendriteAsic::TofinoAsic => "tofino_asic",
+                DendriteAsic::TofinoStub => "tofino_stub",
+                DendriteAsic::Softnpu => "softnpu",
+            }
+        )
+    }
+}
+
+impl From<DendriteAsic> for sled_agent_client::types::DendriteAsic {
+    fn from(a: DendriteAsic) -> Self {
+        match a {
+            DendriteAsic::TofinoAsic => Self::TofinoAsic,
+            DendriteAsic::TofinoStub => Self::TofinoStub,
+            DendriteAsic::Softnpu => Self::Softnpu,
+        }
+    }
+}
+
 /// The type of a dataset, and an auxiliary information necessary
 /// to successfully launch a zone managing the associated data.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
@@ -193,7 +247,7 @@ pub struct InstanceSerialConsoleData {
 pub enum DatasetKind {
     CockroachDb {
         /// The addresses of all nodes within the cluster.
-        all_addresses: Vec<SocketAddr>,
+        all_addresses: Vec<SocketAddrV6>,
     },
     Crucible,
     Clickhouse,
@@ -228,7 +282,7 @@ impl std::fmt::Display for DatasetKind {
         use DatasetKind::*;
         let s = match self {
             Crucible => "crucible",
-            CockroachDb { .. } => "cockroach",
+            CockroachDb { .. } => "cockroachdb",
             Clickhouse => "clickhouse",
         };
         write!(f, "{}", s)
@@ -241,20 +295,36 @@ impl std::fmt::Display for DatasetKind {
 /// instantiated when the dataset is detected.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct DatasetEnsureBody {
+    // The UUID of the dataset, as well as the service using it directly.
+    pub id: Uuid,
     // The name (and UUID) of the Zpool which we are inserting into.
     pub zpool_id: Uuid,
     // The type of the filesystem.
     pub dataset_kind: DatasetKind,
     // The address on which the zone will listen for requests.
     pub address: SocketAddrV6,
-    // NOTE: We could insert a UUID here, if we want that to be set by the
-    // caller explicitly? Currently, the lack of a UUID implies that
-    // "at most one dataset type" exists within a zpool.
-    //
-    // It's unclear if this is actually necessary - making this change
-    // would also require the RSS to query existing datasets before
-    // requesting new ones (after all, we generally wouldn't want to
-    // create two CRDB datasets with different UUIDs on the same zpool).
+}
+
+impl DatasetEnsureBody {
+    pub fn aaaa(&self) -> AAAA {
+        AAAA::Zone(self.id)
+    }
+
+    pub fn srv(&self) -> SRV {
+        match self.dataset_kind {
+            DatasetKind::Crucible => {
+                SRV::Backend(BackendName::Crucible, self.id)
+            }
+            DatasetKind::Clickhouse => SRV::Service(ServiceName::Clickhouse),
+            DatasetKind::CockroachDb { .. } => {
+                SRV::Service(ServiceName::Cockroach)
+            }
+        }
+    }
+
+    pub fn address(&self) -> SocketAddrV6 {
+        self.address
+    }
 }
 
 impl From<DatasetEnsureBody> for sled_agent_client::types::DatasetEnsureBody {
@@ -263,14 +333,53 @@ impl From<DatasetEnsureBody> for sled_agent_client::types::DatasetEnsureBody {
             zpool_id: p.zpool_id,
             dataset_kind: p.dataset_kind.into(),
             address: p.address.to_string(),
+            id: p.id,
         }
     }
 }
 
+/// Describes service-specific parameters.
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ServiceType {
+    Nexus { internal_ip: Ipv6Addr, external_ip: IpAddr },
+    InternalDns { server_address: SocketAddrV6, dns_address: SocketAddrV6 },
+    Oximeter,
+    Dendrite { asic: DendriteAsic },
+}
+
+impl From<ServiceType> for sled_agent_client::types::ServiceType {
+    fn from(s: ServiceType) -> Self {
+        use sled_agent_client::types::ServiceType as AutoSt;
+        use ServiceType as St;
+
+        match s {
+            St::Nexus { internal_ip, external_ip } => {
+                AutoSt::Nexus { internal_ip, external_ip }
+            }
+            St::InternalDns { server_address, dns_address } => {
+                AutoSt::InternalDns {
+                    server_address: server_address.to_string(),
+                    dns_address: dns_address.to_string(),
+                }
+            }
+            St::Oximeter => AutoSt::Oximeter,
+            St::Dendrite { asic } => AutoSt::Dendrite { asic: asic.into() },
+        }
+    }
+}
+
+/// Describes a request to create a service. This information
+/// should be sufficient for a Sled Agent to start a zone
+/// containing the requested service.
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]
 pub struct ServiceRequest {
+    // The UUID of the service to be initialized.
+    pub id: Uuid,
     // The name of the service to be created.
     pub name: String,
     // The addresses on which the service should listen for requests.
@@ -284,14 +393,50 @@ pub struct ServiceRequest {
     // is necessary to allow inter-zone traffic routing.
     #[serde(default)]
     pub gz_addresses: Vec<Ipv6Addr>,
+    // Any other service-specific parameters.
+    pub service_type: ServiceType,
+}
+
+impl ServiceRequest {
+    pub fn aaaa(&self) -> AAAA {
+        AAAA::Zone(self.id)
+    }
+
+    pub fn srv(&self) -> SRV {
+        match self.service_type {
+            ServiceType::InternalDns { .. } => {
+                SRV::Service(ServiceName::InternalDNS)
+            }
+            ServiceType::Nexus { .. } => SRV::Service(ServiceName::Nexus),
+            ServiceType::Oximeter => SRV::Service(ServiceName::Oximeter),
+            ServiceType::Dendrite { .. } => SRV::Service(ServiceName::Dendrite),
+        }
+    }
+
+    pub fn address(&self) -> SocketAddrV6 {
+        match self.service_type {
+            ServiceType::InternalDns { server_address, .. } => server_address,
+            ServiceType::Nexus { internal_ip, .. } => {
+                SocketAddrV6::new(internal_ip, NEXUS_INTERNAL_PORT, 0, 0)
+            }
+            ServiceType::Oximeter => {
+                SocketAddrV6::new(self.addresses[0], OXIMETER_PORT, 0, 0)
+            }
+            ServiceType::Dendrite { .. } => {
+                SocketAddrV6::new(self.addresses[0], DENDRITE_PORT, 0, 0)
+            }
+        }
+    }
 }
 
 impl From<ServiceRequest> for sled_agent_client::types::ServiceRequest {
     fn from(s: ServiceRequest) -> Self {
         Self {
+            id: s.id,
             name: s.name,
             addresses: s.addresses,
             gz_addresses: s.gz_addresses,
+            service_type: s.service_type.into(),
         }
     }
 }

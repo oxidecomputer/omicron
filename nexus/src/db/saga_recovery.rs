@@ -12,13 +12,10 @@ use omicron_common::api::external::Error;
 use omicron_common::backoff::internal_service_policy;
 use omicron_common::backoff::retry_notify;
 use omicron_common::backoff::BackoffError;
-use std::collections::BTreeMap;
-use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use steno::SagaTemplateGeneric;
 
 /// Result type of a [`RecoveryTask`].
 pub type RecoveryResult = Result<CompletionTask, Error>;
@@ -57,8 +54,7 @@ impl Future for CompletionTask {
 /// More specifically, this task queries the database to list all uncompleted
 /// sagas that are assigned to SEC `sec_id` and for each one:
 ///
-/// * finds the appropriate template in `templates`
-/// * loads the saga log from `datastore`
+/// * loads the saga DAG and log from `datastore`
 /// * uses [`steno::SecClient::saga_resume`] to prepare to resume execution of
 ///   the saga using the persistent saga log
 /// * resumes execution of each saga
@@ -69,16 +65,13 @@ impl Future for CompletionTask {
 pub fn recover<T>(
     opctx: OpContext,
     sec_id: db::SecId,
-    uctx: Arc<T>,
+    uctx: Arc<T::ExecContextType>,
     datastore: Arc<db::DataStore>,
     sec_client: Arc<steno::SecClient>,
-    templates: &'static BTreeMap<
-        &'static str,
-        Arc<dyn steno::SagaTemplateGeneric<T>>,
-    >,
+    registry: Arc<steno::ActionRegistry<T>>,
 ) -> RecoveryTask
 where
-    T: Send + Sync + fmt::Debug + 'static,
+    T: steno::SagaType,
 {
     let join_handle = tokio::spawn(async move {
         info!(&opctx.log, "start saga recovery");
@@ -134,10 +127,10 @@ where
             let saga_id: steno::SagaId = saga.id.into();
             recover_saga(
                 &opctx,
-                &uctx,
+                Arc::clone(&uctx),
                 &datastore,
                 &sec_client,
-                templates,
+                Arc::clone(&registry),
                 saga,
             )
             .map_err(|error| {
@@ -226,45 +219,40 @@ async fn list_unfinished_sagas(
 /// has completed. The saga executor will attempt to execute the saga
 /// regardless of this future - it is for notification purposes only,
 /// and does not need to be polled.
-async fn recover_saga<T>(
-    opctx: &OpContext,
-    uctx: &Arc<T>,
-    datastore: &db::DataStore,
-    sec_client: &steno::SecClient,
-    templates: &BTreeMap<&'static str, Arc<dyn SagaTemplateGeneric<T>>>,
+async fn recover_saga<'a, T>(
+    opctx: &'a OpContext,
+    uctx: Arc<T::ExecContextType>,
+    datastore: &'a db::DataStore,
+    sec_client: &'a steno::SecClient,
+    registry: Arc<steno::ActionRegistry<T>>,
     saga: db::saga_types::Saga,
-) -> Result<impl core::future::Future<Output = Result<(), Error>>, Error>
+) -> Result<
+    impl core::future::Future<Output = Result<(), Error>> + 'static,
+    Error,
+>
 where
-    T: Send + Sync + fmt::Debug + 'static,
+    T: steno::SagaType,
 {
     let saga_id: steno::SagaId = saga.id.into();
-    let template_name = saga.template_name.as_str();
+    let saga_name = saga.name.clone();
     trace!(opctx.log, "recovering saga: start";
         "saga_id" => saga_id.to_string(),
-        "template_name" => template_name,
+        "saga_name" => saga_name.clone(),
     );
-    let template = templates.get(template_name).ok_or_else(|| {
-        Error::internal_error(&format!(
-            "saga {} uses unknown template {:?}",
-            saga_id, template_name,
-        ))
-    })?;
-    trace!(opctx.log, "recovering saga: found template";
-        "saga_id" => ?saga_id,
-        "template_name" => template_name
-    );
+
     let log_events = load_saga_log(datastore, &saga).await?;
-    trace!(opctx.log, "recovering saga: loaded log";
+    trace!(
+        opctx.log,
+        "recovering saga: loaded log";
         "saga_id" => ?saga_id,
-        "template_name" => template_name
+        "saga_name" => saga_name.clone()
     );
     let saga_completion = sec_client
         .saga_resume(
             saga_id,
-            Arc::clone(uctx),
-            Arc::clone(template),
-            saga.template_name,
-            saga.saga_params,
+            Arc::clone(&uctx),
+            saga.saga_dag,
+            registry,
             log_events,
         )
         .await
@@ -323,32 +311,11 @@ mod test {
     use omicron_test_utils::dev;
     use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
     use steno::{
-        new_action_noop_undo, ActionContext, ActionError, SagaId, SagaTemplate,
-        SagaTemplateBuilder, SagaTemplateGeneric, SagaType, SecClient,
+        new_action_noop_undo, Action, ActionContext, ActionError,
+        ActionRegistry, DagBuilder, Node, SagaDag, SagaId, SagaName, SagaType,
+        SecClient,
     };
     use uuid::Uuid;
-
-    const SAGA_TWO_NODE_OP_NAME: &'static str = "two-node-op";
-    lazy_static! {
-        static ref SAGA_TWO_NODE_OP_TEMPLATE: Arc<SagaTemplate<TestOp>> =
-            Arc::new(saga_object_create());
-    }
-
-    lazy_static! {
-        static ref ALL_TEMPLATES: BTreeMap<&'static str, Arc<dyn SagaTemplateGeneric<TestContext>>> =
-            all_templates();
-    }
-
-    fn all_templates(
-    ) -> BTreeMap<&'static str, Arc<dyn SagaTemplateGeneric<TestContext>>> {
-        vec![(
-            SAGA_TWO_NODE_OP_NAME,
-            Arc::clone(&SAGA_TWO_NODE_OP_TEMPLATE)
-                as Arc<dyn SagaTemplateGeneric<TestContext>>,
-        )]
-        .into_iter()
-        .collect()
-    }
 
     // Returns a cockroach DB, as well as a "datastore" interface (which is the
     // one more frequently used by Nexus).
@@ -405,15 +372,29 @@ mod test {
     #[derive(Debug)]
     struct TestOp;
     impl SagaType for TestOp {
-        type SagaParamsType = ();
         type ExecContextType = TestContext;
     }
 
-    fn saga_object_create() -> SagaTemplate<TestOp> {
-        let mut builder = SagaTemplateBuilder::new();
-        builder.append("n1_out", "NodeOne", new_action_noop_undo(node_one));
-        builder.append("n2_out", "NodeTwo", new_action_noop_undo(node_two));
-        builder.build()
+    lazy_static! {
+        static ref ACTION_N1: Arc<dyn Action<TestOp>> =
+            new_action_noop_undo("n1_action", node_one);
+        static ref ACTION_N2: Arc<dyn Action<TestOp>> =
+            new_action_noop_undo("n2_action", node_two);
+    }
+
+    fn registry_create() -> Arc<ActionRegistry<TestOp>> {
+        let mut registry = ActionRegistry::new();
+        registry.register(Arc::clone(&ACTION_N1));
+        registry.register(Arc::clone(&ACTION_N2));
+        Arc::new(registry)
+    }
+
+    fn saga_object_create() -> Arc<SagaDag> {
+        let mut builder = DagBuilder::new(SagaName::new("test-saga"));
+        builder.append(Node::action("n1_out", "NodeOne", ACTION_N1.as_ref()));
+        builder.append(Node::action("n2_out", "NodeTwo", ACTION_N2.as_ref()));
+        let dag = builder.build().unwrap();
+        Arc::new(SagaDag::new(dag, serde_json::Value::Null))
     }
 
     async fn node_one(ctx: ActionContext<TestOp>) -> Result<i32, ActionError> {
@@ -482,17 +463,16 @@ mod test {
             .saga_create(
                 saga_id,
                 uctx.clone(),
-                Arc::clone(&SAGA_TWO_NODE_OP_TEMPLATE),
-                SAGA_TWO_NODE_OP_NAME.to_string(),
-                (),
+                saga_object_create(),
+                registry_create(),
             )
             .await
             .unwrap();
         sec_client.saga_start(saga_id).await.unwrap();
         let result = future.await;
         let output = result.kind.unwrap();
-        assert_eq!(output.lookup_output::<i32>("n1_out").unwrap(), 1);
-        assert_eq!(output.lookup_output::<i32>("n2_out").unwrap(), 2);
+        assert_eq!(output.lookup_node_output::<i32>("n1_out").unwrap(), 1);
+        assert_eq!(output.lookup_node_output::<i32>("n2_out").unwrap(), 2);
         assert_eq!(uctx.n1_count.load(Ordering::SeqCst), 1);
         assert_eq!(uctx.n2_count.load(Ordering::SeqCst), 1);
 
@@ -513,7 +493,7 @@ mod test {
             uctx.clone(),
             db_datastore,
             sec_client.clone(),
-            &ALL_TEMPLATES,
+            registry_create(),
         )
         .await // Await the loading and resuming of the sagas
         .unwrap()
@@ -549,17 +529,16 @@ mod test {
             .saga_create(
                 saga_id,
                 uctx.clone(),
-                Arc::clone(&SAGA_TWO_NODE_OP_TEMPLATE),
-                SAGA_TWO_NODE_OP_NAME.to_string(),
-                (),
+                saga_object_create(),
+                registry_create(),
             )
             .await
             .unwrap();
         sec_client.saga_start(saga_id).await.unwrap();
         let result = future.await;
         let output = result.kind.unwrap();
-        assert_eq!(output.lookup_output::<i32>("n1_out").unwrap(), 1);
-        assert_eq!(output.lookup_output::<i32>("n2_out").unwrap(), 2);
+        assert_eq!(output.lookup_node_output::<i32>("n1_out").unwrap(), 1);
+        assert_eq!(output.lookup_node_output::<i32>("n2_out").unwrap(), 2);
         assert_eq!(uctx.n1_count.load(Ordering::SeqCst), 1);
         assert_eq!(uctx.n2_count.load(Ordering::SeqCst), 1);
 
@@ -576,7 +555,7 @@ mod test {
             uctx.clone(),
             db_datastore,
             sec_client.clone(),
-            &ALL_TEMPLATES,
+            registry_create(),
         )
         .await
         .unwrap()

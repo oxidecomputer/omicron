@@ -27,7 +27,7 @@ Prerequisite software may be installed with the following script:
 
 [source,text]
 ----
-$ ./tools/install_prerequisites.sh
+$ ./tools/install_builder_prerequisites.sh
 ----
 
 == Running
@@ -129,7 +129,7 @@ $ cargo run --bin=sled-agent-sim -- $(uuidgen) [::1]:12345 127.0.0.1:12221
 +
 [source,text]
 ----
-$ cargo run --bin=oximeter -- oximeter/collector/config.toml
+$ cargo run --bin=oximeter run --id $(uuidgen) --address [::1]:12223 -- oximeter/collector/config.toml
 Dec 02 18:00:01.062 INFO starting oximeter server
 Dec 02 18:00:01.062 DEBG creating ClickHouse client
 Dec 02 18:00:01.068 DEBG initializing ClickHouse database, component: clickhouse-client, collector_id: 1da65e5b-210c-4859-a7d7-200c1e659972, component: oximeter-agent
@@ -137,5 +137,7 @@ Dec 02 18:00:01.093 DEBG registered endpoint, path: /producers, method: POST, lo
 ...
 ----
 
-Once everything is up and running, you can use `curl` directly to hit either of
-the servers.  But it's easier to use the xref:cli.adoc[`oxide` CLI].
+Once everything is up and running, you can use the system in a few ways:
+
+* Use the browser-based console.  The Nexus log output will show what IP address and port it's listening on.  This is also configured in the config file.  If you're using the defaults, you can reach the console at `http://127.0.0.1:12220/orgs`.  Depending on the environment where you're running this, you may need an ssh tunnel or the like to reach this from your browser.
+* Use the xref:cli.adoc[`oxide` CLI].

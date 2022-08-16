@@ -9,24 +9,23 @@ path = "../rpaths"
 
 [dependencies]
 anyhow = "1.0"
-async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "ab1f49e0b3f95557aa96bf593282199fafeef4bd" }
-async-trait = "0.1.53"
-authz-macros = { path = "src/authz/authz-macros" }
+async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "51de79fe02b334899be5d5fd8b469f9d140ea887" }
+async-trait = "0.1.56"
 base64 = "0.13.0"
 bb8 = "0.8.0"
 clap = { version = "3.2", features = ["derive"] }
 cookie = "0.16"
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "8314eeddd228ec0d76cefa40c4a41d3e2611ac18" }
-diesel = { version = "2.0.0-rc.0", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
-diesel-dtrace = { git = "https://github.com/oxidecomputer/diesel-dtrace" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "1d67a53042f19ff7ca30dd20a04da94b7715ed7c" }
+diesel = { version = "2.0.0-rc.1", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
+diesel-dtrace = { git = "https://github.com/oxidecomputer/diesel-dtrace", rev = "b9262a79db59f0727ca28ca9baed6fc6e3cc31e7" }
 fatfs = "0.3.5"
 futures = "0.3.21"
 headers = "0.3.7"
 hex = "0.4.3"
 http = "0.2.7"
 hyper = "0.14"
-db-macros = { path = "src/db/db-macros" }
-ipnetwork = "0.18"
+internal-dns-client = { path = "../internal-dns-client" }
+ipnetwork = "0.20"
 lazy_static = "1.4.0"
 libc = "0.2.126"
 macaddr = { version = "1.0.1", features = [ "serde_std" ]}
@@ -50,17 +49,21 @@ ring = "0.16"
 samael = { git = "https://github.com/njaremko/samael", features = ["xmlsec"], branch = "master" }
 serde_json = "1.0"
 serde_urlencoded = "0.7.1"
-serde_with = "1.14.0"
+serde_with = "2.0.0"
 sled-agent-client = { path = "../sled-agent-client" }
 slog-dtrace = "0.2"
+steno = "0.2"
 tempfile = "3.3"
 thiserror = "1.0"
 toml = "0.5.9"
 tough = { version = "0.12", features = [ "http" ] }
 usdt = "0.3.1"
 
-[dependencies.api_identity]
-path = "../api_identity"
+authz-macros = { path = "authz-macros" }
+db-macros = { path = "db-macros" }
+nexus-defaults = { path = "defaults" }
+nexus-db-model = { path = "db-model" }
+nexus-types = { path = "types" }
 
 [dependencies.chrono]
 version = "0.4"
@@ -99,12 +102,8 @@ features = [ "derive" ]
 version = "2.7"
 features = [ "max_level_trace", "release_max_level_debug" ]
 
-[dependencies.steno]
-git = "https://github.com/oxidecomputer/steno"
-branch = "main"
-
 [dependencies.tokio]
-version = "1.18"
+version = "1.20"
 features = [ "full" ]
 
 [dependencies.tokio-postgres]
@@ -118,11 +117,12 @@ features = [ "serde", "v4" ]
 [dev-dependencies]
 criterion = { version = "0.3", features = [ "async_tokio" ] }
 expectorate = "1.0.5"
+itertools = "0.10.3"
 nexus-test-utils-macros = { path = "test-utils-macros" }
 nexus-test-utils = { path = "test-utils" }
 omicron-test-utils = { path = "../test-utils" }
 openapiv3 = "1.0"
-regex = "1.5.6"
+regex = "1.6.0"
 subprocess = "0.2.9"
 term = "0.7"
 httptest = "0.15.4"

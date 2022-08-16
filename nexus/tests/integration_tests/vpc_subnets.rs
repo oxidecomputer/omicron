@@ -2,6 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::integration_tests::instances::instance_post;
+use crate::integration_tests::instances::instance_simulate;
+use crate::integration_tests::instances::InstanceOp;
+use dropshot::HttpErrorResponseBody;
 use http::method::Method;
 use http::StatusCode;
 use nexus_test_utils::http_testing::AuthnMode;
@@ -10,7 +14,8 @@ use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::identity_eq;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::{
-    create_organization, create_project, create_vpc,
+    create_instance, create_ip_pool, create_organization, create_project,
+    create_vpc,
 };
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
@@ -19,6 +24,81 @@ use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::Ipv6Net;
 use omicron_nexus::external_api::{params, views::VpcSubnet};
+
+#[nexus_test]
+async fn test_delete_vpc_subnet_with_interfaces_fails(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let apictx = &cptestctx.server.apictx;
+    let nexus = &apictx.nexus;
+
+    // Create a project that we'll use for testing.
+    let org_name = "test-org";
+    let project_name = "springfield-squidport";
+    create_organization(&client, &org_name).await;
+    let _ = create_project(&client, org_name, project_name).await;
+    create_ip_pool(client, "pool0", None, None).await;
+
+    let vpcs_url =
+        format!("/organizations/{}/projects/{}/vpcs", org_name, project_name);
+    let vpc_url = format!("{vpcs_url}/default");
+    let subnets_url = format!("{vpc_url}/subnets");
+    let subnet_url = format!("{subnets_url}/default");
+
+    // get subnets should return the default subnet
+    let subnets =
+        objects_list_page_authz::<VpcSubnet>(client, &subnets_url).await.items;
+    assert_eq!(subnets.len(), 1);
+
+    // Create an instance in the default VPC and VPC Subnet. Verify that we
+    // cannot delete the subnet until the instance is gone.
+    let instance_url = format!(
+        "/organizations/{org_name}/projects/{project_name}/instances/inst"
+    );
+    let instance =
+        create_instance(client, &org_name, project_name, "inst").await;
+    instance_simulate(nexus, &instance.identity.id).await;
+    let err: HttpErrorResponseBody = NexusRequest::expect_failure(
+        &client,
+        StatusCode::BAD_REQUEST,
+        Method::DELETE,
+        &subnet_url,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+    assert_eq!(
+        err.message,
+        "VPC Subnet cannot be deleted while instances \
+        with network interfaces in the subnet exist",
+    );
+
+    // Stop and then delete the instance
+    instance_post(client, &instance_url, InstanceOp::Stop).await;
+    instance_simulate(&nexus, &instance.identity.id).await;
+    NexusRequest::object_delete(&client, &instance_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+
+    // Now deleting the subnet should succeed
+    NexusRequest::object_delete(
+        &client,
+        &format!("{}/{}", subnets_url, subnets[0].identity.name),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+    let subnets =
+        objects_list_page_authz::<VpcSubnet>(client, &subnets_url).await.items;
+    assert!(subnets.is_empty());
+}
 
 #[nexus_test]
 async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {

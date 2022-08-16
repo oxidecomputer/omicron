@@ -14,7 +14,6 @@ use anyhow::Result;
 use async_trait::async_trait;
 use futures::future;
 use gateway_messages::sp_impl::SpHandler;
-use gateway_messages::sp_impl::SpServer;
 use gateway_messages::BulkIgnitionState;
 use gateway_messages::DiscoverResponse;
 use gateway_messages::IgnitionCommand;
@@ -22,6 +21,8 @@ use gateway_messages::IgnitionFlags;
 use gateway_messages::IgnitionState;
 use gateway_messages::ResponseError;
 use gateway_messages::SerialNumber;
+use gateway_messages::SerializedSize;
+use gateway_messages::SpMessage;
 use gateway_messages::SpPort;
 use gateway_messages::SpState;
 use slog::debug;
@@ -40,6 +41,8 @@ use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::task;
 use tokio::task::JoinHandle;
+
+const SIM_SIDECAR_VERSION: u32 = 1;
 
 pub struct Sidecar {
     rot: Mutex<RotSprocket>,
@@ -222,7 +225,7 @@ impl Inner {
     }
 
     async fn run(mut self) -> Result<()> {
-        let mut server = SpServer::default();
+        let mut out_buf = [0; SpMessage::MAX_SIZE];
         let mut responsiveness = Responsiveness::Responsive;
         loop {
             select! {
@@ -230,7 +233,7 @@ impl Inner {
                     if let Some((resp, addr)) = server::handle_request(
                         &mut self.handler,
                         recv0,
-                        &mut server,
+                        &mut out_buf,
                         responsiveness,
                         SpPort::One,
                     ).await? {
@@ -242,7 +245,7 @@ impl Inner {
                     if let Some((resp, addr)) = server::handle_request(
                         &mut self.handler,
                         recv1,
-                        &mut server,
+                        &mut out_buf,
                         responsiveness,
                         SpPort::Two,
                     ).await? {
@@ -406,7 +409,10 @@ impl SpHandler for Handler {
         sender: SocketAddrV6,
         port: SpPort,
     ) -> Result<SpState, ResponseError> {
-        let state = SpState { serial_number: self.serial_number };
+        let state = SpState {
+            serial_number: self.serial_number,
+            version: SIM_SIDECAR_VERSION,
+        };
         debug!(
             &self.log, "received state request";
             "sender" => %sender,
@@ -414,5 +420,64 @@ impl SpHandler for Handler {
             "reply-state" => ?state,
         );
         Ok(state)
+    }
+
+    fn update_start(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+        update: gateway_messages::UpdateStart,
+    ) -> Result<(), ResponseError> {
+        warn!(
+            &self.log,
+            "received update start request; not supported by simulated sidecar";
+            "sender" => %sender,
+            "port" => ?port,
+            "update" => ?update,
+        );
+        Err(ResponseError::RequestUnsupportedForSp)
+    }
+
+    fn update_chunk(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+        chunk: gateway_messages::UpdateChunk,
+    ) -> Result<(), ResponseError> {
+        warn!(
+            &self.log,
+            "received update chunk; not supported by simulated sidecar";
+            "sender" => %sender,
+            "port" => ?port,
+            "offset" => chunk.offset,
+            "length" => chunk.chunk_length,
+        );
+        Err(ResponseError::RequestUnsupportedForSp)
+    }
+
+    fn sys_reset_prepare(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+    ) -> Result<(), ResponseError> {
+        warn!(
+            &self.log, "received sys-reset prepare request; not supported by simulated sidecar";
+            "sender" => %sender,
+            "port" => ?port,
+        );
+        Err(ResponseError::RequestUnsupportedForSp)
+    }
+
+    fn sys_reset_trigger(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+    ) -> Result<std::convert::Infallible, ResponseError> {
+        warn!(
+            &self.log, "received sys-reset trigger request; not supported by simulated sidecar";
+            "sender" => %sender,
+            "port" => ?port,
+        );
+        Err(ResponseError::RequestUnsupportedForSp)
     }
 }

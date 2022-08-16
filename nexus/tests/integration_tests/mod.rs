@@ -4,19 +4,24 @@
 //! the way it is.
 
 mod authn_http;
+mod authz;
 mod basic;
 mod commands;
 mod console_api;
 mod datasets;
+mod device_auth;
 mod disks;
 mod images;
 mod instances;
+mod ip_pools;
 mod organizations;
 mod oximeter;
 mod projects;
+mod rack;
 mod role_assignments;
 mod roles_builtin;
 mod router_routes;
+mod saml;
 mod silos;
 mod ssh_keys;
 mod subnet_allocation;

@@ -6,28 +6,40 @@
 
 use super::client::Client as BootstrapAgentClient;
 use super::config::{Config, BOOTSTRAP_AGENT_PORT};
-use super::discovery;
+use super::ddm_admin_client::{DdmAdminClient, DdmError};
 use super::params::SledAgentRequest;
 use super::rss_handle::RssHandle;
 use super::server::TrustQuorumMembership;
-use super::trust_quorum::{RackSecret, ShareDistribution, TrustQuorumError};
+use super::trust_quorum::{
+    RackSecret, SerializableShareDistribution, ShareDistribution,
+    TrustQuorumError,
+};
 use super::views::SledAgentResponse;
 use crate::config::Config as SledConfig;
 use crate::illumos::dladm::{self, Dladm, PhysicalLink};
 use crate::illumos::zone::Zones;
 use crate::server::Server as SledServer;
 use crate::sp::SpHandle;
-use omicron_common::address::get_sled_address;
+use omicron_common::address::{get_sled_address, Ipv6Subnet};
 use omicron_common::api::external::{Error as ExternalError, MacAddr};
 use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
 };
+use serde::{Deserialize, Serialize};
 use slog::Logger;
+use std::borrow::Cow;
+use std::collections::HashSet;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::Mutex;
+
+/// Initial octet of IPv6 for bootstrap addresses.
+pub(crate) const BOOTSTRAP_PREFIX: u16 = 0xfdb0;
+
+/// IPv6 prefix mask for bootstrap addresses.
+pub(crate) const BOOTSTRAP_MASK: u8 = 64;
 
 /// Describes errors which may occur while operating the bootstrap service.
 #[derive(Error, Debug)]
@@ -39,6 +51,9 @@ pub enum BootstrapError {
         err: std::io::Error,
     },
 
+    #[error("Error contacting ddmd: {0}")]
+    DdmError(#[from] DdmError),
+
     #[error("Error starting sled agent: {0}")]
     SledError(String),
 
@@ -47,6 +62,9 @@ pub enum BootstrapError {
 
     #[error(transparent)]
     TrustQuorum(#[from] TrustQuorumError),
+
+    #[error("Error collecting peer addresses: {0}")]
+    PeerAddresses(String),
 
     #[error("Failed to initialize bootstrap address: {err}")]
     BootstrapAddress { err: crate::illumos::zone::EnsureGzAddressError },
@@ -65,7 +83,7 @@ pub(crate) struct Agent {
     /// Store the parent log - without "component = BootstrapAgent" - so
     /// other launched components can set their own value.
     parent_log: Logger,
-    peer_monitor: discovery::PeerMonitor,
+    address: Ipv6Addr,
 
     /// Our share of the rack secret, if we have one.
     share: Mutex<Option<ShareDistribution>>,
@@ -74,6 +92,7 @@ pub(crate) struct Agent {
     sled_agent: Mutex<Option<SledServer>>,
     sled_config: SledConfig,
     sp: Option<SpHandle>,
+    ddmd_client: DdmAdminClient,
 }
 
 fn get_sled_agent_request_path() -> PathBuf {
@@ -86,7 +105,7 @@ fn mac_to_socket_addr(mac: MacAddr) -> SocketAddrV6 {
     assert_eq!(6, mac_bytes.len());
 
     let address = Ipv6Addr::new(
-        0xfdb0,
+        BOOTSTRAP_PREFIX,
         ((mac_bytes[0] as u16) << 8) | mac_bytes[1] as u16,
         ((mac_bytes[2] as u16) << 8) | mac_bytes[3] as u16,
         ((mac_bytes[4] as u16) << 8) | mac_bytes[5] as u16,
@@ -136,7 +155,7 @@ impl Agent {
                 err,
             })?;
 
-        let etherstub = Dladm::create_etherstub().map_err(|e| {
+        let etherstub = Dladm::ensure_etherstub().map_err(|e| {
             BootstrapError::SledError(format!(
                 "Can't access etherstub device: {}",
                 e
@@ -144,7 +163,7 @@ impl Agent {
         })?;
 
         let etherstub_vnic =
-            Dladm::create_etherstub_vnic(&etherstub).map_err(|e| {
+            Dladm::ensure_etherstub_vnic(&etherstub).map_err(|e| {
                 BootstrapError::SledError(format!(
                     "Can't access etherstub VNIC device: {}",
                     e
@@ -158,27 +177,27 @@ impl Agent {
         )
         .map_err(|err| BootstrapError::BootstrapAddress { err })?;
 
-        let peer_monitor = discovery::PeerMonitor::new(&ba_log, address)
-            .map_err(|err| BootstrapError::Io {
-                message: format!("Monitoring for peers from {address}"),
-                err,
-            })?;
+        // Start trying to notify ddmd of our bootstrap address so it can
+        // advertise it to other sleds.
+        let ddmd_client = DdmAdminClient::new(log.clone())?;
+        ddmd_client.advertise_prefix(Ipv6Subnet::new(address));
 
         let agent = Agent {
             log: ba_log,
             parent_log: log,
-            peer_monitor,
+            address,
             share: Mutex::new(None),
             rss: Mutex::new(None),
             sled_agent: Mutex::new(None),
             sled_config,
             sp,
+            ddmd_client,
         };
 
         let request_path = get_sled_agent_request_path();
         let trust_quorum = if request_path.exists() {
             info!(agent.log, "Sled already configured, loading sled agent");
-            let sled_request: SledAgentRequest = toml::from_str(
+            let sled_request: PersistentSledAgentRequest = toml::from_str(
                 &tokio::fs::read_to_string(&request_path).await.map_err(
                     |err| BootstrapError::Io {
                         message: format!(
@@ -189,10 +208,13 @@ impl Agent {
                 )?,
             )
             .map_err(|err| BootstrapError::Toml { path: request_path, err })?;
-            agent.request_agent(&sled_request).await?;
-            TrustQuorumMembership::Known(Arc::new(
-                sled_request.trust_quorum_share,
-            ))
+
+            let trust_quorum_share =
+                sled_request.trust_quorum_share.map(ShareDistribution::from);
+            agent
+                .request_agent(&*sled_request.request, &trust_quorum_share)
+                .await?;
+            TrustQuorumMembership::Known(Arc::new(trust_quorum_share))
         } else {
             TrustQuorumMembership::Uninitialized
         };
@@ -205,6 +227,7 @@ impl Agent {
     pub async fn request_agent(
         &self,
         request: &SledAgentRequest,
+        trust_quorum_share: &Option<ShareDistribution>,
     ) -> Result<SledAgentResponse, BootstrapError> {
         info!(&self.log, "Loading Sled Agent: {:?}", request);
 
@@ -229,7 +252,7 @@ impl Agent {
             // partially-initialized rack where we may have a share from a
             // previously-started-but-not-completed init process? If rerunning
             // it produces different shares this check will fail.
-            if request.trust_quorum_share != *self.share.lock().await {
+            if *trust_quorum_share != *self.share.lock().await {
                 let err_str = concat!(
                     "Sled Agent already running with",
                     " a different trust quorum share"
@@ -240,11 +263,21 @@ impl Agent {
 
             return Ok(SledAgentResponse { id: server.id() });
         }
+
+        // TODO(https://github.com/oxidecomputer/omicron/issues/823):
+        // Currently, the prescence or abscence of RSS is our signal
+        // for "is this a scrimlet or not".
+        // Longer-term, we should make this call based on the underlying
+        // hardware.
+        let is_scrimlet = self.rss.lock().await.is_some();
+
         // Server does not exist, initialize it.
         let server = SledServer::start(
             &self.sled_config,
             self.parent_log.clone(),
             sled_address,
+            is_scrimlet,
+            request.clone(),
         )
         .await
         .map_err(|e| {
@@ -255,24 +288,40 @@ impl Agent {
         maybe_agent.replace(server);
         info!(&self.log, "Sled Agent loaded; recording configuration");
 
-        *self.share.lock().await = request.trust_quorum_share.clone();
+        *self.share.lock().await = trust_quorum_share.clone();
 
         // Record this request so the sled agent can be automatically
         // initialized on the next boot.
+        //
+        // danger handling: `serialized_request` contains our trust quorum
+        // share; we do not log it and only write it to the designated path.
+        let serialized_request = PersistentSledAgentRequest {
+            request: Cow::Borrowed(request),
+            trust_quorum_share: trust_quorum_share.clone().map(Into::into),
+        }
+        .danger_serialize_as_toml()
+        .expect("Cannot serialize request");
+
         let path = get_sled_agent_request_path();
-        tokio::fs::write(
-            &path,
-            &toml::to_string(
-                &toml::Value::try_from(&request)
-                    .expect("Cannot serialize request"),
-            )
-            .expect("Cannot convert toml to string"),
-        )
-        .await
-        .map_err(|err| BootstrapError::Io {
-            message: format!("Recording Sled Agent request to {path:?}"),
-            err,
+        tokio::fs::write(&path, &serialized_request).await.map_err(|err| {
+            BootstrapError::Io {
+                message: format!("Recording Sled Agent request to {path:?}"),
+                err,
+            }
         })?;
+
+        // Start trying to notify ddmd of our sled prefix so it can
+        // advertise it to other sleds.
+        //
+        // TODO-security This ddmd_client is used to advertise both this
+        // (underlay) address and our bootstrap address. Bootstrap addresses are
+        // unauthenticated (connections made on them are auth'd via sprockets),
+        // but underlay addresses should be exchanged via authenticated channels
+        // between ddmd instances. It's TBD how that will work, but presumably
+        // we'll need to do something different here for underlay vs bootstrap
+        // addrs (either talk to a differently-configured ddmd, or include info
+        // indicating which kind of address we're advertising).
+        self.ddmd_client.advertise_prefix(request.subnet);
 
         Ok(SledAgentResponse { id: self.sled_config.id })
     }
@@ -283,10 +332,33 @@ impl Agent {
         &self,
         share: ShareDistribution,
     ) -> Result<RackSecret, BootstrapError> {
+        let ddm_admin_client = DdmAdminClient::new(self.log.clone())?;
         let rack_secret = retry_notify(
             internal_service_policy(),
             || async {
-                let other_agents = self.peer_monitor.peer_addrs().await;
+                let other_agents = {
+                    // Manually build up a `HashSet` instead of `.collect()`ing
+                    // so we can log if we see any duplicates.
+                    let mut addrs = HashSet::new();
+                    for addr in ddm_admin_client
+                        .peer_addrs()
+                        .await
+                        .map_err(BootstrapError::DdmError)
+                        .map_err(|err| BackoffError::transient(err))?
+                    {
+                        // We should never see duplicates; that would mean
+                        // maghemite thinks two different sleds have the same
+                        // bootstrap address!
+                        if !addrs.insert(addr) {
+                            let msg = format!("Duplicate peer addresses received from ddmd: {addr}");
+                            error!(&self.log, "{}", msg);
+                            return Err(BackoffError::permanent(
+                                BootstrapError::PeerAddresses(msg),
+                            ));
+                        }
+                    }
+                    addrs
+                };
                 info!(
                     &self.log,
                     "Bootstrap: Communicating with peers: {:?}", other_agents
@@ -299,7 +371,9 @@ impl Agent {
                         "Not enough peers to start establishing quorum"
                     );
                     return Err(BackoffError::transient(
-                        TrustQuorumError::NotEnoughPeers,
+                        BootstrapError::TrustQuorum(
+                            TrustQuorumError::NotEnoughPeers,
+                        ),
                     ));
                 }
                 info!(
@@ -328,14 +402,17 @@ impl Agent {
                     })
                     .collect();
 
-                // TODO: Parallelize this and keep track of whose shares we've already retrieved and
-                // don't resend. See https://github.com/oxidecomputer/omicron/issues/514
+                // TODO: Parallelize this and keep track of whose shares we've
+                // already retrieved and don't resend. See
+                // https://github.com/oxidecomputer/omicron/issues/514
                 let mut shares = vec![share.share.clone()];
                 for agent in &other_agents {
                     let share = agent.request_share().await
                         .map_err(|e| {
                             info!(&self.log, "Bootstrap: failed to retreive share from peer: {:?}", e);
-                            BackoffError::transient(e.into())
+                            BackoffError::transient(
+                                BootstrapError::TrustQuorum(e.into()),
+                            )
                         })?;
                     info!(
                         &self.log,
@@ -359,7 +436,9 @@ impl Agent {
                     // the error returned from `RackSecret::combine_shares`.
                     // See https://github.com/oxidecomputer/omicron/issues/516
                     BackoffError::transient(
-                        TrustQuorumError::RackSecretConstructionFailed(e),
+                        BootstrapError::TrustQuorum(
+                            TrustQuorumError::RackSecretConstructionFailed(e),
+                        ),
                     )
                 })?;
                 info!(self.log, "RackSecret computed from shares.");
@@ -385,7 +464,7 @@ impl Agent {
             let rss = RssHandle::start_rss(
                 &self.parent_log,
                 rss_config.clone(),
-                self.peer_monitor.observer().await,
+                self.address,
                 self.sp.clone(),
                 // TODO-cleanup: Remove this arg once RSS can discover the trust
                 // quorum members over the management network.
@@ -423,10 +502,38 @@ impl Agent {
     }
 }
 
+// We intentionally DO NOT derive `Debug` or `Serialize`; both provide avenues
+// by which we may accidentally log the contents of our trust quorum share.
+#[derive(Deserialize, PartialEq)]
+struct PersistentSledAgentRequest<'a> {
+    request: Cow<'a, SledAgentRequest>,
+    trust_quorum_share: Option<SerializableShareDistribution>,
+}
+
+impl PersistentSledAgentRequest<'_> {
+    /// On success, the returned string will contain our raw
+    /// `trust_quorum_share`. This method is named `danger_*` to remind the
+    /// caller that they must not log this string.
+    fn danger_serialize_as_toml(&self) -> Result<String, toml::ser::Error> {
+        #[derive(Serialize)]
+        #[serde(remote = "PersistentSledAgentRequest")]
+        struct PersistentSledAgentRequestDef<'a> {
+            request: Cow<'a, SledAgentRequest>,
+            trust_quorum_share: Option<SerializableShareDistribution>,
+        }
+
+        let mut out = String::with_capacity(128);
+        let mut serializer = toml::Serializer::new(&mut out);
+        PersistentSledAgentRequestDef::serialize(self, &mut serializer)?;
+        Ok(out)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use macaddr::MacAddr6;
+    use uuid::Uuid;
 
     #[test]
     fn test_mac_to_socket_addr() {
@@ -436,5 +543,38 @@ mod tests {
             mac_to_socket_addr(mac).ip(),
             &"fdb0:a840:2510:1::1".parse::<Ipv6Addr>().unwrap(),
         );
+    }
+
+    #[test]
+    fn persistent_sled_agent_request_serialization_round_trips() {
+        let secret = RackSecret::new();
+        let (mut shares, verifier) = secret.split(2, 4).unwrap();
+
+        let request = PersistentSledAgentRequest {
+            request: Cow::Owned(SledAgentRequest {
+                id: Uuid::new_v4(),
+                rack_id: Uuid::new_v4(),
+                gateway: crate::bootstrap::params::Gateway {
+                    address: None,
+                    mac: MacAddr6::nil(),
+                },
+                subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
+            }),
+            trust_quorum_share: Some(
+                ShareDistribution {
+                    threshold: 2,
+                    verifier,
+                    share: shares.pop().unwrap(),
+                    member_device_id_certs: vec![],
+                }
+                .into(),
+            ),
+        };
+
+        let serialized = request.danger_serialize_as_toml().unwrap();
+        let deserialized: PersistentSledAgentRequest =
+            toml::from_slice(serialized.as_bytes()).unwrap();
+
+        assert!(request == deserialized, "serialization round trip failed");
     }
 }

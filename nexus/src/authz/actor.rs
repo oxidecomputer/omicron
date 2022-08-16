@@ -6,6 +6,7 @@
 
 use super::roles::RoleSet;
 use crate::authn;
+use crate::authz::SiloUser;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use uuid::Uuid;
@@ -90,5 +91,9 @@ impl oso::PolarClass for AuthenticatedActor {
                     )
                 })
             })
+            .add_method(
+                "equals_silo_user",
+                |a: &AuthenticatedActor, u: SiloUser| a.actor_id == u.id(),
+            )
     }
 }

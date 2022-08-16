@@ -34,7 +34,7 @@ jobs:
     - name: Update PATH
       run: echo "$PWD/out/cockroachdb/bin:$PWD/out/clickhouse" >> "$GITHUB_PATH"
     - name: Install Pre-Requisites
-      run: ./tools/install_prerequisites.sh -y
+      run: ./tools/install_builder_prerequisites.sh -y
     - name: Check build of deployed Omicron packages
       run: cargo run --bin omicron-package -- check
 
@@ -52,7 +52,7 @@ jobs:
     - name: Update PATH
       run: echo "$PWD/out/cockroachdb/bin:$PWD/out/clickhouse" >> "$GITHUB_PATH"
     - name: Install Pre-Requisites
-      run: ./tools/install_prerequisites.sh -y
+      run: ./tools/install_builder_prerequisites.sh -y
     - name: Run Clippy Lints
       #
       # Clippy's style nits are useful, but not worth keeping in CI.  This
@@ -75,83 +75,6 @@ jobs:
     - name: Update PATH
       run: echo "$PWD/out/cockroachdb/bin:$PWD/out/clickhouse" >> "$GITHUB_PATH"
     - name: Install Pre-Requisites
-      run: ./tools/install_prerequisites.sh -y
+      run: ./tools/install_builder_prerequisites.sh -y
     - name: Test build documentation
-      run: cargo doc
-
-  build-and-test:
-    env:
-      OMICRON_TMP: /tmp/omicron_tmp
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ ubuntu-18.04, macos-11 ]
-    steps:
-    # actions/checkout@v2
-    - uses: actions/checkout@28c7f3d2b5162b5ddd3dfd9a45aa55eaf396478b
-    - uses: Swatinem/rust-cache@v1
-      if: ${{ github.ref != 'refs/heads/main' }}
-    - name: Report cargo version
-      run: cargo --version
-    - name: Remove unnecessary software
-      run: |
-        echo "Disk space:"
-        df -h
-
-        if [ -d "/usr/share/dotnet" ]; then
-          echo "Removing dotnet"
-          sudo rm -rf /usr/share/dotnet
-        fi
-        if [ -d "/usr/local/lib/android" ]; then
-          echo "Removing android"
-          sudo rm -rf /usr/local/lib/android
-        fi
-        if [ -d "/opt/ghc" ]; then
-          echo "Removing haskell"
-          sudo rm -rf /opt/ghc
-        fi
-
-        echo "Disk space:"
-        df -h
-    - name: Update PATH
-      run: echo "$PWD/out/cockroachdb/bin:$PWD/out/clickhouse" >> "$GITHUB_PATH"
-    - name: Install Pre-Requisites
-      run: ./tools/install_prerequisites.sh -y
-    - name: Create temporary directory for test outputs
-      run: mkdir -p $OMICRON_TMP
-    - name: Build
-      # We build with:
-      # - RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings": disallow warnings
-      #   in CI builds.  This can result in breakage when the toolchain is
-      #   updated, but that should only happen with a change to the repo, which
-      #   gives us an opportunity to find and fix any newly-introduced warnings.
-      # - `--locked`: do not update Cargo.lock when building.  Checking in
-      #   Cargo.lock ensures that everyone is using the same dependencies and
-      #   also gives us a record of which dependencies were used for each CI
-      #   run.  Building with `--locked` ensures that the checked-in Cargo.lock
-      #   is up to date.
-      # - TMPDIR=$OMICRON_TMP: we specify a specific temporary directory so that
-      #   failed test outputs will be in a known place that we can grab at the
-      #   end without also grabbing random other temporary files.
-      run: TMPDIR=$OMICRON_TMP RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings" cargo build --locked --all-targets --verbose
-    - name: Run tests
-      # Use the same RUSTFLAGS and RUSTDOCFLAGS as above to avoid having to
-      # rebuild here.
-      run: TMPDIR=$OMICRON_TMP RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings" cargo test --no-fail-fast --workspace --locked --verbose
-    - name: Archive results left by tests
-      # actions/upload-artifact@v2.3.1
-      uses: actions/upload-artifact@82c141cc518b40d92cc801eee768e7aafc9c2fa2
-      with:
-        name: failed_test_outputs_${{ runner.os }}
-        retention-days: 7
-        path: |
-          ${{ env.OMICRON_TMP }}
-          !${{ env.OMICRON_TMP }}/crdb-base
-          !${{ env.OMICRON_TMP }}/rustc*
-    # Fail the build if successful tests leave detritus in $TMPDIR.  The easiest
-    # way to check if the directory is empty is to try to remove it with
-    # `rmdir`.
-    - name: Remove temporary directory on success (if this fails, tests leaked files in TMPDIR)
-      if: ${{ success() }}
-      run: rmdir $OMICRON_TMP
+      run: RUSTDOCFLAGS="-Dwarnings" cargo doc

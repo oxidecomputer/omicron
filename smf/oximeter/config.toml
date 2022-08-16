@@ -1,11 +1,6 @@
 # Example configuration file for running an oximeter collector server
 
-id = "1da65e5b-210c-4859-a7d7-200c1e659972"
-# Internal address of nexus
-nexus_address = "[fd00:1122:3344:0101::3]:12221"
-
 [db]
-address = "[fd00:1122:3344:0101::5]:8123"
 batch_size = 1000
 batch_interval = 5 # In seconds
 
@@ -14,6 +9,3 @@ level = "debug"
 mode = "file"
 path = "/dev/stdout"
 if_exists = "append"
-
-[dropshot]
-bind_address = "[fd00:1122:3344:0101::4]:12223"

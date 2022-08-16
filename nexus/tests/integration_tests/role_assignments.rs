@@ -108,7 +108,7 @@ async fn test_role_assignments_fleet(cptestctx: &ControlPlaneTestContext) {
         const ROLE: Self::RoleType = authz::FleetRole::Admin;
         const VISIBLE_TO_UNPRIVILEGED: bool = true;
         fn policy_url(&self) -> String {
-            String::from("/policy")
+            String::from("/global/policy")
         }
 
         fn verify_initial<'a, 'b, 'c, 'd>(
@@ -177,6 +177,59 @@ async fn test_role_assignments_silo(cptestctx: &ControlPlaneTestContext) {
                 "/silos/{}/policy",
                 fixed_data::silo::DEFAULT_SILO.identity().name.to_string()
             )
+        }
+
+        fn verify_initial<'a, 'b, 'c, 'd>(
+            &'a self,
+            _: &'b ClientTestContext,
+            _current_policy: &'c shared::Policy<Self::RoleType>,
+        ) -> BoxFuture<'d, ()>
+        where
+            'a: 'd,
+            'b: 'd,
+            'c: 'd,
+        {
+            async {
+                // TODO-coverage TODO-security There is currently nothing that
+                // requires the ability to modify a Silo.  Once there is, we
+                // should test it here.
+            }
+            .boxed()
+        }
+
+        fn verify_privileged<'a, 'b, 'c>(
+            &'a self,
+            _: &'b ClientTestContext,
+        ) -> BoxFuture<'c, ()>
+        where
+            'a: 'c,
+            'b: 'c,
+        {
+            async {
+                // TODO-coverage TODO-security There is currently nothing that
+                // requires the ability to modify a Silo.  Once there is, we
+                // should test it here.
+            }
+            .boxed()
+        }
+    }
+
+    let client = &cptestctx.external_client;
+    run_test(client, SiloRoleAssignmentTest {}).await;
+}
+
+// same as above except for /policy, where silo is implicit in auth
+#[nexus_test]
+async fn test_role_assignments_silo_implicit(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    struct SiloRoleAssignmentTest;
+    impl RoleAssignmentTest for SiloRoleAssignmentTest {
+        type RoleType = authz::SiloRole;
+        const ROLE: Self::RoleType = authz::SiloRole::Admin;
+        const VISIBLE_TO_UNPRIVILEGED: bool = true;
+        fn policy_url(&self) -> String {
+            "/policy".to_string()
         }
 
         fn verify_initial<'a, 'b, 'c, 'd>(

@@ -1,10 +1,14 @@
 #!/bin/bash
 #:
-#: name = "helios / build-and-test"
+#: name = "build-and-test (helios)"
 #: variety = "basic"
 #: target = "helios-latest"
 #: rust_toolchain = "nightly-2022-04-27"
-#: output_rules = []
+#: output_rules = [
+#:	"/var/tmp/omicron_tmp/*",
+#:	"!/var/tmp/omicron_tmp/crdb-base*",
+#:	"!/var/tmp/omicron_tmp/rustc*",
+#: ]
 #:
 
 set -o errexit
@@ -18,9 +22,9 @@ rustc --version
 # Set up a custom temporary directory within whatever one we were given so that
 # we can check later whether we left detritus around.
 #
-TEST_TMPDIR="${TMPDIR:-/var/tmp}/omicron_tmp"
-echo "tests will store output in $TEST_TMPDIR"
-mkdir $TEST_TMPDIR
+TEST_TMPDIR='/var/tmp/omicron_tmp'
+echo "tests will store output in $TEST_TMPDIR" >&2
+mkdir "$TEST_TMPDIR"
 
 #
 # Put "./cockroachdb/bin" and "./clickhouse" on the PATH for the test
@@ -29,7 +33,7 @@ mkdir $TEST_TMPDIR
 export PATH="$PATH:$PWD/out/cockroachdb/bin:$PWD/out/clickhouse"
 
 banner prerequisites
-ptime -m bash ./tools/install_prerequisites.sh -y
+ptime -m bash ./tools/install_builder_prerequisites.sh -y
 
 #
 # We build with:
@@ -52,23 +56,18 @@ export TMPDIR=$TEST_TMPDIR
 ptime -m cargo +'nightly-2022-04-27' build --locked --all-targets --verbose
 
 #
-# Check that building individual packages as when deploying Omicron succeeds
-#
-banner deploy-check
-ptime -m cargo run --bin omicron-package -- check
-
-#
 # NOTE: We're using using the same RUSTFLAGS and RUSTDOCFLAGS as above to avoid
 # having to rebuild here.
 #
 banner test
-ptime -m cargo +'nightly-2022-04-27' test --workspace --locked --verbose
+ptime -m cargo +'nightly-2022-04-27' test --workspace --locked --verbose \
+    --no-fail-fast
 
 #
 # Make sure that we have left nothing around in $TEST_TMPDIR.  The easiest way
 # to check is to try to remove it with `rmdir`.
 #
 unset TMPDIR
-echo "files in $TEST_TMPDIR (none expected on success):"
-find $TEST_TMPDIR -ls
-rmdir $TEST_TMPDIR
+echo "files in $TEST_TMPDIR (none expected on success):" >&2
+find "$TEST_TMPDIR" -ls
+rmdir "$TEST_TMPDIR"

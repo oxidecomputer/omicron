@@ -11,6 +11,11 @@ use dropshot::{
     HttpResponseUpdatedNoContent, HttpServer, HttpServerStarter,
     RequestContext, TypedBody,
 };
+use internal_dns_client::{
+    multiclient::{ResolveError, Resolver},
+    names::{ServiceName, SRV},
+};
+use omicron_common::address::{CLICKHOUSE_PORT, NEXUS_INTERNAL_PORT};
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::backoff;
 use oximeter::types::{ProducerResults, ProducerResultsItem};
@@ -18,7 +23,7 @@ use oximeter_db::{Client, DbWrite};
 use serde::{Deserialize, Serialize};
 use slog::{debug, error, info, o, trace, warn, Drain, Logger};
 use std::collections::{btree_map::Entry, BTreeMap};
-use std::net::SocketAddr;
+use std::net::{SocketAddr, SocketAddrV6};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -37,6 +42,9 @@ pub enum Error {
 
     #[error(transparent)]
     Database(#[from] oximeter_db::Error),
+
+    #[error(transparent)]
+    ResolveError(#[from] ResolveError),
 }
 
 // Messages for controlling a collection task
@@ -231,8 +239,11 @@ async fn results_sink(
 /// Configuration for interacting with the metric database.
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 pub struct DbConfig {
-    /// Address of the ClickHouse server
-    pub address: SocketAddr,
+    /// Optional address of the ClickHouse server.
+    ///
+    /// If "None", will be inferred from DNS.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub address: Option<SocketAddr>,
 
     /// Batch size of samples at which to insert
     pub batch_size: usize,
@@ -259,6 +270,7 @@ impl OximeterAgent {
     pub async fn with_id(
         id: Uuid,
         db_config: DbConfig,
+        resolver: &Resolver,
         log: &Logger,
     ) -> Result<Self, Error> {
         let (result_sender, result_receiver) = mpsc::channel(8);
@@ -267,7 +279,17 @@ impl OximeterAgent {
 
         // Construct the ClickHouse client first, propagate an error if we can't reach the
         // database.
-        let client = Client::new(db_config.address, &log);
+        let db_address = if let Some(address) = db_config.address {
+            address
+        } else {
+            SocketAddr::new(
+                resolver
+                    .lookup_ip(SRV::Service(ServiceName::Clickhouse))
+                    .await?,
+                CLICKHOUSE_PORT,
+            )
+        };
+        let client = Client::new(db_address, &log);
         client.init_db().await?;
 
         // Spawn the task for aggregating and inserting all metrics
@@ -334,17 +356,14 @@ impl OximeterAgent {
 /// Configuration used to initialize an oximeter server
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Config {
-    /// An unique ID for this oximeter server
-    pub id: Uuid,
-
     /// The address used to connect to Nexus.
-    pub nexus_address: SocketAddr,
+    ///
+    /// If "None", will be inferred from DNS.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nexus_address: Option<SocketAddr>,
 
     /// Configuration for working with ClickHouse
     pub db: DbConfig,
-
-    /// The internal Dropshot HTTP server configuration
-    pub dropshot: ConfigDropshot,
 
     /// Logging configuration
     pub log: ConfigLogging,
@@ -360,6 +379,11 @@ impl Config {
     }
 }
 
+pub struct OximeterArguments {
+    pub id: Uuid,
+    pub address: SocketAddrV6,
+}
+
 /// A server used to collect metrics from components in the control plane.
 pub struct Oximeter {
     _agent: Arc<OximeterAgent>,
@@ -371,13 +395,27 @@ impl Oximeter {
     ///
     /// This starts an HTTP server used to communicate with other agents in Omicron, especially
     /// Nexus. It also registers itself as a new `oximeter` instance with Nexus.
-    pub async fn new(config: &Config) -> Result<Self, Error> {
-        let (drain, registration) = slog_dtrace::with_drain(
-            config
-                .log
-                .to_logger("oximeter")
-                .map_err(|msg| Error::Server(msg.to_string()))?,
-        );
+    pub async fn new(
+        config: &Config,
+        args: &OximeterArguments,
+    ) -> Result<Self, Error> {
+        let log = config
+            .log
+            .to_logger("oximeter")
+            .map_err(|msg| Error::Server(msg.to_string()))?;
+        Self::with_logger(config, args, log).await
+    }
+
+    /// Create a new `Oximeter`, specifying an alternative logger to use.
+    ///
+    /// This can be used to override / ignore the logging configuration in
+    /// `config`, using `log` instead.
+    pub async fn with_logger(
+        config: &Config,
+        args: &OximeterArguments,
+        log: Logger,
+    ) -> Result<Self, Error> {
+        let (drain, registration) = slog_dtrace::with_drain(log);
         let log = slog::Logger::root(drain.fuse(), o!());
         if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
             let msg = format!("failed to register DTrace probes: {}", e);
@@ -388,10 +426,13 @@ impl Oximeter {
         }
         info!(log, "starting oximeter server");
 
+        let resolver = Resolver::new_from_ip(*args.address.ip())?;
+
         let make_agent = || async {
             debug!(log, "creating ClickHouse client");
             Ok(Arc::new(
-                OximeterAgent::with_id(config.id, config.db, &log).await?,
+                OximeterAgent::with_id(args.id, config.db, &resolver, &log)
+                    .await?,
             ))
         };
         let log_client_failure = |error, delay| {
@@ -411,7 +452,10 @@ impl Oximeter {
 
         let dropshot_log = log.new(o!("component" => "dropshot"));
         let server = HttpServerStarter::new(
-            &config.dropshot,
+            &ConfigDropshot {
+                bind_address: SocketAddr::V6(args.address),
+                ..Default::default()
+            },
             oximeter_api(),
             Arc::clone(&agent),
             &dropshot_log,
@@ -423,20 +467,33 @@ impl Oximeter {
         let client = reqwest::Client::new();
         let notify_nexus = || async {
             debug!(log, "contacting nexus");
-            client
-                .post(format!(
-                    "http://{}/metrics/collectors",
-                    config.nexus_address
+            let nexus_address = if let Some(address) = config.nexus_address {
+                address
+            } else {
+                SocketAddr::V6(SocketAddrV6::new(
+                    resolver
+                        .lookup_ipv6(SRV::Service(ServiceName::Nexus))
+                        .await
+                        .map_err(|e| {
+                            backoff::BackoffError::transient(e.to_string())
+                        })?,
+                    NEXUS_INTERNAL_PORT,
+                    0,
+                    0,
                 ))
+            };
+
+            client
+                .post(format!("http://{}/metrics/collectors", nexus_address,))
                 .json(&nexus_client::types::OximeterInfo {
                     address: server.local_addr().to_string(),
                     collector_id: agent.id,
                 })
                 .send()
                 .await
-                .map_err(backoff::BackoffError::transient)?
+                .map_err(|e| backoff::BackoffError::transient(e.to_string()))?
                 .error_for_status()
-                .map_err(backoff::BackoffError::transient)
+                .map_err(|e| backoff::BackoffError::transient(e.to_string()))
         };
         let log_notification_failure = |error, delay| {
             warn!(
