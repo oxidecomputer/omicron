@@ -11,11 +11,11 @@ futures = "0.3.23"
 hex = "0.4"
 http = "0.2.7"
 hyper = "0.14.20"
-ringbuffer = "0.8"
 schemars = "0.8"
 serde = { version = "1.0", features = ["derive"] }
 slog-dtrace = "0.2"
-thiserror = "1.0.31"
+thiserror = "1.0.32"
+tokio-tungstenite = "0.17"
 toml = "0.5.9"
 uuid = "1.1.0"
 

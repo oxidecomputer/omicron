@@ -14,8 +14,7 @@
 
 mod communicator;
 mod management_switch;
-mod recv_handler;
-pub mod single_sp;
+mod single_sp;
 mod timeout;
 
 pub use usdt::register_probes;
@@ -30,5 +29,10 @@ pub use management_switch::SpIdentifier;
 pub use management_switch::SpType;
 pub use management_switch::SwitchConfig;
 pub use management_switch::SwitchPortConfig;
+pub use single_sp::AttachedSerialConsole;
+pub use single_sp::AttachedSerialConsoleRecv;
+pub use single_sp::AttachedSerialConsoleSend;
+pub use single_sp::SingleSp;
+pub use single_sp::DISCOVERY_MULTICAST_ADDR;
 pub use timeout::Elapsed;
 pub use timeout::Timeout;

@@ -20,8 +20,12 @@ struct Args {
     )]
     openapi: bool,
 
-    #[clap(name = "CONFIG_FILE_PATH", action)]
-    config_file_path: PathBuf,
+    #[clap(
+        name = "CONFIG_FILE_PATH",
+        action,
+        required_unless_present = "openapi"
+    )]
+    config_file_path: Option<PathBuf>,
 }
 
 #[tokio::main]
@@ -34,12 +38,14 @@ async fn main() {
 async fn do_run() -> Result<(), CmdError> {
     let args = Args::parse();
 
-    let config = Config::from_file(args.config_file_path)
-        .map_err(|e| CmdError::Failure(e.to_string()))?;
-
     if args.openapi {
         run_openapi().map_err(CmdError::Failure)
     } else {
+        // `.unwrap()` here is fine because our clap config requires
+        // `config_file_path` to be passed if `openapi` is not.
+        let config = Config::from_file(args.config_file_path.unwrap())
+            .map_err(|e| CmdError::Failure(e.to_string()))?;
+
         run_server(config).await.map_err(CmdError::Failure)
     }
 }

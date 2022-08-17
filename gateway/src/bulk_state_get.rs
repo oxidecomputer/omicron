@@ -154,7 +154,7 @@ impl BulkSpStateRequests {
         self.requests.lock().unwrap().insert(id, Arc::clone(&collector));
 
         // query ignition controller to find out which SPs are powered on
-        let all_sps = self.communicator.get_ignition_state_all(timeout).await?;
+        let all_sps = self.communicator.get_ignition_state_all().await?;
 
         // build collection of futures to contact all SPs
         let communicator = Arc::clone(&self.communicator);
@@ -163,7 +163,7 @@ impl BulkSpStateRequests {
             timeout,
             move |sp| {
                 let communicator = Arc::clone(&communicator);
-                async move { communicator.get_state(sp, timeout).await }
+                async move { communicator.get_state(sp).await }
             },
         );
 
