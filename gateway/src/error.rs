@@ -61,7 +61,8 @@ where
         | SpCommsError::Timeout { .. }
         | SpCommsError::BadIgnitionTarget(_)
         | SpCommsError::LocalIgnitionControllerAddressUnknown
-        | SpCommsError::SpCommunicationFailed(_) => {
+        | SpCommsError::SpCommunicationFailed(_)
+        | SpCommsError::UpdateFailed(_) => {
             HttpError::for_internal_error(err.to_string())
         }
     }

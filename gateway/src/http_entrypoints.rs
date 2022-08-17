@@ -326,7 +326,8 @@ async fn sp_list(
                     // These errors should not be possible for the request we
                     // made.
                     SpCommsError::SpDoesNotExist(_)
-                    | SpCommsError::SerialConsoleAttached => {
+                    | SpCommsError::SerialConsoleAttached
+                    | SpCommsError::UpdateFailed(_) => {
                         unreachable!("impossible error {}", err)
                     }
                 },
@@ -484,7 +485,47 @@ async fn sp_component_serial_console_detach(
 
 // TODO: how can we make this generic enough to support any update mechanism?
 #[derive(Deserialize, JsonSchema)]
-struct UpdateBody {}
+pub struct UpdateBody {
+    pub image: Vec<u8>,
+}
+
+/// Update an SP
+///
+/// Copies a new image to the alternate bank of the SP flash.
+#[endpoint {
+    method = POST,
+    path = "/sp/{type}/{slot}/update",
+}]
+async fn sp_update(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path: Path<PathSp>,
+    body: TypedBody<UpdateBody>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let comms = &rqctx.context().sp_comms;
+    let sp = path.into_inner().sp;
+    let image = body.into_inner().image;
+
+    comms.update(sp.into(), &image).await.map_err(http_err_from_comms_err)?;
+
+    Ok(HttpResponseUpdatedNoContent {})
+}
+
+/// Reset an SP
+#[endpoint {
+    method = POST,
+    path = "/sp/{type}/{slot}/reset",
+}]
+async fn sp_reset(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path: Path<PathSp>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let comms = &rqctx.context().sp_comms;
+    let sp = path.into_inner().sp;
+
+    comms.reset(sp.into()).await.map_err(http_err_from_comms_err)?;
+
+    Ok(HttpResponseUpdatedNoContent {})
+}
 
 /// Update an SP component
 ///
@@ -654,6 +695,8 @@ pub fn api() -> GatewayApiDescription {
     ) -> Result<(), String> {
         api.register(sp_list)?;
         api.register(sp_get)?;
+        api.register(sp_update)?;
+        api.register(sp_reset)?;
         api.register(sp_component_list)?;
         api.register(sp_component_get)?;
         api.register(sp_component_serial_console_attach)?;
