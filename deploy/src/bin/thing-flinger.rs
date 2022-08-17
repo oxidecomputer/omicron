@@ -24,7 +24,7 @@ struct Builder {
 }
 
 // A server on which an omicron package is deployed.
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Eq, PartialEq)]
 struct Server {
     username: String,
     addr: String,
@@ -270,23 +270,11 @@ fn do_sync(config: &Config) -> Result<()> {
     Ok(())
 }
 
-fn rsync_tools_dir_to_deployment_servers(config: &Config) -> Result<()> {
-    // we need to rsync `./tools/*` to each of the deployment targets (the
-    // "builder" already has it via `do_sync()`), and then run `pfexec
-    // tools/install_prerequisites.sh` on each system.
-    let src = format!(
-        // the `./` here is load-bearing; it interacts with `--relative` to tell
-        // rsync to create `tools` but none of its parents
-        "{}/./tools/",
-        config
-            .omicron_path
-            .canonicalize()
-            .with_context(|| format!(
-                "could not canonicalize {}",
-                config.omicron_path.display()
-            ))?
-            .to_string_lossy()
-    );
+fn copy_to_deployment_staging_dir_in_parallel(
+    config: &Config,
+    src: String,
+    description: &str,
+) -> Result<()> {
     let partial_cmd = || {
         let mut cmd = rsync_common();
         cmd.arg("--relative");
@@ -322,15 +310,59 @@ fn rsync_tools_dir_to_deployment_servers(config: &Config) -> Result<()> {
         })
         .collect();
 
-    run_in_parallel("Copy tools dir", config.deployment.servers.iter(), fns);
+    run_in_parallel(description, config.deployment.servers.iter(), fns);
 
     Ok(())
 }
 
+fn rsync_config_needed_for_tools(config: &Config) -> Result<()> {
+    let src = format!(
+        // the `./` here is load-bearing; it interacts with `--relative` to tell
+        // rsync to create `tools` but none of its parents
+        "{}/./smf/sled-agent/",
+        config
+            .omicron_path
+            .canonicalize()
+            .with_context(|| format!(
+                "could not canonicalize {}",
+                config.omicron_path.display()
+            ))?
+            .to_string_lossy()
+    );
+
+    copy_to_deployment_staging_dir_in_parallel(
+        config,
+        src,
+        "Copy smf/sled-agent dir",
+    )
+}
+
+fn rsync_tools_dir_to_deployment_servers(config: &Config) -> Result<()> {
+    // we need to rsync `./tools/*` to each of the deployment targets (the
+    // "builder" already has it via `do_sync()`), and then run `pfexec
+    // tools/install_prerequisites.sh` on each system.
+    let src = format!(
+        // the `./` here is load-bearing; it interacts with `--relative` to tell
+        // rsync to create `tools` but none of its parents
+        "{}/./tools/",
+        config
+            .omicron_path
+            .canonicalize()
+            .with_context(|| format!(
+                "could not canonicalize {}",
+                config.omicron_path.display()
+            ))?
+            .to_string_lossy()
+    );
+    copy_to_deployment_staging_dir_in_parallel(config, src, "Copy tools dir")
+}
+
 fn do_install_prereqs(config: &Config) -> Result<()> {
+    rsync_config_needed_for_tools(config)?;
     rsync_tools_dir_to_deployment_servers(config)?;
     install_rustup_on_deployment_servers(config);
     create_virtual_hardware_on_deployment_servers(config);
+    create_external_tls_cert_on_builder(config)?;
 
     // Create a set of servers to install prereqs to
     let builder = &config.servers[&config.builder.server];
@@ -362,7 +394,7 @@ fn do_install_prereqs(config: &Config) -> Result<()> {
             || {
                 // -y: assume yes instead of prompting
                 // -p: skip check that deps end up in $PATH
-                let (script, script_type) = if server == builder {
+                let (script, script_type) = if *server == *builder {
                     ("install_builder_prerequisites.sh -y -p", "builder")
                 } else {
                     ("install_runner_prerequisites.sh -y", "runner")
@@ -385,6 +417,15 @@ fn do_install_prereqs(config: &Config) -> Result<()> {
     run_in_parallel("Install prerequisites", server_names, fns);
 
     Ok(())
+}
+
+fn create_external_tls_cert_on_builder(config: &Config) -> Result<()> {
+    let builder = &config.servers[&config.builder.server];
+    let cmd = format!(
+        "cd {} && ./tools/create_self_signed_cert.sh",
+        config.builder.omicron_path.to_string_lossy()
+    );
+    ssh_exec(&builder, &cmd, SshStrategy::NoForward)
 }
 
 fn create_virtual_hardware_on_deployment_servers(config: &Config) {
@@ -576,8 +617,9 @@ fn do_overlay(config: &Config) -> Result<()> {
     // will run RSS.
     let mut rss_server_dir = None;
     let sled_agent_dirs = config
+        .deployment
         .servers
-        .keys()
+        .iter()
         .map(|server_name| {
             let mut dir = root_path.clone();
             dir.push(server_name);
@@ -847,7 +889,6 @@ fn ssh_exec(
         remote_cmd.into()
     };
 
-    let auth_sock = std::env::var("SSH_AUTH_SOCK")?;
     let mut cmd = Command::new("ssh");
     if strategy.forward_agent() {
         cmd.arg("-A");
@@ -858,7 +899,12 @@ fn ssh_exec(
         .arg(&server.username)
         .arg(&server.addr)
         .arg(&remote_cmd);
-    cmd.env("SSH_AUTH_SOCK", auth_sock);
+
+    // If the builder is the same as the client, this will likely not be set,
+    // as the keys will reside on the builder. j
+    if let Some(auth_sock) = std::env::var_os("SSH_AUTH_SOCK") {
+        cmd.env("SSH_AUTH_SOCK", auth_sock);
+    }
     let exit_status = cmd
         .status()
         .context(format!("Failed to run {} on {}", remote_cmd, server.addr))?;
