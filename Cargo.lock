@@ -2102,7 +2102,7 @@ dependencies = [
 [[package]]
 name = "illumos-ddi-dki"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=de829c931997558eccdf001d108d29e8e516b257#de829c931997558eccdf001d108d29e8e516b257"
+source = "git+https://github.com/oxidecomputer/opte?rev=ca9d3aa83b46628376886e53b85e13d566d03ceb#ca9d3aa83b46628376886e53b85e13d566d03ceb"
 dependencies = [
  "illumos-sys-hdrs",
 ]
@@ -2110,7 +2110,7 @@ dependencies = [
 [[package]]
 name = "illumos-sys-hdrs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=de829c931997558eccdf001d108d29e8e516b257#de829c931997558eccdf001d108d29e8e516b257"
+source = "git+https://github.com/oxidecomputer/opte?rev=ca9d3aa83b46628376886e53b85e13d566d03ceb#ca9d3aa83b46628376886e53b85e13d566d03ceb"
 
 [[package]]
 name = "impl-trait-for-tuples"
@@ -3206,7 +3206,7 @@ dependencies = [
 [[package]]
 name = "opte"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=de829c931997558eccdf001d108d29e8e516b257#de829c931997558eccdf001d108d29e8e516b257"
+source = "git+https://github.com/oxidecomputer/opte?rev=ca9d3aa83b46628376886e53b85e13d566d03ceb#ca9d3aa83b46628376886e53b85e13d566d03ceb"
 dependencies = [
  "anymap",
  "cfg-if 0.1.10",
@@ -3223,7 +3223,7 @@ dependencies = [
 [[package]]
 name = "opte-ioctl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=de829c931997558eccdf001d108d29e8e516b257#de829c931997558eccdf001d108d29e8e516b257"
+source = "git+https://github.com/oxidecomputer/opte?rev=ca9d3aa83b46628376886e53b85e13d566d03ceb#ca9d3aa83b46628376886e53b85e13d566d03ceb"
 dependencies = [
  "libc",
  "libnet",
@@ -3283,7 +3283,7 @@ dependencies = [
 [[package]]
 name = "oxide-vpc"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=de829c931997558eccdf001d108d29e8e516b257#de829c931997558eccdf001d108d29e8e516b257"
+source = "git+https://github.com/oxidecomputer/opte?rev=ca9d3aa83b46628376886e53b85e13d566d03ceb#ca9d3aa83b46628376886e53b85e13d566d03ceb"
 dependencies = [
  "cfg-if 0.1.10",
  "cstr_core",
