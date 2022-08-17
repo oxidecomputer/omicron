@@ -20,6 +20,7 @@ use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use nexus_types::identity::Resource;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupResult;
@@ -98,6 +99,20 @@ impl DataStore {
             instance_id,
             pool_id,
         );
+        self.allocate_instance_external_ip(opctx, data).await
+    }
+
+    /// Allocates an IP address for internal service usage.
+    pub async fn allocate_service_ip(
+        &self,
+        opctx: &OpContext,
+        ip_id: Uuid,
+        rack_id: Uuid,
+    ) -> CreateResult<InstanceExternalIp> {
+        let (.., pool) =
+            self.ip_pools_lookup_by_rack_id(opctx, rack_id).await?;
+
+        let data = IncompleteInstanceExternalIp::for_service(ip_id, pool.id());
         self.allocate_instance_external_ip(opctx, data).await
     }
 

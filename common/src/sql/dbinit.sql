@@ -1105,7 +1105,13 @@ CREATE TYPE omicron.public.ip_kind AS ENUM (
      * known address that can be moved between instances. Its lifetime is not
      * fixed to any instance.
      */
-    'floating'
+    'floating',
+
+    /*
+     * A service IP is an IP address not attached to a project nor an instance.
+     * It's intended to be used for internal services.
+     */
+    'service'
 );
 
 /*
@@ -1132,7 +1138,7 @@ CREATE TABLE omicron.public.instance_external_ip (
     ip_pool_range_id UUID NOT NULL,
 
     /* FK to the `project` table. */
-    project_id UUID NOT NULL,
+    project_id UUID,
 
     /* FK to the `instance` table. See the constraints below. */
     instance_id UUID,
@@ -1162,12 +1168,13 @@ CREATE TABLE omicron.public.instance_external_ip (
     ),
 
     /*
-     * Only nullable if this is a floating IP, which may exist not attached
-     * to any instance.
+     * Only nullable if this is a floating/service IP, which may exist not
+     * attached to any instance.
      */
     CONSTRAINT null_non_fip_instance_id CHECK (
         (kind != 'floating' AND instance_id IS NOT NULL) OR
-        (kind = 'floating')
+        (kind = 'floating') OR
+        (kind = 'service')
     )
 );
 

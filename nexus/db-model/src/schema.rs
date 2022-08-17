@@ -173,7 +173,7 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         ip_pool_id -> Uuid,
         ip_pool_range_id -> Uuid,
-        project_id -> Uuid,
+        project_id -> Nullable<Uuid>,
         instance_id -> Nullable<Uuid>,
         kind -> crate::IpKindEnum,
         ip -> Inet,
