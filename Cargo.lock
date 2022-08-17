@@ -1403,14 +1403,14 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap 3.2.16",
- "crossbeam-channel",
  "gateway-messages",
- "mio",
+ "gateway-sp-comms",
  "slog",
  "slog-async",
  "slog-term",
  "termios",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]
