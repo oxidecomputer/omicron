@@ -85,8 +85,8 @@ type Result<T, E = Error> = std::result::Result<T, E>;
 
 #[derive(Debug)]
 pub struct SingleSp {
-    inner_commands: mpsc::Sender<InnerCommand>,
-    sp_addr: watch::Receiver<Option<(SocketAddrV6, SpPort)>>,
+    cmds_tx: mpsc::Sender<InnerCommand>,
+    sp_addr_rx: watch::Receiver<Option<(SocketAddrV6, SpPort)>>,
     inner_task: JoinHandle<()>,
     log: Logger,
 }
@@ -109,20 +109,26 @@ impl SingleSp {
         per_attempt_timeout: Duration,
         log: Logger,
     ) -> Self {
-        let (cmd_tx, cmd_rx) = mpsc::channel(8);
-        let (addr_tx, addr_rx) = watch::channel(None);
+        // SPs don't support pipelining, so any command we send to `Inner` that
+        // involves contacting an SP will effectively block until it completes.
+        // We use a more-or-less arbitrary chanel size of 8 here to allow (a)
+        // non-SP commands (e.g., detaching the serial console) and (b) a small
+        // number of enqueued SP commands to be submitted without blocking the
+        // caller.
+        let (cmds_tx, cmds_rx) = mpsc::channel(8);
+        let (sp_addr_tx, sp_addr_rx) = watch::channel(None);
         let inner = Inner::new(
             log.clone(),
             socket,
-            addr_tx,
+            sp_addr_tx,
             discovery_addr,
             max_attempts,
             per_attempt_timeout,
-            cmd_rx,
+            cmds_rx,
         );
         let inner_task = tokio::spawn(inner.run());
 
-        Self { inner_commands: cmd_tx, sp_addr: addr_rx, inner_task, log }
+        Self { cmds_tx, sp_addr_rx, inner_task, log }
     }
 
     /// Retrieve the [`watch::Receiver`] for notifications of discovery of an
@@ -130,7 +136,7 @@ impl SingleSp {
     pub fn sp_addr_watch(
         &self,
     ) -> &watch::Receiver<Option<(SocketAddrV6, SpPort)>> {
-        &self.sp_addr
+        &self.sp_addr_rx
     }
 
     /// Request the state of the SP.
@@ -252,31 +258,25 @@ impl SingleSp {
 
         // `Inner::run()` doesn't exit until we are dropped, so unwrapping here
         // only panics if it itself panicked.
-        self.inner_commands
-            .send(InnerCommand::SerialConsoleAttach(tx))
-            .await
-            .unwrap();
+        self.cmds_tx.send(InnerCommand::SerialConsoleAttach(tx)).await.unwrap();
 
         let rx = rx.await.unwrap()?;
 
-        Ok(AttachedSerialConsole { rx, inner_tx: self.inner_commands.clone() })
+        Ok(AttachedSerialConsole { rx, inner_tx: self.cmds_tx.clone() })
     }
 
     /// Detach an existing attached serial console connection.
     pub async fn serial_console_detach(&self) {
         // `Inner::run()` doesn't exit until we are dropped, so unwrapping here
         // only panics if it itself panicked.
-        self.inner_commands
-            .send(InnerCommand::SerialConsoleDetach)
-            .await
-            .unwrap();
+        self.cmds_tx.send(InnerCommand::SerialConsoleDetach).await.unwrap();
     }
 
     pub(crate) async fn rpc(
         &self,
         kind: RequestKind,
     ) -> Result<(SocketAddrV6, ResponseKind)> {
-        rpc(&self.inner_commands, kind).await
+        rpc(&self.cmds_tx, kind).await
     }
 }
 
@@ -363,12 +363,12 @@ enum InnerCommand {
 struct Inner {
     log: Logger,
     socket: UdpSocket,
-    sp_addr: watch::Sender<Option<(SocketAddrV6, SpPort)>>,
+    sp_addr_tx: watch::Sender<Option<(SocketAddrV6, SpPort)>>,
     discovery_addr: SocketAddrV6,
     max_attempts: usize,
     per_attempt_timeout: Duration,
     serial_console_tx: Option<mpsc::Sender<SerialConsole>>,
-    cmds: mpsc::Receiver<InnerCommand>,
+    cmds_rx: mpsc::Receiver<InnerCommand>,
     request_id: u32,
 }
 
@@ -376,21 +376,21 @@ impl Inner {
     fn new(
         log: Logger,
         socket: UdpSocket,
-        sp_addr: watch::Sender<Option<(SocketAddrV6, SpPort)>>,
+        sp_addr_tx: watch::Sender<Option<(SocketAddrV6, SpPort)>>,
         discovery_addr: SocketAddrV6,
         max_attempts: usize,
         per_attempt_timeout: Duration,
-        cmds: mpsc::Receiver<InnerCommand>,
+        cmds_rx: mpsc::Receiver<InnerCommand>,
     ) -> Self {
         Self {
             log,
             socket,
-            sp_addr,
+            sp_addr_tx,
             discovery_addr,
             max_attempts,
             per_attempt_timeout,
             serial_console_tx: None,
-            cmds,
+            cmds_rx,
             request_id: 0,
         }
     }
@@ -398,7 +398,7 @@ impl Inner {
     async fn run(mut self) {
         let mut incoming_buf = [0; SpMessage::MAX_SIZE];
 
-        let maybe_known_addr = *self.sp_addr.borrow();
+        let maybe_known_addr = *self.sp_addr_tx.borrow();
         let mut sp_addr = match maybe_known_addr {
             Some((addr, _port)) => addr,
             None => {
@@ -427,7 +427,7 @@ impl Inner {
 
         loop {
             tokio::select! {
-                cmd = self.cmds.recv() => {
+                cmd = self.cmds_rx.recv() => {
                     let cmd = match cmd {
                         Some(cmd) => cmd,
                         None => return,
@@ -480,7 +480,11 @@ impl Inner {
 
         let discovery = response.try_into_discover()?;
 
-        let _ = self.sp_addr.send(Some((addr, discovery.sp_port)));
+        // The receiving half of `sp_addr_tx` is held by the `SingleSp` that
+        // created us, and it aborts our task when it's dropped. This send
+        // therefore can't fail; ignore the returned result.
+        let _ = self.sp_addr_tx.send(Some((addr, discovery.sp_port)));
+
         Ok(addr)
     }
 
@@ -490,6 +494,17 @@ impl Inner {
         command: InnerCommand,
         incoming_buf: &mut [u8; SpMessage::MAX_SIZE],
     ) {
+        // When a caller attaches to the SP's serial console, we return an
+        // `mpsc::Receiver<_>` on which we send any packets received from the
+        // SP. We have to pick a depth for that channel, and given we're not
+        // able to apply backpressure to the SP / host sending the data, we
+        // choose to drop data if the channel fills. We want something large
+        // enough that hiccups in the receiver doesn't cause data loss, but
+        // small enough that if the receiver stops handling messages we don't
+        // eat a bunch of memory buffering up console data. We'll take a WAG and
+        // pick a depth of 32 for now.
+        const SERIAL_CONSOLE_CHANNEL_DEPTH: usize = 32;
+
         match command {
             InnerCommand::Rpc(rpc) => {
                 let result =
@@ -506,7 +521,7 @@ impl Inner {
                 let resp = if self.serial_console_tx.is_some() {
                     Err(Error::SerialConsoleAlreadyAttached)
                 } else {
-                    let (tx, rx) = mpsc::channel(32);
+                    let (tx, rx) = mpsc::channel(SERIAL_CONSOLE_CHANNEL_DEPTH);
                     self.serial_console_tx = Some(tx);
                     Ok(rx)
                 };
@@ -522,10 +537,7 @@ impl Inner {
         &mut self,
         result: Result<(SocketAddrV6, SpMessage)>,
     ) {
-        // TODO-correctness / TODO-security Should we check `peer` against what
-        // we believe the SP's address to be? What would we do if they don't
-        // match?
-        let (_peer, message) = match result {
+        let (peer, message) = match result {
             Ok((peer, message)) => (peer, message),
             Err(err) => {
                 error!(
@@ -536,6 +548,21 @@ impl Inner {
                 return;
             }
         };
+
+        // TODO-correctness / TODO-security What does it mean to receive a
+        // message that doesn't match what we believe the SP's address is? For
+        // now, we will log and drop it, but this needs work.
+        if let Some(&(addr, _port)) = self.sp_addr_tx.borrow().as_ref() {
+            if peer != addr {
+                warn!(
+                    self.log,
+                    "ignoring message from unexpected IPv6 address";
+                    "address" => %peer,
+                    "sp_address" => %addr,
+                );
+                return;
+            }
+        }
 
         match message.kind {
             SpMessageKind::Response { request_id, result } => {
@@ -671,9 +698,6 @@ impl Inner {
                     self.serial_console_tx = None;
                 }
                 Err(mpsc::error::TrySendError::Full(_)) => {
-                    // TODO-correctness Should we apply backpressure to the SP
-                    // instead of dropping data? We would need to add acks to
-                    // currently-async SP -> MGS messaging.
                     error!(
                         self.log,
                         "discarding SP serial console data (buffer full)"
