@@ -6203,9 +6203,9 @@ dependencies = [
 
 [[package]]
 name = "vsss-rs"
-version = "2.0.0-pre2"
+version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a56f1fe9df13cff48de34c468a28d38ebede6af79ef5f2bef0b8f6b4a4a28ea"
+checksum = "0343f83b07f061cd1b7ef0de5a6f2ae085766ee0ecc4a199562322e92c4a66cf"
 dependencies = [
  "ff",
  "group",
@@ -6215,6 +6215,7 @@ dependencies = [
  "serde-big-array 0.3.3",
  "serde_cbor",
  "sha2 0.10.2",
+ "sha2 0.9.9",
  "zeroize",
 ]
 
