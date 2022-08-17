@@ -5,7 +5,7 @@ edition = "2018"
 license = "MPL-2.0"
 
 [dependencies]
-futures = "0.3.21"
+futures = "0.3.23"
 http = "0.2.7"
 hyper = "0.14.20"
 ringbuffer = "0.8"
