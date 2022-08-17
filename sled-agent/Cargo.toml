@@ -18,7 +18,7 @@ crucible-client-types = { git = "https://github.com/oxidecomputer/crucible", rev
 crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "1d67a53042f19ff7ca30dd20a04da94b7715ed7c" }
 ddm-admin-client = { path = "../ddm-admin-client" }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
-futures = "0.3.21"
+futures = "0.3.23"
 internal-dns-client = { path = "../internal-dns-client" }
 ipnetwork = "0.20"
 libc = "0.2.132"

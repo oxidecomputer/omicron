@@ -19,7 +19,7 @@ crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev
 diesel = { version = "2.0.0-rc.1", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 diesel-dtrace = { git = "https://github.com/oxidecomputer/diesel-dtrace", rev = "b9262a79db59f0727ca28ca9baed6fc6e3cc31e7" }
 fatfs = "0.3.5"
-futures = "0.3.21"
+futures = "0.3.23"
 headers = "0.3.7"
 hex = "0.4.3"
 http = "0.2.7"
