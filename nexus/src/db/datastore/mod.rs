@@ -1574,7 +1574,7 @@ mod test {
                 time_deleted: None,
                 ip_pool_id: Uuid::new_v4(),
                 ip_pool_range_id: Uuid::new_v4(),
-                project_id: Uuid::new_v4(),
+                project_id: Some(Uuid::new_v4()),
                 instance_id: Some(instance_id),
                 kind: IpKind::Ephemeral,
                 ip: ipnetwork::IpNetwork::from(IpAddr::from(Ipv4Addr::new(
@@ -1634,7 +1634,7 @@ mod test {
             time_deleted: None,
             ip_pool_id: Uuid::new_v4(),
             ip_pool_range_id: Uuid::new_v4(),
-            project_id: Uuid::new_v4(),
+            project_id: Some(Uuid::new_v4()),
             instance_id: Some(Uuid::new_v4()),
             kind: IpKind::SNat,
             ip: ipnetwork::IpNetwork::from(IpAddr::from(Ipv4Addr::new(
@@ -1709,7 +1709,7 @@ mod test {
             time_deleted: None,
             ip_pool_id: Uuid::new_v4(),
             ip_pool_range_id: Uuid::new_v4(),
-            project_id: Uuid::new_v4(),
+            project_id: Some(Uuid::new_v4()),
             instance_id: Some(Uuid::new_v4()),
             kind: IpKind::Floating,
             ip: addresses.next().unwrap().into(),

@@ -127,6 +127,30 @@ where
         Self { log, nexus, dns_updater, phantom: PhantomData }
     }
 
+    // If necessary, allocates an external IP for the service.
+    async fn allocate_external_ip(
+        &self,
+        service_kind: ServiceKind,
+    ) -> Result<Option<IpAddr>, Error> {
+        match service_kind {
+            ServiceKind::Nexus => {
+                // TODO: does this need to be in a txn somewhere?
+                // TODO: THIS SHOULDN'T BE DOING THE ALLOCATION HERE.
+                //                let ip_id = uuid::Uuid::new_v4();
+                //                IncompleteInstanceExternalIp::for_service(
+                //                    ip_id,
+                //                    pool_id,
+                //                );
+
+                // TODO: NO!
+                Ok(Some(IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)))
+            }
+            ServiceKind::InternalDNS
+            | ServiceKind::Oximeter
+            | ServiceKind::Dendrite => Ok(None),
+        }
+    }
+
     // Reaches out to all sled agents implied in "services", and
     // requests that the desired services are executing.
     async fn instantiate_services(
@@ -155,36 +179,38 @@ where
 
                 info!(self.log, "instantiate_services: {:?}", services);
 
+                let mut service_requests = vec![];
+                for service in &services {
+                    let internal_address = Ipv6Addr::from(service.ip);
+                    let external_address =
+                        self.allocate_external_ip(service.kind).await?;
+
+                    let (name, service_type) = Self::get_service_name_and_type(
+                        service.kind,
+                        internal_address,
+                        external_address,
+                    );
+                    let gz_addresses = match &service.kind {
+                        ServiceKind::InternalDNS => {
+                            vec![DnsSubnet::from_dns_address(internal_address)
+                                .gz_address()
+                                .ip()]
+                        }
+                        _ => vec![],
+                    };
+
+                    service_requests.push(SledAgentTypes::ServiceRequest {
+                        id: service.id(),
+                        name,
+                        addresses: vec![internal_address],
+                        gz_addresses,
+                        service_type,
+                    });
+                }
+
                 sled_client
                     .services_put(&SledAgentTypes::ServiceEnsureBody {
-                        services: services
-                            .iter()
-                            .map(|s| {
-                                let address = Ipv6Addr::from(s.ip);
-                                let (name, service_type) =
-                                    Self::get_service_name_and_type(
-                                        address, s.kind,
-                                    );
-                                let gz_addresses = match &s.kind {
-                                    ServiceKind::InternalDNS => {
-                                        vec![DnsSubnet::from_dns_address(
-                                            address,
-                                        )
-                                        .gz_address()
-                                        .ip()]
-                                    }
-                                    _ => vec![],
-                                };
-
-                                SledAgentTypes::ServiceRequest {
-                                    id: s.id(),
-                                    name,
-                                    addresses: vec![address],
-                                    gz_addresses,
-                                    service_type,
-                                }
-                            })
-                            .collect(),
+                        services: service_requests,
                     })
                     .await?;
                 Ok(())
@@ -208,30 +234,37 @@ where
 
     // Translates (address, db kind) to Sled Agent client types.
     fn get_service_name_and_type(
-        address: Ipv6Addr,
         kind: ServiceKind,
+        internal_address: Ipv6Addr,
+        external_address: Option<IpAddr>,
     ) -> (String, SledAgentTypes::ServiceType) {
         match kind {
             ServiceKind::Nexus => (
                 "nexus".to_string(),
                 SledAgentTypes::ServiceType::Nexus {
-                    internal_ip: address,
+                    internal_ip: internal_address,
                     // TODO: This is wrong! needs a separate address for Nexus
-                    external_ip: IpAddr::V6(address),
+                    external_ip: external_address
+                        .expect("Nexus needs an external address"),
                 },
             ),
             ServiceKind::InternalDNS => (
                 "internal-dns".to_string(),
                 SledAgentTypes::ServiceType::InternalDns {
                     server_address: SocketAddrV6::new(
-                        address,
+                        internal_address,
                         DNS_SERVER_PORT,
                         0,
                         0,
                     )
                     .to_string(),
-                    dns_address: SocketAddrV6::new(address, DNS_PORT, 0, 0)
-                        .to_string(),
+                    dns_address: SocketAddrV6::new(
+                        internal_address,
+                        DNS_PORT,
+                        0,
+                        0,
+                    )
+                    .to_string(),
                 },
             ),
             ServiceKind::Oximeter => {
@@ -829,10 +862,7 @@ mod test {
                             // TODO: This is currently failing! We need to make
                             // the Nexus external IP come from an IP pool for
                             // external addresses.
-                            assert_ne!(
-                                internal_ip,
-                                external_ip,
-                            );
+                            assert_ne!(internal_ip, external_ip,);
 
                             // TODO: check ports too, maybe?
                         }

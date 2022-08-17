@@ -24,6 +24,13 @@ pub struct Service {
     pub sled_id: Uuid,
     pub ip: ipv6::Ipv6Addr,
     pub kind: ServiceKind,
+    // TODO: Nexus needs to store:
+    // - External IP
+    // - Cert info.
+    // Where's that coming from?
+    //
+    // Could be in-line (forced on all services that aren't nexus)
+    // or out-of-line (forces extra query for Nexus)
 }
 
 impl Service {

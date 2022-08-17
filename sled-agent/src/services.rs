@@ -415,7 +415,10 @@ impl ServiceManager {
                             dropshot::ConfigDropshot {
                                 bind_address: SocketAddr::new(external_ip, 443),
                                 request_body_max_bytes: 1048576,
-                                tls: Some(dropshot::ConfigTls { cert_file, key_file }),
+                                tls: Some(dropshot::ConfigTls {
+                                    cert_file,
+                                    key_file,
+                                }),
                             },
                             dropshot::ConfigDropshot {
                                 bind_address: SocketAddr::new(external_ip, 80),
@@ -424,7 +427,10 @@ impl ServiceManager {
                             },
                         ],
                         dropshot_internal: dropshot::ConfigDropshot {
-                            bind_address: SocketAddr::new(IpAddr::V6(internal_ip), NEXUS_INTERNAL_PORT),
+                            bind_address: SocketAddr::new(
+                                IpAddr::V6(internal_ip),
+                                NEXUS_INTERNAL_PORT,
+                            ),
                             request_body_max_bytes: 1048576,
                             ..Default::default()
                         },

@@ -188,13 +188,7 @@ impl Plan {
                     gz_addresses: vec![],
                     service_type: ServiceType::Nexus {
                         internal_ip: address,
-//                            NEXUS_INTERNAL_PORT,
-//                            0,
-//                            0,
                         external_ip: config.nexus_external_address,
-                       //     config.nexus_external_address,
-//                            NEXUS_EXTERNAL_PORT,
-//                        ),
                     },
                 })
             }

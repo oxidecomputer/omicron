@@ -411,12 +411,11 @@ impl ServiceInner {
                 .chain(service_request.dns_services.iter())
             {
                 let kind = match svc.service_type {
-                    ServiceType::Nexus {
-                        external_ip,
-                        internal_ip: _,
-                    } => NexusTypes::ServiceKind::Nexus {
-                        external_address: external_ip,
-                    },
+                    ServiceType::Nexus { external_ip, internal_ip: _ } => {
+                        NexusTypes::ServiceKind::Nexus {
+                            external_address: external_ip,
+                        }
+                    }
                     ServiceType::InternalDns { .. } => {
                         NexusTypes::ServiceKind::InternalDNS
                     }

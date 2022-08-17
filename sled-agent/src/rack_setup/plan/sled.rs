@@ -139,7 +139,7 @@ impl Plan {
                     id: Uuid::new_v4(),
                     subnet,
                     gateway: config.gateway.clone(),
-                    rack_id
+                    rack_id,
                 },
             )
         });
