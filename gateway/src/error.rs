@@ -13,6 +13,8 @@ use gateway_sp_comms::error::Error as SpCommsError;
 pub(crate) enum Error {
     #[error("invalid page token ({0})")]
     InvalidPageToken(InvalidPageToken),
+    #[error("websocket connection failure: {0}")]
+    BadWebsocketConnection(&'static str),
     #[error(transparent)]
     CommunicationsError(#[from] SpCommsError),
 }
@@ -33,6 +35,10 @@ impl From<Error> for HttpError {
                 err.to_string(),
             ),
             Error::CommunicationsError(err) => http_err_from_comms_err(err),
+            Error::BadWebsocketConnection(_) => HttpError::for_bad_request(
+                Some("BadWebsocketConnection".to_string()),
+                err.to_string(),
+            ),
         }
     }
 }
@@ -51,12 +57,9 @@ where
             Some("SerialConsoleAttached".to_string()),
             err.to_string(),
         ),
-        SpCommsError::BadWebsocketConnection(_) => HttpError::for_bad_request(
-            Some("BadWebsocketConnection".to_string()),
-            err.to_string(),
-        ),
         SpCommsError::SpAddressUnknown(_)
         | SpCommsError::Timeout { .. }
+        | SpCommsError::BadIgnitionTarget(_)
         | SpCommsError::LocalIgnitionControllerAddressUnknown
         | SpCommsError::SpCommunicationFailed(_) => {
             HttpError::for_internal_error(err.to_string())

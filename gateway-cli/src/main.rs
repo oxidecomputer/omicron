@@ -18,6 +18,7 @@ use slog::o;
 use slog::Drain;
 use slog::Level;
 use slog::Logger;
+use std::borrow::Cow;
 use std::net::IpAddr;
 use std::net::ToSocketAddrs;
 use std::time::Duration;
@@ -25,6 +26,8 @@ use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use tokio::select;
+use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
+use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::MaybeTlsStream;
 use tokio_tungstenite::WebSocketStream;
@@ -281,6 +284,10 @@ async fn main() -> Result<()> {
                 match c {
                     None => {
                         // channel is closed
+                        _ = ws.close(Some(CloseFrame {
+                            code: CloseCode::Normal,
+                            reason: Cow::Borrowed("client closed stdin"),
+                        })).await;
                         break;
                     }
                     Some(c) => {

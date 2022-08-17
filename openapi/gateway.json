@@ -150,7 +150,6 @@
     "/sp/{type}/{slot}": {
       "get": {
         "summary": "Get info on an SP",
-        "description": "As communication with SPs may be unreliable, consumers may specify an optional timeout to override the default.",
         "operationId": "sp_get",
         "parameters": [
           {
@@ -172,17 +171,6 @@
               "$ref": "#/components/schemas/SpType"
             },
             "style": "simple"
-          },
-          {
-            "in": "query",
-            "name": "timeout_millis",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 0
-            },
-            "style": "form"
           }
         ],
         "responses": {
