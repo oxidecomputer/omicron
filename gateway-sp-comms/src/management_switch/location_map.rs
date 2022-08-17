@@ -393,7 +393,7 @@ async fn discover_sps(
                     .request_response(
                         &recv_handler,
                         RequestKind::Discover,
-                        ResponseKindExt::try_into_discover,
+                        ResponseKindExt::expect_discover,
                         // TODO should this timeout be configurable or itself
                         // have some kind of backoff? we're inside a
                         // `backoff::retry()` loop, but if an SP is alive but

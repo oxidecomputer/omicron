@@ -142,7 +142,7 @@ impl SingleSp {
     /// Request the state of the SP.
     pub async fn state(&self) -> Result<SpState> {
         self.rpc(RequestKind::SpState).await.and_then(|(_peer, response)| {
-            response.try_into_sp_state().map_err(Into::into)
+            response.expect_sp_state().map_err(Into::into)
         })
     }
 
@@ -183,7 +183,7 @@ impl SingleSp {
         self.rpc(RequestKind::UpdateStart(UpdateStart { total_size }))
             .await
             .and_then(|(_peer, response)| {
-                response.try_into_update_start_ack().map_err(Into::into)
+                response.expect_update_start_ack().map_err(Into::into)
             })
     }
 
@@ -208,7 +208,7 @@ impl SingleSp {
 
         self.rpc(RequestKind::UpdateChunk(update_chunk)).await.and_then(
             |(_peer, response)| {
-                response.try_into_update_chunk_ack().map_err(Into::into)
+                response.expect_update_chunk_ack().map_err(Into::into)
             },
         )
     }
@@ -226,7 +226,7 @@ impl SingleSp {
     pub async fn reset_prepare(&self) -> Result<()> {
         self.rpc(RequestKind::SysResetPrepare).await.and_then(
             |(_peer, response)| {
-                response.try_into_sys_reset_prepare_ack().map_err(Into::into)
+                response.expect_sys_reset_prepare_ack().map_err(Into::into)
             },
         )
     }
@@ -324,7 +324,7 @@ impl AttachedSerialConsoleSend {
         rpc(&self.inner_tx, RequestKind::SerialConsoleWrite(data))
             .await
             .and_then(|(_peer, response)| {
-                response.try_into_serial_console_write_ack().map_err(Into::into)
+                response.expect_serial_console_write_ack().map_err(Into::into)
             })
     }
 }
@@ -478,7 +478,7 @@ impl Inner {
             .rpc_call(self.discovery_addr, RequestKind::Discover, incoming_buf)
             .await?;
 
-        let discovery = response.try_into_discover()?;
+        let discovery = response.expect_discover()?;
 
         // The receiving half of `sp_addr_tx` is held by the `SingleSp` that
         // created us, and it aborts our task when it's dropped. This send

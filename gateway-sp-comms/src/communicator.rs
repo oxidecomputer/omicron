@@ -132,7 +132,7 @@ impl Communicator {
         self.request_response(
             &controller,
             request,
-            ResponseKindExt::try_into_ignition_state,
+            ResponseKindExt::expect_ignition_state,
             Some(timeout),
         )
         .await
@@ -153,7 +153,7 @@ impl Communicator {
             .request_response(
                 &controller,
                 request,
-                ResponseKindExt::try_into_bulk_ignition_state,
+                ResponseKindExt::expect_bulk_ignition_state,
                 Some(timeout),
             )
             .await?;
@@ -197,7 +197,7 @@ impl Communicator {
         self.request_response(
             &controller,
             request,
-            ResponseKindExt::try_into_ignition_command_ack,
+            ResponseKindExt::expect_ignition_command_ack,
             Some(timeout),
         )
         .await
@@ -328,7 +328,7 @@ impl Communicator {
         self.request_response(
             &sp,
             RequestKind::SerialConsoleWrite(packet),
-            ResponseKindExt::try_into_serial_console_write_ack,
+            ResponseKindExt::expect_serial_console_write_ack,
             Some(timeout),
         )
         .await
@@ -370,7 +370,7 @@ impl Communicator {
         self.request_response(
             &sp,
             request,
-            ResponseKindExt::try_into_sp_state,
+            ResponseKindExt::expect_sp_state,
             timeout,
         )
         .await
@@ -439,25 +439,25 @@ impl Communicator {
 pub(crate) trait ResponseKindExt {
     fn name(&self) -> &'static str;
 
-    fn try_into_discover(self) -> Result<DiscoverResponse, BadResponseType>;
+    fn expect_discover(self) -> Result<DiscoverResponse, BadResponseType>;
 
-    fn try_into_ignition_state(self) -> Result<IgnitionState, BadResponseType>;
+    fn expect_ignition_state(self) -> Result<IgnitionState, BadResponseType>;
 
-    fn try_into_bulk_ignition_state(
+    fn expect_bulk_ignition_state(
         self,
     ) -> Result<BulkIgnitionState, BadResponseType>;
 
-    fn try_into_ignition_command_ack(self) -> Result<(), BadResponseType>;
+    fn expect_ignition_command_ack(self) -> Result<(), BadResponseType>;
 
-    fn try_into_sp_state(self) -> Result<SpState, BadResponseType>;
+    fn expect_sp_state(self) -> Result<SpState, BadResponseType>;
 
-    fn try_into_serial_console_write_ack(self) -> Result<(), BadResponseType>;
+    fn expect_serial_console_write_ack(self) -> Result<(), BadResponseType>;
 
-    fn try_into_update_start_ack(self) -> Result<(), BadResponseType>;
+    fn expect_update_start_ack(self) -> Result<(), BadResponseType>;
 
-    fn try_into_update_chunk_ack(self) -> Result<(), BadResponseType>;
+    fn expect_update_chunk_ack(self) -> Result<(), BadResponseType>;
 
-    fn try_into_sys_reset_prepare_ack(self) -> Result<(), BadResponseType>;
+    fn expect_sys_reset_prepare_ack(self) -> Result<(), BadResponseType>;
 }
 
 impl ResponseKindExt for ResponseKind {
@@ -489,7 +489,7 @@ impl ResponseKindExt for ResponseKind {
         }
     }
 
-    fn try_into_discover(self) -> Result<DiscoverResponse, BadResponseType> {
+    fn expect_discover(self) -> Result<DiscoverResponse, BadResponseType> {
         match self {
             ResponseKind::Discover(discover) => Ok(discover),
             other => Err(BadResponseType {
@@ -499,7 +499,7 @@ impl ResponseKindExt for ResponseKind {
         }
     }
 
-    fn try_into_ignition_state(self) -> Result<IgnitionState, BadResponseType> {
+    fn expect_ignition_state(self) -> Result<IgnitionState, BadResponseType> {
         match self {
             ResponseKind::IgnitionState(state) => Ok(state),
             other => Err(BadResponseType {
@@ -509,7 +509,7 @@ impl ResponseKindExt for ResponseKind {
         }
     }
 
-    fn try_into_bulk_ignition_state(
+    fn expect_bulk_ignition_state(
         self,
     ) -> Result<BulkIgnitionState, BadResponseType> {
         match self {
@@ -521,7 +521,7 @@ impl ResponseKindExt for ResponseKind {
         }
     }
 
-    fn try_into_ignition_command_ack(self) -> Result<(), BadResponseType> {
+    fn expect_ignition_command_ack(self) -> Result<(), BadResponseType> {
         match self {
             ResponseKind::IgnitionCommandAck => Ok(()),
             other => Err(BadResponseType {
@@ -531,7 +531,7 @@ impl ResponseKindExt for ResponseKind {
         }
     }
 
-    fn try_into_sp_state(self) -> Result<SpState, BadResponseType> {
+    fn expect_sp_state(self) -> Result<SpState, BadResponseType> {
         match self {
             ResponseKind::SpState(state) => Ok(state),
             other => Err(BadResponseType {
@@ -541,7 +541,7 @@ impl ResponseKindExt for ResponseKind {
         }
     }
 
-    fn try_into_serial_console_write_ack(self) -> Result<(), BadResponseType> {
+    fn expect_serial_console_write_ack(self) -> Result<(), BadResponseType> {
         match self {
             ResponseKind::SerialConsoleWriteAck => Ok(()),
             other => Err(BadResponseType {
@@ -551,7 +551,7 @@ impl ResponseKindExt for ResponseKind {
         }
     }
 
-    fn try_into_update_start_ack(self) -> Result<(), BadResponseType> {
+    fn expect_update_start_ack(self) -> Result<(), BadResponseType> {
         match self {
             ResponseKind::UpdateStartAck => Ok(()),
             other => Err(BadResponseType {
@@ -561,7 +561,7 @@ impl ResponseKindExt for ResponseKind {
         }
     }
 
-    fn try_into_update_chunk_ack(self) -> Result<(), BadResponseType> {
+    fn expect_update_chunk_ack(self) -> Result<(), BadResponseType> {
         match self {
             ResponseKind::UpdateChunkAck => Ok(()),
             other => Err(BadResponseType {
@@ -571,7 +571,7 @@ impl ResponseKindExt for ResponseKind {
         }
     }
 
-    fn try_into_sys_reset_prepare_ack(self) -> Result<(), BadResponseType> {
+    fn expect_sys_reset_prepare_ack(self) -> Result<(), BadResponseType> {
         match self {
             ResponseKind::SysResetPrepareAck => Ok(()),
             other => Err(BadResponseType {
