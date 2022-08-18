@@ -573,7 +573,6 @@ async fn test_disk_region_creation_failure(
     // no matter what regions get requested, they'll always fail.
     test.set_always_fail_callback().await;
 
-
     // Attempt to allocate the disk, observe a server error.
     let disk_size = ByteCount::from_gibibytes_u32(3);
     let disks_url = get_disks_url();
