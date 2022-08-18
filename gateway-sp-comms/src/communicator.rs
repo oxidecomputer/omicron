@@ -203,6 +203,26 @@ impl Communicator {
         Ok(sp.state().await?)
     }
 
+    /// Update a given SP.
+    pub async fn update(
+        &self,
+        sp: SpIdentifier,
+        image: &[u8],
+    ) -> Result<(), Error> {
+        let port = self.id_to_port(sp)?;
+        let sp = self.switch.sp(port).ok_or(Error::SpAddressUnknown(sp))?;
+        Ok(sp.update(image).await?)
+    }
+
+    /// Reset a given SP.
+    pub async fn reset(&self, sp: SpIdentifier) -> Result<(), Error> {
+        let port = self.id_to_port(sp)?;
+        let sp = self.switch.sp(port).ok_or(Error::SpAddressUnknown(sp))?;
+        sp.reset_prepare().await?;
+        sp.reset_trigger().await?;
+        Ok(())
+    }
+
     /// Query all online SPs.
     ///
     /// `ignition_state` should be the state returned by a (recent) call to
