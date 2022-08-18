@@ -728,7 +728,7 @@
     "/sp/{type}/{slot}/update": {
       "post": {
         "summary": "Update an SP",
-        "description": "Uploads a new image to the alternate bank of the SP flash.",
+        "description": "Copies a new image to the alternate bank of the SP flash.",
         "operationId": "sp_update",
         "parameters": [
           {
