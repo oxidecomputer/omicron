@@ -184,7 +184,7 @@ async fn authorize_everything<W: Write>(
     let mut futures = futures::stream::FuturesOrdered::new();
     for resource in test_resources.resources() {
         let log = log.new(o!("resource" => format!("{:?}", resource)));
-        futures.push(authorize_one_resource(
+        futures.push_back(authorize_one_resource(
             log,
             user_contexts.to_owned(),
             Arc::clone(&resource),

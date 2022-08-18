@@ -656,7 +656,7 @@ impl StorageWorker {
                 "failed to notify nexus, will retry in {:?}", delay;
             );
         };
-        nexus_notifications.push(
+        nexus_notifications.push_back(
             backoff::retry_notify(
                 backoff::internal_service_policy(),
                 notify_nexus,
@@ -702,7 +702,7 @@ impl StorageWorker {
                 "failed to notify nexus about datasets, will retry in {:?}", delay;
             );
         };
-        nexus_notifications.push(
+        nexus_notifications.push_back(
             backoff::retry_notify(
                 backoff::internal_service_policy(),
                 notify_nexus,
