@@ -176,7 +176,9 @@ lazy_static! {
                 name: DEMO_DISK_NAME.clone(),
                 description: "".parse().unwrap(),
             },
-            disk_source: params::DiskSource::Blank { block_size: params::BlockSize::try_from(4096).unwrap() },
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(4096).unwrap(),
+            },
             size: ByteCount::from_gibibytes_u32(10),
         };
     pub static ref DEMO_DISK_METRICS_URL: String =
