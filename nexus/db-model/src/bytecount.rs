@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::BlockSize;
+use anyhow::bail;
 use diesel::backend::{Backend, RawValue};
 use diesel::deserialize::{self, FromSql};
 use diesel::pg::Pg;
@@ -63,3 +64,114 @@ impl From<BlockSize> for ByteCount {
         Self(bs.to_bytes().into())
     }
 }
+
+impl TryFrom<diesel::pg::data_types::PgNumeric> for ByteCount {
+    type Error = anyhow::Error;
+    fn try_from(num: diesel::pg::data_types::PgNumeric) -> Result<Self, Self::Error> {
+        match num {
+            diesel::pg::data_types::PgNumeric::Positive {
+                weight: _, scale, digits
+            } => {
+                // fail if there are digits to right of decimal place -
+                // ByteCount is a whole number
+                if scale != 0 {
+                    bail!("PgNumeric::Positive scale is {}", scale);
+                }
+
+                let mut result: i64 = 0;
+                let mut multiplier = 1;
+
+                for digit in digits.iter().rev() {
+                    result += *digit as i64 * multiplier;
+                    multiplier *= 10000;
+                }
+
+                let result: external::ByteCount = result.try_into()?;
+
+                Ok(result.into())
+            }
+
+            diesel::pg::data_types::PgNumeric::Negative {
+                ..
+            } => {
+                bail!("negative PgNumeric, cannot convert to ByteCount");
+            }
+
+            diesel::pg::data_types::PgNumeric::NaN => {
+                bail!("NaN PgNumeric, cannot convert to ByteCount");
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_pg_numeric_to_byte_count() {
+        type IntoResult = Result<ByteCount, anyhow::Error>;
+
+        // assert this does not work for negative or NaN
+
+        let result: IntoResult = diesel::pg::data_types::PgNumeric::Negative {
+            weight: 1, scale: 0, digits: vec![1]
+        }.try_into();
+        assert!(result.is_err());
+
+        let result: IntoResult = diesel::pg::data_types::PgNumeric::NaN.try_into();
+        assert!(result.is_err());
+
+        // assert this doesn't work for non-whole numbers
+
+        let result: IntoResult = diesel::pg::data_types::PgNumeric::Positive {
+            weight: 0, scale: 1, digits: vec![1]
+        }.try_into();
+        assert!(result.is_err());
+
+        let result: IntoResult = diesel::pg::data_types::PgNumeric::Positive {
+            weight: 0, scale: 1, digits: vec![999]
+        }.try_into();
+        assert!(result.is_err());
+
+        // From https://docs.diesel.rs/diesel/pg/data_types/enum.PgNumeric.html:
+        //
+        // weight: i16
+        //   How many digits come before the decimal point?
+        // scale: u16
+        //   How many significant digits are there?
+        // digits: Vec<i16>
+        //   The digits in this number, stored in base 10000
+
+        let result: IntoResult = diesel::pg::data_types::PgNumeric::Positive {
+            weight: 1, scale: 0, digits: vec![1]
+        }.try_into();
+        assert_eq!(result.unwrap().to_bytes(), 1);
+
+        let result: IntoResult = diesel::pg::data_types::PgNumeric::Positive {
+            weight: 5, scale: 0, digits: vec![1, 0]
+        }.try_into();
+        assert_eq!(result.unwrap().to_bytes(), 10000);
+
+        let result: IntoResult = diesel::pg::data_types::PgNumeric::Positive {
+            weight: 9, scale: 0, digits: vec![1, 0, 0]
+        }.try_into();
+        assert_eq!(result.unwrap().to_bytes(), 100000000);
+
+        let result: IntoResult = diesel::pg::data_types::PgNumeric::Positive {
+            weight: 9, scale: 0, digits: vec![1, 0, 9999]
+        }.try_into();
+        assert_eq!(result.unwrap().to_bytes(), 100009999);
+
+        let result: IntoResult = diesel::pg::data_types::PgNumeric::Positive {
+            weight: 11, scale: 0, digits: vec![512, 512, 512]
+        }.try_into();
+        assert_eq!(result.unwrap().to_bytes(), 51205120512);
+
+        let result: IntoResult = diesel::pg::data_types::PgNumeric::Positive {
+            weight: 12, scale: 0, digits: vec![9999, 9999, 9999]
+        }.try_into();
+        assert_eq!(result.unwrap().to_bytes(), 999999999999);
+    }
+}
+
