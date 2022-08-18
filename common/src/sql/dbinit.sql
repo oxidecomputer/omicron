@@ -207,6 +207,13 @@ CREATE INDEX on omicron.public.Region (
 );
 
 /*
+ * Allow all regions belonging to a dataset to be accessed quickly.
+ */
+CREATE INDEX on omicron.public.Region (
+    dataset_id
+);
+
+/*
  * A volume within Crucible
  */
 CREATE TABLE omicron.public.volume (

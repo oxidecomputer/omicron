@@ -15,6 +15,7 @@ use crate::db::error::TransactionError;
 use crate::db::identity::Asset;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Dataset;
+use crate::db::model::DatasetKind;
 use crate::db::model::Region;
 use crate::db::model::Zpool;
 use crate::external_api::params;
@@ -134,6 +135,9 @@ impl DataStore {
 
             #[error("Not enough avaiable space for regions")]
             NotEnoughAvailableSpace,
+
+            #[error("Numeric error: {0}")]
+            NumericError(String),
         }
         type TxnError = TransactionError<RegionAllocateError>;
 
@@ -188,47 +192,127 @@ impl DataStore {
                         )
                     })
                     .collect();
+
+                // Insert regions into the DB
                 let regions = diesel::insert_into(region_dsl::region)
                     .values(regions)
                     .returning(Region::as_returning())
                     .get_results(conn)?;
 
-                // Update the tallied sizes in the source datasets containing
-                // those regions.
-                let region_size = i64::from(block_size.to_bytes())
-                    * blocks_per_extent
-                    * params.extent_count();
+                // Validate that the datasets (really, the zpools) have the
+                // space for these regions
+                for dataset in source_datasets.iter() {
+                    let zpool_id = dataset.pool_id;
 
-                for dataset in source_datasets.iter_mut() {
-                    dataset.size_used =
-                        dataset.size_used.map(|v| v + region_size);
+                    // Add up size used by all regions in all datasets in the
+                    // zpool
+                    let zpool_total_occupied_size: Option<
+                        diesel::pg::data_types::PgNumeric,
+                    > = region_dsl::region
+                        .filter(
+                            region_dsl::dataset_id.eq_any(
+                                dataset_dsl::dataset
+                                    .filter(dataset_dsl::pool_id.eq(zpool_id))
+                                    .filter(
+                                        dataset_dsl::size_used.is_not_null(),
+                                    )
+                                    .filter(dataset_dsl::time_deleted.is_null())
+                                    .filter(
+                                        dataset_dsl::kind
+                                            .eq(DatasetKind::Crucible),
+                                    )
+                                    .select(dataset_dsl::id),
+                            ),
+                        )
+                        .select(diesel::dsl::sum(
+                            region_dsl::block_size
+                                * region_dsl::blocks_per_extent
+                                * region_dsl::extent_count,
+                        ))
+                        .nullable()
+                        .get_result(conn)?;
+
+                    let zpool_total_occupied_size: u64 = if let Some(
+                        zpool_total_occupied_size,
+                    ) =
+                        zpool_total_occupied_size
+                    {
+                        let zpool_total_occupied_size: db::model::ByteCount =
+                            zpool_total_occupied_size.try_into().map_err(
+                                |e: anyhow::Error| {
+                                    TxnError::CustomError(
+                                        RegionAllocateError::NumericError(
+                                            e.to_string(),
+                                        ),
+                                    )
+                                },
+                            )?;
+
+                        zpool_total_occupied_size.to_bytes()
+                    } else {
+                        0
+                    };
+
+                    let zpool = zpool_dsl::zpool
+                        .filter(zpool_dsl::id.eq(zpool_id))
+                        .select(Zpool::as_returning())
+                        .get_result(conn)?;
 
                     // Does this go over the zpool's total size?
-                    if let Some(size_used) = dataset.size_used {
-                        let zpool = zpool_dsl::zpool
-                            .filter(zpool_dsl::id.eq(dataset.pool_id))
-                            .select(Zpool::as_returning())
-                            .first(conn)?;
-
-                        let size_used: u64 = size_used.try_into().unwrap();
-                        let zpool_total_size: u64 = zpool.total_size.to_bytes();
-                        if size_used > zpool_total_size {
-                            return Err(TxnError::CustomError(
-                                RegionAllocateError::NotEnoughAvailableSpace,
-                            ));
-                        }
+                    if zpool.total_size.to_bytes() < zpool_total_occupied_size {
+                        return Err(TxnError::CustomError(
+                            RegionAllocateError::NotEnoughAvailableSpace,
+                        ));
                     }
                 }
 
-                let dataset_ids: Vec<Uuid> =
-                    source_datasets.iter().map(|ds| ds.id()).collect();
-                diesel::update(dataset_dsl::dataset)
-                    .filter(dataset_dsl::id.eq_any(dataset_ids))
-                    .set(
-                        dataset_dsl::size_used
-                            .eq(dataset_dsl::size_used + region_size),
-                    )
-                    .execute(conn)?;
+                // Update the tallied sizes in the source datasets containing
+                // those regions.
+                for dataset in source_datasets.iter_mut() {
+                    let dataset_total_occupied_size: Option<
+                        diesel::pg::data_types::PgNumeric,
+                    > = region_dsl::region
+                        .filter(region_dsl::dataset_id.eq(dataset.id()))
+                        .select(diesel::dsl::sum(
+                            region_dsl::block_size
+                                * region_dsl::blocks_per_extent
+                                * region_dsl::extent_count,
+                        ))
+                        .nullable()
+                        .get_result(conn)?;
+
+                    let dataset_total_occupied_size: i64 = if let Some(
+                        dataset_total_occupied_size,
+                    ) =
+                        dataset_total_occupied_size
+                    {
+                        let dataset_total_occupied_size: db::model::ByteCount =
+                            dataset_total_occupied_size.try_into().map_err(
+                                |e: anyhow::Error| {
+                                    TxnError::CustomError(
+                                        RegionAllocateError::NumericError(
+                                            e.to_string(),
+                                        ),
+                                    )
+                                },
+                            )?;
+
+                        dataset_total_occupied_size.into()
+                    } else {
+                        0
+                    };
+
+                    diesel::update(dataset_dsl::dataset)
+                        .filter(dataset_dsl::id.eq(dataset.id()))
+                        .set(
+                            dataset_dsl::size_used
+                                .eq(dataset_total_occupied_size),
+                        )
+                        .execute(conn)?;
+
+                    // Update the results we'll send the caller
+                    dataset.size_used = Some(dataset_total_occupied_size);
+                }
 
                 // Return the regions with the datasets to which they were allocated.
                 Ok(source_datasets
@@ -257,42 +341,107 @@ impl DataStore {
     ///
     /// Also updates the storage usage on their corresponding datasets.
     pub async fn regions_hard_delete(&self, volume_id: Uuid) -> DeleteResult {
-        use db::schema::dataset::dsl as dataset_dsl;
+        #[derive(Debug, thiserror::Error)]
+        enum RegionDeleteError {
+            #[error("Numeric error: {0}")]
+            NumericError(String),
+        }
+        type TxnError = TransactionError<RegionDeleteError>;
+
+        self.pool()
+            .transaction(move |conn| {
+                use db::schema::dataset::dsl as dataset_dsl;
+                use db::schema::region::dsl as region_dsl;
+
+                // Remove the regions, collecting datasets they're from.
+                let datasets = diesel::delete(region_dsl::region)
+                    .filter(region_dsl::volume_id.eq(volume_id))
+                    .returning(region_dsl::dataset_id)
+                    .get_results::<Uuid>(conn)?;
+
+                // Update datasets to which the regions belonged.
+                for dataset in datasets {
+                    let dataset_total_occupied_size: Option<
+                        diesel::pg::data_types::PgNumeric,
+                    > = region_dsl::region
+                        .filter(region_dsl::dataset_id.eq(dataset))
+                        .select(diesel::dsl::sum(
+                            region_dsl::block_size
+                                * region_dsl::blocks_per_extent
+                                * region_dsl::extent_count,
+                        ))
+                        .nullable()
+                        .get_result(conn)?;
+
+                    let dataset_total_occupied_size: i64 = if let Some(
+                        dataset_total_occupied_size,
+                    ) =
+                        dataset_total_occupied_size
+                    {
+                        let dataset_total_occupied_size: db::model::ByteCount =
+                            dataset_total_occupied_size.try_into().map_err(
+                                |e: anyhow::Error| {
+                                    TxnError::CustomError(
+                                        RegionDeleteError::NumericError(
+                                            e.to_string(),
+                                        ),
+                                    )
+                                },
+                            )?;
+
+                        dataset_total_occupied_size.into()
+                    } else {
+                        0
+                    };
+
+                    diesel::update(dataset_dsl::dataset)
+                        .filter(dataset_dsl::id.eq(dataset))
+                        .set(
+                            dataset_dsl::size_used
+                                .eq(dataset_total_occupied_size),
+                        )
+                        .execute(conn)?;
+                }
+
+                Ok(())
+            })
+            .await
+            .map_err(|e: TxnError| {
+                Error::internal_error(&format!("Transaction error: {}", e))
+            })
+    }
+
+    /// Return the total occupied size for a dataset
+    pub async fn regions_total_occupied_size(
+        &self,
+        dataset_id: Uuid,
+    ) -> Result<u64, Error> {
         use db::schema::region::dsl as region_dsl;
 
-        // Remove the regions, collecting datasets they're from.
-        let datasets_id_and_size = diesel::delete(region_dsl::region)
-            .filter(region_dsl::volume_id.eq(volume_id))
-            .returning((
-                region_dsl::dataset_id,
-                region_dsl::block_size
-                    * region_dsl::blocks_per_extent
-                    * region_dsl::extent_count,
-            ))
-            .get_results_async::<(Uuid, i64)>(self.pool())
-            .await
-            .map_err(|e| {
-                Error::internal_error(&format!(
-                    "error deleting regions: {:?}",
-                    e
+        let total_occupied_size: Option<diesel::pg::data_types::PgNumeric> =
+            region_dsl::region
+                .filter(region_dsl::dataset_id.eq(dataset_id))
+                .select(diesel::dsl::sum(
+                    region_dsl::block_size
+                        * region_dsl::blocks_per_extent
+                        * region_dsl::extent_count,
                 ))
-            })?;
-
-        // Update those datasets to which the regions belonged.
-        for (dataset_id, size) in datasets_id_and_size {
-            diesel::update(dataset_dsl::dataset)
-                .filter(dataset_dsl::id.eq(dataset_id))
-                .set(dataset_dsl::size_used.eq(dataset_dsl::size_used - size))
-                .execute_async(self.pool())
+                .nullable()
+                .get_result_async(self.pool())
                 .await
                 .map_err(|e| {
-                    Error::internal_error(&format!(
-                        "error updating dataset space: {:?}",
-                        e
-                    ))
+                    public_error_from_diesel_pool(e, ErrorHandler::Server)
                 })?;
-        }
 
-        Ok(())
+        if let Some(total_occupied_size) = total_occupied_size {
+            let total_occupied_size: db::model::ByteCount =
+                total_occupied_size.try_into().map_err(
+                    |e: anyhow::Error| Error::internal_error(&e.to_string()),
+                )?;
+
+            Ok(total_occupied_size.to_bytes())
+        } else {
+            Ok(0)
+        }
     }
 }
