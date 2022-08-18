@@ -391,6 +391,23 @@ table! {
 }
 
 table! {
+    nexus_service (id) {
+        id -> Uuid,
+        service_id -> Uuid,
+        external_ip_id -> Uuid,
+        certificate_id -> Uuid,
+    }
+}
+
+table! {
+    nexus_certificate (id) {
+        id -> Uuid,
+        public_cert -> Binary,
+        private_key -> Binary,
+    }
+}
+
+table! {
     zpool (id) {
         id -> Uuid,
         time_created -> Timestamptz,

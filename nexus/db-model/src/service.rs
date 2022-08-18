@@ -4,6 +4,8 @@
 
 use super::ServiceKind;
 use crate::ipv6;
+use crate::schema::nexus_certificate;
+use crate::schema::nexus_service;
 use crate::schema::service;
 use db_macros::Asset;
 use internal_dns_client::names::{ServiceName, AAAA, SRV};
@@ -24,13 +26,25 @@ pub struct Service {
     pub sled_id: Uuid,
     pub ip: ipv6::Ipv6Addr,
     pub kind: ServiceKind,
-    // TODO: Nexus needs to store:
-    // - External IP
-    // - Cert info.
-    // Where's that coming from?
-    //
-    // Could be in-line (forced on all services that aren't nexus)
-    // or out-of-line (forces extra query for Nexus)
+}
+
+#[derive(Queryable, Insertable, Debug, Clone, Selectable, PartialEq)]
+#[diesel(table_name = nexus_service)]
+pub struct NexusService {
+    id: Uuid,
+
+    service_id: Uuid,
+    external_ip_id: Uuid,
+    certificate_id: Uuid,
+}
+
+#[derive(Queryable, Insertable, Debug, Clone, Selectable, PartialEq)]
+#[diesel(table_name = nexus_certificate)]
+pub struct NexusCertificate {
+    id: Uuid,
+
+    public_cert: Vec<u8>,
+    private_key: Vec<u8>,
 }
 
 impl Service {

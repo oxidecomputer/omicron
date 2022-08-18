@@ -131,6 +131,33 @@ CREATE INDEX ON omicron.public.service (
 );
 
 /*
+ * Additional context for services of "kind = nexus"
+ * This table should be treated as an optional extension
+ * of the service table itself.
+ */
+CREATE TABLE omicron.public.nexus_service (
+    id UUID PRIMARY KEY,
+
+    /* FK to the service table */
+    service_id UUID NOT NULL,
+    /* FK to the instance_external_ip table */
+    external_ip_id UUID NOT NULL,
+    /* FK to the nexus_certificate table */
+    certificate_id UUID NOT NULL
+);
+
+/*
+ * Information about x509 certificates used to serve Nexus' external interface.
+ * These certificates may be used by multiple instantiations of the Nexus
+ * service simultaneously.
+ */
+CREATE TABLE omicron.public.nexus_certificate (
+    id UUID PRIMARY KEY,
+    public_cert BYTES NOT NULL,
+    private_key BYTES NOT NULL
+);
+
+/*
  * ZPools of Storage, attached to Sleds.
  * Typically these are backed by a single physical disk.
  */

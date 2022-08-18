@@ -125,6 +125,20 @@ impl DataStore {
         Ok((authz_pool, pool))
     }
 
+    pub fn ip_pools_lookup_by_rack_id_sync(
+        conn: &mut crate::db::pool::DbConnection,
+        rack_id: Uuid,
+    ) -> Result<IpPool, diesel::result::Error> {
+        use db::schema::ip_pool::dsl;
+
+        // Look up this IP pool by rack ID.
+        dsl::ip_pool
+            .filter(dsl::rack_id.eq(Some(rack_id)))
+            .filter(dsl::time_deleted.is_null())
+            .select(IpPool::as_select())
+            .get_result(conn)
+    }
+
     /// Creates a new IP pool.
     ///
     /// - If `rack_id` is provided, this IP pool is used for Oxide

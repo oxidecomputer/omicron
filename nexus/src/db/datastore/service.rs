@@ -24,6 +24,7 @@ use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl};
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
+use nexus_types::identity::Resource;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::ReservedRackSubnet;
 use omicron_common::address::DNS_REDUNDANCY;
@@ -245,6 +246,7 @@ impl DataStore {
         redundancy: u32,
     ) -> Result<Vec<Service>, Error> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        opctx.authorize(authz::Action::ListChildren, &authz::IP_POOL_LIST).await?;
 
         #[derive(Debug)]
         enum ServiceError {
@@ -253,6 +255,63 @@ impl DataStore {
         }
         type TxnError = TransactionError<ServiceError>;
 
+        // NOTE: We could also make parts of this a saga?
+        //
+        // - Mark rack as "rebalancing"
+        // - List sleds + services, return sleds with/without services
+        // - Pick sleds that are targets probably all up-front
+        // - FOR EACH
+        //  - Provision IPv6
+        //  - Upsert service record
+        //  - IF NEXUS
+        //      - Provision external IP
+        //      - Find cert
+        //      - Upsert nexus service record
+        // - Unmark rack as "rebalancing"
+
+        // NOTE: It's probably possible to do this without the transaction.
+        //
+        // Something like this - heavily inspired by the external IP allocation
+        // CTE:
+        //
+        // WITH
+        // existing_count AS (
+        //     SELECT COUNT(1) FROM services WHERE allocated AND not deleted
+        // ),
+        // new_count AS (
+        //     -- Use "GREATEST" to avoid underflow if we've somehow
+        //     -- over-allocated services beyond the redundancy.
+        //     GREATEST(<redundancy>, existing_count) - existing_count
+        // ),
+        // candidate_sleds AS (
+        //     SELECT all sleds in the allocation scope (in the rack?)
+        //     LEFT OUTER JOIN with allocated services
+        //     ON service_type
+        //     WHERE service_type IS NULL (svc not allocated to the sled)
+        //     LIMIT new_count
+        // ),
+        // new_internal_ips AS (
+        //     UPDATE sled
+        //     SET
+        //          last_used_address = last_used_address + 1
+        //     WHERE
+        //          sled_id IN candidate_sleds
+        //     RETURNING
+        //          last_used_address
+        // ),
+        // new_external_ips AS (
+        //     (need to insert the external IP allocation CTE here somehow)
+        // ),
+        // candidate_services AS (
+        //     JOIN all the sleds with the IPs they need
+        // ),
+        // new_services AS (
+        //     INSERT INTO services
+        //     SELECT * FROM candidate_services
+        //     ON CONFLICT (id)
+        //     DO NOTHING
+        //     RETURNING *
+        // ),
         self.pool()
             .transaction(move |conn| {
                 let sleds_and_maybe_svcs =
@@ -290,10 +349,35 @@ impl DataStore {
                         TxnError::CustomError(ServiceError::NotEnoughSleds)
                     })?;
                     let svc_id = Uuid::new_v4();
+
+                    // Always allocate an internal IP address to this service.
                     let address = Self::next_ipv6_address_sync(conn, sled.id())
                         .map_err(|e| {
                             TxnError::CustomError(ServiceError::Other(e))
                         })?;
+
+                    // If requested, allocate an external IP address for this
+                    // service too.
+                    let external_ip = if matches!(kind, ServiceKind::Nexus) {
+                        let pool = Self::ip_pools_lookup_by_rack_id_sync(conn, rack_id)?;
+
+                        let external_ip = Self::allocate_service_ip_sync(
+                            conn,
+                            Uuid::new_v4(),
+                            pool.id(),
+                        ).map_err(|e| {
+                            TxnError::CustomError(ServiceError::Other(e))
+                        })?;
+
+                        Some(external_ip)
+                    } else {
+                        None
+                    };
+
+                    // TODO: We actually have to *use* the external_ip
+                    // - Use the NexusCertificate table (look up by UUID)
+                    // - Create a NexusService table (reference service, ip,
+                    // certs)
 
                     let service = db::model::Service::new(
                         svc_id,
@@ -315,7 +399,7 @@ impl DataStore {
             .map_err(|e| match e {
                 TxnError::CustomError(ServiceError::NotEnoughSleds) => {
                     Error::unavail("Not enough sleds for service allocation")
-                }
+                },
                 TxnError::CustomError(ServiceError::Other(e)) => e,
                 TxnError::Pool(e) => {
                     public_error_from_diesel_pool(e, ErrorHandler::Server)

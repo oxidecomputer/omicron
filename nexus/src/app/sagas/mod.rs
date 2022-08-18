@@ -23,6 +23,7 @@ pub mod disk_create;
 pub mod disk_delete;
 pub mod instance_create;
 pub mod instance_migrate;
+pub mod service_balance;
 
 #[derive(Debug)]
 pub struct NexusSagaType;
@@ -93,7 +94,9 @@ fn make_action_registry() -> ActionRegistry {
     <instance_migrate::SagaInstanceMigrate as NexusSaga>::register_actions(
         &mut registry,
     );
-
+    <service_balance::SagaServiceBalance as NexusSaga>::register_actions(
+        &mut registry,
+    );
     registry
 }
 

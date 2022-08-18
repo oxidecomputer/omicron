@@ -102,10 +102,6 @@ impl DataStore {
         self.allocate_instance_external_ip(opctx, data).await
     }
 
-    // TODO-correctness: This should be made idempotent.
-    //
-    // It mostly *is* idemptent, but fails when there are no
-    // addresses left.
     pub async fn allocate_service_ip(
         &self,
         opctx: &OpContext,
@@ -117,6 +113,30 @@ impl DataStore {
 
         let data = IncompleteInstanceExternalIp::for_service(ip_id, pool.id());
         self.allocate_instance_external_ip(opctx, data).await
+    }
+
+    // TODO: it's a little quirky that the async version looks up the pool
+    // based on your rack, but this version doesn't.
+    // maybe we should always leave it up to the caller?
+    pub fn allocate_service_ip_sync(
+        conn: &mut crate::db::pool::DbConnection,
+        ip_id: Uuid,
+        pool_id: Uuid,
+    ) -> CreateResult<InstanceExternalIp> {
+        let data = IncompleteInstanceExternalIp::for_service(ip_id, pool_id);
+        NextExternalIp::new(data)
+            .get_result(conn)
+            .map_err(|e| {
+                use diesel::result::Error::NotFound;
+                match e {
+                    NotFound => Error::invalid_request(
+                        "No external IP addresses available for new instance",
+                    ),
+                    _ => Error::internal_error(&format!(
+                        "Unknown diesel error allocating external IP: {:#}", e
+                    )),
+                }
+            })
     }
 
     async fn allocate_instance_external_ip(
