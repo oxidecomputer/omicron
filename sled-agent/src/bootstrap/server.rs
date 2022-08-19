@@ -326,7 +326,7 @@ async fn serve_request_before_quorum_initialization(
             }
         }
         Request::ShareRequest => match initial_share.lock().await.clone() {
-            Some(dist) => Ok(Response::ShareResponse(dist.share.clone())),
+            Some(dist) => Ok(Response::ShareResponse(dist.share)),
             None => {
                 warn!(log, "Share requested before we have one");
                 Err("Share request failed: share unavailable".to_string())
