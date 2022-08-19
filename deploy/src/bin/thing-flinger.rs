@@ -45,6 +45,9 @@ struct Config {
     deployment: Deployment,
 
     #[serde(default)]
+    rss_config_path: Option<PathBuf>,
+
+    #[serde(default)]
     debug: bool,
 }
 
@@ -672,7 +675,11 @@ fn overlay_rss_config(
 ) -> Result<()> {
     // Sync `config-rss.toml` to the directory for the RSS server on the
     // builder.
-    let src = config.omicron_path.join("smf/sled-agent/config-rss.toml");
+    let src = if let Some(src) = &config.rss_config_path {
+        src.clone()
+    } else {
+        config.omicron_path.join("smf/sled-agent/config-rss.toml")
+    };
     let dst = format!(
         "{}@{}:{}",
         builder.username,
