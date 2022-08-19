@@ -1553,6 +1553,7 @@ dependencies = [
  "base64",
  "futures",
  "omicron-sled-agent",
+ "omicron-test-utils",
  "oxide-client",
  "rand 0.8.5",
  "reqwest",

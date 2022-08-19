@@ -1,8 +1,9 @@
 #![cfg(test)]
 
-use crate::helpers::{ctx::Context, generate_name, try_loop};
+use crate::helpers::{ctx::Context, generate_name};
 use anyhow::{ensure, Context as _, Result};
 use futures::future::Ready;
+use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use oxide_client::types::{
     ByteCount, DiskCreate, DiskSource, Distribution, ExternalIpCreate,
     GlobalImageCreate, ImageSource, InstanceCpuCount, InstanceCreate,
@@ -113,9 +114,11 @@ async fn instance_launch() -> Result<()> {
     // poll serial for login prompt, waiting 5 min max
     // (pulling disk blocks over HTTP is slow)
     eprintln!("waiting for serial console");
-    let serial = try_loop(
+    let serial = wait_for_condition(
         || async {
-            sleep(Duration::from_secs(5)).await;
+            type Error =
+                CondCheckError<oxide_client::Error<oxide_client::types::Error>>;
+
             let data = String::from_utf8_lossy(
                 &ctx.client
                     .instance_serial_console()
@@ -129,14 +132,14 @@ async fn instance_launch() -> Result<()> {
                     .data,
             )
             .into_owned();
-            ensure!(
-                data.contains("localshark login:"),
-                "not yet booted\n{}",
-                data
-            );
-            Ok(data)
+            if data.contains("localshark login:") {
+                Ok(data)
+            } else {
+                Err(Error::NotYet)
+            }
         },
-        Duration::from_secs(300),
+        &Duration::from_secs(5),
+        &Duration::from_secs(300),
     )
     .await?;
 

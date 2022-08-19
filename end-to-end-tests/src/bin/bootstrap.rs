@@ -1,13 +1,13 @@
 use anyhow::{bail, Result};
 use end_to_end_tests::helpers::ctx::{build_client, nexus_addr, Context};
-use end_to_end_tests::helpers::{generate_name, try_loop};
+use end_to_end_tests::helpers::generate_name;
+use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use oxide_client::types::{
     ByteCount, DiskCreate, DiskSource, IpPoolCreate, IpRange, Ipv4Range,
 };
 use oxide_client::{ClientDisksExt, ClientIpPoolsExt, ClientOrganizationsExt};
 use std::net::IpAddr;
 use std::time::Duration;
-use tokio::time::sleep;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -15,12 +15,16 @@ async fn main() -> Result<()> {
 
     // ===== ENSURE NEXUS IS UP ===== //
     eprintln!("waiting for nexus to come up...");
-    try_loop(
+    wait_for_condition(
         || async {
-            sleep(Duration::from_secs(1)).await;
-            client.organization_list().send().await
+            client
+                .organization_list()
+                .send()
+                .await
+                .map_err(|_| CondCheckError::<oxide_client::Error>::NotYet)
         },
-        Duration::from_secs(300),
+        &Duration::from_secs(1),
+        &Duration::from_secs(300),
     )
     .await?;
 
@@ -60,9 +64,8 @@ async fn main() -> Result<()> {
     eprintln!("ensuring datasets are ready...");
     let ctx = Context::from_client(client).await?;
     let disk_name = generate_name("disk")?;
-    try_loop(
+    wait_for_condition(
         || async {
-            sleep(Duration::from_secs(1)).await;
             ctx.client
                 .disk_create()
                 .organization_name(ctx.org_name.clone())
@@ -71,17 +74,16 @@ async fn main() -> Result<()> {
                     name: disk_name.clone(),
                     description: String::new(),
                     disk_source: DiskSource::Blank {
-                        block_size: 512
-                            .try_into()
-                            .map_err(anyhow::Error::msg)?,
+                        block_size: 512.try_into().unwrap(),
                     },
                     size: ByteCount(1024 * 1024 * 1024),
                 })
                 .send()
                 .await
-                .map_err(anyhow::Error::from)
+                .map_err(|_| CondCheckError::<oxide_client::Error>::NotYet)
         },
-        Duration::from_secs(120),
+        &Duration::from_secs(1),
+        &Duration::from_secs(120),
     )
     .await?;
     ctx.client
