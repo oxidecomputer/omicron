@@ -382,13 +382,11 @@ fn do_install_prereqs(config: &Config) -> Result<()> {
     );
 
     let server_names = std::iter::once(&config.builder.server).chain(
-        config.deployment.servers.iter().filter_map(|s| {
-            if *s != config.builder.server {
-                Some(s)
-            } else {
-                None
-            }
-        }),
+        config
+            .deployment
+            .servers
+            .iter()
+            .filter(|s| **s != config.builder.server),
     );
 
     // Install functions to run in parallel on each server
