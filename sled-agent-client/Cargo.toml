@@ -6,6 +6,7 @@ license = "MPL-2.0"
 
 [dependencies]
 async-trait = "0.1"
+ipnetwork = "0.20"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor" }
 regress = "0.4.1"
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls", "stream"] }

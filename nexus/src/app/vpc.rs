@@ -29,8 +29,11 @@ use omicron_common::api::external::RouterRouteCreateParams;
 use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
+use sled_agent_client::types::NetworkInterface;
 
 use futures::future::join_all;
+use ipnetwork::IpNetwork;
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 impl super::Nexus {
@@ -177,7 +180,14 @@ impl super::Nexus {
         self.db_datastore
             .vpc_update_firewall_rules(opctx, &authz_vpc, rules.clone())
             .await?;
-        self.send_sled_agents_firewall_rules(&db_vpc, &rules).await?;
+        self.send_sled_agents_firewall_rules(
+            opctx,
+            organization_name,
+            project_name,
+            &db_vpc,
+            &rules,
+        )
+        .await?;
         Ok(db_vpc)
     }
 
@@ -335,20 +345,35 @@ impl super::Nexus {
             .db_datastore
             .vpc_update_firewall_rules(opctx, &authz_vpc, rules)
             .await?;
-        self.send_sled_agents_firewall_rules(&db_vpc, &rules).await?;
+        self.send_sled_agents_firewall_rules(
+            opctx,
+            organization_name,
+            project_name,
+            &db_vpc,
+            &rules,
+        )
+        .await?;
         Ok(rules)
     }
 
     async fn send_sled_agents_firewall_rules(
         &self,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
         vpc: &db::model::Vpc,
         rules: &[db::model::VpcFirewallRule],
     ) -> Result<(), Error> {
-        info!(self.log, "sending firewall rules to sled agents");
-
-        let rules_for_sled =
-            self.resolve_firewall_rules_for_sled_agent(&vpc, rules).await?;
-        info!(self.log, "resolved {} rules for sleds", rules_for_sled.len());
+        let rules_for_sled = self
+            .resolve_firewall_rules_for_sled_agent(
+                opctx,
+                organization_name,
+                project_name,
+                &vpc,
+                rules,
+            )
+            .await?;
+        debug!(self.log, "resolved {} rules for sleds", rules_for_sled.len());
         let sled_rules_request =
             sled_agent_client::types::VpcFirewallRulesEnsureBody {
                 rules: rules_for_sled,
@@ -356,7 +381,8 @@ impl super::Nexus {
 
         let vpc_to_sleds =
             self.db_datastore.vpc_resolve_to_sleds(vpc.id()).await?;
-        info!(self.log, "resolved sleds for vpc {}", vpc.name(); "vpc_to_sled" => ?vpc_to_sleds);
+        debug!(self.log, "resolved sleds for vpc {}", vpc.name(); "vpc_to_sled" => ?vpc_to_sleds);
+
         let mut sled_requests = Vec::with_capacity(vpc_to_sleds.len());
         for sled in &vpc_to_sleds {
             let sled_id = sled.id();
@@ -371,6 +397,7 @@ impl super::Nexus {
             });
         }
 
+        debug!(self.log, "sending firewall rules to sled agents");
         let results = join_all(sled_requests).await;
         // TODO-correctness: handle more than one failure in the sled-agent requests
         for (sled, result) in vpc_to_sleds.iter().zip(results) {
@@ -393,56 +420,272 @@ impl super::Nexus {
 
     async fn resolve_firewall_rules_for_sled_agent(
         &self,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
         vpc: &db::model::Vpc,
         rules: &[db::model::VpcFirewallRule],
     ) -> Result<Vec<sled_agent_client::types::VpcFirewallRule>, Error> {
-        Ok(rules
-            .iter()
-            .map(|rule| sled_agent_client::types::VpcFirewallRule {
+        // Collect the names of instances, subnets, and VPCs that are either
+        // targets or host filters. We have to find the sleds for all the
+        // targets, and we'll need information about the IP addresses or
+        // subnets for things that are specified as host filters as well.
+        let mut instances: HashSet<Name> = HashSet::new();
+        let mut subnets: HashSet<Name> = HashSet::new();
+        let mut vpcs: HashSet<Name> = HashSet::new();
+        for rule in rules {
+            for target in &rule.targets {
+                match &target.0 {
+                    external::VpcFirewallRuleTarget::Instance(name) => {
+                        instances.insert(name.clone().into());
+                    }
+                    external::VpcFirewallRuleTarget::Subnet(name) => {
+                        subnets.insert(name.clone().into());
+                    }
+                    external::VpcFirewallRuleTarget::Vpc(name) => {
+                        if name != vpc.name() {
+                            return Err(Error::invalid_request(
+                                "cross-VPC firewall target unsupported",
+                            ));
+                        }
+                        vpcs.insert(name.clone().into());
+                    }
+                    // We don't need to resolve anything for Ip(Net)s.
+                    external::VpcFirewallRuleTarget::Ip(_) => (),
+                    external::VpcFirewallRuleTarget::IpNet(_) => (),
+                }
+            }
+
+            for host in rule.filter_hosts.iter().flatten() {
+                match &host.0 {
+                    external::VpcFirewallRuleHostFilter::Instance(name) => {
+                        instances.insert(name.clone().into());
+                    }
+                    external::VpcFirewallRuleHostFilter::Subnet(name) => {
+                        subnets.insert(name.clone().into());
+                    }
+                    external::VpcFirewallRuleHostFilter::Vpc(name) => {
+                        if name != vpc.name() {
+                            return Err(Error::invalid_request(
+                                "cross-VPC firewall host filter unsupported",
+                            ));
+                        }
+                        vpcs.insert(name.clone().into());
+                    }
+                    // We don't need to resolve anything for Ip(Net)s.
+                    external::VpcFirewallRuleHostFilter::Ip(_) => (),
+                    external::VpcFirewallRuleHostFilter::IpNet(_) => (),
+                }
+            }
+        }
+
+        // Resolve named instances, VPCs, and subnets.
+        // TODO-correctness: It's possible the resolving queries produce
+        // inconsistent results due to concurrent changes. They should be
+        // transactional.
+        type NetMap = HashMap<external::Name, Vec<IpNetwork>>;
+        type NicMap = HashMap<external::Name, Vec<NetworkInterface>>;
+        let no_networks: Vec<IpNetwork> = Vec::new();
+        let no_interfaces: Vec<NetworkInterface> = Vec::new();
+
+        let mut instance_interfaces: NicMap = HashMap::new();
+        for instance_name in &instances {
+            let (.., authz_instance) =
+                LookupPath::new(opctx, &self.db_datastore)
+                    .organization_name(organization_name)
+                    .project_name(project_name)
+                    .instance_name(instance_name)
+                    .lookup_for(authz::Action::ListChildren)
+                    .await?;
+            for iface in self
+                .db_datastore
+                .derive_guest_network_interface_info(opctx, &authz_instance)
+                .await?
+            {
+                instance_interfaces
+                    .entry(instance_name.0.clone())
+                    .or_insert_with(Vec::new)
+                    .push(iface);
+            }
+        }
+
+        let mut vpc_interfaces: NicMap = HashMap::new();
+        for vpc_name in &vpcs {
+            let (.., authz_vpc) = LookupPath::new(opctx, &self.db_datastore)
+                .organization_name(organization_name)
+                .project_name(project_name)
+                .vpc_name(vpc_name)
+                .lookup_for(authz::Action::ListChildren)
+                .await?;
+            for iface in self
+                .db_datastore
+                .derive_vpc_network_interface_info(opctx, &authz_vpc)
+                .await?
+            {
+                vpc_interfaces
+                    .entry(vpc_name.0.clone())
+                    .or_insert_with(Vec::new)
+                    .push(iface);
+            }
+        }
+
+        let mut subnet_interfaces: NicMap = HashMap::new();
+        for subnet_name in &subnets {
+            let (.., authz_subnet) = LookupPath::new(opctx, &self.db_datastore)
+                .organization_name(organization_name)
+                .project_name(project_name)
+                .vpc_name(&Name::from(vpc.name().clone()))
+                .vpc_subnet_name(subnet_name)
+                .lookup_for(authz::Action::ListChildren)
+                .await?;
+            for iface in self
+                .db_datastore
+                .derive_subnet_network_interface_info(opctx, &authz_subnet)
+                .await?
+            {
+                subnet_interfaces
+                    .entry(subnet_name.0.clone())
+                    .or_insert_with(Vec::new)
+                    .push(iface);
+            }
+        }
+
+        let subnet_networks: NetMap = self
+            .db_datastore
+            .resolve_subnets_to_ips(vpc, subnets)
+            .await?
+            .into_iter()
+            .map(|(name, v)| (name.0, v))
+            .collect();
+
+        debug!(
+            self.log,
+            "resolved names for firewall rules";
+            "instance_interfaces" => ?instance_interfaces,
+            "vpc_interfaces" => ?vpc_interfaces,
+            "subnet_interfaces" => ?subnet_interfaces,
+            "subnet_networks" => ?subnet_networks,
+        );
+
+        // Compile resolved rules for the sled agents.
+        let mut sled_agent_rules = Vec::with_capacity(rules.len());
+        for rule in rules {
+            // TODO: what is the correct behavior when a name is not found?
+            // Options:
+            // (1) Fail update request (though note this can still arise
+            //     from things like instance deletion)
+            // (2) Allow update request, ignore this rule (but store it
+            //     in case it becomes valid later). This is consistent
+            //     with the semantics of the rules. Rules with bad
+            //     references should likely at least be flagged to users.
+            // We currently adopt option (2), as this allows users to add
+            // firewall rules (including default rules) before instances
+            // and their interfaces are instantiated.
+
+            let mut targets = Vec::with_capacity(rule.targets.len());
+            for target in &rule.targets {
+                match &target.0 {
+                    external::VpcFirewallRuleTarget::Vpc(name) => {
+                        for interface in
+                            vpc_interfaces.get(&name).unwrap_or(&no_interfaces)
+                        {
+                            targets.push(interface.clone().into());
+                        }
+                    }
+                    external::VpcFirewallRuleTarget::Subnet(name) => {
+                        for interface in subnet_interfaces
+                            .get(&name)
+                            .unwrap_or(&no_interfaces)
+                        {
+                            targets.push(interface.clone().into());
+                        }
+                    }
+                    external::VpcFirewallRuleTarget::Instance(name) => {
+                        for interface in instance_interfaces
+                            .get(&name)
+                            .unwrap_or(&no_interfaces)
+                        {
+                            targets.push(interface.clone().into());
+                        }
+                    }
+                    external::VpcFirewallRuleTarget::Ip(_addr) => todo!("target addr"),
+                    external::VpcFirewallRuleTarget::IpNet(_net) => todo!("target net"),
+                }
+            }
+
+            let filter_hosts = match &rule.filter_hosts {
+                None => None,
+                Some(hosts) => {
+                    let mut host_addrs = Vec::with_capacity(hosts.len());
+                    for host in hosts {
+                        match &host.0 {
+                            external::VpcFirewallRuleHostFilter::Instance(
+                                name,
+                            ) => {
+                                for interface in instance_interfaces
+                                    .get(&name)
+                                    .unwrap_or(&no_interfaces)
+                                {
+                                    host_addrs.push(interface.ip.into())
+                                }
+                            }
+                            external::VpcFirewallRuleHostFilter::Subnet(
+                                name,
+                            ) => {
+                                for subnet in subnet_networks
+                                    .get(&name)
+                                    .unwrap_or(&no_networks)
+                                {
+                                    host_addrs.push(subnet.clone().into());
+                                }
+                            }
+                            external::VpcFirewallRuleHostFilter::Ip(addr) => {
+                                host_addrs.push(addr.clone().into())
+                            }
+                            external::VpcFirewallRuleHostFilter::IpNet(net) => {
+                                host_addrs.push(net.clone().into())
+                            }
+                            external::VpcFirewallRuleHostFilter::Vpc(name) => {
+                                for interface in vpc_interfaces
+                                    .get(&name)
+                                    .unwrap_or(&no_interfaces)
+                                {
+                                    host_addrs.push(interface.ip.into())
+                                }
+                            }
+                        }
+                    }
+                    Some(host_addrs)
+                }
+            };
+
+            let filter_ports = rule
+                .filter_ports
+                .as_ref()
+                .map(|ports| ports.iter().map(|v| v.0.into()).collect());
+
+            let filter_protocols =
+                rule.filter_protocols.as_ref().map(|protocols| {
+                    protocols.iter().map(|v| v.0.into()).collect()
+                });
+
+            sled_agent_rules.push(sled_agent_client::types::VpcFirewallRule {
                 status: rule.status.0.into(),
                 direction: rule.direction.0.into(),
-                targets: vec![], // XXX
-                filter_hosts: rule.filter_hosts.as_ref().map(|hosts| {
-                    hosts
-                        .iter()
-                        .filter_map(|host| match host {
-                            db::model::VpcFirewallRuleHostFilter(
-                                external::VpcFirewallRuleHostFilter::Ip(
-                                    std::net::IpAddr::V4(addr),
-                                ),
-                            ) => Some(sled_agent_client::types::IpNet::V4(
-                                external::Ipv4Net(
-                                    ipnetwork::Ipv4Network::new(
-                                        addr.clone(),
-                                        32,
-                                    )
-                                    .unwrap(),
-                                )
-                                .into(),
-                            )),
-                            db::model::VpcFirewallRuleHostFilter(
-                                external::VpcFirewallRuleHostFilter::IpNet(
-                                    external::IpNet::V4(external::Ipv4Net(
-                                        network,
-                                    )),
-                                ),
-                            ) => Some(sled_agent_client::types::IpNet::V4(
-                                external::Ipv4Net(network.clone()).into(),
-                            )),
-                            _ => None, // XXX
-                        })
-                        .collect()
-                }),
-                filter_ports: rule
-                    .filter_ports
-                    .as_ref()
-                    .map(|ports| ports.iter().map(|v| v.0.into()).collect()),
-                filter_protocols: rule.filter_protocols.as_ref().map(
-                    |protocols| protocols.iter().map(|v| v.0.into()).collect(),
-                ),
+                targets,
+                filter_hosts,
+                filter_ports,
+                filter_protocols,
                 action: rule.action.0.into(),
                 priority: rule.priority.0 .0,
-            })
-            .collect::<Vec<_>>())
+            });
+        }
+        debug!(
+            self.log,
+            "resolved firewall rules for sled agents";
+            "sled_agent_rules" => ?sled_agent_rules,
+        );
+
+        Ok(sled_agent_rules)
     }
 }

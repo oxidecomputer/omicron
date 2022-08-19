@@ -45,6 +45,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use std::collections::HashMap;
 use uuid::Uuid;
 
 impl DataStore {
@@ -699,5 +700,34 @@ impl DataStore {
                     ErrorHandler::NotFoundByResource(authz_route),
                 )
             })
+    }
+
+    /// Identify all subnets in use by each VpcSubnet
+    pub async fn resolve_subnets_to_ips<T: IntoIterator<Item = Name>>(
+        &self,
+        vpc: &Vpc,
+        subnet_names: T,
+    ) -> Result<HashMap<Name, Vec<ipnetwork::IpNetwork>>, Error> {
+        use db::schema::vpc_subnet;
+        let subnets = vpc_subnet::table
+            .select(VpcSubnet::as_select())
+            .filter(vpc_subnet::vpc_id.eq(vpc.id()))
+            .filter(vpc_subnet::name.eq_any(subnet_names))
+            .filter(vpc_subnet::time_deleted.is_null())
+            .get_results_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            })?;
+
+        let mut result = HashMap::with_capacity(subnets.len());
+        for subnet in subnets {
+            let entry = result
+                .entry(subnet.name().clone().into())
+                .or_insert_with(Vec::new);
+            entry.push(ipnetwork::IpNetwork::V4(subnet.ipv4_block.0 .0));
+            entry.push(ipnetwork::IpNetwork::V6(subnet.ipv6_block.0 .0));
+        }
+        Ok(result)
     }
 }

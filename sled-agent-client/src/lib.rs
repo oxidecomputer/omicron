@@ -235,6 +235,52 @@ impl From<omicron_common::api::external::IpNet> for types::IpNet {
     }
 }
 
+impl From<ipnetwork::Ipv4Network> for types::Ipv4Net {
+    fn from(n: ipnetwork::Ipv4Network) -> Self {
+        Self::try_from(n.to_string()).unwrap_or_else(|e| panic!("{}: {}", n, e))
+    }
+}
+
+impl From<ipnetwork::Ipv6Network> for types::Ipv6Net {
+    fn from(n: ipnetwork::Ipv6Network) -> Self {
+        Self::try_from(n.to_string()).unwrap_or_else(|e| panic!("{}: {}", n, e))
+    }
+}
+
+impl From<ipnetwork::IpNetwork> for types::IpNet {
+    fn from(n: ipnetwork::IpNetwork) -> Self {
+        use ipnetwork::IpNetwork;
+        match n {
+            IpNetwork::V4(v4) => Self::V4(v4.into()),
+            IpNetwork::V6(v6) => Self::V6(v6.into()),
+        }
+    }
+}
+
+impl From<std::net::Ipv4Addr> for types::Ipv4Net {
+    fn from(n: std::net::Ipv4Addr) -> Self {
+        Self::try_from(format!("{n}/32"))
+            .unwrap_or_else(|e| panic!("{}: {}", n, e))
+    }
+}
+
+impl From<std::net::Ipv6Addr> for types::Ipv6Net {
+    fn from(n: std::net::Ipv6Addr) -> Self {
+        Self::try_from(format!("{n}/128"))
+            .unwrap_or_else(|e| panic!("{}: {}", n, e))
+    }
+}
+
+impl From<std::net::IpAddr> for types::IpNet {
+    fn from(s: std::net::IpAddr) -> Self {
+        use std::net::IpAddr;
+        match s {
+            IpAddr::V4(v4) => Self::V4(v4.into()),
+            IpAddr::V6(v6) => Self::V6(v6.into()),
+        }
+    }
+}
+
 impl From<omicron_common::api::external::L4PortRange> for types::L4PortRange {
     fn from(s: omicron_common::api::external::L4PortRange) -> Self {
         Self::try_from(s.to_string()).unwrap_or_else(|e| panic!("{}: {}", s, e))
