@@ -586,11 +586,17 @@ pub async fn console_index_or_login_redirect(
     // otherwise redirect to idp
 
     // put the current URI in the query string to redirect back to after login
-    let uri = rqctx.request.lock().await.uri().to_string();
+    let uri = rqctx
+        .request
+        .lock()
+        .await
+        .uri()
+        .path_and_query()
+        .map(|p| p.to_string());
 
     Ok(Response::builder()
         .status(StatusCode::FOUND)
-        .header(http::header::LOCATION, get_login_url(Some(uri)))
+        .header(http::header::LOCATION, get_login_url(uri))
         .body("".into())?)
 }
 
