@@ -724,8 +724,8 @@ fn single_server_install(
     );
     copy_package_manifest_to_staging(config, builder, server)?;
 
-    println!("INSTALLING packages on deploy server ({})", server_name);
-    run_omicron_package_install_from_staging(
+    println!("UNPACKING packages on deploy server ({})", server_name);
+    run_omicron_package_unpack_from_staging(
         config,
         server,
         &artifact_dir,
@@ -747,8 +747,8 @@ fn single_server_install(
     println!("INSTALLING overlay files into the install directory of the deploy server ({})", server_name);
     install_overlay_files_from_staging(config, server, &install_dir)?;
 
-    println!("RESTARTING services on the deploy server ({})", server_name);
-    restart_services(server)
+    println!("STARTING services on the deploy server ({})", server_name);
+    run_omicron_package_activate_from_staging(config, server, &install_dir)
 }
 
 // Copy package artifacts as a result of `omicron-package package` from the
@@ -817,7 +817,23 @@ fn copy_package_manifest_to_staging(
     ssh_exec(builder, &cmd, SshStrategy::Forward)
 }
 
-fn run_omicron_package_install_from_staging(
+fn run_omicron_package_activate_from_staging(
+    config: &Config,
+    destination: &Server,
+    install_dir: &Path,
+) -> Result<()> {
+    // Run `omicron-package activate` on the deployment server
+    let cmd = format!(
+        "cd {} && pfexec ./omicron-package activate --out {}",
+        config.deployment.staging_dir.to_string_lossy(),
+        install_dir.to_string_lossy(),
+    );
+
+    println!("$ {}", cmd);
+    ssh_exec(destination, &cmd, SshStrategy::Forward)
+}
+
+fn run_omicron_package_unpack_from_staging(
     config: &Config,
     destination: &Server,
     artifact_dir: &Path,
@@ -826,13 +842,14 @@ fn run_omicron_package_install_from_staging(
     let mut deployment_src = PathBuf::from(&config.deployment.staging_dir);
     deployment_src.push(&artifact_dir);
 
-    // Run `omicron-package install` on the deployment server
+    // Run `omicron-package unpack` on the deployment server
     let cmd = format!(
-        "cd {} && pfexec ./omicron-package install --in {} --out {}",
+        "cd {} && pfexec ./omicron-package unpack --in {} --out {}",
         config.deployment.staging_dir.to_string_lossy(),
         deployment_src.to_string_lossy(),
-        install_dir.to_string_lossy()
+        install_dir.to_string_lossy(),
     );
+
     println!("$ {}", cmd);
     ssh_exec(destination, &cmd, SshStrategy::Forward)
 }
@@ -868,12 +885,6 @@ fn install_overlay_files_from_staging(
     );
     println!("$ {}", cmd);
     ssh_exec(&destination, &cmd, SshStrategy::NoForward)
-}
-
-// For now, we just restart sled-agent, as that's the only service with an
-// overlay file.
-fn restart_services(destination: &Server) -> Result<()> {
-    ssh_exec(destination, "svcadm restart sled-agent", SshStrategy::NoForward)
 }
 
 fn ssh_exec(
@@ -978,6 +989,7 @@ fn main() -> Result<()> {
         SubCommand::Deploy(DeployCommand::Install {
             artifact_dir,
             install_dir,
+            ..
         }) => {
             do_build_minimal(&config)?;
             do_install(&config, &artifact_dir, &install_dir);
@@ -989,6 +1001,10 @@ fn main() -> Result<()> {
             do_build_minimal(&config)?;
             do_uninstall(&config, artifact_dir, install_dir)?;
         }
+        // TODO: It doesn't really make sense to allow the user direct access
+        // to these low level operations in thing-flinger. Should we not use
+        // the DeployCommand from omicron-package directly?
+        SubCommand::Deploy(_) => anyhow::bail!("Unsupported action"),
         SubCommand::Overlay => do_overlay(&config)?,
     }
     Ok(())
