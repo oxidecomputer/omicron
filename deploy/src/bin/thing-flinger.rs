@@ -989,7 +989,6 @@ fn main() -> Result<()> {
         SubCommand::Deploy(DeployCommand::Install {
             artifact_dir,
             install_dir,
-            ..
         }) => {
             do_build_minimal(&config)?;
             do_install(&config, &artifact_dir, &install_dir);
