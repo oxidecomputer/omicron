@@ -919,7 +919,7 @@ fn ssh_exec(
         .arg(&remote_cmd);
 
     // If the builder is the same as the client, this will likely not be set,
-    // as the keys will reside on the builder. j
+    // as the keys will reside on the builder.
     if let Some(auth_sock) = std::env::var_os("SSH_AUTH_SOCK") {
         cmd.env("SSH_AUTH_SOCK", auth_sock);
     }
