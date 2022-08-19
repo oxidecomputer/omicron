@@ -139,7 +139,7 @@ impl DataStore {
             params.extent_size() / block_size.to_bytes() as i64;
 
         self.pool()
-            .transaction(move |conn| {
+            .transaction_async(|conn| async move {
                 // First, for idempotency, check if regions are already
                 // allocated to this disk.
                 //
@@ -147,14 +147,16 @@ impl DataStore {
                 // datasets.
                 let datasets_and_regions =
                     Self::get_allocated_regions_query(volume_id)
-                        .get_results::<(Dataset, Region)>(conn)?;
+                        .get_results_async::<(Dataset, Region)>(&conn)
+                        .await?;
                 if !datasets_and_regions.is_empty() {
                     return Ok(datasets_and_regions);
                 }
 
                 let mut datasets: Vec<Dataset> =
                     Self::get_allocatable_datasets_query()
-                        .get_results::<Dataset>(conn)?;
+                        .get_results_async::<Dataset>(&conn)
+                        .await?;
 
                 if datasets.len() < REGION_REDUNDANCY_THRESHOLD {
                     return Err(TxnError::CustomError(
@@ -180,7 +182,8 @@ impl DataStore {
                 let regions = diesel::insert_into(region_dsl::region)
                     .values(regions)
                     .returning(Region::as_returning())
-                    .get_results(conn)?;
+                    .get_results_async(&conn)
+                    .await?;
 
                 // Update the tallied sizes in the source datasets containing
                 // those regions.
@@ -200,7 +203,8 @@ impl DataStore {
                         dataset_dsl::size_used
                             .eq(dataset_dsl::size_used + region_size),
                     )
-                    .execute(conn)?;
+                    .execute_async(&conn)
+                    .await?;
 
                 // Return the regions with the datasets to which they were allocated.
                 Ok(source_datasets

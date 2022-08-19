@@ -79,14 +79,16 @@ impl DataStore {
 
         self.pool_authorized(opctx)
             .await?
-            .transaction(move |conn| match delete_request.execute(conn)? {
-                0 => {
-                    Err(TxnError::CustomError(TokenGrantError::RequestNotFound))
+            .transaction_async(|conn| async move {
+                match delete_request.execute_async(&conn).await? {
+                    0 => {
+                        Err(TxnError::CustomError(TokenGrantError::RequestNotFound))
+                    }
+                    1 => Ok(insert_token.get_result_async(&conn).await?),
+                    _ => Err(TxnError::CustomError(
+                        TokenGrantError::TooManyRequests,
+                    )),
                 }
-                1 => Ok(insert_token.get_result(conn)?),
-                _ => Err(TxnError::CustomError(
-                    TokenGrantError::TooManyRequests,
-                )),
             })
             .await
             .map_err(|e| match e {
