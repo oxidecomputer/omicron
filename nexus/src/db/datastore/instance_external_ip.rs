@@ -30,7 +30,6 @@ use uuid::Uuid;
 
 impl DataStore {
     /// Create an external IP address for source NAT for an instance.
-    // TODO-correctness: This should be made idempotent.
     pub async fn allocate_instance_snat_ip(
         &self,
         opctx: &OpContext,
