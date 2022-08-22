@@ -1171,6 +1171,15 @@ CREATE TABLE omicron.public.instance_external_ip (
     /* The last port in the allowed range, also inclusive. */
     last_port INT4 NOT NULL,
 
+    /*
+     * The project can only be NULL for service IPs.
+     * Additionally, the project MUST be NULL for service IPs.
+     */
+    CONSTRAINT null_project CHECK(
+        (kind != 'service' AND project_id IS NOT NULL) OR
+        (kind = 'service' AND project_id IS NULL)
+    ),
+
     /* The name must be non-NULL iff this is a floating IP. */
     CONSTRAINT null_fip_name CHECK (
         (kind != 'floating' AND name IS NULL) OR
