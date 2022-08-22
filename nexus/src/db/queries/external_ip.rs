@@ -32,7 +32,7 @@ type IpPoolRangeFromClause = FromClause<schema::ip_pool_range::table>;
 const IP_POOL_RANGE_FROM_CLAUSE: IpPoolRangeFromClause =
     IpPoolRangeFromClause::new();
 type ExternalIpFromClause = FromClause<schema::external_ip::table>;
-const INSTANCE_EXTERNAL_IP_FROM_CLAUSE: ExternalIpFromClause =
+const EXTERNAL_IP_FROM_CLAUSE: ExternalIpFromClause =
     ExternalIpFromClause::new();
 
 // The number of ports available to an instance when doing source NAT. Note
@@ -334,7 +334,7 @@ impl NextExternalIp {
         out.push_sql(") CROSS JOIN (");
         self.push_port_sequence_subquery(out.reborrow())?;
         out.push_sql(") LEFT OUTER JOIN ");
-        INSTANCE_EXTERNAL_IP_FROM_CLAUSE.walk_ast(out.reborrow())?;
+        EXTERNAL_IP_FROM_CLAUSE.walk_ast(out.reborrow())?;
 
         // The JOIN conditions depend on the IP type. For automatic SNAT IP
         // addresses, we need to consider existing records with their port
@@ -571,7 +571,7 @@ impl NextExternalIp {
         mut out: AstPass<'_, 'a, Pg>,
     ) -> QueryResult<()> {
         out.push_sql("INSERT INTO ");
-        INSTANCE_EXTERNAL_IP_FROM_CLAUSE.walk_ast(out.reborrow())?;
+        EXTERNAL_IP_FROM_CLAUSE.walk_ast(out.reborrow())?;
         out.push_sql(
             " (SELECT * FROM next_external_ip) \
             ON CONFLICT (id) \
