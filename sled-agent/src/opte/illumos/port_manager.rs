@@ -447,38 +447,44 @@ impl PortManager {
         Ok(port)
     }
 
-    pub fn port_names(&self) -> Vec<String> {
-        self.inner
-            .ports
-            .lock()
-            .unwrap()
-            .keys()
-            .map(|(_instance_id, port_name)| port_name.clone())
-            .collect::<Vec<String>>()
-    }
-
     pub fn firewall_rules_ensure(
         &self,
-        port_name: String,
         rules: &[VpcFirewallRule],
     ) -> Result<(), Error> {
         let hdl = OpteHdl::open(OpteHdl::DLD_CTL)?;
-        let rules = collect_firewall_rules(rules);
-        info!(self.inner.log, "OPTE firewall rules"; "rules" => ?&rules,);
-        hdl.set_fw_rules(&SetFwRulesReq { port_name, rules })?;
+        for ((_, port_name), port) in self.inner.ports.lock().unwrap().iter() {
+            let rules = opte_firewall_rules(port, rules);
+            let port_name = port_name.clone();
+            info!(
+                self.inner.log,
+                "Setting OPTE firewall rules";
+                "port" => ?&port_name,
+                "rules" => ?&rules,
+            );
+            hdl.set_fw_rules(&SetFwRulesReq { port_name, rules })?;
+        }
         Ok(())
     }
 }
 
-/// Translate from a slice of VPC firewall rules to a vector of OPTE rules.
-/// OPTE rules can only encode a single host address and protocol, so we must
-/// unroll rules with multiple hosts/protocols.
-fn collect_firewall_rules(rules: &[VpcFirewallRule]) -> Vec<FirewallRule> {
+/// Translate from a slice of VPC firewall rules to a vector of OPTE rules
+/// that match the given port's MAC address. OPTE rules can only encode a
+/// single host address and protocol, so we must unroll rules with multiple
+/// hosts/protocols.
+fn opte_firewall_rules(
+    port: &Port,
+    rules: &[VpcFirewallRule],
+) -> Vec<FirewallRule> {
     rules
         .iter()
         .filter(|rule| match rule.status {
             VpcFirewallRuleStatus::Disabled => false,
             VpcFirewallRuleStatus::Enabled => true,
+        })
+        .filter(|rule| {
+            // TODO: no targets means apply everywhere, right?
+            rule.targets.is_empty()
+                || rule.targets.iter().any(|nic| nic.mac.0 == *port.mac())
         })
         .map(|rule| {
             let priority = rule.priority.0;

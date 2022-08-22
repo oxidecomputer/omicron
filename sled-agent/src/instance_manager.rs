@@ -217,15 +217,14 @@ impl InstanceManager {
         &self,
         rules: &[VpcFirewallRule],
     ) -> Result<(), Error> {
-        // TODO-correctness: map from VPC to VNICs on instances. Right now
-        // we just update each port on every instance, which is totally wrong.
-        for port_name in self.inner.port_manager.port_names() {
-            info!(
-                &self.inner.log,
-                "Updating firewall rules for OPTE port {}", &port_name
-            );
-            self.inner.port_manager.firewall_rules_ensure(port_name, rules)?;
-        }
+        info!(
+            &self.inner.log,
+            "Ensuring VPC firewall rules";
+            "rules" => ?&rules,
+        );
+        self.inner
+            .port_manager
+            .firewall_rules_ensure(rules)?;
         Ok(())
     }
 }

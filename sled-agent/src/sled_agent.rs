@@ -437,8 +437,6 @@ impl SledAgent {
         _vpc_id: Uuid,
         rules: &[VpcFirewallRule],
     ) -> Result<(), Error> {
-        // TODO-correctness: map from VPC to VNICs on instances. Right now
-        // we just update each port on every instance, which is totally wrong.
         self.instances.firewall_rules_ensure(rules).await.map_err(Error::from)
     }
 }
