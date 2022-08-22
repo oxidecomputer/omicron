@@ -183,10 +183,12 @@ async fn make_project(
         Uuid::new_v4(),
         LookupType::ByName(instance_name.clone()),
     );
+
+    let disk_name = format!("{}-disk1", project_name);
     builder.new_resource(authz::Disk::new(
         project.clone(),
         Uuid::new_v4(),
-        LookupType::ByName(format!("{}-disk1", project_name)),
+        LookupType::ByName(disk_name.clone()),
     ));
     builder.new_resource(instance.clone());
     builder.new_resource(authz::NetworkInterface::new(
@@ -200,6 +202,12 @@ async fn make_project(
         vpc1,
         Uuid::new_v4(),
         LookupType::ByName(format!("{}-subnet1", vpc1_name)),
+    ));
+
+    builder.new_resource(authz::Snapshot::new(
+        project.clone(),
+        Uuid::new_v4(),
+        LookupType::ByName(format!("{}-snapshot1", disk_name)),
     ));
 }
 
@@ -252,7 +260,6 @@ pub fn exempted_authz_classes() -> BTreeSet<String> {
         authz::UpdateAvailableArtifact::get_polar_class(),
         authz::UserBuiltin::get_polar_class(),
         authz::GlobalImage::get_polar_class(),
-        authz::Snapshot::get_polar_class(),
     ]
     .into_iter()
     .map(|c| c.name.clone())
