@@ -23,6 +23,7 @@ mod roles_builtin;
 mod router_routes;
 mod saml;
 mod silos;
+mod snapshots;
 mod ssh_keys;
 mod subnet_allocation;
 mod timeseries;

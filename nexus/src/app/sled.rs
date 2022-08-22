@@ -126,6 +126,14 @@ impl super::Nexus {
         )))
     }
 
+    pub async fn random_sled_id(&self) -> Result<Option<Uuid>, Error> {
+        Ok(self
+            .db_datastore
+            .random_sled(&self.opctx_alloc)
+            .await?
+            .map(|sled| sled.id()))
+    }
+
     // Zpools (contained within sleds)
 
     /// Upserts a Zpool into the database, updating it if it already exists.

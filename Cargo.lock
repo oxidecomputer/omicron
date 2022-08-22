@@ -773,7 +773,7 @@ dependencies = [
 [[package]]
 name = "crucible-agent-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=1d67a53042f19ff7ca30dd20a04da94b7715ed7c#1d67a53042f19ff7ca30dd20a04da94b7715ed7c"
+source = "git+https://github.com/oxidecomputer/crucible?rev=bacffd142fc38a01fe255407b0c8d5d0aacfe778#bacffd142fc38a01fe255407b0c8d5d0aacfe778"
 dependencies = [
  "anyhow",
  "chrono",
@@ -788,7 +788,7 @@ dependencies = [
 [[package]]
 name = "crucible-client-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=1d67a53042f19ff7ca30dd20a04da94b7715ed7c#1d67a53042f19ff7ca30dd20a04da94b7715ed7c"
+source = "git+https://github.com/oxidecomputer/crucible?rev=bacffd142fc38a01fe255407b0c8d5d0aacfe778#bacffd142fc38a01fe255407b0c8d5d0aacfe778"
 dependencies = [
  "base64",
  "schemars",
@@ -2161,15 +2161,14 @@ dependencies = [
 
 [[package]]
 name = "indicatif"
-version = "0.16.2"
+version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d207dc617c7a380ab07ff572a6e52fa202a2a8f355860ac9c38e23f8196be1b"
+checksum = "fcc42b206e70d86ec03285b123e65a5458c92027d1fb2ae3555878b8113b3ddf"
 dependencies = [
  "console",
- "lazy_static",
  "number_prefix",
  "rayon",
- "regex",
+ "unicode-width",
 ]
 
 [[package]]
@@ -3962,7 +3961,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=c59b1ac246b19130bd489cdce217e40a4e51c094#c59b1ac246b19130bd489cdce217e40a4e51c094"
+source = "git+https://github.com/oxidecomputer/propolis?rev=c0776be03bf0928651996eb00ad6f3665e99ebe7#c0776be03bf0928651996eb00ad6f3665e99ebe7"
 dependencies = [
  "crucible-client-types",
  "propolis_types",
@@ -3979,7 +3978,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=c59b1ac246b19130bd489cdce217e40a4e51c094#c59b1ac246b19130bd489cdce217e40a4e51c094"
+source = "git+https://github.com/oxidecomputer/propolis?rev=c0776be03bf0928651996eb00ad6f3665e99ebe7#c0776be03bf0928651996eb00ad6f3665e99ebe7"
 dependencies = [
  "serde",
 ]
@@ -4613,9 +4612,9 @@ dependencies = [
 
 [[package]]
 name = "serde"
-version = "1.0.143"
+version = "1.0.144"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "53e8e5d5b70924f74ff5c6d64d9a5acd91422117c60f48c4e07855238a254553"
+checksum = "0f747710de3dcd43b88c9168773254e809d8ddbdf9653b84e2554ab219f17860"
 dependencies = [
  "serde_derive",
 ]
@@ -4650,9 +4649,9 @@ dependencies = [
 
 [[package]]
 name = "serde_derive"
-version = "1.0.143"
+version = "1.0.144"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3d8e8de557aee63c26b85b947f5e59b690d0454c753f3adeb5cd7835ab88391"
+checksum = "94ed3a816fb1d101812f83e789f888322c34e291f894f19590dc310963e87a00"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4672,9 +4671,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.83"
+version = "1.0.85"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38dd04e3c8279e75b31ef29dbdceebfe5ad89f4d0937213c53f7d49d01b3d5a7"
+checksum = "e55a28e3aaef9d5ce0506d0a14dbba8054ddc7e499ef522dd8b26859ec9d4a44"
 dependencies = [
  "itoa 1.0.2",
  "ryu",

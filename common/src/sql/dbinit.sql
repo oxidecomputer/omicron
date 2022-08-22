@@ -94,6 +94,11 @@ CREATE INDEX ON omicron.public.sled (
     rack_id
 ) WHERE time_deleted IS NULL;
 
+CREATE INDEX ON omicron.public.sled (
+    id
+) WHERE
+    time_deleted IS NULL;
+
 /*
  * Services
  */
@@ -672,6 +677,13 @@ CREATE UNIQUE INDEX on omicron.public.global_image (
 ) WHERE
     time_deleted is NULL;
 
+CREATE TYPE omicron.public.snapshot_state AS ENUM (
+  'creating',
+  'ready',
+  'faulted',
+  'destroyed'
+);
+
 CREATE TABLE omicron.public.snapshot (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
@@ -690,6 +702,10 @@ CREATE TABLE omicron.public.snapshot (
 
     /* Every Snapshot consists of a root volume */
     volume_id UUID NOT NULL,
+
+    gen INT NOT NULL,
+    state omicron.public.snapshot_state NOT NULL,
+    block_size omicron.public.block_size NOT NULL,
 
     /* Disk configuration (from the time the snapshot was taken) */
     size_bytes INT NOT NULL
