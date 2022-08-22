@@ -54,6 +54,8 @@ pub type ListResultVec<T> = Result<Vec<T>, Error>;
 pub type LookupResult<T> = Result<T, Error>;
 /// Result of an update operation for the specified type
 pub type UpdateResult<T> = Result<T, Error>;
+/// Result of an optional lookup operation for the specified type
+pub type OptionalLookupResult<T> = Result<Option<T>, Error>;
 
 /// A stream of Results, each potentially representing an object in the API
 pub type ObjectStream<T> = BoxStream<'static, Result<T, Error>>;
