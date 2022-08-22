@@ -84,6 +84,7 @@ impl Coverage {
         }
 
         if !uncovered.is_empty() {
+            // See exempted_authz_classes().
             panic!(
                 "these classes were not covered by the IAM role \
                     policy test: {}",

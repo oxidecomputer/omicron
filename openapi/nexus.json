@@ -10724,6 +10724,9 @@
           "size": {
             "$ref": "#/components/schemas/ByteCount"
           },
+          "state": {
+            "$ref": "#/components/schemas/SnapshotState"
+          },
           "time_created": {
             "description": "timestamp when this resource was created",
             "type": "string",
@@ -10742,6 +10745,7 @@
           "name",
           "project_id",
           "size",
+          "state",
           "time_created",
           "time_modified"
         ]
@@ -10790,6 +10794,15 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "SnapshotState": {
+        "type": "string",
+        "enum": [
+          "creating",
+          "ready",
+          "faulted",
+          "destroyed"
         ]
       },
       "SpoofLoginBody": {

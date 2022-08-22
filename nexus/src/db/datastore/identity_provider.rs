@@ -26,16 +26,14 @@ impl DataStore {
     pub async fn identity_provider_list(
         &self,
         opctx: &OpContext,
-        authz_silo: &authz::Silo,
+        authz_idp_list: &authz::SiloIdentityProviderList,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<IdentityProvider> {
-        opctx
-            .authorize(authz::Action::ListIdentityProviders, authz_silo)
-            .await?;
+        opctx.authorize(authz::Action::ListChildren, authz_idp_list).await?;
 
         use db::schema::identity_provider::dsl;
         paginated(dsl::identity_provider, dsl::name, pagparams)
-            .filter(dsl::silo_id.eq(authz_silo.id()))
+            .filter(dsl::silo_id.eq(authz_idp_list.silo().id()))
             .filter(dsl::time_deleted.is_null())
             .select(IdentityProvider::as_select())
             .load_async::<IdentityProvider>(self.pool_authorized(opctx).await?)
@@ -46,10 +44,11 @@ impl DataStore {
     pub async fn saml_identity_provider_create(
         &self,
         opctx: &OpContext,
-        authz_silo: &authz::Silo,
+        authz_idp_list: &authz::SiloIdentityProviderList,
         provider: db::model::SamlIdentityProvider,
     ) -> CreateResult<db::model::SamlIdentityProvider> {
-        opctx.authorize(authz::Action::CreateChild, authz_silo).await?;
+        opctx.authorize(authz::Action::CreateChild, authz_idp_list).await?;
+        assert_eq!(provider.silo_id, authz_idp_list.silo().id());
 
         let name = provider.identity().name.to_string();
         self.pool_authorized(opctx)

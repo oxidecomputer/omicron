@@ -241,3 +241,20 @@ impl_dyn_authorized_resource_for_global!(authz::ConsoleSessionList);
 impl_dyn_authorized_resource_for_global!(authz::GlobalImageList);
 impl_dyn_authorized_resource_for_global!(authz::IpPoolList);
 impl_dyn_authorized_resource_for_global!(authz::DeviceAuthRequestList);
+
+impl DynAuthorizedResource for authz::SiloIdentityProviderList {
+    fn do_authorize<'a, 'b>(
+        &'a self,
+        opctx: &'b OpContext,
+        action: authz::Action,
+    ) -> BoxFuture<'a, Result<(), Error>>
+    where
+        'b: 'a,
+    {
+        opctx.authorize(action, self).boxed()
+    }
+
+    fn resource_name(&self) -> String {
+        format!("{}: identity provider list", self.silo().resource_name())
+    }
+}

@@ -21,6 +21,7 @@ use crate::params::{
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::StorageManager;
+use dropshot::HttpError;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use omicron_common::api::{
     internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
@@ -30,6 +31,8 @@ use slog::Logger;
 use std::net::SocketAddrV6;
 use std::process::Command;
 use uuid::Uuid;
+
+use propolis_client::api::VolumeConstructionRequest;
 
 #[cfg(not(test))]
 use crate::illumos::{dladm::Dladm, zfs::Zfs, zone::Zones};
@@ -97,6 +100,46 @@ impl From<Error> for omicron_common::api::external::Error {
     fn from(err: Error) -> Self {
         omicron_common::api::external::Error::InternalError {
             internal_message: err.to_string(),
+        }
+    }
+}
+
+// Provide a more specific HTTP error for some sled agent errors.
+impl From<Error> for dropshot::HttpError {
+    fn from(err: Error) -> Self {
+        match err {
+            crate::sled_agent::Error::Instance(instance_manager_error) => {
+                match instance_manager_error {
+                    crate::instance_manager::Error::Instance(
+                        instance_error,
+                    ) => match instance_error {
+                        crate::instance::Error::Propolis(propolis_error) => {
+                            match propolis_error {
+                                propolis_client::Error::Reqwest(
+                                    reqwest_error,
+                                ) => HttpError::for_internal_error(
+                                    reqwest_error.to_string(),
+                                ),
+
+                                propolis_client::Error::Status(status_code) => {
+                                    HttpError::for_status(
+                                        None,
+                                        status_code.try_into().unwrap_or_else(
+                                            |_| 500.try_into().unwrap(),
+                                        ),
+                                    )
+                                }
+                            }
+                        }
+
+                        e => HttpError::for_internal_error(e.to_string()),
+                    },
+
+                    e => HttpError::for_internal_error(e.to_string()),
+                }
+            }
+
+            e => HttpError::for_internal_error(e.to_string()),
         }
     }
 }
@@ -356,6 +399,37 @@ impl SledAgent {
             )
             .await
             .map_err(Error::from)
+    }
+
+    /// Issue a snapshot request for a Crucible disk attached to an instance
+    pub async fn instance_issue_disk_snapshot_request(
+        &self,
+        instance_id: Uuid,
+        disk_id: Uuid,
+        snapshot_id: Uuid,
+    ) -> Result<(), Error> {
+        self.instances
+            .instance_issue_disk_snapshot_request(
+                instance_id,
+                disk_id,
+                snapshot_id,
+            )
+            .await
+            .map_err(Error::from)
+    }
+
+    /// Issue a snapshot request for a Crucible disk not attached to an
+    /// instance.
+    pub async fn issue_disk_snapshot_request(
+        &self,
+        _disk_id: Uuid,
+        _volume_construction_request: VolumeConstructionRequest,
+        _snapshot_id: Uuid,
+    ) -> Result<(), Error> {
+        // For a disk not attached to an instance, implementation requires
+        // constructing a volume and performing a snapshot through some other
+        // means. Currently unimplemented.
+        todo!();
     }
 }
 

@@ -117,7 +117,6 @@ resource Silo {
 	    "modify",
 	    "read",
 	    "create_child",
-	    "list_identity_providers",
 	];
 	roles = [ "admin", "collaborator", "viewer" ];
 
@@ -140,7 +139,6 @@ resource Silo {
 	# into the Silo as well.)
 	relations = { parent_fleet: Fleet };
 	"read" if "viewer" on "parent_fleet";
-	"list_identity_providers" if "viewer" on "parent_fleet";
 	"modify" if "collaborator" on "parent_fleet";
 
 	# external authenticator has to create silo users
@@ -164,13 +162,12 @@ has_relation(fleet: Fleet, "parent_fleet", silo: Silo)
 # But granting this permission is the simplest way to keep this endpoint's
 # behavior consistent with the rest of the API.
 #
+# This rule is also used to determine if a user can list the identity providers
+# in the Silo (which they should be able to), since that's predicated on being
+# able to read the Silo.
+#
 # It's unclear what else would break if users couldn't see their own Silo.
 has_permission(actor: AuthenticatedActor, "read", silo: Silo)
-	if silo in actor.silo;
-
-# Any authenticated user should be allowed to list the identity providers of
-# their silo.
-has_permission(actor: AuthenticatedActor, "list_identity_providers", silo: Silo)
 	if silo in actor.silo;
 
 resource Organization {
@@ -391,6 +388,30 @@ resource DeviceAuthRequestList {
 has_relation(fleet: Fleet, "parent_fleet", collection: DeviceAuthRequestList)
 	if collection.fleet = fleet;
 
+# Describes the policy for creating and managing Silo identity providers
+resource SiloIdentityProviderList {
+	permissions = [ "list_children", "create_child" ];
+
+	relations = { parent_silo: Silo, parent_fleet: Fleet };
+
+	# Everyone who can read the Silo (which includes all the users in the
+	# Silo) can see the identity providers in it.
+	"list_children" if "read" on "parent_silo";
+
+	# Fleet and Silo administrators can manage the Silo's identity provider
+	# configuration.  This is the only area of Silo configuration that Fleet
+	# Administrators have permissions on.  This is also the only case (so
+	# far) where we need to look two levels up the hierarchy to see if
+	# somebody has the right permission.  For most other things, permissions
+	# cascade down the hierarchy so we only need to look at the parent.
+	"create_child" if "admin" on "parent_silo";
+	"create_child" if "admin" on "parent_fleet";
+}
+has_relation(silo: Silo, "parent_silo", collection: SiloIdentityProviderList)
+	if collection.silo = silo;
+has_relation(fleet: Fleet, "parent_fleet", collection: SiloIdentityProviderList)
+	if collection.silo.fleet = fleet;
+
 # These rules grants the external authenticator role the permissions it needs to
 # read silo users and modify their sessions.  This is necessary for login to
 # work.
@@ -423,14 +444,9 @@ has_permission(actor: AuthenticatedActor, "read", device_token: DeviceAccessToke
 
 has_permission(actor: AuthenticatedActor, "read", identity_provider: IdentityProvider)
 	if has_role(actor, "external-authenticator", identity_provider.silo.fleet);
-has_permission(actor: AuthenticatedActor, "list_identity_providers", identity_provider: IdentityProvider)
-	if has_role(actor, "external-authenticator", identity_provider.silo.fleet);
 
 has_permission(actor: AuthenticatedActor, "read", saml_identity_provider: SamlIdentityProvider)
 	if has_role(actor, "external-authenticator", saml_identity_provider.silo.fleet);
-has_permission(actor: AuthenticatedActor, "list_identity_providers", saml_identity_provider: SamlIdentityProvider)
-	if has_role(actor, "external-authenticator", saml_identity_provider.silo.fleet);
-
 
 # Describes the policy for who can access the internal database.
 resource Database {

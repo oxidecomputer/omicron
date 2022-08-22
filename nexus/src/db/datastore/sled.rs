@@ -19,6 +19,7 @@ use diesel::prelude::*;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::ListResultVec;
+use omicron_common::api::external::OptionalLookupResult;
 use omicron_common::api::external::ResourceType;
 use uuid::Uuid;
 
@@ -63,5 +64,26 @@ impl DataStore {
             .load_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    pub async fn random_sled(
+        &self,
+        opctx: &OpContext,
+    ) -> OptionalLookupResult<Sled> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        use db::schema::sled::dsl;
+
+        sql_function!(fn random() -> diesel::sql_types::Float);
+        Ok(dsl::sled
+            .filter(dsl::time_deleted.is_null())
+            .order(random())
+            .limit(1)
+            .select(Sled::as_select())
+            .load_async::<Sled>(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            })?
+            .pop())
     }
 }
