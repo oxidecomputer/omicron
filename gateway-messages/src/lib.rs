@@ -9,14 +9,27 @@ mod variable_packet;
 
 use bitflags::bitflags;
 use core::fmt;
+use core::mem;
 use core::str;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_repr::Deserialize_repr;
 use serde_repr::Serialize_repr;
+use static_assertions::const_assert;
 
 pub use hubpack::error::Error as HubpackError;
 pub use hubpack::{deserialize, serialize, SerializedSize};
+
+/// Maximum size in bytes for a serialized message.
+pub const MAX_SERIALIZED_SIZE: usize = 1024;
+
+// Serialized requests can be followed by binary data (serial console, update
+// chunk); we want the majority of our packet to be available for that data.
+// Statically check that our serialized `Request` hasn't gotten too large. The
+// specific value here is somewhat arbitrary; if this check starts failing, it's
+// probably fine to reduce it some. The check is here to force us to think about
+// it.
+const_assert!(MAX_SERIALIZED_SIZE - Request::MAX_SIZE > 700);
 
 pub mod version {
     pub const V1: u32 = 1;
@@ -204,79 +217,10 @@ pub struct UpdateStart {
     // TODO should we inline the first chunk?
 }
 
-#[derive(Debug, Clone, PartialEq, SerializedSize)]
+#[derive(Debug, Clone, PartialEq, SerializedSize, Serialize, Deserialize)]
 pub struct UpdateChunk {
     /// Offset in bytes of this chunk from the beginning of the update data.
     pub offset: u32,
-    /// Length in bytes of this chunk.
-    pub chunk_length: u16,
-    /// Data of this chunk; only the first `chunk_length` bytes should be used.
-    pub data: [u8; Self::MAX_CHUNK_SIZE],
-}
-
-mod update_chunk_serde {
-    use super::variable_packet::VariablePacket;
-    use super::*;
-
-    #[derive(Debug, Deserialize, Serialize)]
-    pub(crate) struct Header {
-        offset: u32,
-        chunk_length: u16,
-    }
-
-    impl VariablePacket for UpdateChunk {
-        type Header = Header;
-        type Element = u8;
-
-        const MAX_ELEMENTS: usize = Self::MAX_CHUNK_SIZE;
-        const DESERIALIZE_NAME: &'static str = "update chunk";
-
-        fn header(&self) -> Self::Header {
-            Header { offset: self.offset, chunk_length: self.chunk_length }
-        }
-
-        fn num_elements(&self) -> u16 {
-            self.chunk_length
-        }
-
-        fn elements(&self) -> &[Self::Element] {
-            &self.data
-        }
-
-        fn elements_mut(&mut self) -> &mut [Self::Element] {
-            &mut self.data
-        }
-
-        fn from_header(header: Self::Header) -> Self {
-            Self {
-                offset: header.offset,
-                chunk_length: header.chunk_length,
-                data: [0; Self::MAX_CHUNK_SIZE],
-            }
-        }
-    }
-
-    impl Serialize for UpdateChunk {
-        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: serde::Serializer,
-        {
-            VariablePacket::serialize(self, serializer)
-        }
-    }
-
-    impl<'de> Deserialize<'de> for UpdateChunk {
-        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: serde::Deserializer<'de>,
-        {
-            VariablePacket::deserialize(deserializer)
-        }
-    }
-}
-
-impl UpdateChunk {
-    pub const MAX_CHUNK_SIZE: usize = 512;
 }
 
 #[derive(
@@ -615,6 +559,32 @@ mod serial_console_serde {
             VariablePacket::deserialize(deserializer)
         }
     }
+}
+
+/// Returns `(serialized_size, data_bytes_written)` where `serialized_size` is
+/// the message size written to `out` and `data_bytes_written` is the number of
+/// bytes included in `out` from `data`.
+pub fn serialize_with_trailing_data(
+    out: &mut [u8; MAX_SERIALIZED_SIZE],
+    request: &Request,
+    data: &[u8],
+) -> (usize, usize) {
+    // We know statically that `out` is large enough to hold a serialized
+    // `Request` and that serializing a `Request` can't fail for any other
+    // reason, so we can upwrap here.
+    let n = hubpack::serialize(out, request).unwrap();
+    let out = &mut out[n..];
+
+    // How much data can we fit in what's left, leaving room for a 2-byte
+    // prefix? We know `out.len() > 2` thanks to the static assertion comparing
+    // `Request::MAX_SIZE` and `MAX_SERIALIZED_SIZE` at the root of our crate.
+    let to_write = usize::min(data.len(), out.len() - mem::size_of::<u16>());
+
+    out[..mem::size_of::<u16>()]
+        .copy_from_slice(&(to_write as u16).to_le_bytes());
+    out[mem::size_of::<u16>()..][..to_write].copy_from_slice(&data[..to_write]);
+
+    (n + mem::size_of::<u16>() + to_write, to_write)
 }
 
 #[cfg(test)]

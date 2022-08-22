@@ -207,7 +207,7 @@ impl Communicator {
     pub async fn update(
         &self,
         sp: SpIdentifier,
-        image: &[u8],
+        image: Vec<u8>,
     ) -> Result<(), Error> {
         let port = self.id_to_port(sp)?;
         let sp = self.switch.sp(port).ok_or(Error::SpAddressUnknown(sp))?;

@@ -36,6 +36,9 @@ use slog::trace;
 use slog::warn;
 use slog::Logger;
 use std::convert::TryInto;
+use std::io::Cursor;
+use std::io::Seek;
+use std::io::SeekFrom;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
@@ -163,7 +166,12 @@ impl SingleSp {
     ///
     /// This is a bulk operation that will call [`Self::update_start()`]
     /// followed by [`Self::update_chunk()`] the necessary number of times.
-    pub async fn update(&self, image: &[u8]) -> Result<(), UpdateError> {
+    ///
+    /// # Panics
+    ///
+    /// Panics if `image.is_empty()`.
+    pub async fn update(&self, image: Vec<u8>) -> Result<(), UpdateError> {
+        assert!(!image.is_empty());
         let total_size = image
             .len()
             .try_into()
@@ -172,16 +180,19 @@ impl SingleSp {
         info!(self.log, "starting SP update"; "total_size" => total_size);
         self.update_start(total_size).await.map_err(UpdateError::Start)?;
 
-        for (i, data) in image.chunks(UpdateChunk::MAX_CHUNK_SIZE).enumerate() {
-            let offset = (i * UpdateChunk::MAX_CHUNK_SIZE) as u32;
-            debug!(
-                self.log, "sending update chunk";
-                "offset" => offset,
-                "size" => data.len(),
-            );
-            self.update_chunk(offset, data)
+        let mut image = Cursor::new(image);
+        let mut offset = 0;
+        while CursorUnstable::is_empty(&image) {
+            let prior_pos = image.position();
+            debug!(self.log, "sending update chunk"; "offset" => offset);
+
+            image = self
+                .update_chunk(offset, image)
                 .await
                 .map_err(|err| UpdateError::Chunk { offset, err })?;
+
+            // Update our offset according to how far our cursor advanced.
+            offset += (image.position() - prior_pos) as u32;
         }
         info!(self.log, "update complete");
 
@@ -192,7 +203,7 @@ impl SingleSp {
     ///
     /// This should be followed by a series of `update_chunk()` calls totalling
     /// `total_size` bytes of data.
-    pub async fn update_start(&self, total_size: u32) -> Result<()> {
+    async fn update_start(&self, total_size: u32) -> Result<()> {
         self.rpc(RequestKind::UpdateStart(UpdateStart { total_size }))
             .await
             .and_then(|(_peer, response)| {
@@ -210,20 +221,24 @@ impl SingleSp {
     /// update starts).
     ///
     /// Panics if `chunk.len() > UpdateChunk::MAX_CHUNK_SIZE`.
-    pub async fn update_chunk(&self, offset: u32, chunk: &[u8]) -> Result<()> {
-        assert!(chunk.len() <= UpdateChunk::MAX_CHUNK_SIZE);
-        let mut update_chunk = UpdateChunk {
-            offset,
-            chunk_length: chunk.len() as u16,
-            data: [0; UpdateChunk::MAX_CHUNK_SIZE],
-        };
-        update_chunk.data[..chunk.len()].copy_from_slice(chunk);
+    async fn update_chunk(
+        &self,
+        offset: u32,
+        data: Cursor<Vec<u8>>,
+    ) -> Result<Cursor<Vec<u8>>> {
+        let update_chunk = UpdateChunk { offset };
+        let (result, data) = self
+            .rpc_with_trailing_data(
+                RequestKind::UpdateChunk(update_chunk),
+                data,
+            )
+            .await;
 
-        self.rpc(RequestKind::UpdateChunk(update_chunk)).await.and_then(
-            |(_peer, response)| {
-                response.expect_update_chunk_ack().map_err(Into::into)
-            },
-        )
+        result.and_then(|(_peer, response)| {
+            response.expect_update_chunk_ack().map_err(Into::into)
+        })?;
+
+        Ok(data)
     }
 
     /// Instruct the SP that a reset trigger will be coming.
@@ -298,20 +313,38 @@ impl SingleSp {
         &self,
         kind: RequestKind,
     ) -> Result<(SocketAddrV6, ResponseKind)> {
-        rpc(&self.cmds_tx, kind).await
+        rpc(&self.cmds_tx, kind, None).await.0
+    }
+
+    async fn rpc_with_trailing_data(
+        &self,
+        kind: RequestKind,
+        trailing_data: Cursor<Vec<u8>>,
+    ) -> (Result<(SocketAddrV6, ResponseKind)>, Cursor<Vec<u8>>) {
+        let (result, trailing_data) =
+            rpc(&self.cmds_tx, kind, Some(trailing_data)).await;
+
+        // We sent `Some(_)` trailing data, so we get `Some(_)` back; unwrap it
+        // so our caller can remain ignorant of this detail.
+        (result, trailing_data.unwrap())
     }
 }
 
 async fn rpc(
     inner_tx: &mpsc::Sender<InnerCommand>,
     kind: RequestKind,
-) -> Result<(SocketAddrV6, ResponseKind)> {
+    trailing_data: Option<Cursor<Vec<u8>>>,
+) -> (Result<(SocketAddrV6, ResponseKind)>, Option<Cursor<Vec<u8>>>) {
     let (resp_tx, resp_rx) = oneshot::channel();
 
     // `Inner::run()` doesn't exit as long as `inner_tx` exists, so unwrapping
     // here only panics if it itself panicked.
     inner_tx
-        .send(InnerCommand::Rpc(RpcRequest { kind, response: resp_tx }))
+        .send(InnerCommand::Rpc(RpcRequest {
+            kind,
+            trailing_data,
+            response: resp_tx,
+        }))
         .await
         .unwrap();
 
@@ -348,8 +381,9 @@ pub struct AttachedSerialConsoleSend {
 impl AttachedSerialConsoleSend {
     /// Write `data` to the serial console of the SP.
     pub async fn write(&self, data: SerialConsole) -> Result<()> {
-        rpc(&self.inner_tx, RequestKind::SerialConsoleWrite(data))
+        rpc(&self.inner_tx, RequestKind::SerialConsoleWrite(data), None)
             .await
+            .0
             .and_then(|(_peer, response)| {
                 response.expect_serial_console_write_ack().map_err(Into::into)
             })
@@ -382,7 +416,11 @@ impl AttachedSerialConsoleRecv {
 #[derive(Debug)]
 struct RpcRequest {
     kind: RequestKind,
-    response: oneshot::Sender<Result<(SocketAddrV6, ResponseKind)>>,
+    trailing_data: Option<Cursor<Vec<u8>>>,
+    response: oneshot::Sender<(
+        Result<(SocketAddrV6, ResponseKind)>,
+        Option<Cursor<Vec<u8>>>,
+    )>,
 }
 
 #[derive(Debug)]
@@ -527,7 +565,12 @@ impl Inner {
         incoming_buf: &mut [u8; SpMessage::MAX_SIZE],
     ) -> Result<SocketAddrV6> {
         let (addr, response) = self
-            .rpc_call(self.discovery_addr, RequestKind::Discover, incoming_buf)
+            .rpc_call(
+                self.discovery_addr,
+                RequestKind::Discover,
+                None,
+                incoming_buf,
+            )
             .await?;
 
         let discovery = response.expect_discover()?;
@@ -558,11 +601,17 @@ impl Inner {
         const SERIAL_CONSOLE_CHANNEL_DEPTH: usize = 32;
 
         match command {
-            InnerCommand::Rpc(rpc) => {
-                let result =
-                    self.rpc_call(sp_addr, rpc.kind, incoming_buf).await;
+            InnerCommand::Rpc(mut rpc) => {
+                let result = self
+                    .rpc_call(
+                        sp_addr,
+                        rpc.kind,
+                        rpc.trailing_data.as_mut(),
+                        incoming_buf,
+                    )
+                    .await;
 
-                if rpc.response.send(result).is_err() {
+                if rpc.response.send((result, rpc.trailing_data)).is_err() {
                     warn!(
                         self.log,
                         "RPC requester disappeared while waiting for response"
@@ -643,6 +692,7 @@ impl Inner {
         &mut self,
         addr: SocketAddrV6,
         kind: RequestKind,
+        trailing_data: Option<&mut Cursor<Vec<u8>>>,
         incoming_buf: &mut [u8; SpMessage::MAX_SIZE],
     ) -> Result<(SocketAddrV6, ResponseKind)> {
         // Build and serialize our request once.
@@ -650,12 +700,28 @@ impl Inner {
         let request =
             Request { version: version::V1, request_id: self.request_id, kind };
 
-        // We know statically that `outgoing_buf` is large enough to hold any
-        // `Request`, which in practice is the only possible serialization
-        // error. Therefore, we can `.unwrap()`.
-        let mut outgoing_buf = [0; Request::MAX_SIZE];
-        let n = gateway_messages::serialize(&mut outgoing_buf[..], &request)
-            .unwrap();
+        let mut outgoing_buf = [0; gateway_messages::MAX_SERIALIZED_SIZE];
+        let n = match trailing_data {
+            Some(data) => {
+                let (n, written) =
+                    gateway_messages::serialize_with_trailing_data(
+                        &mut outgoing_buf,
+                        &request,
+                        CursorUnstable::remaining_slice(data),
+                    );
+                // `data` is an in-memory cursor; seeking can only fail if we
+                // provide a bogus offset, so it's safe to unwrap here.
+                data.seek(SeekFrom::Current(written as i64)).unwrap();
+                n
+            }
+            None => {
+                // We know statically that `outgoing_buf` is large enough to
+                // hold any `Request`, which in practice is the only possible
+                // serialization error. Therefore, we can `.unwrap()`.
+                gateway_messages::serialize(&mut outgoing_buf[..], &request)
+                    .unwrap()
+            }
+        };
         let outgoing_buf = &outgoing_buf[..n];
 
         for attempt in 1..=self.max_attempts {
@@ -833,6 +899,24 @@ fn sp_busy_policy() -> backoff::ExponentialBackoff {
         max_interval: MAX_INTERVAL,
         max_elapsed_time: None,
         ..Default::default()
+    }
+}
+
+// Helper trait to provide methods on `io::Cursor` that are currently unstable.
+trait CursorUnstable {
+    fn is_empty(&self) -> bool;
+    fn remaining_slice(&self) -> &[u8];
+}
+
+impl CursorUnstable for Cursor<Vec<u8>> {
+    fn is_empty(&self) -> bool {
+        self.position() as usize >= self.get_ref().len()
+    }
+
+    fn remaining_slice(&self) -> &[u8] {
+        let data = self.get_ref();
+        let pos = usize::min(self.position() as usize, data.len());
+        &data[pos..]
     }
 }
 
