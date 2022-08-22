@@ -1172,7 +1172,7 @@ checksum = "1435fa1053d8b2fbbe9be7e97eca7f33d37b28409959813daefc1446a14247f1"
 [[package]]
 name = "dropshot"
 version = "0.7.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#8baf06e3fcdae54abf59910460de6b89008b6771"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#1f98f791bf4a9bfb5b15549e22f927075bbfa07c"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -1195,6 +1195,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_urlencoded",
+ "sha1",
  "slog",
  "slog-async",
  "slog-bunyan",
@@ -1211,7 +1212,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.7.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#8baf06e3fcdae54abf59910460de6b89008b6771"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#1f98f791bf4a9bfb5b15549e22f927075bbfa07c"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4794,6 +4795,17 @@ name = "sha-1"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "028f48d513f9678cda28f6e4064755b3fbb2af6acd672f2c209b62323f7aea0f"
+dependencies = [
+ "cfg-if 1.0.0",
+ "cpufeatures",
+ "digest 0.10.3",
+]
+
+[[package]]
+name = "sha1"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c77f4e7f65455545c2153c1253d25056825e77ee2533f0e41deb65a93a34852f"
 dependencies = [
  "cfg-if 1.0.0",
  "cpufeatures",
