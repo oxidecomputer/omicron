@@ -296,7 +296,15 @@ impl NextExternalIp {
         out.push_sql(", ");
 
         // Project ID
-        out.push_bind_param::<sql_types::Nullable<sql_types::Uuid>, Option<Uuid>>(self.ip.project_id())?;
+        match self.ip.source() {
+            IpSource::Instance { project_id, .. } => {
+                out.push_bind_param::<sql_types::Uuid, Uuid>(project_id)?;
+            }
+            IpSource::Service { .. } => {
+                out.push_bind_param::<sql_types::Nullable<sql_types::Uuid>, Option<Uuid>>(&None)?;
+            }
+        };
+
         out.push_sql(" AS ");
         out.push_identifier(dsl::project_id::NAME)?;
         out.push_sql(", ");
@@ -443,19 +451,25 @@ impl NextExternalIp {
         IP_POOL_RANGE_FROM_CLAUSE.walk_ast(out.reborrow())?;
         out.push_sql(" WHERE ");
         match self.ip.source() {
-            IpSource::Pool(pool_id) => {
+            IpSource::Instance { project_id, pool_id } => {
+                if let Some(pool_id) = pool_id {
+                    out.push_identifier(dsl::ip_pool_id::NAME)?;
+                    out.push_sql(" = ");
+                    out.push_bind_param::<sql_types::Uuid, Uuid>(pool_id)?;
+                } else {
+                    out.push_sql("(");
+                    out.push_identifier(dsl::project_id::NAME)?;
+                    out.push_sql(" = ");
+                    out.push_bind_param::<sql_types::Uuid, Uuid>(project_id)?;
+                    out.push_sql(" OR ");
+                    out.push_identifier(dsl::project_id::NAME)?;
+                    out.push_sql(" IS NULL)");
+                }
+            }
+            IpSource::Service { pool_id } => {
                 out.push_identifier(dsl::ip_pool_id::NAME)?;
                 out.push_sql(" = ");
                 out.push_bind_param::<sql_types::Uuid, Uuid>(pool_id)?;
-            }
-            IpSource::Project(project_id) => {
-                out.push_sql("(");
-                out.push_identifier(dsl::project_id::NAME)?;
-                out.push_sql(" = ");
-                out.push_bind_param::<sql_types::Uuid, Uuid>(project_id)?;
-                out.push_sql(" OR ");
-                out.push_identifier(dsl::project_id::NAME)?;
-                out.push_sql(" IS NULL)");
             }
         }
         out.push_sql(" AND ");

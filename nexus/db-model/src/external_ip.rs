@@ -87,8 +87,8 @@ impl From<InstanceExternalIp> for sled_agent_client::types::SourceNatConfig {
 /// these options.
 #[derive(Debug, Clone, Copy)]
 pub enum IpSource {
-    Pool(Uuid),
-    Project(Uuid),
+    Instance { project_id: Uuid, pool_id: Option<Uuid> },
+    Service { pool_id: Uuid },
 }
 
 /// An incomplete external IP, used to store state required for issuing the
@@ -100,7 +100,6 @@ pub struct IncompleteInstanceExternalIp {
     description: Option<String>,
     time_created: DateTime<Utc>,
     kind: IpKind,
-    project_id: Option<Uuid>,
     instance_id: Option<Uuid>,
     source: IpSource,
 }
@@ -112,18 +111,14 @@ impl IncompleteInstanceExternalIp {
         instance_id: Uuid,
         pool_id: Option<Uuid>,
     ) -> Self {
-        let source = pool_id
-            .map(|id| IpSource::Pool(id))
-            .unwrap_or_else(|| IpSource::Project(project_id));
         Self {
             id,
             name: None,
             description: None,
             time_created: Utc::now(),
             kind: IpKind::SNat,
-            project_id: Some(project_id),
             instance_id: Some(instance_id),
-            source,
+            source: IpSource::Instance { project_id, pool_id },
         }
     }
 
@@ -133,18 +128,14 @@ impl IncompleteInstanceExternalIp {
         instance_id: Uuid,
         pool_id: Option<Uuid>,
     ) -> Self {
-        let source = pool_id
-            .map(|id| IpSource::Pool(id))
-            .unwrap_or_else(|| IpSource::Project(project_id));
         Self {
             id,
             name: None,
             description: None,
             time_created: Utc::now(),
             kind: IpKind::Ephemeral,
-            project_id: Some(project_id),
             instance_id: Some(instance_id),
-            source,
+            source: IpSource::Instance { project_id, pool_id },
         }
     }
 
@@ -155,18 +146,14 @@ impl IncompleteInstanceExternalIp {
         project_id: Uuid,
         pool_id: Option<Uuid>,
     ) -> Self {
-        let source = pool_id
-            .map(|id| IpSource::Pool(id))
-            .unwrap_or_else(|| IpSource::Project(project_id));
         Self {
             id,
             name: Some(name.clone()),
             description: Some(description.to_string()),
             time_created: Utc::now(),
             kind: IpKind::Floating,
-            project_id: Some(project_id),
             instance_id: None,
-            source,
+            source: IpSource::Instance { project_id, pool_id },
         }
     }
 
@@ -177,9 +164,8 @@ impl IncompleteInstanceExternalIp {
             description: None,
             time_created: Utc::now(),
             kind: IpKind::Service,
-            project_id: None,
             instance_id: None,
-            source: IpSource::Pool(pool_id),
+            source: IpSource::Service { pool_id },
         }
     }
 
@@ -201,10 +187,6 @@ impl IncompleteInstanceExternalIp {
 
     pub fn kind(&self) -> &IpKind {
         &self.kind
-    }
-
-    pub fn project_id(&self) -> &Option<Uuid> {
-        &self.project_id
     }
 
     pub fn instance_id(&self) -> &Option<Uuid> {
