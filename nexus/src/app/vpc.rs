@@ -29,7 +29,7 @@ use omicron_common::api::external::RouterRouteCreateParams;
 use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
-use sled_agent_client::types::NetworkInterface;
+use sled_agent_client::types::{IpNet, NetworkInterface};
 
 use futures::future::join_all;
 use ipnetwork::IpNetwork;
@@ -589,7 +589,7 @@ impl super::Nexus {
                         for interface in
                             vpc_interfaces.get(&name).unwrap_or(&no_interfaces)
                         {
-                            targets.push(interface.clone().into());
+                            targets.push(interface.clone());
                         }
                     }
                     external::VpcFirewallRuleTarget::Subnet(name) => {
@@ -597,7 +597,7 @@ impl super::Nexus {
                             .get(&name)
                             .unwrap_or(&no_interfaces)
                         {
-                            targets.push(interface.clone().into());
+                            targets.push(interface.clone());
                         }
                     }
                     external::VpcFirewallRuleTarget::Instance(name) => {
@@ -605,7 +605,7 @@ impl super::Nexus {
                             .get(&name)
                             .unwrap_or(&no_interfaces)
                         {
-                            targets.push(interface.clone().into());
+                            targets.push(interface.clone());
                         }
                     }
                     external::VpcFirewallRuleTarget::Ip(_addr) => {
@@ -630,7 +630,7 @@ impl super::Nexus {
                                     .get(&name)
                                     .unwrap_or(&no_interfaces)
                                 {
-                                    host_addrs.push(interface.ip.into())
+                                    host_addrs.push(IpNet::from(interface.ip))
                                 }
                             }
                             external::VpcFirewallRuleHostFilter::Subnet(
@@ -640,21 +640,21 @@ impl super::Nexus {
                                     .get(&name)
                                     .unwrap_or(&no_networks)
                                 {
-                                    host_addrs.push(subnet.clone().into());
+                                    host_addrs.push(IpNet::from(*subnet));
                                 }
                             }
                             external::VpcFirewallRuleHostFilter::Ip(addr) => {
-                                host_addrs.push(addr.clone().into())
+                                host_addrs.push(IpNet::from(*addr))
                             }
                             external::VpcFirewallRuleHostFilter::IpNet(net) => {
-                                host_addrs.push(net.clone().into())
+                                host_addrs.push(IpNet::from(*net))
                             }
                             external::VpcFirewallRuleHostFilter::Vpc(name) => {
                                 for interface in vpc_interfaces
                                     .get(&name)
                                     .unwrap_or(&no_interfaces)
                                 {
-                                    host_addrs.push(interface.ip.into())
+                                    host_addrs.push(IpNet::from(interface.ip))
                                 }
                             }
                         }
