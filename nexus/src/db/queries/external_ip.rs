@@ -795,9 +795,7 @@ mod tests {
         assert_eq!(
             err,
             Error::InvalidRequest {
-                message: String::from(
-                    "No external IP addresses available for new instance"
-                ),
+                message: String::from("No external IP addresses available"),
             }
         );
         context.success().await;
@@ -1071,11 +1069,7 @@ mod tests {
         assert_eq!(
             err,
             Error::InvalidRequest {
-                message: String::from(
-                    // TODO: The error is a bit misleading; this isn't an IP
-                    // intended for an instance necessarily.
-                    "No external IP addresses available for new instance"
-                ),
+                message: String::from("No external IP addresses available"),
             }
         );
 

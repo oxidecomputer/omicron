@@ -129,7 +129,7 @@ impl DataStore {
                 use diesel::result::Error::NotFound;
                 match e {
                     Connection(Query(NotFound)) => Error::invalid_request(
-                        "No external IP addresses available for new instance",
+                        "No external IP addresses available",
                     ),
                     _ => public_error_from_diesel_pool(e, ErrorHandler::Server),
                 }
