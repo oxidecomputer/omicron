@@ -168,7 +168,7 @@ table! {
 }
 
 table! {
-    instance_external_ip (id) {
+    external_ip (id) {
         id -> Uuid,
         name -> Nullable<Text>,
         description -> Nullable<Text>,

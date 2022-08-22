@@ -605,7 +605,7 @@ async fn sic_allocate_instance_snat_ip_undo(
         OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
     let ip_id = sagactx.lookup::<Uuid>("snat_ip_id")?;
     datastore
-        .deallocate_instance_external_ip(&opctx, ip_id)
+        .deallocate_external_ip(&opctx, ip_id)
         .await
         .map_err(ActionError::action_failed)?;
     Ok(())
@@ -668,7 +668,7 @@ async fn sic_allocate_instance_external_ip_undo(
         OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
     let ip_id = repeat_saga_params.new_id;
     datastore
-        .deallocate_instance_external_ip(&opctx, ip_id)
+        .deallocate_external_ip(&opctx, ip_id)
         .await
         .map_err(ActionError::action_failed)?;
     Ok(())

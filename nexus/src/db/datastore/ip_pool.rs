@@ -331,7 +331,7 @@ impl DataStore {
         authz_pool: &authz::IpPool,
         range: &IpRange,
     ) -> DeleteResult {
-        use db::schema::instance_external_ip;
+        use db::schema::external_ip;
         use db::schema::ip_pool_range::dsl;
         opctx.authorize(authz::Action::Modify, authz_pool).await?;
 
@@ -370,12 +370,10 @@ impl DataStore {
         // Find external IPs allocated out of this pool and range.
         let range_id = range.id;
         let has_children = diesel::dsl::select(diesel::dsl::exists(
-            instance_external_ip::table
-                .filter(instance_external_ip::dsl::ip_pool_id.eq(pool_id))
-                .filter(
-                    instance_external_ip::dsl::ip_pool_range_id.eq(range_id),
-                )
-                .filter(instance_external_ip::dsl::time_deleted.is_null()),
+            external_ip::table
+                .filter(external_ip::dsl::ip_pool_id.eq(pool_id))
+                .filter(external_ip::dsl::ip_pool_range_id.eq(range_id))
+                .filter(external_ip::dsl::time_deleted.is_null()),
         ))
         .get_result_async::<bool>(self.pool_authorized(opctx).await?)
         .await
