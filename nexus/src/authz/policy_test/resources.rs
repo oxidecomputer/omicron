@@ -252,6 +252,7 @@ pub fn exempted_authz_classes() -> BTreeSet<String> {
         authz::UpdateAvailableArtifact::get_polar_class(),
         authz::UserBuiltin::get_polar_class(),
         authz::GlobalImage::get_polar_class(),
+        authz::Snapshot::get_polar_class(),
     ]
     .into_iter()
     .map(|c| c.name.clone())
