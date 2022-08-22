@@ -608,8 +608,12 @@ impl super::Nexus {
                             targets.push(interface.clone().into());
                         }
                     }
-                    external::VpcFirewallRuleTarget::Ip(_addr) => todo!("target addr"),
-                    external::VpcFirewallRuleTarget::IpNet(_net) => todo!("target net"),
+                    external::VpcFirewallRuleTarget::Ip(_addr) => {
+                        todo!("target addr")
+                    }
+                    external::VpcFirewallRuleTarget::IpNet(_net) => {
+                        todo!("target net")
+                    }
                 }
             }
 

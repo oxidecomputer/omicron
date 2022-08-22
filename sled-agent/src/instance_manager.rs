@@ -222,9 +222,7 @@ impl InstanceManager {
             "Ensuring VPC firewall rules";
             "rules" => ?&rules,
         );
-        self.inner
-            .port_manager
-            .firewall_rules_ensure(rules)?;
+        self.inner.port_manager.firewall_rules_ensure(rules)?;
         Ok(())
     }
 }
