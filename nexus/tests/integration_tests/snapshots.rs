@@ -14,7 +14,6 @@ use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::create_ip_pool;
 use nexus_test_utils::resource_helpers::create_organization;
 use nexus_test_utils::resource_helpers::create_project;
-use nexus_test_utils::resource_helpers::create_silo;
 use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils::ControlPlaneTestContext;
@@ -32,7 +31,6 @@ use omicron_nexus::db;
 use omicron_nexus::db::identity::Resource;
 use omicron_nexus::db::lookup::LookupPath;
 use omicron_nexus::external_api::params;
-use omicron_nexus::external_api::shared;
 use omicron_nexus::external_api::views;
 use uuid::Uuid;
 
