@@ -316,7 +316,7 @@ impl SingleSp {
         &self,
         kind: RequestKind,
     ) -> Result<(SocketAddrV6, ResponseKind)> {
-        rpc(&self.cmds_tx, kind, None).await.0
+        rpc(&self.cmds_tx, kind, None).await.result
     }
 
     async fn rpc_with_trailing_data(
@@ -333,7 +333,7 @@ async fn rpc_with_trailing_data(
     kind: RequestKind,
     trailing_data: Cursor<Vec<u8>>,
 ) -> (Result<(SocketAddrV6, ResponseKind)>, Cursor<Vec<u8>>) {
-    let (result, trailing_data) =
+    let RpcResponse { result, trailing_data } =
         rpc(inner_tx, kind, Some(trailing_data)).await;
 
     // We sent `Some(_)` trailing data, so we get `Some(_)` back; unwrap it
@@ -345,7 +345,7 @@ async fn rpc(
     inner_tx: &mpsc::Sender<InnerCommand>,
     kind: RequestKind,
     trailing_data: Option<Cursor<Vec<u8>>>,
-) -> (Result<(SocketAddrV6, ResponseKind)>, Option<Cursor<Vec<u8>>>) {
+) -> RpcResponse {
     let (resp_tx, resp_rx) = oneshot::channel();
 
     // `Inner::run()` doesn't exit as long as `inner_tx` exists, so unwrapping
@@ -354,7 +354,7 @@ async fn rpc(
         .send(InnerCommand::Rpc(RpcRequest {
             kind,
             trailing_data,
-            response: resp_tx,
+            response_tx: resp_tx,
         }))
         .await
         .unwrap();
@@ -438,13 +438,16 @@ impl AttachedSerialConsoleRecv {
 }
 
 #[derive(Debug)]
+struct RpcResponse {
+    result: Result<(SocketAddrV6, ResponseKind)>,
+    trailing_data: Option<Cursor<Vec<u8>>>,
+}
+
+#[derive(Debug)]
 struct RpcRequest {
     kind: RequestKind,
     trailing_data: Option<Cursor<Vec<u8>>>,
-    response: oneshot::Sender<(
-        Result<(SocketAddrV6, ResponseKind)>,
-        Option<Cursor<Vec<u8>>>,
-    )>,
+    response_tx: oneshot::Sender<RpcResponse>,
 }
 
 #[derive(Debug)]
@@ -634,8 +637,10 @@ impl Inner {
                         incoming_buf,
                     )
                     .await;
+                let response =
+                    RpcResponse { result, trailing_data: rpc.trailing_data };
 
-                if rpc.response.send((result, rpc.trailing_data)).is_err() {
+                if rpc.response_tx.send(response).is_err() {
                     warn!(
                         self.log,
                         "RPC requester disappeared while waiting for response"
