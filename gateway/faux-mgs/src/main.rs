@@ -191,7 +191,7 @@ async fn main() -> Result<()> {
             let data = fs::read(&image).with_context(|| {
                 format!("failed to read image {}", image.display())
             })?;
-            sp.update(&data).await.with_context(|| {
+            sp.update(data).await.with_context(|| {
                 format!("updating to {} failed", image.display())
             })?;
         }

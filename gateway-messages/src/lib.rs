@@ -396,6 +396,9 @@ impl SpComponent {
     /// Maximum number of bytes for a component ID.
     pub const MAX_ID_LENGTH: usize = 16;
 
+    /// The `sp3` CPU.
+    pub const SP3: Self = Self { id: *b"sp3\0\0\0\0\0\0\0\0\0\0\0\0\0" };
+
     /// Interpret the component name as a human-readable string.
     ///
     /// Our current expectation of component names is that this should never

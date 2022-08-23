@@ -6,7 +6,6 @@
 
 use anyhow::Context;
 use anyhow::Result;
-use gateway_messages::sp_impl::SerialConsolePacketizer;
 use gateway_messages::SpComponent;
 use gateway_sp_comms::AttachedSerialConsoleSend;
 use gateway_sp_comms::SingleSp;
@@ -39,14 +38,14 @@ pub(crate) async fn run(
     let mut out_buf = StdinOutBuf::new(raw);
     let mut flush_delay = FlushDelay::new(stdin_buffer_time);
     let console = sp
-        .serial_console_attach()
+        .serial_console_attach(SpComponent::SP3)
         .await
         .with_context(|| "failed to attach to serial console")?;
 
     let (console_tx, mut console_rx) = console.split();
     let (send_tx, send_rx) = mpsc::channel(8);
     tokio::spawn(async move {
-        packetize_and_send(console_tx, send_rx).await.unwrap();
+        relay_data_to_sp(console_tx, send_rx).await.unwrap();
     });
 
     loop {
@@ -69,7 +68,7 @@ pub(crate) async fn run(
                 let chunk = chunk.unwrap();
                 trace!(log, "writing {chunk:?} data to stdout");
                 let mut stdout = io::stdout().lock();
-                stdout.write_all(&chunk.data[..usize::from(chunk.len)]).unwrap();
+                stdout.write_all(&chunk).unwrap();
                 stdout.flush().unwrap();
             }
 
@@ -83,21 +82,16 @@ pub(crate) async fn run(
     }
 }
 
-async fn packetize_and_send(
+async fn relay_data_to_sp(
     console_tx: AttachedSerialConsoleSend,
     mut data_rx: mpsc::Receiver<Vec<u8>>,
 ) -> Result<()> {
-    let mut packetizer =
-        SerialConsolePacketizer::new(SpComponent::try_from("sp3").unwrap());
     loop {
         let data = match data_rx.recv().await {
             Some(data) => data,
             None => return Ok(()),
         };
-
-        for chunk in packetizer.packetize(&data) {
-            console_tx.write(chunk).await?;
-        }
+        console_tx.write(data).await?;
     }
 }
 
