@@ -8988,6 +8988,7 @@
         "type": "string",
         "enum": [
           "creating",
+          "provisioned",
           "starting",
           "running",
           "stopping",

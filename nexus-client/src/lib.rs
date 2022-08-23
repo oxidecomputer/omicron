@@ -41,6 +41,7 @@ impl From<types::InstanceState>
     fn from(s: types::InstanceState) -> Self {
         match s {
             types::InstanceState::Creating => Self::Creating,
+            types::InstanceState::Provisioned => Self::Provisioned,
             types::InstanceState::Starting => Self::Starting,
             types::InstanceState::Running => Self::Running,
             types::InstanceState::Stopping => Self::Stopping,
@@ -83,6 +84,7 @@ impl From<omicron_common::api::external::InstanceState>
         use omicron_common::api::external::InstanceState;
         match s {
             InstanceState::Creating => Self::Creating,
+            InstanceState::Provisioned => Self::Provisioned,
             InstanceState::Starting => Self::Starting,
             InstanceState::Running => Self::Running,
             InstanceState::Stopping => Self::Stopping,
@@ -143,6 +145,7 @@ impl From<&types::InstanceState>
     fn from(state: &types::InstanceState) -> Self {
         match state {
             types::InstanceState::Creating => Self::Creating,
+            types::InstanceState::Provisioned => Self::Provisioned,
             types::InstanceState::Starting => Self::Starting,
             types::InstanceState::Running => Self::Running,
             types::InstanceState::Stopping => Self::Stopping,

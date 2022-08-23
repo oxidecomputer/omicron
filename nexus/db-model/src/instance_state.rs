@@ -17,6 +17,7 @@ impl_enum_wrapper!(
 
     // Enum values
     Creating => b"creating"
+    Provisioned => b"provisioned"
     Starting => b"starting"
     Running => b"running"
     Stopping => b"stopping"
@@ -44,6 +45,7 @@ impl From<InstanceState> for sled_agent_client::types::InstanceState {
         use sled_agent_client::types::InstanceState as Output;
         match s.0 {
             Creating => Output::Creating,
+            Provisioned => Output::Provisioned,
             Starting => Output::Starting,
             Running => Output::Running,
             Stopping => Output::Stopping,

@@ -629,12 +629,17 @@ pub struct IdentityMetadataUpdateParams {
 )]
 #[serde(rename_all = "snake_case")]
 pub enum InstanceState {
-    Creating, // TODO-polish: paper over Creating in the API with Starting?
+    /// An Instance record exists but the Instance is currently being created on the Sled.
+    Creating,
+    /// The Instance and all its resources have been allocated.
+    Provisioned,
+    /// The Instance is currently starting up.
     Starting,
+    /// The Instance is currently running.
     Running,
-    /// Implied that a transition to "Stopped" is imminent.
+    /// The Instance has been requested to stop and a transition to "Stopped" is imminent.
     Stopping,
-    /// The instance is currently stopped.
+    /// The instance is currently stopped and its resources deallocated.
     Stopped,
     /// The instance is in the process of rebooting - it will remain
     /// in the "rebooting" state until the VM is starting once more.
@@ -643,8 +648,11 @@ pub enum InstanceState {
     /// in the "migrating" state until the migration process is complete
     /// and the destination propolis is ready to continue execution.
     Migrating,
+    /// The Instance is attempting to recover from a failure.
     Repairing,
+    /// The Instance has encountered a failure.
     Failed,
+    /// The Instance has been deleted.
     Destroyed,
 }
 
@@ -664,6 +672,7 @@ impl TryFrom<&str> for InstanceState {
     fn try_from(variant: &str) -> Result<Self, Self::Error> {
         let r = match variant {
             "creating" => InstanceState::Creating,
+            "provisioned" => InstanceState::Provisioned,
             "starting" => InstanceState::Starting,
             "running" => InstanceState::Running,
             "stopping" => InstanceState::Stopping,
@@ -683,6 +692,7 @@ impl InstanceState {
     pub fn label(&self) -> &'static str {
         match self {
             InstanceState::Creating => "creating",
+            InstanceState::Provisioned => "provisioned",
             InstanceState::Starting => "starting",
             InstanceState::Running => "running",
             InstanceState::Stopping => "stopping",
@@ -707,6 +717,7 @@ impl InstanceState {
             InstanceState::Migrating => false,
 
             InstanceState::Creating => true,
+            InstanceState::Provisioned => true,
             InstanceState::Stopped => true,
             InstanceState::Repairing => true,
             InstanceState::Failed => true,
