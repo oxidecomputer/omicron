@@ -22,6 +22,7 @@ use gateway_messages::DiscoverResponse;
 use gateway_messages::IgnitionCommand;
 use gateway_messages::IgnitionState;
 use gateway_messages::ResponseKind;
+use gateway_messages::SpComponent;
 use gateway_messages::SpState;
 use slog::info;
 use slog::o;
@@ -178,10 +179,11 @@ impl Communicator {
     pub async fn serial_console_attach(
         &self,
         sp: SpIdentifier,
+        component: SpComponent,
     ) -> Result<AttachedSerialConsole, Error> {
         let port = self.id_to_port(sp)?;
         let sp = self.switch.sp(port).ok_or(Error::SpAddressUnknown(sp))?;
-        Ok(sp.serial_console_attach().await?)
+        Ok(sp.serial_console_attach(component).await?)
     }
 
     /// Detach any existing connection to the given SP component's serial

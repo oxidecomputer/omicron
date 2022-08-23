@@ -126,6 +126,20 @@ impl From<hubpack::error::Error> for Error {
     }
 }
 
+/// Unpack the 2-byte length-prefixed trailing data that comes after some
+/// packets (e.g., update chunks, serial console).
+pub fn unpack_trailing_data(data: &[u8]) -> hubpack::error::Result<&[u8]> {
+    if data.len() < mem::size_of::<u16>() {
+        return Err(hubpack::error::Error::Truncated);
+    }
+    let (prefix, data) = data.split_at(mem::size_of::<u16>());
+    let len = u16::from_le_bytes([prefix[0], prefix[1]]);
+    if data.len() != usize::from(len) {
+        return Err(hubpack::error::Error::Invalid);
+    }
+    Ok(data)
+}
+
 /// Handle a single incoming message.
 ///
 /// The incoming message is described by `sender` (the remote address of the
@@ -157,19 +171,7 @@ pub fn handle_message<H: SpHandler>(
     // if we get any for other messages, bail out.
     let trailing_data = match &request.kind {
         RequestKind::UpdateChunk(_) | RequestKind::SerialConsoleWrite(_) => {
-            if leftover.len() < mem::size_of::<u16>() {
-                return Err(Error::DeserializationFailed(
-                    hubpack::error::Error::Truncated,
-                ));
-            }
-            let (prefix, data) = leftover.split_at(mem::size_of::<u16>());
-            let len = u16::from_le_bytes([prefix[0], prefix[1]]);
-            if data.len() != usize::from(len) {
-                return Err(Error::DeserializationFailed(
-                    hubpack::error::Error::Invalid,
-                ));
-            }
-            data
+            unpack_trailing_data(leftover)?
         }
         _ => {
             if !leftover.is_empty() {

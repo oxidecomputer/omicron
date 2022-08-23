@@ -11,6 +11,7 @@ use crate::error::BadResponseType;
 use crate::error::SerialConsoleAlreadyAttached;
 use crate::error::SpCommunicationError;
 use crate::error::UpdateError;
+use gateway_messages::sp_impl;
 use gateway_messages::version;
 use gateway_messages::BulkIgnitionState;
 use gateway_messages::IgnitionCommand;
@@ -19,8 +20,8 @@ use gateway_messages::Request;
 use gateway_messages::RequestKind;
 use gateway_messages::ResponseError;
 use gateway_messages::ResponseKind;
-use gateway_messages::SerialConsole;
 use gateway_messages::SerializedSize;
+use gateway_messages::SpComponent;
 use gateway_messages::SpMessage;
 use gateway_messages::SpMessageKind;
 use gateway_messages::SpPort;
@@ -182,7 +183,7 @@ impl SingleSp {
 
         let mut image = Cursor::new(image);
         let mut offset = 0;
-        while CursorUnstable::is_empty(&image) {
+        while !CursorUnstable::is_empty(&image) {
             let prior_pos = image.position();
             debug!(self.log, "sending update chunk"; "offset" => offset);
 
@@ -283,6 +284,7 @@ impl SingleSp {
     /// incoming serial console packets from the SP.
     pub async fn serial_console_attach(
         &self,
+        component: SpComponent,
     ) -> Result<AttachedSerialConsole, SerialConsoleAlreadyAttached> {
         let (tx, rx) = oneshot::channel();
 
@@ -295,6 +297,7 @@ impl SingleSp {
         Ok(AttachedSerialConsole {
             key: attachment.key,
             rx: attachment.incoming,
+            component,
             inner_tx: self.cmds_tx.clone(),
         })
     }
@@ -321,13 +324,21 @@ impl SingleSp {
         kind: RequestKind,
         trailing_data: Cursor<Vec<u8>>,
     ) -> (Result<(SocketAddrV6, ResponseKind)>, Cursor<Vec<u8>>) {
-        let (result, trailing_data) =
-            rpc(&self.cmds_tx, kind, Some(trailing_data)).await;
-
-        // We sent `Some(_)` trailing data, so we get `Some(_)` back; unwrap it
-        // so our caller can remain ignorant of this detail.
-        (result, trailing_data.unwrap())
+        rpc_with_trailing_data(&self.cmds_tx, kind, trailing_data).await
     }
+}
+
+async fn rpc_with_trailing_data(
+    inner_tx: &mpsc::Sender<InnerCommand>,
+    kind: RequestKind,
+    trailing_data: Cursor<Vec<u8>>,
+) -> (Result<(SocketAddrV6, ResponseKind)>, Cursor<Vec<u8>>) {
+    let (result, trailing_data) =
+        rpc(inner_tx, kind, Some(trailing_data)).await;
+
+    // We sent `Some(_)` trailing data, so we get `Some(_)` back; unwrap it
+    // so our caller can remain ignorant of this detail.
+    (result, trailing_data.unwrap())
 }
 
 async fn rpc(
@@ -354,7 +365,8 @@ async fn rpc(
 #[derive(Debug)]
 pub struct AttachedSerialConsole {
     key: u64,
-    rx: mpsc::Receiver<SerialConsole>,
+    component: SpComponent,
+    rx: mpsc::Receiver<Vec<u8>>,
     inner_tx: mpsc::Sender<InnerCommand>,
 }
 
@@ -365,6 +377,7 @@ impl AttachedSerialConsole {
         (
             AttachedSerialConsoleSend {
                 key: self.key,
+                component: self.component,
                 inner_tx: self.inner_tx,
             },
             AttachedSerialConsoleRecv { rx: self.rx },
@@ -376,17 +389,28 @@ impl AttachedSerialConsole {
 pub struct AttachedSerialConsoleSend {
     key: u64,
     inner_tx: mpsc::Sender<InnerCommand>,
+    component: SpComponent,
 }
 
 impl AttachedSerialConsoleSend {
     /// Write `data` to the serial console of the SP.
-    pub async fn write(&self, data: SerialConsole) -> Result<()> {
-        rpc(&self.inner_tx, RequestKind::SerialConsoleWrite(data), None)
-            .await
-            .0
-            .and_then(|(_peer, response)| {
+    pub async fn write(&self, data: Vec<u8>) -> Result<()> {
+        let mut data = Cursor::new(data);
+        while !CursorUnstable::is_empty(&data) {
+            let (result, new_data) = rpc_with_trailing_data(
+                &self.inner_tx,
+                RequestKind::SerialConsoleWrite(self.component),
+                data,
+            )
+            .await;
+
+            result.and_then(|(_peer, response)| {
                 response.expect_serial_console_write_ack().map_err(Into::into)
-            })
+            })?;
+
+            data = new_data;
+        }
+        Ok(())
     }
 
     /// Detach this serial console connection.
@@ -400,7 +424,7 @@ impl AttachedSerialConsoleSend {
 
 #[derive(Debug)]
 pub struct AttachedSerialConsoleRecv {
-    rx: mpsc::Receiver<SerialConsole>,
+    rx: mpsc::Receiver<Vec<u8>>,
 }
 
 impl AttachedSerialConsoleRecv {
@@ -408,7 +432,7 @@ impl AttachedSerialConsoleRecv {
     ///
     /// Returns `None` if the underlying channel has been closed (e.g., if the
     /// serial console has been detached).
-    pub async fn recv(&mut self) -> Option<SerialConsole> {
+    pub async fn recv(&mut self) -> Option<Vec<u8>> {
         self.rx.recv().await
     }
 }
@@ -426,7 +450,7 @@ struct RpcRequest {
 #[derive(Debug)]
 struct SerialConsoleAttachment {
     key: u64,
-    incoming: mpsc::Receiver<SerialConsole>,
+    incoming: mpsc::Receiver<Vec<u8>>,
 }
 
 #[derive(Debug)]
@@ -455,7 +479,7 @@ struct Inner {
     discovery_addr: SocketAddrV6,
     max_attempts: usize,
     per_attempt_timeout: Duration,
-    serial_console_tx: Option<mpsc::Sender<SerialConsole>>,
+    serial_console_tx: Option<mpsc::Sender<Vec<u8>>>,
     cmds_rx: mpsc::Receiver<InnerCommand>,
     request_id: u32,
     serial_console_connection_key: u64,
@@ -644,10 +668,12 @@ impl Inner {
 
     fn handle_incoming_message(
         &mut self,
-        result: Result<(SocketAddrV6, SpMessage)>,
+        result: Result<(SocketAddrV6, SpMessage, &[u8])>,
     ) {
-        let (peer, message) = match result {
-            Ok((peer, message)) => (peer, message),
+        let (peer, message, trailing_data) = match result {
+            Ok((peer, message, trailing_data)) => {
+                (peer, message, trailing_data)
+            }
             Err(err) => {
                 error!(
                     self.log,
@@ -682,8 +708,8 @@ impl Inner {
                     "result" => ?result,
                 );
             }
-            SpMessageKind::SerialConsole(serial_console) => {
-                self.forward_serial_console(serial_console);
+            SpMessageKind::SerialConsole(component) => {
+                self.forward_serial_console(component, trailing_data);
             }
         }
     }
@@ -774,8 +800,8 @@ impl Inner {
                 Err(_elapsed) => return Ok(None),
             };
 
-            let (peer, response) = match result {
-                Ok((peer, response)) => (peer, response),
+            let (peer, response, trailing_data) = match result {
+                Ok((peer, response, data)) => (peer, response, data),
                 Err(err) => {
                     warn!(
                         self.log, "error receiving response";
@@ -787,6 +813,9 @@ impl Inner {
 
             let result = match response.kind {
                 SpMessageKind::Response { request_id: response_id, result } => {
+                    if !trailing_data.is_empty() {
+                        warn!(self.log, "received unexpected trailing data with response (discarding)");
+                    }
                     if response_id == request_id {
                         result
                     } else {
@@ -799,7 +828,7 @@ impl Inner {
                     }
                 }
                 SpMessageKind::SerialConsole(serial_console) => {
-                    self.forward_serial_console(serial_console);
+                    self.forward_serial_console(serial_console, trailing_data);
                     continue;
                 }
             };
@@ -816,9 +845,14 @@ impl Inner {
         }
     }
 
-    fn forward_serial_console(&mut self, serial_console: SerialConsole) {
+    fn forward_serial_console(&mut self, _component: SpComponent, data: &[u8]) {
+        // TODO-cleanup component support for serial console is half baked;
+        // should we check here that it matches the attached serial console? For
+        // the foreseeable future we only support one component, so we skip that
+        // for now.
+
         if let Some(tx) = self.serial_console_tx.as_ref() {
-            match tx.try_send(serial_console) {
+            match tx.try_send(data.to_vec()) {
                 Ok(()) => return,
                 Err(mpsc::error::TrySendError::Closed(_)) => {
                     self.serial_console_tx = None;
@@ -852,11 +886,11 @@ async fn send(
     Ok(())
 }
 
-async fn recv(
+async fn recv<'a>(
     socket: &UdpSocket,
-    incoming_buf: &mut [u8; SpMessage::MAX_SIZE],
+    incoming_buf: &'a mut [u8; SpMessage::MAX_SIZE],
     log: &Logger,
-) -> Result<(SocketAddrV6, SpMessage)> {
+) -> Result<(SocketAddrV6, SpMessage, &'a [u8])> {
     let (n, peer) = socket
         .recv_from(&mut incoming_buf[..])
         .await
@@ -875,7 +909,7 @@ async fn recv(
         }
     };
 
-    let (message, _n) =
+    let (message, leftover) =
         gateway_messages::deserialize::<SpMessage>(&incoming_buf[..n])
             .map_err(|err| SpCommunicationError::Deserialize { peer, err })?;
 
@@ -885,7 +919,14 @@ async fn recv(
         "message" => ?message,
     );
 
-    Ok((peer, message))
+    let trailing_data = if leftover.is_empty() {
+        &[]
+    } else {
+        sp_impl::unpack_trailing_data(leftover)
+            .map_err(|err| SpCommunicationError::Deserialize { peer, err })?
+    };
+
+    Ok((peer, message, trailing_data))
 }
 
 fn sp_busy_policy() -> backoff::ExponentialBackoff {

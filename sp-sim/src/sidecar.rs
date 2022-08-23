@@ -13,6 +13,7 @@ use crate::SimulatedSp;
 use anyhow::Result;
 use async_trait::async_trait;
 use futures::future;
+use gateway_messages::SpComponent;
 use gateway_messages::sp_impl::SpHandler;
 use gateway_messages::BulkIgnitionState;
 use gateway_messages::DiscoverResponse;
@@ -394,7 +395,8 @@ impl SpHandler for Handler {
         &mut self,
         sender: SocketAddrV6,
         port: SpPort,
-        _packet: gateway_messages::SerialConsole,
+        _component: SpComponent,
+        _data: &[u8],
     ) -> Result<(), ResponseError> {
         warn!(
             &self.log, "received serial console write; unsupported by sidecar";
@@ -443,6 +445,7 @@ impl SpHandler for Handler {
         sender: SocketAddrV6,
         port: SpPort,
         chunk: gateway_messages::UpdateChunk,
+        data: &[u8],
     ) -> Result<(), ResponseError> {
         warn!(
             &self.log,
@@ -450,12 +453,12 @@ impl SpHandler for Handler {
             "sender" => %sender,
             "port" => ?port,
             "offset" => chunk.offset,
-            "length" => chunk.chunk_length,
+            "length" => data.len(),
         );
         Err(ResponseError::RequestUnsupportedForSp)
     }
 
-    fn sys_reset_prepare(
+    fn reset_prepare(
         &mut self,
         sender: SocketAddrV6,
         port: SpPort,
@@ -468,7 +471,7 @@ impl SpHandler for Handler {
         Err(ResponseError::RequestUnsupportedForSp)
     }
 
-    fn sys_reset_trigger(
+    fn reset_trigger(
         &mut self,
         sender: SocketAddrV6,
         port: SpPort,

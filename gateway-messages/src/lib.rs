@@ -30,6 +30,7 @@ pub const MAX_SERIALIZED_SIZE: usize = 1024;
 // probably fine to reduce it some. The check is here to force us to think about
 // it.
 const_assert!(MAX_SERIALIZED_SIZE - Request::MAX_SIZE > 700);
+const_assert!(MAX_SERIALIZED_SIZE - SpMessage::MAX_SIZE > 700);
 
 pub mod version {
     pub const V1: u32 = 1;
@@ -443,18 +444,33 @@ impl TryFrom<&str> for SpComponent {
     }
 }
 
+/// Sealed trait restricted the types that can be passed to
+/// [`serialize_with_trailing_data()`].
+pub trait GatewayMessage: SerializedSize + Serialize + private::Sealed {}
+mod private {
+    pub trait Sealed {}
+}
+impl GatewayMessage for Request {}
+impl GatewayMessage for SpMessage {}
+impl private::Sealed for Request {}
+impl private::Sealed for SpMessage {}
+
 /// Returns `(serialized_size, data_bytes_written)` where `serialized_size` is
 /// the message size written to `out` and `data_bytes_written` is the number of
 /// bytes included in `out` from `data`.
-pub fn serialize_with_trailing_data(
+pub fn serialize_with_trailing_data<T>(
     out: &mut [u8; MAX_SERIALIZED_SIZE],
-    request: &Request,
+    header: &T,
     data: &[u8],
-) -> (usize, usize) {
-    // We know statically that `out` is large enough to hold a serialized
-    // `Request` and that serializing a `Request` can't fail for any other
-    // reason, so we can upwrap here.
-    let n = hubpack::serialize(out, request).unwrap();
+) -> (usize, usize)
+where
+    T: GatewayMessage,
+{
+    // We know `T` is either `Request` or `SpMessage`, both of which we know
+    // statically (confirmed by `const_assert`s above) are significantly smaller
+    // than `MAX_SERIALIZED_SIZE`. They cannot fail to serialize for any reason
+    // other than an undersized buffer, so we can unwrap here.
+    let n = hubpack::serialize(out, header).unwrap();
     let out = &mut out[n..];
 
     // How much data can we fit in what's left, leaving room for a 2-byte

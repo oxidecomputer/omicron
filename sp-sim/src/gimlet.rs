@@ -10,11 +10,10 @@ use crate::{Responsiveness, SimulatedSp};
 use anyhow::{anyhow, bail, Context, Result};
 use async_trait::async_trait;
 use futures::future;
-use gateway_messages::sp_impl::{SerialConsolePacketizer, SpHandler};
+use gateway_messages::sp_impl::SpHandler;
 use gateway_messages::version;
 use gateway_messages::DiscoverResponse;
 use gateway_messages::ResponseError;
-use gateway_messages::SerialConsole;
 use gateway_messages::SerialNumber;
 use gateway_messages::SerializedSize;
 use gateway_messages::SpComponent;
@@ -221,10 +220,10 @@ impl Gimlet {
 
 struct SerialConsoleTcpTask {
     listener: TcpListener,
-    incoming_serial_console: UnboundedReceiver<SerialConsole>,
+    incoming_serial_console: UnboundedReceiver<Vec<u8>>,
     socks: [Arc<UdpSocket>; 2],
     gateway_addresses: Arc<Mutex<[Option<SocketAddrV6>; 2]>>,
-    console_packetizer: SerialConsolePacketizer,
+    component: SpComponent,
     log: Logger,
 }
 
@@ -232,7 +231,7 @@ impl SerialConsoleTcpTask {
     fn new(
         component: SpComponent,
         listener: TcpListener,
-        incoming_serial_console: UnboundedReceiver<SerialConsole>,
+        incoming_serial_console: UnboundedReceiver<Vec<u8>>,
         socks: [Arc<UdpSocket>; 2],
         gateway_addresses: Arc<Mutex<[Option<SocketAddrV6>; 2]>>,
         log: Logger,
@@ -242,12 +241,12 @@ impl SerialConsoleTcpTask {
             incoming_serial_console,
             socks,
             gateway_addresses,
-            console_packetizer: SerialConsolePacketizer::new(component),
+            component,
             log,
         }
     }
 
-    async fn send_serial_console(&mut self, mut data: &[u8]) -> Result<()> {
+    async fn send_serial_console(&mut self, data: &[u8]) -> Result<()> {
         let gateway_addrs = *self.gateway_addresses.lock().unwrap();
         for (i, (sock, &gateway_addr)) in
             self.socks.iter().zip(&gateway_addrs).enumerate()
@@ -267,26 +266,19 @@ impl SerialConsoleTcpTask {
                 }
             };
 
-            // if we're told to send something starting with "SKIP ", emulate a
-            // dropped packet spanning 10 bytes before sending the rest of the
-            // data.
-            if let Some(remaining) = data.strip_prefix(b"SKIP ") {
-                self.console_packetizer.danger_emulate_dropped_packets(10);
-                data = remaining;
-            }
-
-            let mut out = [0; SpMessage::MAX_SIZE];
-            for packet in self.console_packetizer.packetize(data) {
+            let mut out = [0; gateway_messages::MAX_SERIALIZED_SIZE];
+            let mut remaining = data;
+            while !remaining.is_empty() {
                 let message = SpMessage {
                     version: version::V1,
-                    kind: SpMessageKind::SerialConsole(packet),
+                    kind: SpMessageKind::SerialConsole(self.component),
                 };
-
-                // We know `out` is big enough for any `SpMessage`, so no need
-                // to bubble up an error here.
-                let n = gateway_messages::serialize(&mut out[..], &message)
-                    .unwrap();
+                let (n, written) =
+                    gateway_messages::serialize_with_trailing_data(
+                        &mut out, &message, remaining,
+                    );
                 sock.send_to(&out[..n], gateway_addr).await?;
+                remaining = &remaining[written..];
             }
         }
 
@@ -356,14 +348,13 @@ impl SerialConsoleTcpTask {
                 incoming = self.incoming_serial_console.recv() => {
                     // we can only get `None` if the tx half was dropped,
                     // which means we're in the process of shutting down
-                    let incoming = match incoming {
-                        Some(incoming) => incoming,
+                    let data = match incoming {
+                        Some(data) => data,
                         None => return Ok(()),
                     };
 
-                    let data = &incoming.data[..usize::from(incoming.len)];
                     conn
-                        .write_all(data)
+                        .write_all(&data)
                         .await
                         .with_context(|| "TCP write error")?;
                 }
@@ -393,10 +384,7 @@ impl UdpTask {
         servers: [UdpServer; 2],
         gateway_addresses: Arc<Mutex<[Option<SocketAddrV6>; 2]>>,
         serial_number: SerialNumber,
-        incoming_serial_console: HashMap<
-            SpComponent,
-            UnboundedSender<SerialConsole>,
-        >,
+        incoming_serial_console: HashMap<SpComponent, UnboundedSender<Vec<u8>>>,
         commands: mpsc::UnboundedReceiver<(
             Command,
             oneshot::Sender<CommandResponse>,
@@ -470,8 +458,7 @@ struct Handler {
     log: Logger,
     serial_number: SerialNumber,
     gateway_addresses: Arc<Mutex<[Option<SocketAddrV6>; 2]>>,
-    incoming_serial_console:
-        HashMap<SpComponent, UnboundedSender<SerialConsole>>,
+    incoming_serial_console: HashMap<SpComponent, UnboundedSender<Vec<u8>>>,
 }
 
 impl Handler {
@@ -554,7 +541,8 @@ impl SpHandler for Handler {
         &mut self,
         sender: SocketAddrV6,
         port: SpPort,
-        packet: gateway_messages::SerialConsole,
+        component: SpComponent,
+        data: &[u8],
     ) -> Result<(), ResponseError> {
         self.update_gateway_address(sender, port);
         debug!(
@@ -562,14 +550,13 @@ impl SpHandler for Handler {
             "received serial console packet";
             "sender" => %sender,
             "port" => ?port,
-            "len" => packet.len,
-            "offset" => packet.offset,
-            "component" => ?packet.component,
+            "len" => data.len(),
+            "component" => ?component,
         );
 
         let incoming_serial_console = self
             .incoming_serial_console
-            .get(&packet.component)
+            .get(&component)
             .ok_or(ResponseError::RequestUnsupportedForComponent)?;
 
         // should we sanity check `offset`? for now just assume everything
@@ -577,7 +564,7 @@ impl SpHandler for Handler {
         //
         // if the receiving half is gone, we're in the process of shutting down;
         // ignore errors here
-        let _ = incoming_serial_console.send(packet);
+        let _ = incoming_serial_console.send(data.to_vec());
 
         Ok(())
     }
@@ -622,6 +609,7 @@ impl SpHandler for Handler {
         sender: SocketAddrV6,
         port: SpPort,
         chunk: gateway_messages::UpdateChunk,
+        data: &[u8],
     ) -> Result<(), ResponseError> {
         warn!(
             &self.log,
@@ -629,12 +617,12 @@ impl SpHandler for Handler {
             "sender" => %sender,
             "port" => ?port,
             "offset" => chunk.offset,
-            "length" => chunk.chunk_length,
+            "length" => data.len(),
         );
         Err(ResponseError::RequestUnsupportedForSp)
     }
 
-    fn sys_reset_prepare(
+    fn reset_prepare(
         &mut self,
         sender: SocketAddrV6,
         port: SpPort,
@@ -647,7 +635,7 @@ impl SpHandler for Handler {
         Err(ResponseError::RequestUnsupportedForSp)
     }
 
-    fn sys_reset_trigger(
+    fn reset_trigger(
         &mut self,
         sender: SocketAddrV6,
         port: SpPort,

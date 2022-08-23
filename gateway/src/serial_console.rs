@@ -9,8 +9,6 @@ use futures::future::Fuse;
 use futures::FutureExt;
 use futures::SinkExt;
 use futures::StreamExt;
-use futures::TryFutureExt;
-use gateway_messages::sp_impl::SerialConsolePacketizer;
 use gateway_messages::SpComponent;
 use gateway_sp_comms::AttachedSerialConsole;
 use gateway_sp_comms::AttachedSerialConsoleSend;
@@ -26,6 +24,7 @@ use slog::info;
 use slog::Logger;
 use std::borrow::Cow;
 use std::collections::VecDeque;
+use std::mem;
 use std::ops::Deref;
 use tokio_tungstenite::tungstenite::handshake;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
@@ -87,7 +86,7 @@ pub(crate) async fn attach(
         .map(|key| handshake::derive_accept_key(key))
         .ok_or(Error::BadWebsocketConnection("missing websocket key"))?;
 
-    let console = sp_comms.serial_console_attach(sp).await?;
+    let console = sp_comms.serial_console_attach(sp, component).await?;
     let upgrade_fut = upgrade::on(request);
     tokio::spawn(async move {
         let upgraded = match upgrade_fut.await {
@@ -108,7 +107,7 @@ pub(crate) async fn attach(
         )
         .await;
 
-        let task = SerialConsoleTask { console, component, ws_stream };
+        let task = SerialConsoleTask { console, ws_stream };
         match task.run(&log).await {
             Ok(()) => debug!(log, "serial task complete"),
             Err(e) => {
@@ -139,7 +138,6 @@ enum SerialTaskError {
 
 struct SerialConsoleTask {
     console: AttachedSerialConsole,
-    component: SpComponent,
     ws_stream: WebSocketStream<Upgraded>,
 }
 
@@ -157,7 +155,6 @@ impl SerialConsoleTask {
         // still have data waiting to be sent to the SP.
         let mut data_from_sp: VecDeque<Vec<u8>> = VecDeque::new();
         let mut data_to_sp: Vec<u8> = Vec::new();
-        let mut packetizer_to_sp = SerialConsolePacketizer::new(self.component);
 
         loop {
             let ws_send = if let Some(data) = data_from_sp.pop_front() {
@@ -166,39 +163,28 @@ impl SerialConsoleTask {
                 Fuse::terminated()
             };
 
-            let ws_recv;
-            let sp_send;
-            if data_to_sp.is_empty() {
-                sp_send = Fuse::terminated();
-                ws_recv = ws_stream.next().fuse();
+            let (ws_recv, sp_send) = if data_to_sp.is_empty() {
+                (ws_stream.next().fuse(), Fuse::terminated())
             } else {
-                ws_recv = Fuse::terminated();
-
-                let (packet, _remaining) =
-                    packetizer_to_sp.first_packet(data_to_sp.as_slice());
-                let packet_data_len = usize::from(packet.len);
-
-                sp_send = console_tx
-                    .write(packet)
-                    .map_ok(move |()| packet_data_len)
-                    .fuse();
-            }
+                // Steal `data_to_sp` and create a future to send it to the SP.
+                let mut to_send = Vec::new();
+                mem::swap(&mut to_send, &mut data_to_sp);
+                (Fuse::terminated(), console_tx.write(to_send).fuse())
+            };
 
             tokio::select! {
-                // Send a UDP packet to the SP
+                // Finished (or failed) sending data to the SP.
                 send_success = sp_send => {
-                    let n = send_success
+                    send_success
                         .map_err(gateway_sp_comms::error::Error::from)
                         .map_err(Error::from)?;
-                    data_to_sp.drain(..n);
                 }
 
                 // Receive a UDP packet from the SP.
                 packet = console_rx.recv() => {
-                    match packet.as_ref() {
-                        Some(packet) => {
-                            let data = &packet.data[..usize::from(packet.len)];
-                            data_from_sp.push_back(data.to_vec());
+                    match packet {
+                        Some(data) => {
+                            data_from_sp.push_back(data);
                         }
                         None => {
                             // Sender is closed; i.e., we've been detached.
