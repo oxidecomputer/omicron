@@ -20,7 +20,6 @@ use gateway_messages::Request;
 use gateway_messages::RequestKind;
 use gateway_messages::ResponseError;
 use gateway_messages::ResponseKind;
-use gateway_messages::SerializedSize;
 use gateway_messages::SpComponent;
 use gateway_messages::SpMessage;
 use gateway_messages::SpMessageKind;
@@ -513,7 +512,7 @@ impl Inner {
     }
 
     async fn run(mut self) {
-        let mut incoming_buf = [0; SpMessage::MAX_SIZE];
+        let mut incoming_buf = [0; gateway_messages::MAX_SERIALIZED_SIZE];
 
         let maybe_known_addr = *self.sp_addr_tx.borrow();
         let mut sp_addr = match maybe_known_addr {
@@ -589,7 +588,7 @@ impl Inner {
 
     async fn discover(
         &mut self,
-        incoming_buf: &mut [u8; SpMessage::MAX_SIZE],
+        incoming_buf: &mut [u8; gateway_messages::MAX_SERIALIZED_SIZE],
     ) -> Result<SocketAddrV6> {
         let (addr, response) = self
             .rpc_call(
@@ -614,7 +613,7 @@ impl Inner {
         &mut self,
         sp_addr: SocketAddrV6,
         command: InnerCommand,
-        incoming_buf: &mut [u8; SpMessage::MAX_SIZE],
+        incoming_buf: &mut [u8; gateway_messages::MAX_SERIALIZED_SIZE],
     ) {
         // When a caller attaches to the SP's serial console, we return an
         // `mpsc::Receiver<_>` on which we send any packets received from the
@@ -724,7 +723,7 @@ impl Inner {
         addr: SocketAddrV6,
         kind: RequestKind,
         trailing_data: Option<&mut Cursor<Vec<u8>>>,
-        incoming_buf: &mut [u8; SpMessage::MAX_SIZE],
+        incoming_buf: &mut [u8; gateway_messages::MAX_SERIALIZED_SIZE],
     ) -> Result<(SocketAddrV6, ResponseKind)> {
         // Build and serialize our request once.
         self.request_id += 1;
@@ -784,7 +783,7 @@ impl Inner {
         addr: SocketAddrV6,
         request_id: u32,
         serialized_request: &[u8],
-        incoming_buf: &mut [u8; SpMessage::MAX_SIZE],
+        incoming_buf: &mut [u8; gateway_messages::MAX_SERIALIZED_SIZE],
     ) -> Result<Option<(SocketAddrV6, ResponseKind)>> {
         // We consider an RPC attempt to be our attempt to contact the SP. It's
         // possible for the SP to respond and say it's busy; we shouldn't count
@@ -893,7 +892,7 @@ async fn send(
 
 async fn recv<'a>(
     socket: &UdpSocket,
-    incoming_buf: &'a mut [u8; SpMessage::MAX_SIZE],
+    incoming_buf: &'a mut [u8; gateway_messages::MAX_SERIALIZED_SIZE],
     log: &Logger,
 ) -> Result<(SocketAddrV6, SpMessage, &'a [u8])> {
     let (n, peer) = socket

@@ -22,7 +22,6 @@ use crate::UpdateChunk;
 use crate::UpdateStart;
 use core::convert::Infallible;
 use core::mem;
-use hubpack::SerializedSize;
 
 #[cfg(feature = "std")]
 use std::net::SocketAddrV6;
@@ -153,10 +152,10 @@ pub fn handle_message<H: SpHandler>(
     port: SpPort,
     data: &[u8],
     handler: &mut H,
-    out: &mut [u8; SpMessage::MAX_SIZE],
+    out: &mut [u8; crate::MAX_SERIALIZED_SIZE],
 ) -> Result<usize, Error> {
     // parse request, with sanity checks on sizes
-    if data.len() > Request::MAX_SIZE {
+    if data.len() > crate::MAX_SERIALIZED_SIZE {
         return Err(Error::DataTooLarge);
     }
     let (request, leftover) = hubpack::deserialize::<Request>(data)?;

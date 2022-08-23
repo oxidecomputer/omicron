@@ -15,7 +15,6 @@ use gateway_messages::version;
 use gateway_messages::DiscoverResponse;
 use gateway_messages::ResponseError;
 use gateway_messages::SerialNumber;
-use gateway_messages::SerializedSize;
 use gateway_messages::SpComponent;
 use gateway_messages::SpMessage;
 use gateway_messages::SpMessageKind;
@@ -406,7 +405,7 @@ impl UdpTask {
     }
 
     async fn run(mut self) -> Result<()> {
-        let mut out_buf = [0; SpMessage::MAX_SIZE];
+        let mut out_buf = [0; gateway_messages::MAX_SERIALIZED_SIZE];
         let mut responsiveness = Responsiveness::Responsive;
         loop {
             select! {

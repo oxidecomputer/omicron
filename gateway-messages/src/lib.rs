@@ -84,9 +84,6 @@ pub enum SpPort {
     Two = 2,
 }
 
-// TODO: Not all SPs are capable of crafting all these response kinds, but the
-// way we're using hubpack requires everyone to allocate Response::MAX_SIZE. Is
-// that okay, or should we break this up more?
 #[derive(Debug, Clone, SerializedSize, Serialize, Deserialize)]
 pub enum ResponseKind {
     Discover(DiscoverResponse),
@@ -486,43 +483,4 @@ where
     out[mem::size_of::<u16>()..][..to_write].copy_from_slice(&data[..to_write]);
 
     (n + mem::size_of::<u16>() + to_write, to_write)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn roundtrip_serial_console() {
-        let line = b"hello world\n";
-        let mut console = SerialConsole {
-            component: SpComponent { id: *b"0000111122223333" },
-            offset: 12345,
-            len: line.len() as u16,
-            data: [0xff; SerialConsole::MAX_DATA_PER_PACKET],
-        };
-        console.data[..line.len()].copy_from_slice(line);
-
-        let mut serialized = [0; SerialConsole::MAX_SIZE];
-        let n = serialize(&mut serialized, &console).unwrap();
-
-        // serialized size should be limited to actual line length, not
-        // the size of `console.data` (`MAX_DATA_PER_PACKET`)
-        assert_eq!(
-            n,
-            SpComponent::MAX_SIZE + u64::MAX_SIZE + u16::MAX_SIZE + line.len()
-        );
-
-        let (deserialized, _) =
-            deserialize::<SerialConsole>(&serialized[..n]).unwrap();
-        assert_eq!(deserialized.len, console.len);
-        assert_eq!(&deserialized.data[..line.len()], line);
-    }
-
-    #[test]
-    fn serial_console_data_length_fits_in_u16() {
-        // this is just a sanity check that if we bump `MAX_DATA_PER_PACKET`
-        // above 65535 we also need to change the type of `SerialConsole::len`
-        assert!(SerialConsole::MAX_DATA_PER_PACKET <= usize::from(u16::MAX));
-    }
 }

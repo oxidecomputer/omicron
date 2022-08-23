@@ -184,6 +184,10 @@ impl SerialConsoleTask {
                 packet = console_rx.recv() => {
                     match packet {
                         Some(data) => {
+                            info!(
+                                log, "received serial console data from SP";
+                                "length" => data.len(),
+                            );
                             data_from_sp.push_back(data);
                         }
                         None => {
