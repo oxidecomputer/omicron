@@ -32,7 +32,7 @@ use std::net::SocketAddrV6;
 use std::process::Command;
 use uuid::Uuid;
 
-use propolis_client::api::VolumeConstructionRequest;
+use crucible_client_types::VolumeConstructionRequest;
 
 #[cfg(not(test))]
 use crate::illumos::{dladm::Dladm, zfs::Zfs, zone::Zones};
@@ -114,20 +114,13 @@ impl From<Error> for dropshot::HttpError {
                         instance_error,
                     ) => match instance_error {
                         crate::instance::Error::Propolis(propolis_error) => {
-                            match propolis_error {
-                                propolis_client::Error::Reqwest(
-                                    reqwest_error,
-                                ) => HttpError::for_internal_error(
-                                    reqwest_error.to_string(),
+                            match propolis_error.status() {
+                                None => HttpError::for_internal_error(
+                                    propolis_error.to_string(),
                                 ),
 
-                                propolis_client::Error::Status(status_code) => {
-                                    HttpError::for_status(
-                                        None,
-                                        status_code.try_into().unwrap_or_else(
-                                            |_| 500.try_into().unwrap(),
-                                        ),
-                                    )
+                                Some(status_code) => {
+                                    HttpError::for_status(None, status_code)
                                 }
                             }
                         }

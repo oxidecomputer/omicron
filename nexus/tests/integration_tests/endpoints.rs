@@ -212,7 +212,11 @@ lazy_static! {
             Utc::now(),
             Utc::now(),
         );
+}
 
+// Separate lazy_static! blocks to avoid hitting some recursion limit when
+// compiling
+lazy_static! {
     // Instance used for testing
     pub static ref DEMO_INSTANCE_NAME: Name = "demo-instance".parse().unwrap();
     pub static ref DEMO_INSTANCE_URL: String =
@@ -237,6 +241,8 @@ lazy_static! {
         format!("{}/external-ips", *DEMO_INSTANCE_URL);
     pub static ref DEMO_INSTANCE_SERIAL_URL: String =
         format!("{}/serial-console", *DEMO_INSTANCE_URL);
+    pub static ref DEMO_INSTANCE_SERIAL_STREAM_URL: String =
+        format!("{}/serial-console/stream", *DEMO_INSTANCE_URL);
     pub static ref DEMO_INSTANCE_CREATE: params::InstanceCreate =
         params::InstanceCreate {
             identity: IdentityMetadataCreateParams {
@@ -282,8 +288,6 @@ lazy_static! {
     };
 }
 
-// Separate lazy_static! blocks to avoid hitting some recursion limit when
-// compiling
 lazy_static! {
     // Project Images
     pub static ref DEMO_IMAGE_NAME: Name = "demo-image".parse().unwrap();
@@ -508,6 +512,8 @@ pub enum AllowedMethod {
     /// other HTTP methods, we only make unprivileged requests, and they should
     /// always fail in the correct way.
     GetUnimplemented,
+    /// HTTP "GET" method with websocket handshake headers.
+    GetWebsocket,
     /// HTTP "POST" method, with sample input (which should be valid input for
     /// this endpoint)
     Post(serde_json::Value),
@@ -524,6 +530,7 @@ impl AllowedMethod {
             AllowedMethod::Get => &Method::GET,
             AllowedMethod::GetNonexistent => &Method::GET,
             AllowedMethod::GetUnimplemented => &Method::GET,
+            AllowedMethod::GetWebsocket => &Method::GET,
             AllowedMethod::Post(_) => &Method::POST,
             AllowedMethod::Put(_) => &Method::PUT,
         }
@@ -538,7 +545,8 @@ impl AllowedMethod {
             AllowedMethod::Delete
             | AllowedMethod::Get
             | AllowedMethod::GetNonexistent
-            | AllowedMethod::GetUnimplemented => None,
+            | AllowedMethod::GetUnimplemented
+            | AllowedMethod::GetWebsocket => None,
             AllowedMethod::Post(body) => Some(&body),
             AllowedMethod::Put(body) => Some(&body),
         }
@@ -1317,6 +1325,14 @@ lazy_static! {
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::GetNonexistent // has required query parameters
+            ],
+        },
+        VerifyEndpoint {
+            url: &*DEMO_INSTANCE_SERIAL_STREAM_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::GetWebsocket
             ],
         },
 

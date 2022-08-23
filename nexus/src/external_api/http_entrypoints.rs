@@ -20,7 +20,6 @@ use crate::db;
 use crate::db::model::Name;
 use crate::external_api::shared;
 use crate::ServerContext;
-use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::EmptyScanParams;
 use dropshot::HttpError;
@@ -37,6 +36,9 @@ use dropshot::RequestContext;
 use dropshot::ResultsPage;
 use dropshot::TypedBody;
 use dropshot::WhichPage;
+use dropshot::{
+    channel, endpoint, WebsocketChannelResult, WebsocketConnection,
+};
 use ipnetwork::IpNetwork;
 use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::data_page_params_nameid_id;
@@ -142,6 +144,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(instance_start)?;
         api.register(instance_stop)?;
         api.register(instance_serial_console)?;
+        api.register(instance_serial_console_stream)?;
 
         // Project-scoped images API
         api.register(image_list)?;
@@ -2292,6 +2295,36 @@ async fn instance_serial_console(
         Ok(HttpResponseOk(data))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Connect to an instance's serial console
+#[channel {
+    protocol = WEBSOCKETS,
+    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/serial-console/stream",
+    tags = ["instances"],
+}]
+async fn instance_serial_console_stream(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    conn: WebsocketConnection,
+    path_params: Path<InstancePathParam>,
+) -> WebsocketChannelResult {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
+    let project_name = &path.project_name;
+    let instance_name = &path.instance_name;
+    let opctx = OpContext::for_external_api(&rqctx).await?;
+    nexus
+        .instance_serial_console_stream(
+            &opctx,
+            conn,
+            organization_name,
+            project_name,
+            instance_name,
+        )
+        .await?;
+    Ok(())
 }
 
 /// List an instance's disks
