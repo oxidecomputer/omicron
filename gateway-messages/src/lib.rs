@@ -58,7 +58,7 @@ pub enum RequestKind {
     BulkIgnitionState,
     IgnitionCommand { target: u8, command: IgnitionCommand },
     SpState,
-    SerialConsoleWrite(SerialConsole),
+    SerialConsoleWrite(SpComponent),
     UpdateStart(UpdateStart),
     UpdateChunk(UpdateChunk),
     SysResetPrepare,
@@ -198,7 +198,7 @@ pub enum SpMessageKind {
 
     /// Data traveling from an SP-attached component (in practice, a CPU) on the
     /// component's serial console.
-    SerialConsole(SerialConsole),
+    SerialConsole(SpComponent),
 }
 
 #[derive(
@@ -440,124 +440,6 @@ impl TryFrom<&str> for SpComponent {
         component.id[..value.len()].copy_from_slice(value.as_bytes());
 
         Ok(component)
-    }
-}
-
-// We could derive `Copy`, but `data` is large-ish so we want callers to think
-// abount cloning.
-#[derive(Clone, SerializedSize)]
-pub struct SerialConsole {
-    /// Source component with an attached serial console.
-    pub component: SpComponent,
-
-    /// Offset of this chunk of data relative to all console data this
-    /// source has sent since it booted. The receiver can determine if it's
-    /// missed data and reconstruct out-of-order packets based on this value
-    /// plus `len`.
-    pub offset: u64,
-
-    /// Number of bytes in `data`.
-    pub len: u16,
-
-    /// Actual serial console data.
-    pub data: [u8; Self::MAX_DATA_PER_PACKET],
-}
-
-impl fmt::Debug for SerialConsole {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut debug = f.debug_struct("SerialConsole");
-        debug.field("component", &self.component);
-        debug.field("offset", &self.offset);
-        debug.field("len", &self.len);
-        let data = &self.data[..usize::from(self.len)];
-        if let Ok(s) = str::from_utf8(data) {
-            debug.field("data", &s);
-        } else {
-            debug.field("data", &data);
-        }
-        debug.finish()
-    }
-}
-
-impl SerialConsole {
-    // TODO: See discussion on `BulkIgnitionState::MAX_IGNITION_TARGETS` for
-    // concerns about setting this limit.
-    //
-    // A concern specific to `SerialConsole`: What should we do (if anything) to
-    // account for something like "user `cat`s a large file, which is now
-    // streaming across the management network"? A couple possibilities:
-    //
-    // 1. One packet per line, and truncate any lines longer than
-    //    `MAX_DATA_PER_PACKET` (seems like this could be _very_ annoying if a
-    //    user bumped into it without realizing it).
-    // 2. Rate limiting (enforced where?)
-    pub const MAX_DATA_PER_PACKET: usize = 128;
-}
-
-mod serial_console_serde {
-    use super::variable_packet::VariablePacket;
-    use super::*;
-
-    #[derive(Debug, Deserialize, Serialize)]
-    pub(crate) struct Header {
-        component: SpComponent,
-        offset: u64,
-        len: u16,
-    }
-
-    impl VariablePacket for SerialConsole {
-        type Header = Header;
-        type Element = u8;
-
-        const MAX_ELEMENTS: usize = Self::MAX_DATA_PER_PACKET;
-        const DESERIALIZE_NAME: &'static str = "serial console packet";
-
-        fn header(&self) -> Self::Header {
-            Header {
-                component: self.component,
-                offset: self.offset,
-                len: self.len,
-            }
-        }
-
-        fn num_elements(&self) -> u16 {
-            self.len
-        }
-
-        fn elements(&self) -> &[Self::Element] {
-            &self.data
-        }
-
-        fn elements_mut(&mut self) -> &mut [Self::Element] {
-            &mut self.data
-        }
-
-        fn from_header(header: Self::Header) -> Self {
-            Self {
-                component: header.component,
-                offset: header.offset,
-                len: header.len,
-                data: [0; Self::MAX_DATA_PER_PACKET],
-            }
-        }
-    }
-
-    impl Serialize for SerialConsole {
-        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: serde::Serializer,
-        {
-            VariablePacket::serialize(self, serializer)
-        }
-    }
-
-    impl<'de> Deserialize<'de> for SerialConsole {
-        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: serde::Deserializer<'de>,
-        {
-            VariablePacket::deserialize(deserializer)
-        }
     }
 }
 

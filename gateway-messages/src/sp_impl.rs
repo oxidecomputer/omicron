@@ -13,7 +13,6 @@ use crate::Request;
 use crate::RequestKind;
 use crate::ResponseError;
 use crate::ResponseKind;
-use crate::SerialConsole;
 use crate::SpComponent;
 use crate::SpMessage;
 use crate::SpMessageKind;
@@ -22,6 +21,7 @@ use crate::SpState;
 use crate::UpdateChunk;
 use crate::UpdateStart;
 use core::convert::Infallible;
+use core::mem;
 use hubpack::SerializedSize;
 
 #[cfg(feature = "std")]
@@ -80,6 +80,7 @@ pub trait SpHandler {
         sender: SocketAddrV6,
         port: SpPort,
         chunk: UpdateChunk,
+        data: &[u8],
     ) -> Result<(), ResponseError>;
 
     // TODO Should we return "number of bytes written" here, or is it sufficient
@@ -89,17 +90,18 @@ pub trait SpHandler {
         &mut self,
         sender: SocketAddrV6,
         port: SpPort,
-        packet: SerialConsole,
+        component: SpComponent,
+        data: &[u8],
     ) -> Result<(), ResponseError>;
 
-    fn sys_reset_prepare(
+    fn reset_prepare(
         &mut self,
         sender: SocketAddrV6,
         port: SpPort,
     ) -> Result<(), ResponseError>;
 
     // On success, this method cannot return (it should perform a reset).
-    fn sys_reset_trigger(
+    fn reset_trigger(
         &mut self,
         sender: SocketAddrV6,
         port: SpPort,
@@ -124,82 +126,6 @@ impl From<hubpack::error::Error> for Error {
     }
 }
 
-#[derive(Debug)]
-pub struct SerialConsolePacketizer {
-    component: SpComponent,
-    offset: u64,
-}
-
-impl SerialConsolePacketizer {
-    pub fn new(component: SpComponent) -> Self {
-        Self { component, offset: 0 }
-    }
-
-    pub fn packetize<'a, 'b>(
-        &'a mut self,
-        data: &'b [u8],
-    ) -> SerialConsolePackets<'a, 'b> {
-        SerialConsolePackets { parent: self, data }
-    }
-
-    /// Extract the first packet from `data`, returning that packet and any
-    /// remaining data (which may be empty).
-    ///
-    /// Panics if `data` is empty.
-    pub fn first_packet<'a>(
-        &mut self,
-        data: &'a [u8],
-    ) -> (SerialConsole, &'a [u8]) {
-        if data.is_empty() {
-            panic!();
-        }
-
-        let (this_packet, remaining) = data.split_at(usize::min(
-            data.len(),
-            SerialConsole::MAX_DATA_PER_PACKET,
-        ));
-
-        let mut packet = SerialConsole {
-            component: self.component,
-            offset: self.offset,
-            len: this_packet.len() as u16,
-            data: [0; SerialConsole::MAX_DATA_PER_PACKET],
-        };
-        packet.data[..this_packet.len()].copy_from_slice(this_packet);
-
-        self.offset += this_packet.len() as u64;
-
-        (packet, remaining)
-    }
-
-    // TODO this function exists only to allow callers to inject artifical gaps
-    // in the data they're sending; should we gate it behind a cargo feature?
-    pub fn danger_emulate_dropped_packets(&mut self, bytes_to_skip: u64) {
-        self.offset += bytes_to_skip;
-    }
-}
-
-#[derive(Debug)]
-pub struct SerialConsolePackets<'a, 'b> {
-    parent: &'a mut SerialConsolePacketizer,
-    data: &'b [u8],
-}
-
-impl Iterator for SerialConsolePackets<'_, '_> {
-    type Item = SerialConsole;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.data.is_empty() {
-            return None;
-        }
-
-        let (packet, remaining) = self.parent.first_packet(self.data);
-        self.data = remaining;
-
-        Some(packet)
-    }
-}
-
 /// Handle a single incoming message.
 ///
 /// The incoming message is described by `sender` (the remote address of the
@@ -220,15 +146,38 @@ pub fn handle_message<H: SpHandler>(
         return Err(Error::DataTooLarge);
     }
     let (request, leftover) = hubpack::deserialize::<Request>(data)?;
-    if !leftover.is_empty() {
-        return Err(Error::LeftoverData);
-    }
 
     // `version` is intentionally the first 4 bytes of the packet; we could
     // check it before trying to deserialize?
     if request.version != version::V1 {
         return Err(Error::UnsupportedVersion(request.version));
     }
+
+    // Do we expect any trailing raw data? Only for specific kinds of messages;
+    // if we get any for other messages, bail out.
+    let trailing_data = match &request.kind {
+        RequestKind::UpdateChunk(_) | RequestKind::SerialConsoleWrite(_) => {
+            if leftover.len() < mem::size_of::<u16>() {
+                return Err(Error::DeserializationFailed(
+                    hubpack::error::Error::Truncated,
+                ));
+            }
+            let (prefix, data) = leftover.split_at(mem::size_of::<u16>());
+            let len = u16::from_le_bytes([prefix[0], prefix[1]]);
+            if data.len() != usize::from(len) {
+                return Err(Error::DeserializationFailed(
+                    hubpack::error::Error::Invalid,
+                ));
+            }
+            data
+        }
+        _ => {
+            if !leftover.is_empty() {
+                return Err(Error::LeftoverData);
+            }
+            &[]
+        }
+    };
 
     // call out to handler to provide response
     let result = match request.kind {
@@ -251,16 +200,16 @@ pub fn handle_message<H: SpHandler>(
             .update_start(sender, port, update)
             .map(|()| ResponseKind::UpdateStartAck),
         RequestKind::UpdateChunk(chunk) => handler
-            .update_chunk(sender, port, chunk)
+            .update_chunk(sender, port, chunk, trailing_data)
             .map(|()| ResponseKind::UpdateChunkAck),
         RequestKind::SerialConsoleWrite(packet) => handler
-            .serial_console_write(sender, port, packet)
+            .serial_console_write(sender, port, packet, trailing_data)
             .map(|()| ResponseKind::SerialConsoleWriteAck),
         RequestKind::SysResetPrepare => handler
-            .sys_reset_prepare(sender, port)
+            .reset_prepare(sender, port)
             .map(|()| ResponseKind::SysResetPrepareAck),
         RequestKind::SysResetTrigger => {
-            handler.sys_reset_trigger(sender, port).map(|infallible| {
+            handler.reset_trigger(sender, port).map(|infallible| {
                 // A bit of type system magic here; `sys_reset_trigger`'s
                 // success type (`Infallible`) cannot be instantiated. We can
                 // provide an empty match to teach the type system that an
