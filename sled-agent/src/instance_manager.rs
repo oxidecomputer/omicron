@@ -192,6 +192,26 @@ impl InstanceManager {
             .await
             .map_err(Error::from)
     }
+
+    pub async fn instance_issue_disk_snapshot_request(
+        &self,
+        instance_id: Uuid,
+        disk_id: Uuid,
+        snapshot_id: Uuid,
+    ) -> Result<(), Error> {
+        let instance = {
+            let instances = self.inner.instances.lock().unwrap();
+            let (_, instance) = instances
+                .get(&instance_id)
+                .ok_or(Error::NoSuchInstance(instance_id))?;
+            instance.clone()
+        };
+
+        instance
+            .issue_snapshot_request(disk_id, snapshot_id)
+            .await
+            .map_err(Error::from)
+    }
 }
 
 /// Represents membership of an instance in the [`InstanceManager`].

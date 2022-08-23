@@ -18,11 +18,13 @@ use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::nexus::UpdateArtifact;
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
 
 use super::sled_agent::SledAgent;
+
+use propolis_client::api::VolumeConstructionRequest;
 
 type SledApiDescription = ApiDescription<SledAgent>;
 
@@ -35,6 +37,9 @@ pub fn api() -> SledApiDescription {
         api.register(disk_put)?;
         api.register(update_artifact)?;
         api.register(instance_serial_get)?;
+        api.register(instance_issue_disk_snapshot_request)?;
+        api.register(issue_disk_snapshot_request)?;
+
         Ok(())
     }
 
@@ -194,4 +199,94 @@ async fn instance_serial_get(
         .map_err(Error::from)?;
 
     Ok(HttpResponseOk(data))
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct InstanceIssueDiskSnapshotRequestPathParam {
+    instance_id: Uuid,
+    disk_id: Uuid,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct InstanceIssueDiskSnapshotRequestBody {
+    snapshot_id: Uuid,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub struct InstanceIssueDiskSnapshotRequestResponse {
+    snapshot_id: Uuid,
+}
+
+/// Take a snapshot of a disk that is attached to an instance
+///
+/// For disks not attached to an instance, see [`issue_disk_snapshot_request`]
+#[endpoint {
+    method = POST,
+    path = "/instances/{instance_id}/disks/{disk_id}/snapshot",
+}]
+async fn instance_issue_disk_snapshot_request(
+    rqctx: Arc<RequestContext<SledAgent>>,
+    path_params: Path<InstanceIssueDiskSnapshotRequestPathParam>,
+    body: TypedBody<InstanceIssueDiskSnapshotRequestBody>,
+) -> Result<HttpResponseOk<InstanceIssueDiskSnapshotRequestResponse>, HttpError>
+{
+    let sa = rqctx.context();
+    let path_params = path_params.into_inner();
+    let body = body.into_inner();
+
+    sa.instance_issue_disk_snapshot_request(
+        path_params.instance_id,
+        path_params.disk_id,
+        body.snapshot_id,
+    )
+    .await?;
+
+    Ok(HttpResponseOk(InstanceIssueDiskSnapshotRequestResponse {
+        snapshot_id: body.snapshot_id,
+    }))
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct IssueDiskSnapshotRequestPathParam {
+    disk_id: Uuid,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct DiskSnapshotRequestBody {
+    volume_construction_request: VolumeConstructionRequest,
+    snapshot_id: Uuid,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub struct DiskSnapshotRequestResponse {
+    snapshot_id: Uuid,
+}
+
+/// Take a snapshot of a disk that is not attached to an instance.
+///
+/// For disks attached to an instance, see
+/// [`instance_issue_disk_snapshot_request`]
+#[endpoint {
+    method = POST,
+    path = "/disks/{disk_id}/snapshot",
+}]
+async fn issue_disk_snapshot_request(
+    rqctx: Arc<RequestContext<SledAgent>>,
+    path_params: Path<IssueDiskSnapshotRequestPathParam>,
+    body: TypedBody<DiskSnapshotRequestBody>,
+) -> Result<HttpResponseOk<DiskSnapshotRequestResponse>, HttpError> {
+    let sa = rqctx.context();
+    let path_params = path_params.into_inner();
+    let body = body.into_inner();
+
+    sa.issue_disk_snapshot_request(
+        path_params.disk_id,
+        body.volume_construction_request,
+        body.snapshot_id,
+    )
+    .await?;
+
+    Ok(HttpResponseOk(DiskSnapshotRequestResponse {
+        snapshot_id: body.snapshot_id,
+    }))
 }

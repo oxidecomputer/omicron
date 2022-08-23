@@ -66,13 +66,13 @@ impl DataStore {
                 Ok(db::model::BlockSize::try_from(*block_size)
                     .map_err(|e| Error::invalid_request(&e.to_string()))?)
             }
-            params::DiskSource::Snapshot { snapshot_id: _ } => {
-                // Until we implement snapshots, do not allow disks to be
-                // created from a snapshot.
-                return Err(Error::InvalidValue {
-                    label: String::from("snapshot"),
-                    message: String::from("snapshots are not yet supported"),
-                });
+            params::DiskSource::Snapshot { snapshot_id } => {
+                let (.., db_snapshot) = LookupPath::new(opctx, &self)
+                    .snapshot_id(*snapshot_id)
+                    .fetch()
+                    .await?;
+
+                Ok(db_snapshot.block_size)
             }
             params::DiskSource::Image { image_id: _ } => {
                 // Until we implement project images, do not allow disks to be

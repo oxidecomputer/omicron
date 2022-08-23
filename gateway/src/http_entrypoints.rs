@@ -318,6 +318,7 @@ async fn sp_list(
                     // need more refined errors?
                     SpCommsError::Timeout { .. }
                     | SpCommsError::SpCommunicationFailed(_)
+                    | SpCommsError::BadIgnitionTarget(_)
                     | SpCommsError::LocalIgnitionControllerAddressUnknown
                     | SpCommsError::SpAddressUnknown(_) => {
                         SpState::Unresponsive
@@ -325,8 +326,8 @@ async fn sp_list(
                     // These errors should not be possible for the request we
                     // made.
                     SpCommsError::SpDoesNotExist(_)
-                    | SpCommsError::BadWebsocketConnection(_)
-                    | SpCommsError::SerialConsoleAttached => {
+                    | SpCommsError::SerialConsoleAttached
+                    | SpCommsError::UpdateFailed(_) => {
                         unreachable!("impossible error {}", err)
                     }
                 },
@@ -350,9 +351,6 @@ async fn sp_list(
 }
 
 /// Get info on an SP
-///
-/// As communication with SPs may be unreliable, consumers may specify an
-/// optional timeout to override the default.
 #[endpoint {
     method = GET,
     path = "/sp/{type}/{slot}",
@@ -360,34 +358,21 @@ async fn sp_list(
 async fn sp_get(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path: Path<PathSp>,
-    query: Query<Timeout>,
 ) -> Result<HttpResponseOk<SpInfo>, HttpError> {
     let apictx = rqctx.context();
     let comms = &apictx.sp_comms;
     let sp = path.into_inner().sp;
 
-    // TODO should we construct this here or after our `ignition_get`? By
-    // putting it here, the time it takes us to query ignition counts against
-    // the client's timeout; that seems right but puts us in a bind if their
-    // timeout expires while we're still waiting for ignition.
-    let timeout = SpTimeout::from_now(
-        query
-            .into_inner()
-            .timeout_millis
-            .map(|n| Duration::from_millis(u64::from(n)))
-            .unwrap_or(apictx.timeouts.sp_request),
-    );
-
     // ping the ignition controller first; if it says the SP is off or otherwise
     // unavailable, we're done.
     let state = comms
-        .get_ignition_state(sp.into(), timeout)
+        .get_ignition_state(sp.into())
         .await
         .map_err(http_err_from_comms_err)?;
 
     let details = if state.is_powered_on() {
         // ignition indicates the SP is on; ask it for its state
-        match comms.get_state(sp.into(), timeout).await {
+        match comms.get_state(sp.into()).await {
             Ok(state) => SpState::from(state),
             Err(SpCommsError::Timeout { .. }) => SpState::Unresponsive,
             Err(other) => return Err(http_err_from_comms_err(other)),
@@ -463,16 +448,15 @@ async fn sp_component_serial_console_attach(
     let component = component_from_str(&component)?;
     let mut request = rqctx.request.lock().await;
 
-    apictx
-        .sp_comms
-        .serial_console_attach(
-            &mut request,
-            sp.into(),
-            component,
-            apictx.timeouts.sp_request,
-        )
-        .await
-        .map_err(http_err_from_comms_err)
+    let sp = sp.into();
+    Ok(crate::serial_console::attach(
+        &apictx.sp_comms,
+        sp,
+        component,
+        &mut request,
+        apictx.log.new(slog::o!("sp" => format!("{sp:?}"))),
+    )
+    .await?)
 }
 
 /// Detach the websocket connection attached to the given SP component's serial
@@ -486,12 +470,13 @@ async fn sp_component_serial_console_detach(
     path: Path<PathSpComponent>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let comms = &rqctx.context().sp_comms;
-    let PathSpComponent { sp, component } = path.into_inner();
 
-    let component = component_from_str(&component)?;
+    // TODO-cleanup: "component" support for the serial console is half baked;
+    // we don't use it at all to detach.
+    let PathSpComponent { sp, component: _ } = path.into_inner();
 
     comms
-        .serial_console_detach(sp.into(), &component)
+        .serial_console_detach(sp.into())
         .await
         .map_err(http_err_from_comms_err)?;
 
@@ -500,7 +485,47 @@ async fn sp_component_serial_console_detach(
 
 // TODO: how can we make this generic enough to support any update mechanism?
 #[derive(Deserialize, JsonSchema)]
-struct UpdateBody {}
+pub struct UpdateBody {
+    pub image: Vec<u8>,
+}
+
+/// Update an SP
+///
+/// Copies a new image to the alternate bank of the SP flash.
+#[endpoint {
+    method = POST,
+    path = "/sp/{type}/{slot}/update",
+}]
+async fn sp_update(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path: Path<PathSp>,
+    body: TypedBody<UpdateBody>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let comms = &rqctx.context().sp_comms;
+    let sp = path.into_inner().sp;
+    let image = body.into_inner().image;
+
+    comms.update(sp.into(), &image).await.map_err(http_err_from_comms_err)?;
+
+    Ok(HttpResponseUpdatedNoContent {})
+}
+
+/// Reset an SP
+#[endpoint {
+    method = POST,
+    path = "/sp/{type}/{slot}/reset",
+}]
+async fn sp_reset(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path: Path<PathSp>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let comms = &rqctx.context().sp_comms;
+    let sp = path.into_inner().sp;
+
+    comms.reset(sp.into()).await.map_err(http_err_from_comms_err)?;
+
+    Ok(HttpResponseUpdatedNoContent {})
+}
 
 /// Update an SP component
 ///
@@ -571,9 +596,7 @@ async fn ignition_list(
     let sp_comms = &apictx.sp_comms;
 
     let all_state = sp_comms
-        .get_ignition_state_all(SpTimeout::from_now(
-            apictx.timeouts.ignition_controller,
-        ))
+        .get_ignition_state_all()
         .await
         .map_err(http_err_from_comms_err)?;
 
@@ -602,10 +625,7 @@ async fn ignition_get(
 
     let state = apictx
         .sp_comms
-        .get_ignition_state(
-            sp.into(),
-            SpTimeout::from_now(apictx.timeouts.ignition_controller),
-        )
+        .get_ignition_state(sp.into())
         .await
         .map_err(http_err_from_comms_err)?;
 
@@ -627,11 +647,7 @@ async fn ignition_power_on(
 
     apictx
         .sp_comms
-        .send_ignition_command(
-            sp.into(),
-            IgnitionCommand::PowerOn,
-            SpTimeout::from_now(apictx.timeouts.ignition_controller),
-        )
+        .send_ignition_command(sp.into(), IgnitionCommand::PowerOn)
         .await
         .map_err(http_err_from_comms_err)?;
 
@@ -652,11 +668,7 @@ async fn ignition_power_off(
 
     apictx
         .sp_comms
-        .send_ignition_command(
-            sp.into(),
-            IgnitionCommand::PowerOff,
-            SpTimeout::from_now(apictx.timeouts.ignition_controller),
-        )
+        .send_ignition_command(sp.into(), IgnitionCommand::PowerOff)
         .await
         .map_err(http_err_from_comms_err)?;
 
@@ -683,6 +695,8 @@ pub fn api() -> GatewayApiDescription {
     ) -> Result<(), String> {
         api.register(sp_list)?;
         api.register(sp_get)?;
+        api.register(sp_update)?;
+        api.register(sp_reset)?;
         api.register(sp_component_list)?;
         api.register(sp_component_get)?;
         api.register(sp_component_serial_console_attach)?;

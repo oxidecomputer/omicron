@@ -11,6 +11,13 @@ id = "8afcb12d-f625-4df9-bdf2-f495c3bbd323"
 # our contact to the ignition controller)
 local_ignition_controller_port = 0
 
+# when sending UDP RPC packets to an SP, how many total attempts do we make
+# before giving up?
+rpc_max_attempts = 5
+
+# sleep time between UDP RPC resends (up to `rpc_max_attempts`)
+rpc_per_attempt_timeout_millis = 5000
+
 [switch.location]
 # possible locations where MGS could be running; these names appear in logs and
 # are used in the remainder of the `[switch.*]` configuration to define port
@@ -76,8 +83,6 @@ switch1 = ["sled", 1]
 
 [timeouts]
 discovery_millis = 10_000
-ignition_controller_millis = 10_000
-sp_request_millis = 10_000
 bulk_request_default_millis = 10_000
 bulk_request_max_millis = 40_000
 bulk_request_page_millis = 2_000

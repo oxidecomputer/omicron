@@ -1131,7 +1131,7 @@ lazy_static! {
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
-                AllowedMethod::GetUnimplemented,
+                AllowedMethod::Get,
                 AllowedMethod::Post(
                     serde_json::to_value(DEMO_SNAPSHOT_CREATE.clone()).unwrap(),
                 )
@@ -1143,7 +1143,7 @@ lazy_static! {
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
-                AllowedMethod::GetUnimplemented,
+                AllowedMethod::Get,
             ],
         },
 
@@ -1152,7 +1152,7 @@ lazy_static! {
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
-                AllowedMethod::GetUnimplemented,
+                AllowedMethod::Get,
                 AllowedMethod::Delete,
             ]
         },

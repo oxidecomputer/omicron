@@ -70,7 +70,7 @@ pub async fn spoof_login(
         return Ok(Response::builder()
             .status(StatusCode::UNAUTHORIZED)
             .header(header::SET_COOKIE, clear_session_cookie_header_value())
-            .body("unauthorized".into())?); // TODO: failed login response body?
+            .body("".into())?); // TODO: failed login response body?
     }
 
     let user_id = user_id.unwrap();
@@ -90,7 +90,7 @@ pub async fn spoof_login(
                 apictx.session_idle_timeout(),
             ),
         )
-        .body("ok".into())?) // TODO: what do we return from login?
+        .body("".into())?) // TODO: what do we return from login?
 }
 
 // Silos have one or more identity providers, and an unauthenticated user will
@@ -376,7 +376,7 @@ pub async fn consume_credentials(
             return Ok(Response::builder()
                 .status(StatusCode::UNAUTHORIZED)
                 .header(header::SET_COOKIE, clear_session_cookie_header_value())
-                .body("unauthorized".into())?); // TODO: failed login response body?
+                .body("".into())?); // TODO: failed login response body?
         }
 
         let user = user.unwrap();
@@ -586,11 +586,17 @@ pub async fn console_index_or_login_redirect(
     // otherwise redirect to idp
 
     // put the current URI in the query string to redirect back to after login
-    let uri = rqctx.request.lock().await.uri().to_string();
+    let uri = rqctx
+        .request
+        .lock()
+        .await
+        .uri()
+        .path_and_query()
+        .map(|p| p.to_string());
 
     Ok(Response::builder()
         .status(StatusCode::FOUND)
-        .header(http::header::LOCATION, get_login_url(Some(uri)))
+        .header(http::header::LOCATION, get_login_url(uri))
         .body("".into())?)
 }
 

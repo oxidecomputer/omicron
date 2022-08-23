@@ -17,10 +17,6 @@ pub struct Timeouts {
     /// Timeout for running the discovery process to determine logical mappings
     /// of switches/sleds.
     pub discovery_millis: u64,
-    /// Timeout for messages to our local ignition controller SP.
-    pub ignition_controller_millis: u64,
-    /// Timeout for requests sent to arbitrary SPs.
-    pub sp_request_millis: u64,
     /// Default timeout for requests that collect responses from multiple
     /// targets, if the client doesn't provide one.
     pub bulk_request_default_millis: u64,

@@ -110,7 +110,10 @@ pub async fn device_auth_request(
 
         let model =
             nexus.device_auth_request_create(&opctx, params.client_id).await?;
-        build_oauth_response(StatusCode::OK, &model.into_response(host))
+        build_oauth_response(
+            StatusCode::OK,
+            &model.into_response(rqctx.server.tls, host),
+        )
     };
     // TODO: instrumentation doesn't work because we use `Response<Body>`
     //apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
