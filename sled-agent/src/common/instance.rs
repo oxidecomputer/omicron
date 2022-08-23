@@ -140,6 +140,7 @@ impl InstanceStates {
         target: &InstanceRuntimeStateRequested,
     ) -> Result<Option<Action>, Error> {
         match target.run_state {
+            InstanceStateRequested::Provisioned => self.request_provisioned(),
             InstanceStateRequested::Running => self.request_running(),
             InstanceStateRequested::Stopped => self.request_stopped(),
             InstanceStateRequested::Reboot => self.request_reboot(),
@@ -166,6 +167,49 @@ impl InstanceStates {
             run_state,
             migration_params: None,
         });
+    }
+
+    fn request_provisioned(&mut self) -> Result<Option<Action>, Error> {
+        match self.current.run_state {
+            // Valid states we can transition through and stop right before starting the Instance.
+            InstanceState::Creating
+            | InstanceState::Stopping
+            | InstanceState::Stopped
+            | InstanceState::Rebooting => {
+                self.transition(
+                    InstanceState::Provisioned,
+                    Some(InstanceStateRequested::Provisioned),
+                );
+                // No further action needed to provision the instance.
+                return Ok(None);
+            }
+
+            // No-op
+            InstanceState::Provisioned => return Ok(None),
+
+            // Can't go backwards if the Instance is already running (or will be shortly).
+            InstanceState::Starting
+            | InstanceState::Running
+            | InstanceState::Migrating => {
+                return Err(Error::InvalidRequest {
+                    message: format!(
+                        "instance already provisioned and in state \"{}\"",
+                        self.current.run_state,
+                    ),
+                });
+            }
+
+            InstanceState::Repairing
+            | InstanceState::Failed
+            | InstanceState::Destroyed => {
+                return Err(Error::InvalidRequest {
+                    message: format!(
+                        "instance in invalid state \"{}\"",
+                        self.current.run_state,
+                    ),
+                });
+            }
+        }
     }
 
     fn request_running(&mut self) -> Result<Option<Action>, Error> {
