@@ -575,6 +575,14 @@ async fn test_disk_region_creation_failure(
 
     // Attempt to allocate the disk, observe a server error.
     let disk_size = ByteCount::from_gibibytes_u32(3);
+
+    // Allocation should have room, it should fail due to the callback set
+    // above.
+    assert!(
+        disk_size.to_whole_gibibytes()
+            < DiskTest::DEFAULT_ZPOOL_SIZE_GIB.into()
+    );
+
     let disks_url = get_disks_url();
     let new_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
@@ -647,6 +655,13 @@ async fn test_disk_invalid_block_size_rejected(
 
     // Attempt to allocate the disk, observe a server error.
     let disk_size = ByteCount::from_gibibytes_u32(3);
+
+    // Allocation should have room, it should fail due to block size mismatch.
+    assert!(
+        disk_size.to_whole_gibibytes()
+            < DiskTest::DEFAULT_ZPOOL_SIZE_GIB.into()
+    );
+
     let disks_url = get_disks_url();
 
     let new_disk = params::DiskCreate {
@@ -683,6 +698,14 @@ async fn test_disk_reject_total_size_not_divisible_by_block_size(
 
     // Attempt to allocate the disk, observe a server error.
     let disk_size = ByteCount::from(3 * 1024 * 1024 * 1024 + 256);
+
+    // Allocation should have room, it should fail due to disk_size not being
+    // divisible by block size.
+    assert!(
+        disk_size.to_bytes()
+            < DiskTest::DEFAULT_ZPOOL_SIZE_GIB as u64 * 1024 * 1024 * 1024
+    );
+
     let disks_url = get_disks_url();
     let new_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
@@ -803,6 +826,9 @@ async fn test_disk_backed_by_multiple_region_sets(
     // Create three zpools, all 10 gibibytes, each with one dataset
     let mut test = DiskTest::new(&cptestctx).await;
 
+    // Assert default is still 10 GiB
+    assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
+
     // Create another three zpools, all 10 gibibytes, each with one dataset
     test.add_zpool_with_dataset(10).await;
     test.add_zpool_with_dataset(10).await;
@@ -843,6 +869,9 @@ async fn test_disk_too_big(cptestctx: &ControlPlaneTestContext) {
     DiskTest::new(&cptestctx).await;
     create_org_and_project(client).await;
 
+    // Assert default is still 10 GiB
+    assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
+
     // Ask for a 300 gibibyte disk (but only 10 is available)
     let disk_size = ByteCount::try_from(300u64 * 1024 * 1024 * 1024).unwrap();
     let disks_url = get_disks_url();
@@ -878,6 +907,9 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
     // Create three 10 GiB zpools, each with one dataset.
     let test = DiskTest::new(&cptestctx).await;
 
+    // Assert default is still 10 GiB
+    assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
+
     create_org_and_project(client).await;
 
     // Total occupied size should start at 0
@@ -894,7 +926,6 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
     }
 
     // Ask for a 7 gibibyte disk, this should succeed
-    eprintln!("create 7");
     let disk_size = ByteCount::try_from(7u64 * 1024 * 1024 * 1024).unwrap();
     let disks_url = get_disks_url();
 
@@ -937,7 +968,6 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
 
     // Ask for a 4 gibibyte disk, this should fail because there isn't space
     // available.
-    eprintln!("create 4");
     let disk_size = ByteCount::try_from(4u64 * 1024 * 1024 * 1024).unwrap();
     let disk_two = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
@@ -976,7 +1006,6 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
     }
 
     // Delete the first disk, freeing up 7 gibibytes.
-    eprintln!("delete 7");
     let disk_url = format!("{}/{}", disks_url, "disk-one");
     NexusRequest::new(
         RequestBuilder::new(client, Method::DELETE, &disk_url)
@@ -1001,7 +1030,6 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
     }
 
     // Ask for a 10 gibibyte disk.
-    eprintln!("create 10");
     let disk_size = ByteCount::try_from(10u64 * 1024 * 1024 * 1024).unwrap();
     let disk_three = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
@@ -1049,6 +1077,10 @@ async fn test_multiple_disks_multiple_zpools(
 
     // Create six 10 GB zpools, each with one dataset
     let mut test = DiskTest::new(&cptestctx).await;
+
+    // Assert default is still 10 GiB
+    assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
+
     test.add_zpool_with_dataset(10).await;
     test.add_zpool_with_dataset(10).await;
     test.add_zpool_with_dataset(10).await;

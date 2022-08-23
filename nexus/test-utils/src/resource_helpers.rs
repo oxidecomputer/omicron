@@ -410,6 +410,8 @@ pub struct DiskTest {
 }
 
 impl DiskTest {
+    pub const DEFAULT_ZPOOL_SIZE_GIB: u32 = 10;
+
     // Creates fake physical storage, an organization, and a project.
     pub async fn new(cptestctx: &ControlPlaneTestContext) -> Self {
         let sled_agent = cptestctx.sled_agent.sled_agent.clone();
@@ -418,7 +420,9 @@ impl DiskTest {
 
         // Create three Zpools, each 10 GiB, each with one Crucible dataset.
         for _ in 0..3 {
-            disk_test.add_zpool_with_dataset(10).await;
+            disk_test
+                .add_zpool_with_dataset(Self::DEFAULT_ZPOOL_SIZE_GIB)
+                .await;
         }
 
         disk_test
