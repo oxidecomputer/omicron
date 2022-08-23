@@ -173,10 +173,38 @@ impl super::Nexus {
                 }
                 SubnetError::External(e) => e,
             })?;
-        let rules = db::model::VpcFirewallRule::vec_from_params(
+
+        // Customize the default firewall rules for this VPC.
+        let mut rules = db::model::VpcFirewallRule::vec_from_params(
             authz_vpc.id(),
             defaults::DEFAULT_FIREWALL_RULES.clone(),
         );
+        for rule in rules.iter_mut() {
+            for target in rule.targets.iter_mut() {
+                match target.0 {
+                    external::VpcFirewallRuleTarget::Vpc(ref mut name)
+                        if name.as_str() == "default" =>
+                    {
+                        *name = params.identity.name.clone()
+                    }
+                    _ => (),
+                }
+                if let Some(ref mut filter_hosts) = rule.filter_hosts {
+                    for host in filter_hosts.iter_mut() {
+                        match host.0 {
+                            external::VpcFirewallRuleHostFilter::Vpc(
+                                ref mut name,
+                            ) if name.as_str() == "default" => {
+                                *name = params.identity.name.clone()
+                            }
+                            _ => (),
+                        }
+                    }
+                }
+            }
+        }
+        debug!(self.log, "default firewall rules"; "rules" => ?&rules);
+
         self.db_datastore
             .vpc_update_firewall_rules(opctx, &authz_vpc, rules.clone())
             .await?;
