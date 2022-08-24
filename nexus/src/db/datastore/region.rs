@@ -15,7 +15,6 @@ use crate::db::error::TransactionError;
 use crate::db::identity::Asset;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Dataset;
-use crate::db::model::DatasetKind;
 use crate::db::model::Region;
 use crate::db::model::Zpool;
 use crate::external_api::params;
@@ -199,75 +198,8 @@ impl DataStore {
                     .returning(Region::as_returning())
                     .get_results(conn)?;
 
-                // Validate that the datasets (really, the zpools) have the
-                // space for these regions
-                for dataset in source_datasets.iter() {
-                    let zpool_id = dataset.pool_id;
-
-                    // Add up size used by all regions in all datasets in the
-                    // zpool
-                    let zpool_total_occupied_size: Option<
-                        diesel::pg::data_types::PgNumeric,
-                    > = region_dsl::region
-                        .filter(
-                            region_dsl::dataset_id.eq_any(
-                                dataset_dsl::dataset
-                                    .filter(dataset_dsl::pool_id.eq(zpool_id))
-                                    .filter(
-                                        dataset_dsl::size_used.is_not_null(),
-                                    )
-                                    .filter(dataset_dsl::time_deleted.is_null())
-                                    .filter(
-                                        dataset_dsl::kind
-                                            .eq(DatasetKind::Crucible),
-                                    )
-                                    .select(dataset_dsl::id),
-                            ),
-                        )
-                        .select(diesel::dsl::sum(
-                            region_dsl::block_size
-                                * region_dsl::blocks_per_extent
-                                * region_dsl::extent_count,
-                        ))
-                        .nullable()
-                        .get_result(conn)?;
-
-                    let zpool_total_occupied_size: u64 = if let Some(
-                        zpool_total_occupied_size,
-                    ) =
-                        zpool_total_occupied_size
-                    {
-                        let zpool_total_occupied_size: db::model::ByteCount =
-                            zpool_total_occupied_size.try_into().map_err(
-                                |e: anyhow::Error| {
-                                    TxnError::CustomError(
-                                        RegionAllocateError::NumericError(
-                                            e.to_string(),
-                                        ),
-                                    )
-                                },
-                            )?;
-
-                        zpool_total_occupied_size.to_bytes()
-                    } else {
-                        0
-                    };
-
-                    let zpool = zpool_dsl::zpool
-                        .filter(zpool_dsl::id.eq(zpool_id))
-                        .select(Zpool::as_returning())
-                        .get_result(conn)?;
-
-                    // Does this go over the zpool's total size?
-                    if zpool.total_size.to_bytes() < zpool_total_occupied_size {
-                        return Err(TxnError::CustomError(
-                            RegionAllocateError::NotEnoughAvailableSpace,
-                        ));
-                    }
-                }
-
-                // Update the tallied sizes in the source datasets containing
-                // those regions.
+                // Update size_used in the source datasets containing those
+                // regions.
                 for dataset in source_datasets.iter_mut() {
                     let dataset_total_occupied_size: Option<
                         diesel::pg::data_types::PgNumeric,
@@ -312,6 +244,57 @@ impl DataStore {
 
                     // Update the results we'll send the caller
                     dataset.size_used = Some(dataset_total_occupied_size);
+                }
+
+                // Validate that the total of each dataset's size_used isn't
+                // larger the zpool's total_size
+                for dataset in source_datasets.iter() {
+                    let zpool_id = dataset.pool_id;
+
+                    // Add up size used by all regions in all datasets in the
+                    // zpool
+                    let zpool_total_occupied_size: Option<
+                        diesel::pg::data_types::PgNumeric,
+                    > = dataset_dsl::dataset
+                        .filter(dataset_dsl::pool_id.eq(zpool_id))
+                        .filter(dataset_dsl::size_used.is_not_null())
+                        .filter(dataset_dsl::time_deleted.is_null())
+                        .select(diesel::dsl::sum(dataset_dsl::size_used))
+                        .nullable()
+                        .get_result(conn)?;
+
+                    let zpool_total_occupied_size: u64 = if let Some(
+                        zpool_total_occupied_size,
+                    ) =
+                        zpool_total_occupied_size
+                    {
+                        let zpool_total_occupied_size: db::model::ByteCount =
+                            zpool_total_occupied_size.try_into().map_err(
+                                |e: anyhow::Error| {
+                                    TxnError::CustomError(
+                                        RegionAllocateError::NumericError(
+                                            e.to_string(),
+                                        ),
+                                    )
+                                },
+                            )?;
+
+                        zpool_total_occupied_size.to_bytes()
+                    } else {
+                        0
+                    };
+
+                    let zpool = zpool_dsl::zpool
+                        .filter(zpool_dsl::id.eq(zpool_id))
+                        .select(Zpool::as_returning())
+                        .get_result(conn)?;
+
+                    // Does this go over the zpool's total size?
+                    if zpool.total_size.to_bytes() < zpool_total_occupied_size {
+                        return Err(TxnError::CustomError(
+                            RegionAllocateError::NotEnoughAvailableSpace,
+                        ));
+                    }
                 }
 
                 // Return the regions with the datasets to which they were allocated.
