@@ -1691,6 +1691,7 @@ dependencies = [
  "bitflags",
  "hubpack",
  "serde",
+ "serde-big-array 0.4.1",
  "serde_repr",
  "smoltcp",
  "static_assertions",

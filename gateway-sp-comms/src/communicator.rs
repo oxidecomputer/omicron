@@ -128,14 +128,18 @@ impl Communicator {
             .ok_or(Error::LocalIgnitionControllerAddressUnknown)?;
         let bulk_state = controller.bulk_ignition_state().await?;
 
-        // deserializing checks that `num_targets` is reasonably sized, so we
-        // don't need to guard that here
-        let targets =
-            &bulk_state.targets[..usize::from(bulk_state.num_targets)];
-
         // map ignition target indices back to `SpIdentifier`s for our caller
-        targets
+        bulk_state
+            .targets
             .iter()
+            .filter(|state| {
+                // TODO-cleanup `state.id` should match one of the constants
+                // defined in RFD 142 section 5.2.2, all of which are nonzero.
+                // What does the real ignition controller return for unpopulated
+                // sleds? Our simulator returns 0 for unpopulated targets;
+                // filter those out.
+                state.id != 0
+            })
             .copied()
             .enumerate()
             .map(|(target, state)| {

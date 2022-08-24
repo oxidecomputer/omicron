@@ -5,7 +5,6 @@
 #![cfg_attr(all(not(test), not(feature = "std")), no_std)]
 
 pub mod sp_impl;
-mod variable_packet;
 
 use bitflags::bitflags;
 use core::fmt;
@@ -259,110 +258,21 @@ bitflags! {
     }
 }
 
-#[derive(Clone, PartialEq, SerializedSize)]
+#[derive(Debug, Clone, PartialEq, SerializedSize, Serialize, Deserialize)]
 pub struct BulkIgnitionState {
-    /// Number of ignition targets present in `targets`.
-    pub num_targets: u16,
     /// Ignition state for each target.
     ///
     /// TODO The ignition target is implicitly the array index; is that
     /// reasonable or should we specify target indices explicitly?
+    #[serde(with = "serde_big_array::BigArray")]
     pub targets: [IgnitionState; Self::MAX_IGNITION_TARGETS],
 }
 
-impl fmt::Debug for BulkIgnitionState {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut debug = f.debug_struct("BulkIgnitionState");
-        debug.field("num_targets", &self.num_targets);
-        let targets = &self.targets[..usize::from(self.num_targets)];
-        debug.field("targets", &targets);
-        debug.finish()
-    }
-}
-
 impl BulkIgnitionState {
-    // TODO We need to decide how to set max sizes for packets that may contain
-    // a variable amount of data. There are (at least) three concerns:
-    //
-    // 1. It determines a max packet size; we need to make sure this stays under
-    //    whatever limit is in place on the management network.
-    // 2. It determines the size of the relevant structs/enums (and
-    //    corresponding serialization/deserialization buffers). This is almost
-    //    certainly irrelevant for MGS, but is very relevant for SPs.
-    // 3. What are the implications on versioning of changing the size? It
-    //    doesn't actually affect the packet format on the wire, but a receiver
-    //    with a lower compiled-in max size will reject packets it receives with
-    //    more data than its max size.
-    //
-    // plus one note: these max sizes do not include the header overhead for the
-    // packets; that needs to be accounted for (particularly for point 1 above).
-    //
-    // Another question specific to `BulkIgnitionState`: Will we always send
-    // "max number of targets in the rack" states, even if some slots are
-    // unpopulated? Maybe this message shouldn't be variable at all. For now we
-    // leave it like it is; it's certainly "variable" in the sense that our
-    // simulated racks for tests have fewer than 36 targets.
+    // TODO-cleanup Is it okay to hard code this number to what we know the
+    // value is for the initial rack? For now assuming yes, and any changes in
+    // future products could use a different message.
     pub const MAX_IGNITION_TARGETS: usize = 36;
-}
-
-mod bulk_ignition_state_serde {
-    use super::variable_packet::VariablePacket;
-    use super::*;
-
-    #[derive(Debug, Deserialize, Serialize)]
-    pub(crate) struct Header {
-        num_targets: u16,
-    }
-
-    impl VariablePacket for BulkIgnitionState {
-        type Header = Header;
-        type Element = IgnitionState;
-
-        const MAX_ELEMENTS: usize = Self::MAX_IGNITION_TARGETS;
-        const DESERIALIZE_NAME: &'static str = "bulk ignition state packet";
-
-        fn header(&self) -> Self::Header {
-            Header { num_targets: self.num_targets }
-        }
-
-        fn num_elements(&self) -> u16 {
-            self.num_targets
-        }
-
-        fn elements(&self) -> &[Self::Element] {
-            &self.targets
-        }
-
-        fn elements_mut(&mut self) -> &mut [Self::Element] {
-            &mut self.targets
-        }
-
-        fn from_header(header: Self::Header) -> Self {
-            Self {
-                num_targets: header.num_targets,
-                targets: [IgnitionState::default();
-                    BulkIgnitionState::MAX_IGNITION_TARGETS],
-            }
-        }
-    }
-
-    impl Serialize for BulkIgnitionState {
-        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: serde::Serializer,
-        {
-            VariablePacket::serialize(self, serializer)
-        }
-    }
-
-    impl<'de> Deserialize<'de> for BulkIgnitionState {
-        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: serde::Deserializer<'de>,
-        {
-            VariablePacket::deserialize(deserializer)
-        }
-    }
 }
 
 #[derive(
