@@ -436,17 +436,28 @@ impl AttachedSerialConsoleRecv {
     }
 }
 
-#[derive(Debug)]
-struct RpcResponse {
-    result: Result<(SocketAddrV6, ResponseKind)>,
-    trailing_data: Option<Cursor<Vec<u8>>>,
-}
-
+// All RPC request/responses are handled by message passing to the `Inner` task
+// below. `trailing_data` deserves some extra documentation: Some packet types
+// (e.g., update chunks) want to send potentially-large binary data. We
+// serialize this data with `gateway_messages::serialize_with_trailing_data()`,
+// which appends as much data as will fit after the message header, but the
+// caller doesn't know how much data that is until serialization happens. To
+// handle this, we traffic in `Cursor<Vec<u8>>`s for communicating trailing data
+// to `Inner`. If `trailing_data` in the `RpcRequest` is `Some(_)`, it will
+// always be returned as `Some(_)` in the response as well, and the cursor will
+// have been advanced by however much data was packed into the single RPC packet
+// exchanged with the SP.
 #[derive(Debug)]
 struct RpcRequest {
     kind: RequestKind,
     trailing_data: Option<Cursor<Vec<u8>>>,
     response_tx: oneshot::Sender<RpcResponse>,
+}
+
+#[derive(Debug)]
+struct RpcResponse {
+    result: Result<(SocketAddrV6, ResponseKind)>,
+    trailing_data: Option<Cursor<Vec<u8>>>,
 }
 
 #[derive(Debug)]

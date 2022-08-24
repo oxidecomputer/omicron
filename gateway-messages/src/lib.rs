@@ -22,15 +22,6 @@ pub use hubpack::{deserialize, serialize, SerializedSize};
 /// Maximum size in bytes for a serialized message.
 pub const MAX_SERIALIZED_SIZE: usize = 1024;
 
-// Serialized requests can be followed by binary data (serial console, update
-// chunk); we want the majority of our packet to be available for that data.
-// Statically check that our serialized `Request` hasn't gotten too large. The
-// specific value here is somewhat arbitrary; if this check starts failing, it's
-// probably fine to reduce it some. The check is here to force us to think about
-// it.
-const_assert!(MAX_SERIALIZED_SIZE - Request::MAX_SIZE > 700);
-const_assert!(MAX_SERIALIZED_SIZE - SpMessage::MAX_SIZE > 700);
-
 pub mod version {
     pub const V1: u32 = 1;
 }
@@ -47,19 +38,23 @@ pub struct Request {
 }
 
 #[derive(Debug, Clone, SerializedSize, Serialize, Deserialize)]
-// TODO: Rework how we serialize packets that contain a large amount of data
-// (`SerialConsole`, `UpdateChunk`) to make this enum smaller.
-#[allow(clippy::large_enum_variant)]
 pub enum RequestKind {
     Discover,
     // TODO do we want to be able to request IgnitionState for all targets in
     // one message?
-    IgnitionState { target: u8 },
+    IgnitionState {
+        target: u8,
+    },
     BulkIgnitionState,
-    IgnitionCommand { target: u8, command: IgnitionCommand },
+    IgnitionCommand {
+        target: u8,
+        command: IgnitionCommand,
+    },
     SpState,
+    /// `SerialConsoleWrite` always includes trailing raw data.
     SerialConsoleWrite(SpComponent),
     UpdateStart(UpdateStart),
+    /// `UpdateChunk` always includes trailing raw data.
     UpdateChunk(UpdateChunk),
     SysResetPrepare,
     SysResetTrigger,
@@ -364,6 +359,14 @@ impl GatewayMessage for Request {}
 impl GatewayMessage for SpMessage {}
 impl private::Sealed for Request {}
 impl private::Sealed for SpMessage {}
+
+// `GatewayMessage` imlementers can be followed by binary data; we want the
+// majority of our packet to be available for that data. Statically check that
+// our serialized message headers haven't gotten too large. The specific value
+// here is arbitrary; if this check starts failing, it's probably fine to reduce
+// it some. The check is here to force us to think about it.
+const_assert!(MAX_SERIALIZED_SIZE - Request::MAX_SIZE > 700);
+const_assert!(MAX_SERIALIZED_SIZE - SpMessage::MAX_SIZE > 700);
 
 /// Returns `(serialized_size, data_bytes_written)` where `serialized_size` is
 /// the message size written to `out` and `data_bytes_written` is the number of
