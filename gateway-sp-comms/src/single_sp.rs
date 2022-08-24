@@ -164,8 +164,8 @@ impl SingleSp {
 
     /// Update th SP.
     ///
-    /// This is a bulk operation that will call [`Self::update_start()`]
-    /// followed by [`Self::update_chunk()`] the necessary number of times.
+    /// This is a bulk operation that will make multiple RPC calls to the SP to
+    /// deliver all of `image`.
     ///
     /// # Panics
     ///
