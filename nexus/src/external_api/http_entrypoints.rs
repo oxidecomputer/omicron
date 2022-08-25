@@ -2023,6 +2023,7 @@ async fn instance_reboot(
 async fn instance_start(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstancePathParam>,
+    params: TypedBody<params::InstanceStart>,
 ) -> Result<HttpResponseAccepted<Instance>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -2038,6 +2039,7 @@ async fn instance_start(
                 &organization_name,
                 &project_name,
                 &instance_name,
+                params.into_inner().only_provision.unwrap_or(false),
             )
             .await?;
         Ok(HttpResponseAccepted(instance.into()))

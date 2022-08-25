@@ -370,6 +370,7 @@ impl super::Nexus {
         organization_name: &Name,
         project_name: &Name,
         instance_name: &Name,
+        only_provision: bool,
     ) -> UpdateResult<db::model::Instance> {
         let (.., authz_instance, db_instance) =
             LookupPath::new(opctx, &self.db_datastore)
@@ -379,7 +380,11 @@ impl super::Nexus {
                 .fetch()
                 .await?;
         let requested = InstanceRuntimeStateRequested {
-            run_state: InstanceStateRequested::Running,
+            run_state: if only_provision {
+                InstanceStateRequested::Provisioned
+            } else {
+                InstanceStateRequested::Running
+            },
             migration_params: None,
         };
         self.instance_set_runtime(

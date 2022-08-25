@@ -3885,6 +3885,16 @@
             "style": "simple"
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstanceStart"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "202": {
             "description": "successfully enqueued operation",
@@ -8982,6 +8992,17 @@
           "data",
           "last_byte_offset"
         ]
+      },
+      "InstanceStart": {
+        "description": "Start-time parameters for an [`Instance`](omicron_common::api::external::Instance)",
+        "type": "object",
+        "properties": {
+          "only_provision": {
+            "nullable": true,
+            "description": "Whether to not only provision the Instance, but also run it.\n\nIf `true`, we provision but don't start running the Instance. If `false`, we provision AND start running the Instance.\n\nBy default, the Instance will be provisioned and placed in the \"Running\" state.",
+            "type": "boolean"
+          }
+        }
       },
       "InstanceState": {
         "description": "Running state of an Instance (primarily: booted or stopped)\n\nThis typically reflects whether it's starting, running, stopping, or stopped, but also includes states related to the Instance's lifecycle",
