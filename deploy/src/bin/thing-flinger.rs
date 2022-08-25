@@ -273,7 +273,7 @@ fn do_sync(config: &Config) -> Result<()> {
     Ok(())
 }
 
-fn copy_to_deployment_staging_dir_in_parallel(
+fn copy_to_deployment_staging_dir(
     config: &Config,
     src: String,
     description: &str,
@@ -286,34 +286,30 @@ fn copy_to_deployment_staging_dir_in_parallel(
     };
 
     // A function for each deployment server to run in parallel
-    let fns = config
-        .deployment_servers()
-        .map(|server| {
-            || {
-                let dst = format!(
-                    "{}@{}:{}",
-                    server.username,
-                    server.addr,
-                    config.deployment.staging_dir.to_str().unwrap()
+    let fns = config.deployment_servers().map(|server| {
+        || {
+            let dst = format!(
+                "{}@{}:{}",
+                server.username,
+                server.addr,
+                config.deployment.staging_dir.to_str().unwrap()
+            );
+            let mut cmd = partial_cmd();
+            cmd.arg(&dst);
+            let status = cmd
+                .status()
+                .context(format!("Failed to run command: ({:?})", cmd))?;
+            if !status.success() {
+                return Err(
+                    FlingError::FailedSync { src: src.clone(), dst }.into()
                 );
-                let mut cmd = partial_cmd();
-                cmd.arg(&dst);
-                let status = cmd
-                    .status()
-                    .context(format!("Failed to run command: ({:?})", cmd))?;
-                if !status.success() {
-                    return Err(FlingError::FailedSync {
-                        src: src.clone(),
-                        dst,
-                    }
-                    .into());
-                }
-                Ok(())
             }
-        })
-        .collect();
+            Ok(())
+        }
+    });
 
-    run_in_parallel(description, config.deployment.servers.iter(), fns);
+    let named_fns = config.deployment.servers.iter().zip(fns);
+    run_in_parallel(description, named_fns);
 
     Ok(())
 }
@@ -321,7 +317,7 @@ fn copy_to_deployment_staging_dir_in_parallel(
 fn rsync_config_needed_for_tools(config: &Config) -> Result<()> {
     let src = format!(
         // the `./` here is load-bearing; it interacts with `--relative` to tell
-        // rsync to create `tools` but none of its parents
+        // rsync to create `smf/sled-agent` but none of its parents
         "{}/./smf/sled-agent/",
         config
             .omicron_path
@@ -333,11 +329,7 @@ fn rsync_config_needed_for_tools(config: &Config) -> Result<()> {
             .to_string_lossy()
     );
 
-    copy_to_deployment_staging_dir_in_parallel(
-        config,
-        src,
-        "Copy smf/sled-agent dir",
-    )
+    copy_to_deployment_staging_dir(config, src, "Copy smf/sled-agent dir")
 }
 
 fn rsync_tools_dir_to_deployment_servers(config: &Config) -> Result<()> {
@@ -357,7 +349,7 @@ fn rsync_tools_dir_to_deployment_servers(config: &Config) -> Result<()> {
             ))?
             .to_string_lossy()
     );
-    copy_to_deployment_staging_dir_in_parallel(config, src, "Copy tools dir")
+    copy_to_deployment_staging_dir(config, src, "Copy tools dir")
 }
 
 fn do_install_prereqs(config: &Config) -> Result<()> {
@@ -390,32 +382,31 @@ fn do_install_prereqs(config: &Config) -> Result<()> {
     );
 
     // Install functions to run in parallel on each server
-    let fns = all_servers
-        .map(|(server, root_path)| {
-            || {
-                // -y: assume yes instead of prompting
-                // -p: skip check that deps end up in $PATH
-                let (script, script_type) = if *server == *builder {
-                    ("install_builder_prerequisites.sh -y -p", "builder")
-                } else {
-                    ("install_runner_prerequisites.sh -y", "runner")
-                };
+    let fns = all_servers.map(|(server, root_path)| {
+        || {
+            // -y: assume yes instead of prompting
+            // -p: skip check that deps end up in $PATH
+            let (script, script_type) = if *server == *builder {
+                ("install_builder_prerequisites.sh -y -p", "builder")
+            } else {
+                ("install_runner_prerequisites.sh -y", "runner")
+            };
 
-                let cmd = format!(
-                    "cd {} && mkdir -p out && pfexec ./tools/{}",
-                    root_path.display(),
-                    script
-                );
-                println!(
-                    "Install {} prerequisites on {}",
-                    script_type, server.addr
-                );
-                ssh_exec(server, &cmd, SshStrategy::NoForward)
-            }
-        })
-        .collect();
+            let cmd = format!(
+                "cd {} && mkdir -p out && pfexec ./tools/{}",
+                root_path.display(),
+                script
+            );
+            println!(
+                "Install {} prerequisites on {}",
+                script_type, server.addr
+            );
+            ssh_exec(server, &cmd, SshStrategy::NoForward)
+        }
+    });
 
-    run_in_parallel("Install prerequisites", server_names, fns);
+    let named_fns = server_names.zip(fns);
+    run_in_parallel("Install prerequisites", named_fns);
 
     Ok(())
 }
@@ -434,31 +425,25 @@ fn create_virtual_hardware_on_deployment_servers(config: &Config) {
         "cd {} && pfexec ./tools/create_virtual_hardware.sh",
         config.deployment.staging_dir.display()
     );
-    let fns = config
-        .deployment_servers()
-        .map(|server| {
-            || {
-                println!("Create virtual hardware on {}", server.addr);
-                ssh_exec(server, &cmd, SshStrategy::NoForward)
-            }
-        })
-        .collect();
+    let fns = config.deployment_servers().map(|server| {
+        || {
+            println!("Create virtual hardware on {}", server.addr);
+            ssh_exec(server, &cmd, SshStrategy::NoForward)
+        }
+    });
 
-    run_in_parallel(
-        "Create virtual hardware",
-        config.deployment.servers.iter(),
-        fns,
-    );
+    let named_fns = config.deployment.servers.iter().zip(fns);
+    run_in_parallel("Create virtual hardware", named_fns);
 }
 
 fn install_rustup_on_deployment_servers(config: &Config) {
     let cmd = "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | bash -s -- -y";
-    let fns = config
-        .deployment_servers()
-        .map(|server| || ssh_exec(server, cmd, SshStrategy::NoForwardNoProfile))
-        .collect();
+    let fns = config.deployment_servers().map(|server| {
+        || ssh_exec(server, cmd, SshStrategy::NoForwardNoProfile)
+    });
 
-    run_in_parallel("Install rustup", config.deployment.servers.iter(), fns);
+    let named_fns = config.deployment.servers.iter().zip(fns);
+    run_in_parallel("Install rustup", named_fns);
 }
 
 // Build omicron-package and omicron-deploy on the builder
@@ -521,7 +506,7 @@ fn do_uninstall(
     let mut deployment_src = PathBuf::from(&config.deployment.staging_dir);
     deployment_src.push(&artifact_dir);
     let builder = &config.servers[&config.builder.server];
-    for server in config.servers.values() {
+    for server in config.deployment_servers() {
         copy_omicron_package_binary_to_staging(config, builder, server)?;
 
         // Run `omicron-package uninstall` on the deployment server
@@ -537,19 +522,17 @@ fn do_uninstall(
     Ok(())
 }
 
-fn run_in_parallel<'a, F>(
-    op: &str,
-    server_names: impl Iterator<Item = &'a String>,
-    mut fns: Vec<F>,
-) where
+fn run_in_parallel<'a, F>(op: &str, cmds: impl Iterator<Item = (&'a String, F)>)
+where
     F: FnOnce() -> Result<()> + Send,
 {
     thread::scope(|s| {
-        let handles: Vec<ScopedJoinHandle<'_, Result<()>>> =
-            fns.drain(..).map(|f| s.spawn(|_| f())).collect();
+        let named_handles: Vec<(_, ScopedJoinHandle<'_, Result<()>>)> = cmds
+            .map(|(server_name, f)| (server_name, s.spawn(|_| f())))
+            .collect();
 
         // Join all the handles and print the install status
-        for (server_name, handle) in server_names.zip(handles) {
+        for (server_name, handle) in named_handles {
             match handle.join() {
                 Ok(Ok(())) => {
                     println!("{} completed for server: {}", op, server_name)
@@ -579,25 +562,20 @@ fn do_install(config: &Config, artifact_dir: &Path, install_dir: &Path) {
     let pkg_dir = pkg_dir.to_string_lossy();
     let pkg_dir = &pkg_dir;
 
-    let fns = config
-        .deployment
-        .servers
-        .iter()
-        .map(|server_name| {
-            || {
-                single_server_install(
-                    config,
-                    &artifact_dir,
-                    &install_dir,
-                    &pkg_dir,
-                    builder,
-                    server_name,
-                )
-            }
+    let fns = config.deployment.servers.iter().map(|server_name| {
+        (server_name, || {
+            single_server_install(
+                config,
+                &artifact_dir,
+                &install_dir,
+                &pkg_dir,
+                builder,
+                server_name,
+            )
         })
-        .collect();
+    });
 
-    run_in_parallel("Install", config.deployment.servers.iter(), fns);
+    run_in_parallel("Install", fns);
 }
 
 fn do_overlay(config: &Config) -> Result<()> {
@@ -679,7 +657,7 @@ fn overlay_rss_config(
         config.omicron_path.join("smf/sled-agent/config-rss.toml")
     };
     let dst = format!(
-        "{}@{}:{}",
+        "{}@{}:{}/config-rss.toml",
         builder.username,
         builder.addr,
         rss_server_dir.display()
