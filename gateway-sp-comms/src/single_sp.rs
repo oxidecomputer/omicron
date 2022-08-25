@@ -182,7 +182,7 @@ impl SingleSp {
 
         let mut image = Cursor::new(image);
         let mut offset = 0;
-        while !CursorUnstable::is_empty(&image) {
+        while !CursorExt::is_empty(&image) {
             let prior_pos = image.position();
             debug!(self.log, "sending update chunk"; "offset" => offset);
 
@@ -395,7 +395,7 @@ impl AttachedSerialConsoleSend {
     /// Write `data` to the serial console of the SP.
     pub async fn write(&self, data: Vec<u8>) -> Result<()> {
         let mut data = Cursor::new(data);
-        while !CursorUnstable::is_empty(&data) {
+        while !CursorExt::is_empty(&data) {
             let (result, new_data) = rpc_with_trailing_data(
                 &self.inner_tx,
                 RequestKind::SerialConsoleWrite(self.component),
@@ -748,7 +748,7 @@ impl Inner {
                     gateway_messages::serialize_with_trailing_data(
                         &mut outgoing_buf,
                         &request,
-                        CursorUnstable::remaining_slice(data),
+                        CursorExt::remaining_slice(data),
                     );
                 // `data` is an in-memory cursor; seeking can only fail if we
                 // provide a bogus offset, so it's safe to unwrap here.
@@ -959,12 +959,12 @@ fn sp_busy_policy() -> backoff::ExponentialBackoff {
 }
 
 // Helper trait to provide methods on `io::Cursor` that are currently unstable.
-trait CursorUnstable {
+trait CursorExt {
     fn is_empty(&self) -> bool;
     fn remaining_slice(&self) -> &[u8];
 }
 
-impl CursorUnstable for Cursor<Vec<u8>> {
+impl CursorExt for Cursor<Vec<u8>> {
     fn is_empty(&self) -> bool {
         self.position() as usize >= self.get_ref().len()
     }

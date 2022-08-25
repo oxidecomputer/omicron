@@ -38,7 +38,7 @@ pub(crate) async fn run(
     let mut out_buf = StdinOutBuf::new(raw);
     let mut flush_delay = FlushDelay::new(stdin_buffer_time);
     let console = sp
-        .serial_console_attach(SpComponent::SP3)
+        .serial_console_attach(SpComponent::SP3_HOST_CPU)
         .await
         .with_context(|| "failed to attach to serial console")?;
 

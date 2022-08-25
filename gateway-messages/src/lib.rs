@@ -298,8 +298,9 @@ impl SpComponent {
     /// Maximum number of bytes for a component ID.
     pub const MAX_ID_LENGTH: usize = 16;
 
-    /// The `sp3` CPU.
-    pub const SP3: Self = Self { id: *b"sp3\0\0\0\0\0\0\0\0\0\0\0\0\0" };
+    /// The `sp3` host CPU.
+    pub const SP3_HOST_CPU: Self =
+        Self { id: *b"sp3\0\0\0\0\0\0\0\0\0\0\0\0\0" };
 
     /// Interpret the component name as a human-readable string.
     ///
@@ -349,7 +350,7 @@ impl TryFrom<&str> for SpComponent {
     }
 }
 
-/// Sealed trait restricted the types that can be passed to
+/// Sealed trait restricting the types that can be passed to
 /// [`serialize_with_trailing_data()`].
 pub trait GatewayMessage: SerializedSize + Serialize + private::Sealed {}
 mod private {
