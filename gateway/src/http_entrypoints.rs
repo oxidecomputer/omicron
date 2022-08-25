@@ -505,7 +505,7 @@ async fn sp_update(
     let sp = path.into_inner().sp;
     let image = body.into_inner().image;
 
-    comms.update(sp.into(), &image).await.map_err(http_err_from_comms_err)?;
+    comms.update(sp.into(), image).await.map_err(http_err_from_comms_err)?;
 
     Ok(HttpResponseUpdatedNoContent {})
 }

@@ -10,9 +10,6 @@ use anyhow::Context;
 use anyhow::Result;
 use gateway_messages::sp_impl;
 use gateway_messages::sp_impl::SpHandler;
-use gateway_messages::Request;
-use gateway_messages::SerializedSize;
-use gateway_messages::SpMessage;
 use gateway_messages::SpPort;
 use slog::debug;
 use slog::error;
@@ -24,11 +21,12 @@ use std::net::SocketAddrV6;
 use std::sync::Arc;
 use tokio::net::UdpSocket;
 
-/// Thin wrapper pairing a [`UdpSocket`] with a buffer sized for [`Request`]s.
+/// Thin wrapper pairing a [`UdpSocket`] with a buffer sized for gateway
+/// messages.
 pub(crate) struct UdpServer {
     sock: Arc<UdpSocket>,
     local_addr: SocketAddrV6,
-    buf: [u8; Request::MAX_SIZE],
+    buf: [u8; gateway_messages::MAX_SERIALIZED_SIZE],
 }
 
 impl UdpServer {
@@ -70,7 +68,11 @@ impl UdpServer {
             "multicast_addr" => %multicast_addr,
         );
 
-        Ok(Self { sock, local_addr, buf: [0; Request::MAX_SIZE] })
+        Ok(Self {
+            sock,
+            local_addr,
+            buf: [0; gateway_messages::MAX_SERIALIZED_SIZE],
+        })
     }
 
     pub(crate) fn socket(&self) -> &Arc<UdpSocket> {
@@ -123,7 +125,7 @@ pub fn logger(config: &Config) -> Result<Logger> {
 pub(crate) async fn handle_request<'a, H: SpHandler>(
     handler: &mut H,
     recv: Result<(&[u8], SocketAddrV6)>,
-    out: &'a mut [u8; SpMessage::MAX_SIZE],
+    out: &'a mut [u8; gateway_messages::MAX_SERIALIZED_SIZE],
     responsiveness: Responsiveness,
     port_num: SpPort,
 ) -> Result<Option<(&'a [u8], SocketAddrV6)>> {

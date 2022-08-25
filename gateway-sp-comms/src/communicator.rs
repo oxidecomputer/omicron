@@ -22,6 +22,7 @@ use gateway_messages::DiscoverResponse;
 use gateway_messages::IgnitionCommand;
 use gateway_messages::IgnitionState;
 use gateway_messages::ResponseKind;
+use gateway_messages::SpComponent;
 use gateway_messages::SpState;
 use slog::info;
 use slog::o;
@@ -127,14 +128,18 @@ impl Communicator {
             .ok_or(Error::LocalIgnitionControllerAddressUnknown)?;
         let bulk_state = controller.bulk_ignition_state().await?;
 
-        // deserializing checks that `num_targets` is reasonably sized, so we
-        // don't need to guard that here
-        let targets =
-            &bulk_state.targets[..usize::from(bulk_state.num_targets)];
-
         // map ignition target indices back to `SpIdentifier`s for our caller
-        targets
+        bulk_state
+            .targets
             .iter()
+            .filter(|state| {
+                // TODO-cleanup `state.id` should match one of the constants
+                // defined in RFD 142 section 5.2.2, all of which are nonzero.
+                // What does the real ignition controller return for unpopulated
+                // sleds? Our simulator returns 0 for unpopulated targets;
+                // filter those out.
+                state.id != 0
+            })
             .copied()
             .enumerate()
             .map(|(target, state)| {
@@ -178,10 +183,11 @@ impl Communicator {
     pub async fn serial_console_attach(
         &self,
         sp: SpIdentifier,
+        component: SpComponent,
     ) -> Result<AttachedSerialConsole, Error> {
         let port = self.id_to_port(sp)?;
         let sp = self.switch.sp(port).ok_or(Error::SpAddressUnknown(sp))?;
-        Ok(sp.serial_console_attach().await?)
+        Ok(sp.serial_console_attach(component).await?)
     }
 
     /// Detach any existing connection to the given SP component's serial
@@ -207,7 +213,7 @@ impl Communicator {
     pub async fn update(
         &self,
         sp: SpIdentifier,
-        image: &[u8],
+        image: Vec<u8>,
     ) -> Result<(), Error> {
         let port = self.id_to_port(sp)?;
         let sp = self.switch.sp(port).ok_or(Error::SpAddressUnknown(sp))?;

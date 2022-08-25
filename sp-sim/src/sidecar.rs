@@ -21,8 +21,7 @@ use gateway_messages::IgnitionFlags;
 use gateway_messages::IgnitionState;
 use gateway_messages::ResponseError;
 use gateway_messages::SerialNumber;
-use gateway_messages::SerializedSize;
-use gateway_messages::SpMessage;
+use gateway_messages::SpComponent;
 use gateway_messages::SpPort;
 use gateway_messages::SpState;
 use slog::debug;
@@ -225,7 +224,7 @@ impl Inner {
     }
 
     async fn run(mut self) -> Result<()> {
-        let mut out_buf = [0; SpMessage::MAX_SIZE];
+        let mut out_buf = [0; gateway_messages::MAX_SERIALIZED_SIZE];
         let mut responsiveness = Responsiveness::Responsive;
         loop {
             select! {
@@ -346,7 +345,6 @@ impl SpHandler for Handler {
             BulkIgnitionState::MAX_IGNITION_TARGETS
         );
         let mut out = BulkIgnitionState {
-            num_targets: u16::try_from(num_targets).unwrap(),
             targets: [IgnitionState::default();
                 BulkIgnitionState::MAX_IGNITION_TARGETS],
         };
@@ -394,7 +392,8 @@ impl SpHandler for Handler {
         &mut self,
         sender: SocketAddrV6,
         port: SpPort,
-        _packet: gateway_messages::SerialConsole,
+        _component: SpComponent,
+        _data: &[u8],
     ) -> Result<(), ResponseError> {
         warn!(
             &self.log, "received serial console write; unsupported by sidecar";
@@ -443,6 +442,7 @@ impl SpHandler for Handler {
         sender: SocketAddrV6,
         port: SpPort,
         chunk: gateway_messages::UpdateChunk,
+        data: &[u8],
     ) -> Result<(), ResponseError> {
         warn!(
             &self.log,
@@ -450,12 +450,12 @@ impl SpHandler for Handler {
             "sender" => %sender,
             "port" => ?port,
             "offset" => chunk.offset,
-            "length" => chunk.chunk_length,
+            "length" => data.len(),
         );
         Err(ResponseError::RequestUnsupportedForSp)
     }
 
-    fn sys_reset_prepare(
+    fn reset_prepare(
         &mut self,
         sender: SocketAddrV6,
         port: SpPort,
@@ -468,7 +468,7 @@ impl SpHandler for Handler {
         Err(ResponseError::RequestUnsupportedForSp)
     }
 
-    fn sys_reset_trigger(
+    fn reset_trigger(
         &mut self,
         sender: SocketAddrV6,
         port: SpPort,
