@@ -155,7 +155,7 @@ impl InstanceStates {
     // generation number.
     //
     // This transition always succeeds.
-    fn transition(
+    pub(crate) fn transition(
         &mut self,
         next: InstanceState,
         desired: Option<InstanceStateRequested>,
