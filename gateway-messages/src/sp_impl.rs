@@ -82,15 +82,28 @@ pub trait SpHandler {
         data: &[u8],
     ) -> Result<(), ResponseError>;
 
-    // TODO Should we return "number of bytes written" here, or is it sufficient
-    // to say "all or none"? Would be nice for the caller to not have to resend
-    // UDP chunks; can SP ensure it writes all data locally?
-    fn serial_console_write(
+    fn serial_console_attach(
         &mut self,
         sender: SocketAddrV6,
         port: SpPort,
         component: SpComponent,
+    ) -> Result<(), ResponseError>;
+
+    /// The returned u64 should be the offset we want to receive in the next
+    /// call to `serial_console_write()`; i.e., the furthest offset we've
+    /// ingested (either by writing to the console or by buffering to write it).
+    fn serial_console_write(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+        offset: u64,
         data: &[u8],
+    ) -> Result<u64, ResponseError>;
+
+    fn serial_console_detach(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
     ) -> Result<(), ResponseError>;
 
     fn reset_prepare(
@@ -169,7 +182,8 @@ pub fn handle_message<H: SpHandler>(
     // Do we expect any trailing raw data? Only for specific kinds of messages;
     // if we get any for other messages, bail out.
     let trailing_data = match &request.kind {
-        RequestKind::UpdateChunk(_) | RequestKind::SerialConsoleWrite(_) => {
+        RequestKind::UpdateChunk(_)
+        | RequestKind::SerialConsoleWrite { .. } => {
             unpack_trailing_data(leftover)?
         }
         _ => {
@@ -203,9 +217,17 @@ pub fn handle_message<H: SpHandler>(
         RequestKind::UpdateChunk(chunk) => handler
             .update_chunk(sender, port, chunk, trailing_data)
             .map(|()| ResponseKind::UpdateChunkAck),
-        RequestKind::SerialConsoleWrite(packet) => handler
-            .serial_console_write(sender, port, packet, trailing_data)
-            .map(|()| ResponseKind::SerialConsoleWriteAck),
+        RequestKind::SerialConsoleAttach(component) => handler
+            .serial_console_attach(sender, port, component)
+            .map(|()| ResponseKind::SerialConsoleAttachAck),
+        RequestKind::SerialConsoleWrite { offset } => handler
+            .serial_console_write(sender, port, offset, trailing_data)
+            .map(|n| ResponseKind::SerialConsoleWriteAck {
+                furthest_ingested_offset: n,
+            }),
+        RequestKind::SerialConsoleDetach => handler
+            .serial_console_detach(sender, port)
+            .map(|()| ResponseKind::SerialConsoleDetachAck),
         RequestKind::SysResetPrepare => handler
             .reset_prepare(sender, port)
             .map(|()| ResponseKind::SysResetPrepareAck),

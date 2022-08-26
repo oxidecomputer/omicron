@@ -25,6 +25,8 @@ pub enum SpCommunicationError {
     BadResponseType(#[from] BadResponseType),
     #[error("Error response from SP: {0}")]
     SpError(#[from] ResponseError),
+    #[error("Bogus serial console state; detach and reattach")]
+    BogusSerialConsoleState,
 }
 
 #[derive(Debug, Error)]
@@ -36,10 +38,6 @@ pub enum UpdateError {
     #[error("error sending update chunk at offset {offset}: {err}")]
     Chunk { offset: u32, err: SpCommunicationError },
 }
-
-#[derive(Debug, Error)]
-#[error("serial console already attached")]
-pub struct SerialConsoleAlreadyAttached;
 
 #[derive(Debug, Error)]
 pub enum StartupError {
@@ -77,12 +75,6 @@ pub enum Error {
     UpdateFailed(#[from] UpdateError),
     #[error("serial console is already attached")]
     SerialConsoleAttached,
-}
-
-impl From<SerialConsoleAlreadyAttached> for Error {
-    fn from(_: SerialConsoleAlreadyAttached) -> Self {
-        Self::SerialConsoleAttached
-    }
 }
 
 #[derive(Debug, Error)]

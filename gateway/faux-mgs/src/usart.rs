@@ -44,7 +44,7 @@ pub(crate) async fn run(
 
     let (console_tx, mut console_rx) = console.split();
     let (send_tx, send_rx) = mpsc::channel(8);
-    tokio::spawn(async move {
+    let tx_to_sp_handle = tokio::spawn(async move {
         relay_data_to_sp(console_tx, send_rx).await.unwrap();
     });
 
@@ -53,6 +53,8 @@ pub(crate) async fn run(
             result = stdin.read_buf(&mut stdin_buf) => {
                 let n = result.with_context(|| "failed to read from stdin")?;
                 if n == 0 {
+                    mem::drop(send_tx);
+                    tx_to_sp_handle.await.unwrap();
                     return Ok(());
                 }
 
@@ -83,16 +85,20 @@ pub(crate) async fn run(
 }
 
 async fn relay_data_to_sp(
-    console_tx: AttachedSerialConsoleSend,
+    mut console_tx: AttachedSerialConsoleSend,
     mut data_rx: mpsc::Receiver<Vec<u8>>,
 ) -> Result<()> {
     loop {
         let data = match data_rx.recv().await {
             Some(data) => data,
-            None => return Ok(()),
+            None => break,
         };
         console_tx.write(data).await?;
     }
+
+    console_tx.detach().await?;
+
+    Ok(())
 }
 
 struct UnrawTermiosGuard {

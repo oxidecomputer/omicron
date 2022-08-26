@@ -198,7 +198,7 @@ impl Communicator {
     ) -> Result<(), Error> {
         let port = self.id_to_port(sp)?;
         let sp = self.switch.sp(port).ok_or(Error::SpAddressUnknown(sp))?;
-        sp.serial_console_detach().await;
+        sp.serial_console_detach().await?;
         Ok(())
     }
 
@@ -291,7 +291,11 @@ pub(crate) trait ResponseKindExt {
 
     fn expect_sp_state(self) -> Result<SpState, BadResponseType>;
 
-    fn expect_serial_console_write_ack(self) -> Result<(), BadResponseType>;
+    fn expect_serial_console_attach_ack(self) -> Result<(), BadResponseType>;
+
+    fn expect_serial_console_write_ack(self) -> Result<u64, BadResponseType>;
+
+    fn expect_serial_console_detach_ack(self) -> Result<(), BadResponseType>;
 
     fn expect_update_start_ack(self) -> Result<(), BadResponseType>;
 
@@ -314,8 +318,14 @@ impl ResponseKindExt for ResponseKind {
                 response_kind_names::IGNITION_COMMAND_ACK
             }
             ResponseKind::SpState(_) => response_kind_names::SP_STATE,
-            ResponseKind::SerialConsoleWriteAck => {
+            ResponseKind::SerialConsoleAttachAck => {
+                response_kind_names::SERIAL_CONSOLE_ATTACH_ACK
+            }
+            ResponseKind::SerialConsoleWriteAck { .. } => {
                 response_kind_names::SERIAL_CONSOLE_WRITE_ACK
+            }
+            ResponseKind::SerialConsoleDetachAck => {
+                response_kind_names::SERIAL_CONSOLE_DETACH_ACK
             }
             ResponseKind::UpdateStartAck => {
                 response_kind_names::UPDATE_START_ACK
@@ -381,9 +391,31 @@ impl ResponseKindExt for ResponseKind {
         }
     }
 
-    fn expect_serial_console_write_ack(self) -> Result<(), BadResponseType> {
+    fn expect_serial_console_attach_ack(self) -> Result<(), BadResponseType> {
         match self {
-            ResponseKind::SerialConsoleWriteAck => Ok(()),
+            ResponseKind::SerialConsoleAttachAck => Ok(()),
+            other => Err(BadResponseType {
+                expected: response_kind_names::SP_STATE,
+                got: other.name(),
+            }),
+        }
+    }
+
+    fn expect_serial_console_write_ack(self) -> Result<u64, BadResponseType> {
+        match self {
+            ResponseKind::SerialConsoleWriteAck {
+                furthest_ingested_offset,
+            } => Ok(furthest_ingested_offset),
+            other => Err(BadResponseType {
+                expected: response_kind_names::SP_STATE,
+                got: other.name(),
+            }),
+        }
+    }
+
+    fn expect_serial_console_detach_ack(self) -> Result<(), BadResponseType> {
+        match self {
+            ResponseKind::SerialConsoleDetachAck => Ok(()),
             other => Err(BadResponseType {
                 expected: response_kind_names::SP_STATE,
                 got: other.name(),
@@ -428,8 +460,12 @@ mod response_kind_names {
     pub(super) const BULK_IGNITION_STATE: &str = "bulk_ignition_state";
     pub(super) const IGNITION_COMMAND_ACK: &str = "ignition_command_ack";
     pub(super) const SP_STATE: &str = "sp_state";
+    pub(super) const SERIAL_CONSOLE_ATTACH_ACK: &str =
+        "serial_console_attach_ack";
     pub(super) const SERIAL_CONSOLE_WRITE_ACK: &str =
         "serial_console_write_ack";
+    pub(super) const SERIAL_CONSOLE_DETACH_ACK: &str =
+        "serial_console_detach_ack";
     pub(super) const UPDATE_START_ACK: &str = "update_start_ack";
     pub(super) const UPDATE_CHUNK_ACK: &str = "update_chunk_ack";
     pub(super) const SYS_RESET_PREPARE_ACK: &str = "sys_reset_prepare_ack";

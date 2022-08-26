@@ -51,8 +51,14 @@ pub enum RequestKind {
         command: IgnitionCommand,
     },
     SpState,
+    SerialConsoleAttach(SpComponent),
     /// `SerialConsoleWrite` always includes trailing raw data.
-    SerialConsoleWrite(SpComponent),
+    SerialConsoleWrite {
+        /// Offset of the first byte of this packet, starting from 0 when this
+        /// serial console session was attached.
+        offset: u64,
+    },
+    SerialConsoleDetach,
     UpdateStart(UpdateStart),
     /// `UpdateChunk` always includes trailing raw data.
     UpdateChunk(UpdateChunk),
@@ -87,7 +93,9 @@ pub enum ResponseKind {
     SpState(SpState),
     UpdateStartAck,
     UpdateChunkAck,
-    SerialConsoleWriteAck,
+    SerialConsoleAttachAck,
+    SerialConsoleWriteAck { furthest_ingested_offset: u64 },
+    SerialConsoleDetachAck,
     SysResetPrepareAck,
     // There is intentionally no `SysResetTriggerAck` response; the expected
     // "resposne" to `SysResetTrigger` is an SP reset, which won't allow for
@@ -125,6 +133,11 @@ pub enum ResponseError {
     RequestUnsupportedForComponent,
     /// The specified ignition target does not exist.
     IgnitionTargetDoesNotExist(u8),
+    /// Cannot write to the serial console because it is not attached.
+    SerialConsoleNotAttached,
+    /// Cannot attach to the serial console because another MGS instance is
+    /// already attached.
+    SerialConsoleAlreadyAttached,
     /// An update is already in progress with the specified amount of data
     /// already provided. MGS should resume the update at that offset.
     UpdateInProgress { bytes_received: u32 },
@@ -153,6 +166,12 @@ impl fmt::Display for ResponseError {
             }
             ResponseError::IgnitionTargetDoesNotExist(target) => {
                 write!(f, "nonexistent ignition target {}", target)
+            }
+            ResponseError::SerialConsoleNotAttached => {
+                write!(f, "serial console is not attached")
+            }
+            ResponseError::SerialConsoleAlreadyAttached => {
+                write!(f, "serial console already attached")
             }
             ResponseError::UpdateInProgress { bytes_received } => {
                 write!(f, "update still in progress ({bytes_received} bytes received so far)")
