@@ -63,9 +63,12 @@ pub struct TransactionId {
 
 /// A sprockets server endpoint. We don't know the identity of the endpoint
 /// until the session is established.
-pub struct StorageNode {
+pub struct StorageNode<Chan>
+where
+    Chan: AsyncRead + AsyncWrite,
+{
     addr: Ipv6Addr,
-    session: sprockets_host::Session<TcpStream>,
+    session: Chan,
     id: Identity,
 }
 
