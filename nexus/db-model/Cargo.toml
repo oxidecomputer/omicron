@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
+[build-dependencies.omicron-rpaths]
+path = "../../rpaths"
+
 [dependencies]
 anyhow = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
@@ -13,6 +16,8 @@ ipnetwork = "0.20"
 macaddr = { version = "1.0.1", features = [ "serde_std" ]}
 newtype_derive = "0.1.6"
 parse-display = "0.5.4"
+# See omicron-rpaths for more about the "pq-sys" dependency.
+pq-sys = "*"
 rand = "0.8.5"
 ref-cast = "1.0"
 schemars = { version = "0.8.10", features = ["chrono", "uuid1"] }

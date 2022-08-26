@@ -394,37 +394,101 @@ pub async fn project_get(
         .expect("failed to parse Project")
 }
 
+pub struct TestDataset {
+    pub id: Uuid,
+}
+
+pub struct TestZpool {
+    pub id: Uuid,
+    pub size: ByteCount,
+    pub datasets: Vec<TestDataset>,
+}
+
 pub struct DiskTest {
     pub sled_agent: Arc<SledAgent>,
-    pub zpool_id: Uuid,
-    pub zpool_size: ByteCount,
-    pub dataset_ids: Vec<Uuid>,
+    pub zpools: Vec<TestZpool>,
 }
 
 impl DiskTest {
+    pub const DEFAULT_ZPOOL_SIZE_GIB: u32 = 10;
+
     // Creates fake physical storage, an organization, and a project.
     pub async fn new(cptestctx: &ControlPlaneTestContext) -> Self {
         let sled_agent = cptestctx.sled_agent.sled_agent.clone();
 
-        // Create a Zpool.
-        let zpool_id = Uuid::new_v4();
-        let zpool_size = ByteCount::from_gibibytes_u32(10);
-        sled_agent.create_zpool(zpool_id, zpool_size.to_bytes()).await;
+        let mut disk_test = Self { sled_agent, zpools: vec![] };
 
-        // Create multiple Datasets within that Zpool.
-        let dataset_count = 3;
-        let dataset_ids: Vec<_> =
-            (0..dataset_count).map(|_| Uuid::new_v4()).collect();
-        for id in &dataset_ids {
-            sled_agent.create_crucible_dataset(zpool_id, *id).await;
+        // Create three Zpools, each 10 GiB, each with one Crucible dataset.
+        for _ in 0..3 {
+            disk_test
+                .add_zpool_with_dataset(Self::DEFAULT_ZPOOL_SIZE_GIB)
+                .await;
+        }
+
+        disk_test
+    }
+
+    pub async fn add_zpool_with_dataset(&mut self, gibibytes: u32) {
+        let zpool = TestZpool {
+            id: Uuid::new_v4(),
+            size: ByteCount::from_gibibytes_u32(gibibytes),
+            datasets: vec![TestDataset { id: Uuid::new_v4() }],
+        };
+
+        self.sled_agent.create_zpool(zpool.id, zpool.size.to_bytes()).await;
+
+        for dataset in &zpool.datasets {
+            self.sled_agent.create_crucible_dataset(zpool.id, dataset.id).await;
 
             // By default, regions are created immediately.
-            let crucible = sled_agent.get_crucible_dataset(zpool_id, *id).await;
+            let crucible = self
+                .sled_agent
+                .get_crucible_dataset(zpool.id, dataset.id)
+                .await;
             crucible
                 .set_create_callback(Box::new(|_| RegionState::Created))
                 .await;
         }
 
-        Self { sled_agent, zpool_id, zpool_size, dataset_ids }
+        self.zpools.push(zpool);
+    }
+
+    pub async fn set_requested_then_created_callback(&self) {
+        for zpool in &self.zpools {
+            for dataset in &zpool.datasets {
+                let crucible = self
+                    .sled_agent
+                    .get_crucible_dataset(zpool.id, dataset.id)
+                    .await;
+                let called = std::sync::atomic::AtomicBool::new(false);
+                crucible
+                    .set_create_callback(Box::new(move |_| {
+                        if !called.load(std::sync::atomic::Ordering::SeqCst) {
+                            called.store(
+                                true,
+                                std::sync::atomic::Ordering::SeqCst,
+                            );
+                            RegionState::Requested
+                        } else {
+                            RegionState::Created
+                        }
+                    }))
+                    .await;
+            }
+        }
+    }
+
+    pub async fn set_always_fail_callback(&self) {
+        for zpool in &self.zpools {
+            for dataset in &zpool.datasets {
+                let crucible = self
+                    .sled_agent
+                    .get_crucible_dataset(zpool.id, dataset.id)
+                    .await;
+                crucible
+                    .set_create_callback(Box::new(|_| RegionState::Failed))
+                    .await;
+            }
+        }
     }
 }

@@ -674,13 +674,10 @@ mod test {
         logctx.cleanup_successful();
     }
 
-    // TODO: This test should be updated when the correct handling
-    // of this out-of-space case is implemented.
     #[tokio::test]
-    async fn test_region_allocation_out_of_space_does_not_fail_yet() {
-        let logctx = dev::test_setup_log(
-            "test_region_allocation_out_of_space_does_not_fail_yet",
-        );
+    async fn test_region_allocation_out_of_space_fails() {
+        let logctx =
+            dev::test_setup_log("test_region_allocation_out_of_space_fails");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&cfg);
@@ -714,8 +711,10 @@ mod test {
         let params = create_test_disk_create_params("disk1", disk_size);
         let volume1_id = Uuid::new_v4();
 
-        // NOTE: This *should* be an error, rather than succeeding.
-        datastore.region_allocate(&opctx, volume1_id, &params).await.unwrap();
+        assert!(datastore
+            .region_allocate(&opctx, volume1_id, &params)
+            .await
+            .is_err());
 
         let _ = db.cleanup().await;
         logctx.cleanup_successful();
