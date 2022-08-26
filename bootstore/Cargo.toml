@@ -1,0 +1,12 @@
+[package]
+name = "bootstore"
+description = "A replicated datastore read before CockroachDb is available"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[dependencies]
+sprockets-common = { git = "http://github.com/oxidecomputer/sprockets", rev = "0361fd13ff19cda6696242fe40f1325fca30d3d1" }
+sprockets-host = { git = "http://github.com/oxidecomputer/sprockets", rev = "0361fd13ff19cda6696242fe40f1325fca30d3d1" }
+tokio = { version = "1.20", features = [ "full" ] }
+thiserror = "1.0"

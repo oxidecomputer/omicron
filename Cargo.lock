@@ -339,6 +339,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "bootstore"
+version = "0.1.0"
+dependencies = [
+ "sprockets-common",
+ "sprockets-host",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "bstr"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
