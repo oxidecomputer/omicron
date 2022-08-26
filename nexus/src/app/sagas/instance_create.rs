@@ -924,7 +924,11 @@ async fn sic_instance_ensure(
     let params = sagactx.saga_params::<Params>()?;
     let datastore = osagactx.datastore();
     let runtime_params = InstanceRuntimeStateRequested {
-        run_state: InstanceStateRequested::Running,
+        run_state: if params.create_params.only_create.unwrap_or(false) {
+            InstanceStateRequested::Stopped
+        } else {
+            InstanceStateRequested::Running
+        },
         migration_params: None,
     };
 

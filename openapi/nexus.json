@@ -8792,6 +8792,11 @@
               }
             ]
           },
+          "only_create": {
+            "nullable": true,
+            "description": "Whether to not only create the Instance, but also run it.\n\nIf `true`, the instance will be created but not started. If `false`, the instance will be created and started immediately.\n\nBy default, the instance will be created and started.",
+            "type": "boolean"
+          },
           "user_data": {
             "description": "User data for instance initialization systems (such as cloud-init). Must be a Base64-encoded string, as specified in RFC 4648 § 4 (+ and / characters with padding). Maximum 32 KiB unencoded data.",
             "default": "",

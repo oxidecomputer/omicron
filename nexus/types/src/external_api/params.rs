@@ -466,6 +466,14 @@ pub struct InstanceCreate {
     /// The disks to be created or attached for this instance.
     #[serde(default)]
     pub disks: Vec<InstanceDiskAttachment>,
+
+    /// Whether to not only create the Instance, but also run it.
+    ///
+    /// If `true`, the instance will be created but not started.
+    /// If `false`, the instance will be created and started immediately.
+    ///
+    /// By default, the instance will be created and started.
+    pub only_create: Option<bool>,
 }
 
 /// Start-time parameters for an [`Instance`](omicron_common::api::external::Instance)
