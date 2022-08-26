@@ -329,10 +329,25 @@ async fn sic_alloc_server(
     sagactx: NexusActionContext,
 ) -> Result<Uuid, ActionError> {
     let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params::<Params>()?;
+
+    // ALLOCATION POLICY
+    //
+    // NOTE: This policy can - and should! - be changed.
+    //
+    // See https://rfd.shared.oxide.computer/rfd/0205 for a more complete
+    // discussion.
+    //
+    // Right now, allocate an instance to any random sled agent.
     osagactx
-        .alloc_server(&params.create_params)
+        .nexus()
+        .random_sled_id()
         .await
+        .map_err(ActionError::action_failed)?
+        .ok_or_else(|| Error::ServiceUnavailable {
+            internal_message: String::from(
+                "no sleds available for new Instance",
+            ),
+        })
         .map_err(ActionError::action_failed)
 }
 
