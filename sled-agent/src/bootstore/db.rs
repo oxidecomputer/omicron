@@ -4,6 +4,21 @@
 
 //! Database layer for the bootstore
 
+use diesel::prelude::*;
+use diesel::SqliteConnection;
+use slog::Logger;
+
+use crate::bootstrap::trust_quorum::SerializableShareDistribution;
+
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("Failed to open db connection to {path}: {err}")]
+    DbOpen { path: String, err: ConnectionError },
+
+    #[error(transparent)]
+    Db(#[from] diesel::result::Error),
+}
+
 /// The ID of the database used to store blobs.
 ///
 /// We separate them because they are encrypted and accessed differently.
@@ -15,3 +30,87 @@ pub enum DbId {
     /// up NTP.
     NetworkConfig,
 }
+
+pub struct Db {
+    log: Logger,
+    conn: SqliteConnection,
+}
+
+impl Db {
+    pub fn open(log: Logger, path: &str) -> Result<Db, Error> {
+        let log = log.new(o!(
+            "component" => "BootstoreDb"
+        ));
+        info!(log, "opening database {:?}", path);
+        let mut c = SqliteConnection::establish(path)
+            .map_err(|err| Error::DbOpen { path: path.into(), err })?;
+
+        // Enable foreign key processing, which is off by default. Without
+        // enabling this, there is no referential integrity check between
+        // primary and foreign keys in tables.
+        diesel::sql_query("PRAGMA foreign_keys = 'ON'").execute(&mut c)?;
+
+        // Enable the WAL.
+        diesel::sql_query("PRAGMA journal_mode = 'WAL'").execute(&mut c)?;
+
+        // Force overwriting with 0s on delete
+        diesel::sql_query("PRAGMA secure_delete = 'ON'").execute(&mut c)?;
+
+        // Sync to disk after every commit.
+        // DO NOT CHANGE THIS SETTING!
+        diesel::sql_query("PRAGMA synchronous = 'FULL'").execute(&mut c)?;
+
+        Ok(Db { log, conn: c })
+    }
+}
+
+// TODO: Use Josh's json_new_type macro from buildomat for this
+pub struct ShareData(SerializableShareDistribution);
+
+#[derive(Queryable)]
+pub struct KeySharePrepare {
+    pub epoch: i32,
+    pub share_distribution: ShareData,
+}
+
+#[derive(Queryable)]
+pub struct KeyShareCommit {
+    pub epoch: i32,
+}
+
+// TODO: These should go in a crypto module
+// The length of a SHA3-256 digest
+pub const DIGEST_LEN: usize = 32;
+
+// The length of a ChaCha20Poly1305 Key
+pub const KEY_LEN: usize = 32;
+
+// The length of a ChaCha20Poly1305 authentication tag
+pub const TAG_LEN: usize = 16;
+
+// A chacha20poly1305 secret encrypted by a chacha20poly1305 secret key
+// derived from the rack secret for the given epoch with the given salt
+//
+// The epoch informs which rack secret should be used to derive the
+// encryptiong key used to encrypt this root secret.
+#[derive(Queryable)]
+pub struct EncryptedRootSecret {
+    /// The epoch of the rack secret rotation or rack reconfiguration
+    pub epoch: i32,
+
+    /// Used as the salt parameter to HKDF to derive the encryption
+    /// key from the rack secret that protects `key` in this struct.
+    pub salt: Salt,
+
+    /// The encrypted key
+    pub key: EncryptedKey,
+
+    /// The authentication tag for the encrypted key
+    pub tag: AuthTag,
+}
+
+// TODO: Create some ToSql/FromSql impls
+// Should probably create a macro for arrays
+pub struct EncryptedKey([u8; KEY_LEN]);
+pub struct Salt([u8; DIGEST_LEN]);
+pub struct AuthTag([u8; TAG_LEN]);

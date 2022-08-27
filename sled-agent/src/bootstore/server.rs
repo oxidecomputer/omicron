@@ -14,6 +14,7 @@ use std::io;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 
+use super::db::Db;
 use crate::sp::SimSpConfig;
 use crate::sp::SpHandle;
 
@@ -47,4 +48,6 @@ impl Server {
         let server = Server { listener, sp, bind_address, log };
         Ok(tokio::spawn(server.run()))
     }
+
+    async fn run(self) -> Result<(), Error> {}
 }

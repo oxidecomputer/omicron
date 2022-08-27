@@ -14,7 +14,8 @@
 //! it to CockroachDB when we start it up.
 
 mod db;
-mod trust_quorum;
+//mod server;
+//mod trust_quorum;
 mod twopc;
 
 #[cfg(test)]

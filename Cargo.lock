@@ -339,16 +339,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bootstore"
-version = "0.1.0"
-dependencies = [
- "sprockets-common",
- "sprockets-host",
- "thiserror",
- "tokio",
-]
-
-[[package]]
 name = "bstr"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1075,6 +1065,7 @@ dependencies = [
  "ipnetwork",
  "itoa 1.0.2",
  "libc",
+ "libsqlite3-sys",
  "pq-sys",
  "r2d2",
  "serde_json",
@@ -2412,6 +2403,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "libsqlite3-sys"
+version = "0.25.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9f0455f2c1bc9a7caa792907026e469c1d91761fb0ea37cbb16427c77280cf35"
+dependencies = [
+ "pkg-config",
+ "vcpkg",
+]
+
+[[package]]
 name = "libxml"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3074,6 +3075,7 @@ dependencies = [
  "crucible-agent-client",
  "crucible-client-types",
  "ddm-admin-client",
+ "diesel",
  "dropshot",
  "expectorate",
  "futures",

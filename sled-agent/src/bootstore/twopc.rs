@@ -4,7 +4,7 @@
 
 //! Two-phase commit (2PC) layer for the bootstore
 
-use crate::db::DbId;
+use super::db::DbId;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::Ipv6Addr;
