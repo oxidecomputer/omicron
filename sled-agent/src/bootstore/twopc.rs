@@ -1,18 +1,16 @@
-//! The two communication paths for the bootstore:
-//!
-//! RSS -> Sled Agent -> Coordinator -> Storage Nodes
-//! Nexus -> Steno -> Sled Agent -> Coordinator -> Storage Nodes
-//!
-//!
-//! Since some trust quorum membership information that is input via RSS must
-//! make its way into CockroachDb so that reconfiguration works, we will load
-//! that information from the trust quorum database, parse it, and write
-//! it to CockroachDB when we start it up.
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::collections::BTreeMap;
+//! Two-phase commit (2PC) layer for the bootstore
+
+use crate::db::DbId;
+
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::Ipv6Addr;
 use std::sync::Arc;
 
+use sprockets_common::certificates::Ed25519Certificate;
 use sprockets_common::Sha3_256Digest;
 use sprockets_host::Identity;
 use thiserror::Error;
@@ -28,19 +26,6 @@ pub enum TransactionState {
     Committed,
     Aborted,
 }
-
-/// The database used store blobs.
-///
-/// We separate them because they are encrypted and accessed differently.
-pub enum Db {
-    /// Used pre-rack unlock: Contains key shares and membership data
-    TrustQuorum,
-
-    /// Used post-rack unlock: Contains information necessary for setting
-    /// up NTP.
-    NetworkConfig,
-}
-
 /// A two phase commit (2PC) transaction identifier. Transactions either commit or abort.
 ///
 /// Users submit transactions to a coordinator and retry indefinitely for them
@@ -54,9 +39,8 @@ pub enum Db {
 pub struct TransactionId {
     // Database structures are specifically adapted to append-only log style
     // blog storage.
-    db: Db,
+    db_id: DbId,
 
-    // The name of the item in the database
     // The monotonically increasing generation number of the data value
     gen: u64,
 }
@@ -68,12 +52,29 @@ where
     Chan: AsyncRead + AsyncWrite,
 {
     addr: Ipv6Addr,
-    session: Chan,
+    session: sprockets_host::Session<Chan>,
     id: Identity,
 }
 
+pub enum TransactionOp {
+    // This is an instruction from RSS to generate a rack secret
+    //
+    // The coordinator will generate a rack secret and distribute shares at
+    // database generation 0.
+    InitializeTrustQuorum {
+        rack_secret_threshold: usize,
+        member_device_id_certs: Vec<Ed25519Certificate>,
+    },
+}
+
+pub struct Transaction {
+    id: TransactionId,
+    op: TransactionOp,
+    addrs: BTreeSet<Ipv6Addr>,
+}
+
 /// The coordinator of the 2PC protocol. It establishes connections
-/// to the storage nodes and transfers data via 2PC.
+/// to [`StorageNode`]]s and transfers data via 2PC.
 pub struct Coordinator {
     // We don't know which address maps to which identity, but we know which
     // identity maps to which data. We use an Arc for data, because in some
@@ -83,15 +84,4 @@ pub struct Coordinator {
     // The data is serialized before we get it. The handlers
     // on the nodes know how to deserialize and interpret it.
     data: BTreeMap<Identity, Arc<Vec<u8>>>,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn it_works() {
-        let result = 2 + 2;
-        assert_eq!(result, 4);
-    }
 }
