@@ -4,7 +4,13 @@
 
 //! Database layer for the bootstore
 
+use super::db_macros::array_new_type;
+use super::db_macros::json_new_type;
+
+use diesel::deserialize::FromSql;
 use diesel::prelude::*;
+use diesel::serialize::ToSql;
+use diesel::FromSqlRow;
 use diesel::SqliteConnection;
 use slog::Logger;
 
@@ -109,8 +115,6 @@ pub struct EncryptedRootSecret {
     pub tag: AuthTag,
 }
 
-// TODO: Create some ToSql/FromSql impls
-// Should probably create a macro for arrays
-pub struct EncryptedKey([u8; KEY_LEN]);
-pub struct Salt([u8; DIGEST_LEN]);
-pub struct AuthTag([u8; TAG_LEN]);
+array_new_type!(EncryptedKey, KEY_LEN);
+array_new_type!(Salt, DIGEST_LEN);
+array_new_type!(AuthTag, TAG_LEN);

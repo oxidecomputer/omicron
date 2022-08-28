@@ -14,6 +14,7 @@
 //! it to CockroachDB when we start it up.
 
 mod db;
+mod db_macros;
 //mod server;
 //mod trust_quorum;
 mod twopc;
