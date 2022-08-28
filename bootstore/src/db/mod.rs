@@ -3,19 +3,14 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Database layer for the bootstore
+mod macros;
+mod models;
+mod schema;
 
-use super::db_macros::array_new_type;
-use super::db_macros::json_new_type;
-
-use diesel::deserialize::FromSql;
 use diesel::prelude::*;
-use diesel::serialize::ToSql;
-use diesel::FromSqlRow;
 use diesel::SqliteConnection;
 use slog::Logger;
 use slog::{info, o};
-
-use crate::trust_quorum::SerializableShareDistribution;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -45,6 +40,7 @@ pub struct Db {
 
 impl Db {
     pub fn open(log: Logger, path: &str) -> Result<Db, Error> {
+        let schema = include_str!("./schema.sql");
         let log = log.new(o!(
             "component" => "BootstoreDb"
         ));
@@ -67,54 +63,9 @@ impl Db {
         // DO NOT CHANGE THIS SETTING!
         diesel::sql_query("PRAGMA synchronous = 'FULL'").execute(&mut c)?;
 
+        // Create tables
+        diesel::sql_query(schema).execute(&mut c)?;
+
         Ok(Db { log, conn: c })
     }
 }
-
-json_new_type!(Share, SerializableShareDistribution);
-
-#[derive(Queryable)]
-pub struct KeySharePrepare {
-    pub epoch: i32,
-    pub share: Share,
-}
-
-#[derive(Queryable)]
-pub struct KeyShareCommit {
-    pub epoch: i32,
-}
-
-// TODO: These should go in a crypto module
-// The length of a SHA3-256 digest
-pub const DIGEST_LEN: usize = 32;
-
-// The length of a ChaCha20Poly1305 Key
-pub const KEY_LEN: usize = 32;
-
-// The length of a ChaCha20Poly1305 authentication tag
-pub const TAG_LEN: usize = 16;
-
-// A chacha20poly1305 secret encrypted by a chacha20poly1305 secret key
-// derived from the rack secret for the given epoch with the given salt
-//
-// The epoch informs which rack secret should be used to derive the
-// encryptiong key used to encrypt this root secret.
-#[derive(Queryable)]
-pub struct EncryptedRootSecret {
-    /// The epoch of the rack secret rotation or rack reconfiguration
-    pub epoch: i32,
-
-    /// Used as the salt parameter to HKDF to derive the encryption
-    /// key from the rack secret that protects `key` in this struct.
-    pub salt: Salt,
-
-    /// The encrypted key
-    pub key: EncryptedKey,
-
-    /// The authentication tag for the encrypted key
-    pub tag: AuthTag,
-}
-
-array_new_type!(EncryptedKey, KEY_LEN);
-array_new_type!(Salt, DIGEST_LEN);
-array_new_type!(AuthTag, TAG_LEN);
