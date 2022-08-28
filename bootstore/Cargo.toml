@@ -1,0 +1,18 @@
+[package]
+name = "bootstore"
+description = "Storage required for rack unlock"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[dependencies]
+diesel = { version = "2.0.0-rc.1", features = ["sqlite", "chrono", "serde_json", "network-address", "uuid"] }
+p256 = "0.9.0"
+rand = { version = "0.8.5", features = ["getrandom"] }
+serde = { version = "1.0", features = [ "derive" ] }
+serde_json = "1.0"
+slog = { version = "2.5", features = [ "max_level_trace", "release_max_level_debug" ] }
+sprockets-common = { git = "http://github.com/oxidecomputer/sprockets", rev = "0361fd13ff19cda6696242fe40f1325fca30d3d1" }
+sprockets-host = { git = "http://github.com/oxidecomputer/sprockets", rev = "0361fd13ff19cda6696242fe40f1325fca30d3d1" }
+thiserror = "1.0"
+vsss-rs = { version = "2.0.0", default-features = false, features = ["std"] }

@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "bootstore",
     "common",
     "ddm-admin-client",
     "deploy",
@@ -37,6 +38,7 @@ members = [
 ]
 
 default-members = [
+    "bootstore",
     "common",
     "ddm-admin-client",
     "deploy",

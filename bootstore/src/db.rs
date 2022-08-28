@@ -13,8 +13,9 @@ use diesel::serialize::ToSql;
 use diesel::FromSqlRow;
 use diesel::SqliteConnection;
 use slog::Logger;
+use slog::{info, o};
 
-use crate::bootstrap::trust_quorum::SerializableShareDistribution;
+use crate::trust_quorum::SerializableShareDistribution;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
