@@ -70,13 +70,12 @@ impl Db {
     }
 }
 
-// TODO: Use Josh's json_new_type macro from buildomat for this
-pub struct ShareData(SerializableShareDistribution);
+json_new_type!(Share, SerializableShareDistribution);
 
 #[derive(Queryable)]
 pub struct KeySharePrepare {
     pub epoch: i32,
-    pub share_distribution: ShareData,
+    pub share: Share,
 }
 
 #[derive(Queryable)]

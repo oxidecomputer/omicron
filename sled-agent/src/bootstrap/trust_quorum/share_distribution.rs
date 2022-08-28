@@ -56,6 +56,19 @@ pub struct SerializableShareDistribution {
     pub verifier: Verifier,
 }
 
+// We don't want to risk debug-logging the actual share contents, so implement
+// `Debug` manually and omit sensitive fields.
+impl fmt::Debug for SerializableShareDistribution {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SerializableShareDistribution")
+            .field("threshold", &self.threshold)
+            .field("verifier", &"Verifier")
+            .field("share", &"Share")
+            .field("member_device_id_certs", &self.member_device_id_certs)
+            .finish()
+    }
+}
+
 impl From<ShareDistribution> for SerializableShareDistribution {
     fn from(dist: ShareDistribution) -> Self {
         Self {
