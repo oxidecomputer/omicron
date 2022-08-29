@@ -7,6 +7,7 @@ mod macros;
 mod models;
 mod schema;
 
+use diesel::connection::SimpleConnection;
 use diesel::prelude::*;
 use diesel::SqliteConnection;
 use slog::Logger;
@@ -69,10 +70,8 @@ impl Db {
         // DO NOT CHANGE THIS SETTING!
         diesel::sql_query("PRAGMA synchronous = 'FULL'").execute(&mut c)?;
 
-        c.immediate_transaction::<_, Error, _>(|tx| {
-            // Create tables
-            diesel::sql_query(schema).execute(tx).map_err(|e| Error::Db(e))
-        })?;
+        // Create tables
+        c.batch_execute(&schema)?;
 
         Ok(Db { log, conn: c })
     }
@@ -86,6 +85,19 @@ impl Db {
         let prepare = KeySharePrepare { epoch, share: Share(share) };
         diesel::insert_into(dsl::key_share_prepares)
             .values(&prepare)
+            .execute(&mut self.conn)?;
+        Ok(())
+    }
+
+    pub fn commit_share(
+        &mut self,
+        epoch: i32,
+        digest: sprockets_common::Sha3_256Digest,
+    ) -> Result<(), Error> {
+        use schema::key_share_commits::dsl;
+        let commit = KeyShareCommit { epoch, share_digest: digest.into() };
+        diesel::insert_into(dsl::key_share_commits)
+            .values(&commit)
             .execute(&mut self.conn)?;
         Ok(())
     }
@@ -143,5 +155,22 @@ mod tests {
             .get_result::<Share>(&mut db.conn)
             .unwrap();
         assert_eq!(val.0, expected);
+    }
+
+    #[test]
+    fn commit_fails_without_corresponding_prepare() {
+        let log = test_setup_log("test_db").log.clone();
+        let mut db = Db::open(log, &rand_db_name()).unwrap();
+        let epoch = 0;
+
+        let digest = sprockets_common::Sha3_256Digest::default();
+        let err = db.commit_share(epoch, digest).unwrap_err();
+        assert!(matches!(
+            err,
+            Error::Db(diesel::result::Error::DatabaseError(
+                diesel::result::DatabaseErrorKind::ForeignKeyViolation,
+                _
+            )),
+        ));
     }
 }

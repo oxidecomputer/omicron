@@ -14,6 +14,7 @@ table! {
 table! {
     key_share_commits(epoch) {
         epoch -> Integer,
+        share_digest -> Binary,
     }
 }
 

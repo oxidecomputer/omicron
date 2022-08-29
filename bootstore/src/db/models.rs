@@ -25,6 +25,8 @@ pub struct KeySharePrepare {
 #[derive(Debug, Queryable, Insertable)]
 pub struct KeyShareCommit {
     pub epoch: i32,
+    // The hash of the share in the corresponding KeySharePrepare
+    pub share_digest: Sha3_256Digest,
 }
 
 // TODO: These should go in a crypto module
@@ -61,6 +63,13 @@ pub struct EncryptedRootSecret {
     pub tag: AuthTag,
 }
 
+array_new_type!(Sha3_256Digest, DIGEST_LEN);
 array_new_type!(EncryptedSecret, KEY_LEN);
 array_new_type!(Salt, DIGEST_LEN);
 array_new_type!(AuthTag, TAG_LEN);
+
+impl From<sprockets_common::Sha3_256Digest> for Sha3_256Digest {
+    fn from(digest: sprockets_common::Sha3_256Digest) -> Self {
+        Sha3_256Digest(digest.0)
+    }
+}
