@@ -253,15 +253,13 @@ impl InstanceStates {
                 return Ok(None)
             }
             // Valid states for a stop request
-            InstanceState::Creating | InstanceState::Provisioning | InstanceState::Provisioned => {
-                // Instance hasn't been started yet, no action necessary.
-                self.transition(InstanceState::Stopped, None);
-                return Ok(None);
-            }
-            InstanceState::Starting
+            InstanceState::Creating
+            | InstanceState::Provisioning
+            | InstanceState::Provisioned
+            | InstanceState::Starting
             | InstanceState::Running
             | InstanceState::Rebooting => {
-                // The VM is running, explicitly tell it to stop.
+                // There's a propolis service, explicitly tell it to stop.
                 self.transition(
                     InstanceState::Stopping,
                     Some(InstanceStateRequested::Stopped),
