@@ -88,14 +88,9 @@ async fn relay_data_to_sp(
     mut console_tx: AttachedSerialConsoleSend,
     mut data_rx: mpsc::Receiver<Vec<u8>>,
 ) -> Result<()> {
-    loop {
-        let data = match data_rx.recv().await {
-            Some(data) => data,
-            None => break,
-        };
+    while let Some(data) = data_rx.recv().await {
         console_tx.write(data).await?;
     }
-
     console_tx.detach().await?;
 
     Ok(())

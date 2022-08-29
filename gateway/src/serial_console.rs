@@ -24,6 +24,7 @@ use slog::info;
 use slog::Logger;
 use std::borrow::Cow;
 use std::ops::Deref;
+use std::ops::DerefMut;
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::handshake;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
@@ -222,7 +223,7 @@ impl SerialConsoleTask {
 
     async fn ws_recv_task(
         mut ws_stream: SplitStream<WebSocketStream<Upgraded>>,
-        console_tx: DetachOnDrop,
+        mut console_tx: DetachOnDrop,
         log: Logger,
     ) -> Result<(), SerialTaskError> {
         while let Some(message) = ws_stream.next().await {
@@ -279,5 +280,13 @@ impl Deref for DetachOnDrop {
         // We know from `new()` that we're created with `Some(console)`, and we
         // don't remove it until our `Drop` impl
         self.0.as_ref().unwrap()
+    }
+}
+
+impl DerefMut for DetachOnDrop {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        // We know from `new()` that we're created with `Some(console)`, and we
+        // don't remove it until our `Drop` impl
+        self.0.as_mut().unwrap()
     }
 }
