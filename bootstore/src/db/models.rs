@@ -11,17 +11,18 @@ use diesel::FromSqlRow;
 
 use super::macros::array_new_type;
 use super::macros::json_new_type;
+use super::schema::*;
 use crate::trust_quorum::SerializableShareDistribution;
 
 json_new_type!(Share, SerializableShareDistribution);
 
-#[derive(Queryable)]
+#[derive(Debug, Queryable, Insertable)]
 pub struct KeySharePrepare {
     pub epoch: i32,
     pub share: Share,
 }
 
-#[derive(Queryable)]
+#[derive(Debug, Queryable, Insertable)]
 pub struct KeyShareCommit {
     pub epoch: i32,
 }
@@ -41,7 +42,10 @@ pub const TAG_LEN: usize = 16;
 //
 // The epoch informs which rack secret should be used to derive the
 // encryptiong key used to encrypt this root secret.
-#[derive(Queryable)]
+//
+// TODO-security: We probably don't want to log even the encrypted secret, but
+// it's likely useful for debugging right now.
+#[derive(Debug, Queryable, Insertable)]
 pub struct EncryptedRootSecret {
     /// The epoch of the rack secret rotation or rack reconfiguration
     pub epoch: i32,

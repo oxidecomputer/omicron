@@ -342,7 +342,9 @@ dependencies = [
 name = "bootstore"
 version = "0.1.0"
 dependencies = [
+ "bincode",
  "diesel",
+ "omicron-test-utils",
  "p256",
  "rand 0.8.5",
  "serde",

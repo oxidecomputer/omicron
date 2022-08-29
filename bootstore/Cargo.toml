@@ -16,3 +16,7 @@ sprockets-common = { git = "http://github.com/oxidecomputer/sprockets", rev = "0
 sprockets-host = { git = "http://github.com/oxidecomputer/sprockets", rev = "0361fd13ff19cda6696242fe40f1325fca30d3d1" }
 thiserror = "1.0"
 vsss-rs = { version = "2.0.0", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+bincode = "1.3.3"
+omicron-test-utils = { path = "../test-utils" }

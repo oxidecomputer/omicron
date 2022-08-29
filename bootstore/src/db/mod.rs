@@ -12,6 +12,12 @@ use diesel::SqliteConnection;
 use slog::Logger;
 use slog::{info, o};
 
+use crate::trust_quorum::SerializableShareDistribution;
+use models::EncryptedRootSecret;
+use models::KeyShareCommit;
+use models::KeySharePrepare;
+use models::Share;
+
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("Failed to open db connection to {path}: {err}")]
@@ -63,9 +69,68 @@ impl Db {
         // DO NOT CHANGE THIS SETTING!
         diesel::sql_query("PRAGMA synchronous = 'FULL'").execute(&mut c)?;
 
-        // Create tables
-        diesel::sql_query(schema).execute(&mut c)?;
+        c.immediate_transaction::<_, Error, _>(|tx| {
+            // Create tables
+            diesel::sql_query(schema).execute(tx).map_err(|e| Error::Db(e))
+        })?;
 
         Ok(Db { log, conn: c })
+    }
+
+    pub fn prepare_share(
+        &mut self,
+        epoch: i32,
+        share: SerializableShareDistribution,
+    ) -> Result<(), Error> {
+        use schema::key_share_prepares::dsl;
+        let prepare = KeySharePrepare { epoch, share: Share(share) };
+        diesel::insert_into(dsl::key_share_prepares)
+            .values(&prepare)
+            .execute(&mut self.conn)?;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::trust_quorum::{RackSecret, ShareDistribution};
+    use omicron_test_utils::dev::test_setup_log;
+
+    // TODO: Fill in with actual member certs
+    fn new_shares() -> Vec<ShareDistribution> {
+        let member_device_id_certs = vec![];
+        let rack_secret_threshold = 3;
+        let total_shares = 5;
+        let secret = RackSecret::new();
+        let (shares, verifier) =
+            secret.split(rack_secret_threshold, total_shares).unwrap();
+
+        shares
+            .into_iter()
+            .map(move |share| ShareDistribution {
+                threshold: rack_secret_threshold,
+                verifier: verifier.clone(),
+                share,
+                member_device_id_certs: member_device_id_certs.clone(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn simple_prepare_insert_and_query() {
+        use schema::key_share_prepares::dsl;
+        let log = test_setup_log("test_db").log.clone();
+        let mut db = Db::open(log, "/tmp/testdb.sqlite").unwrap();
+        let shares = new_shares();
+        let epoch = 0;
+        let expected: SerializableShareDistribution = shares[0].clone().into();
+        db.prepare_share(epoch, expected.clone()).unwrap();
+        let val = dsl::key_share_prepares
+            .select(dsl::share)
+            .filter(dsl::epoch.eq(epoch))
+            .get_result::<Share>(&mut db.conn)
+            .unwrap();
+        assert_eq!(val.0, expected);
     }
 }

@@ -5,20 +5,20 @@
 use diesel::table;
 
 table! {
-    key_share_prepare(epoch) {
+    key_share_prepares(epoch) {
         epoch -> Integer,
         share -> Text,
     }
 }
 
 table! {
-    key_share_commit(epoch) {
+    key_share_commits(epoch) {
         epoch -> Integer,
     }
 }
 
 table! {
-    encrypted_root_secret(epoch) {
+    encrypted_root_secrets(epoch) {
         epoch -> Integer,
         salt -> Binary,
         secret -> Binary,
