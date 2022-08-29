@@ -449,6 +449,7 @@ impl super::Nexus {
         // allowed to allow for idempotency.
         let allowed = match runtime.run_state {
             InstanceState::Creating => true,
+            InstanceState::Provisioning => true,
             InstanceState::Provisioned => true,
             InstanceState::Starting => true,
             InstanceState::Running => true,

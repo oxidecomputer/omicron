@@ -173,6 +173,7 @@ impl InstanceStates {
         match self.current.run_state {
             // Valid states we can transition through and stop right before starting the Instance.
             InstanceState::Creating
+            | InstanceState::Provisioning
             | InstanceState::Stopping
             | InstanceState::Stopped
             | InstanceState::Rebooting => {
@@ -221,6 +222,7 @@ impl InstanceStates {
             | InstanceState::Migrating => return Ok(None),
             // Valid states for a running request
             InstanceState::Creating
+            | InstanceState::Provisioning
             | InstanceState::Provisioned
             | InstanceState::Stopping
             | InstanceState::Stopped => {
@@ -251,8 +253,8 @@ impl InstanceStates {
                 return Ok(None)
             }
             // Valid states for a stop request
-            InstanceState::Creating | InstanceState::Provisioned => {
-                // Already stopped, no action necessary.
+            InstanceState::Creating | InstanceState::Provisioning | InstanceState::Provisioned => {
+                // Instance hasn't been started yet, no action necessary.
                 self.transition(InstanceState::Stopped, None);
                 return Ok(None);
             }
@@ -362,6 +364,7 @@ impl InstanceStates {
 
             // Invalid states for a migration request
             InstanceState::Creating
+            | InstanceState::Provisioning
             | InstanceState::Provisioned // TODO(luqman): should be able to migrate this?
             | InstanceState::Starting
             | InstanceState::Stopping

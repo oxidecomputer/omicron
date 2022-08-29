@@ -631,6 +631,8 @@ pub struct IdentityMetadataUpdateParams {
 pub enum InstanceState {
     /// An Instance record exists but the Instance is currently being created on the Sled.
     Creating,
+    /// The Instance and its resources are being brought up.
+    Provisioning,
     /// The Instance and all its resources have been allocated.
     Provisioned,
     /// The Instance is currently starting up.
@@ -672,6 +674,7 @@ impl TryFrom<&str> for InstanceState {
     fn try_from(variant: &str) -> Result<Self, Self::Error> {
         let r = match variant {
             "creating" => InstanceState::Creating,
+            "provisioning" => InstanceState::Provisioning,
             "provisioned" => InstanceState::Provisioned,
             "starting" => InstanceState::Starting,
             "running" => InstanceState::Running,
@@ -692,6 +695,7 @@ impl InstanceState {
     pub fn label(&self) -> &'static str {
         match self {
             InstanceState::Creating => "creating",
+            InstanceState::Provisioning => "provisioning",
             InstanceState::Provisioned => "provisioned",
             InstanceState::Starting => "starting",
             InstanceState::Running => "running",
@@ -717,6 +721,7 @@ impl InstanceState {
             InstanceState::Migrating => false,
 
             InstanceState::Creating => true,
+            InstanceState::Provisioning => true,
             InstanceState::Provisioned => true,
             InstanceState::Stopped => true,
             InstanceState::Repairing => true,

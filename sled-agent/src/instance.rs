@@ -509,11 +509,12 @@ impl Instance {
         &self,
         inner: &mut MutexGuard<'_, InstanceInner>,
     ) -> Result<PropolisSetup, Error> {
-
         // Update nexus with an in-progress state while we set up the instance.
         let desired = inner.state.desired().clone();
-        // TODO(luqman): Provisioning instead of Creating?
-        inner.state.transition(InstanceState::Creating, desired.map(|d| d.run_state));
+        inner.state.transition(
+            InstanceState::Provisioning,
+            desired.map(|d| d.run_state),
+        );
         inner
             .lazy_nexus_client
             .get()

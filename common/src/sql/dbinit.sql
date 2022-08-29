@@ -482,6 +482,7 @@ CREATE UNIQUE INDEX ON omicron.public.project (
 
 CREATE TYPE omicron.public.instance_state AS ENUM (
     'creating',
+    'provisioning',
     'provisioned',
     'starting',
     'running',

@@ -1503,6 +1503,7 @@
         "type": "string",
         "enum": [
           "creating",
+          "provisioning",
           "provisioned",
           "starting",
           "running",

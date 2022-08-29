@@ -46,6 +46,7 @@ impl From<omicron_common::api::external::InstanceState>
         use omicron_common::api::external::InstanceState::*;
         match s {
             Creating => Self::Creating,
+            Provisioning => Self::Provisioning,
             Provisioned => Self::Provisioned,
             Starting => Self::Starting,
             Running => Self::Running,
@@ -107,6 +108,7 @@ impl From<types::InstanceState>
         use types::InstanceState::*;
         match s {
             Creating => Self::Creating,
+            Provisioning => Self::Provisioning,
             Provisioned => Self::Provisioned,
             Starting => Self::Starting,
             Running => Self::Running,
