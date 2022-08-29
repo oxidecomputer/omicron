@@ -96,6 +96,8 @@ mod tests {
     use super::*;
     use crate::trust_quorum::{RackSecret, ShareDistribution};
     use omicron_test_utils::dev::test_setup_log;
+    use rand::distributions::Alphanumeric;
+    use rand::{thread_rng, Rng};
 
     // TODO: Fill in with actual member certs
     fn new_shares() -> Vec<ShareDistribution> {
@@ -117,11 +119,20 @@ mod tests {
             .collect()
     }
 
+    fn rand_db_name() -> String {
+        let seed: String = thread_rng()
+            .sample_iter(&Alphanumeric)
+            .take(16)
+            .map(char::from)
+            .collect();
+        format!("/tmp/testdb-{}.sqlite", seed)
+    }
+
     #[test]
     fn simple_prepare_insert_and_query() {
         use schema::key_share_prepares::dsl;
         let log = test_setup_log("test_db").log.clone();
-        let mut db = Db::open(log, "/tmp/testdb.sqlite").unwrap();
+        let mut db = Db::open(log, &rand_db_name()).unwrap();
         let shares = new_shares();
         let epoch = 0;
         let expected: SerializableShareDistribution = shares[0].clone().into();
