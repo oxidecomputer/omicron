@@ -393,8 +393,7 @@ impl SpHandler for Handler {
         sender: SocketAddrV6,
         port: SpPort,
         _component: SpComponent,
-    ) -> Result<(), ResponseError>
-    {
+    ) -> Result<(), ResponseError> {
         warn!(
             &self.log, "received serial console attach; unsupported by sidecar";
             "sender" => %sender,
@@ -422,8 +421,7 @@ impl SpHandler for Handler {
         &mut self,
         sender: SocketAddrV6,
         port: SpPort,
-    ) -> Result<(), ResponseError>
-    {
+    ) -> Result<(), ResponseError> {
         warn!(
             &self.log, "received serial console detach; unsupported by sidecar";
             "sender" => %sender,
