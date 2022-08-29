@@ -299,6 +299,7 @@ impl SingleSp {
             key: attachment.key,
             rx: attachment.incoming,
             inner_tx: self.cmds_tx.clone(),
+            log: self.log.clone(),
         })
     }
 
@@ -369,8 +370,9 @@ async fn rpc(
 #[derive(Debug)]
 pub struct AttachedSerialConsole {
     key: u64,
-    rx: mpsc::Receiver<Vec<u8>>,
+    rx: mpsc::Receiver<(u64, Vec<u8>)>,
     inner_tx: mpsc::Sender<InnerCommand>,
+    log: Logger,
 }
 
 impl AttachedSerialConsole {
@@ -383,7 +385,11 @@ impl AttachedSerialConsole {
                 tx_offset: 0,
                 inner_tx: self.inner_tx,
             },
-            AttachedSerialConsoleRecv { rx: self.rx },
+            AttachedSerialConsoleRecv {
+                rx_offset: 0,
+                rx: self.rx,
+                log: self.log,
+            },
         )
     }
 }
@@ -456,7 +462,9 @@ impl AttachedSerialConsoleSend {
 
 #[derive(Debug)]
 pub struct AttachedSerialConsoleRecv {
-    rx: mpsc::Receiver<Vec<u8>>,
+    rx_offset: u64,
+    rx: mpsc::Receiver<(u64, Vec<u8>)>,
+    log: Logger,
 }
 
 impl AttachedSerialConsoleRecv {
@@ -465,7 +473,15 @@ impl AttachedSerialConsoleRecv {
     /// Returns `None` if the underlying channel has been closed (e.g., if the
     /// serial console has been detached).
     pub async fn recv(&mut self) -> Option<Vec<u8>> {
-        self.rx.recv().await
+        let (offset, data) = self.rx.recv().await?;
+        if offset != self.rx_offset {
+            warn!(
+                self.log,
+                "gap in serial console data (dropped packet or buffer overrun)",
+            );
+        }
+        self.rx_offset = offset + data.len() as u64;
+        Some(data)
     }
 }
 
@@ -496,7 +512,7 @@ struct RpcResponse {
 #[derive(Debug)]
 struct SerialConsoleAttachment {
     key: u64,
-    incoming: mpsc::Receiver<Vec<u8>>,
+    incoming: mpsc::Receiver<(u64, Vec<u8>)>,
 }
 
 #[derive(Debug)]
@@ -524,7 +540,7 @@ struct Inner {
     discovery_addr: SocketAddrV6,
     max_attempts: usize,
     per_attempt_timeout: Duration,
-    serial_console_tx: Option<mpsc::Sender<Vec<u8>>>,
+    serial_console_tx: Option<mpsc::Sender<(u64, Vec<u8>)>>,
     cmds_rx: mpsc::Receiver<InnerCommand>,
     request_id: u32,
     serial_console_connection_key: u64,
@@ -739,8 +755,8 @@ impl Inner {
                     "result" => ?result,
                 );
             }
-            SpMessageKind::SerialConsole(component) => {
-                self.forward_serial_console(component, trailing_data);
+            SpMessageKind::SerialConsole { component, offset } => {
+                self.forward_serial_console(component, offset, trailing_data);
             }
         }
     }
@@ -858,8 +874,12 @@ impl Inner {
                         return Ok(None);
                     }
                 }
-                SpMessageKind::SerialConsole(serial_console) => {
-                    self.forward_serial_console(serial_console, trailing_data);
+                SpMessageKind::SerialConsole { component, offset } => {
+                    self.forward_serial_console(
+                        component,
+                        offset,
+                        trailing_data,
+                    );
                     continue;
                 }
             };
@@ -876,14 +896,19 @@ impl Inner {
         }
     }
 
-    fn forward_serial_console(&mut self, _component: SpComponent, data: &[u8]) {
+    fn forward_serial_console(
+        &mut self,
+        _component: SpComponent,
+        offset: u64,
+        data: &[u8],
+    ) {
         // TODO-cleanup component support for serial console is half baked;
         // should we check here that it matches the attached serial console? For
         // the foreseeable future we only support one component, so we skip that
         // for now.
 
         if let Some(tx) = self.serial_console_tx.as_ref() {
-            match tx.try_send(data.to_vec()) {
+            match tx.try_send((offset, data.to_vec())) {
                 Ok(()) => return,
                 Err(mpsc::error::TrySendError::Closed(_)) => {
                     self.serial_console_tx = None;

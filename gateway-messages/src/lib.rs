@@ -209,7 +209,17 @@ pub enum SpMessageKind {
 
     /// Data traveling from an SP-attached component (in practice, a CPU) on the
     /// component's serial console.
-    SerialConsole(SpComponent),
+    ///
+    /// Note that SP -> MGS serial console messages are currently _not_
+    /// acknowledged or retried; they are purely "fire and forget" from the SP's
+    /// point of view. Once it sends data in a packet, it discards it from its
+    /// local buffer.
+    SerialConsole {
+        component: SpComponent,
+        /// Offset of the first byte in this packet's data starting from 0 when
+        /// the serial console session was attached.
+        offset: u64,
+    },
 }
 
 #[derive(
