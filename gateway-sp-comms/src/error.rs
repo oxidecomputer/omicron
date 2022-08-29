@@ -73,8 +73,6 @@ pub enum Error {
     SpCommunicationFailed(#[from] SpCommunicationError),
     #[error("updating SP failed: {0}")]
     UpdateFailed(#[from] UpdateError),
-    #[error("serial console is already attached")]
-    SerialConsoleAttached,
 }
 
 #[derive(Debug, Error)]
