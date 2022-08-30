@@ -8,6 +8,7 @@ table! {
     key_share_prepares(epoch) {
         epoch -> Integer,
         share -> Text,
+        share_digest -> Binary,
     }
 }
 

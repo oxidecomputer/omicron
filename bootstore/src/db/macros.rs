@@ -64,7 +64,11 @@ macro_rules! json_new_type {
 macro_rules! array_new_type {
     ($name:ident, $len:expr) => {
         #[derive(
-            Clone, Debug, FromSqlRow, diesel::expression::AsExpression,
+            PartialEq,
+            Clone,
+            Debug,
+            FromSqlRow,
+            diesel::expression::AsExpression,
         )]
         #[diesel(sql_type = diesel::sql_types::Binary)]
         pub struct $name(pub [u8; $len]);
@@ -84,7 +88,7 @@ macro_rules! array_new_type {
             }
         }
 
-        impl<DB> FromSql<diesel::sql_types::Text, DB> for $name
+        impl<DB> FromSql<diesel::sql_types::Binary, DB> for $name
         where
             DB: diesel::backend::Backend,
             Vec<u8>: FromSql<diesel::sql_types::Binary, DB>,

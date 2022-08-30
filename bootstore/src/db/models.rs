@@ -20,6 +20,7 @@ json_new_type!(Share, SerializableShareDistribution);
 pub struct KeySharePrepare {
     pub epoch: i32,
     pub share: Share,
+    pub share_digest: Sha3_256Digest,
 }
 
 #[derive(Debug, Queryable, Insertable)]

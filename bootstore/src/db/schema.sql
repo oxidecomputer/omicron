@@ -1,6 +1,7 @@
 CREATE TABLE IF NOT EXISTS key_share_prepares (
     epoch            INTEGER   NOT NULL,
     share            TEXT      NOT NULL,
+    share_digest     BLOB      NOT NULL,
     
     PRIMARY KEY (epoch)
 );
