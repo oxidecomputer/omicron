@@ -329,9 +329,9 @@ impl<S: Simulatable + 'static> SimCollection<S> {
         id: &Uuid,
     ) -> Result<S::CurrentState, Error> {
         let objects = self.objects.lock().await;
-        let instance = objects
-            .get(id)
-            .ok_or(Error::not_found_by_id(ResourceType::Instance, id))?;
+        let instance = objects.get(id).ok_or_else(|| {
+            Error::not_found_by_id(ResourceType::Instance, id)
+        })?;
         Ok(instance.object.current().clone())
     }
 }
