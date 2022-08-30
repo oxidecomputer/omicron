@@ -388,15 +388,42 @@ impl SpHandler for Handler {
         Ok(())
     }
 
-    fn serial_console_write(
+    fn serial_console_attach(
         &mut self,
         sender: SocketAddrV6,
         port: SpPort,
         _component: SpComponent,
-        _data: &[u8],
     ) -> Result<(), ResponseError> {
         warn!(
+            &self.log, "received serial console attach; unsupported by sidecar";
+            "sender" => %sender,
+            "port" => ?port,
+        );
+        Err(ResponseError::RequestUnsupportedForSp)
+    }
+
+    fn serial_console_write(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+        _offset: u64,
+        _data: &[u8],
+    ) -> Result<u64, ResponseError> {
+        warn!(
             &self.log, "received serial console write; unsupported by sidecar";
+            "sender" => %sender,
+            "port" => ?port,
+        );
+        Err(ResponseError::RequestUnsupportedForSp)
+    }
+
+    fn serial_console_detach(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+    ) -> Result<(), ResponseError> {
+        warn!(
+            &self.log, "received serial console detach; unsupported by sidecar";
             "sender" => %sender,
             "port" => ?port,
         );

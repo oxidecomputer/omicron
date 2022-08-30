@@ -326,7 +326,6 @@ async fn sp_list(
                     // These errors should not be possible for the request we
                     // made.
                     SpCommsError::SpDoesNotExist(_)
-                    | SpCommsError::SerialConsoleAttached
                     | SpCommsError::UpdateFailed(_) => {
                         unreachable!("impossible error {}", err)
                     }

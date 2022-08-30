@@ -104,6 +104,9 @@ enum SpCommand {
         stdin_buffer_time_millis: u64,
     },
 
+    /// Detach any other attached USART connection.
+    UsartDetach,
+
     /// Upload a new image to the SP and have it swap banks (requires reset)
     Update { hubris_archive: PathBuf },
 
@@ -188,6 +191,10 @@ async fn main() -> Result<()> {
                 log,
             )
             .await?;
+        }
+        Some(SpCommand::UsartDetach) => {
+            sp.serial_console_detach().await?;
+            info!(log, "SP serial console detached");
         }
         Some(SpCommand::Update { hubris_archive }) => {
             let mut archive = HubrisArchive::open(&hubris_archive)?;

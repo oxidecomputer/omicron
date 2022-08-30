@@ -8,7 +8,6 @@
 
 use crate::communicator::ResponseKindExt;
 use crate::error::BadResponseType;
-use crate::error::SerialConsoleAlreadyAttached;
 use crate::error::SpCommunicationError;
 use crate::error::UpdateError;
 use gateway_messages::sp_impl;
@@ -284,31 +283,38 @@ impl SingleSp {
     pub async fn serial_console_attach(
         &self,
         component: SpComponent,
-    ) -> Result<AttachedSerialConsole, SerialConsoleAlreadyAttached> {
+    ) -> Result<AttachedSerialConsole> {
         let (tx, rx) = oneshot::channel();
 
         // `Inner::run()` doesn't exit until we are dropped, so unwrapping here
         // only panics if it itself panicked.
-        self.cmds_tx.send(InnerCommand::SerialConsoleAttach(tx)).await.unwrap();
+        self.cmds_tx
+            .send(InnerCommand::SerialConsoleAttach(component, tx))
+            .await
+            .unwrap();
 
         let attachment = rx.await.unwrap()?;
 
         Ok(AttachedSerialConsole {
             key: attachment.key,
             rx: attachment.incoming,
-            component,
             inner_tx: self.cmds_tx.clone(),
+            log: self.log.clone(),
         })
     }
 
     /// Detach any existing attached serial console connection.
-    pub async fn serial_console_detach(&self) {
+    pub async fn serial_console_detach(&self) -> Result<()> {
+        let (tx, rx) = oneshot::channel();
+
         // `Inner::run()` doesn't exit until we are dropped, so unwrapping here
         // only panics if it itself panicked.
         self.cmds_tx
-            .send(InnerCommand::SerialConsoleDetach(None))
+            .send(InnerCommand::SerialConsoleDetach(None, tx))
             .await
             .unwrap();
+
+        rx.await.unwrap()
     }
 
     pub(crate) async fn rpc(
@@ -364,9 +370,9 @@ async fn rpc(
 #[derive(Debug)]
 pub struct AttachedSerialConsole {
     key: u64,
-    component: SpComponent,
-    rx: mpsc::Receiver<Vec<u8>>,
+    rx: mpsc::Receiver<(u64, Vec<u8>)>,
     inner_tx: mpsc::Sender<InnerCommand>,
+    log: Logger,
 }
 
 impl AttachedSerialConsole {
@@ -376,10 +382,14 @@ impl AttachedSerialConsole {
         (
             AttachedSerialConsoleSend {
                 key: self.key,
-                component: self.component,
+                tx_offset: 0,
                 inner_tx: self.inner_tx,
             },
-            AttachedSerialConsoleRecv { rx: self.rx },
+            AttachedSerialConsoleRecv {
+                rx_offset: 0,
+                rx: self.rx,
+                log: self.log,
+            },
         )
     }
 }
@@ -387,43 +397,74 @@ impl AttachedSerialConsole {
 #[derive(Debug)]
 pub struct AttachedSerialConsoleSend {
     key: u64,
+    tx_offset: u64,
     inner_tx: mpsc::Sender<InnerCommand>,
-    component: SpComponent,
 }
 
 impl AttachedSerialConsoleSend {
     /// Write `data` to the serial console of the SP.
-    pub async fn write(&self, data: Vec<u8>) -> Result<()> {
+    pub async fn write(&mut self, data: Vec<u8>) -> Result<()> {
         let mut data = Cursor::new(data);
-        while !CursorExt::is_empty(&data) {
+        let mut remaining_data = CursorExt::remaining_slice(&data).len();
+        while remaining_data > 0 {
             let (result, new_data) = rpc_with_trailing_data(
                 &self.inner_tx,
-                RequestKind::SerialConsoleWrite(self.component),
+                RequestKind::SerialConsoleWrite { offset: self.tx_offset },
                 data,
             )
             .await;
 
-            result.and_then(|(_peer, response)| {
+            let data_sent = (remaining_data
+                - CursorExt::remaining_slice(&new_data).len())
+                as u64;
+
+            let n = result.and_then(|(_peer, response)| {
                 response.expect_serial_console_write_ack().map_err(Into::into)
             })?;
 
+            // Confirm the ack we got back makes sense; its `n` should be in the
+            // range `[self.tx_offset..self.tx_offset + data_sent]`.
+            if n < self.tx_offset {
+                return Err(SpCommunicationError::BogusSerialConsoleState);
+            }
+            let bytes_accepted = n - self.tx_offset;
+            if bytes_accepted > data_sent {
+                return Err(SpCommunicationError::BogusSerialConsoleState);
+            }
+
             data = new_data;
+
+            // If the SP only accepted part of the data we sent, we need to
+            // rewind our cursor and resend what it couldn't accept.
+            if bytes_accepted < data_sent {
+                let rewind = data_sent - bytes_accepted;
+                data.seek(SeekFrom::Current(-(rewind as i64))).unwrap();
+            }
+
+            self.tx_offset += bytes_accepted;
+            remaining_data = CursorExt::remaining_slice(&data).len();
         }
         Ok(())
     }
 
     /// Detach this serial console connection.
-    pub async fn detach(&self) {
+    pub async fn detach(&self) -> Result<()> {
+        let (tx, rx) = oneshot::channel();
+
         self.inner_tx
-            .send(InnerCommand::SerialConsoleDetach(Some(self.key)))
+            .send(InnerCommand::SerialConsoleDetach(Some(self.key), tx))
             .await
             .unwrap();
+
+        rx.await.unwrap()
     }
 }
 
 #[derive(Debug)]
 pub struct AttachedSerialConsoleRecv {
-    rx: mpsc::Receiver<Vec<u8>>,
+    rx_offset: u64,
+    rx: mpsc::Receiver<(u64, Vec<u8>)>,
+    log: Logger,
 }
 
 impl AttachedSerialConsoleRecv {
@@ -432,7 +473,15 @@ impl AttachedSerialConsoleRecv {
     /// Returns `None` if the underlying channel has been closed (e.g., if the
     /// serial console has been detached).
     pub async fn recv(&mut self) -> Option<Vec<u8>> {
-        self.rx.recv().await
+        let (offset, data) = self.rx.recv().await?;
+        if offset != self.rx_offset {
+            warn!(
+                self.log,
+                "gap in serial console data (dropped packet or buffer overrun)",
+            );
+        }
+        self.rx_offset = offset + data.len() as u64;
+        Some(data)
     }
 }
 
@@ -463,7 +512,7 @@ struct RpcResponse {
 #[derive(Debug)]
 struct SerialConsoleAttachment {
     key: u64,
-    incoming: mpsc::Receiver<Vec<u8>>,
+    incoming: mpsc::Receiver<(u64, Vec<u8>)>,
 }
 
 #[derive(Debug)]
@@ -473,16 +522,15 @@ struct SerialConsoleAttachment {
 enum InnerCommand {
     Rpc(RpcRequest),
     SerialConsoleAttach(
-        oneshot::Sender<
-            Result<SerialConsoleAttachment, SerialConsoleAlreadyAttached>,
-        >,
+        SpComponent,
+        oneshot::Sender<Result<SerialConsoleAttachment>>,
     ),
     // The associated value is the connection key; if `Some(_)`, only detach if
     // the currently-attached key number matches. If `None`, detach any current
     // connection. These correspond to "detach the current session" (performed
     // automatically when a connection is closed) and "force-detach any session"
     // (performed by a user).
-    SerialConsoleDetach(Option<u64>),
+    SerialConsoleDetach(Option<u64>, oneshot::Sender<Result<()>>),
 }
 
 struct Inner {
@@ -492,7 +540,7 @@ struct Inner {
     discovery_addr: SocketAddrV6,
     max_attempts: usize,
     per_attempt_timeout: Duration,
-    serial_console_tx: Option<mpsc::Sender<Vec<u8>>>,
+    serial_console_tx: Option<mpsc::Sender<(u64, Vec<u8>)>>,
     cmds_rx: mpsc::Receiver<InnerCommand>,
     request_id: u32,
     serial_console_connection_key: u64,
@@ -626,17 +674,6 @@ impl Inner {
         command: InnerCommand,
         incoming_buf: &mut [u8; gateway_messages::MAX_SERIALIZED_SIZE],
     ) {
-        // When a caller attaches to the SP's serial console, we return an
-        // `mpsc::Receiver<_>` on which we send any packets received from the
-        // SP. We have to pick a depth for that channel, and given we're not
-        // able to apply backpressure to the SP / host sending the data, we
-        // choose to drop data if the channel fills. We want something large
-        // enough that hiccups in the receiver doesn't cause data loss, but
-        // small enough that if the receiver stops handling messages we don't
-        // eat a bunch of memory buffering up console data. We'll take a WAG and
-        // pick a depth of 32 for now.
-        const SERIAL_CONSOLE_CHANNEL_DEPTH: usize = 32;
-
         match command {
             InnerCommand::Rpc(mut rpc) => {
                 let result = self
@@ -657,26 +694,21 @@ impl Inner {
                     );
                 }
             }
-            InnerCommand::SerialConsoleAttach(response_tx) => {
-                let resp = if self.serial_console_tx.is_some() {
-                    Err(SerialConsoleAlreadyAttached)
-                } else {
-                    let (tx, rx) = mpsc::channel(SERIAL_CONSOLE_CHANNEL_DEPTH);
-                    self.serial_console_tx = Some(tx);
-                    self.serial_console_connection_key += 1;
-                    Ok(SerialConsoleAttachment {
-                        key: self.serial_console_connection_key,
-                        incoming: rx,
-                    })
-                };
+            InnerCommand::SerialConsoleAttach(component, response_tx) => {
+                let resp = self
+                    .attach_serial_console(sp_addr, component, incoming_buf)
+                    .await;
                 response_tx.send(resp).unwrap();
             }
-            InnerCommand::SerialConsoleDetach(key) => {
-                if key.is_none()
+            InnerCommand::SerialConsoleDetach(key, response_tx) => {
+                let resp = if key.is_none()
                     || key == Some(self.serial_console_connection_key)
                 {
-                    self.serial_console_tx = None;
-                }
+                    self.detach_serial_console(sp_addr, incoming_buf).await
+                } else {
+                    Ok(())
+                };
+                response_tx.send(resp).unwrap();
             }
         }
     }
@@ -723,8 +755,8 @@ impl Inner {
                     "result" => ?result,
                 );
             }
-            SpMessageKind::SerialConsole(component) => {
-                self.forward_serial_console(component, trailing_data);
+            SpMessageKind::SerialConsole { component, offset } => {
+                self.forward_serial_console(component, offset, trailing_data);
             }
         }
     }
@@ -842,8 +874,12 @@ impl Inner {
                         return Ok(None);
                     }
                 }
-                SpMessageKind::SerialConsole(serial_console) => {
-                    self.forward_serial_console(serial_console, trailing_data);
+                SpMessageKind::SerialConsole { component, offset } => {
+                    self.forward_serial_console(
+                        component,
+                        offset,
+                        trailing_data,
+                    );
                     continue;
                 }
             };
@@ -860,14 +896,19 @@ impl Inner {
         }
     }
 
-    fn forward_serial_console(&mut self, _component: SpComponent, data: &[u8]) {
+    fn forward_serial_console(
+        &mut self,
+        _component: SpComponent,
+        offset: u64,
+        data: &[u8],
+    ) {
         // TODO-cleanup component support for serial console is half baked;
         // should we check here that it matches the attached serial console? For
         // the foreseeable future we only support one component, so we skip that
         // for now.
 
         if let Some(tx) = self.serial_console_tx.as_ref() {
-            match tx.try_send(data.to_vec()) {
+            match tx.try_send((offset, data.to_vec())) {
                 Ok(()) => return,
                 Err(mpsc::error::TrySendError::Closed(_)) => {
                     self.serial_console_tx = None;
@@ -882,6 +923,69 @@ impl Inner {
             }
         }
         warn!(self.log, "discarding SP serial console data (no receiver)");
+    }
+
+    async fn attach_serial_console(
+        &mut self,
+        sp_addr: SocketAddrV6,
+        component: SpComponent,
+        incoming_buf: &mut [u8; gateway_messages::MAX_SERIALIZED_SIZE],
+    ) -> Result<SerialConsoleAttachment> {
+        // When a caller attaches to the SP's serial console, we return an
+        // `mpsc::Receiver<_>` on which we send any packets received from the
+        // SP. We have to pick a depth for that channel, and given we're not
+        // able to apply backpressure to the SP / host sending the data, we
+        // choose to drop data if the channel fills. We want something large
+        // enough that hiccups in the receiver doesn't cause data loss, but
+        // small enough that if the receiver stops handling messages we don't
+        // eat a bunch of memory buffering up console data. We'll take a WAG and
+        // pick a depth of 32 for now.
+        const SERIAL_CONSOLE_CHANNEL_DEPTH: usize = 32;
+
+        if self.serial_console_tx.is_some() {
+            // Returning an `SpError` here is a little suspect since we didn't
+            // actually talk to an SP, but we already know we're attached to it.
+            // If we asked it to attach again, it would send back this error.
+            return Err(SpCommunicationError::SpError(
+                ResponseError::SerialConsoleAlreadyAttached,
+            ));
+        }
+
+        let (_peer, response) = self
+            .rpc_call(
+                sp_addr,
+                RequestKind::SerialConsoleAttach(component),
+                None,
+                incoming_buf,
+            )
+            .await?;
+        response.expect_serial_console_attach_ack()?;
+
+        let (tx, rx) = mpsc::channel(SERIAL_CONSOLE_CHANNEL_DEPTH);
+        self.serial_console_tx = Some(tx);
+        self.serial_console_connection_key += 1;
+        Ok(SerialConsoleAttachment {
+            key: self.serial_console_connection_key,
+            incoming: rx,
+        })
+    }
+
+    async fn detach_serial_console(
+        &mut self,
+        sp_addr: SocketAddrV6,
+        incoming_buf: &mut [u8; gateway_messages::MAX_SERIALIZED_SIZE],
+    ) -> Result<()> {
+        let (_peer, response) = self
+            .rpc_call(
+                sp_addr,
+                RequestKind::SerialConsoleDetach,
+                None,
+                incoming_buf,
+            )
+            .await?;
+        response.expect_serial_console_detach_ack()?;
+        self.serial_console_tx = None;
+        Ok(())
     }
 }
 
