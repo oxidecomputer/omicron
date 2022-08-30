@@ -31,7 +31,7 @@ pub mod version {
 
 /// Messages from a gateway to an SP.
 #[derive(
-    Debug, Clone, SerializedSize, Serialize, Deserialize, PartialEq, Eq,
+    Debug, Clone, Copy, SerializedSize, Serialize, Deserialize, PartialEq, Eq,
 )]
 pub struct Request {
     pub version: u32,
@@ -40,7 +40,7 @@ pub struct Request {
 }
 
 #[derive(
-    Debug, Clone, SerializedSize, Serialize, Deserialize, PartialEq, Eq,
+    Debug, Clone, Copy, SerializedSize, Serialize, Deserialize, PartialEq, Eq,
 )]
 pub enum RequestKind {
     Discover,
@@ -63,9 +63,11 @@ pub enum RequestKind {
         offset: u64,
     },
     SerialConsoleDetach,
-    UpdateStart(UpdateStart),
+    UpdatePrepare(UpdatePrepare),
+    UpdatePrepareStatus(UpdatePrepareStatusRequest),
     /// `UpdateChunk` always includes trailing raw data.
     UpdateChunk(UpdateChunk),
+    UpdateAbort(SpComponent),
     SysResetPrepare,
     SysResetTrigger,
 }
@@ -95,8 +97,10 @@ pub enum ResponseKind {
     BulkIgnitionState(BulkIgnitionState),
     IgnitionCommandAck,
     SpState(SpState),
-    UpdateStartAck,
+    UpdatePrepareAck,
+    UpdatePrepareStatus(UpdatePrepareStatusResponse),
     UpdateChunkAck,
+    UpdateAbortAck,
     SerialConsoleAttachAck,
     SerialConsoleWriteAck { furthest_ingested_offset: u64 },
     SerialConsoleDetachAck,
@@ -142,18 +146,29 @@ pub enum ResponseError {
     /// Cannot attach to the serial console because another MGS instance is
     /// already attached.
     SerialConsoleAlreadyAttached,
+    /// An update has not been prepared yet.
+    UpdateNotPrepared,
+    /// An update-related message arrived at the SP, but it is already
+    /// processing an update with the stream id `sp_stream_id`.
+    InvalidUpdateStreamId { sp_stream_id: u64 },
     /// An update is already in progress with the specified amount of data
     /// already provided. MGS should resume the update at that offset.
     UpdateInProgress { bytes_received: u32 },
     /// Received an invalid update chunk; the in-progress update must be
-    /// abandoned and restarted.
+    /// aborted and restarted.
     InvalidUpdateChunk,
     /// An update operation failed with the associated code.
     UpdateFailed(u32),
+    /// An update is not possible at this time (e.g., the target slot is locked
+    /// by another device).
+    UpdateSlotBusy,
     /// Received a `SysResetTrigger` request without first receiving a
     /// `SysResetPrepare` request. This can be used to detect a successful
     /// reset.
     SysResetTriggerWithoutPrepare,
+    /// Request mentioned a slot number for a component that does not have that
+    /// slot.
+    InvalidSlotForComponent,
 }
 
 impl fmt::Display for ResponseError {
@@ -177,8 +192,17 @@ impl fmt::Display for ResponseError {
             ResponseError::SerialConsoleAlreadyAttached => {
                 write!(f, "serial console already attached")
             }
+            ResponseError::UpdateNotPrepared => {
+                write!(f, "SP has not received update prepare request")
+            }
+            ResponseError::InvalidUpdateStreamId { sp_stream_id } => {
+                write!(f, "bad update stream ID (update already in progress, stream id {:#x})", sp_stream_id)
+            }
             ResponseError::UpdateInProgress { bytes_received } => {
                 write!(f, "update still in progress ({bytes_received} bytes received so far)")
+            }
+            ResponseError::UpdateSlotBusy => {
+                write!(f, "update currently unavailable (slot busy)")
             }
             ResponseError::InvalidUpdateChunk => {
                 write!(f, "invalid update chunk")
@@ -186,8 +210,11 @@ impl fmt::Display for ResponseError {
             ResponseError::UpdateFailed(code) => {
                 write!(f, "update failed (code {})", code)
             }
-            &ResponseError::SysResetTriggerWithoutPrepare => {
+            ResponseError::SysResetTriggerWithoutPrepare => {
                 write!(f, "sys reset trigger requested without a preceding sys reset prepare")
+            }
+            ResponseError::InvalidSlotForComponent => {
+                write!(f, "invalid slot number for component")
             }
         }
     }
@@ -227,26 +254,47 @@ pub enum SpMessageKind {
 }
 
 #[derive(
-    Debug,
-    Default,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    SerializedSize,
-    Serialize,
-    Deserialize,
+    Debug, Clone, Copy, PartialEq, Eq, SerializedSize, Serialize, Deserialize,
 )]
-pub struct UpdateStart {
+pub struct UpdatePrepare {
+    pub component: SpComponent,
+    /// MGS sets `stream_id` to a random `u64`, and the SP uses it to correlate
+    /// any subsequent `UpdateChunk` messages with this update. This is a
+    /// safeguard against the SP receiving multiple `UpdateChunk` messages
+    /// concurrently and not being able to tell which are associated with the
+    /// stream it is currently updating.
+    pub stream_id: u64,
+    /// The number of available slots depends on `component`; passing an invalid
+    /// slot number will result in a [`ResponseError::InvalidSlotForComponent`].
+    pub slot: u16,
     pub total_size: u32,
     // TODO auth info? checksum/digest?
     // TODO should we inline the first chunk?
 }
 
 #[derive(
-    Debug, Clone, PartialEq, Eq, SerializedSize, Serialize, Deserialize,
+    Debug, Clone, Copy, PartialEq, Eq, SerializedSize, Serialize, Deserialize,
+)]
+pub struct UpdatePrepareStatusRequest {
+    pub component: SpComponent,
+    /// See [`UpdatePrepare::stream_id`].
+    pub stream_id: u64,
+}
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, SerializedSize, Serialize, Deserialize,
+)]
+pub struct UpdatePrepareStatusResponse {
+    pub done: bool,
+}
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, SerializedSize, Serialize, Deserialize,
 )]
 pub struct UpdateChunk {
+    pub component: SpComponent,
+    /// See [`UpdatePrepare::stream_id`].
+    pub stream_id: u64,
     /// Offset in bytes of this chunk from the beginning of the update data.
     pub offset: u32,
 }
@@ -335,9 +383,11 @@ impl SpComponent {
     /// Maximum number of bytes for a component ID.
     pub const MAX_ID_LENGTH: usize = 16;
 
+    /// The SP itself.
+    pub const SP_ITSELF: Self = Self { id: *b"sp\0\0\0\0\0\0\0\0\0\0\0\0\0\0" };
+
     /// The `sp3` host CPU.
-    pub const SP3_HOST_CPU: Self =
-        Self { id: *b"sp3\0\0\0\0\0\0\0\0\0\0\0\0\0" };
+    pub const SP3_HOST_CPU: Self = Self { id: *b"sp3-host-cpu\0\0\0\0" };
 
     /// Interpret the component name as a human-readable string.
     ///
