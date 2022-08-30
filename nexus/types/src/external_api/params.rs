@@ -473,7 +473,8 @@ pub struct InstanceCreate {
     /// If `false`, the instance will be created and started immediately.
     ///
     /// By default, the instance will be created and started.
-    pub only_create: Option<bool>,
+    #[serde(default)]
+    pub only_create: bool,
 }
 
 /// Start-time parameters for an [`Instance`](omicron_common::api::external::Instance)
@@ -485,7 +486,8 @@ pub struct InstanceStart {
     /// If `false`, we provision AND start running the Instance.
     ///
     /// By default, the Instance will be provisioned and placed in the "Running" state.
-    pub only_provision: Option<bool>,
+    #[serde(default)]
+    pub only_provision: bool,
 }
 
 // If you change this, also update the error message in

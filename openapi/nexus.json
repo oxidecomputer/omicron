@@ -8793,8 +8793,8 @@
             ]
           },
           "only_create": {
-            "nullable": true,
             "description": "Whether to not only create the Instance, but also run it.\n\nIf `true`, the instance will be created but not started. If `false`, the instance will be created and started immediately.\n\nBy default, the instance will be created and started.",
+            "default": false,
             "type": "boolean"
           },
           "user_data": {
@@ -9003,8 +9003,8 @@
         "type": "object",
         "properties": {
           "only_provision": {
-            "nullable": true,
             "description": "Whether to not only provision the Instance, but also run it.\n\nIf `true`, we provision but don't start running the Instance. If `false`, we provision AND start running the Instance.\n\nBy default, the Instance will be provisioned and placed in the \"Running\" state.",
+            "default": false,
             "type": "boolean"
           }
         }

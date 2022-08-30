@@ -2039,7 +2039,7 @@ async fn instance_start(
                 &organization_name,
                 &project_name,
                 &instance_name,
-                params.into_inner().only_provision.unwrap_or(false),
+                params.into_inner().only_provision,
             )
             .await?;
         Ok(HttpResponseAccepted(instance.into()))
