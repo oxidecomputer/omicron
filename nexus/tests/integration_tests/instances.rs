@@ -11,6 +11,7 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::create_ip_pool;
+use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::DiskTest;
 use omicron_common::api::external::ByteCount;
@@ -440,6 +441,62 @@ async fn test_instances_create_reboot_halt(
     .execute()
     .await
     .unwrap();
+}
+
+#[nexus_test]
+async fn test_instances_create_stopped_start(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let apictx = &cptestctx.server.apictx;
+    let nexus = &apictx.nexus;
+
+    // Create an IP pool and  project that we'll use for testing.
+    create_ip_pool(&client, POOL_NAME, None, None).await;
+    create_organization(&client, ORGANIZATION_NAME).await;
+    let url_instances = format!(
+        "/organizations/{}/projects/{}/instances",
+        ORGANIZATION_NAME, PROJECT_NAME
+    );
+    let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
+
+    // Create an instance in a stopped state.
+    let instance: Instance = object_create(
+        client,
+        &url_instances,
+        &params::InstanceCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "just-rainsticks".parse().unwrap(),
+                description: "instance just-rainsticks".to_string(),
+            },
+            ncpus: InstanceCpuCount(4),
+            memory: ByteCount::from_gibibytes_u32(1),
+            hostname: String::from("the_host"),
+            user_data: vec![],
+            network_interfaces:
+                params::InstanceNetworkInterfaceAttachment::Default,
+            external_ips: vec![],
+            disks: vec![],
+            only_create: true,
+        },
+    )
+    .await;
+    assert_eq!(instance.runtime.run_state, InstanceState::Stopped);
+
+    // Start the instance.
+    let instance_url = format!("{}/just-rainsticks", url_instances);
+    let instance =
+        instance_post(&client, &instance_url, InstanceOp::Start).await;
+
+    // Now, simulate completion of instance boot and check the state reported.
+    instance_simulate(nexus, &instance.identity.id).await;
+    let instance_next = instance_get(&client, &instance_url).await;
+    identity_eq(&instance.identity, &instance_next.identity);
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
+    assert!(
+        instance_next.runtime.time_run_state_updated
+            > instance.runtime.time_run_state_updated
+    );
 }
 
 #[nexus_test]
