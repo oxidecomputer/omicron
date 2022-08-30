@@ -714,6 +714,8 @@ impl InstanceState {
     /// through Stopping.
     pub fn is_stopped(&self) -> bool {
         match self {
+            InstanceState::Provisioning => false,
+            InstanceState::Provisioned => false,
             InstanceState::Starting => false,
             InstanceState::Running => false,
             InstanceState::Stopping => false,
@@ -721,8 +723,6 @@ impl InstanceState {
             InstanceState::Migrating => false,
 
             InstanceState::Creating => true,
-            InstanceState::Provisioning => true,
-            InstanceState::Provisioned => true,
             InstanceState::Stopped => true,
             InstanceState::Repairing => true,
             InstanceState::Failed => true,

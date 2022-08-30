@@ -253,8 +253,12 @@ impl InstanceStates {
                 return Ok(None)
             }
             // Valid states for a stop request
-            InstanceState::Creating
-            | InstanceState::Provisioning
+            InstanceState::Creating => {
+                // Already stopped, no action necessary.
+                self.transition(InstanceState::Stopped, None);
+                return Ok(None);
+            }
+            InstanceState::Provisioning
             | InstanceState::Provisioned
             | InstanceState::Starting
             | InstanceState::Running
