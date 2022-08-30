@@ -11,7 +11,7 @@ use crate::params::{
 };
 use crate::serial::ByteOffset;
 use futures::lock::Mutex;
-use omicron_common::api::external::{Error, ResourceType};
+use omicron_common::api::external::{Error, InstanceState, ResourceType};
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use slog::Logger;
@@ -283,9 +283,17 @@ impl SledAgent {
             return Err(format!("No such instance {}", instance_id));
         }
 
-        // TODO: if instance state isn't running {
-        //  return Ok(InstanceSerialConsoleData { data: vec![], last_byte_offset: 0 });
-        // }
+        let current = self
+            .instances
+            .sim_get_current_state(&instance_id)
+            .await
+            .map_err(|e| format!("{}", e))?;
+        if current.run_state != InstanceState::Running {
+            return Ok(InstanceSerialConsoleData {
+                data: vec![],
+                last_byte_offset: 0,
+            });
+        }
 
         let gerunds = [
             "Loading",
