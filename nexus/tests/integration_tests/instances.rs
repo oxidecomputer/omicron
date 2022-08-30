@@ -500,6 +500,62 @@ async fn test_instances_create_stopped_start(
 }
 
 #[nexus_test]
+async fn test_instances_provision_start(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let apictx = &cptestctx.server.apictx;
+    let nexus = &apictx.nexus;
+
+    // Create an IP pool and  project that we'll use for testing.
+    create_ip_pool(&client, POOL_NAME, None, None).await;
+    create_organization(&client, ORGANIZATION_NAME).await;
+    let url_instances = format!(
+        "/organizations/{}/projects/{}/instances",
+        ORGANIZATION_NAME, PROJECT_NAME
+    );
+    let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
+
+    // Create an instance in a stopped state.
+    let instance: Instance = object_create(
+        client,
+        &url_instances,
+        &params::InstanceCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "just-rainsticks".parse().unwrap(),
+                description: "instance just-rainsticks".to_string(),
+            },
+            ncpus: InstanceCpuCount(4),
+            memory: ByteCount::from_gibibytes_u32(1),
+            hostname: String::from("the_host"),
+            user_data: vec![],
+            network_interfaces:
+                params::InstanceNetworkInterfaceAttachment::Default,
+            external_ips: vec![],
+            disks: vec![],
+            only_create: true,
+        },
+    )
+    .await;
+    assert_eq!(instance.runtime.run_state, InstanceState::Stopped);
+
+    // Provision the instance and verify state change
+    let instance_url = format!("{}/just-rainsticks", url_instances);
+    let instance =
+        instance_post(&client, &instance_url, InstanceOp::Provision).await;
+    assert_eq!(instance.runtime.run_state, InstanceState::Provisioned);
+
+    // Start the instance, simulate completion of instance boot and check the state reported.
+    let instance =
+        instance_post(&client, &instance_url, InstanceOp::Start).await;
+    instance_simulate(nexus, &instance.identity.id).await;
+    let instance_next = instance_get(&client, &instance_url).await;
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
+    assert!(
+        instance_next.runtime.time_run_state_updated
+            > instance.runtime.time_run_state_updated
+    );
+}
+
+#[nexus_test]
 async fn test_instances_delete_fails_when_running_succeeds_when_stopped(
     cptestctx: &ControlPlaneTestContext,
 ) {
@@ -2613,6 +2669,7 @@ async fn instances_list(
 /// Convenience function for starting, stopping, or rebooting an instance.
 pub enum InstanceOp {
     Start,
+    Provision,
     Stop,
     Reboot,
 }
@@ -2626,7 +2683,7 @@ pub async fn instance_post(
         "{}/{}",
         instance_url,
         match which {
-            InstanceOp::Start => "start",
+            InstanceOp::Start | InstanceOp::Provision => "start",
             InstanceOp::Stop => "stop",
             InstanceOp::Reboot => "reboot",
         }
@@ -2634,6 +2691,9 @@ pub async fn instance_post(
     let body = match which {
         InstanceOp::Start => {
             Some(serde_json::json!({ "only_provision": false }))
+        }
+        InstanceOp::Provision => {
+            Some(serde_json::json!({ "only_provision": true }))
         }
         InstanceOp::Stop | InstanceOp::Reboot => None,
     };
