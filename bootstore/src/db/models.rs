@@ -30,16 +30,6 @@ pub struct KeyShareCommit {
     pub share_digest: Sha3_256Digest,
 }
 
-// TODO: These should go in a crypto module
-// The length of a SHA3-256 digest
-pub const DIGEST_LEN: usize = 32;
-
-// The length of a ChaCha20Poly1305 Key
-pub const KEY_LEN: usize = 32;
-
-// The length of a ChaCha20Poly1305 authentication tag
-pub const TAG_LEN: usize = 16;
-
 // A chacha20poly1305 secret encrypted by a chacha20poly1305 secret key
 // derived from the rack secret for the given epoch with the given salt
 //
@@ -63,6 +53,16 @@ pub struct EncryptedRootSecret {
     /// The authentication tag for the encrypted secret
     pub tag: AuthTag,
 }
+
+// TODO: These should likely go in a crypto module
+// The length of a SHA3-256 digest
+pub const DIGEST_LEN: usize = 32;
+
+// The length of a ChaCha20Poly1305 Key
+pub const KEY_LEN: usize = 32;
+
+// The length of a ChaCha20Poly1305 authentication tag
+pub const TAG_LEN: usize = 16;
 
 array_new_type!(Sha3_256Digest, DIGEST_LEN);
 array_new_type!(EncryptedSecret, KEY_LEN);
