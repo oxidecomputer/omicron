@@ -30,14 +30,18 @@ pub mod version {
 // other messages need?
 
 /// Messages from a gateway to an SP.
-#[derive(Debug, Clone, SerializedSize, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, SerializedSize, Serialize, Deserialize, PartialEq, Eq,
+)]
 pub struct Request {
     pub version: u32,
     pub request_id: u32,
     pub kind: RequestKind,
 }
 
-#[derive(Debug, Clone, SerializedSize, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, SerializedSize, Serialize, Deserialize, PartialEq, Eq,
+)]
 pub enum RequestKind {
     Discover,
     // TODO do we want to be able to request IgnitionState for all targets in
@@ -228,6 +232,7 @@ pub enum SpMessageKind {
     Clone,
     Copy,
     PartialEq,
+    Eq,
     SerializedSize,
     Serialize,
     Deserialize,
@@ -238,7 +243,9 @@ pub struct UpdateStart {
     // TODO should we inline the first chunk?
 }
 
-#[derive(Debug, Clone, PartialEq, SerializedSize, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, SerializedSize, Serialize, Deserialize,
+)]
 pub struct UpdateChunk {
     /// Offset in bytes of this chunk from the beginning of the update data.
     pub offset: u32,
@@ -250,6 +257,7 @@ pub struct UpdateChunk {
     Clone,
     Copy,
     PartialEq,
+    Eq,
     SerializedSize,
     Serialize,
     Deserialize,
@@ -300,7 +308,7 @@ impl BulkIgnitionState {
 }
 
 #[derive(
-    Debug, Clone, Copy, SerializedSize, Serialize, Deserialize, PartialEq,
+    Debug, Clone, Copy, SerializedSize, Serialize, Deserialize, PartialEq, Eq,
 )]
 pub enum IgnitionCommand {
     PowerOn,
@@ -400,11 +408,17 @@ const_assert!(MAX_SERIALIZED_SIZE - SpMessage::MAX_SIZE > 700);
 
 /// Returns `(serialized_size, data_bytes_written)` where `serialized_size` is
 /// the message size written to `out` and `data_bytes_written` is the number of
-/// bytes included in `out` from `data`.
+/// bytes included in `out` from `data_slices`.
+///
+/// `data_slices` is provided as multiple slices to allow for data structures
+/// like `heapless::Deque` (which presents its contents as two slices). If
+/// multiple slices are present in `data_slices`, `data_bytes_written` will be
+/// at most the sum of all their lengths. Bytes will be appended from the slices
+/// in order.
 pub fn serialize_with_trailing_data<T>(
     out: &mut [u8; MAX_SERIALIZED_SIZE],
     header: &T,
-    data: &[u8],
+    data_slices: &[&[u8]],
 ) -> (usize, usize)
 where
     T: GatewayMessage,
@@ -416,14 +430,64 @@ where
     let n = hubpack::serialize(out, header).unwrap();
     let out = &mut out[n..];
 
-    // How much data can we fit in what's left, leaving room for a 2-byte
-    // prefix? We know `out.len() > 2` thanks to the static assertion comparing
-    // `Request::MAX_SIZE` and `MAX_SERIALIZED_SIZE` at the root of our crate.
-    let to_write = usize::min(data.len(), out.len() - mem::size_of::<u16>());
+    // Split `out` into a 2-byte length prefix and the remainder of the buffer.
+    let (length_prefix, mut out) = out.split_at_mut(mem::size_of::<u16>());
 
-    out[..mem::size_of::<u16>()]
-        .copy_from_slice(&(to_write as u16).to_le_bytes());
-    out[mem::size_of::<u16>()..][..to_write].copy_from_slice(&data[..to_write]);
+    let mut nwritten = 0;
+    for &data in data_slices {
+        // How much of this slice can we fit in `out`?
+        let to_write = usize::min(out.len(), data.len());
+        out[..to_write].copy_from_slice(&data[..to_write]);
+        nwritten += to_write;
+        out = &mut out[to_write..];
+        if out.is_empty() {
+            break;
+        }
+    }
 
-    (n + mem::size_of::<u16>() + to_write, to_write)
+    // Fill in the length prefix with the amount of data we copied into `out`.
+    length_prefix.copy_from_slice(&(nwritten as u16).to_le_bytes());
+
+    (n + mem::size_of::<u16>() + nwritten, nwritten)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_serialize_with_trailing_data() {
+        let mut out = [0; MAX_SERIALIZED_SIZE];
+        let header =
+            Request { version: 1, request_id: 2, kind: RequestKind::Discover };
+        let data_vecs = &[
+            vec![0; 256],
+            vec![1; 256],
+            vec![2; 256],
+            vec![3; 256],
+            vec![4; 256],
+            vec![5; 256],
+        ];
+        let data_slices =
+            data_vecs.iter().map(|v| v.as_slice()).collect::<Vec<_>>();
+
+        let (out_len, nwritten) =
+            serialize_with_trailing_data(&mut out, &header, &data_slices);
+
+        // We should have filled `out` entirely; `data_vecs` contains more data
+        // than fits in `MAX_SERIALIZED_SIZE`.
+        assert_eq!(out_len, MAX_SERIALIZED_SIZE);
+
+        let (deserialized_header, remainder) =
+            deserialize::<Request>(&out).unwrap();
+
+        let remainder = sp_impl::unpack_trailing_data(remainder).unwrap();
+
+        assert_eq!(header, deserialized_header);
+        assert_eq!(remainder.len(), nwritten);
+
+        for (i, chunk) in remainder.chunks(256).enumerate() {
+            assert_eq!(chunk, &data_vecs[i][..chunk.len()]);
+        }
+    }
 }

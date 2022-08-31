@@ -780,7 +780,7 @@ impl Inner {
                     gateway_messages::serialize_with_trailing_data(
                         &mut outgoing_buf,
                         &request,
-                        CursorExt::remaining_slice(data),
+                        &[CursorExt::remaining_slice(data)],
                     );
                 // `data` is an in-memory cursor; seeking can only fail if we
                 // provide a bogus offset, so it's safe to unwrap here.
