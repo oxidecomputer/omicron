@@ -19,7 +19,6 @@ pub mod sim;
 pub mod common;
 
 // Modules for the non-simulated sled agent.
-mod bootstore;
 pub mod bootstrap;
 pub mod config;
 mod http_entrypoints;

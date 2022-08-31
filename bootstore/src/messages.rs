@@ -12,7 +12,7 @@ use vsss_rs::Share;
 use crate::trust_quorum::SerializableShareDistribution;
 
 /// A request sent to a [`Node`] from another [`Node`] or a [`Coordinator`].
-#[derive(Debug, Clone, PartialEq, From, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NodeRequest {
     pub version: u32,
     /// A message correlation id to match requests to responses
@@ -21,7 +21,7 @@ pub struct NodeRequest {
 }
 
 /// A specific operation for a Node
-#[derive(Debug, Clone, PartialEq, From, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum NodeOp {
     /// Retrieve a key share for the given epoch
     ///
@@ -57,13 +57,14 @@ pub enum NodeOp {
     /// A request from a [`Coordinator`] for the Prepare phase
     /// of a rekey or reconfiguration
     KeySharePrepare {
+        rack_uuid: Uuid,
         epoch: i32,
         share_distribution: SerializableShareDistribution,
     },
 
     /// A request from a [`Coordinator`] for the Commit phase of a
     /// rekey or reconfiguration
-    KeyShareCommit { epoch: i32 },
+    KeyShareCommit { rack_uuid: Uuid, epoch: i32 },
 }
 
 /// A response from a  [`Node`] to another [`Node`] or a [`Coordinator`]
@@ -72,7 +73,7 @@ pub struct NodeResponse {
     pub version: u32,
     /// A message correlation id to match requests to responses
     pub id: u64,
-    pub op: NodeOp,
+    pub op: NodeOpResult,
 }
 
 #[derive(Debug, Clone, PartialEq, From, Serialize, Deserialize)]
@@ -83,4 +84,33 @@ pub enum NodeOpResult {
 
     /// An ack for the most recent coordinator message
     CoordinatorAck,
+
+    /// Error responses
+    Error(NodeError),
+}
+
+/// Errors returned inside a [`NodeOpResult`]
+#[derive(Debug, Clone, PartialEq, From, Serialize, Deserialize)]
+pub enum NodeError {
+    KeyShareDoesNotExist {
+        epoch: i32,
+    },
+    RackUuidMismatch {
+        expected: Uuid,
+        actual: Uuid,
+    },
+
+    /// A Commit has already occurred for the rack initialization.
+    AlreadyInitialized {
+        rack_uuid: Uuid,
+    },
+
+    /// A `Prepare` for a given epoch was requested, but the node has not
+    /// seen the corresponding `KeySharePrepare`.
+    ///
+    /// This is valid for various 2-phase commits, not just key shares
+    MissingPrepare {
+        rack_uuid: Uuid,
+        epoch: i32,
+    },
 }

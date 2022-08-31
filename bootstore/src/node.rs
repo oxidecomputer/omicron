@@ -9,12 +9,22 @@
 
 use slog::Logger;
 use slog::{info, o};
+use sprockets_host::Ed25519Certificate;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use std::sync::Mutex;
+use uuid::Uuid;
 
 use crate::db::Db;
-use sprockets_host::Ed25519Certificate;
+use crate::messages::*;
+use crate::trust_quorum::SerializableShareDistribution;
+
+/// An error returned by a Node
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("Version {0} messages are unsupported.")]
+    UnsupportedVersion(u32),
+}
 
 /// Configuration for an individual node
 pub struct Config {
@@ -45,5 +55,63 @@ impl Node {
     pub fn new(config: Config) -> Node {
         let db = Db::open(config.log.clone(), &config.db_path).unwrap();
         Node { config, db }
+    }
+
+    /// Handle a message received over sprockets from another [`Node`] or
+    /// the [`Coordinator`].
+    pub fn handle(&mut self, req: NodeRequest) -> Result<NodeResponse, Error> {
+        if req.version != 1 {
+            return Err(Error::UnsupportedVersion(req.version));
+        }
+
+        let op_result = match req.op {
+            NodeOp::GetShare { epoch } => self.handle_get_share(epoch),
+            NodeOp::Initialize { rack_uuid, share_distribution } => {
+                self.handle_initialize(rack_uuid, share_distribution)
+            }
+            NodeOp::KeySharePrepare {
+                rack_uuid,
+                epoch,
+                share_distribution,
+            } => self.handle_key_share_prepare(
+                rack_uuid,
+                epoch,
+                share_distribution,
+            ),
+            NodeOp::KeyShareCommit { rack_uuid, epoch } => {
+                self.handle_key_share_commit(rack_uuid, epoch)
+            }
+        }?;
+
+        Ok(NodeResponse { version: req.version, id: req.id, op: op_result })
+    }
+
+    fn handle_get_share(&mut self, epoch: i32) -> Result<NodeOpResult, Error> {
+        unimplemented!();
+    }
+
+    fn handle_initialize(
+        &mut self,
+        rack_uuid: Uuid,
+        share_distribution: SerializableShareDistribution,
+    ) -> Result<NodeOpResult, Error> {
+        unimplemented!();
+    }
+
+    fn handle_key_share_prepare(
+        &mut self,
+        rack_uuid: Uuid,
+        epoch: i32,
+        share_distribution: SerializableShareDistribution,
+    ) -> Result<NodeOpResult, Error> {
+        unimplemented!();
+    }
+
+    fn handle_key_share_commit(
+        &mut self,
+        rack_uuid: Uuid,
+        epoch: i32,
+    ) -> Result<NodeOpResult, Error> {
+        unimplemented!();
     }
 }
