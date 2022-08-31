@@ -10,5 +10,9 @@
 //! it to CockroachDB when we start it up.
 
 mod db;
+mod messages;
+mod node;
 mod trust_quorum;
-//mod server;
+
+pub use node::Config;
+pub use node::Node;

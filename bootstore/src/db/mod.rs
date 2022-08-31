@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Database layer for the bootstore
+
 mod macros;
 mod models;
 mod schema;
