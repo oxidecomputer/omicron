@@ -41,9 +41,9 @@ pub enum NodeOp {
     /// lack of global datastore, we must re-issue the request.
     ///
     /// This request generates a `KeySharePrepare` for epoch 0. Once all sleds
-    /// have prepared, RSS trigger the start of RSS replicas. The trust quorum
-    /// membership and prepare status will be written into CockroachDB as the
-    /// epoch 0 trust quorum configuration. Nexus will then proceed to
+    /// have prepared, RSS trigger the start of CockroachDB replicas. The trust
+    /// quorum membership and prepare status will be written into CockroachDB
+    /// as the epoch 0 trust quorum configuration. Nexus will then proceed to
     /// commit the trust quorum information, by first writing the Commit to
     /// CockroachDb and then sending a `KeyShareCommit` for epoch 0.
     ///
