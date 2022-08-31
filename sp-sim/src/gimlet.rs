@@ -274,7 +274,9 @@ impl SerialConsoleTcpTask {
                 },
             };
             let (n, written) = gateway_messages::serialize_with_trailing_data(
-                &mut out, &message, remaining,
+                &mut out,
+                &message,
+                &[remaining],
             );
             sock.send_to(&out[..n], mgs_addr).await?;
             remaining = &remaining[written..];
