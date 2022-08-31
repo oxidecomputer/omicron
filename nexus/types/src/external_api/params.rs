@@ -477,19 +477,6 @@ pub struct InstanceCreate {
     pub only_create: bool,
 }
 
-/// Start-time parameters for an [`Instance`](omicron_common::api::external::Instance)
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct InstanceStart {
-    /// Whether to not only provision the Instance, but also run it.
-    ///
-    /// If `true`, we provision but don't start running the Instance.
-    /// If `false`, we provision AND start running the Instance.
-    ///
-    /// By default, the Instance will be provisioned and placed in the "Running" state.
-    #[serde(default)]
-    pub only_provision: bool,
-}
-
 // If you change this, also update the error message in
 // `UserData::deserialize()` below.
 pub const MAX_USER_DATA_BYTES: usize = 32 * 1024; // 32 KiB

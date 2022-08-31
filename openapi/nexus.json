@@ -3701,6 +3701,62 @@
         }
       }
     },
+    "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/provision": {
+      "post": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "Provision an instance",
+        "operationId": "instance_provision",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "organization_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "project_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Instance"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/reboot": {
       "post": {
         "tags": [
@@ -3885,16 +3941,6 @@
             "style": "simple"
           }
         ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/InstanceStart"
-              }
-            }
-          },
-          "required": true
-        },
         "responses": {
           "202": {
             "description": "successfully enqueued operation",
@@ -8997,17 +9043,6 @@
           "data",
           "last_byte_offset"
         ]
-      },
-      "InstanceStart": {
-        "description": "Start-time parameters for an [`Instance`](omicron_common::api::external::Instance)",
-        "type": "object",
-        "properties": {
-          "only_provision": {
-            "description": "Whether to not only provision the Instance, but also run it.\n\nIf `true`, we provision but don't start running the Instance. If `false`, we provision AND start running the Instance.\n\nBy default, the Instance will be provisioned and placed in the \"Running\" state.",
-            "default": false,
-            "type": "boolean"
-          }
-        }
       },
       "InstanceState": {
         "description": "Running state of an Instance (primarily: booted or stopped)\n\nThis typically reflects whether it's starting, running, stopping, or stopped, but also includes states related to the Instance's lifecycle",

@@ -363,14 +363,13 @@ impl super::Nexus {
         self.db_datastore.instance_refetch(opctx, &authz_instance).await
     }
 
-    /// Make sure the given Instance is running.
-    pub async fn instance_start(
+    /// Make sure the given Instance is provisioned.
+    pub async fn instance_provision(
         &self,
         opctx: &OpContext,
         organization_name: &Name,
         project_name: &Name,
         instance_name: &Name,
-        only_provision: bool,
     ) -> UpdateResult<db::model::Instance> {
         let (.., authz_instance, db_instance) =
             LookupPath::new(opctx, &self.db_datastore)
@@ -380,11 +379,36 @@ impl super::Nexus {
                 .fetch()
                 .await?;
         let requested = InstanceRuntimeStateRequested {
-            run_state: if only_provision {
-                InstanceStateRequested::Provisioned
-            } else {
-                InstanceStateRequested::Running
-            },
+            run_state: InstanceStateRequested::Provisioned,
+            migration_params: None,
+        };
+        self.instance_set_runtime(
+            opctx,
+            &authz_instance,
+            &db_instance,
+            requested,
+        )
+        .await?;
+        self.db_datastore.instance_refetch(opctx, &authz_instance).await
+    }
+
+    /// Make sure the given Instance is running.
+    pub async fn instance_start(
+        &self,
+        opctx: &OpContext,
+        organization_name: &Name,
+        project_name: &Name,
+        instance_name: &Name,
+    ) -> UpdateResult<db::model::Instance> {
+        let (.., authz_instance, db_instance) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .organization_name(organization_name)
+                .project_name(project_name)
+                .instance_name(instance_name)
+                .fetch()
+                .await?;
+        let requested = InstanceRuntimeStateRequested {
+            run_state: InstanceStateRequested::Running,
             migration_params: None,
         };
         self.instance_set_runtime(

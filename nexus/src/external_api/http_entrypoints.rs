@@ -138,6 +138,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(instance_delete)?;
         api.register(instance_migrate)?;
         api.register(instance_reboot)?;
+        api.register(instance_provision)?;
         api.register(instance_start)?;
         api.register(instance_stop)?;
         api.register(instance_serial_console)?;
@@ -2014,6 +2015,37 @@ async fn instance_reboot(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Provision an instance
+#[endpoint {
+    method = POST,
+    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/provision",
+    tags = ["instances"],
+}]
+async fn instance_provision(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<InstancePathParam>,
+) -> Result<HttpResponseOk<Instance>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let organization_name = &path.organization_name;
+    let project_name = &path.project_name;
+    let instance_name = &path.instance_name;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let instance = nexus
+            .instance_provision(
+                &opctx,
+                &organization_name,
+                &project_name,
+                &instance_name,
+            )
+            .await?;
+        Ok(HttpResponseOk(instance.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /// Boot an instance
 #[endpoint {
     method = POST,
@@ -2023,7 +2055,6 @@ async fn instance_reboot(
 async fn instance_start(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<InstancePathParam>,
-    params: TypedBody<params::InstanceStart>,
 ) -> Result<HttpResponseAccepted<Instance>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -2039,7 +2070,6 @@ async fn instance_start(
                 &organization_name,
                 &project_name,
                 &instance_name,
-                params.into_inner().only_provision,
             )
             .await?;
         Ok(HttpResponseAccepted(instance.into()))
