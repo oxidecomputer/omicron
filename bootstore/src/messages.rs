@@ -90,27 +90,27 @@ pub enum NodeOpResult {
 }
 
 /// Errors returned inside a [`NodeOpResult`]
-#[derive(Debug, Clone, PartialEq, From, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, From, Serialize, Deserialize, thiserror::Error,
+)]
 pub enum NodeError {
-    KeyShareDoesNotExist {
-        epoch: i32,
-    },
-    RackUuidMismatch {
-        expected: Uuid,
-        actual: Uuid,
-    },
+    #[error("Version {0} messages are unsupported.")]
+    UnsupportedVersion(u32),
 
-    /// A Commit has already occurred for the rack initialization.
-    AlreadyInitialized {
-        rack_uuid: Uuid,
-    },
+    #[error("Key share for epoch {epoch} does not exist.")]
+    KeyShareDoesNotExist { epoch: i32 },
 
-    /// A `Prepare` for a given epoch was requested, but the node has not
-    /// seen the corresponding `KeySharePrepare`.
-    ///
-    /// This is valid for various 2-phase commits, not just key shares
-    MissingPrepare {
-        rack_uuid: Uuid,
-        epoch: i32,
-    },
+    #[error(
+        "Received unexpected rack UUID. Expected: {expected}, Actual: {actual}"
+    )]
+    RackUuidMismatch { expected: Uuid, actual: Uuid },
+
+    #[error("A commit has already occurred for rack {rack_uuid}")]
+    AlreadyInitialized { rack_uuid: Uuid },
+
+    #[error(
+        "No corresponding key share prepare for this commit: rack UUID:
+{rack_uuid}, epoch: {epoch}"
+    )]
+    MissingKeySharePrepare { rack_uuid: Uuid, epoch: i32 },
 }

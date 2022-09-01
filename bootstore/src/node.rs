@@ -19,13 +19,6 @@ use crate::db::Db;
 use crate::messages::*;
 use crate::trust_quorum::SerializableShareDistribution;
 
-/// An error returned by a Node
-#[derive(thiserror::Error, Debug)]
-pub enum Error {
-    #[error("Version {0} messages are unsupported.")]
-    UnsupportedVersion(u32),
-}
-
 /// Configuration for an individual node
 pub struct Config {
     log: Logger,
@@ -59,12 +52,18 @@ impl Node {
 
     /// Handle a message received over sprockets from another [`Node`] or
     /// the [`Coordinator`].
-    pub fn handle(&mut self, req: NodeRequest) -> Result<NodeResponse, Error> {
+    pub fn handle(&mut self, req: NodeRequest) -> NodeResponse {
         if req.version != 1 {
-            return Err(Error::UnsupportedVersion(req.version));
+            return NodeResponse {
+                version: req.version,
+                id: req.id,
+                op: NodeOpResult::Error(NodeError::UnsupportedVersion(
+                    req.version,
+                )),
+            };
         }
 
-        let op_result = match req.op {
+        let result = match req.op {
             NodeOp::GetShare { epoch } => self.handle_get_share(epoch),
             NodeOp::Initialize { rack_uuid, share_distribution } => {
                 self.handle_initialize(rack_uuid, share_distribution)
@@ -81,12 +80,20 @@ impl Node {
             NodeOp::KeyShareCommit { rack_uuid, epoch } => {
                 self.handle_key_share_commit(rack_uuid, epoch)
             }
-        }?;
+        };
 
-        Ok(NodeResponse { version: req.version, id: req.id, op: op_result })
+        let op_result = match result {
+            Ok(op_result) => op_result,
+            Err(err) => NodeOpResult::Error(err),
+        };
+
+        NodeResponse { version: req.version, id: req.id, op: op_result }
     }
 
-    fn handle_get_share(&mut self, epoch: i32) -> Result<NodeOpResult, Error> {
+    fn handle_get_share(
+        &mut self,
+        epoch: i32,
+    ) -> Result<NodeOpResult, NodeError> {
         unimplemented!();
     }
 
@@ -94,7 +101,7 @@ impl Node {
         &mut self,
         rack_uuid: Uuid,
         share_distribution: SerializableShareDistribution,
-    ) -> Result<NodeOpResult, Error> {
+    ) -> Result<NodeOpResult, NodeError> {
         unimplemented!();
     }
 
@@ -103,7 +110,7 @@ impl Node {
         rack_uuid: Uuid,
         epoch: i32,
         share_distribution: SerializableShareDistribution,
-    ) -> Result<NodeOpResult, Error> {
+    ) -> Result<NodeOpResult, NodeError> {
         unimplemented!();
     }
 
@@ -111,7 +118,7 @@ impl Node {
         &mut self,
         rack_uuid: Uuid,
         epoch: i32,
-    ) -> Result<NodeOpResult, Error> {
+    ) -> Result<NodeOpResult, NodeError> {
         unimplemented!();
     }
 }
