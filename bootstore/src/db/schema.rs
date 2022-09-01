@@ -5,17 +5,11 @@
 use diesel::table;
 
 table! {
-    key_share_prepares(epoch) {
+    key_shares(epoch) {
         epoch -> Integer,
         share -> Text,
         share_digest -> Binary,
-    }
-}
-
-table! {
-    key_share_commits(epoch) {
-        epoch -> Integer,
-        share_digest -> Binary,
+        committed -> Bool,
     }
 }
 

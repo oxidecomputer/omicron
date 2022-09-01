@@ -16,8 +16,7 @@ use slog::{info, o};
 
 use crate::trust_quorum::SerializableShareDistribution;
 use models::EncryptedRootSecret;
-use models::KeyShareCommit;
-use models::KeySharePrepare;
+use models::KeyShare;
 use models::Sha3_256Digest;
 use models::Share;
 use sha3::{Digest, Sha3_256};
@@ -90,16 +89,20 @@ impl Db {
         epoch: i32,
         share: SerializableShareDistribution,
     ) -> Result<(), Error> {
-        use schema::key_share_prepares::dsl;
+        use schema::key_shares::dsl;
         // We save the digest so we don't have to deserialize and recompute most of the time.
         // We'd only want to do that for a consistency check occasionally.
         let val = serde_json::to_string(&share)?;
         let share_digest =
             sprockets_common::Sha3_256Digest(Sha3_256::digest(&val).into())
                 .into();
-        let prepare =
-            KeySharePrepare { epoch, share: Share(share), share_digest };
-        diesel::insert_into(dsl::key_share_prepares)
+        let prepare = KeyShare {
+            epoch,
+            share: Share(share),
+            share_digest,
+            committed: false,
+        };
+        diesel::insert_into(dsl::key_shares)
             .values(&prepare)
             .execute(&mut self.conn)?;
         Ok(())
@@ -110,24 +113,21 @@ impl Db {
         epoch: i32,
         digest: sprockets_common::Sha3_256Digest,
     ) -> Result<(), Error> {
-        use schema::key_share_commits;
-        use schema::key_share_prepares;
-        let commit =
-            KeyShareCommit { epoch, share_digest: digest.clone().into() };
+        use schema::key_shares::dsl;
         self.conn.immediate_transaction(|tx| {
             // We only want to commit if the share digest of the commit is the
             // same as that of the prepare.
-            let prepare_digest = key_share_prepares::table
-                .select(key_share_prepares::share_digest)
-                .filter(key_share_prepares::epoch.eq(epoch))
+            let prepare_digest = dsl::key_shares
+                .select(dsl::share_digest)
+                .filter(dsl::epoch.eq(epoch))
                 .get_result::<Sha3_256Digest>(tx)?;
 
             if prepare_digest != digest.into() {
                 return Err(Error::CommitHashMismatch { epoch });
             }
 
-            diesel::insert_into(key_share_commits::table)
-                .values(&commit)
+            diesel::update(dsl::key_shares.filter(dsl::epoch.eq(epoch)))
+                .set(dsl::committed.eq(true))
                 .execute(tx)?;
             Ok(())
         })
@@ -173,19 +173,20 @@ mod tests {
 
     #[test]
     fn simple_prepare_insert_and_query() {
-        use schema::key_share_prepares::dsl;
+        use schema::key_shares::dsl;
         let log = test_setup_log("test_db").log.clone();
         let mut db = Db::open(log, &rand_db_name()).unwrap();
         let shares = new_shares();
         let epoch = 0;
         let expected: SerializableShareDistribution = shares[0].clone().into();
         db.prepare_share(epoch, expected.clone()).unwrap();
-        let val = dsl::key_share_prepares
-            .select(dsl::share)
+        let (share, committed) = dsl::key_shares
+            .select((dsl::share, dsl::committed))
             .filter(dsl::epoch.eq(epoch))
-            .get_result::<Share>(&mut db.conn)
+            .get_result::<(Share, bool)>(&mut db.conn)
             .unwrap();
-        assert_eq!(val.0, expected);
+        assert_eq!(share.0, expected);
+        assert_eq!(committed, false);
     }
 
     #[test]
@@ -226,5 +227,14 @@ mod tests {
             sprockets_common::Sha3_256Digest(Sha3_256::digest(&val).into())
                 .into();
         assert!(db.commit_share(epoch, digest).is_ok());
+
+        // Ensure `committed = true`
+        use schema::key_shares::dsl;
+        let committed = dsl::key_shares
+            .select(dsl::committed)
+            .filter(dsl::epoch.eq(epoch))
+            .get_result::<bool>(&mut db.conn)
+            .unwrap();
+        assert_eq!(true, committed);
     }
 }

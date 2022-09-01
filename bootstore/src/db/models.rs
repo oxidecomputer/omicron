@@ -16,18 +16,15 @@ use crate::trust_quorum::SerializableShareDistribution;
 
 json_new_type!(Share, SerializableShareDistribution);
 
+/// When a [`KeyShareParepare`] message arrives it is stored in a [`KeyShare`]
+/// When a [`KeyShareCommit`] message arrives the `committed` field/column is
+/// set to true.
 #[derive(Debug, Queryable, Insertable)]
-pub struct KeySharePrepare {
+pub struct KeyShare {
     pub epoch: i32,
     pub share: Share,
     pub share_digest: Sha3_256Digest,
-}
-
-#[derive(Debug, Queryable, Insertable)]
-pub struct KeyShareCommit {
-    pub epoch: i32,
-    // The hash of the share in the corresponding KeySharePrepare
-    pub share_digest: Sha3_256Digest,
+    pub committed: bool,
 }
 
 // A chacha20poly1305 secret encrypted by a chacha20poly1305 secret key

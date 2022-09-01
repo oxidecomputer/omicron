@@ -1,17 +1,10 @@
-CREATE TABLE IF NOT EXISTS key_share_prepares (
+CREATE TABLE IF NOT EXISTS key_shares (
     epoch            INTEGER   NOT NULL,
     share            TEXT      NOT NULL,
     share_digest     BLOB      NOT NULL,
+    committed        INTEGER   NOT NULL,
     
     PRIMARY KEY (epoch)
-);
-
-CREATE TABLE IF NOT EXISTS key_share_commits (
-    epoch            INTEGER   NOT NULL,
-    share_digest     BLOB      NOT NULL,
-    
-    PRIMARY KEY (epoch)
-    FOREIGN KEY (epoch) REFERENCES key_share_prepares (epoch)
 );
 
 CREATE TABLE IF NOT EXISTS encrypted_root_secrets (
