@@ -162,20 +162,11 @@ mod tests {
             .collect()
     }
 
-    fn rand_db_name() -> String {
-        let seed: String = thread_rng()
-            .sample_iter(&Alphanumeric)
-            .take(16)
-            .map(char::from)
-            .collect();
-        format!("/tmp/testdb-{}.sqlite", seed)
-    }
-
     #[test]
     fn simple_prepare_insert_and_query() {
         use schema::key_shares::dsl;
         let log = test_setup_log("test_db").log.clone();
-        let mut db = Db::open(log, &rand_db_name()).unwrap();
+        let mut db = Db::open(log, ":memory:").unwrap();
         let shares = new_shares();
         let epoch = 0;
         let expected: SerializableShareDistribution = shares[0].clone().into();
@@ -192,7 +183,7 @@ mod tests {
     #[test]
     fn commit_fails_without_corresponding_prepare() {
         let log = test_setup_log("test_db").log.clone();
-        let mut db = Db::open(log, &rand_db_name()).unwrap();
+        let mut db = Db::open(log, ":memory:").unwrap();
         let epoch = 0;
 
         let digest = sprockets_common::Sha3_256Digest::default();
@@ -203,7 +194,7 @@ mod tests {
     #[test]
     fn commit_fails_with_invalid_hash() {
         let log = test_setup_log("test_db").log.clone();
-        let mut db = Db::open(log, &rand_db_name()).unwrap();
+        let mut db = Db::open(log, ":memory:").unwrap();
         let shares = new_shares();
         let epoch = 0;
         let expected: SerializableShareDistribution = shares[0].clone().into();
@@ -216,7 +207,7 @@ mod tests {
     #[test]
     fn commit_succeeds_with_correct_hash() {
         let log = test_setup_log("test_db").log.clone();
-        let mut db = Db::open(log, &rand_db_name()).unwrap();
+        let mut db = Db::open(log, ":memory:").unwrap();
         let shares = new_shares();
         let epoch = 0;
         let expected: SerializableShareDistribution = shares[0].clone().into();
