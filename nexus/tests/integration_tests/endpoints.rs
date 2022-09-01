@@ -232,11 +232,7 @@ lazy_static! {
                 params::ExternalIpCreate::Ephemeral { pool_name: None }
             ],
             disks: vec![],
-            only_create: false,
-        };
-    pub static ref DEMO_INSTANCE_START: params::InstanceStart =
-        params::InstanceStart {
-            only_provision: false,
+            start: true,
         };
 
     // The instance needs a network interface, too.
@@ -1202,9 +1198,7 @@ lazy_static! {
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_INSTANCE_START).unwrap()
-                ),
+                AllowedMethod::Post(serde_json::Value::Null)
             ],
         },
         VerifyEndpoint {

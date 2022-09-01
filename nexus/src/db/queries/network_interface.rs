@@ -1532,7 +1532,7 @@ mod tests {
             network_interfaces: InstanceNetworkInterfaceAttachment::None,
             external_ips: vec![],
             disks: vec![],
-            only_create: false,
+            start: true,
         };
         let runtime = InstanceRuntimeState {
             run_state: InstanceState::Creating,

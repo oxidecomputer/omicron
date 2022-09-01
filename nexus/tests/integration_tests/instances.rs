@@ -175,7 +175,7 @@ async fn test_instances_create_reboot_halt(
                     params::InstanceNetworkInterfaceAttachment::Default,
                 external_ips: vec![],
                 disks: vec![],
-                only_create: false,
+                start: true,
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -420,12 +420,11 @@ async fn test_instances_create_reboot_halt(
     .unwrap();
 
     // Similarly, we should not be able to start or stop the instance.
-    NexusRequest::expect_failure_with_body(
+    NexusRequest::expect_failure(
         client,
         StatusCode::NOT_FOUND,
         Method::POST,
         &format!("{}/start", instance_url),
-        &serde_json::json!({ "only_provision": false }),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -477,7 +476,7 @@ async fn test_instances_create_stopped_start(
                 params::InstanceNetworkInterfaceAttachment::Default,
             external_ips: vec![],
             disks: vec![],
-            only_create: true,
+            start: false,
         },
     )
     .await;
@@ -531,7 +530,7 @@ async fn test_instances_provision_start(cptestctx: &ControlPlaneTestContext) {
                 params::InstanceNetworkInterfaceAttachment::Default,
             external_ips: vec![],
             disks: vec![],
-            only_create: true,
+            start: false,
         },
     )
     .await;
@@ -727,7 +726,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
         network_interfaces: interface_params.clone(),
         external_ips: vec![],
         disks: vec![],
-        only_create: false,
+        start: true,
     };
     let response =
         NexusRequest::objects_post(client, &url_instances, &instance_params)
@@ -751,7 +750,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
         network_interfaces: interface_params,
         external_ips: vec![],
         disks: vec![],
-        only_create: false,
+        start: true,
     };
     let _ =
         NexusRequest::objects_post(client, &url_instances, &instance_params)
@@ -840,7 +839,7 @@ async fn test_instance_with_single_explicit_ip_address(
         network_interfaces: interface_params,
         external_ips: vec![],
         disks: vec![],
-        only_create: false,
+        start: true,
     };
     let response =
         NexusRequest::objects_post(client, &url_instances, &instance_params)
@@ -960,7 +959,7 @@ async fn test_instance_with_new_custom_network_interfaces(
         network_interfaces: interface_params,
         external_ips: vec![],
         disks: vec![],
-        only_create: false,
+        start: true,
     };
     let response =
         NexusRequest::objects_post(client, &url_instances, &instance_params)
@@ -1077,7 +1076,7 @@ async fn test_instance_create_delete_network_interface(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::None,
         external_ips: vec![],
         disks: vec![],
-        only_create: false,
+        start: true,
     };
     let response =
         NexusRequest::objects_post(client, &url_instances, &instance_params)
@@ -1328,7 +1327,7 @@ async fn test_instance_update_network_interfaces(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::None,
         external_ips: vec![],
         disks: vec![],
-        only_create: false,
+        start: true,
     };
     let response =
         NexusRequest::objects_post(client, &url_instances, &instance_params)
@@ -1734,7 +1733,7 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
         network_interfaces: interface_params,
         external_ips: vec![],
         disks: vec![],
-        only_create: false,
+        start: true,
     };
     let builder =
         RequestBuilder::new(client, http::Method::POST, &url_instances)
@@ -1816,7 +1815,7 @@ async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
                 name: Name::try_from(String::from("probablydata")).unwrap(),
             },
         )],
-        only_create: false,
+        start: true,
     };
 
     let url_instances = format!(
@@ -1923,7 +1922,7 @@ async fn test_attach_eight_disks_to_instance(
                 )
             })
             .collect(),
-        only_create: false,
+        start: true,
     };
 
     let url_instances = format!(
@@ -2031,7 +2030,7 @@ async fn test_cannot_attach_nine_disks_to_instance(
                 )
             })
             .collect(),
-        only_create: false,
+        start: true,
     };
 
     let url_instances = format!(
@@ -2163,7 +2162,7 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
                 )
             })
             .collect(),
-        only_create: false,
+        start: true,
     };
 
     let url_instances = format!(
@@ -2279,7 +2278,7 @@ async fn test_disks_detached_when_instance_destroyed(
                 )
             })
             .collect(),
-        only_create: false,
+        start: true,
     };
 
     let url_instances = format!(
@@ -2385,7 +2384,7 @@ async fn test_instances_memory_rejected_less_than_min_memory_size(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![],
-        only_create: false,
+        start: true,
     };
 
     let error = NexusRequest::new(
@@ -2435,7 +2434,7 @@ async fn test_instances_memory_not_divisible_by_min_memory_size(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![],
-        only_create: false,
+        start: true,
     };
 
     let error = NexusRequest::new(
@@ -2598,7 +2597,7 @@ async fn test_instance_serial_provisioned(cptestctx: &ControlPlaneTestContext) {
                 params::InstanceNetworkInterfaceAttachment::Default,
             external_ips: vec![],
             disks: vec![],
-            only_create: true,
+            start: false,
         },
     )
     .await;
@@ -2737,7 +2736,7 @@ async fn test_instance_ephemeral_ip_from_correct_project(
             pool_name: None,
         }],
         disks: vec![],
-        only_create: false,
+        start: true,
     };
     let response =
         NexusRequest::objects_post(client, &url_instances, &instance_params)
@@ -2810,24 +2809,20 @@ pub async fn instance_post(
         "{}/{}",
         instance_url,
         match which {
-            InstanceOp::Start | InstanceOp::Provision => "start",
+            InstanceOp::Provision => "provision",
+            InstanceOp::Start => "start",
             InstanceOp::Stop => "stop",
             InstanceOp::Reboot => "reboot",
         }
     );
-    let body = match which {
-        InstanceOp::Start => {
-            Some(serde_json::json!({ "only_provision": false }))
-        }
-        InstanceOp::Provision => {
-            Some(serde_json::json!({ "only_provision": true }))
-        }
-        InstanceOp::Stop | InstanceOp::Reboot => None,
+    let status = match which {
+        InstanceOp::Provision => StatusCode::OK,
+        _ => StatusCode::ACCEPTED,
     };
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url)
-            .body(body.as_ref())
-            .expect_status(Some(StatusCode::ACCEPTED)),
+            .body(None as Option<&serde_json::Value>)
+            .expect_status(Some(status)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()

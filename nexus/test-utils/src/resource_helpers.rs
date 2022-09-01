@@ -240,7 +240,7 @@ pub async fn create_instance_with(
             network_interfaces: nics.clone(),
             external_ips: vec![],
             disks,
-            only_create: false,
+            start: true,
         },
     )
     .await

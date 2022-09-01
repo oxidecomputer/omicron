@@ -153,7 +153,7 @@ async fn test_snapshot(cptestctx: &ControlPlaneTestContext) {
                 params::InstanceDiskAttach { name: base_disk_name.clone() },
             )],
             external_ips: vec![],
-            only_create: false,
+            start: true,
         },
     )
     .await;
