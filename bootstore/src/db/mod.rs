@@ -15,7 +15,6 @@ use slog::Logger;
 use slog::{info, o};
 
 use crate::trust_quorum::SerializableShareDistribution;
-use models::EncryptedRootSecret;
 use models::KeyShare;
 use models::Sha3_256Digest;
 use models::Share;
@@ -32,15 +31,23 @@ pub enum Error {
     #[error(transparent)]
     Bcs(#[from] bcs::Error),
 
+    // Temporary until the using code is written
+    #[allow(dead_code)]
     #[error("Share commit for {epoch} does not match prepare")]
     CommitHashMismatch { epoch: i32 },
 }
 
 pub struct Db {
+    // Temporary until the using code is written
+    #[allow(dead_code)]
     log: Logger,
+    // Temporary until the using code is written
+    #[allow(dead_code)]
     conn: SqliteConnection,
 }
 
+// Temporary until the using code is written
+#[allow(dead_code)]
 impl Db {
     pub fn open(log: Logger, path: &str) -> Result<Db, Error> {
         let schema = include_str!("./schema.sql");

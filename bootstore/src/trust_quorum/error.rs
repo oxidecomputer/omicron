@@ -8,9 +8,13 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum TrustQuorumError {
+    // Temporary until the using code is written
+    #[allow(dead_code)]
     #[error("Not enough peers to unlock storage")]
     NotEnoughPeers,
 
+    // Temporary until the using code is written
+    #[allow(dead_code)]
     #[error("Rack secret construction failed: {0:?}")]
     RackSecretConstructionFailed(vsss_rs::Error),
 }

@@ -8,11 +8,7 @@
 //! This allows easier testing of clusters and failure situations.
 
 use slog::Logger;
-use slog::{info, o};
 use sprockets_host::Ed25519Certificate;
-use std::net::SocketAddrV6;
-use std::sync::Arc;
-use std::sync::Mutex;
 use uuid::Uuid;
 
 use crate::db::Db;
@@ -24,8 +20,8 @@ pub struct Config {
     log: Logger,
     db_path: String,
     // TODO: This will live inside the certificate eventually
-    serial_number: String,
-    device_id_cert: Ed25519Certificate,
+    _serial_number: String,
+    _device_id_cert: Ed25519Certificate,
 }
 
 /// A node of the bootstore
@@ -38,6 +34,9 @@ pub struct Config {
 /// Messages are received over sprockets sessions from either peer nodes
 /// during rack unlock, or from a [`Coordinator`] during rack initialization
 /// or reconfiguration.
+//
+// Temporary until the using code is written
+#[allow(dead_code)]
 pub struct Node {
     config: Config,
     db: Db,
@@ -85,32 +84,32 @@ impl Node {
 
     fn handle_get_share(
         &mut self,
-        epoch: i32,
+        _epoch: i32,
     ) -> Result<NodeOpResult, NodeError> {
         unimplemented!();
     }
 
     fn handle_initialize(
         &mut self,
-        rack_uuid: Uuid,
-        share_distribution: SerializableShareDistribution,
+        _rack_uuid: Uuid,
+        _share_distribution: SerializableShareDistribution,
     ) -> Result<NodeOpResult, NodeError> {
         unimplemented!();
     }
 
     fn handle_key_share_prepare(
         &mut self,
-        rack_uuid: Uuid,
-        epoch: i32,
-        share_distribution: SerializableShareDistribution,
+        _rack_uuid: Uuid,
+        _epoch: i32,
+        _share_distribution: SerializableShareDistribution,
     ) -> Result<NodeOpResult, NodeError> {
         unimplemented!();
     }
 
     fn handle_key_share_commit(
         &mut self,
-        rack_uuid: Uuid,
-        epoch: i32,
+        _rack_uuid: Uuid,
+        _epoch: i32,
     ) -> Result<NodeOpResult, NodeError> {
         unimplemented!();
     }

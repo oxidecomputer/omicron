@@ -70,6 +70,8 @@ impl Verifier {
     }
 }
 
+// Temporary until the using code is written
+#[allow(dead_code)]
 impl RackSecret {
     /// Create a secret based on the NIST P-256 curve
     pub fn new() -> RackSecret {
