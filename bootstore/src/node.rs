@@ -57,9 +57,7 @@ impl Node {
             return NodeResponse {
                 version: req.version,
                 id: req.id,
-                op: NodeOpResult::Error(NodeError::UnsupportedVersion(
-                    req.version,
-                )),
+                result: Err(NodeError::UnsupportedVersion(req.version)),
             };
         }
 
@@ -82,12 +80,7 @@ impl Node {
             }
         };
 
-        let op_result = match result {
-            Ok(op_result) => op_result,
-            Err(err) => NodeOpResult::Error(err),
-        };
-
-        NodeResponse { version: req.version, id: req.id, op: op_result }
+        NodeResponse { version: req.version, id: req.id, result }
     }
 
     fn handle_get_share(

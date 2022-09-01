@@ -73,7 +73,7 @@ pub struct NodeResponse {
     pub version: u32,
     /// A message correlation id to match requests to responses
     pub id: u64,
-    pub op: NodeOpResult,
+    pub result: Result<NodeOpResult, NodeError>,
 }
 
 #[derive(Debug, Clone, PartialEq, From, Serialize, Deserialize)]
@@ -84,9 +84,6 @@ pub enum NodeOpResult {
 
     /// An ack for the most recent coordinator message
     CoordinatorAck,
-
-    /// Error responses
-    Error(NodeError),
 }
 
 /// Errors returned inside a [`NodeOpResult`]
