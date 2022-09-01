@@ -479,7 +479,9 @@ pub struct InstanceCreate {
 
 // Workaround for https://github.com/serde-rs/serde/issues/368
 #[inline]
-fn bool_true() -> bool { true }
+fn bool_true() -> bool {
+    true
+}
 
 // If you change this, also update the error message in
 // `UserData::deserialize()` below.
