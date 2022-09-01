@@ -1,6 +1,6 @@
 CREATE TABLE IF NOT EXISTS key_shares (
     epoch            INTEGER   NOT NULL,
-    share            TEXT      NOT NULL,
+    share            BLOB      NOT NULL,
     share_digest     BLOB      NOT NULL,
     committed        INTEGER   NOT NULL,
     

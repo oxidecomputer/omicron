@@ -6,12 +6,12 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
+bcs = "0.1.3"
 derive_more = "0.99.17"
 diesel = { version = "2.0.0-rc.1", features = ["sqlite", "chrono", "serde_json", "network-address", "uuid"] }
 p256 = "0.9.0"
 rand = { version = "0.8.5", features = ["getrandom"] }
 serde = { version = "1.0", features = [ "derive" ] }
-serde_json = "1.0"
 sha3 = "0.10.1"
 slog = { version = "2.5", features = [ "max_level_trace", "release_max_level_debug" ] }
 sprockets-common = { git = "http://github.com/oxidecomputer/sprockets", rev = "0361fd13ff19cda6696242fe40f1325fca30d3d1" }

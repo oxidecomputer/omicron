@@ -7,7 +7,7 @@ use diesel::table;
 table! {
     key_shares(epoch) {
         epoch -> Integer,
-        share -> Text,
+        share -> Binary,
         share_digest -> Binary,
         committed -> Bool,
     }

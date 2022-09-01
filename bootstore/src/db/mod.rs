@@ -30,22 +30,10 @@ pub enum Error {
     Db(#[from] diesel::result::Error),
 
     #[error(transparent)]
-    Json(#[from] serde_json::Error),
+    Bcs(#[from] bcs::Error),
 
     #[error("Share commit for {epoch} does not match prepare")]
     CommitHashMismatch { epoch: i32 },
-}
-
-/// The ID of the database used to store blobs.
-///
-/// We separate them because they are encrypted and accessed differently.
-pub enum DbId {
-    /// Used pre-rack unlock: Contains key shares and membership data
-    TrustQuorum,
-
-    /// Used post-rack unlock: Contains information necessary for setting
-    /// up NTP.
-    NetworkConfig,
 }
 
 pub struct Db {
@@ -89,10 +77,11 @@ impl Db {
         epoch: i32,
         share: SerializableShareDistribution,
     ) -> Result<(), Error> {
+        info!(self.log, "Writing key share prepare for {epoch} to the Db");
         use schema::key_shares::dsl;
         // We save the digest so we don't have to deserialize and recompute most of the time.
         // We'd only want to do that for a consistency check occasionally.
-        let val = serde_json::to_string(&share)?;
+        let val = bcs::to_bytes(&share)?;
         let share_digest =
             sprockets_common::Sha3_256Digest(Sha3_256::digest(&val).into())
                 .into();
@@ -139,8 +128,6 @@ mod tests {
     use super::*;
     use crate::trust_quorum::{RackSecret, ShareDistribution};
     use omicron_test_utils::dev::test_setup_log;
-    use rand::distributions::Alphanumeric;
-    use rand::{thread_rng, Rng};
 
     // TODO: Fill in with actual member certs
     fn new_shares() -> Vec<ShareDistribution> {
@@ -213,7 +200,7 @@ mod tests {
         let expected: SerializableShareDistribution = shares[0].clone().into();
         db.prepare_share(epoch, expected.clone()).unwrap();
 
-        let val = serde_json::to_string(&expected).unwrap();
+        let val = bcs::to_bytes(&expected).unwrap();
         let digest =
             sprockets_common::Sha3_256Digest(Sha3_256::digest(&val).into())
                 .into();

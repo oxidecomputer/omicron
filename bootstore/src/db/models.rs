@@ -10,11 +10,11 @@ use diesel::serialize::ToSql;
 use diesel::FromSqlRow;
 
 use super::macros::array_new_type;
-use super::macros::json_new_type;
+use super::macros::bcs_new_type;
 use super::schema::*;
 use crate::trust_quorum::SerializableShareDistribution;
 
-json_new_type!(Share, SerializableShareDistribution);
+bcs_new_type!(Share, SerializableShareDistribution);
 
 /// When a [`KeyShareParepare`] message arrives it is stored in a [`KeyShare`]
 /// When a [`KeyShareCommit`] message arrives the `committed` field/column is

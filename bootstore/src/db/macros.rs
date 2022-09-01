@@ -6,36 +6,36 @@
 
 /// Shamelessly stolen from buildomat/common/src/db.rs
 /// Thanks @jmc
-macro_rules! json_new_type {
+macro_rules! bcs_new_type {
     ($name:ident, $mytype:ty) => {
         #[derive(
             Clone, Debug, FromSqlRow, diesel::expression::AsExpression,
         )]
-        #[diesel(sql_type = diesel::sql_types::Text)]
+        #[diesel(sql_type = diesel::sql_types::Binary)]
         pub struct $name(pub $mytype);
 
-        impl ToSql<diesel::sql_types::Text, diesel::sqlite::Sqlite> for $name
+        impl ToSql<diesel::sql_types::Binary, diesel::sqlite::Sqlite> for $name
         where
-            String: ToSql<diesel::sql_types::Text, diesel::sqlite::Sqlite>,
+            Vec<u8>: ToSql<diesel::sql_types::Binary, diesel::sqlite::Sqlite>,
         {
             fn to_sql(
                 &self,
                 out: &mut diesel::serialize::Output<diesel::sqlite::Sqlite>,
             ) -> diesel::serialize::Result {
-                out.set_value(serde_json::to_string(&self.0)?);
+                out.set_value(bcs::to_bytes(&self.0)?);
                 Ok(diesel::serialize::IsNull::No)
             }
         }
 
-        impl<DB> FromSql<diesel::sql_types::Text, DB> for $name
+        impl<DB> FromSql<diesel::sql_types::Binary, DB> for $name
         where
             DB: diesel::backend::Backend,
-            String: FromSql<diesel::sql_types::Text, DB>,
+            Vec<u8>: FromSql<diesel::sql_types::Binary, DB>,
         {
             fn from_sql(
                 bytes: diesel::backend::RawValue<DB>,
             ) -> diesel::deserialize::Result<Self> {
-                Ok($name(serde_json::from_str(&String::from_sql(bytes)?)?))
+                Ok($name(bcs::from_bytes(&Vec::<u8>::from_sql(bytes)?)?))
             }
         }
 
@@ -134,4 +134,4 @@ macro_rules! array_new_type {
 }
 
 pub(crate) use array_new_type;
-pub(crate) use json_new_type;
+pub(crate) use bcs_new_type;
