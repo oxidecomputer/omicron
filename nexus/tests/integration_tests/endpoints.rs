@@ -196,6 +196,8 @@ lazy_static! {
     pub static ref DEMO_INSTANCE_NAME: Name = "demo-instance".parse().unwrap();
     pub static ref DEMO_INSTANCE_URL: String =
         format!("{}/{}", *DEMO_PROJECT_URL_INSTANCES, *DEMO_INSTANCE_NAME);
+    pub static ref DEMO_INSTANCE_PROVISION_URL: String =
+        format!("{}/provision", *DEMO_INSTANCE_URL);
     pub static ref DEMO_INSTANCE_START_URL: String =
         format!("{}/start", *DEMO_INSTANCE_URL);
     pub static ref DEMO_INSTANCE_STOP_URL: String =
@@ -1193,6 +1195,14 @@ lazy_static! {
             ],
         },
 
+        VerifyEndpoint {
+            url: &*DEMO_INSTANCE_PROVISION_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Post(serde_json::Value::Null)
+            ],
+        },
         VerifyEndpoint {
             url: &*DEMO_INSTANCE_START_URL,
             visibility: Visibility::Protected,
