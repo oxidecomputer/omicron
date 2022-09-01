@@ -8838,9 +8838,9 @@
               }
             ]
           },
-          "only_create": {
-            "description": "Whether to not only create the Instance, but also run it.\n\nIf `true`, the instance will be created but not started. If `false`, the instance will be created and started immediately.\n\nBy default, the instance will be created and started.",
-            "default": false,
+          "start": {
+            "description": "Whether to not only create the Instance, but also run it.\n\nIf `true`, the instance will be created and started immediately. If `false`, the instance will be created but not started.\n\nBy default, the instance will be created and started.",
+            "default": true,
             "type": "boolean"
           },
           "user_data": {

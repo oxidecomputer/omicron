@@ -469,13 +469,17 @@ pub struct InstanceCreate {
 
     /// Whether to not only create the Instance, but also run it.
     ///
-    /// If `true`, the instance will be created but not started.
-    /// If `false`, the instance will be created and started immediately.
+    /// If `true`, the instance will be created and started immediately.
+    /// If `false`, the instance will be created but not started.
     ///
     /// By default, the instance will be created and started.
-    #[serde(default)]
-    pub only_create: bool,
+    #[serde(default = "bool_true")]
+    pub start: bool,
 }
+
+// Workaround for https://github.com/serde-rs/serde/issues/368
+#[inline]
+fn bool_true() -> bool { true }
 
 // If you change this, also update the error message in
 // `UserData::deserialize()` below.

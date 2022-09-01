@@ -940,7 +940,7 @@ async fn sic_instance_ensure(
         .await
         .map_err(ActionError::action_failed)?;
 
-    if params.create_params.only_create {
+    if !params.create_params.start {
         let instance_id = db_instance.id();
         // If we don't need to start the instance, we can skip the ensure
         // and just update the instance runtime state to `Stopped`
