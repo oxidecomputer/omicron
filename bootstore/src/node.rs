@@ -45,7 +45,7 @@ pub struct Node {
 impl Node {
     /// Create a new Node
     pub fn new(config: Config) -> Node {
-        let db = Db::open(config.log.clone(), &config.db_path).unwrap();
+        let db = Db::open(&config.log, &config.db_path).unwrap();
         Node { config, db }
     }
 

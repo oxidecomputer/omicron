@@ -49,7 +49,7 @@ pub struct Db {
 // Temporary until the using code is written
 #[allow(dead_code)]
 impl Db {
-    pub fn open(log: Logger, path: &str) -> Result<Db, Error> {
+    pub fn open(log: &Logger, path: &str) -> Result<Db, Error> {
         let schema = include_str!("./schema.sql");
         let log = log.new(o!(
             "component" => "BootstoreDb"
@@ -159,8 +159,8 @@ mod tests {
     #[test]
     fn simple_prepare_insert_and_query() {
         use schema::key_shares::dsl;
-        let log = test_setup_log("test_db").log.clone();
-        let mut db = Db::open(log, ":memory:").unwrap();
+        let logctx = test_setup_log("test_db");
+        let mut db = Db::open(&logctx.log, ":memory:").unwrap();
         let shares = new_shares();
         let epoch = 0;
         let expected: SerializableShareDistribution = shares[0].clone().into();
@@ -172,23 +172,24 @@ mod tests {
             .unwrap();
         assert_eq!(share.0, expected);
         assert_eq!(committed, false);
+        logctx.cleanup_successful();
     }
 
     #[test]
     fn commit_fails_without_corresponding_prepare() {
-        let log = test_setup_log("test_db").log.clone();
-        let mut db = Db::open(log, ":memory:").unwrap();
+        let logctx = test_setup_log("test_db");
+        let mut db = Db::open(&logctx.log, ":memory:").unwrap();
         let epoch = 0;
-
         let digest = sprockets_common::Sha3_256Digest::default();
         let err = db.commit_share(epoch, digest).unwrap_err();
         assert!(matches!(err, Error::Db(diesel::result::Error::NotFound)));
+        logctx.cleanup_successful();
     }
 
     #[test]
     fn commit_fails_with_invalid_hash() {
-        let log = test_setup_log("test_db").log.clone();
-        let mut db = Db::open(log, ":memory:").unwrap();
+        let logctx = test_setup_log("test_db");
+        let mut db = Db::open(&logctx.log, ":memory:").unwrap();
         let shares = new_shares();
         let epoch = 0;
         let expected: SerializableShareDistribution = shares[0].clone().into();
@@ -196,12 +197,13 @@ mod tests {
         let digest = sprockets_common::Sha3_256Digest::default();
         let err = db.commit_share(epoch, digest).unwrap_err();
         assert!(matches!(err, Error::CommitHashMismatch { epoch: _ }));
+        logctx.cleanup_successful();
     }
 
     #[test]
     fn commit_succeeds_with_correct_hash() {
-        let log = test_setup_log("test_db").log.clone();
-        let mut db = Db::open(log, ":memory:").unwrap();
+        let logctx = test_setup_log("test_db");
+        let mut db = Db::open(&logctx.log, ":memory:").unwrap();
         let shares = new_shares();
         let epoch = 0;
         let expected: SerializableShareDistribution = shares[0].clone().into();
@@ -221,5 +223,6 @@ mod tests {
             .get_result::<bool>(&mut db.conn)
             .unwrap();
         assert_eq!(true, committed);
+        logctx.cleanup_successful();
     }
 }
