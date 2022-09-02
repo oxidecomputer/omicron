@@ -135,36 +135,23 @@ impl Db {
     pub fn get_latest_committed_share(
         &mut self,
     ) -> Result<(i32, Share), Error> {
-        self.conn.immediate_transaction(|tx| {
-            let epoch = Self::get_latest_committed_share_epoch(tx)?;
-            if epoch.is_none() {
-                return Err(Error::NoSharesCommitted);
-            }
-            let epoch = epoch.unwrap();
-            let share = Self::get_prepared_share(tx, epoch)?;
-            Ok((epoch, share))
-        })
+        use schema::key_shares::dsl;
+        let res = dsl::key_shares
+            .select((dsl::epoch, dsl::share))
+            .order(dsl::epoch.desc())
+            .filter(dsl::committed.eq(true))
+            .get_result::<(i32, Share)>(&mut self.conn)?;
+        Ok(res)
     }
 
-    pub fn get_latest_committed_share_epoch(
-        tx: &mut SqliteConnection,
-    ) -> Result<Option<i32>, Error> {
-        use schema::key_share_commits::dsl;
-        let epoch = dsl::key_share_commits
-            .select(diesel::dsl::max(dsl::epoch))
-            .get_result(tx)?;
-        Ok(epoch)
-    }
-
-    pub fn get_prepared_share(
-        tx: &mut SqliteConnection,
-        epoch: i32,
-    ) -> Result<Share, Error> {
-        use schema::key_share_prepares::dsl;
-        let share = dsl::key_share_prepares
+    pub fn get_committed_share(&mut self, epoch: i32) -> Result<Share, Error> {
+        use schema::key_shares::dsl;
+        let share = dsl::key_shares
             .select(dsl::share)
             .filter(dsl::epoch.eq(epoch))
-            .get_result(tx)?;
+            .filter(dsl::committed.eq(true))
+            .get_result::<Share>(&mut self.conn)?;
+
         Ok(share)
     }
 }
