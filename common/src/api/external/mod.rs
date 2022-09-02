@@ -628,20 +628,17 @@ pub struct IdentityMetadataUpdateParams {
     JsonSchema,
 )]
 #[serde(rename_all = "snake_case")]
+// TODO-polish: RFD 315
 pub enum InstanceState {
-    /// An Instance record exists but the Instance is currently being created on the Sled.
+    /// The instance is being created.
     Creating,
-    /// The Instance and its resources are being brought up.
-    Provisioning,
-    /// The Instance and all its resources have been allocated.
-    Provisioned,
-    /// The Instance is currently starting up.
+    /// The instance is currently starting up.
     Starting,
-    /// The Instance is currently running.
+    /// The instance is currently running.
     Running,
-    /// The Instance has been requested to stop and a transition to "Stopped" is imminent.
+    /// The instance has been requested to stop and a transition to "Stopped" is imminent.
     Stopping,
-    /// The instance is currently stopped and its resources deallocated.
+    /// The instance is currently stopped.
     Stopped,
     /// The instance is in the process of rebooting - it will remain
     /// in the "rebooting" state until the VM is starting once more.
@@ -650,11 +647,11 @@ pub enum InstanceState {
     /// in the "migrating" state until the migration process is complete
     /// and the destination propolis is ready to continue execution.
     Migrating,
-    /// The Instance is attempting to recover from a failure.
+    /// The instance is attempting to recover from a failure.
     Repairing,
-    /// The Instance has encountered a failure.
+    /// The instance has encountered a failure.
     Failed,
-    /// The Instance has been deleted.
+    /// The instance has been deleted.
     Destroyed,
 }
 
@@ -674,8 +671,6 @@ impl TryFrom<&str> for InstanceState {
     fn try_from(variant: &str) -> Result<Self, Self::Error> {
         let r = match variant {
             "creating" => InstanceState::Creating,
-            "provisioning" => InstanceState::Provisioning,
-            "provisioned" => InstanceState::Provisioned,
             "starting" => InstanceState::Starting,
             "running" => InstanceState::Running,
             "stopping" => InstanceState::Stopping,
@@ -695,8 +690,6 @@ impl InstanceState {
     pub fn label(&self) -> &'static str {
         match self {
             InstanceState::Creating => "creating",
-            InstanceState::Provisioning => "provisioning",
-            InstanceState::Provisioned => "provisioned",
             InstanceState::Starting => "starting",
             InstanceState::Running => "running",
             InstanceState::Stopping => "stopping",
@@ -714,8 +707,6 @@ impl InstanceState {
     /// through Stopping.
     pub fn is_stopped(&self) -> bool {
         match self {
-            InstanceState::Provisioning => false,
-            InstanceState::Provisioned => false,
             InstanceState::Starting => false,
             InstanceState::Running => false,
             InstanceState::Stopping => false,

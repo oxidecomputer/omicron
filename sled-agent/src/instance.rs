@@ -511,10 +511,9 @@ impl Instance {
     ) -> Result<PropolisSetup, Error> {
         // Update nexus with an in-progress state while we set up the instance.
         let desired = inner.state.desired().clone();
-        inner.state.transition(
-            InstanceState::Provisioning,
-            desired.map(|d| d.run_state),
-        );
+        inner
+            .state
+            .transition(InstanceState::Starting, desired.map(|d| d.run_state));
         inner
             .lazy_nexus_client
             .get()

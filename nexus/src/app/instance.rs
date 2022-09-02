@@ -363,35 +363,6 @@ impl super::Nexus {
         self.db_datastore.instance_refetch(opctx, &authz_instance).await
     }
 
-    /// Make sure the given Instance is provisioned.
-    pub async fn instance_provision(
-        &self,
-        opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
-        instance_name: &Name,
-    ) -> UpdateResult<db::model::Instance> {
-        let (.., authz_instance, db_instance) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .organization_name(organization_name)
-                .project_name(project_name)
-                .instance_name(instance_name)
-                .fetch()
-                .await?;
-        let requested = InstanceRuntimeStateRequested {
-            run_state: InstanceStateRequested::Provisioned,
-            migration_params: None,
-        };
-        self.instance_set_runtime(
-            opctx,
-            &authz_instance,
-            &db_instance,
-            requested,
-        )
-        .await?;
-        self.db_datastore.instance_refetch(opctx, &authz_instance).await
-    }
-
     /// Make sure the given Instance is running.
     pub async fn instance_start(
         &self,
@@ -473,8 +444,6 @@ impl super::Nexus {
         // allowed to allow for idempotency.
         let allowed = match runtime.run_state {
             InstanceState::Creating => true,
-            InstanceState::Provisioning => true,
-            InstanceState::Provisioned => true,
             InstanceState::Starting => true,
             InstanceState::Running => true,
             InstanceState::Stopping => true,

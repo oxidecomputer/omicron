@@ -1127,8 +1127,6 @@
         "type": "string",
         "enum": [
           "creating",
-          "provisioning",
-          "provisioned",
           "starting",
           "running",
           "stopping",
@@ -1144,7 +1142,6 @@
         "description": "Requestable running state of an Instance.\n\nA subset of [`external::InstanceState`].",
         "type": "string",
         "enum": [
-          "provisioned",
           "running",
           "stopped",
           "reboot",

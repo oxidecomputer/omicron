@@ -467,17 +467,14 @@ pub struct InstanceCreate {
     #[serde(default)]
     pub disks: Vec<InstanceDiskAttachment>,
 
-    /// Whether to not only create the Instance, but also run it.
-    ///
-    /// If `true`, the instance will be created and started immediately.
-    /// If `false`, the instance will be created but not started.
-    ///
-    /// By default, the instance will be created and started.
+    /// Should this instance be started upon creation; true by default.
     #[serde(default = "bool_true")]
     pub start: bool,
 }
 
-// Workaround for https://github.com/serde-rs/serde/issues/368
+// serde doesn't allow literal values in #[serde(default)], so we need
+// a function to return the default value we want.
+// See: https://github.com/serde-rs/serde/issues/368
 #[inline]
 fn bool_true() -> bool {
     true

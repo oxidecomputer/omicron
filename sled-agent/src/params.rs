@@ -121,18 +121,16 @@ pub struct InstanceMigrateParams {
 )]
 #[serde(rename_all = "lowercase")]
 pub enum InstanceStateRequested {
-    /// Allocate the Instance and its associated resources but do not start it.
-    Provisioned,
-    /// Allocate the Instance and start it.
+    /// Start the instance if it is not already running.
     Running,
-    /// Stop the Instance.
+    /// Stop the instance.
     Stopped,
     /// Issues a reset command to the instance, such that it should
     /// stop and then immediately become running.
     Reboot,
-    /// Migrate the Instance to another node.
+    /// Migrate the instance to another node.
     Migrating,
-    /// Stop the Instance and delete it.
+    /// Stop the instance and delete it.
     Destroyed,
 }
 
@@ -145,7 +143,6 @@ impl Display for InstanceStateRequested {
 impl InstanceStateRequested {
     fn label(&self) -> &str {
         match self {
-            InstanceStateRequested::Provisioned => "provisioned",
             InstanceStateRequested::Running => "running",
             InstanceStateRequested::Stopped => "stopped",
             InstanceStateRequested::Reboot => "reboot",
@@ -157,7 +154,6 @@ impl InstanceStateRequested {
     /// Returns true if the state represents a stopped Instance.
     pub fn is_stopped(&self) -> bool {
         match self {
-            InstanceStateRequested::Provisioned => true,
             InstanceStateRequested::Running => false,
             InstanceStateRequested::Stopped => true,
             InstanceStateRequested::Reboot => false,

@@ -92,9 +92,10 @@ impl InstanceStates {
         use PropolisInstanceState as Observed;
 
         let current = match observed {
-            // TODO(luqman): update propolis naming to match
-            Observed::Creating => State::Provisioned,
-            Observed::Starting => State::Starting,
+            // From an external perspective, the instance has already been created.
+            // Creating the propolis instance is an internal detail and happens
+            // every time we start the instance, so we map it to "Starting" here.
+            Observed::Creating | Observed::Starting => State::Starting,
             Observed::Running => State::Running,
             Observed::Stopping => State::Stopping,
             Observed::Stopped => State::Stopped,
@@ -140,7 +141,6 @@ impl InstanceStates {
         target: &InstanceRuntimeStateRequested,
     ) -> Result<Option<Action>, Error> {
         match target.run_state {
-            InstanceStateRequested::Provisioned => self.request_provisioned(),
             InstanceStateRequested::Running => self.request_running(),
             InstanceStateRequested::Stopped => self.request_stopped(),
             InstanceStateRequested::Reboot => self.request_reboot(),
@@ -169,61 +169,15 @@ impl InstanceStates {
         });
     }
 
-    fn request_provisioned(&mut self) -> Result<Option<Action>, Error> {
-        match self.current.run_state {
-            // Valid states we can transition through and stop right before starting the Instance.
-            InstanceState::Creating
-            | InstanceState::Provisioning
-            | InstanceState::Stopping
-            | InstanceState::Stopped
-            | InstanceState::Rebooting => {
-                self.transition(
-                    InstanceState::Provisioned,
-                    Some(InstanceStateRequested::Provisioned),
-                );
-                // No further action needed to provision the instance.
-                return Ok(None);
-            }
-
-            // No-op
-            InstanceState::Provisioned => return Ok(None),
-
-            // Can't go backwards if the Instance is already running (or will be shortly).
-            InstanceState::Starting
-            | InstanceState::Running
-            | InstanceState::Migrating => {
-                return Err(Error::InvalidRequest {
-                    message: format!(
-                        "instance already provisioned and in state \"{}\"",
-                        self.current.run_state,
-                    ),
-                });
-            }
-
-            InstanceState::Repairing
-            | InstanceState::Failed
-            | InstanceState::Destroyed => {
-                return Err(Error::InvalidRequest {
-                    message: format!(
-                        "instance in invalid state \"{}\"",
-                        self.current.run_state,
-                    ),
-                });
-            }
-        }
-    }
-
     fn request_running(&mut self) -> Result<Option<Action>, Error> {
         match self.current.run_state {
             // Early exit: Running request is no-op
             InstanceState::Running
-            | InstanceState::Starting
             | InstanceState::Rebooting
             | InstanceState::Migrating => return Ok(None),
             // Valid states for a running request
             InstanceState::Creating
-            | InstanceState::Provisioning
-            | InstanceState::Provisioned
+            | InstanceState::Starting
             | InstanceState::Stopping
             | InstanceState::Stopped => {
                 self.transition(
@@ -258,9 +212,7 @@ impl InstanceStates {
                 self.transition(InstanceState::Stopped, None);
                 return Ok(None);
             }
-            InstanceState::Provisioning
-            | InstanceState::Provisioned
-            | InstanceState::Starting
+            InstanceState::Starting
             | InstanceState::Running
             | InstanceState::Rebooting => {
                 // There's a propolis service, explicitly tell it to stop.
@@ -366,8 +318,6 @@ impl InstanceStates {
 
             // Invalid states for a migration request
             InstanceState::Creating
-            | InstanceState::Provisioning
-            | InstanceState::Provisioned // TODO(luqman): should be able to migrate this?
             | InstanceState::Starting
             | InstanceState::Stopping
             | InstanceState::Stopped

@@ -3701,62 +3701,6 @@
         }
       }
     },
-    "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/provision": {
-      "post": {
-        "tags": [
-          "instances"
-        ],
-        "summary": "Provision an instance",
-        "operationId": "instance_provision",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "instance_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
-          },
-          {
-            "in": "path",
-            "name": "organization_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
-          },
-          {
-            "in": "path",
-            "name": "project_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Instance"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/reboot": {
       "post": {
         "tags": [
@@ -8839,7 +8783,7 @@
             ]
           },
           "start": {
-            "description": "Whether to not only create the Instance, but also run it.\n\nIf `true`, the instance will be created and started immediately. If `false`, the instance will be created but not started.\n\nBy default, the instance will be created and started.",
+            "description": "Should this instance be started upon creation; true by default.",
             "default": true,
             "type": "boolean"
           },
@@ -9049,8 +8993,6 @@
         "type": "string",
         "enum": [
           "creating",
-          "provisioning",
-          "provisioned",
           "starting",
           "running",
           "stopping",
