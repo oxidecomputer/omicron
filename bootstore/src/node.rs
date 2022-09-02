@@ -11,6 +11,7 @@ use slog::Logger;
 use sprockets_host::Ed25519Certificate;
 use uuid::Uuid;
 
+use crate::db;
 use crate::db::Db;
 use crate::messages::*;
 use crate::trust_quorum::SerializableShareDistribution;
@@ -84,9 +85,20 @@ impl Node {
 
     fn handle_get_share(
         &mut self,
-        _epoch: i32,
+        epoch: i32,
     ) -> Result<NodeOpResult, NodeError> {
-        unimplemented!();
+        match self.db.get_committed_share(epoch) {
+            Ok(share) => {
+                Ok(NodeOpResult::Share { epoch, share: share.0.share })
+            }
+            Err(err) => {
+                if let db::Error::Db(diesel::result::Error::NotFound) = err {
+                    Err(NodeError::KeyShareDoesNotExist { epoch })
+                } else {
+                    Err(err.into())
+                }
+            }
+        }
     }
 
     fn handle_initialize(

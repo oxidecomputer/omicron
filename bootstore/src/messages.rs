@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use vsss_rs::Share;
 
+use crate::db;
 use crate::trust_quorum::SerializableShareDistribution;
 
 /// A request sent to a [`Node`] from another [`Node`] or a [`Coordinator`].
@@ -110,4 +111,13 @@ pub enum NodeError {
 {rack_uuid}, epoch: {epoch}"
     )]
     MissingKeySharePrepare { rack_uuid: Uuid, epoch: i32 },
+
+    #[error("DB error: {0}")]
+    Db(String),
+}
+
+impl From<db::Error> for NodeError {
+    fn from(err: db::Error) -> Self {
+        NodeError::Db(err.to_string())
+    }
 }
