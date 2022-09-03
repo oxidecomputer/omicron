@@ -472,9 +472,6 @@ pub struct InstanceCreate {
     pub start: bool,
 }
 
-// serde doesn't allow literal values in #[serde(default)], so we need
-// a function to return the default value we want.
-// See: https://github.com/serde-rs/serde/issues/368
 #[inline]
 fn bool_true() -> bool {
     true
