@@ -39,7 +39,7 @@ openssl-probe = "0.1.2"
 oso = "0.26"
 oximeter-client = { path = "../oximeter-client" }
 oximeter-db = { path = "../oximeter/db/" }
-parse-display = "0.5.4"
+parse-display = "0.6.0"
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
 rand = "0.8.5"
