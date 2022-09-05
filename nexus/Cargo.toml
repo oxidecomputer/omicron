@@ -20,7 +20,7 @@ diesel = { version = "2.0.0-rc.1", features = ["postgres", "r2d2", "chrono", "se
 diesel-dtrace = { git = "https://github.com/oxidecomputer/diesel-dtrace", rev = "18748d9f76c94e1f4400fbec0859b3e77a221a8d" }
 fatfs = "0.3.5"
 futures = "0.3.23"
-headers = "0.3.7"
+headers = "0.3.8"
 hex = "0.4.3"
 http = "0.2.7"
 hyper = "0.14"
