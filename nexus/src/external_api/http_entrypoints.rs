@@ -200,10 +200,10 @@ pub fn external_api() -> NexusApiDescription {
         api.register(vpc_firewall_rules_view)?;
         api.register(vpc_firewall_rules_update)?;
 
-        api.register(rack_list)?;
-        api.register(rack_view)?;
-        api.register(sled_list)?;
-        api.register(sled_view)?;
+        api.register(system_rack_list)?;
+        api.register(system_rack_view)?;
+        api.register(system_sled_list)?;
+        api.register(system_sled_view)?;
 
         api.register(saga_list)?;
         api.register(saga_view)?;
@@ -3840,10 +3840,10 @@ async fn vpc_router_route_update(
 /// List racks
 #[endpoint {
     method = GET,
-    path = "/hardware/racks",
+    path = "/system/hardware/racks",
     tags = ["hardware"],
 }]
-async fn rack_list(
+async fn system_rack_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<Rack>>, HttpError> {
@@ -3877,10 +3877,10 @@ struct RackPathParam {
 /// Fetch a rack
 #[endpoint {
     method = GET,
-    path = "/hardware/racks/{rack_id}",
+    path = "/system/hardware/racks/{rack_id}",
     tags = ["hardware"],
 }]
-async fn rack_view(
+async fn system_rack_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<RackPathParam>,
 ) -> Result<HttpResponseOk<Rack>, HttpError> {
@@ -3900,10 +3900,10 @@ async fn rack_view(
 /// List sleds
 #[endpoint {
     method = GET,
-    path = "/hardware/sleds",
+    path = "/system/hardware/sleds",
     tags = ["hardware"],
 }]
-async fn sled_list(
+async fn system_sled_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<Sled>>, HttpError> {
@@ -3937,10 +3937,10 @@ struct SledPathParam {
 /// Fetch a sled
 #[endpoint {
     method = GET,
-    path = "/hardware/sleds/{sled_id}",
+    path = "/system/hardware/sleds/{sled_id}",
     tags = ["hardware"],
 }]
-async fn sled_view(
+async fn system_sled_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<SledPathParam>,
 ) -> Result<HttpResponseOk<Sled>, HttpError> {

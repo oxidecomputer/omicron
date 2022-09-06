@@ -36,9 +36,9 @@ use std::net::Ipv4Addr;
 
 lazy_static! {
     pub static ref HARDWARE_RACK_URL: String =
-        format!("/hardware/racks/{}", RACK_UUID);
+        format!("/system/hardware/racks/{}", RACK_UUID);
     pub static ref HARDWARE_SLED_URL: String =
-        format!("/hardware/sleds/{}", SLED_AGENT_UUID);
+        format!("/system/hardware/sleds/{}", SLED_AGENT_UUID);
 
     // Global policy
     pub static ref GLOBAL_POLICY_URL: &'static str = "/global/policy";
@@ -1311,7 +1311,7 @@ lazy_static! {
         /* Hardware */
 
         VerifyEndpoint {
-            url: "/hardware/racks",
+            url: "/system/hardware/racks",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Get],
@@ -1325,7 +1325,7 @@ lazy_static! {
         },
 
         VerifyEndpoint {
-            url: "/hardware/sleds",
+            url: "/system/hardware/sleds",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Get],

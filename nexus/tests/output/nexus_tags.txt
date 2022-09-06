@@ -9,10 +9,10 @@ disk_view_by_id                          /by-id/disks/{id}
 
 API operations found with tag "hardware"
 OPERATION ID                             URL PATH
-rack_list                                /hardware/racks
-rack_view                                /hardware/racks/{rack_id}
-sled_list                                /hardware/sleds
-sled_view                                /hardware/sleds/{sled_id}
+system_rack_list                         /system/hardware/racks
+system_rack_view                         /system/hardware/racks/{rack_id}
+system_sled_list                         /system/hardware/sleds
+system_sled_view                         /system/hardware/sleds/{sled_id}
 
 API operations found with tag "hidden"
 OPERATION ID                             URL PATH
