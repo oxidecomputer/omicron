@@ -569,68 +569,6 @@
         }
       }
     },
-    "/global/policy": {
-      "get": {
-        "tags": [
-          "policy"
-        ],
-        "summary": "Fetch the top-level IAM policy",
-        "operationId": "global_policy_view",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FleetRolePolicy"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
-      "put": {
-        "tags": [
-          "policy"
-        ],
-        "summary": "Update the top-level IAM policy",
-        "operationId": "global_policy_update",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/FleetRolePolicy"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FleetRolePolicy"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/images": {
       "get": {
         "tags": [
@@ -6640,10 +6578,10 @@
     "/system/hardware/racks": {
       "get": {
         "tags": [
-          "hardware"
+          "system"
         ],
         "summary": "List racks",
-        "operationId": "system_rack_list",
+        "operationId": "rack_list",
         "parameters": [
           {
             "in": "query",
@@ -6700,10 +6638,10 @@
     "/system/hardware/racks/{rack_id}": {
       "get": {
         "tags": [
-          "hardware"
+          "system"
         ],
         "summary": "Fetch a rack",
-        "operationId": "system_rack_view",
+        "operationId": "rack_view",
         "parameters": [
           {
             "in": "path",
@@ -6740,10 +6678,10 @@
     "/system/hardware/sleds": {
       "get": {
         "tags": [
-          "hardware"
+          "system"
         ],
         "summary": "List sleds",
-        "operationId": "system_sled_list",
+        "operationId": "sled_list",
         "parameters": [
           {
             "in": "query",
@@ -6800,10 +6738,10 @@
     "/system/hardware/sleds/{sled_id}": {
       "get": {
         "tags": [
-          "hardware"
+          "system"
         ],
         "summary": "Fetch a sled",
-        "operationId": "system_sled_view",
+        "operationId": "sled_view",
         "parameters": [
           {
             "in": "path",
@@ -6824,6 +6762,68 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Sled"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/system/policy": {
+      "get": {
+        "tags": [
+          "policy"
+        ],
+        "summary": "Fetch the top-level IAM policy",
+        "operationId": "system_policy_view",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetRolePolicy"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "policy"
+        ],
+        "summary": "Update the top-level IAM policy",
+        "operationId": "system_policy_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FleetRolePolicy"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetRolePolicy"
                 }
               }
             }

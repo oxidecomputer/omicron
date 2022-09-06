@@ -80,8 +80,8 @@ type NexusApiDescription = ApiDescription<Arc<ServerContext>>;
 /// Returns a description of the external nexus API
 pub fn external_api() -> NexusApiDescription {
     fn register_endpoints(api: &mut NexusApiDescription) -> Result<(), String> {
-        api.register(global_policy_view)?;
-        api.register(global_policy_update)?;
+        api.register(system_policy_view)?;
+        api.register(system_policy_update)?;
 
         api.register(policy_view)?;
         api.register(policy_update)?;
@@ -319,10 +319,10 @@ pub fn external_api() -> NexusApiDescription {
 /// Fetch the top-level IAM policy
 #[endpoint {
     method = GET,
-    path = "/global/policy",
+    path = "/system/policy",
     tags = ["policy"],
 }]
-async fn global_policy_view(
+async fn system_policy_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::FleetRole>>, HttpError> {
     let apictx = rqctx.context();
@@ -345,10 +345,10 @@ struct ByIdPathParams {
 /// Update the top-level IAM policy
 #[endpoint {
     method = PUT,
-    path = "/global/policy",
+    path = "/system/policy",
     tags = ["policy"],
 }]
-async fn global_policy_update(
+async fn system_policy_update(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     new_policy: TypedBody<shared::Policy<authz::FleetRole>>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::FleetRole>>, HttpError> {
