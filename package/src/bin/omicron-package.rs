@@ -298,7 +298,7 @@ async fn do_package(config: &Config, output_directory: &Path) -> Result<()> {
     Ok(())
 }
 
-fn do_install(
+fn do_unpack(
     config: &Config,
     artifact_dir: &Path,
     install_dir: &Path,
@@ -368,6 +368,14 @@ fn do_install(
         archive.unpack(&service_path)?;
     }
 
+    Ok(())
+}
+
+fn do_activate(
+    config: &Config,
+    install_dir: &Path,
+    log: &Logger,
+) -> Result<()> {
     // Install the bootstrap service, which itself extracts and
     // installs other services.
     if let Some(package) = config.packages.get("omicron-sled-agent") {
@@ -380,10 +388,21 @@ fn do_install(
             "Installing boostrap service from {}",
             manifest_path.to_string_lossy()
         );
+
         smf::Config::import().run(&manifest_path)?;
     }
 
     Ok(())
+}
+
+fn do_install(
+    config: &Config,
+    artifact_dir: &Path,
+    install_dir: &Path,
+    log: &Logger,
+) -> Result<()> {
+    do_unpack(config, artifact_dir, install_dir, log)?;
+    do_activate(config, install_dir, log)
 }
 
 fn uninstall_all_omicron_zones() -> Result<()> {
@@ -594,6 +613,15 @@ async fn main() -> Result<()> {
             install_dir,
         }) => {
             do_uninstall(&config, &artifact_dir, &install_dir, &log).await?;
+        }
+        SubCommand::Deploy(DeployCommand::Unpack {
+            artifact_dir,
+            install_dir,
+        }) => {
+            do_unpack(&config, &artifact_dir, &install_dir, &log)?;
+        }
+        SubCommand::Deploy(DeployCommand::Activate { install_dir }) => {
+            do_activate(&config, &install_dir, &log)?;
         }
     }
 

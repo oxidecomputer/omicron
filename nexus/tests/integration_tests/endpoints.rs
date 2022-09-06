@@ -11,6 +11,7 @@ use crate::integration_tests::unauthorized::HTTP_SERVER;
 use chrono::Utc;
 use http::method::Method;
 use lazy_static::lazy_static;
+use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils::RACK_UUID;
 use nexus_test_utils::SLED_AGENT_UUID;
 use omicron_common::api::external::ByteCount;
@@ -176,8 +177,12 @@ lazy_static! {
                 name: DEMO_DISK_NAME.clone(),
                 description: "".parse().unwrap(),
             },
-            disk_source: params::DiskSource::Blank { block_size: params::BlockSize::try_from(4096).unwrap() },
-            size: ByteCount::from_gibibytes_u32(16),
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(4096).unwrap(),
+            },
+            size: ByteCount::from_gibibytes_u32(
+                DiskTest::DEFAULT_ZPOOL_SIZE_GIB
+            ),
         };
     pub static ref DEMO_DISK_METRICS_URL: String =
         format!(

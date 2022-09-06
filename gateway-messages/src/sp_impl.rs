@@ -13,7 +13,6 @@ use crate::Request;
 use crate::RequestKind;
 use crate::ResponseError;
 use crate::ResponseKind;
-use crate::SerialConsole;
 use crate::SpComponent;
 use crate::SpMessage;
 use crate::SpMessageKind;
@@ -22,7 +21,7 @@ use crate::SpState;
 use crate::UpdateChunk;
 use crate::UpdateStart;
 use core::convert::Infallible;
-use hubpack::SerializedSize;
+use core::mem;
 
 #[cfg(feature = "std")]
 use std::net::SocketAddrV6;
@@ -80,26 +79,41 @@ pub trait SpHandler {
         sender: SocketAddrV6,
         port: SpPort,
         chunk: UpdateChunk,
+        data: &[u8],
     ) -> Result<(), ResponseError>;
 
-    // TODO Should we return "number of bytes written" here, or is it sufficient
-    // to say "all or none"? Would be nice for the caller to not have to resend
-    // UDP chunks; can SP ensure it writes all data locally?
+    fn serial_console_attach(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+        component: SpComponent,
+    ) -> Result<(), ResponseError>;
+
+    /// The returned u64 should be the offset we want to receive in the next
+    /// call to `serial_console_write()`; i.e., the furthest offset we've
+    /// ingested (either by writing to the console or by buffering to write it).
     fn serial_console_write(
         &mut self,
         sender: SocketAddrV6,
         port: SpPort,
-        packet: SerialConsole,
+        offset: u64,
+        data: &[u8],
+    ) -> Result<u64, ResponseError>;
+
+    fn serial_console_detach(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
     ) -> Result<(), ResponseError>;
 
-    fn sys_reset_prepare(
+    fn reset_prepare(
         &mut self,
         sender: SocketAddrV6,
         port: SpPort,
     ) -> Result<(), ResponseError>;
 
     // On success, this method cannot return (it should perform a reset).
-    fn sys_reset_trigger(
+    fn reset_trigger(
         &mut self,
         sender: SocketAddrV6,
         port: SpPort,
@@ -124,80 +138,18 @@ impl From<hubpack::error::Error> for Error {
     }
 }
 
-#[derive(Debug)]
-pub struct SerialConsolePacketizer {
-    component: SpComponent,
-    offset: u64,
-}
-
-impl SerialConsolePacketizer {
-    pub fn new(component: SpComponent) -> Self {
-        Self { component, offset: 0 }
+/// Unpack the 2-byte length-prefixed trailing data that comes after some
+/// packets (e.g., update chunks, serial console).
+pub fn unpack_trailing_data(data: &[u8]) -> hubpack::error::Result<&[u8]> {
+    if data.len() < mem::size_of::<u16>() {
+        return Err(hubpack::error::Error::Truncated);
     }
-
-    pub fn packetize<'a, 'b>(
-        &'a mut self,
-        data: &'b [u8],
-    ) -> SerialConsolePackets<'a, 'b> {
-        SerialConsolePackets { parent: self, data }
+    let (prefix, data) = data.split_at(mem::size_of::<u16>());
+    let len = u16::from_le_bytes([prefix[0], prefix[1]]);
+    if data.len() != usize::from(len) {
+        return Err(hubpack::error::Error::Invalid);
     }
-
-    /// Extract the first packet from `data`, returning that packet and any
-    /// remaining data (which may be empty).
-    ///
-    /// Panics if `data` is empty.
-    pub fn first_packet<'a>(
-        &mut self,
-        data: &'a [u8],
-    ) -> (SerialConsole, &'a [u8]) {
-        if data.is_empty() {
-            panic!();
-        }
-
-        let (this_packet, remaining) = data.split_at(usize::min(
-            data.len(),
-            SerialConsole::MAX_DATA_PER_PACKET,
-        ));
-
-        let mut packet = SerialConsole {
-            component: self.component,
-            offset: self.offset,
-            len: this_packet.len() as u16,
-            data: [0; SerialConsole::MAX_DATA_PER_PACKET],
-        };
-        packet.data[..this_packet.len()].copy_from_slice(this_packet);
-
-        self.offset += this_packet.len() as u64;
-
-        (packet, remaining)
-    }
-
-    // TODO this function exists only to allow callers to inject artifical gaps
-    // in the data they're sending; should we gate it behind a cargo feature?
-    pub fn danger_emulate_dropped_packets(&mut self, bytes_to_skip: u64) {
-        self.offset += bytes_to_skip;
-    }
-}
-
-#[derive(Debug)]
-pub struct SerialConsolePackets<'a, 'b> {
-    parent: &'a mut SerialConsolePacketizer,
-    data: &'b [u8],
-}
-
-impl Iterator for SerialConsolePackets<'_, '_> {
-    type Item = SerialConsole;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.data.is_empty() {
-            return None;
-        }
-
-        let (packet, remaining) = self.parent.first_packet(self.data);
-        self.data = remaining;
-
-        Some(packet)
-    }
+    Ok(data)
 }
 
 /// Handle a single incoming message.
@@ -213,22 +165,34 @@ pub fn handle_message<H: SpHandler>(
     port: SpPort,
     data: &[u8],
     handler: &mut H,
-    out: &mut [u8; SpMessage::MAX_SIZE],
+    out: &mut [u8; crate::MAX_SERIALIZED_SIZE],
 ) -> Result<usize, Error> {
     // parse request, with sanity checks on sizes
-    if data.len() > Request::MAX_SIZE {
+    if data.len() > crate::MAX_SERIALIZED_SIZE {
         return Err(Error::DataTooLarge);
     }
     let (request, leftover) = hubpack::deserialize::<Request>(data)?;
-    if !leftover.is_empty() {
-        return Err(Error::LeftoverData);
-    }
 
     // `version` is intentionally the first 4 bytes of the packet; we could
     // check it before trying to deserialize?
     if request.version != version::V1 {
         return Err(Error::UnsupportedVersion(request.version));
     }
+
+    // Do we expect any trailing raw data? Only for specific kinds of messages;
+    // if we get any for other messages, bail out.
+    let trailing_data = match &request.kind {
+        RequestKind::UpdateChunk(_)
+        | RequestKind::SerialConsoleWrite { .. } => {
+            unpack_trailing_data(leftover)?
+        }
+        _ => {
+            if !leftover.is_empty() {
+                return Err(Error::LeftoverData);
+            }
+            &[]
+        }
+    };
 
     // call out to handler to provide response
     let result = match request.kind {
@@ -251,16 +215,24 @@ pub fn handle_message<H: SpHandler>(
             .update_start(sender, port, update)
             .map(|()| ResponseKind::UpdateStartAck),
         RequestKind::UpdateChunk(chunk) => handler
-            .update_chunk(sender, port, chunk)
+            .update_chunk(sender, port, chunk, trailing_data)
             .map(|()| ResponseKind::UpdateChunkAck),
-        RequestKind::SerialConsoleWrite(packet) => handler
-            .serial_console_write(sender, port, packet)
-            .map(|()| ResponseKind::SerialConsoleWriteAck),
+        RequestKind::SerialConsoleAttach(component) => handler
+            .serial_console_attach(sender, port, component)
+            .map(|()| ResponseKind::SerialConsoleAttachAck),
+        RequestKind::SerialConsoleWrite { offset } => handler
+            .serial_console_write(sender, port, offset, trailing_data)
+            .map(|n| ResponseKind::SerialConsoleWriteAck {
+                furthest_ingested_offset: n,
+            }),
+        RequestKind::SerialConsoleDetach => handler
+            .serial_console_detach(sender, port)
+            .map(|()| ResponseKind::SerialConsoleDetachAck),
         RequestKind::SysResetPrepare => handler
-            .sys_reset_prepare(sender, port)
+            .reset_prepare(sender, port)
             .map(|()| ResponseKind::SysResetPrepareAck),
         RequestKind::SysResetTrigger => {
-            handler.sys_reset_trigger(sender, port).map(|infallible| {
+            handler.reset_trigger(sender, port).map(|infallible| {
                 // A bit of type system magic here; `sys_reset_trigger`'s
                 // success type (`Infallible`) cannot be instantiated. We can
                 // provide an empty match to teach the type system that an
