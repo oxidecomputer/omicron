@@ -49,45 +49,6 @@
         }
       }
     },
-    "/by-id/global-images/{id}": {
-      "get": {
-        "tags": [
-          "images:global"
-        ],
-        "summary": "Fetch a global image by id",
-        "operationId": "image_global_view_by_id",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "style": "simple"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GlobalImage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/by-id/images/{id}": {
       "get": {
         "tags": [
@@ -838,7 +799,7 @@
         ],
         "summary": "List global images",
         "description": "Returns a list of all the global images. Global images are returned sorted by creation date, with the most recent images appearing first.",
-        "operationId": "image_global_list",
+        "operationId": "system_image_list",
         "parameters": [
           {
             "in": "query",
@@ -897,7 +858,7 @@
         ],
         "summary": "Create a global image",
         "description": "Create a new global image. This image can then be used by any user as a base for instances.",
-        "operationId": "image_global_create",
+        "operationId": "system_image_create",
         "requestBody": {
           "content": {
             "application/json": {
@@ -935,7 +896,7 @@
         ],
         "summary": "Fetch a global image",
         "description": "Returns the details of a specific global image.",
-        "operationId": "image_global_view",
+        "operationId": "system_image_view",
         "parameters": [
           {
             "in": "path",
@@ -972,7 +933,7 @@
         ],
         "summary": "Delete a global image",
         "description": "Permanently delete a global image. This operation cannot be undone. Any instances using the global image will continue to run, however new instances can not be created with this image.",
-        "operationId": "image_global_delete",
+        "operationId": "system_image_delete",
         "parameters": [
           {
             "in": "path",
@@ -6824,6 +6785,45 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SamlIdentityProvider"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/system/by-id/images/{id}": {
+      "get": {
+        "tags": [
+          "images:global"
+        ],
+        "summary": "Fetch a global image by id",
+        "operationId": "system_image_view_by_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GlobalImage"
                 }
               }
             }

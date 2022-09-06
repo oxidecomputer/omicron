@@ -33,11 +33,11 @@ image_view_by_id                         /by-id/images/{id}
 
 API operations found with tag "images:global"
 OPERATION ID                             URL PATH
-image_global_create                      /images
-image_global_delete                      /images/{image_name}
-image_global_list                        /images
-image_global_view                        /images/{image_name}
-image_global_view_by_id                  /by-id/global-images/{id}
+system_image_create                      /images
+system_image_delete                      /images/{image_name}
+system_image_list                        /images
+system_image_view                        /images/{image_name}
+system_image_view_by_id                  /system/by-id/images/{id}
 
 API operations found with tag "instances"
 OPERATION ID                             URL PATH

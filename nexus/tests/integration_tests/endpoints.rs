@@ -1377,7 +1377,7 @@ lazy_static! {
         /* Global Images */
 
         VerifyEndpoint {
-            url: "/images",
+            url: "/system/images",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::ReadOnly,
             allowed_methods: vec![
@@ -1389,7 +1389,7 @@ lazy_static! {
         },
 
         VerifyEndpoint {
-            url: "/by-id/global-images/{id}",
+            url: "/system/by-id/images/{id}",
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::ReadOnly,
             allowed_methods: vec![

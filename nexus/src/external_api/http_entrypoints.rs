@@ -233,11 +233,11 @@ pub fn external_api() -> NexusApiDescription {
         api.register(silo_identity_provider_create)?;
         api.register(silo_identity_provider_view)?;
 
-        api.register(image_global_list)?;
-        api.register(image_global_create)?;
-        api.register(image_global_view)?;
-        api.register(image_global_view_by_id)?;
-        api.register(image_global_delete)?;
+        api.register(system_image_list)?;
+        api.register(system_image_create)?;
+        api.register(system_image_view)?;
+        api.register(system_image_view_by_id)?;
+        api.register(system_image_delete)?;
 
         api.register(updates_refresh)?;
         api.register(user_list)?;
@@ -2226,10 +2226,10 @@ async fn instance_disk_detach(
 /// by creation date, with the most recent images appearing first.
 #[endpoint {
     method = GET,
-    path = "/images",
-    tags = ["images:global"],
+    path = "/system/images",
+    tags = ["system"],
 }]
-async fn image_global_list(
+async fn system_image_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByName>,
 ) -> Result<HttpResponseOk<ResultsPage<GlobalImage>>, HttpError> {
@@ -2266,7 +2266,7 @@ async fn image_global_list(
     path = "/images",
     tags = ["images:global"]
 }]
-async fn image_global_create(
+async fn system_image_create(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     new_image: TypedBody<params::GlobalImageCreate>,
 ) -> Result<HttpResponseCreated<GlobalImage>, HttpError> {
@@ -2292,10 +2292,10 @@ struct GlobalImagePathParam {
 /// Returns the details of a specific global image.
 #[endpoint {
     method = GET,
-    path = "/images/{image_name}",
-    tags = ["images:global"],
+    path = "/system/images/{image_name}",
+    tags = ["system"],
 }]
-async fn image_global_view(
+async fn system_image_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<GlobalImagePathParam>,
 ) -> Result<HttpResponseOk<GlobalImage>, HttpError> {
@@ -2314,10 +2314,10 @@ async fn image_global_view(
 /// Fetch a global image by id
 #[endpoint {
     method = GET,
-    path = "/by-id/global-images/{id}",
-    tags = ["images:global"],
+    path = "/system/by-id/images/{id}",
+    tags = ["system"],
 }]
-async fn image_global_view_by_id(
+async fn system_image_view_by_id(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ByIdPathParams>,
 ) -> Result<HttpResponseOk<GlobalImage>, HttpError> {
@@ -2340,10 +2340,10 @@ async fn image_global_view_by_id(
 /// can not be created with this image.
 #[endpoint {
     method = DELETE,
-    path = "/images/{image_name}",
-    tags = ["images:global"],
+    path = "/system/images/{image_name}",
+    tags = ["system"],
 }]
-async fn image_global_delete(
+async fn system_image_delete(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<GlobalImagePathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
