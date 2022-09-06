@@ -200,10 +200,10 @@ pub fn external_api() -> NexusApiDescription {
         api.register(vpc_firewall_rules_view)?;
         api.register(vpc_firewall_rules_update)?;
 
-        api.register(system_rack_list)?;
-        api.register(system_rack_view)?;
-        api.register(system_sled_list)?;
-        api.register(system_sled_view)?;
+        api.register(rack_list)?;
+        api.register(rack_view)?;
+        api.register(sled_list)?;
+        api.register(sled_view)?;
 
         api.register(saga_list)?;
         api.register(saga_view)?;
@@ -3841,9 +3841,9 @@ async fn vpc_router_route_update(
 #[endpoint {
     method = GET,
     path = "/system/hardware/racks",
-    tags = ["hardware"],
+    tags = ["system"],
 }]
-async fn system_rack_list(
+async fn rack_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<Rack>>, HttpError> {
@@ -3878,9 +3878,9 @@ struct RackPathParam {
 #[endpoint {
     method = GET,
     path = "/system/hardware/racks/{rack_id}",
-    tags = ["hardware"],
+    tags = ["system"],
 }]
-async fn system_rack_view(
+async fn rack_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<RackPathParam>,
 ) -> Result<HttpResponseOk<Rack>, HttpError> {
@@ -3901,9 +3901,9 @@ async fn system_rack_view(
 #[endpoint {
     method = GET,
     path = "/system/hardware/sleds",
-    tags = ["hardware"],
+    tags = ["system"],
 }]
-async fn system_sled_list(
+async fn sled_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<Sled>>, HttpError> {
@@ -3938,9 +3938,9 @@ struct SledPathParam {
 #[endpoint {
     method = GET,
     path = "/system/hardware/sleds/{sled_id}",
-    tags = ["hardware"],
+    tags = ["system"],
 }]
-async fn system_sled_view(
+async fn sled_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<SledPathParam>,
 ) -> Result<HttpResponseOk<Sled>, HttpError> {
