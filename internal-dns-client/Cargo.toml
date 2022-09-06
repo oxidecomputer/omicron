@@ -5,7 +5,7 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
-futures = "0.3.23"
+futures = "0.3.24"
 omicron-common = { path = "../common" }
 progenitor = { git = "https://github.com/oxidecomputer/progenitor" }
 reqwest = { version = "0.11", features = ["json", "rustls-tls", "stream"] }
