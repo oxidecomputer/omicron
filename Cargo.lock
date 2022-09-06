@@ -240,7 +240,7 @@ dependencies = [
  "bitflags",
  "cexpr",
  "clang-sys",
- "clap 3.2.17",
+ "clap 3.2.20",
  "env_logger",
  "lazy_static",
  "lazycell",
@@ -514,9 +514,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "3.2.17"
+version = "3.2.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "29e724a68d9319343bb3328c9cc2dfde263f4b3142ee1059a9980580171c954b"
+checksum = "23b71c3ce99b7611011217b366d923f1d0a7e07a92bb2dbf1e84508c673ca3bd"
 dependencies = [
  "atty",
  "bitflags",
@@ -531,9 +531,9 @@ dependencies = [
 
 [[package]]
 name = "clap_derive"
-version = "3.2.17"
+version = "3.2.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13547f7012c01ab4a0e8f8967730ada8f9fdf419e8b6c792788f39cf4e46eefa"
+checksum = "ea0c8bce528c4be4da13ea6fead8965e95b6073585a2f05204bd8f4119f82a65"
 dependencies = [
  "heck 0.4.0",
  "proc-macro-error",
@@ -1430,7 +1430,7 @@ name = "faux-mgs"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 3.2.17",
+ "clap 3.2.20",
  "gateway-messages",
  "gateway-sp-comms",
  "slog",
@@ -1679,7 +1679,7 @@ name = "gateway-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 3.2.17",
+ "clap 3.2.20",
  "futures",
  "gateway-client",
  "libc",
@@ -2217,7 +2217,7 @@ name = "internal-dns"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 3.2.17",
+ "clap 3.2.20",
  "dropshot",
  "expectorate",
  "internal-dns-client",
@@ -2892,7 +2892,7 @@ name = "omicron-deploy"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 3.2.17",
+ "clap 3.2.20",
  "crossbeam",
  "omicron-package",
  "omicron-sled-agent",
@@ -2908,7 +2908,7 @@ dependencies = [
 name = "omicron-gateway"
 version = "0.1.0"
 dependencies = [
- "clap 3.2.17",
+ "clap 3.2.20",
  "dropshot",
  "expectorate",
  "futures",
@@ -2946,7 +2946,7 @@ dependencies = [
  "base64",
  "bb8",
  "chrono",
- "clap 3.2.17",
+ "clap 3.2.20",
  "cookie",
  "criterion",
  "crucible-agent-client",
@@ -3025,7 +3025,7 @@ name = "omicron-package"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 3.2.17",
+ "clap 3.2.20",
  "futures",
  "hex",
  "indicatif",
@@ -3063,7 +3063,7 @@ dependencies = [
  "bytes",
  "cfg-if 1.0.0",
  "chrono",
- "clap 3.2.17",
+ "clap 3.2.20",
  "crucible-agent-client",
  "crucible-client-types",
  "ddm-admin-client",
@@ -3125,7 +3125,7 @@ name = "omicron-test-utils"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 3.2.17",
+ "clap 3.2.20",
  "dropshot",
  "expectorate",
  "futures",
@@ -3362,7 +3362,7 @@ dependencies = [
 name = "oximeter-collector"
 version = "0.1.0"
 dependencies = [
- "clap 3.2.17",
+ "clap 3.2.20",
  "dropshot",
  "expectorate",
  "internal-dns-client",
@@ -3393,7 +3393,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "chrono",
- "clap 3.2.17",
+ "clap 3.2.20",
  "dropshot",
  "itertools",
  "omicron-test-utils",
@@ -3935,7 +3935,7 @@ version = "0.1.2-dev"
 source = "git+https://github.com/oxidecomputer/progenitor#96adfa1d2aae83d75192545a53ab3f1931954d8f"
 dependencies = [
  "anyhow",
- "clap 3.2.17",
+ "clap 3.2.20",
  "openapiv3",
  "progenitor-client",
  "progenitor-impl",
@@ -5157,7 +5157,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "clap 3.2.17",
+ "clap 3.2.20",
  "dropshot",
  "futures",
  "gateway-messages",
@@ -5226,7 +5226,7 @@ version = "0.1.0"
 source = "git+http://github.com/oxidecomputer/sprockets?rev=0361fd13ff19cda6696242fe40f1325fca30d3d1#0361fd13ff19cda6696242fe40f1325fca30d3d1"
 dependencies = [
  "anyhow",
- "clap 3.2.17",
+ "clap 3.2.20",
  "derive_more",
  "futures",
  "pin-project",
