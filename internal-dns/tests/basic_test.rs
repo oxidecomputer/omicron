@@ -12,12 +12,12 @@ use internal_dns_client::{
     Client,
 };
 use omicron_test_utils::dev::test_setup_log;
-use trust_dns_proto::op::response_code::ResponseCode;
-use trust_dns_resolver::config::{
-    NameServerConfig, Protocol, ResolverConfig, ResolverOpts,
-};
 use trust_dns_resolver::error::ResolveErrorKind;
 use trust_dns_resolver::TokioAsyncResolver;
+use trust_dns_resolver::{
+    config::{NameServerConfig, Protocol, ResolverConfig, ResolverOpts},
+    proto::op::ResponseCode,
+};
 
 #[tokio::test]
 pub async fn aaaa_crud() -> Result<(), anyhow::Error> {
