@@ -8,6 +8,7 @@
 #:	"/var/tmp/omicron_tmp/*",
 #:	"!/var/tmp/omicron_tmp/crdb-base*",
 #:	"!/var/tmp/omicron_tmp/rustc*",
+#:  "%/var/tmp/signals.log",
 #: ]
 #:
 
@@ -34,6 +35,11 @@ export PATH="$PATH:$PWD/out/cockroachdb/bin:$PWD/out/clickhouse"
 
 banner prerequisites
 ptime -m bash ./tools/install_builder_prerequisites.sh -y
+
+#
+# Try to figure out what is killing the cargo test process
+#
+./signals.sh
 
 #
 # We build with:
