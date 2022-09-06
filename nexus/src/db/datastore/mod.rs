@@ -44,10 +44,10 @@ mod console_session;
 mod dataset;
 mod device_auth;
 mod disk;
+mod external_ip;
 mod global_image;
 mod identity_provider;
 mod instance;
-mod instance_external_ip;
 mod ip_pool;
 mod network_interface;
 mod organization;
@@ -233,7 +233,7 @@ mod test {
     use crate::db::identity::Resource;
     use crate::db::lookup::LookupPath;
     use crate::db::model::Dataset;
-    use crate::db::model::InstanceExternalIp;
+    use crate::db::model::ExternalIp;
     use crate::db::model::Rack;
     use crate::db::model::Region;
     use crate::db::model::Service;
@@ -1010,13 +1010,12 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_deallocate_instance_external_ip_by_instance_id_is_idempotent()
-    {
+    async fn test_deallocate_external_ip_by_instance_id_is_idempotent() {
         use crate::db::model::IpKind;
-        use crate::db::schema::instance_external_ip::dsl;
+        use crate::db::schema::external_ip::dsl;
 
         let logctx = dev::test_setup_log(
-            "test_deallocate_instance_external_ip_by_instance_id_is_idempotent",
+            "test_deallocate_external_ip_by_instance_id_is_idempotent",
         );
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
@@ -1025,7 +1024,7 @@ mod test {
         let now = Utc::now();
         let instance_id = Uuid::new_v4();
         let ips = (0..4)
-            .map(|i| InstanceExternalIp {
+            .map(|i| ExternalIp {
                 id: Uuid::new_v4(),
                 name: None,
                 description: None,
@@ -1044,7 +1043,7 @@ mod test {
                 last_port: crate::db::model::SqlU16(10),
             })
             .collect::<Vec<_>>();
-        diesel::insert_into(dsl::instance_external_ip)
+        diesel::insert_into(dsl::external_ip)
             .values(ips.clone())
             .execute_async(datastore.pool())
             .await
@@ -1052,7 +1051,7 @@ mod test {
 
         // Delete everything, make sure we delete all records we made above
         let count = datastore
-            .deallocate_instance_external_ip_by_instance_id(&opctx, instance_id)
+            .deallocate_external_ip_by_instance_id(&opctx, instance_id)
             .await
             .expect("Failed to delete instance external IPs");
         assert_eq!(
@@ -1063,7 +1062,7 @@ mod test {
 
         // Do it again, we should get zero records
         let count = datastore
-            .deallocate_instance_external_ip_by_instance_id(&opctx, instance_id)
+            .deallocate_external_ip_by_instance_id(&opctx, instance_id)
             .await
             .expect("Failed to delete instance external IPs");
         assert_eq!(count, 0, "Expected to delete zero IPs for the instance");
@@ -1073,19 +1072,18 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_deallocate_instance_external_ip_is_idempotent() {
+    async fn test_deallocate_external_ip_is_idempotent() {
         use crate::db::model::IpKind;
-        use crate::db::schema::instance_external_ip::dsl;
+        use crate::db::schema::external_ip::dsl;
 
-        let logctx = dev::test_setup_log(
-            "test_deallocate_instance_external_ip_is_idempotent",
-        );
+        let logctx =
+            dev::test_setup_log("test_deallocate_external_ip_is_idempotent");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
         // Create a record.
         let now = Utc::now();
-        let ip = InstanceExternalIp {
+        let ip = ExternalIp {
             id: Uuid::new_v4(),
             name: None,
             description: None,
@@ -1103,26 +1101,22 @@ mod test {
             first_port: crate::db::model::SqlU16(0),
             last_port: crate::db::model::SqlU16(10),
         };
-        diesel::insert_into(dsl::instance_external_ip)
+        diesel::insert_into(dsl::external_ip)
             .values(ip.clone())
             .execute_async(datastore.pool())
             .await
             .unwrap();
 
         // Delete it twice, make sure we get the right sentinel return values.
-        let deleted = datastore
-            .deallocate_instance_external_ip(&opctx, ip.id)
-            .await
-            .unwrap();
+        let deleted =
+            datastore.deallocate_external_ip(&opctx, ip.id).await.unwrap();
         assert!(
             deleted,
             "Got unexpected sentinel value back when \
             deleting external IP the first time"
         );
-        let deleted = datastore
-            .deallocate_instance_external_ip(&opctx, ip.id)
-            .await
-            .unwrap();
+        let deleted =
+            datastore.deallocate_external_ip(&opctx, ip.id).await.unwrap();
         assert!(
             !deleted,
             "Got unexpected sentinel value back when \
@@ -1131,7 +1125,7 @@ mod test {
 
         // Deleting a non-existing record fails
         assert!(datastore
-            .deallocate_instance_external_ip(&opctx, Uuid::nil())
+            .deallocate_external_ip(&opctx, Uuid::nil())
             .await
             .is_err());
 
@@ -1142,7 +1136,7 @@ mod test {
     #[tokio::test]
     async fn test_external_ip_check_constraints() {
         use crate::db::model::IpKind;
-        use crate::db::schema::instance_external_ip::dsl;
+        use crate::db::schema::external_ip::dsl;
         use async_bb8_diesel::ConnectionError::Query;
         use async_bb8_diesel::PoolError::Connection;
         use diesel::result::DatabaseErrorKind::CheckViolation;
@@ -1160,7 +1154,7 @@ mod test {
         )
         .unwrap();
         let mut addresses = subnet.iter();
-        let ip = InstanceExternalIp {
+        let ip = ExternalIp {
             id: Uuid::new_v4(),
             name: None,
             description: None,
@@ -1192,7 +1186,7 @@ mod test {
         for name in names.iter() {
             for description in descriptions.iter() {
                 for instance_id in instance_ids.iter() {
-                    let new_ip = InstanceExternalIp {
+                    let new_ip = ExternalIp {
                         id: Uuid::new_v4(),
                         name: name.clone(),
                         description: description.clone(),
@@ -1200,7 +1194,7 @@ mod test {
                         instance_id: *instance_id,
                         ..ip
                     };
-                    let res = diesel::insert_into(dsl::instance_external_ip)
+                    let res = diesel::insert_into(dsl::external_ip)
                         .values(new_ip)
                         .execute_async(datastore.pool())
                         .await;
@@ -1238,7 +1232,7 @@ mod test {
             for name in names.iter() {
                 for description in descriptions.iter() {
                     for instance_id in instance_ids.iter() {
-                        let new_ip = InstanceExternalIp {
+                        let new_ip = ExternalIp {
                             id: Uuid::new_v4(),
                             name: name.clone(),
                             description: description.clone(),
@@ -1247,11 +1241,10 @@ mod test {
                             instance_id: *instance_id,
                             ..ip
                         };
-                        let res =
-                            diesel::insert_into(dsl::instance_external_ip)
-                                .values(new_ip.clone())
-                                .execute_async(datastore.pool())
-                                .await;
+                        let res = diesel::insert_into(dsl::external_ip)
+                            .values(new_ip.clone())
+                            .execute_async(datastore.pool())
+                            .await;
                         if name.is_none()
                             && description.is_none()
                             && instance_id.is_some()

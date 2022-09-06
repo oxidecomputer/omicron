@@ -2,15 +2,15 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! [`DataStore`] methods on [`InstanceExternalIp`]s.
+//! [`DataStore`] methods on [`ExternalIp`]s.
 
 use super::DataStore;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
-use crate::db::model::IncompleteInstanceExternalIp;
-use crate::db::model::InstanceExternalIp;
+use crate::db::model::ExternalIp;
+use crate::db::model::IncompleteExternalIp;
 use crate::db::model::IpKind;
 use crate::db::model::IpPool;
 use crate::db::model::Name;
@@ -36,14 +36,14 @@ impl DataStore {
         ip_id: Uuid,
         project_id: Uuid,
         instance_id: Uuid,
-    ) -> CreateResult<InstanceExternalIp> {
-        let data = IncompleteInstanceExternalIp::for_instance_source_nat(
+    ) -> CreateResult<ExternalIp> {
+        let data = IncompleteExternalIp::for_instance_source_nat(
             ip_id,
             project_id,
             instance_id,
             /* pool_id = */ None,
         );
-        self.allocate_instance_external_ip(opctx, data).await
+        self.allocate_external_ip(opctx, data).await
     }
 
     /// Create an Ephemeral IP address for an instance.
@@ -54,7 +54,7 @@ impl DataStore {
         project_id: Uuid,
         instance_id: Uuid,
         pool_name: Option<Name>,
-    ) -> CreateResult<InstanceExternalIp> {
+    ) -> CreateResult<ExternalIp> {
         let pool_id = if let Some(ref name) = pool_name {
             // We'd like to add authz checks here, and use the `LookupPath`
             // methods on the project-scoped view of this resource. It's not
@@ -92,13 +92,13 @@ impl DataStore {
         } else {
             None
         };
-        let data = IncompleteInstanceExternalIp::for_ephemeral(
+        let data = IncompleteExternalIp::for_ephemeral(
             ip_id,
             project_id,
             instance_id,
             pool_id,
         );
-        self.allocate_instance_external_ip(opctx, data).await
+        self.allocate_external_ip(opctx, data).await
     }
 
     /// Allocates an IP address for internal service usage.
@@ -107,19 +107,19 @@ impl DataStore {
         opctx: &OpContext,
         ip_id: Uuid,
         rack_id: Uuid,
-    ) -> CreateResult<InstanceExternalIp> {
+    ) -> CreateResult<ExternalIp> {
         let (.., pool) =
             self.ip_pools_lookup_by_rack_id(opctx, rack_id).await?;
 
-        let data = IncompleteInstanceExternalIp::for_service(ip_id, pool.id());
-        self.allocate_instance_external_ip(opctx, data).await
+        let data = IncompleteExternalIp::for_service(ip_id, pool.id());
+        self.allocate_external_ip(opctx, data).await
     }
 
-    async fn allocate_instance_external_ip(
+    async fn allocate_external_ip(
         &self,
         opctx: &OpContext,
-        data: IncompleteInstanceExternalIp,
-    ) -> CreateResult<InstanceExternalIp> {
+        data: IncompleteExternalIp,
+    ) -> CreateResult<ExternalIp> {
         NextExternalIp::new(data)
             .get_result_async(self.pool_authorized(opctx).await?)
             .await
@@ -129,7 +129,7 @@ impl DataStore {
                 use diesel::result::Error::NotFound;
                 match e {
                     Connection(Query(NotFound)) => Error::invalid_request(
-                        "No external IP addresses available for new instance",
+                        "No external IP addresses available",
                     ),
                     _ => public_error_from_diesel_pool(e, ErrorHandler::Server),
                 }
@@ -146,18 +146,18 @@ impl DataStore {
     /// - `Ok(false)`: The record was already deleted, such as by a previous
     /// call
     /// - `Err(_)`: Any other condition, including a non-existent record.
-    pub async fn deallocate_instance_external_ip(
+    pub async fn deallocate_external_ip(
         &self,
         opctx: &OpContext,
         ip_id: Uuid,
     ) -> Result<bool, Error> {
-        use db::schema::instance_external_ip::dsl;
+        use db::schema::external_ip::dsl;
         let now = Utc::now();
-        diesel::update(dsl::instance_external_ip)
+        diesel::update(dsl::external_ip)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(ip_id))
             .set(dsl::time_deleted.eq(now))
-            .check_if_exists::<InstanceExternalIp>(ip_id)
+            .check_if_exists::<ExternalIp>(ip_id)
             .execute_and_check(self.pool_authorized(opctx).await?)
             .await
             .map(|r| match r.status {
@@ -175,14 +175,14 @@ impl DataStore {
     /// if callers have some invariants they'd like to check.
     // TODO-correctness: This can't be used for Floating IPs, we'll need a
     // _detatch_ method for that.
-    pub async fn deallocate_instance_external_ip_by_instance_id(
+    pub async fn deallocate_external_ip_by_instance_id(
         &self,
         opctx: &OpContext,
         instance_id: Uuid,
     ) -> Result<usize, Error> {
-        use db::schema::instance_external_ip::dsl;
+        use db::schema::external_ip::dsl;
         let now = Utc::now();
-        diesel::update(dsl::instance_external_ip)
+        diesel::update(dsl::external_ip)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::instance_id.eq(instance_id))
             .filter(dsl::kind.ne(IpKind::Floating))
@@ -197,12 +197,12 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         instance_id: Uuid,
-    ) -> LookupResult<Vec<InstanceExternalIp>> {
-        use db::schema::instance_external_ip::dsl;
-        dsl::instance_external_ip
+    ) -> LookupResult<Vec<ExternalIp>> {
+        use db::schema::external_ip::dsl;
+        dsl::external_ip
             .filter(dsl::instance_id.eq(instance_id))
             .filter(dsl::time_deleted.is_null())
-            .select(InstanceExternalIp::as_select())
+            .select(ExternalIp::as_select())
             .get_results_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))

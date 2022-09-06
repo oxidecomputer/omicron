@@ -5,8 +5,8 @@
 //! Implementation of queries for operating on external IP addresses from IP
 //! Pools.
 
-use crate::db::model::IncompleteInstanceExternalIp;
-use crate::db::model::InstanceExternalIp;
+use crate::db::model::ExternalIp;
+use crate::db::model::IncompleteExternalIp;
 use crate::db::model::IpKind;
 use crate::db::model::IpKindEnum;
 use crate::db::model::IpSource;
@@ -31,10 +31,9 @@ type FromClause<T> =
 type IpPoolRangeFromClause = FromClause<schema::ip_pool_range::table>;
 const IP_POOL_RANGE_FROM_CLAUSE: IpPoolRangeFromClause =
     IpPoolRangeFromClause::new();
-type InstanceExternalIpFromClause =
-    FromClause<schema::instance_external_ip::table>;
-const INSTANCE_EXTERNAL_IP_FROM_CLAUSE: InstanceExternalIpFromClause =
-    InstanceExternalIpFromClause::new();
+type ExternalIpFromClause = FromClause<schema::external_ip::table>;
+const EXTERNAL_IP_FROM_CLAUSE: ExternalIpFromClause =
+    ExternalIpFromClause::new();
 
 // The number of ports available to an instance when doing source NAT. Note
 // that for static NAT, this value isn't used, and all ports are available.
@@ -65,7 +64,7 @@ const MAX_PORT: i32 = u16::MAX as _;
 /// In general, the query:
 ///
 /// - Selects the next available IP address and port range from _any_ IP Pool
-/// - Inserts that record into the `instance_external_ip` table
+/// - Inserts that record into the `external_ip` table
 /// - Updates the rcgen and time modified of the parent `ip_pool_range` table
 ///
 /// In detail, the query is:
@@ -118,7 +117,7 @@ const MAX_PORT: i32 = u16::MAX as _;
 ///         -- Join with existing IPs, selecting the first row from the
 ///         -- address and port sequence subqueryes that has no match. I.e.,
 ///         -- is not yet reserved.
-///         instance_external_ip
+///         external_ip
 ///     ON
 ///         (ip, first_port, time_deleted IS NULL) =
 ///         (candidate_ip, candidate_first_port, TRUE)
@@ -134,7 +133,7 @@ const MAX_PORT: i32 = u16::MAX as _;
 ///     -- everything else as it exists in the record. This should only be
 ///     -- possible on replay of a saga node.
 ///     INSERT INTO
-///         instance_external_ip
+///         external_ip
 ///     (SELECT * FROM next_external_ip)
 ///     ON CONFLICT (id)
 ///     DO UPDATE SET
@@ -213,7 +212,7 @@ const MAX_PORT: i32 = u16::MAX as _;
 /// violates that expectation.
 #[derive(Debug, Clone)]
 pub struct NextExternalIp {
-    ip: IncompleteInstanceExternalIp,
+    ip: IncompleteExternalIp,
     // Number of ports reserved per IP address. Only applicable if the IP kind
     // is snat.
     n_ports_per_chunk: i32,
@@ -225,7 +224,7 @@ pub struct NextExternalIp {
 }
 
 impl NextExternalIp {
-    pub fn new(ip: IncompleteInstanceExternalIp) -> Self {
+    pub fn new(ip: IncompleteExternalIp) -> Self {
         let now = Utc::now();
         let n_ports_per_chunk = i32::try_from(NUM_SOURCE_NAT_PORTS).unwrap();
         Self {
@@ -240,7 +239,7 @@ impl NextExternalIp {
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
     ) -> QueryResult<()> {
-        use schema::instance_external_ip::dsl;
+        use schema::external_ip::dsl;
         out.push_sql("SELECT ");
 
         // NOTE: These columns must be selected in the order in which they
@@ -335,7 +334,7 @@ impl NextExternalIp {
         out.push_sql(") CROSS JOIN (");
         self.push_port_sequence_subquery(out.reborrow())?;
         out.push_sql(") LEFT OUTER JOIN ");
-        INSTANCE_EXTERNAL_IP_FROM_CLAUSE.walk_ast(out.reborrow())?;
+        EXTERNAL_IP_FROM_CLAUSE.walk_ast(out.reborrow())?;
 
         // The JOIN conditions depend on the IP type. For automatic SNAT IP
         // addresses, we need to consider existing records with their port
@@ -395,10 +394,10 @@ impl NextExternalIp {
         // the `time_deleted` is null. That means that if the record has been
         // soft-deleted, it won't be considered a match, and thus both the IP
         // and first port (in the join result) will be null. Note that there
-        // _is_ a record in the `instance_external_ip` table that has that IP
+        // _is_ a record in the `external_ip` table that has that IP
         // and possibly first port, but since it's been soft-deleted, it's not a
         // match. In that case, we can get away with _only_ filtering the join
-        // results on the IP from the `instance_external_ip` table being NULL.
+        // results on the IP from the `external_ip` table being NULL.
         out.push_sql(" WHERE (");
         out.push_identifier(dsl::ip::NAME)?;
         out.push_sql(" IS NULL) OR (");
@@ -555,9 +554,7 @@ impl NextExternalIp {
         out.push_sql(" + 1 WHERE ");
         out.push_identifier(dsl::id::NAME)?;
         out.push_sql(" = (SELECT ");
-        out.push_identifier(
-            schema::instance_external_ip::ip_pool_range_id::NAME,
-        )?;
+        out.push_identifier(schema::external_ip::ip_pool_range_id::NAME)?;
         out.push_sql(" FROM next_external_ip) AND ");
         out.push_identifier(dsl::time_deleted::NAME)?;
         out.push_sql(" IS NULL RETURNING ");
@@ -565,16 +562,16 @@ impl NextExternalIp {
         Ok(())
     }
 
-    // Push the subquery that updates the actual `instance_external_ip` table
+    // Push the subquery that updates the actual `external_ip` table
     // with the candidate record created in the main `next_external_ip` CTE and
     // returns it. Note that this may just update the timestamps, if a record
     // with the same primary key is found.
-    fn push_update_instance_external_ip_subquery<'a>(
+    fn push_update_external_ip_subquery<'a>(
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
     ) -> QueryResult<()> {
         out.push_sql("INSERT INTO ");
-        INSTANCE_EXTERNAL_IP_FROM_CLAUSE.walk_ast(out.reborrow())?;
+        EXTERNAL_IP_FROM_CLAUSE.walk_ast(out.reborrow())?;
         out.push_sql(
             " (SELECT * FROM next_external_ip) \
             ON CONFLICT (id) \
@@ -609,7 +606,7 @@ impl QueryFragment<Pg> for NextExternalIp {
         // Push the subquery that potentially inserts this record, or ignores
         // primary key conflicts (for idempotency).
         out.push_sql("), external_ip AS (");
-        self.push_update_instance_external_ip_subquery(out.reborrow())?;
+        self.push_update_external_ip_subquery(out.reborrow())?;
 
         // Push the subquery that bumps the `rcgen` of the IP Pool range table
         out.push_sql("), updated_pool_range AS (");
@@ -623,7 +620,7 @@ impl QueryFragment<Pg> for NextExternalIp {
 }
 
 impl Query for NextExternalIp {
-    type SqlType = <<InstanceExternalIp as
+    type SqlType = <<ExternalIp as
         diesel::Selectable<Pg>>::SelectExpression as diesel::Expression>::SqlType;
 }
 
@@ -798,9 +795,7 @@ mod tests {
         assert_eq!(
             err,
             Error::InvalidRequest {
-                message: String::from(
-                    "No external IP addresses available for new instance"
-                ),
+                message: String::from("No external IP addresses available"),
             }
         );
         context.success().await;
@@ -857,7 +852,7 @@ mod tests {
         // Release the first
         context
             .db_datastore
-            .deallocate_instance_external_ip(&context.opctx, ips[0].id)
+            .deallocate_external_ip(&context.opctx, ips[0].id)
             .await
             .expect("Failed to release the first external IP address");
 
@@ -1074,11 +1069,7 @@ mod tests {
         assert_eq!(
             err,
             Error::InvalidRequest {
-                message: String::from(
-                    // TODO: The error is a bit misleading; this isn't an IP
-                    // intended for an instance necessarily.
-                    "No external IP addresses available for new instance"
-                ),
+                message: String::from("No external IP addresses available"),
             }
         );
 

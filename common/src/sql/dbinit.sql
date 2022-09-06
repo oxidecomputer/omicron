@@ -1143,9 +1143,10 @@ CREATE TYPE omicron.public.ip_kind AS ENUM (
 );
 
 /*
- * External IP addresses used for guest instances
+ * External IP addresses used for guest instances and externally-facing
+ * services.
  */
-CREATE TABLE omicron.public.instance_external_ip (
+CREATE TABLE omicron.public.external_ip (
     /* Identity metadata */
     id UUID PRIMARY KEY,
 
@@ -1219,7 +1220,7 @@ CREATE TABLE omicron.public.instance_external_ip (
  * Index used to support quickly looking up children of the IP Pool range table,
  * when checking for allocated addresses during deletion.
  */
-CREATE INDEX ON omicron.public.instance_external_ip (
+CREATE INDEX ON omicron.public.external_ip (
     ip_pool_id,
     ip_pool_range_id
 )
@@ -1232,13 +1233,13 @@ CREATE INDEX ON omicron.public.instance_external_ip (
  * pools, _and_ on the fact that the number of ports assigned to each instance
  * is fixed at compile time.
  */
-CREATE UNIQUE INDEX ON omicron.public.instance_external_ip (
+CREATE UNIQUE INDEX ON omicron.public.external_ip (
     ip,
     first_port
 )
     WHERE time_deleted IS NULL;
 
-CREATE UNIQUE INDEX ON omicron.public.instance_external_ip (
+CREATE UNIQUE INDEX ON omicron.public.external_ip (
     instance_id,
     id
 )
