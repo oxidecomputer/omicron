@@ -99,8 +99,8 @@ organization_view_by_id                  /by-id/organizations/{id}
 
 API operations found with tag "policy"
 OPERATION ID                             URL PATH
-global_policy_update                     /global/policy
-global_policy_view                       /global/policy
+system_policy_update                     /system/policy
+system_policy_view                       /system/policy
 
 API operations found with tag "projects"
 OPERATION ID                             URL PATH

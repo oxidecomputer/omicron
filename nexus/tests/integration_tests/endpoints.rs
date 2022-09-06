@@ -41,7 +41,7 @@ lazy_static! {
         format!("/hardware/sleds/{}", SLED_AGENT_UUID);
 
     // Global policy
-    pub static ref GLOBAL_POLICY_URL: &'static str = "/global/policy";
+    pub static ref SYSTEM_POLICY_URL: &'static str = "/system/policy";
 
     // Silo used for testing
     pub static ref DEMO_SILO_NAME: Name = "demo-silo".parse().unwrap();
@@ -525,7 +525,7 @@ lazy_static! {
     pub static ref VERIFY_ENDPOINTS: Vec<VerifyEndpoint> = vec![
         // Global IAM policy
         VerifyEndpoint {
-            url: *GLOBAL_POLICY_URL,
+            url: *SYSTEM_POLICY_URL,
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
