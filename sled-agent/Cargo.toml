@@ -49,7 +49,7 @@ socket2 = { version = "0.4", features = [ "all" ] }
 tar = "0.4"
 tempfile = "3.3"
 thiserror = "1.0"
-tokio = { version = "1.20", features = [ "full" ] }
+tokio = { version = "1.21", features = [ "full" ] }
 tokio-tungstenite = "0.17.2"
 tokio-util = { version = "0.7", features = ["codec"] }
 toml = "0.5.9"
