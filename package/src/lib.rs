@@ -46,7 +46,9 @@ pub enum BuildCommand {
 /// Commands which should execute on a host installing packages.
 #[derive(Debug, Subcommand)]
 pub enum DeployCommand {
-    /// Installs the packages to a target machine.
+    /// Installs the packages to a target machine and starts the sled-agent
+    ///
+    /// This is a combination of `Unpack` and `Activate`
     Install {
         /// The directory from which artifacts will be pulled.
         ///
@@ -69,6 +71,28 @@ pub enum DeployCommand {
         artifact_dir: PathBuf,
 
         /// The directory to which artifacts were installed.
+        ///
+        /// Defaults to "/opt/oxide".
+        #[clap(long = "out", default_value = "/opt/oxide", action)]
+        install_dir: PathBuf,
+    },
+    // Unpacks the package files on the target machine
+    Unpack {
+        /// The directory from which artifacts will be pulled.
+        ///
+        /// Should match the format from the Package subcommand.
+        #[clap(long = "in", default_value = "out", action)]
+        artifact_dir: PathBuf,
+
+        /// The directory to which artifacts will be installed.
+        ///
+        /// Defaults to "/opt/oxide".
+        #[clap(long = "out", default_value = "/opt/oxide", action)]
+        install_dir: PathBuf,
+    },
+    // Installs the sled-agent illumos service and starts it
+    Activate {
+        /// The directory to which artifacts will be installed.
         ///
         /// Defaults to "/opt/oxide".
         #[clap(long = "out", default_value = "/opt/oxide", action)]

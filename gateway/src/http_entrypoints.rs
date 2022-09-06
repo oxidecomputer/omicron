@@ -326,7 +326,6 @@ async fn sp_list(
                     // These errors should not be possible for the request we
                     // made.
                     SpCommsError::SpDoesNotExist(_)
-                    | SpCommsError::SerialConsoleAttached
                     | SpCommsError::UpdateFailed(_) => {
                         unreachable!("impossible error {}", err)
                     }
@@ -505,7 +504,7 @@ async fn sp_update(
     let sp = path.into_inner().sp;
     let image = body.into_inner().image;
 
-    comms.update(sp.into(), &image).await.map_err(http_err_from_comms_err)?;
+    comms.update(sp.into(), image).await.map_err(http_err_from_comms_err)?;
 
     Ok(HttpResponseUpdatedNoContent {})
 }

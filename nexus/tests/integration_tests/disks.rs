@@ -553,21 +553,7 @@ async fn test_disk_creation_region_requested_then_started(
     // Before we create a disk, set the response from the Crucible Agent:
     // no matter what regions get requested, they'll always *start* as
     // "Requested", and transition to "Created" on the second call.
-    for id in &test.dataset_ids {
-        let crucible =
-            test.sled_agent.get_crucible_dataset(test.zpool_id, *id).await;
-        let called = std::sync::atomic::AtomicBool::new(false);
-        crucible
-            .set_create_callback(Box::new(move |_| {
-                if !called.load(std::sync::atomic::Ordering::SeqCst) {
-                    called.store(true, std::sync::atomic::Ordering::SeqCst);
-                    RegionState::Requested
-                } else {
-                    RegionState::Created
-                }
-            }))
-            .await;
-    }
+    test.set_requested_then_created_callback().await;
 
     // The disk is created successfully, even when this "requested" -> "started"
     // transition occurs.
@@ -585,24 +571,18 @@ async fn test_disk_region_creation_failure(
 
     // Before we create a disk, set the response from the Crucible Agent:
     // no matter what regions get requested, they'll always fail.
-    for id in &test.dataset_ids {
-        let crucible =
-            test.sled_agent.get_crucible_dataset(test.zpool_id, *id).await;
-        crucible.set_create_callback(Box::new(|_| RegionState::Failed)).await;
-    }
-
-    let disk_size = ByteCount::from_gibibytes_u32(3);
-    let dataset_count = test.dataset_ids.len() as u64;
-    assert!(
-        disk_size.to_bytes() * dataset_count < test.zpool_size.to_bytes(),
-        "Disk size too big for Zpool size"
-    );
-    assert!(
-        2 * disk_size.to_bytes() * dataset_count > test.zpool_size.to_bytes(),
-        "(test constraint) Zpool needs to be smaller (to store only one disk)",
-    );
+    test.set_always_fail_callback().await;
 
     // Attempt to allocate the disk, observe a server error.
+    let disk_size = ByteCount::from_gibibytes_u32(3);
+
+    // Allocation should have room, it should fail due to the callback set
+    // above.
+    assert!(
+        disk_size.to_whole_gibibytes()
+            < DiskTest::DEFAULT_ZPOOL_SIZE_GIB.into()
+    );
+
     let disks_url = get_disks_url();
     let new_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
@@ -635,21 +615,31 @@ async fn test_disk_region_creation_failure(
     assert_eq!(disks.len(), 0);
 
     // After the failed allocation, regions will exist, but be "Failed".
-    for id in &test.dataset_ids {
-        let crucible =
-            test.sled_agent.get_crucible_dataset(test.zpool_id, *id).await;
-        let regions = crucible.list().await;
-        assert_eq!(regions.len(), 1);
-        assert_eq!(regions[0].state, RegionState::Failed);
+    for zpool in &test.zpools {
+        for dataset in &zpool.datasets {
+            let crucible = test
+                .sled_agent
+                .get_crucible_dataset(zpool.id, dataset.id)
+                .await;
+            let regions = crucible.list().await;
+            assert_eq!(regions.len(), 1);
+            assert_eq!(regions[0].state, RegionState::Failed);
+        }
     }
 
     // Validate that the underlying regions were released as a part of
     // unwinding the failed disk allocation, by performing another disk
     // allocation that should succeed.
-    for id in &test.dataset_ids {
-        let crucible =
-            test.sled_agent.get_crucible_dataset(test.zpool_id, *id).await;
-        crucible.set_create_callback(Box::new(|_| RegionState::Created)).await;
+    for zpool in &test.zpools {
+        for dataset in &zpool.datasets {
+            let crucible = test
+                .sled_agent
+                .get_crucible_dataset(zpool.id, dataset.id)
+                .await;
+            crucible
+                .set_create_callback(Box::new(|_| RegionState::Created))
+                .await;
+        }
     }
     let _ = create_disk(client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
 }
@@ -660,22 +650,20 @@ async fn test_disk_invalid_block_size_rejected(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let test = DiskTest::new(&cptestctx).await;
+    let _test = DiskTest::new(&cptestctx).await;
     create_org_and_project(client).await;
 
+    // Attempt to allocate the disk, observe a server error.
     let disk_size = ByteCount::from_gibibytes_u32(3);
-    let dataset_count = test.dataset_ids.len() as u64;
+
+    // Allocation should have room, it should fail due to block size mismatch.
     assert!(
-        disk_size.to_bytes() * dataset_count < test.zpool_size.to_bytes(),
-        "Disk size too big for Zpool size"
-    );
-    assert!(
-        2 * disk_size.to_bytes() * dataset_count > test.zpool_size.to_bytes(),
-        "(test constraint) Zpool needs to be smaller (to store only one disk)",
+        disk_size.to_whole_gibibytes()
+            < DiskTest::DEFAULT_ZPOOL_SIZE_GIB.into()
     );
 
-    // Attempt to allocate the disk, observe a server error.
     let disks_url = get_disks_url();
+
     let new_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: DISK_NAME.parse().unwrap(),
@@ -705,21 +693,19 @@ async fn test_disk_reject_total_size_not_divisible_by_block_size(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let test = DiskTest::new(&cptestctx).await;
+    let _test = DiskTest::new(&cptestctx).await;
     create_org_and_project(client).await;
 
+    // Attempt to allocate the disk, observe a server error.
     let disk_size = ByteCount::from(3 * 1024 * 1024 * 1024 + 256);
-    let dataset_count = test.dataset_ids.len() as u64;
+
+    // Allocation should have room, it should fail due to disk_size not being
+    // divisible by block size.
     assert!(
-        disk_size.to_bytes() * dataset_count < test.zpool_size.to_bytes(),
-        "Disk size too big for Zpool size"
-    );
-    assert!(
-        2 * disk_size.to_bytes() * dataset_count > test.zpool_size.to_bytes(),
-        "(test constraint) Zpool needs to be smaller (to store only one disk)",
+        disk_size.to_bytes()
+            < DiskTest::DEFAULT_ZPOOL_SIZE_GIB as u64 * 1024 * 1024 * 1024
     );
 
-    // Attempt to allocate the disk, observe a server error.
     let disks_url = get_disks_url();
     let new_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
@@ -828,6 +814,326 @@ async fn test_disk_reject_total_size_not_divisible_by_min_disk_size(
             ByteCount::from(params::MIN_DISK_SIZE_BYTES)
         )
     );
+}
+
+// Test disks backed by multiple region sets (one region set being three regions)
+#[nexus_test]
+async fn test_disk_backed_by_multiple_region_sets(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // Create three zpools, all 10 gibibytes, each with one dataset
+    let mut test = DiskTest::new(&cptestctx).await;
+
+    // Assert default is still 10 GiB
+    assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
+
+    // Create another three zpools, all 10 gibibytes, each with one dataset
+    test.add_zpool_with_dataset(10).await;
+    test.add_zpool_with_dataset(10).await;
+    test.add_zpool_with_dataset(10).await;
+
+    create_org_and_project(client).await;
+
+    // Ask for a 20 gibibyte disk.
+    let disk_size = ByteCount::try_from(20u64 * 1024 * 1024 * 1024).unwrap();
+    let disks_url = get_disks_url();
+    let new_disk = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: DISK_NAME.parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
+        size: disk_size,
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&new_disk))
+            // TODO: this fails! the current allocation algorithm does not split
+            // across datasets
+            .expect_status(Some(StatusCode::SERVICE_UNAVAILABLE)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+}
+
+#[nexus_test]
+async fn test_disk_too_big(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    DiskTest::new(&cptestctx).await;
+    create_org_and_project(client).await;
+
+    // Assert default is still 10 GiB
+    assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
+
+    // Ask for a 300 gibibyte disk (but only 10 is available)
+    let disk_size = ByteCount::try_from(300u64 * 1024 * 1024 * 1024).unwrap();
+    let disks_url = get_disks_url();
+    let new_disk = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: DISK_NAME.parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
+        size: disk_size,
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&new_disk))
+            .expect_status(Some(StatusCode::SERVICE_UNAVAILABLE)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+}
+
+// Test disk size accounting
+#[nexus_test]
+async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.apictx.nexus;
+    let datastore = nexus.datastore();
+
+    // Create three 10 GiB zpools, each with one dataset.
+    let test = DiskTest::new(&cptestctx).await;
+
+    // Assert default is still 10 GiB
+    assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
+
+    create_org_and_project(client).await;
+
+    // Total occupied size should start at 0
+    for zpool in &test.zpools {
+        for dataset in &zpool.datasets {
+            assert_eq!(
+                datastore
+                    .regions_total_occupied_size(dataset.id)
+                    .await
+                    .unwrap(),
+                0
+            );
+        }
+    }
+
+    // Ask for a 7 gibibyte disk, this should succeed
+    let disk_size = ByteCount::try_from(7u64 * 1024 * 1024 * 1024).unwrap();
+    let disks_url = get_disks_url();
+
+    let disk_one = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "disk-one".parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
+        size: disk_size,
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&disk_one))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("unexpected failure creating 7 GiB disk");
+
+    // Total occupied size is 7 GiB * 3 (each Crucible disk requires three
+    // regions to make a region set for an Upstairs, one region per dataset)
+    for zpool in &test.zpools {
+        for dataset in &zpool.datasets {
+            assert_eq!(
+                datastore
+                    .regions_total_occupied_size(dataset.id)
+                    .await
+                    .unwrap(),
+                ByteCount::try_from(7u64 * 1024 * 1024 * 1024)
+                    .unwrap()
+                    .to_bytes(),
+            );
+        }
+    }
+
+    // Ask for a 4 gibibyte disk, this should fail because there isn't space
+    // available.
+    let disk_size = ByteCount::try_from(4u64 * 1024 * 1024 * 1024).unwrap();
+    let disk_two = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "disk-two".parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
+        size: disk_size,
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&disk_two))
+            .expect_status(Some(StatusCode::SERVICE_UNAVAILABLE)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("unexpected success creating 4 GiB disk");
+
+    // Total occupied size is still 7 GiB * 3
+    for zpool in &test.zpools {
+        for dataset in &zpool.datasets {
+            assert_eq!(
+                datastore
+                    .regions_total_occupied_size(dataset.id)
+                    .await
+                    .unwrap(),
+                ByteCount::try_from(7u64 * 1024 * 1024 * 1024)
+                    .unwrap()
+                    .to_bytes(),
+            );
+        }
+    }
+
+    // Delete the first disk, freeing up 7 gibibytes.
+    let disk_url = format!("{}/{}", disks_url, "disk-one");
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::DELETE, &disk_url)
+            .expect_status(Some(StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("unexpected failure deleting 7 GiB disk");
+
+    // Total occupied size should be 0
+    for zpool in &test.zpools {
+        for dataset in &zpool.datasets {
+            assert_eq!(
+                datastore
+                    .regions_total_occupied_size(dataset.id)
+                    .await
+                    .unwrap(),
+                0,
+            );
+        }
+    }
+
+    // Ask for a 10 gibibyte disk.
+    let disk_size = ByteCount::try_from(10u64 * 1024 * 1024 * 1024).unwrap();
+    let disk_three = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "disk-three".parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
+        size: disk_size,
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&disk_three))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("unexpected failure creating 10 GiB disk");
+
+    // Total occupied size should be 10 GiB * 3
+    for zpool in &test.zpools {
+        for dataset in &zpool.datasets {
+            assert_eq!(
+                datastore
+                    .regions_total_occupied_size(dataset.id)
+                    .await
+                    .unwrap(),
+                ByteCount::try_from(10u64 * 1024 * 1024 * 1024)
+                    .unwrap()
+                    .to_bytes(),
+            );
+        }
+    }
+}
+
+// Test creating two disks across six zpools
+#[nexus_test]
+async fn test_multiple_disks_multiple_zpools(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // Create six 10 GB zpools, each with one dataset
+    let mut test = DiskTest::new(&cptestctx).await;
+
+    // Assert default is still 10 GiB
+    assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
+
+    test.add_zpool_with_dataset(10).await;
+    test.add_zpool_with_dataset(10).await;
+    test.add_zpool_with_dataset(10).await;
+
+    create_org_and_project(client).await;
+
+    // Ask for a 10 gibibyte disk, this should succeed
+    let disk_size = ByteCount::try_from(10u64 * 1024 * 1024 * 1024).unwrap();
+    let disks_url = get_disks_url();
+
+    let disk_one = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "disk-one".parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
+        size: disk_size,
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&disk_one))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Ask for another 10 gibibyte disk
+    let disk_size = ByteCount::try_from(10u64 * 1024 * 1024 * 1024).unwrap();
+    let disk_two = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "disk-two".parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
+        size: disk_size,
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&disk_two))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
 }
 
 async fn create_instance_with_disk(client: &ClientTestContext) {

@@ -5,18 +5,22 @@
 #![cfg_attr(all(not(test), not(feature = "std")), no_std)]
 
 pub mod sp_impl;
-mod variable_packet;
 
 use bitflags::bitflags;
 use core::fmt;
+use core::mem;
 use core::str;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_repr::Deserialize_repr;
 use serde_repr::Serialize_repr;
+use static_assertions::const_assert;
 
 pub use hubpack::error::Error as HubpackError;
 pub use hubpack::{deserialize, serialize, SerializedSize};
+
+/// Maximum size in bytes for a serialized message.
+pub const MAX_SERIALIZED_SIZE: usize = 1024;
 
 pub mod version {
     pub const V1: u32 = 1;
@@ -26,27 +30,41 @@ pub mod version {
 // other messages need?
 
 /// Messages from a gateway to an SP.
-#[derive(Debug, Clone, SerializedSize, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, SerializedSize, Serialize, Deserialize, PartialEq, Eq,
+)]
 pub struct Request {
     pub version: u32,
     pub request_id: u32,
     pub kind: RequestKind,
 }
 
-#[derive(Debug, Clone, SerializedSize, Serialize, Deserialize)]
-// TODO: Rework how we serialize packets that contain a large amount of data
-// (`SerialConsole`, `UpdateChunk`) to make this enum smaller.
-#[allow(clippy::large_enum_variant)]
+#[derive(
+    Debug, Clone, SerializedSize, Serialize, Deserialize, PartialEq, Eq,
+)]
 pub enum RequestKind {
     Discover,
     // TODO do we want to be able to request IgnitionState for all targets in
     // one message?
-    IgnitionState { target: u8 },
+    IgnitionState {
+        target: u8,
+    },
     BulkIgnitionState,
-    IgnitionCommand { target: u8, command: IgnitionCommand },
+    IgnitionCommand {
+        target: u8,
+        command: IgnitionCommand,
+    },
     SpState,
-    SerialConsoleWrite(SerialConsole),
+    SerialConsoleAttach(SpComponent),
+    /// `SerialConsoleWrite` always includes trailing raw data.
+    SerialConsoleWrite {
+        /// Offset of the first byte of this packet, starting from 0 when this
+        /// serial console session was attached.
+        offset: u64,
+    },
+    SerialConsoleDetach,
     UpdateStart(UpdateStart),
+    /// `UpdateChunk` always includes trailing raw data.
     UpdateChunk(UpdateChunk),
     SysResetPrepare,
     SysResetTrigger,
@@ -70,9 +88,6 @@ pub enum SpPort {
     Two = 2,
 }
 
-// TODO: Not all SPs are capable of crafting all these response kinds, but the
-// way we're using hubpack requires everyone to allocate Response::MAX_SIZE. Is
-// that okay, or should we break this up more?
 #[derive(Debug, Clone, SerializedSize, Serialize, Deserialize)]
 pub enum ResponseKind {
     Discover(DiscoverResponse),
@@ -82,7 +97,9 @@ pub enum ResponseKind {
     SpState(SpState),
     UpdateStartAck,
     UpdateChunkAck,
-    SerialConsoleWriteAck,
+    SerialConsoleAttachAck,
+    SerialConsoleWriteAck { furthest_ingested_offset: u64 },
+    SerialConsoleDetachAck,
     SysResetPrepareAck,
     // There is intentionally no `SysResetTriggerAck` response; the expected
     // "resposne" to `SysResetTrigger` is an SP reset, which won't allow for
@@ -120,6 +137,11 @@ pub enum ResponseError {
     RequestUnsupportedForComponent,
     /// The specified ignition target does not exist.
     IgnitionTargetDoesNotExist(u8),
+    /// Cannot write to the serial console because it is not attached.
+    SerialConsoleNotAttached,
+    /// Cannot attach to the serial console because another MGS instance is
+    /// already attached.
+    SerialConsoleAlreadyAttached,
     /// An update is already in progress with the specified amount of data
     /// already provided. MGS should resume the update at that offset.
     UpdateInProgress { bytes_received: u32 },
@@ -148,6 +170,12 @@ impl fmt::Display for ResponseError {
             }
             ResponseError::IgnitionTargetDoesNotExist(target) => {
                 write!(f, "nonexistent ignition target {}", target)
+            }
+            ResponseError::SerialConsoleNotAttached => {
+                write!(f, "serial console is not attached")
+            }
+            ResponseError::SerialConsoleAlreadyAttached => {
+                write!(f, "serial console already attached")
             }
             ResponseError::UpdateInProgress { bytes_received } => {
                 write!(f, "update still in progress ({bytes_received} bytes received so far)")
@@ -185,7 +213,17 @@ pub enum SpMessageKind {
 
     /// Data traveling from an SP-attached component (in practice, a CPU) on the
     /// component's serial console.
-    SerialConsole(SerialConsole),
+    ///
+    /// Note that SP -> MGS serial console messages are currently _not_
+    /// acknowledged or retried; they are purely "fire and forget" from the SP's
+    /// point of view. Once it sends data in a packet, it discards it from its
+    /// local buffer.
+    SerialConsole {
+        component: SpComponent,
+        /// Offset of the first byte in this packet's data starting from 0 when
+        /// the serial console session was attached.
+        offset: u64,
+    },
 }
 
 #[derive(
@@ -194,6 +232,7 @@ pub enum SpMessageKind {
     Clone,
     Copy,
     PartialEq,
+    Eq,
     SerializedSize,
     Serialize,
     Deserialize,
@@ -204,79 +243,12 @@ pub struct UpdateStart {
     // TODO should we inline the first chunk?
 }
 
-#[derive(Debug, Clone, PartialEq, SerializedSize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, SerializedSize, Serialize, Deserialize,
+)]
 pub struct UpdateChunk {
     /// Offset in bytes of this chunk from the beginning of the update data.
     pub offset: u32,
-    /// Length in bytes of this chunk.
-    pub chunk_length: u16,
-    /// Data of this chunk; only the first `chunk_length` bytes should be used.
-    pub data: [u8; Self::MAX_CHUNK_SIZE],
-}
-
-mod update_chunk_serde {
-    use super::variable_packet::VariablePacket;
-    use super::*;
-
-    #[derive(Debug, Deserialize, Serialize)]
-    pub(crate) struct Header {
-        offset: u32,
-        chunk_length: u16,
-    }
-
-    impl VariablePacket for UpdateChunk {
-        type Header = Header;
-        type Element = u8;
-
-        const MAX_ELEMENTS: usize = Self::MAX_CHUNK_SIZE;
-        const DESERIALIZE_NAME: &'static str = "update chunk";
-
-        fn header(&self) -> Self::Header {
-            Header { offset: self.offset, chunk_length: self.chunk_length }
-        }
-
-        fn num_elements(&self) -> u16 {
-            self.chunk_length
-        }
-
-        fn elements(&self) -> &[Self::Element] {
-            &self.data
-        }
-
-        fn elements_mut(&mut self) -> &mut [Self::Element] {
-            &mut self.data
-        }
-
-        fn from_header(header: Self::Header) -> Self {
-            Self {
-                offset: header.offset,
-                chunk_length: header.chunk_length,
-                data: [0; Self::MAX_CHUNK_SIZE],
-            }
-        }
-    }
-
-    impl Serialize for UpdateChunk {
-        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: serde::Serializer,
-        {
-            VariablePacket::serialize(self, serializer)
-        }
-    }
-
-    impl<'de> Deserialize<'de> for UpdateChunk {
-        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: serde::Deserializer<'de>,
-        {
-            VariablePacket::deserialize(deserializer)
-        }
-    }
-}
-
-impl UpdateChunk {
-    pub const MAX_CHUNK_SIZE: usize = 512;
 }
 
 #[derive(
@@ -285,6 +257,7 @@ impl UpdateChunk {
     Clone,
     Copy,
     PartialEq,
+    Eq,
     SerializedSize,
     Serialize,
     Deserialize,
@@ -317,114 +290,25 @@ bitflags! {
     }
 }
 
-#[derive(Clone, PartialEq, SerializedSize)]
+#[derive(Debug, Clone, PartialEq, SerializedSize, Serialize, Deserialize)]
 pub struct BulkIgnitionState {
-    /// Number of ignition targets present in `targets`.
-    pub num_targets: u16,
     /// Ignition state for each target.
     ///
     /// TODO The ignition target is implicitly the array index; is that
     /// reasonable or should we specify target indices explicitly?
+    #[serde(with = "serde_big_array::BigArray")]
     pub targets: [IgnitionState; Self::MAX_IGNITION_TARGETS],
 }
 
-impl fmt::Debug for BulkIgnitionState {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut debug = f.debug_struct("BulkIgnitionState");
-        debug.field("num_targets", &self.num_targets);
-        let targets = &self.targets[..usize::from(self.num_targets)];
-        debug.field("targets", &targets);
-        debug.finish()
-    }
-}
-
 impl BulkIgnitionState {
-    // TODO We need to decide how to set max sizes for packets that may contain
-    // a variable amount of data. There are (at least) three concerns:
-    //
-    // 1. It determines a max packet size; we need to make sure this stays under
-    //    whatever limit is in place on the management network.
-    // 2. It determines the size of the relevant structs/enums (and
-    //    corresponding serialization/deserialization buffers). This is almost
-    //    certainly irrelevant for MGS, but is very relevant for SPs.
-    // 3. What are the implications on versioning of changing the size? It
-    //    doesn't actually affect the packet format on the wire, but a receiver
-    //    with a lower compiled-in max size will reject packets it receives with
-    //    more data than its max size.
-    //
-    // plus one note: these max sizes do not include the header overhead for the
-    // packets; that needs to be accounted for (particularly for point 1 above).
-    //
-    // Another question specific to `BulkIgnitionState`: Will we always send
-    // "max number of targets in the rack" states, even if some slots are
-    // unpopulated? Maybe this message shouldn't be variable at all. For now we
-    // leave it like it is; it's certainly "variable" in the sense that our
-    // simulated racks for tests have fewer than 36 targets.
+    // TODO-cleanup Is it okay to hard code this number to what we know the
+    // value is for the initial rack? For now assuming yes, and any changes in
+    // future products could use a different message.
     pub const MAX_IGNITION_TARGETS: usize = 36;
 }
 
-mod bulk_ignition_state_serde {
-    use super::variable_packet::VariablePacket;
-    use super::*;
-
-    #[derive(Debug, Deserialize, Serialize)]
-    pub(crate) struct Header {
-        num_targets: u16,
-    }
-
-    impl VariablePacket for BulkIgnitionState {
-        type Header = Header;
-        type Element = IgnitionState;
-
-        const MAX_ELEMENTS: usize = Self::MAX_IGNITION_TARGETS;
-        const DESERIALIZE_NAME: &'static str = "bulk ignition state packet";
-
-        fn header(&self) -> Self::Header {
-            Header { num_targets: self.num_targets }
-        }
-
-        fn num_elements(&self) -> u16 {
-            self.num_targets
-        }
-
-        fn elements(&self) -> &[Self::Element] {
-            &self.targets
-        }
-
-        fn elements_mut(&mut self) -> &mut [Self::Element] {
-            &mut self.targets
-        }
-
-        fn from_header(header: Self::Header) -> Self {
-            Self {
-                num_targets: header.num_targets,
-                targets: [IgnitionState::default();
-                    BulkIgnitionState::MAX_IGNITION_TARGETS],
-            }
-        }
-    }
-
-    impl Serialize for BulkIgnitionState {
-        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: serde::Serializer,
-        {
-            VariablePacket::serialize(self, serializer)
-        }
-    }
-
-    impl<'de> Deserialize<'de> for BulkIgnitionState {
-        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: serde::Deserializer<'de>,
-        {
-            VariablePacket::deserialize(deserializer)
-        }
-    }
-}
-
 #[derive(
-    Debug, Clone, Copy, SerializedSize, Serialize, Deserialize, PartialEq,
+    Debug, Clone, Copy, SerializedSize, Serialize, Deserialize, PartialEq, Eq,
 )]
 pub enum IgnitionCommand {
     PowerOn,
@@ -450,6 +334,10 @@ pub struct SpComponent {
 impl SpComponent {
     /// Maximum number of bytes for a component ID.
     pub const MAX_ID_LENGTH: usize = 16;
+
+    /// The `sp3` host CPU.
+    pub const SP3_HOST_CPU: Self =
+        Self { id: *b"sp3\0\0\0\0\0\0\0\0\0\0\0\0\0" };
 
     /// Interpret the component name as a human-readable string.
     ///
@@ -499,122 +387,68 @@ impl TryFrom<&str> for SpComponent {
     }
 }
 
-// We could derive `Copy`, but `data` is large-ish so we want callers to think
-// abount cloning.
-#[derive(Clone, SerializedSize)]
-pub struct SerialConsole {
-    /// Source component with an attached serial console.
-    pub component: SpComponent,
-
-    /// Offset of this chunk of data relative to all console data this
-    /// source has sent since it booted. The receiver can determine if it's
-    /// missed data and reconstruct out-of-order packets based on this value
-    /// plus `len`.
-    pub offset: u64,
-
-    /// Number of bytes in `data`.
-    pub len: u16,
-
-    /// Actual serial console data.
-    pub data: [u8; Self::MAX_DATA_PER_PACKET],
+/// Sealed trait restricting the types that can be passed to
+/// [`serialize_with_trailing_data()`].
+pub trait GatewayMessage: SerializedSize + Serialize + private::Sealed {}
+mod private {
+    pub trait Sealed {}
 }
+impl GatewayMessage for Request {}
+impl GatewayMessage for SpMessage {}
+impl private::Sealed for Request {}
+impl private::Sealed for SpMessage {}
 
-impl fmt::Debug for SerialConsole {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut debug = f.debug_struct("SerialConsole");
-        debug.field("component", &self.component);
-        debug.field("offset", &self.offset);
-        debug.field("len", &self.len);
-        let data = &self.data[..usize::from(self.len)];
-        if let Ok(s) = str::from_utf8(data) {
-            debug.field("data", &s);
-        } else {
-            debug.field("data", &data);
-        }
-        debug.finish()
-    }
-}
+// `GatewayMessage` imlementers can be followed by binary data; we want the
+// majority of our packet to be available for that data. Statically check that
+// our serialized message headers haven't gotten too large. The specific value
+// here is arbitrary; if this check starts failing, it's probably fine to reduce
+// it some. The check is here to force us to think about it.
+const_assert!(MAX_SERIALIZED_SIZE - Request::MAX_SIZE > 700);
+const_assert!(MAX_SERIALIZED_SIZE - SpMessage::MAX_SIZE > 700);
 
-impl SerialConsole {
-    // TODO: See discussion on `BulkIgnitionState::MAX_IGNITION_TARGETS` for
-    // concerns about setting this limit.
-    //
-    // A concern specific to `SerialConsole`: What should we do (if anything) to
-    // account for something like "user `cat`s a large file, which is now
-    // streaming across the management network"? A couple possibilities:
-    //
-    // 1. One packet per line, and truncate any lines longer than
-    //    `MAX_DATA_PER_PACKET` (seems like this could be _very_ annoying if a
-    //    user bumped into it without realizing it).
-    // 2. Rate limiting (enforced where?)
-    pub const MAX_DATA_PER_PACKET: usize = 128;
-}
+/// Returns `(serialized_size, data_bytes_written)` where `serialized_size` is
+/// the message size written to `out` and `data_bytes_written` is the number of
+/// bytes included in `out` from `data_slices`.
+///
+/// `data_slices` is provided as multiple slices to allow for data structures
+/// like `heapless::Deque` (which presents its contents as two slices). If
+/// multiple slices are present in `data_slices`, `data_bytes_written` will be
+/// at most the sum of all their lengths. Bytes will be appended from the slices
+/// in order.
+pub fn serialize_with_trailing_data<T>(
+    out: &mut [u8; MAX_SERIALIZED_SIZE],
+    header: &T,
+    data_slices: &[&[u8]],
+) -> (usize, usize)
+where
+    T: GatewayMessage,
+{
+    // We know `T` is either `Request` or `SpMessage`, both of which we know
+    // statically (confirmed by `const_assert`s above) are significantly smaller
+    // than `MAX_SERIALIZED_SIZE`. They cannot fail to serialize for any reason
+    // other than an undersized buffer, so we can unwrap here.
+    let n = hubpack::serialize(out, header).unwrap();
+    let out = &mut out[n..];
 
-mod serial_console_serde {
-    use super::variable_packet::VariablePacket;
-    use super::*;
+    // Split `out` into a 2-byte length prefix and the remainder of the buffer.
+    let (length_prefix, mut out) = out.split_at_mut(mem::size_of::<u16>());
 
-    #[derive(Debug, Deserialize, Serialize)]
-    pub(crate) struct Header {
-        component: SpComponent,
-        offset: u64,
-        len: u16,
-    }
-
-    impl VariablePacket for SerialConsole {
-        type Header = Header;
-        type Element = u8;
-
-        const MAX_ELEMENTS: usize = Self::MAX_DATA_PER_PACKET;
-        const DESERIALIZE_NAME: &'static str = "serial console packet";
-
-        fn header(&self) -> Self::Header {
-            Header {
-                component: self.component,
-                offset: self.offset,
-                len: self.len,
-            }
-        }
-
-        fn num_elements(&self) -> u16 {
-            self.len
-        }
-
-        fn elements(&self) -> &[Self::Element] {
-            &self.data
-        }
-
-        fn elements_mut(&mut self) -> &mut [Self::Element] {
-            &mut self.data
-        }
-
-        fn from_header(header: Self::Header) -> Self {
-            Self {
-                component: header.component,
-                offset: header.offset,
-                len: header.len,
-                data: [0; Self::MAX_DATA_PER_PACKET],
-            }
+    let mut nwritten = 0;
+    for &data in data_slices {
+        // How much of this slice can we fit in `out`?
+        let to_write = usize::min(out.len(), data.len());
+        out[..to_write].copy_from_slice(&data[..to_write]);
+        nwritten += to_write;
+        out = &mut out[to_write..];
+        if out.is_empty() {
+            break;
         }
     }
 
-    impl Serialize for SerialConsole {
-        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: serde::Serializer,
-        {
-            VariablePacket::serialize(self, serializer)
-        }
-    }
+    // Fill in the length prefix with the amount of data we copied into `out`.
+    length_prefix.copy_from_slice(&(nwritten as u16).to_le_bytes());
 
-    impl<'de> Deserialize<'de> for SerialConsole {
-        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: serde::Deserializer<'de>,
-        {
-            VariablePacket::deserialize(deserializer)
-        }
-    }
+    (n + mem::size_of::<u16>() + nwritten, nwritten)
 }
 
 #[cfg(test)]
@@ -622,36 +456,38 @@ mod tests {
     use super::*;
 
     #[test]
-    fn roundtrip_serial_console() {
-        let line = b"hello world\n";
-        let mut console = SerialConsole {
-            component: SpComponent { id: *b"0000111122223333" },
-            offset: 12345,
-            len: line.len() as u16,
-            data: [0xff; SerialConsole::MAX_DATA_PER_PACKET],
-        };
-        console.data[..line.len()].copy_from_slice(line);
+    fn test_serialize_with_trailing_data() {
+        let mut out = [0; MAX_SERIALIZED_SIZE];
+        let header =
+            Request { version: 1, request_id: 2, kind: RequestKind::Discover };
+        let data_vecs = &[
+            vec![0; 256],
+            vec![1; 256],
+            vec![2; 256],
+            vec![3; 256],
+            vec![4; 256],
+            vec![5; 256],
+        ];
+        let data_slices =
+            data_vecs.iter().map(|v| v.as_slice()).collect::<Vec<_>>();
 
-        let mut serialized = [0; SerialConsole::MAX_SIZE];
-        let n = serialize(&mut serialized, &console).unwrap();
+        let (out_len, nwritten) =
+            serialize_with_trailing_data(&mut out, &header, &data_slices);
 
-        // serialized size should be limited to actual line length, not
-        // the size of `console.data` (`MAX_DATA_PER_PACKET`)
-        assert_eq!(
-            n,
-            SpComponent::MAX_SIZE + u64::MAX_SIZE + u16::MAX_SIZE + line.len()
-        );
+        // We should have filled `out` entirely; `data_vecs` contains more data
+        // than fits in `MAX_SERIALIZED_SIZE`.
+        assert_eq!(out_len, MAX_SERIALIZED_SIZE);
 
-        let (deserialized, _) =
-            deserialize::<SerialConsole>(&serialized[..n]).unwrap();
-        assert_eq!(deserialized.len, console.len);
-        assert_eq!(&deserialized.data[..line.len()], line);
-    }
+        let (deserialized_header, remainder) =
+            deserialize::<Request>(&out).unwrap();
 
-    #[test]
-    fn serial_console_data_length_fits_in_u16() {
-        // this is just a sanity check that if we bump `MAX_DATA_PER_PACKET`
-        // above 65535 we also need to change the type of `SerialConsole::len`
-        assert!(SerialConsole::MAX_DATA_PER_PACKET <= usize::from(u16::MAX));
+        let remainder = sp_impl::unpack_trailing_data(remainder).unwrap();
+
+        assert_eq!(header, deserialized_header);
+        assert_eq!(remainder.len(), nwritten);
+
+        for (i, chunk) in remainder.chunks(256).enumerate() {
+            assert_eq!(chunk, &data_vecs[i][..chunk.len()]);
+        }
     }
 }

@@ -76,11 +76,6 @@ impl DataStore {
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::kind.eq(DatasetKind::Crucible))
             .order(dsl::size_used.asc())
-            // TODO: We admittedly don't actually *fail* any request for
-            // running out of space - we try to send the request down to
-            // crucible agents, and expect them to fail on our behalf in
-            // out-of-storage conditions. This should undoubtedly be
-            // handled more explicitly.
             .select(Dataset::as_select())
             .limit(REGION_REDUNDANCY_THRESHOLD.try_into().unwrap())
     }

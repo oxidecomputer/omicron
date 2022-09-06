@@ -183,6 +183,11 @@ CREATE INDEX on omicron.public.Dataset (
     size_used
 ) WHERE size_used IS NOT NULL AND time_deleted IS NULL AND kind = 'crucible';
 
+/* Create an index on the size usage for any dataset */
+CREATE INDEX on omicron.public.Dataset (
+    size_used
+) WHERE size_used IS NOT NULL AND time_deleted IS NULL;
+
 /*
  * A region of space allocated to Crucible Downstairs, within a dataset.
  */
@@ -209,6 +214,13 @@ CREATE TABLE omicron.public.Region (
  */
 CREATE INDEX on omicron.public.Region (
     volume_id
+);
+
+/*
+ * Allow all regions belonging to a dataset to be accessed quickly.
+ */
+CREATE INDEX on omicron.public.Region (
+    dataset_id
 );
 
 /*

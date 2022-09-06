@@ -16,13 +16,15 @@ use slog::o;
 use slog::Drain;
 use slog::Level;
 use slog::Logger;
-use std::fs;
 use std::net::SocketAddrV6;
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::net::UdpSocket;
 
+mod hubris_archive;
 mod usart;
+
+use self::hubris_archive::HubrisArchive;
 
 /// Command line program that can send MGS messages to a single SP.
 #[derive(Parser, Debug)]
@@ -102,8 +104,11 @@ enum SpCommand {
         stdin_buffer_time_millis: u64,
     },
 
+    /// Detach any other attached USART connection.
+    UsartDetach,
+
     /// Upload a new image to the SP and have it swap banks (requires reset)
-    Update { image: PathBuf },
+    Update { hubris_archive: PathBuf },
 
     /// Instruct the SP to reset.
     Reset,
@@ -187,12 +192,15 @@ async fn main() -> Result<()> {
             )
             .await?;
         }
-        Some(SpCommand::Update { image }) => {
-            let data = fs::read(&image).with_context(|| {
-                format!("failed to read image {}", image.display())
-            })?;
-            sp.update(&data).await.with_context(|| {
-                format!("updating to {} failed", image.display())
+        Some(SpCommand::UsartDetach) => {
+            sp.serial_console_detach().await?;
+            info!(log, "SP serial console detached");
+        }
+        Some(SpCommand::Update { hubris_archive }) => {
+            let mut archive = HubrisArchive::open(&hubris_archive)?;
+            let data = archive.final_bin()?;
+            sp.update(data).await.with_context(|| {
+                format!("updating to {} failed", hubris_archive.display())
             })?;
         }
         Some(SpCommand::Reset) => {
