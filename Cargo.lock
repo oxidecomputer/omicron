@@ -1369,6 +1369,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "enum-as-inner"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c9720bba047d567ffc8a3cba48bf19126600e249ab7f128e9233e6376976a116"
+dependencies = [
+ "heck 0.4.0",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "env_logger"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2238,7 +2250,7 @@ dependencies = [
  "tokio",
  "toml",
  "trust-dns-client",
- "trust-dns-proto",
+ "trust-dns-proto 0.22.0",
  "trust-dns-resolver",
  "trust-dns-server",
 ]
@@ -2261,7 +2273,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
- "trust-dns-proto",
+ "trust-dns-proto 0.22.0",
  "trust-dns-resolver",
  "uuid",
 ]
@@ -5876,7 +5888,7 @@ dependencies = [
  "thiserror",
  "time 0.3.9",
  "tokio",
- "trust-dns-proto",
+ "trust-dns-proto 0.21.2",
 ]
 
 [[package]]
@@ -5888,7 +5900,7 @@ dependencies = [
  "async-trait",
  "cfg-if 1.0.0",
  "data-encoding",
- "enum-as-inner",
+ "enum-as-inner 0.4.0",
  "futures-channel",
  "futures-io",
  "futures-util",
@@ -5901,6 +5913,31 @@ dependencies = [
  "thiserror",
  "tinyvec",
  "tokio",
+ "url",
+]
+
+[[package]]
+name = "trust-dns-proto"
+version = "0.22.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f7f83d1e4a0e4358ac54c5c3681e5d7da5efc5a7a632c90bb6d6669ddd9bc26"
+dependencies = [
+ "async-trait",
+ "cfg-if 1.0.0",
+ "data-encoding",
+ "enum-as-inner 0.5.1",
+ "futures-channel",
+ "futures-io",
+ "futures-util",
+ "idna",
+ "ipnet",
+ "lazy_static",
+ "rand 0.8.5",
+ "smallvec",
+ "thiserror",
+ "tinyvec",
+ "tokio",
+ "tracing",
  "url",
 ]
 
@@ -5921,7 +5958,7 @@ dependencies = [
  "smallvec",
  "thiserror",
  "tokio",
- "trust-dns-proto",
+ "trust-dns-proto 0.21.2",
 ]
 
 [[package]]
@@ -5933,7 +5970,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "cfg-if 1.0.0",
- "enum-as-inner",
+ "enum-as-inner 0.4.0",
  "env_logger",
  "futures-executor",
  "futures-util",
@@ -5944,7 +5981,7 @@ dependencies = [
  "tokio",
  "toml",
  "trust-dns-client",
- "trust-dns-proto",
+ "trust-dns-proto 0.21.2",
 ]
 
 [[package]]
