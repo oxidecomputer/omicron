@@ -16,6 +16,7 @@ use slog::{info, o};
 
 use crate::trust_quorum::SerializableShareDistribution;
 use models::KeyShare;
+use models::Rack;
 use models::Sha3_256Digest;
 use models::Share;
 use sha3::{Digest, Sha3_256};
@@ -38,21 +39,32 @@ pub enum Error {
 
     #[error("No shares have been committed")]
     NoSharesCommitted,
+
+    #[error("DB invariant violated: {0}")]
+    DbInvariant(String),
+
+    #[error("Already initialized with rack uuid: {0}")]
+    AlreadyInitialized(String),
 }
 
 pub struct Db {
-    // Temporary until the using code is written
-    #[allow(dead_code)]
     log: Logger,
-    // Temporary until the using code is written
-    #[allow(dead_code)]
-    conn: SqliteConnection,
+
+    // We use a String, because sqlite requires paths to be UTF-8,
+    // and strings guarantee that constraint.
+    path: String,
 }
 
 // Temporary until the using code is written
 #[allow(dead_code)]
 impl Db {
-    pub fn open(log: &Logger, path: &str) -> Result<Db, Error> {
+    /// Initialize the database
+    ///
+    /// Create tables if they don't exist and set pragmas
+    pub fn init(
+        log: &Logger,
+        path: &str,
+    ) -> Result<(Db, SqliteConnection), Error> {
         let schema = include_str!("./schema.sql");
         let log = log.new(o!(
             "component" => "BootstoreDb"
@@ -79,11 +91,21 @@ impl Db {
         // Create tables
         c.batch_execute(&schema)?;
 
-        Ok(Db { log, conn: c })
+        Ok((Db { log, path: path.to_string() }, c))
+    }
+
+    pub fn new_connection(&self) -> Result<SqliteConnection, Error> {
+        info!(
+            self.log,
+            "Creating a new connection to database {:?}", self.path
+        );
+        SqliteConnection::establish(&self.path)
+            .map_err(|err| Error::DbOpen { path: self.path.clone(), err })
     }
 
     pub fn prepare_share(
-        &mut self,
+        &self,
+        tx: &mut SqliteConnection,
         epoch: i32,
         share: SerializableShareDistribution,
     ) -> Result<(), Error> {
@@ -101,19 +123,18 @@ impl Db {
             share_digest,
             committed: false,
         };
-        diesel::insert_into(dsl::key_shares)
-            .values(&prepare)
-            .execute(&mut self.conn)?;
+        diesel::insert_into(dsl::key_shares).values(&prepare).execute(tx)?;
         Ok(())
     }
 
     pub fn commit_share(
-        &mut self,
+        &self,
+        conn: &mut SqliteConnection,
         epoch: i32,
         digest: sprockets_common::Sha3_256Digest,
     ) -> Result<(), Error> {
         use schema::key_shares::dsl;
-        self.conn.immediate_transaction(|tx| {
+        conn.immediate_transaction(|tx| {
             // We only want to commit if the share digest of the commit is the
             // same as that of the prepare.
             let prepare_digest = dsl::key_shares
@@ -132,27 +153,82 @@ impl Db {
         })
     }
 
+    pub fn initialize(&self, conn: &mut SqliteConnection) -> Result<(), Error> {
+        conn.immediate_transaction(|tx| {
+            if self.is_initialized(tx)? {
+                let uuid = self.get_rack_uuid(tx)?;
+                return Err(Error::AlreadyInitialized(uuid));
+            }
+
+            Ok(())
+        })
+    }
+
     pub fn get_latest_committed_share(
-        &mut self,
+        &self,
+        conn: &mut SqliteConnection,
     ) -> Result<(i32, Share), Error> {
         use schema::key_shares::dsl;
         let res = dsl::key_shares
             .select((dsl::epoch, dsl::share))
             .order(dsl::epoch.desc())
             .filter(dsl::committed.eq(true))
-            .get_result::<(i32, Share)>(&mut self.conn)?;
+            .get_result::<(i32, Share)>(conn)?;
         Ok(res)
     }
 
-    pub fn get_committed_share(&mut self, epoch: i32) -> Result<Share, Error> {
+    pub fn get_committed_share(
+        &self,
+        conn: &mut SqliteConnection,
+        epoch: i32,
+    ) -> Result<Share, Error> {
         use schema::key_shares::dsl;
         let share = dsl::key_shares
             .select(dsl::share)
             .filter(dsl::epoch.eq(epoch))
             .filter(dsl::committed.eq(true))
-            .get_result::<Share>(&mut self.conn)?;
+            .get_result::<Share>(conn)?;
 
         Ok(share)
+    }
+
+    /// Return true if there is a commit for epoch 0, false otherwise
+    pub fn is_initialized(
+        &self,
+        tx: &mut SqliteConnection,
+    ) -> Result<bool, Error> {
+        use schema::key_shares::dsl;
+        Ok(dsl::key_shares
+            .select(dsl::epoch)
+            .filter(dsl::epoch.eq(0))
+            .filter(dsl::committed.eq(true))
+            .get_result::<i32>(tx)
+            .optional()?
+            .is_some())
+    }
+
+    /// Return true if the persisted rack uuid matches `uuid`, false otherwise
+    pub fn has_valid_rack_uuid(
+        &self,
+        uuid: &str,
+        tx: &mut SqliteConnection,
+    ) -> Result<bool, Error> {
+        use schema::rack::dsl;
+
+        Ok(dsl::rack
+            .filter(dsl::uuid.eq(uuid))
+            .get_result::<Rack>(tx)
+            .optional()?
+            .is_some())
+    }
+
+    pub fn get_rack_uuid(
+        &self,
+        tx: &mut SqliteConnection,
+    ) -> Result<String, Error> {
+        use schema::rack::dsl;
+
+        Ok(dsl::rack.select(dsl::uuid).get_result::<String>(tx)?)
     }
 }
 
@@ -186,15 +262,15 @@ mod tests {
     fn simple_prepare_insert_and_query() {
         use schema::key_shares::dsl;
         let logctx = test_setup_log("test_db");
-        let mut db = Db::open(&logctx.log, ":memory:").unwrap();
+        let (db, mut conn) = Db::init(&logctx.log, ":memory:").unwrap();
         let shares = new_shares();
         let epoch = 0;
         let expected: SerializableShareDistribution = shares[0].clone().into();
-        db.prepare_share(epoch, expected.clone()).unwrap();
+        db.prepare_share(&mut conn, epoch, expected.clone()).unwrap();
         let (share, committed) = dsl::key_shares
             .select((dsl::share, dsl::committed))
             .filter(dsl::epoch.eq(epoch))
-            .get_result::<(Share, bool)>(&mut db.conn)
+            .get_result::<(Share, bool)>(&mut conn)
             .unwrap();
         assert_eq!(share.0, expected);
         assert_eq!(committed, false);
@@ -204,10 +280,10 @@ mod tests {
     #[test]
     fn commit_fails_without_corresponding_prepare() {
         let logctx = test_setup_log("test_db");
-        let mut db = Db::open(&logctx.log, ":memory:").unwrap();
+        let (db, mut conn) = Db::init(&logctx.log, ":memory:").unwrap();
         let epoch = 0;
         let digest = sprockets_common::Sha3_256Digest::default();
-        let err = db.commit_share(epoch, digest).unwrap_err();
+        let err = db.commit_share(&mut conn, epoch, digest).unwrap_err();
         assert!(matches!(err, Error::Db(diesel::result::Error::NotFound)));
         logctx.cleanup_successful();
     }
@@ -215,13 +291,13 @@ mod tests {
     #[test]
     fn commit_fails_with_invalid_hash() {
         let logctx = test_setup_log("test_db");
-        let mut db = Db::open(&logctx.log, ":memory:").unwrap();
+        let (db, mut conn) = Db::init(&logctx.log, ":memory:").unwrap();
         let shares = new_shares();
         let epoch = 0;
         let expected: SerializableShareDistribution = shares[0].clone().into();
-        db.prepare_share(epoch, expected.clone()).unwrap();
+        db.prepare_share(&mut conn, epoch, expected.clone()).unwrap();
         let digest = sprockets_common::Sha3_256Digest::default();
-        let err = db.commit_share(epoch, digest).unwrap_err();
+        let err = db.commit_share(&mut conn, epoch, digest).unwrap_err();
         assert!(matches!(err, Error::CommitHashMismatch { epoch: _ }));
         logctx.cleanup_successful();
     }
@@ -229,24 +305,24 @@ mod tests {
     #[test]
     fn commit_succeeds_with_correct_hash() {
         let logctx = test_setup_log("test_db");
-        let mut db = Db::open(&logctx.log, ":memory:").unwrap();
+        let (db, mut conn) = Db::init(&logctx.log, ":memory:").unwrap();
         let shares = new_shares();
         let epoch = 0;
         let expected: SerializableShareDistribution = shares[0].clone().into();
-        db.prepare_share(epoch, expected.clone()).unwrap();
+        db.prepare_share(&mut conn, epoch, expected.clone()).unwrap();
 
         let val = bcs::to_bytes(&expected).unwrap();
         let digest =
             sprockets_common::Sha3_256Digest(Sha3_256::digest(&val).into())
                 .into();
-        assert!(db.commit_share(epoch, digest).is_ok());
+        assert!(db.commit_share(&mut conn, epoch, digest).is_ok());
 
         // Ensure `committed = true`
         use schema::key_shares::dsl;
         let committed = dsl::key_shares
             .select(dsl::committed)
             .filter(dsl::epoch.eq(epoch))
-            .get_result::<bool>(&mut db.conn)
+            .get_result::<bool>(&mut conn)
             .unwrap();
         assert_eq!(true, committed);
         logctx.cleanup_successful();

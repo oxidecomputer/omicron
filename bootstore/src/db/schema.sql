@@ -7,6 +7,12 @@ CREATE TABLE IF NOT EXISTS key_shares (
     PRIMARY KEY (epoch)
 );
 
+CREATE TABLE IF NOT EXISTS rack (
+    uuid             TEXT     NOT NULL,
+    
+    PRIMARY KEY (uuid)
+);
+
 CREATE TABLE IF NOT EXISTS encrypted_root_secrets (
     epoch            INTEGER    NOT NULL,
     salt             BLOB       NOT NULL,

@@ -8,6 +8,7 @@ use diesel::deserialize::FromSql;
 use diesel::prelude::*;
 use diesel::serialize::ToSql;
 use diesel::FromSqlRow;
+use uuid::Uuid;
 
 use super::macros::array_new_type;
 use super::macros::bcs_new_type;
@@ -27,14 +28,21 @@ pub struct KeyShare {
     pub committed: bool,
 }
 
-// A chacha20poly1305 secret encrypted by a chacha20poly1305 secret key
-// derived from the rack secret for the given epoch with the given salt
-//
-// The epoch informs which rack secret should be used to derive the
-// encryptiong key used to encrypt this root secret.
-//
-// TODO-security: We probably don't want to log even the encrypted secret, but
-// it's likely useful for debugging right now.
+/// Information about the rack
+#[derive(Debug, Queryable, Insertable)]
+#[diesel(table_name = rack)]
+pub struct Rack {
+    pub uuid: String,
+}
+
+/// A chacha20poly1305 secret encrypted by a chacha20poly1305 secret key
+/// derived from the rack secret for the given epoch with the given salt
+///
+/// The epoch informs which rack secret should be used to derive the
+/// encryptiong key used to encrypt this root secret.
+///
+/// TODO-security: We probably don't want to log even the encrypted secret, but
+/// it's likely useful for debugging right now.
 #[derive(Debug, Queryable, Insertable)]
 pub struct EncryptedRootSecret {
     /// The epoch of the rack secret rotation or rack reconfiguration

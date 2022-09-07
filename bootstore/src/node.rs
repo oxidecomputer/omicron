@@ -7,6 +7,7 @@
 //! Most logic is contained here, but networking sits on top.
 //! This allows easier testing of clusters and failure situations.
 
+use diesel::SqliteConnection;
 use slog::Logger;
 use sprockets_host::Ed25519Certificate;
 use uuid::Uuid;
@@ -41,13 +42,17 @@ pub struct Config {
 pub struct Node {
     config: Config,
     db: Db,
+
+    // For now we just use a single connection
+    // This *may* change once there is an async connection handling mechanism on top.
+    conn: SqliteConnection,
 }
 
 impl Node {
     /// Create a new Node
     pub fn new(config: Config) -> Node {
-        let db = Db::open(&config.log, &config.db_path).unwrap();
-        Node { config, db }
+        let (db, conn) = Db::init(&config.log, &config.db_path).unwrap();
+        Node { config, db, conn }
     }
 
     /// Handle a message received over sprockets from another [`Node`] or
@@ -87,7 +92,7 @@ impl Node {
         &mut self,
         epoch: i32,
     ) -> Result<NodeOpResult, NodeError> {
-        match self.db.get_committed_share(epoch) {
+        match self.db.get_committed_share(&mut self.conn, epoch) {
             Ok(share) => {
                 Ok(NodeOpResult::Share { epoch, share: share.0.share })
             }
@@ -103,8 +108,8 @@ impl Node {
 
     fn handle_initialize(
         &mut self,
-        _rack_uuid: Uuid,
-        _share_distribution: SerializableShareDistribution,
+        rack_uuid: Uuid,
+        share_distribution: SerializableShareDistribution,
     ) -> Result<NodeOpResult, NodeError> {
         unimplemented!();
     }
