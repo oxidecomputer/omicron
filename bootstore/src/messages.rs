@@ -116,6 +116,12 @@ pub enum NodeError {
     //TODO: Should probably pull out the variants for better matching
     #[error("DB error: {0}")]
     Db(String),
+
+    #[error(
+        "'KeySharePrepare' messages are not allowed for epoch 0.
+Please send an 'Initialize' message"
+    )]
+    KeySharePrepareForEpoch0,
 }
 
 impl From<db::Error> for NodeError {

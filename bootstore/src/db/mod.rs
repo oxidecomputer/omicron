@@ -79,20 +79,75 @@ impl Db {
             .map_err(|err| Error::DbOpen { path: self.path.clone(), err })
     }
 
+    /// Write an uncommitted `KeyShare` into the database.
+    ///
+    /// This command is idempotent.
+    ///
+    /// The rules for inserting a KeyShare are:
+    ///   1. A KeyShare for the given epoch does not exist unless it is identical
+    ///   2. A KeyShare for a later epoch does not exist
+    ///
+    /// Calling this method with an epoch of 0 is a programmer error so we
+    /// assert.
     pub fn prepare_share(
         &self,
-        tx: &mut SqliteConnection,
+        conn: &mut SqliteConnection,
+        rack_uuid: &Uuid,
         epoch: i32,
-        share: SerializableShareDistribution,
+        share_distribution: SerializableShareDistribution,
     ) -> Result<(), Error> {
-        info!(
-            self.log,
-            "Writing key share prepare for epoch {epoch} to the Db"
-        );
+        assert_ne!(0, epoch);
         use schema::key_shares::dsl;
-        let prepare = KeyShare::new(epoch, share)?;
-        diesel::insert_into(dsl::key_shares).values(&prepare).execute(tx)?;
-        Ok(())
+        let prepare = KeyShare::new(epoch, share_distribution)?;
+        let rack_uuid = rack_uuid.to_string();
+        conn.immediate_transaction(|tx| {
+            // Has the rack been initialized?
+            if !self.is_initialized(tx)? {
+                return Err(Error::RackNotInitialized);
+            }
+
+            // Is the rack id valid?
+            // If the rack is initialized, a rack uuid must exist, so unwrap is safe.
+            let stored_rack_uuid = self.get_rack_uuid(tx)?.unwrap();
+            if rack_uuid != stored_rack_uuid {
+                return Err(Error::RackUuidMismatch {
+                    expected: rack_uuid,
+                    actual: stored_rack_uuid,
+                });
+            }
+
+            // Check for idempotence
+            if let Some(stored_key_share) = dsl::key_shares
+                .filter(dsl::epoch.eq(epoch))
+                .get_result::<KeyShare>(tx)
+                .optional()?
+            {
+                if prepare == stored_key_share {
+                    return Ok(());
+                } else {
+                    return Err(Error::KeyShareAlreadyExists { epoch });
+                }
+            }
+
+            // We don't allow shares for old epochs
+            if let Some(stored_epoch) = dsl::key_shares
+                .select(dsl::epoch)
+                .filter(dsl::epoch.gt(epoch))
+                .get_result::<i32>(tx)
+                .optional()?
+            {
+                return Err(Error::OldKeySharePrepare { epoch, stored_epoch });
+            }
+
+            info!(
+                self.log,
+                "Writing key share prepare for epoch {epoch} to the Db"
+            );
+            diesel::insert_into(dsl::key_shares)
+                .values(&prepare)
+                .execute(tx)?;
+            Ok(())
+        })
     }
 
     pub fn commit_share(
@@ -142,11 +197,26 @@ impl Db {
                 },
                 None => {
                     info!(self.log, "Initializing Rack for the first time with UUID: {new_uuid}");
-                    self.prepare_share(tx, 0, share_distribution)
+                    self.insert_prepare(tx, 0, share_distribution)
                     }
             }
 
         })
+    }
+
+    // Insert an uncommitted key share for a given epoch This should be called
+    // inside a transaction by the caller so that the given checks can be
+    // performed.
+    fn insert_prepare(
+        &self,
+        tx: &mut SqliteConnection,
+        epoch: i32,
+        share_distribution: SerializableShareDistribution,
+    ) -> Result<(), Error> {
+        use schema::key_shares::dsl;
+        let prepare = KeyShare::new(epoch, share_distribution)?;
+        diesel::insert_into(dsl::key_shares).values(&prepare).execute(tx)?;
+        Ok(())
     }
 
     // During rack initialization we set the rack UUID.
@@ -174,7 +244,7 @@ impl Db {
 
     // Overwrite a share for epoch 0 during rack initialization
     //
-    // This method should only be called from dinitialize.
+    // This method should only be called from initialize.
     fn update_prepare_for_epoch_0(
         &self,
         tx: &mut SqliteConnection,
@@ -232,8 +302,8 @@ impl Db {
     /// Return true if the persisted rack uuid matches `uuid`, false otherwise
     pub fn has_valid_rack_uuid(
         &self,
-        uuid: &str,
         tx: &mut SqliteConnection,
+        uuid: &str,
     ) -> Result<bool, Error> {
         use schema::rack::dsl;
 
@@ -289,7 +359,7 @@ pub mod tests {
         let shares = new_shares();
         let epoch = 0;
         let expected: SerializableShareDistribution = shares[0].clone().into();
-        db.prepare_share(&mut conn, epoch, expected.clone()).unwrap();
+        db.insert_prepare(&mut conn, epoch, expected.clone()).unwrap();
         let (share, committed) = dsl::key_shares
             .select((dsl::share, dsl::committed))
             .filter(dsl::epoch.eq(epoch))
@@ -318,7 +388,7 @@ pub mod tests {
         let shares = new_shares();
         let epoch = 0;
         let expected: SerializableShareDistribution = shares[0].clone().into();
-        db.prepare_share(&mut conn, epoch, expected.clone()).unwrap();
+        db.insert_prepare(&mut conn, epoch, expected.clone()).unwrap();
         let digest = sprockets_common::Sha3_256Digest::default();
         let err = db.commit_share(&mut conn, epoch, digest).unwrap_err();
         assert!(matches!(err, Error::CommitHashMismatch { epoch: _ }));
@@ -332,7 +402,7 @@ pub mod tests {
         let shares = new_shares();
         let epoch = 0;
         let expected: SerializableShareDistribution = shares[0].clone().into();
-        db.prepare_share(&mut conn, epoch, expected.clone()).unwrap();
+        db.insert_prepare(&mut conn, epoch, expected.clone()).unwrap();
 
         let val = bcs::to_bytes(&expected).unwrap();
         let digest =

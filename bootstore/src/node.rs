@@ -76,7 +76,7 @@ impl Node {
                 epoch,
                 share_distribution,
             } => self.handle_key_share_prepare(
-                rack_uuid,
+                &rack_uuid,
                 epoch,
                 share_distribution,
             ),
@@ -88,6 +88,7 @@ impl Node {
         NodeResponse { version: req.version, id: req.id, result }
     }
 
+    // Handle `GetShare` messages from another node
     fn handle_get_share(
         &mut self,
         epoch: i32,
@@ -106,6 +107,7 @@ impl Node {
         }
     }
 
+    // Handle `Initialize` messages from the coordinator
     fn handle_initialize(
         &mut self,
         rack_uuid: &Uuid,
@@ -115,15 +117,28 @@ impl Node {
         Ok(NodeOpResult::CoordinatorAck)
     }
 
+    // Handle `KeySharePrepare` messages from the coordinator
     fn handle_key_share_prepare(
         &mut self,
-        _rack_uuid: Uuid,
-        _epoch: i32,
-        _share_distribution: SerializableShareDistribution,
+        rack_uuid: &Uuid,
+        epoch: i32,
+        share_distribution: SerializableShareDistribution,
     ) -> Result<NodeOpResult, NodeError> {
-        unimplemented!();
+        if epoch == 0 {
+            return Err(NodeError::KeySharePrepareForEpoch0);
+        }
+
+        self.db.prepare_share(
+            &mut self.conn,
+            rack_uuid,
+            epoch,
+            share_distribution,
+        )?;
+
+        Ok(NodeOpResult::CoordinatorAck)
     }
 
+    // Handle `KeyShareCommit` messages from the coordinator
     fn handle_key_share_commit(
         &mut self,
         _rack_uuid: Uuid,

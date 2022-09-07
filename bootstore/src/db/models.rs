@@ -21,7 +21,9 @@ bcs_new_type!(Share, SerializableShareDistribution);
 /// When a [`KeyShareParepare`] message arrives it is stored in a [`KeyShare`]
 /// When a [`KeyShareCommit`] message arrives the `committed` field/column is
 /// set to true.
-#[derive(Debug, Queryable, Insertable, Identifiable, AsChangeset)]
+#[derive(
+    Debug, PartialEq, Queryable, Insertable, Identifiable, AsChangeset,
+)]
 #[diesel(primary_key(epoch))]
 pub struct KeyShare {
     pub epoch: i32,
