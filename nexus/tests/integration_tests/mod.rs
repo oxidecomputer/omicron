@@ -31,6 +31,7 @@ mod unauthorized;
 mod unauthorized_coverage;
 mod updates;
 mod users_builtin;
+mod volume_management;
 mod vpc_firewall;
 mod vpc_routers;
 mod vpc_subnets;

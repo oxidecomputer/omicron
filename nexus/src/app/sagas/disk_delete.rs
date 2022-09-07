@@ -2,7 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::disk_create::delete_regions;
 use super::ActionRegistry;
 use super::NexusActionContext;
 use super::NexusSaga;
@@ -33,23 +32,6 @@ lazy_static! {
         // underlying regions.
         sdd_delete_disk_record
     );
-    static ref DELETE_REGIONS: NexusAction = new_action_noop_undo(
-        "disk-delete.delete-regions",
-        // TODO(https://github.com/oxidecomputer/omicron/issues/612):
-        // We need a way to deal with this operation failing, aside from
-        // propagating the error to the user.
-        //
-        // What if the Sled goes offline? Nexus must ultimately be
-        // responsible for reconciling this scenario.
-        //
-        // The current behavior causes the disk deletion saga to
-        // fail, but still marks the disk as destroyed.
-        sdd_delete_regions
-    );
-    static ref DELETE_REGION_RECORDS: NexusAction = new_action_noop_undo(
-        "disk-delete.delete-region-records",
-        sdd_delete_region_records
-    );
     static ref DELETE_VOLUME_RECORD: NexusAction = new_action_noop_undo(
         "disk-delete.delete-volume-record",
         sdd_delete_volume_record
@@ -66,8 +48,6 @@ impl NexusSaga for SagaDiskDelete {
 
     fn register_actions(registry: &mut ActionRegistry) {
         registry.register(Arc::clone(&*DELETE_DISK_RECORD));
-        registry.register(Arc::clone(&*DELETE_REGIONS));
-        registry.register(Arc::clone(&*DELETE_REGION_RECORDS));
         registry.register(Arc::clone(&*DELETE_VOLUME_RECORD));
     }
 
@@ -81,17 +61,7 @@ impl NexusSaga for SagaDiskDelete {
             DELETE_DISK_RECORD.as_ref(),
         ));
         builder.append(Node::action(
-            "no_result1",
-            "DeleteRegions",
-            DELETE_REGIONS.as_ref(),
-        ));
-        builder.append(Node::action(
-            "no_result2",
-            "DeleteRegionRecords",
-            DELETE_REGION_RECORDS.as_ref(),
-        ));
-        builder.append(Node::action(
-            "no_result3",
+            "no_result",
             "DeleteVolumeRecord",
             DELETE_VOLUME_RECORD.as_ref(),
         ));
@@ -115,42 +85,13 @@ async fn sdd_delete_disk_record(
     Ok(volume_id)
 }
 
-async fn sdd_delete_regions(
-    sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
-    let osagactx = sagactx.user_data();
-    let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
-    let datasets_and_regions = osagactx
-        .datastore()
-        .get_allocated_regions(volume_id)
-        .await
-        .map_err(ActionError::action_failed)?;
-    delete_regions(datasets_and_regions)
-        .await
-        .map_err(ActionError::action_failed)?;
-    Ok(())
-}
-
-async fn sdd_delete_region_records(
-    sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
-    let osagactx = sagactx.user_data();
-    let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
-    osagactx
-        .datastore()
-        .regions_hard_delete(volume_id)
-        .await
-        .map_err(ActionError::action_failed)?;
-    Ok(())
-}
-
 async fn sdd_delete_volume_record(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
     osagactx
-        .datastore()
+        .nexus()
         .volume_delete(volume_id)
         .await
         .map_err(ActionError::action_failed)?;

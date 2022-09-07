@@ -39,6 +39,7 @@ mod silo;
 mod sled;
 pub mod test_interfaces;
 mod update;
+mod volume;
 mod vpc;
 mod vpc_router;
 mod vpc_subnet;

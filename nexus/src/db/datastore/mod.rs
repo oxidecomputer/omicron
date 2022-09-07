@@ -55,6 +55,7 @@ mod oximeter;
 mod project;
 mod rack;
 mod region;
+mod region_snapshot;
 mod role;
 mod saga;
 mod service;
@@ -68,6 +69,8 @@ mod update;
 mod volume;
 mod vpc;
 mod zpool;
+
+pub use volume::CrucibleResources;
 
 // Number of unique datasets required to back a region.
 // TODO: This should likely turn into a configuration option.

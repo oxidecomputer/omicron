@@ -327,10 +327,14 @@ impl DataStore {
             })
     }
 
-    /// Deletes all regions backing a disk.
+    /// Deletes a set of regions.
     ///
     /// Also updates the storage usage on their corresponding datasets.
-    pub async fn regions_hard_delete(&self, volume_id: Uuid) -> DeleteResult {
+    pub async fn regions_hard_delete(&self, region_ids: Vec<Uuid>) -> DeleteResult {
+        if region_ids.is_empty() {
+            return Ok(());
+        }
+
         #[derive(Debug, thiserror::Error)]
         enum RegionDeleteError {
             #[error("Numeric error: {0}")]
@@ -345,7 +349,7 @@ impl DataStore {
 
                 // Remove the regions, collecting datasets they're from.
                 let datasets = diesel::delete(region_dsl::region)
-                    .filter(region_dsl::volume_id.eq(volume_id))
+                    .filter(region_dsl::id.eq_any(region_ids))
                     .returning(region_dsl::dataset_id)
                     .get_results::<Uuid>(conn)?;
 

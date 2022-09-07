@@ -224,6 +224,45 @@ CREATE INDEX on omicron.public.Region (
 );
 
 /*
+ * A snapshot of a region, within a dataset.
+ */
+CREATE TABLE omicron.public.region_snapshot (
+    dataset_id UUID NOT NULL,
+    region_id UUID NOT NULL,
+
+    /* Associated higher level virtual snapshot */
+    snapshot_id UUID NOT NULL,
+
+    /*
+     * Target string, for identification as part of
+     * volume construction request(s)
+     */
+    snapshot_addr TEXT NOT NULL,
+
+    /* How many volumes reference this? */
+    volume_references INT8 NOT NULL,
+
+    PRIMARY KEY (dataset_id, region_id, snapshot_id)
+);
+
+/* Index for use during join with region table */
+CREATE INDEX on omicron.public.region_snapshot (
+    dataset_id, region_id
+);
+
+/*
+ * Index on volume_references and snapshot_addr for crucible
+ * resource accounting lookup
+ */
+CREATE INDEX on omicron.public.region_snapshot (
+    volume_references
+);
+
+CREATE INDEX on omicron.public.region_snapshot (
+    snapshot_addr
+);
+
+/*
  * A volume within Crucible
  */
 CREATE TABLE omicron.public.volume (
@@ -241,7 +280,18 @@ CREATE TABLE omicron.public.volume (
      * consumed by some Upstairs code to perform the volume creation. The Rust
      * type of this column should be Crucible::VolumeConstructionRequest.
      */
-    data TEXT NOT NULL
+    data TEXT NOT NULL,
+
+    /*
+     * A JSON document describing what resources to clean up when deleting this
+     * volume.
+     */
+    resources_to_clean_up TEXT
+);
+
+/* Quickly find deleted volumes */
+CREATE INDEX on omicron.public.volume (
+    time_deleted
 );
 
 /*
