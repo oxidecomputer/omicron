@@ -174,37 +174,13 @@ impl super::Nexus {
                 SubnetError::External(e) => e,
             })?;
 
-        // Customize the default firewall rules for this VPC.
-        let mut rules = db::model::VpcFirewallRule::vec_from_params(
-            authz_vpc.id(),
-            defaults::DEFAULT_FIREWALL_RULES.clone(),
-        );
-        for rule in rules.iter_mut() {
-            for target in rule.targets.iter_mut() {
-                match target.0 {
-                    external::VpcFirewallRuleTarget::Vpc(ref mut name)
-                        if name.as_str() == "default" =>
-                    {
-                        *name = params.identity.name.clone()
-                    }
-                    _ => (),
-                }
-                if let Some(ref mut filter_hosts) = rule.filter_hosts {
-                    for host in filter_hosts.iter_mut() {
-                        match host.0 {
-                            external::VpcFirewallRuleHostFilter::Vpc(
-                                ref mut name,
-                            ) if name.as_str() == "default" => {
-                                *name = params.identity.name.clone()
-                            }
-                            _ => (),
-                        }
-                    }
-                }
-            }
-        }
-        debug!(self.log, "default firewall rules"; "rules" => ?&rules);
-
+        // Save and send the default firewall rules for the new VPC.
+        let rules = self
+            .default_firewall_rules_for_vpc(
+                authz_vpc.id(),
+                params.identity.name.clone().into(),
+            )
+            .await?;
         self.db_datastore
             .vpc_update_firewall_rules(opctx, &authz_vpc, rules.clone())
             .await?;
@@ -216,6 +192,7 @@ impl super::Nexus {
             &rules,
         )
         .await?;
+
         Ok(db_vpc)
     }
 
@@ -381,6 +358,50 @@ impl super::Nexus {
             &rules,
         )
         .await?;
+        Ok(rules)
+    }
+
+    /// Customize the default firewall rules for a particular VPC.
+    async fn default_firewall_rules_for_vpc(
+        &self,
+        vpc_id: Uuid,
+        vpc_name: Name,
+    ) -> Result<Vec<db::model::VpcFirewallRule>, Error> {
+        let mut rules = db::model::VpcFirewallRule::vec_from_params(
+            vpc_id,
+            defaults::DEFAULT_FIREWALL_RULES.clone(),
+        );
+        for rule in rules.iter_mut() {
+            for target in rule.targets.iter_mut() {
+                match target.0 {
+                    external::VpcFirewallRuleTarget::Vpc(ref mut name)
+                        if name.as_str() == "default" =>
+                    {
+                        *name = vpc_name.clone().into()
+                    }
+                    _ => {
+                        return Err(external::Error::internal_error(
+                            "unexpected target in default firewall rule",
+                        ))
+                    }
+                }
+                if let Some(ref mut filter_hosts) = rule.filter_hosts {
+                    for host in filter_hosts.iter_mut() {
+                        match host.0 {
+                            external::VpcFirewallRuleHostFilter::Vpc(
+                                ref mut name,
+                            ) if name.as_str() == "default" => {
+                                *name = vpc_name.clone().into()
+                            }
+                            _ => return Err(external::Error::internal_error(
+                                "unexpected host filter in default firewall rule"
+                            )),
+                        }
+                    }
+                }
+            }
+        }
+        debug!(self.log, "default firewall rules for vpc {}", vpc_name; "rules" => ?&rules);
         Ok(rules)
     }
 
