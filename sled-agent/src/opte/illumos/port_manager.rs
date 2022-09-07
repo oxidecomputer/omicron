@@ -39,7 +39,7 @@ use std::sync::MutexGuard;
 use uuid::Uuid;
 
 // Prefix used to identify xde data links.
-const XDE_LINK_PREFIX: &str = "opte";
+pub const XDE_LINK_PREFIX: &str = "opte";
 
 #[derive(Debug)]
 struct PortManagerInner {
@@ -281,8 +281,17 @@ impl PortManager {
             snat,
             external_ip,
             /* passthru = */ false,
-        )?;
-        debug!(
+        )
+        .map_err(|e| {
+            warn!(
+                self.inner.log,
+                "Failed to create xde device";
+                "port_name" => &port_name,
+                "error" => e.to_string(),
+            );
+            e
+        })?;
+        info!(
             self.inner.log,
             "Created xde device for guest port";
             "port_name" => &port_name,

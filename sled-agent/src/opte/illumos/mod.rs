@@ -19,6 +19,7 @@ mod port_manager;
 pub use port::Port;
 pub use port_manager::PortManager;
 pub use port_manager::PortTicket;
+pub use port_manager::XDE_LINK_PREFIX;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {

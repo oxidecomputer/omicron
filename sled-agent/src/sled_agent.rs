@@ -6,6 +6,7 @@
 
 use crate::bootstrap::params::SledAgentRequest;
 use crate::config::Config;
+use crate::illumos::dladm::VNIC_PREFIX_GUEST;
 use crate::illumos::vnic::VnicKind;
 use crate::illumos::zfs::{
     Mountpoint, ZONE_ZFS_DATASET, ZONE_ZFS_DATASET_MOUNTPOINT,
@@ -14,6 +15,7 @@ use crate::illumos::zone::IPADM;
 use crate::illumos::{execute, PFEXEC};
 use crate::instance_manager::InstanceManager;
 use crate::nexus::LazyNexusClient;
+use crate::opte::XDE_LINK_PREFIX;
 use crate::params::{
     DatasetKind, DiskStateRequested, InstanceHardware, InstanceMigrateParams,
     InstanceRuntimeStateRequested, InstanceSerialConsoleData,
@@ -29,6 +31,7 @@ use omicron_common::api::{
 };
 use slog::Logger;
 use std::net::SocketAddrV6;
+use std::path::PathBuf;
 use std::process::Command;
 use uuid::Uuid;
 
@@ -94,6 +97,20 @@ pub enum Error {
 
     #[error("Error resolving DNS name: {0}")]
     ResolveError(#[from] internal_dns_client::multiclient::ResolveError),
+
+    #[error("I/O Error accessing file {path}: {err}")]
+    Io { path: PathBuf, err: std::io::Error },
+
+    #[error(
+        "Unexpected object in dladm cache file which cannot be deleted automatically
+        This is related to https://github.com/oxidecomputer/omicron/issues/1679 ; ideally
+        We'd never leave around this half-deleted objects, and we'd automatically remove
+        them if we ever saw them.
+        To fix:
+        - Delete the line \"{line}\" in {DATALINK_CACHE_FILE}.
+        - Run `svcadm restart svc:/network/datalink-management:default`"
+    )]
+    DladmBug { line: String, prefix: String },
 }
 
 impl From<Error> for omicron_common::api::external::Error {
@@ -252,6 +269,7 @@ impl SledAgent {
         // order. That should be OK, since we're definitely deleting the guest
         // VNICs before the xde devices, which is the main constraint.
         delete_omicron_vnics(&log).await?;
+        verify_datalink_cache_does_not_contain(&log, VNIC_PREFIX_GUEST).await?;
 
         // Also delete any extant xde devices. These should also eventually be
         // recovered / tracked, to avoid interruption of any guests that are
@@ -261,6 +279,7 @@ impl SledAgent {
         // This is also tracked by
         // https://github.com/oxidecomputer/omicron/issues/725.
         crate::opte::delete_all_xde_devices(&log)?;
+        verify_datalink_cache_does_not_contain(&log, XDE_LINK_PREFIX).await?;
 
         // Ipv6 forwarding must be enabled to route traffic between zones.
         //
@@ -494,6 +513,41 @@ async fn delete_omicron_vnics(log: &Logger) -> Result<(), Error> {
             .unwrap()
         })
         .await?;
+    Ok(())
+}
+
+const DATALINK_CACHE_FILE: &str =
+    "/etc/svc/volatile/dladm/network-datalink-management:default.cache";
+
+// Verifies that the datalink cache file does not contain a particular prefix.
+//
+// This is used for detecting cases where data links are not visible through
+// dladm, but "exist" according to the datalink management service.
+//
+// Typically, this indicates a failed delete or bad state, so we propagate an
+// error upward to make these cases more obvious.
+//
+// See https://github.com/oxidecomputer/omicron/issues/1679 for more context.
+async fn verify_datalink_cache_does_not_contain(
+    log: &Logger,
+    prefix: &str,
+) -> Result<(), Error> {
+    use tokio::io::AsyncBufReadExt;
+    let file =
+        tokio::fs::File::open(DATALINK_CACHE_FILE).await.map_err(|err| {
+            Error::Io { path: PathBuf::from(DATALINK_CACHE_FILE), err }
+        })?;
+    let reader = tokio::io::BufReader::new(file);
+    let mut lines = reader.lines();
+    while let Some(line) = lines.next_line().await.map_err(|err| Error::Io {
+        path: PathBuf::from(DATALINK_CACHE_FILE),
+        err,
+    })? {
+        if line.starts_with(prefix) {
+            warn!(log, "Found unexpected line {line} with prefix {prefix}");
+            return Err(Error::DladmBug { line, prefix: prefix.to_string() });
+        }
+    }
     Ok(())
 }
 

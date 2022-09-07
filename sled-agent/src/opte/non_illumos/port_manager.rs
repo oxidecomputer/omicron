@@ -27,7 +27,7 @@ use std::sync::Mutex;
 use uuid::Uuid;
 
 // Prefix used to identify xde data links.
-const XDE_LINK_PREFIX: &str = "opte";
+pub const XDE_LINK_PREFIX: &str = "opte";
 
 #[derive(Debug)]
 #[allow(dead_code)]
