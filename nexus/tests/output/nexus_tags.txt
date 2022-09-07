@@ -34,10 +34,6 @@ image_view_by_id                         /by-id/images/{id}
 API operations found with tag "images:global"
 OPERATION ID                             URL PATH
 system_image_create                      /images
-system_image_delete                      /images/{image_name}
-system_image_list                        /images
-system_image_view                        /images/{image_name}
-system_image_view_by_id                  /system/by-id/images/{id}
 
 API operations found with tag "instances"
 OPERATION ID                             URL PATH
@@ -99,8 +95,8 @@ organization_view_by_id                  /by-id/organizations/{id}
 
 API operations found with tag "policy"
 OPERATION ID                             URL PATH
-global_policy_update                     /global/policy
-global_policy_view                       /global/policy
+system_policy_update                     /system/policy
+system_policy_view                       /system/policy
 
 API operations found with tag "projects"
 OPERATION ID                             URL PATH
@@ -155,6 +151,10 @@ snapshot_view_by_id                      /by-id/snapshots/{id}
 
 API operations found with tag "system"
 OPERATION ID                             URL PATH
+system_image_delete                      /system/images/{image_name}
+system_image_list                        /system/images
+system_image_view                        /system/images/{image_name}
+system_image_view_by_id                  /system/by-id/images/{id}
 system_user_list                         /system/user
 system_user_view                         /system/user/{user_name}
 
