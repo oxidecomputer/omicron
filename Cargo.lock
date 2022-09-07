@@ -223,6 +223,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "bcs"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "510fd83e3eaf7263b06182f3550b4c0af2af42cb36ab8024969ff5ea7fcb2833"
+dependencies = [
+ "serde",
+ "thiserror",
+]
+
+[[package]]
 name = "bincode"
 version = "1.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -336,6 +346,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fa79dedbb091f449f1f39e53edf88d5dbe95f895dae6135a8d7b881fb5af73f5"
 dependencies = [
  "byte-tools",
+]
+
+[[package]]
+name = "bootstore"
+version = "0.1.0"
+dependencies = [
+ "bcs",
+ "bincode",
+ "derive_more",
+ "diesel",
+ "omicron-rpaths",
+ "omicron-test-utils",
+ "p256",
+ "pq-sys",
+ "rand 0.8.5",
+ "serde",
+ "sha3",
+ "slog",
+ "sprockets-common",
+ "sprockets-host",
+ "thiserror",
+ "uuid",
+ "vsss-rs",
 ]
 
 [[package]]
@@ -1065,6 +1098,7 @@ dependencies = [
  "ipnetwork",
  "itoa 1.0.2",
  "libc",
+ "libsqlite3-sys",
  "pq-sys",
  "r2d2",
  "serde_json",
@@ -2403,6 +2437,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "libsqlite3-sys"
+version = "0.25.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9f0455f2c1bc9a7caa792907026e469c1d91761fb0ea37cbb16427c77280cf35"
+dependencies = [
+ "pkg-config",
+ "vcpkg",
+]
+
+[[package]]
 name = "libxml"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3067,6 +3111,7 @@ dependencies = [
  "crucible-agent-client",
  "crucible-client-types",
  "ddm-admin-client",
+ "diesel",
  "dropshot",
  "expectorate",
  "futures",
