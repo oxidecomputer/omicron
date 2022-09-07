@@ -4,6 +4,7 @@
 
 //! Database layer for the bootstore
 
+mod error;
 mod macros;
 mod models;
 mod schema;
@@ -13,39 +14,14 @@ use diesel::prelude::*;
 use diesel::SqliteConnection;
 use slog::Logger;
 use slog::{info, o};
+use uuid::Uuid;
 
 use crate::trust_quorum::SerializableShareDistribution;
+pub(crate) use error::Error;
 use models::KeyShare;
 use models::Rack;
 use models::Sha3_256Digest;
 use models::Share;
-use sha3::{Digest, Sha3_256};
-
-#[derive(thiserror::Error, Debug)]
-pub enum Error {
-    #[error("Failed to open db connection to {path}: {err}")]
-    DbOpen { path: String, err: ConnectionError },
-
-    #[error(transparent)]
-    Db(#[from] diesel::result::Error),
-
-    #[error(transparent)]
-    Bcs(#[from] bcs::Error),
-
-    // Temporary until the using code is written
-    #[allow(dead_code)]
-    #[error("Share commit for {epoch} does not match prepare")]
-    CommitHashMismatch { epoch: i32 },
-
-    #[error("No shares have been committed")]
-    NoSharesCommitted,
-
-    #[error("DB invariant violated: {0}")]
-    DbInvariant(String),
-
-    #[error("Already initialized with rack uuid: {0}")]
-    AlreadyInitialized(String),
-}
 
 pub struct Db {
     log: Logger,
@@ -111,18 +87,7 @@ impl Db {
     ) -> Result<(), Error> {
         info!(self.log, "Writing key share prepare for {epoch} to the Db");
         use schema::key_shares::dsl;
-        // We save the digest so we don't have to deserialize and recompute most of the time.
-        // We'd only want to do that for a consistency check occasionally.
-        let val = bcs::to_bytes(&share)?;
-        let share_digest =
-            sprockets_common::Sha3_256Digest(Sha3_256::digest(&val).into())
-                .into();
-        let prepare = KeyShare {
-            epoch,
-            share: Share(share),
-            share_digest,
-            committed: false,
-        };
+        let prepare = KeyShare::new(epoch, share)?;
         diesel::insert_into(dsl::key_shares).values(&prepare).execute(tx)?;
         Ok(())
     }
@@ -153,15 +118,69 @@ impl Db {
         })
     }
 
-    pub fn initialize(&self, conn: &mut SqliteConnection) -> Result<(), Error> {
+    pub fn initialize(
+        &self,
+        conn: &mut SqliteConnection,
+        rack_uuid: &Uuid,
+        share_distribution: SerializableShareDistribution,
+    ) -> Result<(), Error> {
         conn.immediate_transaction(|tx| {
             if self.is_initialized(tx)? {
-                let uuid = self.get_rack_uuid(tx)?;
+                // If the rack is initialized, a rack uuid must exist
+                let uuid = self.get_rack_uuid(tx)?.unwrap();
                 return Err(Error::AlreadyInitialized(uuid));
             }
+            let new_uuid = rack_uuid.to_string();
+            match self.initialize_rack_uuid(tx, &new_uuid)? {
+                Some(old_uuid) => {
+                        info!(self.log, "Re-Initializing Rack: Old UUID: {old_uuid}, New UUID: {new_uuid}");
+                    self.update_prepare_for_epoch_0(tx, share_distribution)
 
-            Ok(())
+                },
+                None => {
+                    info!(self.log, "Initializing Rack for the first time with UUID: {new_uuid}");
+                    self.prepare_share(tx, 0, share_distribution)
+                    }
+            }
+
         })
+    }
+
+    // During rack initialization we set the rack UUID.
+    //
+    // We only allow rewriting this UUID in when the rack is not initialized,
+    // and so we only call this from the `initialize` method.
+    //
+    // Since we only allow a single row, we just delete the existing rows
+    // and insert the new one.
+    //
+    // Return the old rack UUID if one exists
+    fn initialize_rack_uuid(
+        &self,
+        tx: &mut SqliteConnection,
+        new_uuid: &str,
+    ) -> Result<Option<String>, Error> {
+        use schema::rack::dsl;
+        let old_uuid = self.get_rack_uuid(tx)?;
+        diesel::delete(dsl::rack).execute(tx)?;
+        diesel::insert_into(dsl::rack)
+            .values(dsl::uuid.eq(new_uuid))
+            .execute(tx)?;
+        Ok(old_uuid)
+    }
+
+    // Overwrite a share for epoch 0 during rack initialization
+    //
+    // This method should only be called from dinitialize.
+    fn update_prepare_for_epoch_0(
+        &self,
+        tx: &mut SqliteConnection,
+        share_distribution: SerializableShareDistribution,
+    ) -> Result<(), Error> {
+        use schema::key_shares::dsl;
+        let prepare = KeyShare::new(0, share_distribution)?;
+        diesel::update(dsl::key_shares).set(prepare).execute(tx)?;
+        Ok(())
     }
 
     pub fn get_latest_committed_share(
@@ -225,10 +244,10 @@ impl Db {
     pub fn get_rack_uuid(
         &self,
         tx: &mut SqliteConnection,
-    ) -> Result<String, Error> {
+    ) -> Result<Option<String>, Error> {
         use schema::rack::dsl;
 
-        Ok(dsl::rack.select(dsl::uuid).get_result::<String>(tx)?)
+        Ok(dsl::rack.select(dsl::uuid).get_result::<String>(tx).optional()?)
     }
 }
 
@@ -237,6 +256,7 @@ mod tests {
     use super::*;
     use crate::trust_quorum::{RackSecret, ShareDistribution};
     use omicron_test_utils::dev::test_setup_log;
+    use sha3::{Digest, Sha3_256};
 
     // TODO: Fill in with actual member certs
     fn new_shares() -> Vec<ShareDistribution> {

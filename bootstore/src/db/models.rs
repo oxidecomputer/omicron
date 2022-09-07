@@ -8,11 +8,12 @@ use diesel::deserialize::FromSql;
 use diesel::prelude::*;
 use diesel::serialize::ToSql;
 use diesel::FromSqlRow;
-use uuid::Uuid;
+use sha3::{Digest, Sha3_256};
 
 use super::macros::array_new_type;
 use super::macros::bcs_new_type;
 use super::schema::*;
+use super::Error;
 use crate::trust_quorum::SerializableShareDistribution;
 
 bcs_new_type!(Share, SerializableShareDistribution);
@@ -20,12 +21,33 @@ bcs_new_type!(Share, SerializableShareDistribution);
 /// When a [`KeyShareParepare`] message arrives it is stored in a [`KeyShare`]
 /// When a [`KeyShareCommit`] message arrives the `committed` field/column is
 /// set to true.
-#[derive(Debug, Queryable, Insertable)]
+#[derive(Debug, Queryable, Insertable, Identifiable, AsChangeset)]
+#[diesel(primary_key(epoch))]
 pub struct KeyShare {
     pub epoch: i32,
     pub share: Share,
     pub share_digest: Sha3_256Digest,
     pub committed: bool,
+}
+
+impl KeyShare {
+    pub fn new(
+        epoch: i32,
+        share: SerializableShareDistribution,
+    ) -> Result<KeyShare, Error> {
+        // We save the digest so we don't have to deserialize and recompute most of the time.
+        // We'd only want to do that for a consistency check occasionally.
+        let val = bcs::to_bytes(&share)?;
+        let share_digest =
+            sprockets_common::Sha3_256Digest(Sha3_256::digest(&val).into())
+                .into();
+        Ok(KeyShare {
+            epoch,
+            share: Share(share),
+            share_digest,
+            committed: false,
+        })
+    }
 }
 
 /// Information about the rack

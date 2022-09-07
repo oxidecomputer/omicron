@@ -83,7 +83,8 @@ pub enum NodeOpResult {
     /// A key share for a given epoch as requested by [`PeerRequest::GetShare`]
     Share { epoch: i32, share: Share },
 
-    /// An ack for the most recent coordinator message
+    /// An ack for the most recent coordinator message, where there is no data
+    /// to return
     CoordinatorAck,
 }
 

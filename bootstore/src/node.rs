@@ -111,7 +111,8 @@ impl Node {
         rack_uuid: Uuid,
         share_distribution: SerializableShareDistribution,
     ) -> Result<NodeOpResult, NodeError> {
-        unimplemented!();
+        self.db.initialize(&mut self.conn, &rack_uuid, share_distribution)?;
+        Ok(NodeOpResult::CoordinatorAck)
     }
 
     fn handle_key_share_prepare(
