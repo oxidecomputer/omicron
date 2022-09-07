@@ -9,7 +9,7 @@
 
 use diesel::SqliteConnection;
 use slog::Logger;
-use sprockets_host::Ed25519Certificate;
+//use sprockets_host::Ed25519Certificate;
 use uuid::Uuid;
 
 use crate::db;
@@ -22,8 +22,8 @@ pub struct Config {
     log: Logger,
     db_path: String,
     // TODO: This will live inside the certificate eventually
-    _serial_number: String,
-    _device_id_cert: Ed25519Certificate,
+    //_serial_number: String,
+    //_device_id_cert: Ed25519Certificate,
 }
 
 /// A node of the bootstore
@@ -69,7 +69,7 @@ impl Node {
         let result = match req.op {
             NodeOp::GetShare { epoch } => self.handle_get_share(epoch),
             NodeOp::Initialize { rack_uuid, share_distribution } => {
-                self.handle_initialize(rack_uuid, share_distribution)
+                self.handle_initialize(&rack_uuid, share_distribution)
             }
             NodeOp::KeySharePrepare {
                 rack_uuid,
@@ -108,10 +108,10 @@ impl Node {
 
     fn handle_initialize(
         &mut self,
-        rack_uuid: Uuid,
+        rack_uuid: &Uuid,
         share_distribution: SerializableShareDistribution,
     ) -> Result<NodeOpResult, NodeError> {
-        self.db.initialize(&mut self.conn, &rack_uuid, share_distribution)?;
+        self.db.initialize(&mut self.conn, rack_uuid, share_distribution)?;
         Ok(NodeOpResult::CoordinatorAck)
     }
 
@@ -130,5 +130,53 @@ impl Node {
         _epoch: i32,
     ) -> Result<NodeOpResult, NodeError> {
         unimplemented!();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::models::KeyShare;
+    use crate::db::tests::new_shares;
+    use omicron_test_utils::dev::test_setup_log;
+    use uuid::Uuid;
+
+    #[test]
+    fn initialize_can_run_again_if_epoch_0_is_not_committed() {
+        let logctx = test_setup_log("test_db");
+        let config =
+            Config { log: logctx.log.clone(), db_path: ":memory:".to_string() };
+        let mut node = Node::new(config);
+        let shares = new_shares();
+        let expected = Ok(NodeOpResult::CoordinatorAck);
+        assert_eq!(
+            expected,
+            node.handle_initialize(&Uuid::new_v4(), shares[0].clone().into())
+        );
+        // We can re-initialize with a new uuid
+        let rack_uuid = Uuid::new_v4();
+        assert_eq!(
+            expected,
+            node.handle_initialize(&rack_uuid, shares[0].clone().into())
+        );
+
+        // We can re-initialize with a the same uuid
+        assert_eq!(
+            expected,
+            node.handle_initialize(&rack_uuid, shares[0].clone().into())
+        );
+
+        // Committing the key share for epoch 0 means we cannot initialize again
+        let epoch = 0;
+        let prepare = KeyShare::new(epoch, shares[0].clone().into()).unwrap();
+        node.db
+            .commit_share(&mut node.conn, epoch, prepare.share_digest.into())
+            .unwrap();
+
+        assert!(node
+            .handle_initialize(&rack_uuid, shares[0].clone().into())
+            .is_err());
+
+        logctx.cleanup_successful();
     }
 }

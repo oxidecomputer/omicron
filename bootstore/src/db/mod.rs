@@ -6,7 +6,7 @@
 
 mod error;
 mod macros;
-mod models;
+pub(crate) mod models;
 mod schema;
 
 use diesel::connection::SimpleConnection;
@@ -85,7 +85,10 @@ impl Db {
         epoch: i32,
         share: SerializableShareDistribution,
     ) -> Result<(), Error> {
-        info!(self.log, "Writing key share prepare for {epoch} to the Db");
+        info!(
+            self.log,
+            "Writing key share prepare for epoch {epoch} to the Db"
+        );
         use schema::key_shares::dsl;
         let prepare = KeyShare::new(epoch, share)?;
         diesel::insert_into(dsl::key_shares).values(&prepare).execute(tx)?;
@@ -252,14 +255,14 @@ impl Db {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use crate::trust_quorum::{RackSecret, ShareDistribution};
     use omicron_test_utils::dev::test_setup_log;
     use sha3::{Digest, Sha3_256};
 
     // TODO: Fill in with actual member certs
-    fn new_shares() -> Vec<ShareDistribution> {
+    pub fn new_shares() -> Vec<ShareDistribution> {
         let member_device_id_certs = vec![];
         let rack_secret_threshold = 3;
         let total_shares = 5;

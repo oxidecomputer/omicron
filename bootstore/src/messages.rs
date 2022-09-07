@@ -113,6 +113,7 @@ pub enum NodeError {
     )]
     MissingKeySharePrepare { rack_uuid: Uuid, epoch: i32 },
 
+    //TODO: Should probably pull out the variants for better matching
     #[error("DB error: {0}")]
     Db(String),
 }

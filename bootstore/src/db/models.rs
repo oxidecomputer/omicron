@@ -101,3 +101,9 @@ impl From<sprockets_common::Sha3_256Digest> for Sha3_256Digest {
         Sha3_256Digest(digest.0)
     }
 }
+
+impl From<Sha3_256Digest> for sprockets_common::Sha3_256Digest {
+    fn from(digest: Sha3_256Digest) -> Self {
+        sprockets_common::Sha3_256Digest(digest.0)
+    }
+}
