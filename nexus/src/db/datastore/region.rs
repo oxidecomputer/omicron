@@ -20,7 +20,10 @@ use crate::db::model::Zpool;
 use crate::external_api::params;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::{ConnectionError, PoolError};
 use diesel::prelude::*;
+use diesel::result::DatabaseErrorKind as DieselDatabaseErrorKind;
+use diesel::result::Error as DieselError;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use uuid::Uuid;
@@ -314,6 +317,47 @@ impl DataStore {
                 ) => Error::unavail(
                     "Not enough available space to allocate disks",
                 ),
+                TxnError::Pool(PoolError::Connection(
+                    ConnectionError::Query(DieselError::DatabaseError(
+                        DieselDatabaseErrorKind::SerializationFailure,
+                        ref boxed_error,
+                    )),
+                )) => {
+                    // Extract the boxed_error from the serialization failure,
+                    // and check if cockroachdb returned a case where the
+                    // transaction didn't fail, but needs to be retried.
+                    //
+                    // From https://www.cockroachlabs.com/docs/v21.2/transactions#client-side-intervention:
+                    //
+                    //    To indicate that a transaction must be retried,
+                    //    CockroachDB signals an error with the code 40001 and an
+                    //    error message that begins with the string "retry
+                    //    transaction".
+                    //
+                    // Note I also saw:
+                    //
+                    //    restart transaction: TransactionRetryWithProtoRefreshError: TransactionRetryError: retry txn (RETRY_SERIALIZABLE ...
+                    //
+                    // with a link to https://www.cockroachlabs.com/docs/v21.2/transaction-retry-error-reference.html#retry_serializable
+                    //
+                    // Check for "restart transaction" and "retry transaction"
+                    // here, and let users know when too many transactions are
+                    // in flight and causing retryable failures.
+                    if boxed_error.message().starts_with("restart transaction")
+                        || boxed_error
+                            .message()
+                            .starts_with("retry transaction")
+                    {
+                        Error::too_many_requests("transaction must be retried")
+                    } else {
+                        // other types of serialization failure should be
+                        // considered an internal error
+                        Error::internal_error(&format!(
+                            "Transaction error: {}",
+                            e
+                        ))
+                    }
+                }
                 _ => {
                     Error::internal_error(&format!("Transaction error: {}", e))
                 }

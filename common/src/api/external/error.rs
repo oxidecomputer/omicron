@@ -61,6 +61,9 @@ pub enum Error {
 
     #[error("Type version mismatch! {internal_message}")]
     TypeVersionMismatch { internal_message: String },
+
+    #[error("Too many requests! {internal_message}")]
+    TooManyRequests { internal_message: String },
 }
 
 /// Indicates how an object was looked up (for an `ObjectNotFound` error)
@@ -108,7 +111,8 @@ impl Error {
     /// retried
     pub fn retryable(&self) -> bool {
         match self {
-            Error::ServiceUnavailable { .. } => true,
+            Error::ServiceUnavailable { .. }
+            | Error::TooManyRequests { .. } => true,
 
             Error::ObjectNotFound { .. }
             | Error::ObjectAlreadyExists { .. }
@@ -174,6 +178,15 @@ impl Error {
         Error::TypeVersionMismatch { internal_message: message.to_owned() }
     }
 
+    /// Generates an [`Error::TooManyRequests`] with a specific message.
+    ///
+    /// TooManyRequests is returned when the control plane can't keep up with
+    /// requests, but there wasn't an associated error. It's meant to signal to
+    /// users that the request can be re-attempted.
+    pub fn too_many_requests(message: &str) -> Error {
+        Error::TooManyRequests { internal_message: message.to_owned() }
+    }
+
     /// Given an [`Error`] with an internal message, return the same error with
     /// `context` prepended to it to provide more context
     ///
@@ -188,6 +201,7 @@ impl Error {
             | Error::InvalidRequest { .. }
             | Error::InvalidValue { .. }
             | Error::Forbidden => self,
+
             Error::Unauthenticated { internal_message } => {
                 Error::Unauthenticated {
                     internal_message: format!(
@@ -217,6 +231,14 @@ impl Error {
             }
             Error::TypeVersionMismatch { internal_message } => {
                 Error::TypeVersionMismatch {
+                    internal_message: format!(
+                        "{}: {}",
+                        context, internal_message
+                    ),
+                }
+            }
+            Error::TooManyRequests { internal_message } => {
+                Error::TooManyRequests {
                     internal_message: format!(
                         "{}: {}",
                         context, internal_message
@@ -316,6 +338,14 @@ impl From<Error> for HttpError {
 
             Error::TypeVersionMismatch { internal_message } => {
                 HttpError::for_internal_error(internal_message)
+            }
+
+            Error::TooManyRequests { internal_message } => {
+                HttpError::for_client_error(
+                    Some(String::from("TooManyRequests")),
+                    http::StatusCode::TOO_MANY_REQUESTS,
+                    internal_message,
+                )
             }
         }
     }
