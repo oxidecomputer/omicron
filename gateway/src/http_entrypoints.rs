@@ -27,6 +27,7 @@ use dropshot::ResultsPage;
 use dropshot::TypedBody;
 use dropshot::WhichPage;
 use gateway_messages::IgnitionCommand;
+use gateway_messages::SpComponent;
 use gateway_sp_comms::error::Error as SpCommsError;
 use gateway_sp_comms::Timeout as SpTimeout;
 use schemars::JsonSchema;
@@ -504,10 +505,17 @@ async fn sp_update(
     let sp = path.into_inner().sp;
     let image = body.into_inner().image;
 
-    comms.update(sp.into(), image).await.map_err(http_err_from_comms_err)?;
+    comms
+        .update(sp.into(), SpComponent::SP_ITSELF, 0, image)
+        .await
+        .map_err(http_err_from_comms_err)?;
 
     Ok(HttpResponseUpdatedNoContent {})
 }
+
+// TODO-completeness: Either add a new endpoint to allow for updating
+// components, or expand the above endpoint to cover that case in addition to
+// updating the SP itself.
 
 /// Reset an SP
 #[endpoint {
