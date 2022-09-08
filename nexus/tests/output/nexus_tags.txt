@@ -31,10 +31,6 @@ image_list                               /organizations/{organization_name}/proj
 image_view                               /organizations/{organization_name}/projects/{project_name}/images/{image_name}
 image_view_by_id                         /by-id/images/{id}
 
-API operations found with tag "images:global"
-OPERATION ID                             URL PATH
-system_image_create                      /images
-
 API operations found with tag "instances"
 OPERATION ID                             URL PATH
 instance_create                          /organizations/{organization_name}/projects/{project_name}/instances
@@ -151,6 +147,7 @@ snapshot_view_by_id                      /by-id/snapshots/{id}
 
 API operations found with tag "system"
 OPERATION ID                             URL PATH
+system_image_create                      /system/images
 system_image_delete                      /system/images/{image_name}
 system_image_list                        /system/images
 system_image_view                        /system/images/{image_name}

@@ -730,44 +730,6 @@
         }
       }
     },
-    "/images": {
-      "post": {
-        "tags": [
-          "images:global"
-        ],
-        "summary": "Create a global image",
-        "description": "Create a new global image. This image can then be used by any user as a base for instances.",
-        "operationId": "system_image_create",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/GlobalImageCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GlobalImage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/ip-pools": {
       "get": {
         "tags": [
@@ -6706,6 +6668,42 @@
           }
         },
         "x-dropshot-pagination": true
+      },
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Create a global image",
+        "description": "Create a new global image. This image can then be used by any user as a base for instances.",
+        "operationId": "system_image_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GlobalImageCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GlobalImage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/system/images/{image_name}": {

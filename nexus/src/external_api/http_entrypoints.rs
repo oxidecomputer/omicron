@@ -2263,8 +2263,8 @@ async fn system_image_list(
 /// base for instances.
 #[endpoint {
     method = POST,
-    path = "/images",
-    tags = ["images:global"]
+    path = "/system/images",
+    tags = ["system"]
 }]
 async fn system_image_create(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,

@@ -40,7 +40,7 @@ async fn test_global_image_create(cptestctx: &ControlPlaneTestContext) {
 
     // No global images yet
     let global_images: Vec<GlobalImage> =
-        NexusRequest::iter_collection_authn(client, "/images", "", None)
+        NexusRequest::iter_collection_authn(client, "/system/images", "", None)
             .await
             .expect("failed to list images")
             .all_items;
@@ -65,7 +65,7 @@ async fn test_global_image_create(cptestctx: &ControlPlaneTestContext) {
         block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
-    NexusRequest::objects_post(client, "/images", &image_create_params)
+    NexusRequest::objects_post(client, "/system/images", &image_create_params)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -73,7 +73,7 @@ async fn test_global_image_create(cptestctx: &ControlPlaneTestContext) {
 
     // Verify one global image
     let global_images: Vec<GlobalImage> =
-        NexusRequest::iter_collection_authn(client, "/images", "", None)
+        NexusRequest::iter_collection_authn(client, "/system/images", "", None)
             .await
             .expect("failed to list images")
             .all_items;
@@ -112,7 +112,7 @@ async fn test_global_image_create_url_404(cptestctx: &ControlPlaneTestContext) {
     };
 
     let error = NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &"/images")
+        RequestBuilder::new(client, Method::POST, &"/system/images")
             .body(Some(&image_create_params))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -149,7 +149,7 @@ async fn test_global_image_create_bad_url(cptestctx: &ControlPlaneTestContext) {
     };
 
     let error = NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &"/images")
+        RequestBuilder::new(client, Method::POST, &"/system/images")
             .body(Some(&image_create_params))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -199,7 +199,7 @@ async fn test_global_image_create_bad_content_length(
     };
 
     let error = NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &"/images")
+        RequestBuilder::new(client, Method::POST, &"/system/images")
             .body(Some(&image_create_params))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -250,7 +250,7 @@ async fn test_global_image_create_bad_image_size(
     };
 
     let error = NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &"/images")
+        RequestBuilder::new(client, Method::POST, &"/system/images")
             .body(Some(&image_create_params))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -300,14 +300,17 @@ async fn test_make_disk_from_global_image(cptestctx: &ControlPlaneTestContext) {
         block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
-    let alpine_image: GlobalImage =
-        NexusRequest::objects_post(client, "/images", &image_create_params)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .unwrap()
-            .parsed_body()
-            .unwrap();
+    let alpine_image: GlobalImage = NexusRequest::objects_post(
+        client,
+        "/system/images",
+        &image_create_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
 
     create_organization(&client, "myorg").await;
     create_project(client, "myorg", "myproj").await;
@@ -370,14 +373,17 @@ async fn test_make_disk_from_global_image_too_small(
         block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
-    let alpine_image: GlobalImage =
-        NexusRequest::objects_post(client, "/images", &image_create_params)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .unwrap()
-            .parsed_body()
-            .unwrap();
+    let alpine_image: GlobalImage = NexusRequest::objects_post(
+        client,
+        "/system/images",
+        &image_create_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
 
     create_organization(&client, "myorg").await;
     create_project(client, "myorg", "myproj").await;
