@@ -125,7 +125,7 @@ pub enum InstanceStateRequested {
     Running,
     /// Stop the instance.
     Stopped,
-    /// Issues a reset command to the instance, such that it should
+    /// Issue a reset command to the instance, such that it should
     /// stop and then immediately become running.
     Reboot,
     /// Migrate the instance to another node.
