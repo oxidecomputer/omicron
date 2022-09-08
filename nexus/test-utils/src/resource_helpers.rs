@@ -210,7 +210,7 @@ pub async fn create_instance(
     .await
 }
 
-/// Creates an instance with attached resou8rces.
+/// Creates an instance with attached resources.
 pub async fn create_instance_with(
     client: &ClientTestContext,
     organization_name: &str,
@@ -240,6 +240,7 @@ pub async fn create_instance_with(
             network_interfaces: nics.clone(),
             external_ips: vec![],
             disks,
+            start: true,
         },
     )
     .await

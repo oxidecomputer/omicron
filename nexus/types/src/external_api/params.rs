@@ -466,6 +466,15 @@ pub struct InstanceCreate {
     /// The disks to be created or attached for this instance.
     #[serde(default)]
     pub disks: Vec<InstanceDiskAttachment>,
+
+    /// Should this instance be started upon creation; true by default.
+    #[serde(default = "bool_true")]
+    pub start: bool,
+}
+
+#[inline]
+fn bool_true() -> bool {
+    true
 }
 
 // If you change this, also update the error message in

@@ -121,12 +121,16 @@ pub struct InstanceMigrateParams {
 )]
 #[serde(rename_all = "lowercase")]
 pub enum InstanceStateRequested {
+    /// Start the instance if it is not already running.
     Running,
+    /// Stop the instance.
     Stopped,
-    // Issues a reset command to the instance, such that it should
-    // stop and then immediately become running.
+    /// Issue a reset command to the instance, such that it should
+    /// stop and then immediately become running.
     Reboot,
+    /// Migrate the instance to another node.
     Migrating,
+    /// Stop the instance and delete it.
     Destroyed,
 }
 

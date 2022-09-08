@@ -232,6 +232,7 @@ lazy_static! {
                 params::ExternalIpCreate::Ephemeral { pool_name: None }
             ],
             disks: vec![],
+            start: true,
         };
 
     // The instance needs a network interface, too.
