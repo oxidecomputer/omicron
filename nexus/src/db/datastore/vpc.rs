@@ -29,6 +29,7 @@ use crate::db::model::VpcRouterUpdate;
 use crate::db::model::VpcSubnet;
 use crate::db::model::VpcSubnetUpdate;
 use crate::db::model::VpcUpdate;
+use crate::db::model::{Ipv4Net, Ipv6Net};
 use crate::db::pagination::paginated;
 use crate::db::queries::vpc::InsertVpcQuery;
 use crate::db::queries::vpc_subnet::FilterConflictingVpcSubnetRangesQuery;
@@ -37,6 +38,7 @@ use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use ipnetwork::IpNetwork;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -707,14 +709,25 @@ impl DataStore {
         &self,
         vpc: &Vpc,
         subnet_names: T,
-    ) -> Result<HashMap<Name, Vec<ipnetwork::IpNetwork>>, Error> {
+    ) -> Result<HashMap<Name, Vec<IpNetwork>>, Error> {
+        #[derive(diesel::Queryable)]
+        struct SubnetIps {
+            name: Name,
+            ipv4_block: Ipv4Net,
+            ipv6_block: Ipv6Net,
+        }
+
         use db::schema::vpc_subnet;
         let subnets = vpc_subnet::table
-            .select(VpcSubnet::as_select())
             .filter(vpc_subnet::vpc_id.eq(vpc.id()))
             .filter(vpc_subnet::name.eq_any(subnet_names))
             .filter(vpc_subnet::time_deleted.is_null())
-            .get_results_async(self.pool())
+            .select((
+                vpc_subnet::name,
+                vpc_subnet::ipv4_block,
+                vpc_subnet::ipv6_block,
+            ))
+            .get_results_async::<SubnetIps>(self.pool())
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(e, ErrorHandler::Server)
@@ -722,11 +735,9 @@ impl DataStore {
 
         let mut result = HashMap::with_capacity(subnets.len());
         for subnet in subnets {
-            let entry = result
-                .entry(subnet.name().clone().into())
-                .or_insert_with(Vec::new);
-            entry.push(ipnetwork::IpNetwork::V4(subnet.ipv4_block.0 .0));
-            entry.push(ipnetwork::IpNetwork::V6(subnet.ipv6_block.0 .0));
+            let entry = result.entry(subnet.name).or_insert_with(Vec::new);
+            entry.push(IpNetwork::V4(subnet.ipv4_block.0 .0));
+            entry.push(IpNetwork::V6(subnet.ipv6_block.0 .0));
         }
         Ok(result)
     }
