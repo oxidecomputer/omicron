@@ -4,18 +4,18 @@
 
 //! DB related errors
 
-use diesel::result::ConnectionError;
+use serde::{Deserialize, Serialize};
 
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Error {
     #[error("Failed to open db connection to {path}: {err}")]
-    DbOpen { path: String, err: ConnectionError },
+    DbOpen { path: String, err: String },
 
-    #[error(transparent)]
-    Db(#[from] diesel::result::Error),
+    #[error("Diesel/sqlite error: {err}")]
+    Diesel { err: String },
 
-    #[error(transparent)]
-    Bcs(#[from] bcs::Error),
+    #[error("BCS serialization error: {err}")]
+    Bcs { err: String },
 
     // Temporary until the using code is written
     #[allow(dead_code)]
@@ -43,6 +43,21 @@ pub enum Error {
     #[error("Rack UUID mismatch: Expected: {expected}, Actual: {actual}")]
     RackUuidMismatch { expected: String, actual: String },
 
-    #[error("Rack not yet initialized")]
+    #[error("Rack not initialized")]
     RackNotInitialized,
+
+    #[error("Key share for epoch {epoch} not committed")]
+    KeyShareNotCommitted { epoch: i32 },
+}
+
+impl From<diesel::result::Error> for Error {
+    fn from(err: diesel::result::Error) -> Self {
+        Error::Diesel { err: err.to_string() }
+    }
+}
+
+impl From<bcs::Error> for Error {
+    fn from(err: bcs::Error) -> Self {
+        Error::Bcs { err: err.to_string() }
+    }
 }

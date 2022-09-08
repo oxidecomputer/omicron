@@ -90,7 +90,7 @@ pub enum NodeOpResult {
 
 /// Errors returned inside a [`NodeOpResult`]
 #[derive(
-    Debug, Clone, PartialEq, From, Serialize, Deserialize, thiserror::Error,
+    Debug, PartialEq, Clone, From, Serialize, Deserialize, thiserror::Error,
 )]
 pub enum NodeError {
     #[error("Version {0} messages are unsupported.")]
@@ -113,19 +113,12 @@ pub enum NodeError {
     )]
     MissingKeySharePrepare { rack_uuid: Uuid, epoch: i32 },
 
-    //TODO: Should probably pull out the variants for better matching
     #[error("DB error: {0}")]
-    Db(String),
+    Db(db::Error),
 
     #[error(
         "'KeySharePrepare' messages are not allowed for epoch 0.
 Please send an 'Initialize' message"
     )]
     KeySharePrepareForEpoch0,
-}
-
-impl From<db::Error> for NodeError {
-    fn from(err: db::Error) -> Self {
-        NodeError::Db(err.to_string())
-    }
 }

@@ -46,8 +46,9 @@ impl Db {
             "component" => "BootstoreDb"
         ));
         info!(log, "opening database {:?}", path);
-        let mut c = SqliteConnection::establish(path)
-            .map_err(|err| Error::DbOpen { path: path.into(), err })?;
+        let mut c = SqliteConnection::establish(path).map_err(|err| {
+            Error::DbOpen { path: path.into(), err: err.to_string() }
+        })?;
 
         // Enable foreign key processing, which is off by default. Without
         // enabling this, there is no referential integrity check between
@@ -75,8 +76,10 @@ impl Db {
             self.log,
             "Creating a new connection to database {:?}", self.path
         );
-        SqliteConnection::establish(&self.path)
-            .map_err(|err| Error::DbOpen { path: self.path.clone(), err })
+        SqliteConnection::establish(&self.path).map_err(|err| Error::DbOpen {
+            path: self.path.clone(),
+            err: err.to_string(),
+        })
     }
 
     /// Write an uncommitted `KeyShare` into the database.
@@ -279,9 +282,13 @@ impl Db {
             .select(dsl::share)
             .filter(dsl::epoch.eq(epoch))
             .filter(dsl::committed.eq(true))
-            .get_result::<Share>(conn)?;
+            .get_result::<Share>(conn)
+            .optional()?;
 
-        Ok(share)
+        match share {
+            Some(share) => Ok(share),
+            None => Err(Error::KeyShareNotCommitted { epoch }),
+        }
     }
 
     /// Return true if there is a commit for epoch 0, false otherwise
@@ -376,8 +383,7 @@ pub mod tests {
         let (db, mut conn) = Db::init(&logctx.log, ":memory:").unwrap();
         let epoch = 0;
         let digest = sprockets_common::Sha3_256Digest::default();
-        let err = db.commit_share(&mut conn, epoch, digest).unwrap_err();
-        assert!(matches!(err, Error::Db(diesel::result::Error::NotFound)));
+        db.commit_share(&mut conn, epoch, digest).unwrap_err();
         logctx.cleanup_successful();
     }
 
