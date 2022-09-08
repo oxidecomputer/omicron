@@ -177,9 +177,13 @@ mod tests {
             .commit_share(&mut node.conn, epoch, prepare.share_digest.into())
             .unwrap();
 
-        assert!(node
-            .handle_initialize(&rack_uuid, shares[0].clone().into())
-            .is_err());
+        let expected = Err(NodeError::Db(
+            crate::db::Error::AlreadyInitialized(rack_uuid.to_string()),
+        ));
+        assert_eq!(
+            expected,
+            node.handle_initialize(&rack_uuid, shares[0].clone().into())
+        );
 
         logctx.cleanup_successful();
     }
