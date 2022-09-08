@@ -157,10 +157,7 @@ API operations found with tag "system"
 OPERATION ID                             URL PATH
 system_user_list                         /system/user
 system_user_view                         /system/user/{user_name}
-
-API operations found with tag "updates"
-OPERATION ID                             URL PATH
-updates_refresh                          /updates/refresh
+updates_refresh                          /system/updates/refresh
 
 API operations found with tag "vpcs"
 OPERATION ID                             URL PATH
