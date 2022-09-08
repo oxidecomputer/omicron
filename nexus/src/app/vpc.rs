@@ -631,31 +631,39 @@ impl super::Nexus {
             // firewall rules (including default rules) before instances
             // and their interfaces are instantiated.
 
+            // Collect unique network interface targets.
+            // This would be easier if `NetworkInterface` were `Hash`,
+            // but that's not easy because it's a generated type. We
+            // use the pair (VNI, MAC) as a unique interface identifier.
+            let mut nics = HashSet::new();
             let mut targets = Vec::with_capacity(rule.targets.len());
+            let mut push_target_nic = |nic: &NetworkInterface| {
+                if nics.insert(((*nic.vni).clone(), (*nic.mac).clone())) {
+                    targets.push(nic.clone());
+                }
+            };
             for target in &rule.targets {
                 match &target.0 {
                     external::VpcFirewallRuleTarget::Vpc(name) => {
-                        for interface in
-                            vpc_interfaces.get(&name).unwrap_or(&no_interfaces)
-                        {
-                            targets.push(interface.clone());
-                        }
+                        vpc_interfaces
+                            .get(&name)
+                            .unwrap_or(&no_interfaces)
+                            .iter()
+                            .for_each(&mut push_target_nic);
                     }
                     external::VpcFirewallRuleTarget::Subnet(name) => {
-                        for interface in subnet_interfaces
+                        subnet_interfaces
                             .get(&name)
                             .unwrap_or(&no_interfaces)
-                        {
-                            targets.push(interface.clone());
-                        }
+                            .iter()
+                            .for_each(&mut push_target_nic);
                     }
                     external::VpcFirewallRuleTarget::Instance(name) => {
-                        for interface in instance_interfaces
+                        instance_interfaces
                             .get(&name)
                             .unwrap_or(&no_interfaces)
-                        {
-                            targets.push(interface.clone());
-                        }
+                            .iter()
+                            .for_each(&mut push_target_nic);
                     }
                     external::VpcFirewallRuleTarget::Ip(_addr) => {
                         todo!("target addr")
