@@ -1762,6 +1762,7 @@ dependencies = [
  "omicron-common",
  "omicron-test-utils",
  "once_cell",
+ "rand 0.8.5",
  "serde",
  "serde_with",
  "slog",
