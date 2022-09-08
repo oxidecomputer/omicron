@@ -3119,6 +3119,7 @@ dependencies = [
  "internal-dns-client",
  "ipnetwork",
  "libc",
+ "libnet",
  "macaddr",
  "mockall",
  "nexus-client",
