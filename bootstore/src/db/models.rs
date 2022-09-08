@@ -35,20 +35,26 @@ pub struct KeyShare {
 impl KeyShare {
     pub fn new(
         epoch: i32,
-        share: SerializableShareDistribution,
+        share_distribution: SerializableShareDistribution,
     ) -> Result<KeyShare, Error> {
         // We save the digest so we don't have to deserialize and recompute most of the time.
         // We'd only want to do that for a consistency check occasionally.
-        let val = bcs::to_bytes(&share)?;
         let share_digest =
-            sprockets_common::Sha3_256Digest(Sha3_256::digest(&val).into())
-                .into();
+            Self::share_distribution_digest(&share_distribution)?;
         Ok(KeyShare {
             epoch,
-            share: Share(share),
+            share: Share(share_distribution),
             share_digest,
             committed: false,
         })
+    }
+
+    pub fn share_distribution_digest(
+        sd: &SerializableShareDistribution,
+    ) -> Result<Sha3_256Digest, Error> {
+        let val = bcs::to_bytes(&sd)?;
+        Ok(sprockets_common::Sha3_256Digest(Sha3_256::digest(&val).into())
+            .into())
     }
 }
 
@@ -63,7 +69,7 @@ pub struct Rack {
 /// derived from the rack secret for the given epoch with the given salt
 ///
 /// The epoch informs which rack secret should be used to derive the
-/// encryptiong key used to encrypt this root secret.
+/// encryption key used to encrypt this root secret.
 ///
 /// TODO-security: We probably don't want to log even the encrypted secret, but
 /// it's likely useful for debugging right now.

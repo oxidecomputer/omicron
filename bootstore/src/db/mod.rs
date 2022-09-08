@@ -19,7 +19,6 @@ use uuid::Uuid;
 use crate::trust_quorum::SerializableShareDistribution;
 pub(crate) use error::Error;
 use models::KeyShare;
-use models::Rack;
 use models::Sha3_256Digest;
 use models::Share;
 
@@ -102,22 +101,14 @@ impl Db {
         assert_ne!(0, epoch);
         use schema::key_shares::dsl;
         let prepare = KeyShare::new(epoch, share_distribution)?;
-        let rack_uuid = rack_uuid.to_string();
         conn.immediate_transaction(|tx| {
             // Has the rack been initialized?
             if !self.is_initialized(tx)? {
                 return Err(Error::RackNotInitialized);
             }
 
-            // Is the rack id valid?
-            // If the rack is initialized, a rack uuid must exist, so unwrap is safe.
-            let stored_rack_uuid = self.get_rack_uuid(tx)?.unwrap();
-            if rack_uuid != stored_rack_uuid {
-                return Err(Error::RackUuidMismatch {
-                    expected: rack_uuid,
-                    actual: stored_rack_uuid,
-                });
-            }
+            // Does the rack_uuid match what's stored?
+            self.validate_rack_uuid(tx, rack_uuid)?;
 
             // Check for idempotence
             if let Some(stored_key_share) = dsl::key_shares
@@ -156,11 +147,15 @@ impl Db {
     pub fn commit_share(
         &self,
         conn: &mut SqliteConnection,
+        rack_uuid: &Uuid,
         epoch: i32,
         digest: sprockets_common::Sha3_256Digest,
     ) -> Result<(), Error> {
         use schema::key_shares::dsl;
         conn.immediate_transaction(|tx| {
+            // Does the rack_uuid match what's stored?
+            self.validate_rack_uuid(tx, rack_uuid)?;
+
             // We only want to commit if the share digest of the commit is the
             // same as that of the prepare.
             let prepare_digest = dsl::key_shares
@@ -292,10 +287,7 @@ impl Db {
     }
 
     /// Return true if there is a commit for epoch 0, false otherwise
-    pub fn is_initialized(
-        &self,
-        tx: &mut SqliteConnection,
-    ) -> Result<bool, Error> {
+    fn is_initialized(&self, tx: &mut SqliteConnection) -> Result<bool, Error> {
         use schema::key_shares::dsl;
         Ok(dsl::key_shares
             .select(dsl::epoch)
@@ -306,19 +298,22 @@ impl Db {
             .is_some())
     }
 
-    /// Return true if the persisted rack uuid matches `uuid`, false otherwise
-    pub fn has_valid_rack_uuid(
+    /// Return `Ok(())` if the persisted rack uuid matches `uuid`, or
+    /// `Err(Error::RackUuidMismatch{..})` otherwise.
+    fn validate_rack_uuid(
         &self,
         tx: &mut SqliteConnection,
-        uuid: &str,
-    ) -> Result<bool, Error> {
-        use schema::rack::dsl;
-
-        Ok(dsl::rack
-            .filter(dsl::uuid.eq(uuid))
-            .get_result::<Rack>(tx)
-            .optional()?
-            .is_some())
+        rack_uuid: &Uuid,
+    ) -> Result<(), Error> {
+        let rack_uuid = rack_uuid.to_string();
+        let stored_rack_uuid = self.get_rack_uuid(tx)?;
+        if Some(&rack_uuid) != stored_rack_uuid.as_ref() {
+            return Err(Error::RackUuidMismatch {
+                expected: rack_uuid,
+                actual: stored_rack_uuid,
+            });
+        }
+        Ok(())
     }
 
     pub fn get_rack_uuid(
@@ -383,7 +378,7 @@ pub mod tests {
         let (db, mut conn) = Db::init(&logctx.log, ":memory:").unwrap();
         let epoch = 0;
         let digest = sprockets_common::Sha3_256Digest::default();
-        db.commit_share(&mut conn, epoch, digest).unwrap_err();
+        db.commit_share(&mut conn, &Uuid::new_v4(), epoch, digest).unwrap_err();
         logctx.cleanup_successful();
     }
 
@@ -394,9 +389,11 @@ pub mod tests {
         let shares = new_shares();
         let epoch = 0;
         let expected: SerializableShareDistribution = shares[0].clone().into();
-        db.insert_prepare(&mut conn, epoch, expected.clone()).unwrap();
+        let rack_uuid = Uuid::new_v4();
+        db.initialize(&mut conn, &rack_uuid, expected.clone()).unwrap();
         let digest = sprockets_common::Sha3_256Digest::default();
-        let err = db.commit_share(&mut conn, epoch, digest).unwrap_err();
+        let err =
+            db.commit_share(&mut conn, &rack_uuid, epoch, digest).unwrap_err();
         assert!(matches!(err, Error::CommitHashMismatch { epoch: _ }));
         logctx.cleanup_successful();
     }
@@ -408,13 +405,14 @@ pub mod tests {
         let shares = new_shares();
         let epoch = 0;
         let expected: SerializableShareDistribution = shares[0].clone().into();
-        db.insert_prepare(&mut conn, epoch, expected.clone()).unwrap();
+        let rack_uuid = Uuid::new_v4();
+        db.initialize(&mut conn, &rack_uuid, expected.clone()).unwrap();
 
         let val = bcs::to_bytes(&expected).unwrap();
         let digest =
             sprockets_common::Sha3_256Digest(Sha3_256::digest(&val).into())
                 .into();
-        assert!(db.commit_share(&mut conn, epoch, digest).is_ok());
+        assert!(db.commit_share(&mut conn, &rack_uuid, epoch, digest).is_ok());
 
         // Ensure `committed = true`
         use schema::key_shares::dsl;

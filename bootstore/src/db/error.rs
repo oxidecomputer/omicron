@@ -40,8 +40,8 @@ pub enum Error {
     #[error("A distinct key share already exists for epoch {epoch}")]
     KeyShareAlreadyExists { epoch: i32 },
 
-    #[error("Rack UUID mismatch: Expected: {expected}, Actual: {actual}")]
-    RackUuidMismatch { expected: String, actual: String },
+    #[error("Rack UUID mismatch: Expected: {expected}, Actual: {actual:?}")]
+    RackUuidMismatch { expected: String, actual: Option<String> },
 
     #[error("Rack not initialized")]
     RackNotInitialized,

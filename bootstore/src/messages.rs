@@ -65,7 +65,11 @@ pub enum NodeOp {
 
     /// A request from a [`Coordinator`] for the Commit phase of a
     /// rekey or reconfiguration
-    KeyShareCommit { rack_uuid: Uuid, epoch: i32 },
+    KeyShareCommit {
+        rack_uuid: Uuid,
+        epoch: i32,
+        prepare_share_distribution_digest: sprockets_common::Sha3_256Digest,
+    },
 }
 
 /// A response from a  [`Node`] to another [`Node`] or a [`Coordinator`]

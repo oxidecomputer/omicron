@@ -9,6 +9,7 @@
 
 use diesel::SqliteConnection;
 use slog::Logger;
+use sprockets_common::Sha3_256Digest;
 //use sprockets_host::Ed25519Certificate;
 use uuid::Uuid;
 
@@ -79,9 +80,15 @@ impl Node {
                 epoch,
                 share_distribution,
             ),
-            NodeOp::KeyShareCommit { rack_uuid, epoch } => {
-                self.handle_key_share_commit(rack_uuid, epoch)
-            }
+            NodeOp::KeyShareCommit {
+                rack_uuid,
+                epoch,
+                prepare_share_distribution_digest,
+            } => self.handle_key_share_commit(
+                &rack_uuid,
+                epoch,
+                prepare_share_distribution_digest,
+            ),
         };
 
         NodeResponse { version: req.version, id: req.id, result }
@@ -130,10 +137,18 @@ impl Node {
     // Handle `KeyShareCommit` messages from the coordinator
     fn handle_key_share_commit(
         &mut self,
-        _rack_uuid: Uuid,
-        _epoch: i32,
+        rack_uuid: &Uuid,
+        epoch: i32,
+        prepare_shared_distribution_digest: Sha3_256Digest,
     ) -> Result<NodeOpResult, NodeError> {
-        unimplemented!();
+        self.db.commit_share(
+            &mut self.conn,
+            rack_uuid,
+            epoch,
+            prepare_shared_distribution_digest,
+        )?;
+
+        Ok(NodeOpResult::CoordinatorAck)
     }
 }
 
@@ -142,47 +157,90 @@ mod tests {
     use super::*;
     use crate::db::models::KeyShare;
     use crate::db::tests::new_shares;
+    use crate::trust_quorum::ShareDistribution;
     use omicron_test_utils::dev::test_setup_log;
+    use omicron_test_utils::dev::LogContext;
     use uuid::Uuid;
 
-    #[test]
-    fn initialize_can_run_again_if_epoch_0_is_not_committed() {
+    fn setup() -> (LogContext, Node, Vec<ShareDistribution>) {
         let logctx = test_setup_log("test_db");
         let config =
             Config { log: logctx.log.clone(), db_path: ":memory:".to_string() };
-        let mut node = Node::new(config);
-        let shares = new_shares();
+        let node = Node::new(config);
+        (logctx, node, new_shares())
+    }
+
+    #[test]
+    fn initialize_can_run_again_if_epoch_0_is_not_committed() {
+        let (logctx, mut node, share_distributions) = setup();
+        let sd: SerializableShareDistribution =
+            share_distributions[0].clone().into();
         let expected = Ok(NodeOpResult::CoordinatorAck);
         assert_eq!(
             expected,
-            node.handle_initialize(&Uuid::new_v4(), shares[0].clone().into())
+            node.handle_initialize(&Uuid::new_v4(), sd.clone())
         );
         // We can re-initialize with a new uuid
         let rack_uuid = Uuid::new_v4();
-        assert_eq!(
-            expected,
-            node.handle_initialize(&rack_uuid, shares[0].clone().into())
-        );
+        assert_eq!(expected, node.handle_initialize(&rack_uuid, sd.clone()));
 
         // We can re-initialize with a the same uuid
-        assert_eq!(
-            expected,
-            node.handle_initialize(&rack_uuid, shares[0].clone().into())
-        );
+        assert_eq!(expected, node.handle_initialize(&rack_uuid, sd.clone()));
 
         // Committing the key share for epoch 0 means we cannot initialize again
         let epoch = 0;
-        let prepare = KeyShare::new(epoch, shares[0].clone().into()).unwrap();
+        let prepare = KeyShare::new(epoch, sd.clone()).unwrap();
         node.db
-            .commit_share(&mut node.conn, epoch, prepare.share_digest.into())
+            .commit_share(
+                &mut node.conn,
+                &rack_uuid,
+                epoch,
+                prepare.share_digest.into(),
+            )
             .unwrap();
 
         let expected = Err(NodeError::Db(
             crate::db::Error::AlreadyInitialized(rack_uuid.to_string()),
         ));
+        assert_eq!(expected, node.handle_initialize(&rack_uuid, sd));
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn initialize_and_reconfigure() {
+        let (logctx, mut node, share_distributions) = setup();
+        let sd: SerializableShareDistribution =
+            share_distributions[0].clone().into();
+        let rack_uuid = Uuid::new_v4();
+        let ok_ack = Ok(NodeOpResult::CoordinatorAck);
+        let sd_digest =
+            KeyShare::share_distribution_digest(&sd).unwrap().into();
+        let epoch = 0;
+
+        // Successful rack initialization - The initialize request is the prepare
+        // Then we commit it. In the future, we will also prepare and commit a plan
+        // as well as a share distribution. In that case we will likely have a separate
+        // `InitializeCommit` message and will likely change the `Initialize` message to
+        // `InitializePrepare`.
+        assert_eq!(ok_ack, node.handle_initialize(&rack_uuid, sd));
         assert_eq!(
-            expected,
-            node.handle_initialize(&rack_uuid, shares[0].clone().into())
+            ok_ack,
+            node.handle_key_share_commit(&rack_uuid, epoch, sd_digest)
+        );
+
+        // Let's simulate a successful reconfiguration
+        let sd: SerializableShareDistribution = new_shares()[0].clone().into();
+        let sd_digest =
+            KeyShare::share_distribution_digest(&sd).unwrap().into();
+        let epoch = 1;
+        assert_eq!(
+            ok_ack,
+            node.handle_key_share_prepare(&rack_uuid, epoch, sd)
+        );
+        assert_eq!(
+            ok_ack,
+            node.handle_key_share_commit(&rack_uuid, epoch, sd_digest)
         );
 
         logctx.cleanup_successful();
