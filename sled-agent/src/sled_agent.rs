@@ -103,9 +103,7 @@ pub enum Error {
 
     #[error(
         "Unexpected object in dladm cache file which cannot be deleted automatically
-        This is related to https://github.com/oxidecomputer/omicron/issues/1679 ; ideally
-        We'd never leave around this half-deleted objects, and we'd automatically remove
-        them if we ever saw them.
+        This is related to https://github.com/oxidecomputer/omicron/issues/1679 .
         To fix:
         - Delete the line \"{line}\" in {DATALINK_CACHE_FILE}.
         - Run `svcadm restart svc:/network/datalink-management:default`"
