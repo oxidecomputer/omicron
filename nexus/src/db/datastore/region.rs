@@ -146,6 +146,110 @@ impl DataStore {
         let blocks_per_extent =
             params.extent_size() / block_size.to_bytes() as i64;
 
+        // TODO: as a CTE, this could be the following:
+        //
+        // WITH
+        //   /*
+        //    * Look up all regions referencing this volume.
+        //    * This only returns results if the allocation previously
+        //    * completed.
+        //    */
+        //   previously_allocated_regions AS (
+        //     SELECT
+        //       [region fields]
+        //     FROM
+        //       omicron.public.Region
+        //     WHERE
+        //       volume_id = <volume_id>
+        //   ),
+        //   /*
+        //    * Find datasets provisioned for Crucible which have a
+        //    * low storage usage.
+        //    */
+        //   candidate_datasets AS (
+        //     SELECT
+        //       [dataset fields]
+        //     FROM
+        //       omicron.public.Dataset
+        //     WHERE
+        //       size_used IS NOT NULL AND
+        //       time_deleted IS NULL AND
+        //       kind = 'crucible'
+        //     ORDER BY size_used ASC
+        //     LIMIT <REGION_REDUNDANCY_THRESHOLD>
+        //   ),
+        //   /* Get the zpools to which those candidate datasets belong. */
+        //   candidate_zpools AS (
+        //     SELECT
+        //       [zpool fields]
+        //     FROM
+        //       omicron.public.Zpool
+        //     JOIN
+        //       candidate_datasets
+        //     ON
+        //       candidate_datasets.pool_id = omicron.public.Zpool.id
+        //   ),
+        //   /* Get the proposed new sizes for zpool capacity
+        //   zpool_capacity AS (
+        //     SELECT
+        //       SUM(dataset.size_used) AS previous_size_used
+        //       previous_size_used + <new_region_size> AS new_size_used
+        //       new_size_used <= zpool.total_size AS insert_would_fit
+        //     FROM
+        //       dataset
+        //     JOIN
+        //       candidate_zpools
+        //     ON
+        //       dataset.pool_id = zpool.id
+        //     WHERE
+        //       dataset.size_used != NULL AND
+        //       dataset.time_deleted = NULL
+        //   ),
+        //
+        //   /* Make the decision on whether or not to perform the insert */
+        //   do_insert AS (
+        //     SELECT IF(
+        //       zpool_capacity.insert_would_fit AND
+        //       NOT(EXISTS(SELECT id from previously_allocated_regions)) AND
+        //       COUNT(candidate_datasets) >= REGION_REDUNDANCY_THRESHOLD
+        //       TRUE,
+        //       FALSE
+        //     ),
+        //   ),
+        //
+        //   candidate_regions AS (
+        //     SELECT
+        //       gen_random_uuid() as id,
+        //       now() as time_created,
+        //       now() as time_modified,
+        //       candidate_datasets.id as dataset_id,
+        //       <volume_id> as volume_id,
+        //       <block_size> as block_size,
+        //       <blocks_per_extent> as blocks_per_extent,
+        //       <extent_count> as extent_count,
+        //     FROM
+        //       candidate_datasets
+        //   ),
+        //
+        //   inserted_regions AS (
+        //     INSERT INTO omicron.public.Region
+        //       candidate_regions
+        //     WHERE
+        //       (SELECT * FROM do_insert)
+        //     RETURNING *
+        //   ),
+        //   updated_datasets AS (
+        //     UPDATE dataset SET
+        //       size_used = size_used + <new_region_size>
+        //     WHERE
+        //       id IN (SELECT id FROM candidate_datasets) AND
+        //       (SELECT * FROM do_insert)
+        //     RETURNING *
+        //   ),
+        // TODO: How hard is it to cope with the variable length here?
+        // SELECT * FROM
+        //   (SELECT * FROM previously_allocated_regions)
+        //   LEFT JOIN (SELECT * FROM inserted_regions) ON TRUE;
         self.pool()
             .transaction(move |conn| {
                 // First, for idempotency, check if regions are already
