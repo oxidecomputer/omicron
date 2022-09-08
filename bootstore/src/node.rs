@@ -155,6 +155,7 @@ impl Node {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db;
     use crate::db::models::KeyShare;
     use crate::db::tests::new_shares;
     use crate::trust_quorum::ShareDistribution;
@@ -199,9 +200,9 @@ mod tests {
             )
             .unwrap();
 
-        let expected = Err(NodeError::Db(
-            crate::db::Error::AlreadyInitialized(rack_uuid.to_string()),
-        ));
+        let expected = Err(NodeError::Db(db::Error::AlreadyInitialized(
+            rack_uuid.to_string(),
+        )));
         assert_eq!(expected, node.handle_initialize(&rack_uuid, sd));
 
         logctx.cleanup_successful();
@@ -241,6 +242,66 @@ mod tests {
         assert_eq!(
             ok_ack,
             node.handle_key_share_commit(&rack_uuid, epoch, sd_digest)
+        );
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn cannot_prepare_if_not_initialized() {
+        let (logctx, mut node, share_distributions) = setup();
+        let sd: SerializableShareDistribution =
+            share_distributions[0].clone().into();
+        let rack_uuid = Uuid::new_v4();
+        let epoch = 1;
+
+        // We don't have even a prepared key share at epoch 0 yet
+        assert_eq!(
+            Err(NodeError::Db(db::Error::RackNotInitialized)),
+            node.handle_key_share_prepare(&rack_uuid, epoch, sd.clone())
+        );
+
+        // Create a prepare, but don't commit it
+        let ok_ack = Ok(NodeOpResult::CoordinatorAck);
+        assert_eq!(ok_ack, node.handle_initialize(&rack_uuid, sd.clone()));
+
+        // Try (and fail) to issue a prepare for epoch 1 again. The actual contents of the
+        // share distribution doesn't matter.
+        assert_eq!(
+            Err(NodeError::Db(db::Error::RackNotInitialized)),
+            node.handle_key_share_prepare(&rack_uuid, epoch, sd.clone())
+        );
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn cannot_prepare_with_bad_rack_uuid() {
+        let (logctx, mut node, share_distributions) = setup();
+        let sd: SerializableShareDistribution =
+            share_distributions[0].clone().into();
+        let rack_uuid = Uuid::new_v4();
+        let ok_ack = Ok(NodeOpResult::CoordinatorAck);
+        let sd_digest =
+            KeyShare::share_distribution_digest(&sd).unwrap().into();
+        let epoch = 0;
+
+        // Successful rack initialization
+        assert_eq!(ok_ack, node.handle_initialize(&rack_uuid, sd.clone()));
+        assert_eq!(
+            ok_ack,
+            node.handle_key_share_commit(&rack_uuid, epoch, sd_digest)
+        );
+
+        // Attempt to prepare with an invalid rack uuid
+        let bad_uuid = Uuid::new_v4();
+        let epoch = 1;
+        assert_eq!(
+            Err(NodeError::Db(db::Error::RackUuidMismatch {
+                expected: bad_uuid.to_string(),
+                actual: Some(rack_uuid.to_string())
+            })),
+            node.handle_key_share_prepare(&bad_uuid, epoch, sd.clone())
         );
 
         logctx.cleanup_successful();

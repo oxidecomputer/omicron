@@ -226,6 +226,8 @@ impl Db {
     // and insert the new one.
     //
     // Return the old rack UUID if one exists
+    //
+    // TODO: Add a DB trigger to ensure only 1 row can exist at a time?
     fn initialize_rack_uuid(
         &self,
         tx: &mut SqliteConnection,
