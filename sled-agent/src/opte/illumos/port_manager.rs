@@ -482,9 +482,12 @@ fn opte_firewall_rules(
             VpcFirewallRuleStatus::Enabled => true,
         })
         .filter(|rule| {
-            // TODO: no targets means apply everywhere, right?
-            rule.targets.is_empty()
-                || rule.targets.iter().any(|nic| nic.mac.0 == *port.mac())
+            rule.targets.is_empty() // no targets means apply everywhere
+                || rule.targets.iter().any(|nic| {
+                    // (VNI, MAC) is a unique identifier for the NIC.
+                    u32::from(nic.vni) == u32::from(*port.vni())
+                        && nic.mac.0 == *port.mac()
+                })
         })
         .map(|rule| {
             let priority = rule.priority.0;
