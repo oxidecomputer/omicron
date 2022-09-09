@@ -619,18 +619,35 @@ impl SpHandler for Handler {
         Ok(state)
     }
 
-    fn update_start(
+    fn update_prepare(
         &mut self,
         sender: SocketAddrV6,
         port: SpPort,
-        update: gateway_messages::UpdateStart,
+        update: gateway_messages::UpdatePrepare,
     ) -> Result<(), ResponseError> {
         warn!(
             &self.log,
-            "received update start request; not supported by simulated gimlet";
+            "received update prepare request; not supported by simulated gimlet";
             "sender" => %sender,
             "port" => ?port,
             "update" => ?update,
+        );
+        Err(ResponseError::RequestUnsupportedForSp)
+    }
+
+    fn update_prepare_status(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+        request: gateway_messages::UpdatePrepareStatusRequest,
+    ) -> Result<gateway_messages::UpdatePrepareStatusResponse, ResponseError>
+    {
+        warn!(
+            &self.log,
+            "received update prepare status request; not supported by simulated gimlet";
+            "sender" => %sender,
+            "port" => ?port,
+            "request" => ?request,
         );
         Err(ResponseError::RequestUnsupportedForSp)
     }
@@ -649,6 +666,22 @@ impl SpHandler for Handler {
             "port" => ?port,
             "offset" => chunk.offset,
             "length" => data.len(),
+        );
+        Err(ResponseError::RequestUnsupportedForSp)
+    }
+
+    fn update_abort(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+        component: SpComponent,
+    ) -> Result<(), ResponseError> {
+        warn!(
+            &self.log,
+            "received update abort; not supported by simulated gimlet";
+            "sender" => %sender,
+            "port" => ?port,
+            "component" => ?component,
         );
         Err(ResponseError::RequestUnsupportedForSp)
     }

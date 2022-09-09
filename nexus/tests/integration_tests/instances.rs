@@ -11,6 +11,7 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::create_ip_pool;
+use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::DiskTest;
 use omicron_common::api::external::ByteCount;
@@ -174,6 +175,7 @@ async fn test_instances_create_reboot_halt(
                     params::InstanceNetworkInterfaceAttachment::Default,
                 external_ips: vec![],
                 disks: vec![],
+                start: true,
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -441,6 +443,62 @@ async fn test_instances_create_reboot_halt(
 }
 
 #[nexus_test]
+async fn test_instances_create_stopped_start(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let apictx = &cptestctx.server.apictx;
+    let nexus = &apictx.nexus;
+
+    // Create an IP pool and  project that we'll use for testing.
+    create_ip_pool(&client, POOL_NAME, None, None).await;
+    create_organization(&client, ORGANIZATION_NAME).await;
+    let url_instances = format!(
+        "/organizations/{}/projects/{}/instances",
+        ORGANIZATION_NAME, PROJECT_NAME
+    );
+    let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
+
+    // Create an instance in a stopped state.
+    let instance: Instance = object_create(
+        client,
+        &url_instances,
+        &params::InstanceCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "just-rainsticks".parse().unwrap(),
+                description: "instance just-rainsticks".to_string(),
+            },
+            ncpus: InstanceCpuCount(4),
+            memory: ByteCount::from_gibibytes_u32(1),
+            hostname: String::from("the_host"),
+            user_data: vec![],
+            network_interfaces:
+                params::InstanceNetworkInterfaceAttachment::Default,
+            external_ips: vec![],
+            disks: vec![],
+            start: false,
+        },
+    )
+    .await;
+    assert_eq!(instance.runtime.run_state, InstanceState::Stopped);
+
+    // Start the instance.
+    let instance_url = format!("{}/just-rainsticks", url_instances);
+    let instance =
+        instance_post(&client, &instance_url, InstanceOp::Start).await;
+
+    // Now, simulate completion of instance boot and check the state reported.
+    instance_simulate(nexus, &instance.identity.id).await;
+    let instance_next = instance_get(&client, &instance_url).await;
+    identity_eq(&instance.identity, &instance_next.identity);
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
+    assert!(
+        instance_next.runtime.time_run_state_updated
+            > instance.runtime.time_run_state_updated
+    );
+}
+
+#[nexus_test]
 async fn test_instances_delete_fails_when_running_succeeds_when_stopped(
     cptestctx: &ControlPlaneTestContext,
 ) {
@@ -612,6 +670,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
         network_interfaces: interface_params.clone(),
         external_ips: vec![],
         disks: vec![],
+        start: true,
     };
     let response =
         NexusRequest::objects_post(client, &url_instances, &instance_params)
@@ -635,6 +694,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
         network_interfaces: interface_params,
         external_ips: vec![],
         disks: vec![],
+        start: true,
     };
     let _ =
         NexusRequest::objects_post(client, &url_instances, &instance_params)
@@ -723,6 +783,7 @@ async fn test_instance_with_single_explicit_ip_address(
         network_interfaces: interface_params,
         external_ips: vec![],
         disks: vec![],
+        start: true,
     };
     let response =
         NexusRequest::objects_post(client, &url_instances, &instance_params)
@@ -842,6 +903,7 @@ async fn test_instance_with_new_custom_network_interfaces(
         network_interfaces: interface_params,
         external_ips: vec![],
         disks: vec![],
+        start: true,
     };
     let response =
         NexusRequest::objects_post(client, &url_instances, &instance_params)
@@ -958,6 +1020,7 @@ async fn test_instance_create_delete_network_interface(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::None,
         external_ips: vec![],
         disks: vec![],
+        start: true,
     };
     let response =
         NexusRequest::objects_post(client, &url_instances, &instance_params)
@@ -1208,6 +1271,7 @@ async fn test_instance_update_network_interfaces(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::None,
         external_ips: vec![],
         disks: vec![],
+        start: true,
     };
     let response =
         NexusRequest::objects_post(client, &url_instances, &instance_params)
@@ -1613,6 +1677,7 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
         network_interfaces: interface_params,
         external_ips: vec![],
         disks: vec![],
+        start: true,
     };
     let builder =
         RequestBuilder::new(client, http::Method::POST, &url_instances)
@@ -1694,6 +1759,7 @@ async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
                 name: Name::try_from(String::from("probablydata")).unwrap(),
             },
         )],
+        start: true,
     };
 
     let url_instances = format!(
@@ -1800,6 +1866,7 @@ async fn test_attach_eight_disks_to_instance(
                 )
             })
             .collect(),
+        start: true,
     };
 
     let url_instances = format!(
@@ -1907,6 +1974,7 @@ async fn test_cannot_attach_nine_disks_to_instance(
                 )
             })
             .collect(),
+        start: true,
     };
 
     let url_instances = format!(
@@ -2038,6 +2106,7 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
                 )
             })
             .collect(),
+        start: true,
     };
 
     let url_instances = format!(
@@ -2153,6 +2222,7 @@ async fn test_disks_detached_when_instance_destroyed(
                 )
             })
             .collect(),
+        start: true,
     };
 
     let url_instances = format!(
@@ -2258,6 +2328,7 @@ async fn test_instances_memory_rejected_less_than_min_memory_size(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![],
+        start: true,
     };
 
     let error = NexusRequest::new(
@@ -2307,6 +2378,7 @@ async fn test_instances_memory_not_divisible_by_min_memory_size(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![],
+        start: true,
     };
 
     let error = NexusRequest::new(
@@ -2481,6 +2553,7 @@ async fn test_instance_ephemeral_ip_from_correct_project(
             pool_name: None,
         }],
         disks: vec![],
+        start: true,
     };
     let response =
         NexusRequest::objects_post(client, &url_instances, &instance_params)
