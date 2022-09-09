@@ -517,15 +517,23 @@ async fn sp_component_update(
     path: Path<PathSpComponent>,
     body: TypedBody<UpdateBody>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let comms = &rqctx.context().sp_comms;
+    let comms = Arc::clone(&rqctx.context().sp_comms);
     let PathSpComponent { sp, component } = path.into_inner();
     let component = component_from_str(&component)?;
     let UpdateBody { image, slot } = body.into_inner();
 
-    comms
+    // Sending an update image to an SP involves multiple round trips to that SP
+    // and may run for several minutes in some cases. We want to run that to
+    // completion, even if our client disconnects (which would cause the future
+    // we're in now to be cancelled). Move the update call into a background
+    // task.
+    let task = tokio::spawn(async move {
+        comms
         .update(sp.into(), component, slot, image)
         .await
-        .map_err(http_err_from_comms_err)?;
+    }).await.unwrap();
+
+    task.map_err(http_err_from_comms_err)?;
 
     Ok(HttpResponseUpdatedNoContent {})
 }
