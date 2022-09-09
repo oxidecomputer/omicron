@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use vsss_rs::Share;
 
+use crate::db;
 use crate::trust_quorum::SerializableShareDistribution;
 
 /// A request sent to a [`Node`] from another [`Node`] or a [`Coordinator`].
@@ -64,7 +65,11 @@ pub enum NodeOp {
 
     /// A request from a [`Coordinator`] for the Commit phase of a
     /// rekey or reconfiguration
-    KeyShareCommit { rack_uuid: Uuid, epoch: i32 },
+    KeyShareCommit {
+        rack_uuid: Uuid,
+        epoch: i32,
+        prepare_share_distribution_digest: sprockets_common::Sha3_256Digest,
+    },
 }
 
 /// A response from a  [`Node`] to another [`Node`] or a [`Coordinator`]
@@ -82,13 +87,14 @@ pub enum NodeOpResult {
     /// A key share for a given epoch as requested by [`PeerRequest::GetShare`]
     Share { epoch: i32, share: Share },
 
-    /// An ack for the most recent coordinator message
+    /// An ack for the most recent coordinator message, where there is no data
+    /// to return
     CoordinatorAck,
 }
 
 /// Errors returned inside a [`NodeOpResult`]
 #[derive(
-    Debug, Clone, PartialEq, From, Serialize, Deserialize, thiserror::Error,
+    Debug, PartialEq, Clone, From, Serialize, Deserialize, thiserror::Error,
 )]
 pub enum NodeError {
     #[error("Version {0} messages are unsupported.")]
@@ -106,8 +112,17 @@ pub enum NodeError {
     AlreadyInitialized { rack_uuid: Uuid },
 
     #[error(
-        "No corresponding key share prepare for this commit: rack UUID:
+        "No corresponding key share prepare for this commit: rack UUID: \
 {rack_uuid}, epoch: {epoch}"
     )]
     MissingKeySharePrepare { rack_uuid: Uuid, epoch: i32 },
+
+    #[error("DB error: {0}")]
+    Db(db::Error),
+
+    #[error(
+        "'KeySharePrepare' messages are not allowed for epoch 0. \
+Please send an 'Initialize' message"
+    )]
+    KeySharePrepareForEpoch0,
 }
