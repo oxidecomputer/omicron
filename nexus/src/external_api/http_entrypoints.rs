@@ -3960,8 +3960,8 @@ async fn sled_view(
 /// Refresh update data
 #[endpoint {
      method = POST,
-     path = "/updates/refresh",
-     tags = ["updates"],
+     path = "/system/updates/refresh",
+     tags = ["system"],
 }]
 async fn updates_refresh(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
