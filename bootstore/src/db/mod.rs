@@ -422,5 +422,6 @@ pub mod tests {
         assert_matches!(err, diesel::result::Error::DatabaseError(_, s) => {
             assert_eq!("maximum one rack", s.message());
         });
+        logctx.cleanup_successful();
     }
 }
