@@ -92,8 +92,10 @@ impl InstanceStates {
         use PropolisInstanceState as Observed;
 
         let current = match observed {
-            Observed::Creating => State::Creating,
-            Observed::Starting => State::Starting,
+            // From an external perspective, the instance has already been created.
+            // Creating the propolis instance is an internal detail and happens
+            // every time we start the instance, so we map it to "Starting" here.
+            Observed::Creating | Observed::Starting => State::Starting,
             Observed::Running => State::Running,
             Observed::Stopping => State::Stopping,
             Observed::Stopped => State::Stopped,
@@ -153,7 +155,7 @@ impl InstanceStates {
     // generation number.
     //
     // This transition always succeeds.
-    fn transition(
+    pub(crate) fn transition(
         &mut self,
         next: InstanceState,
         desired: Option<InstanceStateRequested>,
@@ -171,11 +173,11 @@ impl InstanceStates {
         match self.current.run_state {
             // Early exit: Running request is no-op
             InstanceState::Running
-            | InstanceState::Starting
             | InstanceState::Rebooting
             | InstanceState::Migrating => return Ok(None),
             // Valid states for a running request
             InstanceState::Creating
+            | InstanceState::Starting
             | InstanceState::Stopping
             | InstanceState::Stopped => {
                 self.transition(
@@ -213,7 +215,7 @@ impl InstanceStates {
             InstanceState::Starting
             | InstanceState::Running
             | InstanceState::Rebooting => {
-                // The VM is running, explicitly tell it to stop.
+                // There's a propolis service, explicitly tell it to stop.
                 self.transition(
                     InstanceState::Stopping,
                     Some(InstanceStateRequested::Stopped),
