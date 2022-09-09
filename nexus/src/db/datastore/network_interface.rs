@@ -10,6 +10,7 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
+use crate::db::cte_utils::BoxedQuery;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
@@ -178,21 +179,20 @@ impl DataStore {
         Ok(())
     }
 
-    /// Return the information about an instance's network interfaces required
-    /// for the sled agent to instantiate them via OPTE.
-    pub(crate) async fn derive_guest_network_interface_info(
+    /// Return information about network interfaces required for the sled
+    /// agent to instantiate or modify them via OPTE. This function takes
+    /// a partially constructed query over the network interface table so
+    /// that we can use it for instances, VPCs, and subnets.
+    async fn derive_network_interface_info(
         &self,
         opctx: &OpContext,
-        authz_instance: &authz::Instance,
+        partial_query: BoxedQuery<db::schema::network_interface::table>,
     ) -> ListResultVec<sled_client_types::NetworkInterface> {
-        opctx.authorize(authz::Action::ListChildren, authz_instance).await?;
-
         use db::schema::network_interface;
         use db::schema::vpc;
         use db::schema::vpc_subnet;
 
-        let rows = network_interface::table
-            .filter(network_interface::instance_id.eq(authz_instance.id()))
+        let rows = partial_query
             .filter(network_interface::time_deleted.is_null())
             .inner_join(
                 vpc_subnet::table
@@ -224,6 +224,25 @@ impl DataStore {
             .collect())
     }
 
+    /// Return the information about an instance's network interfaces required
+    /// for the sled agent to instantiate them via OPTE.
+    pub(crate) async fn derive_guest_network_interface_info(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+    ) -> ListResultVec<sled_client_types::NetworkInterface> {
+        opctx.authorize(authz::Action::ListChildren, authz_instance).await?;
+
+        use db::schema::network_interface;
+        self.derive_network_interface_info(
+            opctx,
+            network_interface::table
+                .filter(network_interface::instance_id.eq(authz_instance.id()))
+                .into_boxed(),
+        )
+        .await
+    }
+
     /// Return information about all VNICs connected to a VPC required
     /// for the sled agent to instantiate firewall rules via OPTE.
     pub(crate) async fn derive_vpc_network_interface_info(
@@ -233,36 +252,14 @@ impl DataStore {
     ) -> ListResultVec<sled_client_types::NetworkInterface> {
         opctx.authorize(authz::Action::ListChildren, authz_vpc).await?;
 
-        use db::schema::{network_interface, vpc, vpc_subnet};
-        let rows = network_interface::table
-            .filter(network_interface::vpc_id.eq(authz_vpc.id()))
-            .filter(network_interface::time_deleted.is_null())
-            .inner_join(
-                vpc_subnet::table
-                    .on(network_interface::subnet_id.eq(vpc_subnet::id)),
-            )
-            .inner_join(vpc::table.on(vpc_subnet::vpc_id.eq(vpc::id)))
-            .order_by(network_interface::slot)
-            // TODO-cleanup: See DRY comment above.
-            .select((
-                network_interface::name,
-                network_interface::ip,
-                network_interface::mac,
-                vpc_subnet::ipv4_block,
-                vpc_subnet::ipv6_block,
-                vpc::vni,
-                network_interface::is_primary,
-                network_interface::slot,
-            ))
-            .get_results_async::<NicInfo>(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
-            })?;
-        Ok(rows
-            .into_iter()
-            .map(sled_client_types::NetworkInterface::from)
-            .collect())
+        use db::schema::network_interface;
+        self.derive_network_interface_info(
+            opctx,
+            network_interface::table
+                .filter(network_interface::vpc_id.eq(authz_vpc.id()))
+                .into_boxed(),
+        )
+        .await
     }
 
     /// Return information about all VNICs connected to a VpcSubnet required
@@ -274,36 +271,14 @@ impl DataStore {
     ) -> ListResultVec<sled_client_types::NetworkInterface> {
         opctx.authorize(authz::Action::ListChildren, authz_subnet).await?;
 
-        use db::schema::{network_interface, vpc, vpc_subnet};
-        let rows = network_interface::table
-            .filter(network_interface::subnet_id.eq(authz_subnet.id()))
-            .filter(network_interface::time_deleted.is_null())
-            .inner_join(
-                vpc_subnet::table
-                    .on(network_interface::subnet_id.eq(vpc_subnet::id)),
-            )
-            .inner_join(vpc::table.on(vpc_subnet::vpc_id.eq(vpc::id)))
-            .order_by(network_interface::slot)
-            // TODO-cleanup: See DRY comment above.
-            .select((
-                network_interface::name,
-                network_interface::ip,
-                network_interface::mac,
-                vpc_subnet::ipv4_block,
-                vpc_subnet::ipv6_block,
-                vpc::vni,
-                network_interface::is_primary,
-                network_interface::slot,
-            ))
-            .get_results_async::<NicInfo>(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
-            })?;
-        Ok(rows
-            .into_iter()
-            .map(sled_client_types::NetworkInterface::from)
-            .collect())
+        use db::schema::network_interface;
+        self.derive_network_interface_info(
+            opctx,
+            network_interface::table
+                .filter(network_interface::subnet_id.eq(authz_subnet.id()))
+                .into_boxed(),
+        )
+        .await
     }
 
     /// List network interfaces associated with a given instance.
