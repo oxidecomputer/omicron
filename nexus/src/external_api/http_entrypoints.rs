@@ -3840,8 +3840,8 @@ async fn vpc_router_route_update(
 /// List racks
 #[endpoint {
     method = GET,
-    path = "/hardware/racks",
-    tags = ["hardware"],
+    path = "/system/hardware/racks",
+    tags = ["system"],
 }]
 async fn rack_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -3877,8 +3877,8 @@ struct RackPathParam {
 /// Fetch a rack
 #[endpoint {
     method = GET,
-    path = "/hardware/racks/{rack_id}",
-    tags = ["hardware"],
+    path = "/system/hardware/racks/{rack_id}",
+    tags = ["system"],
 }]
 async fn rack_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -3900,8 +3900,8 @@ async fn rack_view(
 /// List sleds
 #[endpoint {
     method = GET,
-    path = "/hardware/sleds",
-    tags = ["hardware"],
+    path = "/system/hardware/sleds",
+    tags = ["system"],
 }]
 async fn sled_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -3937,8 +3937,8 @@ struct SledPathParam {
 /// Fetch a sled
 #[endpoint {
     method = GET,
-    path = "/hardware/sleds/{sled_id}",
-    tags = ["hardware"],
+    path = "/system/hardware/sleds/{sled_id}",
+    tags = ["system"],
 }]
 async fn sled_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
