@@ -186,15 +186,14 @@ impl Db {
                 let uuid = self.get_rack_uuid(tx)?.unwrap();
                 return Err(Error::AlreadyInitialized(uuid));
             }
-            let new_uuid = rack_uuid.to_string();
-            match self.initialize_rack_uuid(tx, &new_uuid)? {
+            match self.initialize_rack_uuid(tx, &rack_uuid)? {
                 Some(old_uuid) => {
-                        info!(self.log, "Re-Initializing Rack: Old UUID: {old_uuid}, New UUID: {new_uuid}");
+                        info!(self.log, "Re-Initializing Rack: Old UUID: {old_uuid}, New UUID: {rack_uuid}");
                     self.update_prepare_for_epoch_0(tx, share_distribution)
 
                 },
                 None => {
-                    info!(self.log, "Initializing Rack for the first time with UUID: {new_uuid}");
+                    info!(self.log, "Initializing Rack for the first time with UUID: {rack_uuid}");
                     self.insert_prepare(tx, 0, share_distribution)
                     }
             }
@@ -202,7 +201,7 @@ impl Db {
         })
     }
 
-    // Insert an uncommitted key share for a given epoch This should be called
+    // Insert an uncommitted key share for a given epoch. This should be called
     // inside a transaction by the caller so that the given checks can be
     // performed.
     fn insert_prepare(
@@ -219,7 +218,7 @@ impl Db {
 
     // During rack initialization we set the rack UUID.
     //
-    // We only allow rewriting this UUID in when the rack is not initialized,
+    // We only allow rewriting this UUID when the rack is not initialized,
     // and so we only call this from the `initialize` method.
     //
     // Since we only allow a single row, we just delete the existing rows
@@ -231,13 +230,13 @@ impl Db {
     fn initialize_rack_uuid(
         &self,
         tx: &mut SqliteConnection,
-        new_uuid: &str,
-    ) -> Result<Option<String>, Error> {
+        new_uuid: &Uuid,
+    ) -> Result<Option<Uuid>, Error> {
         use schema::rack::dsl;
         let old_uuid = self.get_rack_uuid(tx)?;
         diesel::delete(dsl::rack).execute(tx)?;
         diesel::insert_into(dsl::rack)
-            .values(dsl::uuid.eq(new_uuid))
+            .values(dsl::uuid.eq(new_uuid.to_string()))
             .execute(tx)?;
         Ok(old_uuid)
     }
@@ -307,11 +306,10 @@ impl Db {
         tx: &mut SqliteConnection,
         rack_uuid: &Uuid,
     ) -> Result<(), Error> {
-        let rack_uuid = rack_uuid.to_string();
         let stored_rack_uuid = self.get_rack_uuid(tx)?;
-        if Some(&rack_uuid) != stored_rack_uuid.as_ref() {
+        if Some(rack_uuid) != stored_rack_uuid.as_ref() {
             return Err(Error::RackUuidMismatch {
-                expected: rack_uuid,
+                expected: rack_uuid.clone(),
                 actual: stored_rack_uuid,
             });
         }
@@ -321,10 +319,17 @@ impl Db {
     pub fn get_rack_uuid(
         &self,
         tx: &mut SqliteConnection,
-    ) -> Result<Option<String>, Error> {
+    ) -> Result<Option<Uuid>, Error> {
         use schema::rack::dsl;
 
-        Ok(dsl::rack.select(dsl::uuid).get_result::<String>(tx).optional()?)
+        dsl::rack.select(dsl::uuid).get_result::<String>(tx).optional()?.map_or(
+            Ok(None),
+            |uuidstr| {
+                Uuid::parse_str(&uuidstr).map(|uuid| Some(uuid)).map_err(
+                    |err| Error::ParseUuid { uuidstr, err: err.to_string() },
+                )
+            },
+        )
     }
 }
 

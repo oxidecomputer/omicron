@@ -112,7 +112,7 @@ pub enum NodeError {
     AlreadyInitialized { rack_uuid: Uuid },
 
     #[error(
-        "No corresponding key share prepare for this commit: rack UUID:
+        "No corresponding key share prepare for this commit: rack UUID: \
 {rack_uuid}, epoch: {epoch}"
     )]
     MissingKeySharePrepare { rack_uuid: Uuid, epoch: i32 },
@@ -121,7 +121,7 @@ pub enum NodeError {
     Db(db::Error),
 
     #[error(
-        "'KeySharePrepare' messages are not allowed for epoch 0.
+        "'KeySharePrepare' messages are not allowed for epoch 0. \
 Please send an 'Initialize' message"
     )]
     KeySharePrepareForEpoch0,

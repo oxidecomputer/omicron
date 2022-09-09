@@ -5,6 +5,7 @@
 //! DB related errors
 
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 #[derive(thiserror::Error, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Error {
@@ -16,6 +17,9 @@ pub enum Error {
 
     #[error("BCS serialization error: {err}")]
     Bcs { err: String },
+
+    #[error("Failed to parse string as UUID: {uuidstr} - {err}")]
+    ParseUuid { uuidstr: String, err: String },
 
     // Temporary until the using code is written
     #[allow(dead_code)]
@@ -29,10 +33,10 @@ pub enum Error {
     DbInvariant(String),
 
     #[error("Already initialized with rack uuid: {0}")]
-    AlreadyInitialized(String),
+    AlreadyInitialized(Uuid),
 
     #[error(
-        "Tried to Prepare a KeyShare with epoch {epoch}, but found one 
+        "Tried to Prepare a KeyShare with epoch {epoch}, but found one \
     with later epoch {stored_epoch}"
     )]
     OldKeySharePrepare { epoch: i32, stored_epoch: i32 },
@@ -41,7 +45,7 @@ pub enum Error {
     KeyShareAlreadyExists { epoch: i32 },
 
     #[error("Rack UUID mismatch: Expected: {expected}, Actual: {actual:?}")]
-    RackUuidMismatch { expected: String, actual: Option<String> },
+    RackUuidMismatch { expected: Uuid, actual: Option<Uuid> },
 
     #[error("Rack not initialized")]
     RackNotInitialized,

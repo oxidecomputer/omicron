@@ -185,7 +185,7 @@ mod tests {
         let rack_uuid = Uuid::new_v4();
         assert_eq!(expected, node.handle_initialize(&rack_uuid, sd.clone()));
 
-        // We can re-initialize with a the same uuid
+        // We can re-initialize with the same uuid
         assert_eq!(expected, node.handle_initialize(&rack_uuid, sd.clone()));
 
         // Committing the key share for epoch 0 means we cannot initialize again
@@ -200,9 +200,8 @@ mod tests {
             )
             .unwrap();
 
-        let expected = Err(NodeError::Db(db::Error::AlreadyInitialized(
-            rack_uuid.to_string(),
-        )));
+        let expected =
+            Err(NodeError::Db(db::Error::AlreadyInitialized(rack_uuid)));
         assert_eq!(expected, node.handle_initialize(&rack_uuid, sd));
 
         logctx.cleanup_successful();
@@ -298,8 +297,8 @@ mod tests {
         let epoch = 1;
         assert_eq!(
             Err(NodeError::Db(db::Error::RackUuidMismatch {
-                expected: bad_uuid.to_string(),
-                actual: Some(rack_uuid.to_string())
+                expected: bad_uuid,
+                actual: Some(rack_uuid)
             })),
             node.handle_key_share_prepare(&bad_uuid, epoch, sd.clone())
         );
