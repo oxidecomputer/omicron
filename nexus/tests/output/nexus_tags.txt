@@ -7,13 +7,6 @@ disk_metrics_list                        /organizations/{organization_name}/proj
 disk_view                                /organizations/{organization_name}/projects/{project_name}/disks/{disk_name}
 disk_view_by_id                          /by-id/disks/{id}
 
-API operations found with tag "hardware"
-OPERATION ID                             URL PATH
-rack_list                                /hardware/racks
-rack_view                                /hardware/racks/{rack_id}
-sled_list                                /hardware/sleds
-sled_view                                /hardware/sleds/{sled_id}
-
 API operations found with tag "hidden"
 OPERATION ID                             URL PATH
 device_access_token                      /device/token
@@ -155,6 +148,10 @@ snapshot_view_by_id                      /by-id/snapshots/{id}
 
 API operations found with tag "system"
 OPERATION ID                             URL PATH
+rack_list                                /system/hardware/racks
+rack_view                                /system/hardware/racks/{rack_id}
+sled_list                                /system/hardware/sleds
+sled_view                                /system/hardware/sleds/{sled_id}
 system_user_list                         /system/user
 system_user_view                         /system/user/{user_name}
 updates_refresh                          /system/updates/refresh
