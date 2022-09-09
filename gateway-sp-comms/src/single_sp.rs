@@ -191,14 +191,10 @@ impl SingleSp {
             "stream_id" => stream_id,
             "total_size" => total_size,
         );
-        self.update_prepare(component, stream_id, slot, total_size)
-            .await
-            .map_err(UpdateError::Start)?;
+        self.update_prepare(component, stream_id, slot, total_size).await?;
 
         // Wait until the SP finishes whatever prep work it needs to do.
-        self.poll_for_update_prepare_status_done(component, stream_id)
-            .await
-            .map_err(UpdateError::Start)?;
+        self.poll_for_update_prepare_status_done(component, stream_id).await?;
         info!(
             self.log, "SP update preparation complete";
             "stream_id" => stream_id,
@@ -214,10 +210,8 @@ impl SingleSp {
                 "offset" => offset,
             );
 
-            image = self
-                .update_chunk(component, stream_id, offset, image)
-                .await
-                .map_err(|err| UpdateError::Chunk { offset, err })?;
+            image =
+                self.update_chunk(component, stream_id, offset, image).await?;
 
             // Update our offset according to how far our cursor advanced.
             offset += (image.position() - prior_pos) as u32;

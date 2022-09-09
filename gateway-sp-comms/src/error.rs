@@ -33,10 +33,8 @@ pub enum SpCommunicationError {
 pub enum UpdateError {
     #[error("update image is too large")]
     ImageTooLarge,
-    #[error("error starting update: {0}")]
-    Start(SpCommunicationError),
-    #[error("error sending update chunk at offset {offset}: {err}")]
-    Chunk { offset: u32, err: SpCommunicationError },
+    #[error("failed to send update message to SP: {0}")]
+    Communication(#[from] SpCommunicationError),
 }
 
 #[derive(Debug, Error)]
