@@ -301,6 +301,7 @@ pub fn get_rack_uuid(tx: &mut SqliteConnection) -> Result<Option<Uuid>, Error> {
 pub mod tests {
     use super::*;
     use crate::trust_quorum::{RackSecret, ShareDistribution};
+    use assert_matches::assert_matches;
     use omicron_test_utils::dev::test_setup_log;
     use sha3::{Digest, Sha3_256};
 
@@ -402,5 +403,26 @@ pub mod tests {
             .unwrap();
         assert_eq!(true, committed);
         logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn ensure_db_trigger_fires_for_more_than_one_row_in_rack_table() {
+        let logctx = test_setup_log("test_db");
+        let mut db = Db::init(&logctx.log, ":memory:").unwrap();
+        use schema::rack::dsl;
+        // One insert succeeds.
+        diesel::insert_into(dsl::rack)
+            .values(dsl::uuid.eq(Uuid::new_v4().to_string()))
+            .execute(db.get_conn())
+            .unwrap();
+
+        // A second fails
+        let err = diesel::insert_into(dsl::rack)
+            .values(dsl::uuid.eq(Uuid::new_v4().to_string()))
+            .execute(db.get_conn())
+            .unwrap_err();
+        assert_matches!(err, diesel::result::Error::DatabaseError(_, s) => {
+            assert_eq!("maximum one rack", s.message());
+        });
     }
 }
