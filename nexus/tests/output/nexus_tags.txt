@@ -111,11 +111,6 @@ OPERATION ID                             URL PATH
 role_list                                /roles
 role_view                                /roles/{role_name}
 
-API operations found with tag "sagas"
-OPERATION ID                             URL PATH
-saga_list                                /sagas
-saga_view                                /sagas/{saga_id}
-
 API operations found with tag "session"
 OPERATION ID                             URL PATH
 session_sshkey_create                    /session/me/sshkeys
@@ -150,6 +145,8 @@ API operations found with tag "system"
 OPERATION ID                             URL PATH
 rack_list                                /system/hardware/racks
 rack_view                                /system/hardware/racks/{rack_id}
+saga_list                                /system/sagas
+saga_view                                /system/sagas/{saga_id}
 sled_list                                /system/hardware/sleds
 sled_view                                /system/hardware/sleds/{sled_id}
 system_user_list                         /system/user
