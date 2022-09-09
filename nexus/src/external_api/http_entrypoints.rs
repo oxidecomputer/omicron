@@ -3981,8 +3981,8 @@ async fn updates_refresh(
 /// List sagas
 #[endpoint {
     method = GET,
-    path = "/sagas",
-    tags = ["sagas"],
+    path = "/system/sagas",
+    tags = ["system"],
 }]
 async fn saga_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -4014,8 +4014,8 @@ struct SagaPathParam {
 /// Fetch a saga
 #[endpoint {
     method = GET,
-    path = "/sagas/{saga_id}",
-    tags = ["sagas"],
+    path = "/system/sagas/{saga_id}",
+    tags = ["system"],
 }]
 async fn saga_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
