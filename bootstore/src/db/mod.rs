@@ -65,7 +65,7 @@ impl Db {
         diesel::sql_query("PRAGMA synchronous = 'FULL'").execute(&mut c)?;
 
         // Create tables
-        c.batch_execute(&schema)?;
+        c.batch_execute(schema)?;
 
         Ok((Db { log, path: path.to_string() }, c))
     }
@@ -186,7 +186,7 @@ impl Db {
                 let uuid = self.get_rack_uuid(tx)?.unwrap();
                 return Err(Error::AlreadyInitialized(uuid));
             }
-            match self.initialize_rack_uuid(tx, &rack_uuid)? {
+            match self.initialize_rack_uuid(tx, rack_uuid)? {
                 Some(old_uuid) => {
                         info!(self.log, "Re-Initializing Rack: Old UUID: {old_uuid}, New UUID: {rack_uuid}");
                     self.update_prepare_for_epoch_0(tx, share_distribution)
@@ -309,7 +309,7 @@ impl Db {
         let stored_rack_uuid = self.get_rack_uuid(tx)?;
         if Some(rack_uuid) != stored_rack_uuid.as_ref() {
             return Err(Error::RackUuidMismatch {
-                expected: rack_uuid.clone(),
+                expected: *rack_uuid,
                 actual: stored_rack_uuid,
             });
         }
@@ -325,9 +325,9 @@ impl Db {
         dsl::rack.select(dsl::uuid).get_result::<String>(tx).optional()?.map_or(
             Ok(None),
             |uuidstr| {
-                Uuid::parse_str(&uuidstr).map(|uuid| Some(uuid)).map_err(
-                    |err| Error::ParseUuid { uuidstr, err: err.to_string() },
-                )
+                Uuid::parse_str(&uuidstr).map(Some).map_err(|err| {
+                    Error::ParseUuid { uuidstr, err: err.to_string() }
+                })
             },
         )
     }
