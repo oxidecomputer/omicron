@@ -7,7 +7,6 @@
 //! Most logic is contained here, but networking sits on top.
 //! This allows easier testing of clusters and failure situations.
 
-use diesel::SqliteConnection;
 use slog::Logger;
 use sprockets_common::Sha3_256Digest;
 //use sprockets_host::Ed25519Certificate;
@@ -42,17 +41,13 @@ pub struct Config {
 pub struct Node {
     config: Config,
     db: Db,
-
-    // For now we just use a single connection
-    // This *may* change once there is an async connection handling mechanism on top.
-    conn: SqliteConnection,
 }
 
 impl Node {
     /// Create a new Node
     pub fn new(config: Config) -> Node {
-        let (db, conn) = Db::init(&config.log, &config.db_path).unwrap();
-        Node { config, db, conn }
+        let db = Db::init(&config.log, &config.db_path).unwrap();
+        Node { config, db }
     }
 
     /// Handle a message received over sprockets from another [`Node`] or
@@ -99,7 +94,7 @@ impl Node {
         &mut self,
         epoch: i32,
     ) -> Result<NodeOpResult, NodeError> {
-        let share = self.db.get_committed_share(&mut self.conn, epoch)?;
+        let share = self.db.get_committed_share(epoch)?;
         Ok(NodeOpResult::Share { epoch, share: share.0.share })
     }
 
@@ -109,7 +104,7 @@ impl Node {
         rack_uuid: &Uuid,
         share_distribution: SerializableShareDistribution,
     ) -> Result<NodeOpResult, NodeError> {
-        self.db.initialize(&mut self.conn, rack_uuid, share_distribution)?;
+        self.db.initialize(rack_uuid, share_distribution)?;
         Ok(NodeOpResult::CoordinatorAck)
     }
 
@@ -124,12 +119,7 @@ impl Node {
             return Err(NodeError::KeySharePrepareForEpoch0);
         }
 
-        self.db.prepare_share(
-            &mut self.conn,
-            rack_uuid,
-            epoch,
-            share_distribution,
-        )?;
+        self.db.prepare_share(rack_uuid, epoch, share_distribution)?;
 
         Ok(NodeOpResult::CoordinatorAck)
     }
@@ -142,7 +132,6 @@ impl Node {
         prepare_shared_distribution_digest: Sha3_256Digest,
     ) -> Result<NodeOpResult, NodeError> {
         self.db.commit_share(
-            &mut self.conn,
             rack_uuid,
             epoch,
             prepare_shared_distribution_digest,
@@ -192,12 +181,7 @@ mod tests {
         let epoch = 0;
         let prepare = KeyShare::new(epoch, sd.clone()).unwrap();
         node.db
-            .commit_share(
-                &mut node.conn,
-                &rack_uuid,
-                epoch,
-                prepare.share_digest.into(),
-            )
+            .commit_share(&rack_uuid, epoch, prepare.share_digest.into())
             .unwrap();
 
         let expected =
