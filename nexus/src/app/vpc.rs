@@ -638,7 +638,7 @@ impl super::Nexus {
             let mut nics = HashSet::new();
             let mut targets = Vec::with_capacity(rule.targets.len());
             let mut push_target_nic = |nic: &NetworkInterface| {
-                if nics.insert(((*nic.vni).clone(), (*nic.mac).clone())) {
+                if nics.insert((*nic.vni, (*nic.mac).clone())) {
                     targets.push(nic.clone());
                 }
             };
