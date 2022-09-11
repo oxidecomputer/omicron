@@ -4,11 +4,13 @@
 
 // Copyright 2022 Oxide Computer Company
 
+use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Context;
 use anyhow::Result;
 use clap::Parser;
 use clap::Subcommand;
+use gateway_messages::SpComponent;
 use gateway_sp_comms::SingleSp;
 use gateway_sp_comms::DISCOVERY_MULTICAST_ADDR;
 use slog::info;
@@ -16,6 +18,7 @@ use slog::o;
 use slog::Drain;
 use slog::Level;
 use slog::Logger;
+use std::fs;
 use std::net::SocketAddrV6;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -110,6 +113,16 @@ enum SpCommand {
     /// Upload a new image to the SP and have it swap banks (requires reset)
     Update { hubris_archive: PathBuf },
 
+    /// Update a component of the SP.
+    UpdateComponent { component: String, slot: u16, image: PathBuf },
+
+    /// Abort an in-progress update.
+    AbortUpdate {
+        /// Component with an update-in-progress to be aborted. Omit to abort
+        /// updates to the SP itself.
+        component: Option<String>,
+    },
+
     /// Instruct the SP to reset.
     Reset,
 }
@@ -199,8 +212,40 @@ async fn main() -> Result<()> {
         Some(SpCommand::Update { hubris_archive }) => {
             let mut archive = HubrisArchive::open(&hubris_archive)?;
             let data = archive.final_bin()?;
-            sp.update(data).await.with_context(|| {
-                format!("updating to {} failed", hubris_archive.display())
+            sp.update(gateway_messages::SpComponent::SP_ITSELF, 0, data)
+                .await
+                .with_context(|| {
+                    format!("updating to {} failed", hubris_archive.display())
+                })?;
+        }
+        Some(SpCommand::UpdateComponent { component, slot, image }) => {
+            let data = fs::read(&image).with_context(|| {
+                format!("failed to read {}", image.display())
+            })?;
+            let sp_component = SpComponent::try_from(component.as_str())
+                .map_err(|_| {
+                    anyhow!("invalid component name: {}", component)
+                })?;
+            sp.update(sp_component, slot, data).await.with_context(|| {
+                format!(
+                    "updating {} slot {} to {} failed",
+                    component,
+                    slot,
+                    image.display()
+                )
+            })?;
+        }
+        Some(SpCommand::AbortUpdate { component }) => {
+            let sp_component = match &component {
+                Some(c) => SpComponent::try_from(c.as_str())
+                    .map_err(|_| anyhow!("invalid component name: {}", c))?,
+                None => SpComponent::SP_ITSELF,
+            };
+            sp.update_abort(sp_component).await.with_context(|| {
+                format!(
+                    "aborting update to {} failed",
+                    component.as_deref().unwrap_or("SP")
+                )
             })?;
         }
         Some(SpCommand::Reset) => {

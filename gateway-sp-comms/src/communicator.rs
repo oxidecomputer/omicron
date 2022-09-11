@@ -24,6 +24,7 @@ use gateway_messages::IgnitionState;
 use gateway_messages::ResponseKind;
 use gateway_messages::SpComponent;
 use gateway_messages::SpState;
+use gateway_messages::UpdatePrepareStatusResponse;
 use slog::info;
 use slog::o;
 use slog::Logger;
@@ -213,11 +214,13 @@ impl Communicator {
     pub async fn update(
         &self,
         sp: SpIdentifier,
+        component: SpComponent,
+        slot: u16,
         image: Vec<u8>,
     ) -> Result<(), Error> {
         let port = self.id_to_port(sp)?;
         let sp = self.switch.sp(port).ok_or(Error::SpAddressUnknown(sp))?;
-        Ok(sp.update(image).await?)
+        Ok(sp.update(component, slot, image).await?)
     }
 
     /// Reset a given SP.
@@ -297,9 +300,15 @@ pub(crate) trait ResponseKindExt {
 
     fn expect_serial_console_detach_ack(self) -> Result<(), BadResponseType>;
 
-    fn expect_update_start_ack(self) -> Result<(), BadResponseType>;
+    fn expect_update_prepare_ack(self) -> Result<(), BadResponseType>;
+
+    fn expect_update_prepare_status(
+        self,
+    ) -> Result<UpdatePrepareStatusResponse, BadResponseType>;
 
     fn expect_update_chunk_ack(self) -> Result<(), BadResponseType>;
+
+    fn expect_update_abort_ack(self) -> Result<(), BadResponseType>;
 
     fn expect_sys_reset_prepare_ack(self) -> Result<(), BadResponseType>;
 }
@@ -327,8 +336,14 @@ impl ResponseKindExt for ResponseKind {
             ResponseKind::SerialConsoleDetachAck => {
                 response_kind_names::SERIAL_CONSOLE_DETACH_ACK
             }
-            ResponseKind::UpdateStartAck => {
-                response_kind_names::UPDATE_START_ACK
+            ResponseKind::UpdatePrepareAck => {
+                response_kind_names::UPDATE_PREPARE_ACK
+            }
+            ResponseKind::UpdatePrepareStatus(_) => {
+                response_kind_names::UPDATE_PREPARE_STATUS
+            }
+            ResponseKind::UpdateAbortAck => {
+                response_kind_names::UPDATE_ABORT_ACK
             }
             ResponseKind::UpdateChunkAck => {
                 response_kind_names::UPDATE_CHUNK_ACK
@@ -423,11 +438,23 @@ impl ResponseKindExt for ResponseKind {
         }
     }
 
-    fn expect_update_start_ack(self) -> Result<(), BadResponseType> {
+    fn expect_update_prepare_ack(self) -> Result<(), BadResponseType> {
         match self {
-            ResponseKind::UpdateStartAck => Ok(()),
+            ResponseKind::UpdatePrepareAck => Ok(()),
             other => Err(BadResponseType {
-                expected: response_kind_names::UPDATE_START_ACK,
+                expected: response_kind_names::UPDATE_PREPARE_ACK,
+                got: other.name(),
+            }),
+        }
+    }
+
+    fn expect_update_prepare_status(
+        self,
+    ) -> Result<UpdatePrepareStatusResponse, BadResponseType> {
+        match self {
+            ResponseKind::UpdatePrepareStatus(status) => Ok(status),
+            other => Err(BadResponseType {
+                expected: response_kind_names::UPDATE_PREPARE_ACK,
                 got: other.name(),
             }),
         }
@@ -438,6 +465,16 @@ impl ResponseKindExt for ResponseKind {
             ResponseKind::UpdateChunkAck => Ok(()),
             other => Err(BadResponseType {
                 expected: response_kind_names::UPDATE_CHUNK_ACK,
+                got: other.name(),
+            }),
+        }
+    }
+
+    fn expect_update_abort_ack(self) -> Result<(), BadResponseType> {
+        match self {
+            ResponseKind::UpdateAbortAck => Ok(()),
+            other => Err(BadResponseType {
+                expected: response_kind_names::UPDATE_ABORT_ACK,
                 got: other.name(),
             }),
         }
@@ -466,7 +503,9 @@ mod response_kind_names {
         "serial_console_write_ack";
     pub(super) const SERIAL_CONSOLE_DETACH_ACK: &str =
         "serial_console_detach_ack";
-    pub(super) const UPDATE_START_ACK: &str = "update_start_ack";
+    pub(super) const UPDATE_PREPARE_ACK: &str = "update_prepare_ack";
+    pub(super) const UPDATE_PREPARE_STATUS: &str = "update_prepare_status";
+    pub(super) const UPDATE_ABORT_ACK: &str = "update_abort_ack";
     pub(super) const UPDATE_CHUNK_ACK: &str = "update_chunk_ack";
     pub(super) const SYS_RESET_PREPARE_ACK: &str = "sys_reset_prepare_ack";
 }

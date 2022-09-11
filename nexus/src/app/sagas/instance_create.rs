@@ -940,16 +940,47 @@ async fn sic_instance_ensure(
         .await
         .map_err(ActionError::action_failed)?;
 
-    osagactx
-        .nexus()
-        .instance_set_runtime(
-            &opctx,
-            &authz_instance,
-            &db_instance,
-            runtime_params,
-        )
-        .await
-        .map_err(ActionError::action_failed)?;
+    if !params.create_params.start {
+        let instance_id = db_instance.id();
+        // If we don't need to start the instance, we can skip the ensure
+        // and just update the instance runtime state to `Stopped`
+        let runtime_state = db::model::InstanceRuntimeState {
+            state: db::model::InstanceState::new(InstanceState::Stopped),
+            // Must update the generation, or the database query will fail.
+            //
+            // The runtime state of the instance record is only changed as a result
+            // of the successful completion of the saga (i.e. after ensure which we're
+            // skipping in this case) or during saga unwinding. So we're guaranteed
+            // that the cached generation in the saga log is the most recent in the database.
+            gen: db::model::Generation::from(
+                db_instance.runtime_state.gen.next(),
+            ),
+            ..db_instance.runtime_state
+        };
+
+        let updated = datastore
+            .instance_update_runtime(&instance_id, &runtime_state)
+            .await
+            .map_err(ActionError::action_failed)?;
+
+        if !updated {
+            warn!(
+                osagactx.log(),
+                "failed to update instance runtime state from creating to stopped",
+            );
+        }
+    } else {
+        osagactx
+            .nexus()
+            .instance_set_runtime(
+                &opctx,
+                &authz_instance,
+                &db_instance,
+                runtime_params,
+            )
+            .await
+            .map_err(ActionError::action_failed)?;
+    }
 
     Ok(())
 }

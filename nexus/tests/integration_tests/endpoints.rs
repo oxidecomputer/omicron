@@ -36,9 +36,9 @@ use std::net::Ipv4Addr;
 
 lazy_static! {
     pub static ref HARDWARE_RACK_URL: String =
-        format!("/hardware/racks/{}", RACK_UUID);
+        format!("/system/hardware/racks/{}", RACK_UUID);
     pub static ref HARDWARE_SLED_URL: String =
-        format!("/hardware/sleds/{}", SLED_AGENT_UUID);
+        format!("/system/hardware/sleds/{}", SLED_AGENT_UUID);
 
     // Global policy
     pub static ref SYSTEM_POLICY_URL: &'static str = "/system/policy";
@@ -232,6 +232,7 @@ lazy_static! {
                 params::ExternalIpCreate::Ephemeral { pool_name: None }
             ],
             disks: vec![],
+            start: true,
         };
 
     // The instance needs a network interface, too.
@@ -1311,7 +1312,7 @@ lazy_static! {
         /* Hardware */
 
         VerifyEndpoint {
-            url: "/hardware/racks",
+            url: "/system/hardware/racks",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Get],
@@ -1325,7 +1326,7 @@ lazy_static! {
         },
 
         VerifyEndpoint {
-            url: "/hardware/sleds",
+            url: "/system/hardware/sleds",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Get],
@@ -1341,14 +1342,14 @@ lazy_static! {
         /* Sagas */
 
         VerifyEndpoint {
-            url: "/sagas",
+            url: "/system/sagas",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Get],
         },
 
         VerifyEndpoint {
-            url: "/sagas/48a1b8c8-fc1c-6fea-9de9-fdeb8dda7823",
+            url: "/system/sagas/48a1b8c8-fc1c-6fea-9de9-fdeb8dda7823",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::GetNonexistent],
@@ -1366,7 +1367,7 @@ lazy_static! {
         /* Updates */
 
         VerifyEndpoint {
-            url: "/updates/refresh",
+            url: "/system/updates/refresh",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Post(

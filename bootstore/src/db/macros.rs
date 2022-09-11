@@ -4,12 +4,16 @@
 
 //! Macros used to create ToSql and FromSql impls required by Diesel
 
-/// Shamelessly stolen from buildomat/common/src/db.rs
+/// Shamelessly cribbed and mutated from buildomat/common/src/db.rs
 /// Thanks @jmc
 macro_rules! bcs_new_type {
     ($name:ident, $mytype:ty) => {
         #[derive(
-            Clone, Debug, FromSqlRow, diesel::expression::AsExpression,
+            Clone,
+            PartialEq,
+            Debug,
+            FromSqlRow,
+            diesel::expression::AsExpression,
         )]
         #[diesel(sql_type = diesel::sql_types::Binary)]
         pub struct $name(pub $mytype);
