@@ -65,8 +65,29 @@ CREATE TABLE omicron.public.Dataset (
 
     kind omicron.public.dataset_kind NOT NULL,
 
+    /* An upper bound on the amount of space that is allowed to be in-use */
+    quota INT NOT NULL,
+    reservation INT NOT NULL,
+
     /* An upper bound on the amount of space that might be in-use */
-    size_used INT
+    size_used INT,
+
+    /* A quota smaller than a reservation would reserve unusable space */
+    CONSTRAINT reservation_less_than_or_equal_to_quota CHECK (
+      reservation <= quota
+    ),
+
+    /* Crucible must make use of 'size_used'; other datasets manage their own storage */
+    CONSTRAINT size_used_column_set_for_crucible CHECK (
+      (kind != 'crucible') OR
+      (kind = 'crucible' AND size_used IS NOT NULL)
+    ),
+
+    /* Validate that the size usage is less than the quota */
+    CONSTRAINT size_used_less_than_or_equal_to_quota CHECK (
+      (size_used IS NULL) OR
+      (size_used IS NOT NULL AND size_used <= quota)
+    )
 );
 
 /* Create an index on the size usage for Crucible's allocation */
@@ -170,7 +191,7 @@ INSERT INTO omicron.public.Zpool (id, time_created, time_modified, time_deleted,
 
 
 /* Make some datasets */
-INSERT INTO omicron.public.Dataset (id, time_created, time_modified, time_deleted, rcgen, pool_id, ip, port, kind, size_used) VALUES
+INSERT INTO omicron.public.Dataset (id, time_created, time_modified, time_deleted, rcgen, pool_id, ip, port, kind, quota, reservation, size_used) VALUES
   (
     '33333333-aaaa-407e-aa8d-602ed78f38be',
     TIMESTAMPTZ '2016-03-26',
@@ -181,6 +202,8 @@ INSERT INTO omicron.public.Dataset (id, time_created, time_modified, time_delete
     '127.0.0.1',
     0,
     'crucible',
+    200,
+    200,
     50
   ),
   (
@@ -193,6 +216,8 @@ INSERT INTO omicron.public.Dataset (id, time_created, time_modified, time_delete
     '127.0.0.1',
     0,
     'crucible',
+    200,
+    200,
     60
   ),
   (
@@ -205,6 +230,8 @@ INSERT INTO omicron.public.Dataset (id, time_created, time_modified, time_delete
     '127.0.0.1',
     0,
     'crucible',
+    200,
+    200,
     70
   ),
   (
@@ -217,6 +244,8 @@ INSERT INTO omicron.public.Dataset (id, time_created, time_modified, time_delete
     '127.0.0.1',
     0,
     'cockroach',
+    200,
+    200,
     100
   );
 
@@ -283,15 +312,7 @@ WITH
   candidate_datasets AS (
     SELECT
       omicron.public.Dataset.id,
-      omicron.public.Dataset.time_created,
-      omicron.public.Dataset.time_modified,
-      omicron.public.Dataset.time_deleted,
-      omicron.public.Dataset.rcgen,
-      omicron.public.Dataset.pool_id,
-      omicron.public.Dataset.ip,
-      omicron.public.Dataset.port,
-      omicron.public.Dataset.kind,
-      omicron.public.Dataset.size_used
+      omicron.public.Dataset.pool_id
     FROM
       omicron.public.Dataset
     WHERE
@@ -331,7 +352,7 @@ WITH
       now() as time_modified,
       candidate_datasets.id as dataset_id,
       CAST('44444444-aaaa-407e-aa8d-602ed78f38be' AS UUID) as volume_id,
-      50 as block_size,
+      140 as block_size,
       1 as blocks_per_extent,
       1 as extent_count
     FROM
@@ -345,7 +366,6 @@ WITH
     SELECT
       omicron.public.Dataset.pool_id,
       candidate_regions.dataset_id,
-      omicron.public.Zpool.total_size as pool_total_size,
       candidate_regions.block_size *
         candidate_regions.blocks_per_extent *
         candidate_regions.extent_count as size_used_delta
@@ -355,47 +375,6 @@ WITH
       omicron.public.Dataset
     ON
       omicron.public.Dataset.id = candidate_regions.dataset_id
-    LEFT JOIN
-      omicron.public.Zpool
-    ON
-      omicron.public.Zpool.id = omicron.public.Dataset.pool_id
-  ),
-
-  /*
-   * Get the total size used on all datasets in the candidate zpools.
-   * This is a necessary calculation to determine if the proposed regions
-   * will fit or not.
-   */
-  previous_zpool_size_usage AS (
-    SELECT
-      omicron.public.Dataset.pool_id,
-      SUM(omicron.public.Dataset.size_used) as previous_size_used
-    FROM
-      omicron.public.Dataset
-    LEFT JOIN
-      candidate_zpools
-    ON
-      omicron.public.Dataset.pool_id = candidate_zpools.id
-    WHERE
-      omicron.public.Dataset.size_used IS NOT NULL AND
-      omicron.public.Dataset.time_deleted IS NULL
-    GROUP BY
-      pool_id
-  ),
-
-  /*
-   * Compare the old space usage with the proposed changes,
-   * and make a call on whether or not it'll fit.
-   */
-  proposed_zpool_size_usage AS (
-    SELECT
-      previous_size_used + size_used_delta <= pool_total_size as valid
-    FROM
-      previous_zpool_size_usage
-    JOIN
-      proposed_dataset_size_changes
-    ON
-      proposed_dataset_size_changes.pool_id = previous_zpool_size_usage.pool_id
   ),
 
   /*
@@ -406,12 +385,7 @@ WITH
       /* Only insert if we have not previously allocated regions. */
       NOT(EXISTS(SELECT id from previously_allocated_regions)) AND
       /* Only insert if we found the necessary amount of regions. */
-      (SELECT COUNT(*) FROM candidate_regions) >= 2 AND
-      /* Only insert if all the proposed size changes fit. */
-      (
-        SELECT(BOOL_AND(valid))
-        FROM proposed_zpool_size_usage
-      ),
+      (SELECT COUNT(*) FROM candidate_regions) >= 2,
       TRUE,
       FALSE
     )

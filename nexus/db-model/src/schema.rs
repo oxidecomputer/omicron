@@ -421,8 +421,10 @@ table! {
         ip -> Inet,
         port -> Int4,
 
-        kind -> crate::DatasetKindEnum,
+        quota -> Int8,
+        reservation -> Int8,
 
+        kind -> crate::DatasetKindEnum,
         size_used -> Nullable<Int8>,
     }
 }

@@ -172,10 +172,40 @@ CREATE TABLE omicron.public.Dataset (
     ip INET NOT NULL,
     port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
 
+    /* An upper bound on the amount of space that is allowed to be in-use */
+    quota INT NOT NULL,
+
+    /* A lower bound on the minumum amount of space usable by the dataset */
+    reservation INT NOT NULL,
+
     kind omicron.public.dataset_kind NOT NULL,
 
-    /* An upper bound on the amount of space that might be in-use */
-    size_used INT
+    /*
+     * An upper bound on the amount of space currently in-use.
+     *
+     * Triggers are not supported in CRDB yet (see: https://github.com/cockroachdb/cockroach/issues/28296),
+     * but for Crucible datasets, we'd like to enforce that size_used is greater than or equal
+     * to the sum of all regions. Without triggers, we are resorting to validating this constraint
+     * in non-SQL code.
+     */
+    size_used INT,
+
+    /* A quota smaller than a reservation would reserve unusable space */
+    CONSTRAINT reservation_less_than_or_equal_to_quota CHECK (
+      reservation <= quota
+    ),
+
+    /* Crucible must make use of 'size_used'; other datasets manage their own storage */
+    CONSTRAINT size_used_column_set_for_crucible CHECK (
+      (kind != 'crucible') OR
+      (kind = 'crucible' AND size_used IS NOT NULL)
+    ),
+
+    /* Validate that the size usage is less than the quota */
+    CONSTRAINT size_used_less_than_or_equal_to_quota CHECK (
+      (size_used IS NULL) OR
+      (size_used IS NOT NULL AND size_used <= quota)
+    )
 );
 
 /* Create an index on the size usage for Crucible's allocation */
