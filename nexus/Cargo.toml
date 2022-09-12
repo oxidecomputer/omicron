@@ -115,7 +115,7 @@ version = "1.1.0"
 features = [ "serde", "v4" ]
 
 [dev-dependencies]
-criterion = { version = "0.3", features = [ "async_tokio" ] }
+criterion = { version = "0.4", features = [ "async_tokio" ] }
 expectorate = "1.0.5"
 itertools = "0.10.3"
 nexus-test-utils-macros = { path = "test-utils-macros" }
