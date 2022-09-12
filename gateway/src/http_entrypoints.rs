@@ -117,6 +117,39 @@ pub enum SpIgnition {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+struct SpUpdateStatus {
+    id: Uuid,
+    state: SpUpdateState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "state", rename_all = "snake_case")]
+enum SpUpdateState {
+    /// The SP is preparing to receive an update.
+    ///
+    /// May or may not include progress, depending on the capabilities of the
+    /// component being updated. If progress is present, the units are defined
+    /// by the SP.
+    Preparing { progress: Option<Progress> },
+    /// The SP is currently receiving an update.
+    ///
+    /// The units of `progress` are bytes.
+    InProgress { progress: Progress },
+    /// The SP has completed receiving an update.
+    Complete,
+    /// The SP has aborted an in-progress update.
+    Aborted,
+}
+
+/// Progress of an operation; units of `current` and `total` are defined by the
+/// operation.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+struct Progress {
+    current: u32,
+    total: u32,
+}
+
 #[derive(Serialize, JsonSchema)]
 struct SpComponentInfo {}
 
@@ -552,6 +585,30 @@ async fn sp_component_update(
     Ok(HttpResponseUpdatedNoContent {})
 }
 
+/// Get the status of an update being applied to an SP component
+///
+/// Getting the status of an update to the SP itself is done via the component
+/// name `sp`.
+#[endpoint {
+    method = GET,
+    path = "/sp/{type}/{slot}/component/{component}/update-status",
+}]
+async fn sp_component_update_status(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path: Path<PathSpComponent>,
+) -> Result<HttpResponseOk<Option<SpUpdateStatus>>, HttpError> {
+    let comms = Arc::clone(&rqctx.context().sp_comms);
+    let PathSpComponent { sp, component } = path.into_inner();
+    let component = component_from_str(&component)?;
+
+    let status = comms
+        .update_status(sp.into(), component)
+        .await
+        .map_err(http_err_from_comms_err)?;
+
+    Ok(HttpResponseOk(status.map(Into::into)))
+}
+
 /// Abort any in-progress update an SP component
 ///
 /// Aborting an update to the SP itself is done via the component name `sp`.
@@ -560,9 +617,9 @@ async fn sp_component_update(
 /// aborted; it only means no update is currently in progress.
 #[endpoint {
     method = POST,
-    path = "/sp/{type}/{slot}/component/{component}/abort-update",
+    path = "/sp/{type}/{slot}/component/{component}/update-abort",
 }]
-async fn sp_component_abort_update(
+async fn sp_component_update_abort(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path: Path<PathSpComponent>,
     body: TypedBody<UpdateAbortBody>,
@@ -731,7 +788,8 @@ pub fn api() -> GatewayApiDescription {
         api.register(sp_component_serial_console_attach)?;
         api.register(sp_component_serial_console_detach)?;
         api.register(sp_component_update)?;
-        api.register(sp_component_abort_update)?;
+        api.register(sp_component_update_status)?;
+        api.register(sp_component_update_abort)?;
         api.register(sp_component_power_on)?;
         api.register(sp_component_power_off)?;
         api.register(ignition_list)?;

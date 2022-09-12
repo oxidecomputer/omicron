@@ -31,6 +31,8 @@ pub enum SpCommunicationError {
 
 #[derive(Debug, Error)]
 pub enum UpdateError {
+    #[error("update image cannot be empty")]
+    ImageEmpty,
     #[error("update image is too large")]
     ImageTooLarge,
     #[error("failed to send update message to SP: {0}")]

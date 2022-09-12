@@ -232,6 +232,17 @@ impl Communicator {
         Ok(sp.start_update(component, update_id, slot, image).await?)
     }
 
+    /// Get the status of an in-progress update.
+    pub async fn update_status(
+        &self,
+        sp: SpIdentifier,
+        component: SpComponent,
+    ) -> Result<Option<UpdateStatus>, Error> {
+        let port = self.id_to_port(sp)?;
+        let sp = self.switch.sp(port).ok_or(Error::SpAddressUnknown(sp))?;
+        Ok(sp.update_status(component).await?)
+    }
+
     /// Abort an in-progress update.
     pub async fn update_abort(
         &self,

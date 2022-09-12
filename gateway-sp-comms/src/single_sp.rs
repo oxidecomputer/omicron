@@ -170,10 +170,6 @@ impl SingleSp {
     /// acknowledges that we want to apply an update, we spawn a background task
     /// to stream the update to the SP and then return. Poll the status of the
     /// update via [`update_status()`].
-    ///
-    /// # Panics
-    ///
-    /// Panics if `image.is_empty()`.
     pub async fn start_update(
         &self,
         component: SpComponent,
@@ -181,7 +177,10 @@ impl SingleSp {
         slot: u16,
         image: Vec<u8>,
     ) -> Result<(), UpdateError> {
-        assert!(!image.is_empty());
+        if image.is_empty() {
+            return Err(UpdateError::ImageEmpty);
+        }
+
         let total_size = image
             .len()
             .try_into()

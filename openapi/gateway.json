@@ -342,56 +342,6 @@
         }
       }
     },
-    "/sp/{type}/{slot}/component/{component}/abort-update": {
-      "post": {
-        "summary": "Abort any in-progress update an SP component",
-        "description": "Aborting an update to the SP itself is done via the component name `sp`.\nIf this returns successfully, it does not mean an update was actually aborted; it only means no update is currently in progress.",
-        "operationId": "sp_component_abort_update",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "component",
-            "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "style": "simple"
-          },
-          {
-            "in": "path",
-            "name": "slot",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 0
-            },
-            "style": "simple"
-          },
-          {
-            "in": "path",
-            "name": "type",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/SpType"
-            },
-            "style": "simple"
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/sp/{type}/{slot}/component/{component}/power-off": {
       "post": {
         "summary": "Power off an SP component",
@@ -651,6 +601,123 @@
         }
       }
     },
+    "/sp/{type}/{slot}/component/{component}/update-abort": {
+      "post": {
+        "summary": "Abort any in-progress update an SP component",
+        "description": "Aborting an update to the SP itself is done via the component name `sp`.\nIf this returns successfully, it does not mean an update was actually aborted; it only means no update is currently in progress.",
+        "operationId": "sp_component_update_abort",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "component",
+            "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateAbortBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/sp/{type}/{slot}/component/{component}/update-status": {
+      "get": {
+        "summary": "Get the status of an update being applied to an SP component",
+        "description": "Getting the status of an update to the SP itself is done via the component name `sp`.",
+        "operationId": "sp_component_update_status",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "component",
+            "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpUpdateStatus"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/sp/{type}/{slot}/power-off": {
       "post": {
         "summary": "Power off an SP via Ignition",
@@ -800,6 +867,26 @@
         "required": [
           "message",
           "request_id"
+        ]
+      },
+      "Progress": {
+        "description": "Progress of an operation; units of `current` and `total` are defined by the operation.",
+        "type": "object",
+        "properties": {
+          "current": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "total": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "current",
+          "total"
         ]
       },
       "SpComponentInfo": {
@@ -1018,9 +1105,119 @@
           "switch"
         ]
       },
+      "SpUpdateState": {
+        "oneOf": [
+          {
+            "description": "The SP is preparing to receive an update.\n\nMay or may not include progress, depending on the capabilities of the component being updated. If progress is present, the units are defined by the SP.",
+            "type": "object",
+            "properties": {
+              "progress": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Progress"
+                  }
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "preparing"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "The SP is currently receiving an update.\n\nThe units of `progress` are bytes.",
+            "type": "object",
+            "properties": {
+              "progress": {
+                "$ref": "#/components/schemas/Progress"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "in_progress"
+                ]
+              }
+            },
+            "required": [
+              "progress",
+              "state"
+            ]
+          },
+          {
+            "description": "The SP has completed receiving an update.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "The SP has aborted an in-progress update.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "aborted"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        ]
+      },
+      "SpUpdateStatus": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "$ref": "#/components/schemas/SpUpdateState"
+          }
+        },
+        "required": [
+          "id",
+          "state"
+        ]
+      },
+      "UpdateAbortBody": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The ID of the update to abort.\n\nIf the SP is currently receiving an update with this ID, it will be aborted.\n\nIf the SP is currently receiving an update with a different ID, the abort request will fail.\n\nIf the SP is not currently receiving any update, the request to abort should succeed but will not have actually done anything.",
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
       "UpdateBody": {
         "type": "object",
         "properties": {
+          "id": {
+            "description": "An identifier for this update.\n\nThis ID applies to this single instance of the API call; it is not an ID of `image` itself. Multiple API calls with the same `image` should use different IDs.",
+            "type": "string",
+            "format": "uuid"
+          },
           "image": {
             "description": "The binary blob containing the update image (component-specific).",
             "type": "array",
@@ -1038,6 +1235,7 @@
           }
         },
         "required": [
+          "id",
           "image",
           "slot"
         ]
