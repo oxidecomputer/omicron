@@ -14,7 +14,6 @@ use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::create_ip_pool;
 use nexus_test_utils::resource_helpers::create_organization;
 use nexus_test_utils::resource_helpers::create_project;
-use nexus_test_utils::resource_helpers::create_silo;
 use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils::ControlPlaneTestContext;
@@ -32,7 +31,6 @@ use omicron_nexus::db;
 use omicron_nexus::db::identity::Resource;
 use omicron_nexus::db::lookup::LookupPath;
 use omicron_nexus::external_api::params;
-use omicron_nexus::external_api::shared;
 use omicron_nexus::external_api::views;
 use uuid::Uuid;
 
@@ -155,6 +153,7 @@ async fn test_snapshot(cptestctx: &ControlPlaneTestContext) {
                 params::InstanceDiskAttach { name: base_disk_name.clone() },
             )],
             external_ips: vec![],
+            start: true,
         },
     )
     .await;
@@ -385,18 +384,13 @@ async fn test_reject_creating_disk_from_snapshot(
     let nexus = &cptestctx.server.apictx.nexus;
     let datastore = nexus.datastore();
 
-    const SILO_NAME: &str = "snapshot-silo";
-    let silo =
-        create_silo(&client, SILO_NAME, true, shared::UserProvisionType::Fixed)
-            .await;
-
     let project_id = create_org_and_project(&client).await;
 
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
     let (authz_silo, ..) = LookupPath::new(&opctx, &datastore)
-        .silo_id(silo.identity.id)
+        .silo_id(*db::fixed_data::silo::SILO_ID)
         .fetch()
         .await
         .unwrap();
@@ -546,18 +540,13 @@ async fn test_reject_creating_disk_from_illegal_snapshot(
     let nexus = &cptestctx.server.apictx.nexus;
     let datastore = nexus.datastore();
 
-    const SILO_NAME: &str = "snapshot-silo";
-    let silo =
-        create_silo(&client, SILO_NAME, true, shared::UserProvisionType::Fixed)
-            .await;
-
     let project_id = create_org_and_project(&client).await;
 
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
     let (authz_silo, ..) = LookupPath::new(&opctx, &datastore)
-        .silo_id(silo.identity.id)
+        .silo_id(*db::fixed_data::silo::SILO_ID)
         .fetch()
         .await
         .unwrap();
@@ -649,11 +638,6 @@ async fn test_create_snapshot_record_idempotent(
     let nexus = &cptestctx.server.apictx.nexus;
     let datastore = nexus.datastore();
 
-    const SILO_NAME: &str = "snapshot-silo";
-    let silo =
-        create_silo(&client, SILO_NAME, true, shared::UserProvisionType::Fixed)
-            .await;
-
     let project_id = create_org_and_project(&client).await;
 
     let snapshot = db::model::Snapshot {
@@ -683,7 +667,7 @@ async fn test_create_snapshot_record_idempotent(
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
     let (authz_silo, ..) = LookupPath::new(&opctx, &datastore)
-        .silo_id(silo.identity.id)
+        .silo_id(*db::fixed_data::silo::SILO_ID)
         .fetch()
         .await
         .unwrap();

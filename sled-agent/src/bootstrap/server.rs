@@ -28,6 +28,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
+use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
 pub enum TrustQuorumMembership {
@@ -212,7 +213,13 @@ impl Inner {
     async fn wait_for_sled_initialization(
         &self,
     ) -> Result<Arc<Option<ShareDistribution>>, String> {
+        // Channel on which we receive the trust quorum share after quorum has
+        // been established.
         let (tx_share, mut rx_share) = mpsc::channel(1);
+
+        // Shared trust quorum share allowing us to return the share while we're
+        // still establishing quorum.
+        let initial_share = Arc::new(Mutex::new(None));
 
         loop {
             // Wait for either a new client or a response on our channel sent by
@@ -237,9 +244,15 @@ impl Inner {
             let sp = self.sp.clone();
             let ba = Arc::clone(&self.bootstrap_agent);
             let tx_share = tx_share.clone();
+            let initial_share = Arc::clone(&initial_share);
             tokio::spawn(async move {
                 match serve_request_before_quorum_initialization(
-                    stream, sp, &ba, tx_share, &log,
+                    stream,
+                    sp,
+                    &ba,
+                    tx_share,
+                    &initial_share,
+                    &log,
                 )
                 .await
                 {
@@ -256,6 +269,7 @@ async fn serve_request_before_quorum_initialization(
     sp: Option<SpHandle>,
     bootstrap_agent: &Agent,
     tx_share: mpsc::Sender<Option<ShareDistribution>>,
+    initial_share: &Mutex<Option<ShareDistribution>>,
     log: &Logger,
 ) -> Result<(), String> {
     // Establish sprockets session (if we have an SP).
@@ -263,7 +277,16 @@ async fn serve_request_before_quorum_initialization(
         stream,
         &sp,
         SprocketsRole::Server,
-        None, // We don't have our trust quorum members yet
+        // If we've already received a sled agent request, any future
+        // connections to us are only allowed for members of our trust quorum.
+        // If we haven't yet received a sled agent request, we don't know our
+        // trust quorum members, and have to blindly accept any valid sprockets
+        // connection.
+        initial_share
+            .lock()
+            .await
+            .as_ref()
+            .map(|dist| dist.member_device_id_certs.as_slice()),
         log,
     )
     .await
@@ -273,6 +296,15 @@ async fn serve_request_before_quorum_initialization(
         Request::SledAgentRequest(request, trust_quorum_share) => {
             let trust_quorum_share =
                 trust_quorum_share.map(ShareDistribution::from);
+
+            // Save the trust quorum share _before_ calling request_agent, so
+            // that we can return it in the `Request::ShareRequest` branch below
+            //
+            // TODO should we check that if `initial_share` is already
+            // `Some(_)`, the value is the same? If it's not, we got two
+            // different shares from RSS...
+            *initial_share.lock().await = trust_quorum_share.clone();
+
             match bootstrap_agent
                 .request_agent(&*request, &trust_quorum_share)
                 .await
@@ -293,10 +325,13 @@ async fn serve_request_before_quorum_initialization(
                 }
             }
         }
-        Request::ShareRequest => {
-            warn!(log, "Share requested before we have one");
-            Err("Share request failed: share unavailable".to_string())
-        }
+        Request::ShareRequest => match initial_share.lock().await.clone() {
+            Some(dist) => Ok(Response::ShareResponse(dist.share)),
+            None => {
+                warn!(log, "Share requested before we have one");
+                Err("Share request failed: share unavailable".to_string())
+            }
+        },
     };
 
     write_response(&mut stream, response).await

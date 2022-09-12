@@ -7,14 +7,14 @@ license = "MPL-2.0"
 [dependencies]
 clap = { version = "3.2", features = ["derive"] }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
-futures = "0.3.23"
+futures = "0.3.24"
 hex = "0.4"
 http = "0.2.7"
 hyper = "0.14.20"
 schemars = "0.8"
 serde = { version = "1.0", features = ["derive"] }
 slog-dtrace = "0.2"
-thiserror = "1.0.32"
+thiserror = "1.0.34"
 tokio-tungstenite = "0.17"
 toml = "0.5.9"
 uuid = "1.1.0"
@@ -28,7 +28,7 @@ version = "2.7"
 features = [ "max_level_trace", "release_max_level_debug" ]
 
 [dependencies.tokio]
-version = "1.20"
+version = "1.21"
 features = [ "full" ]
 
 [dev-dependencies]

@@ -8,7 +8,7 @@ license = "MPL-2.0"
 [dependencies]
 anyhow = "1.0"
 clap = { version = "3.2", features = ["derive"] }
-futures = "0.3.23"
+futures = "0.3.24"
 hex = "0.4.3"
 indicatif = { version = "0.17.0", features = ["rayon"] }
 omicron-common = { path = "../common" }
@@ -26,7 +26,7 @@ smf = "0.2"
 tar = "0.4"
 tempfile = "3.3"
 thiserror = "1.0"
-tokio = { version = "1.20", features = [ "full" ] }
+tokio = { version = "1.21", features = [ "full" ] }
 toml = "0.5.9"
 walkdir = "2.3"
 

@@ -5,7 +5,7 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
-futures = "0.3.23"
+futures = "0.3.24"
 omicron-common = { path = "../common" }
 progenitor = { git = "https://github.com/oxidecomputer/progenitor" }
 reqwest = { version = "0.11", features = ["json", "rustls-tls", "stream"] }
@@ -13,8 +13,8 @@ serde = { version = "1.0", features = [ "derive" ] }
 serde_json = "1.0"
 slog = { version = "2.5.0", features = [ "max_level_trace", "release_max_level_debug" ] }
 thiserror = "1.0"
-trust-dns-proto = "0.21"
-trust-dns-resolver = "0.21"
+trust-dns-proto = "0.22"
+trust-dns-resolver = "0.22"
 uuid = { version = "1.1.0", features = [ "v4", "serde" ] }
 
 [dev-dependencies]
@@ -23,4 +23,4 @@ internal-dns = { path = "../internal-dns" }
 omicron-test-utils = { path = "../test-utils" }
 sled = "0.34"
 tempfile = "3.3"
-tokio = { version = "1.20", features = [ "full" ] }
+tokio = { version = "1.21", features = [ "full" ] }

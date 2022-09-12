@@ -569,268 +569,6 @@
         }
       }
     },
-    "/global/policy": {
-      "get": {
-        "tags": [
-          "policy"
-        ],
-        "summary": "Fetch the top-level IAM policy",
-        "operationId": "global_policy_view",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FleetRolePolicy"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
-      "put": {
-        "tags": [
-          "policy"
-        ],
-        "summary": "Update the top-level IAM policy",
-        "operationId": "global_policy_update",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/FleetRolePolicy"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FleetRolePolicy"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/hardware/racks": {
-      "get": {
-        "tags": [
-          "hardware"
-        ],
-        "summary": "List racks",
-        "operationId": "rack_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            },
-            "style": "form"
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            },
-            "style": "form"
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/IdSortMode"
-            },
-            "style": "form"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RackResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-dropshot-pagination": true
-      }
-    },
-    "/hardware/racks/{rack_id}": {
-      "get": {
-        "tags": [
-          "hardware"
-        ],
-        "summary": "Fetch a rack",
-        "operationId": "rack_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "rack_id",
-            "description": "The rack's unique ID.",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "style": "simple"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Rack"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/hardware/sleds": {
-      "get": {
-        "tags": [
-          "hardware"
-        ],
-        "summary": "List sleds",
-        "operationId": "sled_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            },
-            "style": "form"
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            },
-            "style": "form"
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/IdSortMode"
-            },
-            "style": "form"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SledResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-dropshot-pagination": true
-      }
-    },
-    "/hardware/sleds/{sled_id}": {
-      "get": {
-        "tags": [
-          "hardware"
-        ],
-        "summary": "Fetch a sled",
-        "operationId": "sled_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "sled_id",
-            "description": "The sled's unique ID.",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "style": "simple"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Sled"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/images": {
       "get": {
         "tags": [
@@ -6124,105 +5862,6 @@
         }
       }
     },
-    "/sagas": {
-      "get": {
-        "tags": [
-          "sagas"
-        ],
-        "summary": "List sagas",
-        "operationId": "saga_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            },
-            "style": "form"
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            },
-            "style": "form"
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/IdSortMode"
-            },
-            "style": "form"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SagaResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-dropshot-pagination": true
-      }
-    },
-    "/sagas/{saga_id}": {
-      "get": {
-        "tags": [
-          "sagas"
-        ],
-        "summary": "Fetch a saga",
-        "operationId": "saga_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "saga_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "style": "simple"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Saga"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/session/me": {
       "get": {
         "tags": [
@@ -6837,6 +6476,387 @@
         }
       }
     },
+    "/system/hardware/racks": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "List racks",
+        "operationId": "rack_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RackResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      }
+    },
+    "/system/hardware/racks/{rack_id}": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Fetch a rack",
+        "operationId": "rack_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rack_id",
+            "description": "The rack's unique ID.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Rack"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/system/hardware/sleds": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "List sleds",
+        "operationId": "sled_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SledResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      }
+    },
+    "/system/hardware/sleds/{sled_id}": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Fetch a sled",
+        "operationId": "sled_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sled_id",
+            "description": "The sled's unique ID.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Sled"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/system/policy": {
+      "get": {
+        "tags": [
+          "policy"
+        ],
+        "summary": "Fetch the top-level IAM policy",
+        "operationId": "system_policy_view",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetRolePolicy"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "policy"
+        ],
+        "summary": "Update the top-level IAM policy",
+        "operationId": "system_policy_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FleetRolePolicy"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetRolePolicy"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/system/sagas": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "List sagas",
+        "operationId": "saga_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SagaResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      }
+    },
+    "/system/sagas/{saga_id}": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Fetch a saga",
+        "operationId": "saga_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "saga_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Saga"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/system/updates/refresh": {
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Refresh update data",
+        "operationId": "updates_refresh",
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/system/user": {
       "get": {
         "tags": [
@@ -6986,26 +7006,6 @@
           }
         },
         "x-dropshot-pagination": true
-      }
-    },
-    "/updates/refresh": {
-      "post": {
-        "tags": [
-          "updates"
-        ],
-        "summary": "Refresh update data",
-        "operationId": "updates_refresh",
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
       }
     },
     "/users": {
@@ -8781,6 +8781,11 @@
                 "$ref": "#/components/schemas/InstanceNetworkInterfaceAttachment"
               }
             ]
+          },
+          "start": {
+            "description": "Should this instance be started upon creation; true by default.",
+            "default": true,
+            "type": "boolean"
           },
           "user_data": {
             "description": "User data for instance initialization systems (such as cloud-init). Must be a Base64-encoded string, as specified in RFC 4648 § 4 (+ and / characters with padding). Maximum 32 KiB unencoded data.",
@@ -11929,13 +11934,6 @@
           }
         }
       },
-      "IdSortMode": {
-        "description": "Supported set of sort modes for scanning by id only.\n\nCurrently, we only support scanning in ascending order.",
-        "type": "string",
-        "enum": [
-          "id_ascending"
-        ]
-      },
       "NameSortMode": {
         "description": "Supported set of sort modes for scanning by name only\n\nCurrently, we only support scanning in ascending order.",
         "type": "string",
@@ -11961,6 +11959,13 @@
           "read_bytes",
           "write",
           "write_bytes"
+        ]
+      },
+      "IdSortMode": {
+        "description": "Supported set of sort modes for scanning by id only.\n\nCurrently, we only support scanning in ascending order.",
+        "type": "string",
+        "enum": [
+          "id_ascending"
         ]
       }
     }

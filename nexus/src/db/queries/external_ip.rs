@@ -5,10 +5,11 @@
 //! Implementation of queries for operating on external IP addresses from IP
 //! Pools.
 
-use crate::db::model::IncompleteInstanceExternalIp;
-use crate::db::model::InstanceExternalIp;
+use crate::db::model::ExternalIp;
+use crate::db::model::IncompleteExternalIp;
 use crate::db::model::IpKind;
 use crate::db::model::IpKindEnum;
+use crate::db::model::IpSource;
 use crate::db::model::Name;
 use crate::db::pool::DbConnection;
 use crate::db::schema;
@@ -30,10 +31,9 @@ type FromClause<T> =
 type IpPoolRangeFromClause = FromClause<schema::ip_pool_range::table>;
 const IP_POOL_RANGE_FROM_CLAUSE: IpPoolRangeFromClause =
     IpPoolRangeFromClause::new();
-type InstanceExternalIpFromClause =
-    FromClause<schema::instance_external_ip::table>;
-const INSTANCE_EXTERNAL_IP_FROM_CLAUSE: InstanceExternalIpFromClause =
-    InstanceExternalIpFromClause::new();
+type ExternalIpFromClause = FromClause<schema::external_ip::table>;
+const EXTERNAL_IP_FROM_CLAUSE: ExternalIpFromClause =
+    ExternalIpFromClause::new();
 
 // The number of ports available to an instance when doing source NAT. Note
 // that for static NAT, this value isn't used, and all ports are available.
@@ -64,7 +64,7 @@ const MAX_PORT: i32 = u16::MAX as _;
 /// In general, the query:
 ///
 /// - Selects the next available IP address and port range from _any_ IP Pool
-/// - Inserts that record into the `instance_external_ip` table
+/// - Inserts that record into the `external_ip` table
 /// - Updates the rcgen and time modified of the parent `ip_pool_range` table
 ///
 /// In detail, the query is:
@@ -117,12 +117,12 @@ const MAX_PORT: i32 = u16::MAX as _;
 ///         -- Join with existing IPs, selecting the first row from the
 ///         -- address and port sequence subqueryes that has no match. I.e.,
 ///         -- is not yet reserved.
-///         instance_external_ip
+///         external_ip
 ///     ON
 ///         (ip, first_port, time_deleted IS NULL) =
 ///         (candidate_ip, candidate_first_port, TRUE)
 ///     WHERE
-///         ip IS NULL
+///         (ip IS NULL) OR (id = <ip_id>)
 ///     ORDER BY
 ///         candidate_ip, candidate_first_port
 ///     LIMIT 1
@@ -133,9 +133,9 @@ const MAX_PORT: i32 = u16::MAX as _;
 ///     -- everything else as it exists in the record. This should only be
 ///     -- possible on replay of a saga node.
 ///     INSERT INTO
-///         instance_external_ip
-///     (SELECT * FROM external_ip)
-///     ON CONFLICT
+///         external_ip
+///     (SELECT * FROM next_external_ip)
+///     ON CONFLICT (id)
 ///     DO UPDATE SET
 ///         time_created = excluded.time_created,
 ///         time_modified = excluded.time_modified,
@@ -212,7 +212,7 @@ const MAX_PORT: i32 = u16::MAX as _;
 /// violates that expectation.
 #[derive(Debug, Clone)]
 pub struct NextExternalIp {
-    ip: IncompleteInstanceExternalIp,
+    ip: IncompleteExternalIp,
     // Number of ports reserved per IP address. Only applicable if the IP kind
     // is snat.
     n_ports_per_chunk: i32,
@@ -224,7 +224,7 @@ pub struct NextExternalIp {
 }
 
 impl NextExternalIp {
-    pub fn new(ip: IncompleteInstanceExternalIp) -> Self {
+    pub fn new(ip: IncompleteExternalIp) -> Self {
         let now = Utc::now();
         let n_ports_per_chunk = i32::try_from(NUM_SOURCE_NAT_PORTS).unwrap();
         Self {
@@ -239,7 +239,7 @@ impl NextExternalIp {
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
     ) -> QueryResult<()> {
-        use schema::instance_external_ip::dsl;
+        use schema::external_ip::dsl;
         out.push_sql("SELECT ");
 
         // NOTE: These columns must be selected in the order in which they
@@ -295,7 +295,15 @@ impl NextExternalIp {
         out.push_sql(", ");
 
         // Project ID
-        out.push_bind_param::<sql_types::Uuid, Uuid>(self.ip.project_id())?;
+        match self.ip.source() {
+            IpSource::Instance { project_id, .. } => {
+                out.push_bind_param::<sql_types::Uuid, Uuid>(project_id)?;
+            }
+            IpSource::Service { .. } => {
+                out.push_bind_param::<sql_types::Nullable<sql_types::Uuid>, Option<Uuid>>(&None)?;
+            }
+        };
+
         out.push_sql(" AS ");
         out.push_identifier(dsl::project_id::NAME)?;
         out.push_sql(", ");
@@ -326,7 +334,7 @@ impl NextExternalIp {
         out.push_sql(") CROSS JOIN (");
         self.push_port_sequence_subquery(out.reborrow())?;
         out.push_sql(") LEFT OUTER JOIN ");
-        INSTANCE_EXTERNAL_IP_FROM_CLAUSE.walk_ast(out.reborrow())?;
+        EXTERNAL_IP_FROM_CLAUSE.walk_ast(out.reborrow())?;
 
         // The JOIN conditions depend on the IP type. For automatic SNAT IP
         // addresses, we need to consider existing records with their port
@@ -386,14 +394,18 @@ impl NextExternalIp {
         // the `time_deleted` is null. That means that if the record has been
         // soft-deleted, it won't be considered a match, and thus both the IP
         // and first port (in the join result) will be null. Note that there
-        // _is_ a record in the `instance_external_ip` table that has that IP
+        // _is_ a record in the `external_ip` table that has that IP
         // and possibly first port, but since it's been soft-deleted, it's not a
         // match. In that case, we can get away with _only_ filtering the join
-        // results on the IP from the `instance_external_ip` table being NULL.
-        out.push_sql(" WHERE ");
+        // results on the IP from the `external_ip` table being NULL.
+        out.push_sql(" WHERE (");
         out.push_identifier(dsl::ip::NAME)?;
+        out.push_sql(" IS NULL) OR (");
+        out.push_identifier(dsl::id::NAME)?;
+        out.push_sql(" = ");
+        out.push_bind_param::<sql_types::Uuid, Uuid>(self.ip.id())?;
         out.push_sql(
-            " IS NULL \
+            ") \
             ORDER BY candidate_ip, candidate_first_port \
             LIMIT 1",
         );
@@ -437,18 +449,27 @@ impl NextExternalIp {
         out.push_sql(") AS candidate_ip FROM ");
         IP_POOL_RANGE_FROM_CLAUSE.walk_ast(out.reborrow())?;
         out.push_sql(" WHERE ");
-        if let Some(ref pool_id) = self.ip.pool_id() {
-            out.push_identifier(dsl::ip_pool_id::NAME)?;
-            out.push_sql(" = ");
-            out.push_bind_param::<sql_types::Uuid, Uuid>(pool_id)?;
-        } else {
-            out.push_sql("(");
-            out.push_identifier(dsl::project_id::NAME)?;
-            out.push_sql(" = ");
-            out.push_bind_param::<sql_types::Uuid, Uuid>(self.ip.project_id())?;
-            out.push_sql(" OR ");
-            out.push_identifier(dsl::project_id::NAME)?;
-            out.push_sql(" IS NULL)");
+        match self.ip.source() {
+            IpSource::Instance { project_id, pool_id } => {
+                if let Some(pool_id) = pool_id {
+                    out.push_identifier(dsl::ip_pool_id::NAME)?;
+                    out.push_sql(" = ");
+                    out.push_bind_param::<sql_types::Uuid, Uuid>(pool_id)?;
+                } else {
+                    out.push_sql("(");
+                    out.push_identifier(dsl::project_id::NAME)?;
+                    out.push_sql(" = ");
+                    out.push_bind_param::<sql_types::Uuid, Uuid>(project_id)?;
+                    out.push_sql(" OR ");
+                    out.push_identifier(dsl::project_id::NAME)?;
+                    out.push_sql(" IS NULL)");
+                }
+            }
+            IpSource::Service { pool_id } => {
+                out.push_identifier(dsl::ip_pool_id::NAME)?;
+                out.push_sql(" = ");
+                out.push_bind_param::<sql_types::Uuid, Uuid>(pool_id)?;
+            }
         }
         out.push_sql(" AND ");
         out.push_identifier(dsl::time_deleted::NAME)?;
@@ -533,9 +554,7 @@ impl NextExternalIp {
         out.push_sql(" + 1 WHERE ");
         out.push_identifier(dsl::id::NAME)?;
         out.push_sql(" = (SELECT ");
-        out.push_identifier(
-            schema::instance_external_ip::ip_pool_range_id::NAME,
-        )?;
+        out.push_identifier(schema::external_ip::ip_pool_range_id::NAME)?;
         out.push_sql(" FROM next_external_ip) AND ");
         out.push_identifier(dsl::time_deleted::NAME)?;
         out.push_sql(" IS NULL RETURNING ");
@@ -543,16 +562,16 @@ impl NextExternalIp {
         Ok(())
     }
 
-    // Push the subquery that updates the actual `instance_external_ip` table
+    // Push the subquery that updates the actual `external_ip` table
     // with the candidate record created in the main `next_external_ip` CTE and
     // returns it. Note that this may just update the timestamps, if a record
     // with the same primary key is found.
-    fn push_update_instance_external_ip_subquery<'a>(
+    fn push_update_external_ip_subquery<'a>(
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
     ) -> QueryResult<()> {
         out.push_sql("INSERT INTO ");
-        INSTANCE_EXTERNAL_IP_FROM_CLAUSE.walk_ast(out.reborrow())?;
+        EXTERNAL_IP_FROM_CLAUSE.walk_ast(out.reborrow())?;
         out.push_sql(
             " (SELECT * FROM next_external_ip) \
             ON CONFLICT (id) \
@@ -587,7 +606,7 @@ impl QueryFragment<Pg> for NextExternalIp {
         // Push the subquery that potentially inserts this record, or ignores
         // primary key conflicts (for idempotency).
         out.push_sql("), external_ip AS (");
-        self.push_update_instance_external_ip_subquery(out.reborrow())?;
+        self.push_update_external_ip_subquery(out.reborrow())?;
 
         // Push the subquery that bumps the `rcgen` of the IP Pool range table
         out.push_sql("), updated_pool_range AS (");
@@ -601,7 +620,7 @@ impl QueryFragment<Pg> for NextExternalIp {
 }
 
 impl Query for NextExternalIp {
-    type SqlType = <<InstanceExternalIp as
+    type SqlType = <<ExternalIp as
         diesel::Selectable<Pg>>::SelectExpression as diesel::Expression>::SqlType;
 }
 
@@ -620,6 +639,7 @@ mod tests {
     use async_bb8_diesel::AsyncRunQueryDsl;
     use dropshot::test_util::LogContext;
     use nexus_test_utils::db::test_setup_database;
+    use nexus_test_utils::RACK_UUID;
     use omicron_common::api::external::Error;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev;
@@ -641,6 +661,7 @@ mod tests {
             let logctx = dev::test_setup_log(test_name);
             let log = logctx.log.new(o!());
             let db = test_setup_database(&log).await;
+            crate::db::datastore::datastore_test(&logctx, &db).await;
             let cfg = crate::db::Config { url: db.pg_config().clone() };
             let pool = Arc::new(crate::db::Pool::new(&cfg));
             let db_datastore =
@@ -650,22 +671,21 @@ mod tests {
             Self { logctx, opctx, db, db_datastore }
         }
 
-        async fn create_ip_pool(
+        async fn create_ip_pool_internal(
             &self,
             name: &str,
             range: IpRange,
             project_id: Option<Uuid>,
+            rack_id: Option<Uuid>,
         ) {
-            // Create with no org/project name, set project_id manually.
-            let mut pool = IpPool::new(
+            let pool = IpPool::new(
                 &IdentityMetadataCreateParams {
                     name: String::from(name).parse().unwrap(),
                     description: format!("ip pool {}", name),
                 },
-                /* project_id= */ None,
-                /* rack_id= */ None,
+                project_id,
+                rack_id,
             );
-            pool.project_id = project_id;
 
             diesel::insert_into(crate::db::schema::ip_pool::dsl::ip_pool)
                 .values(pool.clone())
@@ -688,6 +708,33 @@ mod tests {
             )
             .await
             .expect("Failed to create IP Pool range");
+        }
+
+        async fn create_rack_ip_pool(
+            &self,
+            name: &str,
+            range: IpRange,
+            rack_id: Uuid,
+        ) {
+            self.create_ip_pool_internal(
+                name,
+                range,
+                /* project_id= */ None,
+                Some(rack_id),
+            )
+            .await;
+        }
+
+        async fn create_ip_pool(
+            &self,
+            name: &str,
+            range: IpRange,
+            project_id: Option<Uuid>,
+        ) {
+            self.create_ip_pool_internal(
+                name, range, project_id, /* rack_id= */ None,
+            )
+            .await;
         }
 
         async fn success(mut self) {
@@ -748,9 +795,7 @@ mod tests {
         assert_eq!(
             err,
             Error::InvalidRequest {
-                message: String::from(
-                    "No external IP addresses available for new instance"
-                ),
+                message: String::from("No external IP addresses available"),
             }
         );
         context.success().await;
@@ -807,7 +852,7 @@ mod tests {
         // Release the first
         context
             .db_datastore
-            .deallocate_instance_external_ip(&context.opctx, ips[0].id)
+            .deallocate_external_ip(&context.opctx, ips[0].id)
             .await
             .expect("Failed to release the first external IP address");
 
@@ -943,7 +988,7 @@ mod tests {
         assert_eq!(ip.ip.ip(), second_range.first_address());
         assert_eq!(ip.first_port.0, 0);
         assert_eq!(ip.last_port.0, u16::MAX);
-        assert_eq!(ip.project_id, instance_project_id);
+        assert_eq!(ip.project_id.unwrap(), instance_project_id);
 
         // Allocating an address on an instance in the same project should get
         // an address from the first pool.
@@ -966,7 +1011,157 @@ mod tests {
         assert_eq!(ip.ip.ip(), first_range.first_address());
         assert_eq!(ip.first_port.0, 0);
         assert_eq!(ip.last_port.0, u16::MAX);
-        assert_eq!(ip.project_id, project_id);
+        assert_eq!(ip.project_id.unwrap(), project_id);
+
+        context.success().await;
+    }
+
+    #[tokio::test]
+    async fn test_next_external_ip_for_service() {
+        let context =
+            TestContext::new("test_next_external_ip_for_service").await;
+
+        // Create an IP pool without an associated project.
+        let rack_id = Uuid::parse_str(RACK_UUID).unwrap();
+        let ip_range = IpRange::try_from((
+            Ipv4Addr::new(10, 0, 0, 1),
+            Ipv4Addr::new(10, 0, 0, 2),
+        ))
+        .unwrap();
+        context.create_rack_ip_pool("p0", ip_range, rack_id).await;
+
+        // Allocate an IP address as we would for an external, rack-associated
+        // service.
+        let id1 = Uuid::new_v4();
+        let ip1 = context
+            .db_datastore
+            .allocate_service_ip(&context.opctx, id1, rack_id)
+            .await
+            .expect("Failed to allocate service IP address");
+        assert_eq!(ip1.kind, IpKind::Service);
+        assert_eq!(ip1.ip.ip(), IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
+        assert_eq!(ip1.first_port.0, 0);
+        assert_eq!(ip1.last_port.0, u16::MAX);
+        assert!(ip1.instance_id.is_none());
+        assert!(ip1.project_id.is_none());
+
+        // Allocate the next (last) IP address
+        let id2 = Uuid::new_v4();
+        let ip2 = context
+            .db_datastore
+            .allocate_service_ip(&context.opctx, id2, rack_id)
+            .await
+            .expect("Failed to allocate service IP address");
+        assert_eq!(ip2.kind, IpKind::Service);
+        assert_eq!(ip2.ip.ip(), IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)));
+        assert_eq!(ip2.first_port.0, 0);
+        assert_eq!(ip2.last_port.0, u16::MAX);
+        assert!(ip2.instance_id.is_none());
+        assert!(ip2.project_id.is_none());
+
+        // Once we're out of IP addresses, test that we see the right error.
+        let id3 = Uuid::new_v4();
+        let err = context
+            .db_datastore
+            .allocate_service_ip(&context.opctx, id3, rack_id)
+            .await
+            .expect_err("Should have failed to allocate after pool exhausted");
+        assert_eq!(
+            err,
+            Error::InvalidRequest {
+                message: String::from("No external IP addresses available"),
+            }
+        );
+
+        context.success().await;
+    }
+
+    #[tokio::test]
+    async fn test_insert_external_ip_for_service_is_idempoent() {
+        let context = TestContext::new(
+            "test_insert_external_ip_for_service_is_idempotent",
+        )
+        .await;
+
+        // Create an IP pool without an associated project.
+        let rack_id = Uuid::parse_str(RACK_UUID).unwrap();
+        let ip_range = IpRange::try_from((
+            Ipv4Addr::new(10, 0, 0, 1),
+            Ipv4Addr::new(10, 0, 0, 2),
+        ))
+        .unwrap();
+        context.create_rack_ip_pool("p0", ip_range, rack_id).await;
+
+        // Allocate an IP address as we would for an external, rack-associated
+        // service.
+        let id = Uuid::new_v4();
+        let ip = context
+            .db_datastore
+            .allocate_service_ip(&context.opctx, id, rack_id)
+            .await
+            .expect("Failed to allocate service IP address");
+        assert_eq!(ip.kind, IpKind::Service);
+        assert_eq!(ip.ip.ip(), IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
+        assert_eq!(ip.first_port.0, 0);
+        assert_eq!(ip.last_port.0, u16::MAX);
+        assert!(ip.instance_id.is_none());
+        assert!(ip.project_id.is_none());
+
+        let ip_again = context
+            .db_datastore
+            .allocate_service_ip(&context.opctx, id, rack_id)
+            .await
+            .expect("Failed to allocate service IP address");
+
+        assert_eq!(ip.id, ip_again.id);
+        assert_eq!(ip.ip.ip(), ip_again.ip.ip());
+
+        context.success().await;
+    }
+
+    // This test is identical to "test_insert_external_ip_is_idempotent",
+    // but tries to make an idempotent allocation after all addresses in the
+    // pool have been allocated.
+    #[tokio::test]
+    async fn test_insert_external_ip_for_service_is_idempotent_even_when_full()
+    {
+        let context = TestContext::new(
+            "test_insert_external_ip_is_idempotent_even_when_full",
+        )
+        .await;
+
+        // Create an IP pool without an associated project.
+        let rack_id = Uuid::parse_str(RACK_UUID).unwrap();
+        let ip_range = IpRange::try_from((
+            Ipv4Addr::new(10, 0, 0, 1),
+            Ipv4Addr::new(10, 0, 0, 1),
+        ))
+        .unwrap();
+        context.create_rack_ip_pool("p0", ip_range, rack_id).await;
+
+        // Allocate an IP address as we would for an external, rack-associated
+        // service.
+        let id = Uuid::new_v4();
+        let ip = context
+            .db_datastore
+            .allocate_service_ip(&context.opctx, id, rack_id)
+            .await
+            .expect("Failed to allocate service IP address");
+        assert_eq!(ip.kind, IpKind::Service);
+        assert_eq!(ip.ip.ip(), IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
+        assert_eq!(ip.first_port.0, 0);
+        assert_eq!(ip.last_port.0, u16::MAX);
+        assert!(ip.instance_id.is_none());
+        assert!(ip.project_id.is_none());
+
+        let ip_again = context
+            .db_datastore
+            .allocate_service_ip(&context.opctx, id, rack_id)
+            .await
+            .expect("Failed to allocate service IP address");
+
+        assert_eq!(ip.id, ip_again.id);
+        assert_eq!(ip.ip.ip(), ip_again.ip.ip());
 
         context.success().await;
     }
@@ -1005,7 +1200,7 @@ mod tests {
             usize::from(ip.last_port.0),
             super::NUM_SOURCE_NAT_PORTS - 1
         );
-        assert_eq!(ip.project_id, project_id);
+        assert_eq!(ip.project_id.unwrap(), project_id);
 
         // Create a new IP, with the _same_ ID, and ensure we get back the same
         // value.
@@ -1079,7 +1274,7 @@ mod tests {
         assert_eq!(ip.ip.ip(), second_range.first_address());
         assert_eq!(ip.first_port.0, 0);
         assert_eq!(ip.last_port.0, u16::MAX);
-        assert_eq!(ip.project_id, project_id);
+        assert_eq!(ip.project_id.unwrap(), project_id);
 
         context.success().await;
     }

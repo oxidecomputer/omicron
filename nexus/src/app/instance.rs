@@ -255,10 +255,7 @@ impl super::Nexus {
             .await?;
         // Ignore the count of addresses deleted
         self.db_datastore
-            .deallocate_instance_external_ip_by_instance_id(
-                opctx,
-                authz_instance.id(),
-            )
+            .deallocate_external_ip_by_instance_id(opctx, authz_instance.id())
             .await?;
         Ok(())
     }
