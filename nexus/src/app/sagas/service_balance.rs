@@ -2,17 +2,17 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{NexusActionContext, NexusSaga, SagaInitError, ACTION_GENERATE_ID};
+use super::{NexusActionContext, NexusSaga, SagaInitError};
 use crate::app::sagas::NexusAction;
 use crate::authn;
-use crate::context::OpContext;
-use crate::db::identity::Resource;
+//use crate::context::OpContext;
+//use crate::db::identity::Resource;
 use crate::db::model::ServiceKind;
-use chrono::Utc;
+//use chrono::Utc;
 use lazy_static::lazy_static;
-use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::RACK_PREFIX;
-use omicron_common::api::external::Error;
+//use omicron_common::address::Ipv6Subnet;
+//use omicron_common::address::RACK_PREFIX;
+//use omicron_common::api::external::Error;
 use serde::Deserialize;
 use serde::Serialize;
 use std::fmt::Debug;

@@ -10,13 +10,10 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::collection_insert::SyncInsertError;
-use crate::db::error::public_error_from_diesel_create;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
 use crate::db::identity::Asset;
-use crate::db::model::ExternalIp;
 use crate::db::model::Service;
 use crate::db::model::ServiceKind;
 use crate::db::model::Sled;
@@ -79,10 +76,10 @@ impl DataStore {
         })
     }
 
-    fn service_upsert_sync(
-        conn: &mut DbConnection,
+    async fn service_upsert_on_connection(
+        conn: &async_bb8_diesel::Connection<crate::db::pool::DbConnection>,
         service: Service,
-    ) -> CreateResult<Service> {
+    ) -> Result<Service, async_bb8_diesel::ConnectionError> {
         use db::schema::service::dsl;
 
         let sled_id = service.sled_id;
@@ -99,32 +96,36 @@ impl DataStore {
                     dsl::kind.eq(excluded(dsl::kind)),
                 )),
         )
-        .insert_and_get_result(conn)
+        .insert_and_get_result_async(conn)
+        .await
         .map_err(|e| match e {
-            SyncInsertError::CollectionNotFound => Error::ObjectNotFound {
+            AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
                 type_name: ResourceType::Sled,
                 lookup_type: LookupType::ById(sled_id),
             },
-            SyncInsertError::DatabaseError(e) => {
-                public_error_from_diesel_create(
+            AsyncInsertError::DatabaseError(e) => {
+                public_error_from_diesel_pool(
                     e,
-                    ResourceType::Service,
-                    &service.id().to_string(),
+                    ErrorHandler::Conflict(
+                        ResourceType::Service,
+                        &service.id().to_string(),
+                    ),
                 )
             }
         })
     }
 
-    fn sled_list_with_limit_sync(
-        conn: &mut DbConnection,
+    async fn sled_list_with_limit_on_connection(
+        conn: &async_bb8_diesel::Connection<crate::db::pool::DbConnection>,
         limit: u32,
-    ) -> Result<Vec<Sled>, diesel::result::Error> {
+    ) -> Result<Vec<Sled>, async_bb8_diesel::ConnectionError> {
         use db::schema::sled::dsl;
         dsl::sled
             .filter(dsl::time_deleted.is_null())
             .limit(limit as i64)
             .select(Sled::as_select())
-            .load(conn)
+            .load_async(conn)
+            .await
     }
 
     pub async fn service_list(
@@ -144,11 +145,11 @@ impl DataStore {
 
     // List all sleds on a rack, with info about provisioned services of a
     // particular type.
-    fn sled_and_service_list_sync(
-        conn: &mut DbConnection,
+    async fn sled_and_service_list(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         rack_id: Uuid,
         kind: ServiceKind,
-    ) -> Result<Vec<(Sled, Option<Service>)>, diesel::result::Error> {
+    ) -> Result<Vec<(Sled, Option<Service>)>, async_bb8_diesel::ConnectionError> {
         use db::schema::service::dsl as svc_dsl;
         use db::schema::sled::dsl as sled_dsl;
 
@@ -159,7 +160,8 @@ impl DataStore {
                 svc_dsl::sled_id.eq(sled_dsl::id).and(svc_dsl::kind.eq(kind)),
             ))
             .select(<(Sled, Option<Service>)>::as_select())
-            .get_results(conn)
+            .get_results_async(conn)
+            .await
     }
 
     /// Ensures that all Scrimlets in `rack_id` have the `kind` service
@@ -177,9 +179,9 @@ impl DataStore {
         type TxnError = TransactionError<Error>;
 
         self.pool()
-            .transaction(move |conn| {
+            .transaction_async(|conn| async move {
                 let sleds_and_maybe_svcs =
-                    Self::sled_and_service_list_sync(conn, rack_id, kind)?;
+                    Self::sled_and_service_list(&conn, rack_id, kind).await?;
 
                 // Split the set of returned sleds into "those with" and "those
                 // without" the requested service.
@@ -208,7 +210,8 @@ impl DataStore {
                     if sled.is_scrimlet() {
                         let svc_id = Uuid::new_v4();
                         let address =
-                            Self::next_ipv6_address_sync(conn, sled.id())
+                            Self::next_ipv6_address_on_connection(&conn, sled.id())
+                                .await
                                 .map_err(|e| TxnError::CustomError(e))?;
 
                         let service = db::model::Service::new(
@@ -218,7 +221,8 @@ impl DataStore {
                             kind,
                         );
 
-                        let svc = Self::service_upsert_sync(conn, service)
+                        let svc = Self::service_upsert_on_connection(&conn, service)
+                            .await
                             .map_err(|e| TxnError::CustomError(e))?;
                         svcs.push(svc);
                     }
@@ -316,9 +320,11 @@ impl DataStore {
         //     RETURNING *
         // ),
         self.pool()
-            .transaction(move |conn| {
+            .transaction_async(|conn| async move {
                 let sleds_and_maybe_svcs =
-                    Self::sled_and_service_list_sync(conn, rack_id, kind)?;
+                    Self::sled_and_service_list(&conn, rack_id, kind)
+                        .await
+                        .map_err(|e| TxnError::Pool(e.into()))?;
 
                 // Split the set of returned sleds into "those with" and "those
                 // without" the requested service.
@@ -354,30 +360,31 @@ impl DataStore {
                     let svc_id = Uuid::new_v4();
 
                     // Always allocate an internal IP address to this service.
-                    let address = Self::next_ipv6_address_sync(conn, sled.id())
+                    let address = Self::next_ipv6_address_on_connection(&conn, sled.id())
+                        .await
                         .map_err(|e| {
-                            TxnError::CustomError(ServiceError::Other(e))
+                            TxnError::CustomError(ServiceError::Other(e.into()))
                         })?;
 
                     // If requested, allocate an external IP address for this
                     // service too.
-                    let external_ip: Option<ExternalIp> = if matches!(kind, ServiceKind::Nexus) {
-                        let pool = Self::ip_pools_lookup_by_rack_id_sync(
-                            conn, rack_id,
-                        )?;
+                    let external_ip = if matches!(kind, ServiceKind::Nexus) {
+                        let pool = Self::ip_pools_lookup_by_rack_id_on_connection(
+                            &conn, rack_id,
+                        ).await
+                            .map_err(|e| {
+                                TxnError::Pool(e.into())
+                            })?;
 
-                        todo!("We are deleting the sync version, right?");
-                        /*
-                        let external_ip = Self::allocate_service_ip_sync(
-                            conn,
+                        let external_ip = Self::allocate_service_ip_on_connection(
+                            &conn,
                             Uuid::new_v4(),
                             pool.id(),
-                        ).map_err(|e| {
-                            TxnError::CustomError(ServiceError::Other(e))
+                        ).await.map_err(|e| {
+                            TxnError::Pool(e.into())
                         })?;
 
                         Some(external_ip)
-                        */
                     } else {
                         None
                     };
@@ -394,10 +401,9 @@ impl DataStore {
                         kind,
                     );
 
-                    let svc = Self::service_upsert_sync(conn, service)
-                        .map_err(|e| {
-                            TxnError::CustomError(ServiceError::Other(e))
-                        })?;
+                    let svc = Self::service_upsert_on_connection(&conn, service)
+                        .await
+                        .map_err(|e| TxnError::Pool(e.into()))?;
                     svcs.push(svc);
                 }
 
@@ -436,8 +442,8 @@ impl DataStore {
         type TxnError = TransactionError<ServiceError>;
 
         self.pool()
-            .transaction(move |conn| {
-                let mut svcs = Self::dns_service_list_sync(conn)?;
+            .transaction_async(|conn| async move {
+                let mut svcs = Self::dns_service_list(&conn).await?;
 
                 // Get all subnets not allocated to existing services.
                 let mut usable_dns_subnets = ReservedRackSubnet(rack_subnet)
@@ -455,7 +461,8 @@ impl DataStore {
 
                 // Get all sleds which aren't already running DNS services.
                 let mut target_sleds =
-                    Self::sled_list_with_limit_sync(conn, redundancy)?
+                    Self::sled_list_with_limit_on_connection(&conn, redundancy)
+                        .await?
                         .into_iter()
                         .filter(|sled| {
                             // The target sleds are only considered if they aren't already
@@ -482,10 +489,9 @@ impl DataStore {
                         ServiceKind::InternalDNS,
                     );
 
-                    let svc = Self::service_upsert_sync(conn, service)
-                        .map_err(|e| {
-                            TxnError::CustomError(ServiceError::Other(e))
-                        })?;
+                    let svc = Self::service_upsert_on_connection(&conn, service)
+                        .await
+                        .map_err(|e| TxnError::Pool(e.into()))?;
 
                     svcs.push(svc);
                 }
@@ -508,15 +514,16 @@ impl DataStore {
             })
     }
 
-    fn dns_service_list_sync(
-        conn: &mut DbConnection,
-    ) -> Result<Vec<Service>, diesel::result::Error> {
+    async fn dns_service_list(
+        conn: &async_bb8_diesel::Connection<crate::db::pool::DbConnection>,
+    ) -> Result<Vec<Service>, async_bb8_diesel::ConnectionError> {
         use db::schema::service::dsl as svc;
 
         svc::service
             .filter(svc::kind.eq(ServiceKind::InternalDNS))
             .limit(DNS_REDUNDANCY.into())
             .select(Service::as_select())
-            .get_results(conn)
+            .get_results_async(conn)
+            .await
     }
 }

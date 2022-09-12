@@ -43,6 +43,13 @@ impl From<PublicError> for TransactionError<PublicError> {
     }
 }
 
+impl From<async_bb8_diesel::ConnectionError> for TransactionError<async_bb8_diesel::ConnectionError> {
+    fn from(err: async_bb8_diesel::ConnectionError) -> Self {
+        TransactionError::Pool(async_bb8_diesel::PoolError::Connection(err))
+    }
+}
+
+
 /// Summarizes details provided with a database error.
 fn format_database_error(
     kind: DieselErrorKind,

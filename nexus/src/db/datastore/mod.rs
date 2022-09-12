@@ -25,7 +25,7 @@ use crate::context::OpContext;
 use crate::db::{
     self,
     error::{
-        public_error_from_diesel_lookup, public_error_from_diesel_pool,
+        public_error_from_diesel_pool,
         ErrorHandler,
     },
 };
@@ -150,21 +150,24 @@ impl DataStore {
         .returning(dsl::last_used_address)
     }
 
-    pub fn next_ipv6_address_sync(
-        conn: &mut DbConnection,
+    pub async fn next_ipv6_address_on_connection(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         sled_id: Uuid,
     ) -> Result<Ipv6Addr, Error> {
         let net = Self::next_ipv6_address_query(sled_id)
-            .get_result(conn)
+            .get_result_async(conn)
+            .await
             .map_err(|e| {
-                public_error_from_diesel_lookup(
-                    e,
-                    ResourceType::Sled,
-                    &LookupType::ById(sled_id),
+                public_error_from_diesel_pool(
+                    async_bb8_diesel::PoolError::Connection(e),
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Sled,
+                        LookupType::ById(sled_id),
+                    ),
                 )
             })?;
 
-        // TODO-correctness: We could ensure that this address is actually
+        // TODO-correctness: We need to ensure that this address is actually
         // within the sled's underlay prefix, once that's included in the
         // database record.
         match net {
@@ -182,28 +185,8 @@ impl DataStore {
         opctx: &OpContext,
         sled_id: Uuid,
     ) -> Result<Ipv6Addr, Error> {
-        let net = Self::next_ipv6_address_query(sled_id)
-            .get_result_async(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Sled,
-                        LookupType::ById(sled_id),
-                    ),
-                )
-            })?;
-
-        // TODO-correctness: We need to ensure that this address is actually
-        // within the sled's underlay prefix, once that's included in the
-        // database record.
-        match net {
-            ipnetwork::IpNetwork::V6(net) => Ok(net.ip()),
-            _ => Err(Error::InternalError {
-                internal_message: String::from("Sled IP address must be IPv6"),
-            }),
-        }
+        let conn = self.pool_authorized(opctx).await?;
+        Self::next_ipv6_address_on_connection(&conn).await
     }
 
     // Test interfaces

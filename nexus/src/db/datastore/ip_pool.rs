@@ -125,10 +125,10 @@ impl DataStore {
         Ok((authz_pool, pool))
     }
 
-    pub fn ip_pools_lookup_by_rack_id_sync(
-        conn: &mut crate::db::pool::DbConnection,
+    pub async fn ip_pools_lookup_by_rack_id_on_connection(
+        conn: &async_bb8_diesel::Connection<crate::db::pool::DbConnection>,
         rack_id: Uuid,
-    ) -> Result<IpPool, diesel::result::Error> {
+    ) -> Result<IpPool, async_bb8_diesel::ConnectionError> {
         use db::schema::ip_pool::dsl;
 
         // Look up this IP pool by rack ID.
@@ -136,7 +136,8 @@ impl DataStore {
             .filter(dsl::rack_id.eq(Some(rack_id)))
             .filter(dsl::time_deleted.is_null())
             .select(IpPool::as_select())
-            .get_result(conn)
+            .get_result_async(conn)
+            .await
     }
 
     /// Creates a new IP pool.
