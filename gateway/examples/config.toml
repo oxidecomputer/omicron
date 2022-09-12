@@ -74,7 +74,6 @@ switch0 = ["sled", 1]
 switch1 = ["sled", 1]
 
 [timeouts]
-discovery_millis = 1_000
 bulk_request_default_millis = 5_000
 bulk_request_max_millis = 60_000
 bulk_request_page_millis = 1_000

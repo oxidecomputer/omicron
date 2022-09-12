@@ -313,22 +313,8 @@ async fn sp_list(
             let details = match result {
                 Ok(details) => details,
                 Err(err) => match &*err {
-                    // TODO Treating "communication failed" and "we don't know
-                    // the IP address" as "unresponsive" may not be right. Do we
-                    // need more refined errors?
-                    SpCommsError::Timeout { .. }
-                    | SpCommsError::SpCommunicationFailed(_)
-                    | SpCommsError::BadIgnitionTarget(_)
-                    | SpCommsError::LocalIgnitionControllerAddressUnknown
-                    | SpCommsError::SpAddressUnknown(_) => {
-                        SpState::Unresponsive
-                    }
-                    // These errors should not be possible for the request we
-                    // made.
-                    SpCommsError::SpDoesNotExist(_)
-                    | SpCommsError::UpdateFailed(_) => {
-                        unreachable!("impossible error {}", err)
-                    }
+                    SpCommsError::Timeout { .. } => SpState::Unresponsive,
+                    _ => return Err(err),
                 },
             };
             Ok(SpInfo {
