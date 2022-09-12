@@ -55,11 +55,6 @@ pub struct ServiceParams {
 }
 
 lazy_static! {
-    static ref MARK_RACK_BALANCING: NexusAction = ActionFunc::new_action(
-        "service-balance.mark-rack-balancing",
-        mark_rack_balancing,
-        mark_rack_balancing_undo,
-    );
     static ref PICK_DESTINATION_SLEDS: NexusAction = new_action_noop_undo(
         "service-balance.pick-destination-sleds",
         pick_destination_sleds,
@@ -78,10 +73,6 @@ lazy_static! {
         "service-balance.create-external-ip",
         create_external_ip,
         destroy_external_ip,
-    );
-    static ref UNMARK_RACK_BALANCING: NexusAction = new_action_noop_undo(
-        "service-balance.unmark-rack-balancing",
-        unmark_rack_balancing,
     );
 }
 
@@ -118,26 +109,16 @@ impl NexusSaga for SagaServiceBalance {
     type Params = Params;
 
     fn register_actions(registry: &mut super::ActionRegistry) {
-        registry.register(Arc::clone(&*MARK_RACK_BALANCING));
         registry.register(Arc::clone(&*PICK_DESTINATION_SLEDS));
         registry.register(Arc::clone(&*CREATE_SERVICE_RECORD));
         registry.register(Arc::clone(&*CREATE_INTERNAL_IP));
         registry.register(Arc::clone(&*CREATE_EXTERNAL_IP));
-        registry.register(Arc::clone(&*UNMARK_RACK_BALANCING));
     }
 
     fn make_saga_dag(
         params: &Self::Params,
         mut builder: steno::DagBuilder,
     ) -> Result<steno::Dag, SagaInitError> {
-        let instance_id = Uuid::new_v4();
-
-        builder.append(Node::action(
-            "mark_balancing",
-            "MarkBalancing",
-            MARK_RACK_BALANCING.as_ref(),
-        ));
-
         builder.append(Node::action(
             "destination_sleds",
             "PickDestinationSleds",
@@ -171,81 +152,54 @@ impl NexusSaga for SagaServiceBalance {
             )?;
         }
 
-        builder.append(Node::action(
-            "unmark_balancing",
-            "UnmarkBalancing",
-            UNMARK_RACK_BALANCING.as_ref(),
-        ));
-
         Ok(builder.build()?)
     }
 }
 
-async fn mark_rack_balancing(
-    sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
-    // TODO
-    Ok(())
-}
-
-async fn mark_rack_balancing_undo(
-    sagactx: NexusActionContext,
-) -> Result<(), anyhow::Error> {
-    // TODO
-    Ok(())
-}
-
-async fn unmark_rack_balancing(
-    sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
-    // TODO
-    Ok(())
-}
-
 async fn create_service_record(
-    sagactx: NexusActionContext,
+    _sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     // TODO
     Ok(())
 }
 
 async fn create_service_record_undo(
-    sagactx: NexusActionContext,
+    _sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     // TODO
     Ok(())
 }
 
 async fn create_internal_ip(
-    sagactx: NexusActionContext,
+    _sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     // TODO
     Ok(())
 }
 
 async fn create_internal_ip_undo(
-    sagactx: NexusActionContext,
+    _sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     // TODO
     Ok(())
 }
 
 async fn create_external_ip(
-    sagactx: NexusActionContext,
+    _sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     // TODO
     Ok(())
 }
 
 async fn destroy_external_ip(
-    sagactx: NexusActionContext,
+    _sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     // TODO
     Ok(())
 }
 
 async fn pick_destination_sleds(
-    sagactx: NexusActionContext,
+    _sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     // TODO
     Ok(())

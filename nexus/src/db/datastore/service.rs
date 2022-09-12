@@ -268,7 +268,15 @@ impl DataStore {
 
         // NOTE: We could also make parts of this a saga?
         //
-        // - Mark rack as "rebalancing"
+        // - TODO: DON'T mark/unmark as rebalancing!!!!!!
+        //     - Use rcgen!!! It's what it's for - optimistic concurrency control.
+        //     - Basically, create a new rcgen for Nexus to use, bail if
+        //     somone else increments past us? *That* can be stored on the rack
+        //     table.
+        //   TODO: alternatively, this whole thing is happening in the DB.
+        //   We *could* issue a CTE.
+        //
+        //
         // - List sleds + services, return sleds with/without services
         // - Pick sleds that are targets probably all up-front
         // - FOR EACH
@@ -278,7 +286,6 @@ impl DataStore {
         //      - Provision external IP
         //      - Find cert
         //      - Upsert nexus service record
-        // - Unmark rack as "rebalancing"
 
         // NOTE: It's probably possible to do this without the transaction.
         //
@@ -320,6 +327,7 @@ impl DataStore {
         //     INSERT INTO services
         //     SELECT * FROM candidate_services
         //     ON CONFLICT (id)
+        //     --- This doesn't actually work for the 'already exists' case, fyi
         //     DO NOTHING
         //     RETURNING *
         // ),
@@ -362,6 +370,15 @@ impl DataStore {
                         TxnError::CustomError(ServiceError::NotEnoughSleds)
                     })?;
                     let svc_id = Uuid::new_v4();
+
+                    // TODO: With some work, you can get rid of the
+                    // "...on_connection" versions of functions.
+                    //
+                    // See: https://github.com/oxidecomputer/omicron/pull/1621#discussion_r949796959
+                    //
+                    // TODO: I *strongly* believe this means Connection vs Pool
+                    // error unification in async_bb8_diesel. *always* return
+                    // the pool error; keep it simple.
 
                     // Always allocate an internal IP address to this service.
                     let address =

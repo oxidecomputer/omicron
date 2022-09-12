@@ -206,7 +206,7 @@ impl DataStore {
                 TxnError::CustomError(RackInitError::DatasetInsert {
                     err,
                     zpool_id,
-                    dataset_id,
+                    dataset_id: _,
                 }) => match err {
                     AsyncInsertError::CollectionNotFound => {
                         Error::ObjectNotFound {
