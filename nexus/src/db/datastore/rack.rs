@@ -91,8 +91,16 @@ impl DataStore {
 
         #[derive(Debug)]
         enum RackInitError {
-            ServiceInsert { err: AsyncInsertError, sled_id: Uuid, svc_id: Uuid },
-            DatasetInsert { err: AsyncInsertError, zpool_id: Uuid, dataset_id: Uuid, },
+            ServiceInsert {
+                err: AsyncInsertError,
+                sled_id: Uuid,
+                svc_id: Uuid,
+            },
+            DatasetInsert {
+                err: AsyncInsertError,
+                zpool_id: Uuid,
+                dataset_id: Uuid,
+            },
             RackUpdate(PoolError),
         }
         type TxnError = TransactionError<RackInitError>;
@@ -164,7 +172,8 @@ impl DataStore {
                                 dsl::kind.eq(excluded(dsl::kind)),
                             )),
                     )
-                    .insert_and_get_result(conn)
+                    .insert_and_get_result_async(&conn)
+                    .await
                     .map_err(|err| {
                         TxnError::CustomError(RackInitError::DatasetInsert {
                             err,
@@ -199,18 +208,14 @@ impl DataStore {
                     zpool_id,
                     dataset_id,
                 }) => match err {
-                    SyncInsertError::CollectionNotFound => {
+                    AsyncInsertError::CollectionNotFound => {
                         Error::ObjectNotFound {
                             type_name: ResourceType::Zpool,
                             lookup_type: LookupType::ById(zpool_id),
                         }
                     }
-                    SyncInsertError::DatabaseError(e) => {
-                        public_error_from_diesel_create(
-                            e,
-                            ResourceType::Dataset,
-                            &dataset_id.to_string(),
-                        )
+                    AsyncInsertError::DatabaseError(e) => {
+                        public_error_from_diesel_pool(e, ErrorHandler::Server)
                     }
                 },
                 TxnError::CustomError(RackInitError::ServiceInsert {

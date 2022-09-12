@@ -11,10 +11,8 @@ use crate::authz;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::collection_insert::SyncInsertError;
 use crate::db::datastore::DatasetRedundancy;
 use crate::db::datastore::OpContext;
-use crate::db::error::public_error_from_diesel_create;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
@@ -79,8 +77,8 @@ impl DataStore {
     }
 
     /// Stores a new dataset in the database.
-    fn dataset_upsert_sync(
-        conn: &mut DbConnection,
+    async fn dataset_upsert_on_connection(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         dataset: Dataset,
     ) -> CreateResult<Dataset> {
         use db::schema::dataset::dsl;
@@ -100,18 +98,15 @@ impl DataStore {
                     dsl::kind.eq(excluded(dsl::kind)),
                 )),
         )
-        .insert_and_get_result(conn)
+        .insert_and_get_result_async(conn)
+        .await
         .map_err(|e| match e {
-            SyncInsertError::CollectionNotFound => Error::ObjectNotFound {
+            AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
                 type_name: ResourceType::Zpool,
                 lookup_type: LookupType::ById(zpool_id),
             },
-            SyncInsertError::DatabaseError(e) => {
-                public_error_from_diesel_create(
-                    e,
-                    ResourceType::Dataset,
-                    &dataset.id().to_string(),
-                )
+            AsyncInsertError::DatabaseError(e) => {
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
             }
         })
     }
@@ -146,12 +141,11 @@ impl DataStore {
             .limit(REGION_REDUNDANCY_THRESHOLD.try_into().unwrap())
     }
 
-    fn sled_zpool_and_dataset_list_sync(
-        conn: &mut DbConnection,
+    async fn sled_zpool_and_dataset_list_on_connection(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         rack_id: Uuid,
         kind: DatasetKind,
-    ) -> Result<Vec<(Sled, Zpool, Option<Dataset>)>, diesel::result::Error>
-    {
+    ) -> Result<Vec<(Sled, Zpool, Option<Dataset>)>, Error> {
         use db::schema::dataset::dsl as dataset_dsl;
         use db::schema::sled::dsl as sled_dsl;
         use db::schema::zpool::dsl as zpool_dsl;
@@ -171,7 +165,11 @@ impl DataStore {
                     .and(dataset_dsl::time_deleted.is_null())),
             )
             .select(<(Sled, Zpool, Option<Dataset>)>::as_select())
-            .get_results(conn)
+            .get_results_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(e.into(), ErrorHandler::Server)
+            })
     }
 
     pub async fn ensure_rack_dataset(
@@ -191,11 +189,15 @@ impl DataStore {
         type TxnError = TransactionError<DatasetError>;
 
         self.pool()
-            .transaction(move |conn| {
+            .transaction_async(|conn| async move {
                 let sleds_zpools_and_maybe_datasets =
-                    Self::sled_zpool_and_dataset_list_sync(
-                        conn, rack_id, kind,
-                    )?;
+                    Self::sled_zpool_and_dataset_list_on_connection(
+                        &conn, rack_id, kind,
+                    )
+                    .await
+                    .map_err(|e| {
+                        TxnError::CustomError(DatasetError::Other(e.into()))
+                    })?;
 
                 // Split the set of returned zpools into "those with" and "those
                 // without" the requested dataset.
@@ -245,11 +247,17 @@ impl DataStore {
                             TxnError::CustomError(DatasetError::NotEnoughZpools)
                         })?;
                     let dataset_id = Uuid::new_v4();
-                    let address = Self::next_ipv6_address_sync(conn, sled.id())
-                        .map_err(|e| {
-                            TxnError::CustomError(DatasetError::Other(e))
-                        })
-                        .map(|ip| SocketAddrV6::new(ip, kind.port(), 0, 0))?;
+                    let address =
+                        Self::next_ipv6_address_on_connection(&conn, sled.id())
+                            .await
+                            .map_err(|e| {
+                                TxnError::CustomError(DatasetError::Other(
+                                    e.into(),
+                                ))
+                            })
+                            .map(|ip| {
+                                SocketAddrV6::new(ip, kind.port(), 0, 0)
+                            })?;
 
                     let dataset = db::model::Dataset::new(
                         dataset_id,
@@ -258,10 +266,14 @@ impl DataStore {
                         kind,
                     );
 
-                    let dataset = Self::dataset_upsert_sync(conn, dataset)
-                        .map_err(|e| {
-                            TxnError::CustomError(DatasetError::Other(e))
-                        })?;
+                    let dataset =
+                        Self::dataset_upsert_on_connection(&conn, dataset)
+                            .await
+                            .map_err(|e| {
+                                TxnError::CustomError(DatasetError::Other(
+                                    e.into(),
+                                ))
+                            })?;
                     datasets.push((sled, zpool, dataset));
                 }
 

@@ -119,9 +119,10 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<crate::db::pool::DbConnection>,
         ip_id: Uuid,
         rack_id: Uuid,
-    ) -> Result<ExternalIp, async_bb8_diesel::ConnectionError> {
-        let pool =
-            Self::ip_pools_lookup_by_rack_id_on_connection(conn, rack_id).await?;
+    ) -> CreateResult<ExternalIp> {
+        let (.., pool) =
+            Self::ip_pools_lookup_by_rack_id_on_connection(conn, rack_id)
+                .await?;
 
         let data = IncompleteExternalIp::for_service(ip_id, pool.id());
         Self::allocate_external_ip_on_connection(conn, data).await
@@ -151,21 +152,20 @@ impl DataStore {
     async fn allocate_external_ip_on_connection(
         conn: &async_bb8_diesel::Connection<crate::db::pool::DbConnection>,
         data: IncompleteExternalIp,
-    ) -> Result<ExternalIp, async_bb8_diesel::ConnectionError> {
-        NextExternalIp::new(data)
-            .get_result_async(&conn)
-            .await
-            .map_err(|e| {
-                use async_bb8_diesel::ConnectionError::Query;
-                use async_bb8_diesel::PoolError::Connection;
-                use diesel::result::Error::NotFound;
-                match e {
-                    Connection(Query(NotFound)) => Error::invalid_request(
-                        "No external IP addresses available",
-                    ),
-                    _ => public_error_from_diesel_pool(e, ErrorHandler::Server),
+    ) -> CreateResult<ExternalIp> {
+        NextExternalIp::new(data).get_result_async(conn).await.map_err(|e| {
+            use async_bb8_diesel::ConnectionError::Query;
+            use diesel::result::Error::NotFound;
+            match e {
+                Query(NotFound) => {
+                    Error::invalid_request("No external IP addresses available")
                 }
-            })
+                _ => public_error_from_diesel_pool(
+                    e.into(),
+                    ErrorHandler::Server,
+                ),
+            }
+        })
     }
 
     /// Deallocate the external IP address with the provided ID.

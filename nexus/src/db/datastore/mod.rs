@@ -24,10 +24,7 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db::{
     self,
-    error::{
-        public_error_from_diesel_pool,
-        ErrorHandler,
-    },
+    error::{public_error_from_diesel_pool, ErrorHandler},
 };
 use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager};
 use diesel::pg::Pg;
@@ -150,16 +147,21 @@ impl DataStore {
         .returning(dsl::last_used_address)
     }
 
-    pub async fn next_ipv6_address_on_connection(
-        conn: &async_bb8_diesel::Connection<DbConnection>,
+    pub async fn next_ipv6_address_on_connection<ConnErr>(
+        conn: &(impl async_bb8_diesel::AsyncConnection<DbConnection, ConnErr>
+              + Sync),
         sled_id: Uuid,
-    ) -> Result<Ipv6Addr, Error> {
+    ) -> Result<Ipv6Addr, Error>
+    where
+        ConnErr: From<diesel::result::Error> + Send + 'static,
+        async_bb8_diesel::PoolError: From<ConnErr>,
+    {
         let net = Self::next_ipv6_address_query(sled_id)
             .get_result_async(conn)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(
-                    async_bb8_diesel::PoolError::Connection(e),
+                    async_bb8_diesel::PoolError::from(e),
                     ErrorHandler::NotFoundByLookup(
                         ResourceType::Sled,
                         LookupType::ById(sled_id),
@@ -186,7 +188,7 @@ impl DataStore {
         sled_id: Uuid,
     ) -> Result<Ipv6Addr, Error> {
         let conn = self.pool_authorized(opctx).await?;
-        Self::next_ipv6_address_on_connection(&conn).await
+        Self::next_ipv6_address_on_connection(conn, sled_id).await
     }
 
     // Test interfaces

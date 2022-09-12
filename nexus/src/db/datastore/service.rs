@@ -79,7 +79,7 @@ impl DataStore {
     async fn service_upsert_on_connection(
         conn: &async_bb8_diesel::Connection<crate::db::pool::DbConnection>,
         service: Service,
-    ) -> Result<Service, async_bb8_diesel::ConnectionError> {
+    ) -> Result<Service, Error> {
         use db::schema::service::dsl;
 
         let sled_id = service.sled_id;
@@ -149,7 +149,8 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<DbConnection>,
         rack_id: Uuid,
         kind: ServiceKind,
-    ) -> Result<Vec<(Sled, Option<Service>)>, async_bb8_diesel::ConnectionError> {
+    ) -> Result<Vec<(Sled, Option<Service>)>, async_bb8_diesel::ConnectionError>
+    {
         use db::schema::service::dsl as svc_dsl;
         use db::schema::sled::dsl as sled_dsl;
 
@@ -209,10 +210,12 @@ impl DataStore {
                 for sled in sleds_without_svc {
                     if sled.is_scrimlet() {
                         let svc_id = Uuid::new_v4();
-                        let address =
-                            Self::next_ipv6_address_on_connection(&conn, sled.id())
-                                .await
-                                .map_err(|e| TxnError::CustomError(e))?;
+                        let address = Self::next_ipv6_address_on_connection(
+                            &conn,
+                            sled.id(),
+                        )
+                        .await
+                        .map_err(|e| TxnError::CustomError(e))?;
 
                         let service = db::model::Service::new(
                             svc_id,
@@ -221,9 +224,10 @@ impl DataStore {
                             kind,
                         );
 
-                        let svc = Self::service_upsert_on_connection(&conn, service)
-                            .await
-                            .map_err(|e| TxnError::CustomError(e))?;
+                        let svc =
+                            Self::service_upsert_on_connection(&conn, service)
+                                .await
+                                .map_err(|e| TxnError::CustomError(e))?;
                         svcs.push(svc);
                     }
                 }
@@ -360,29 +364,41 @@ impl DataStore {
                     let svc_id = Uuid::new_v4();
 
                     // Always allocate an internal IP address to this service.
-                    let address = Self::next_ipv6_address_on_connection(&conn, sled.id())
-                        .await
-                        .map_err(|e| {
-                            TxnError::CustomError(ServiceError::Other(e.into()))
-                        })?;
+                    let address =
+                        Self::next_ipv6_address_on_connection(&conn, sled.id())
+                            .await
+                            .map_err(|e| {
+                                TxnError::CustomError(ServiceError::Other(
+                                    e.into(),
+                                ))
+                            })?;
 
                     // If requested, allocate an external IP address for this
                     // service too.
                     let external_ip = if matches!(kind, ServiceKind::Nexus) {
-                        let pool = Self::ip_pools_lookup_by_rack_id_on_connection(
-                            &conn, rack_id,
-                        ).await
+                        let (.., pool) =
+                            Self::ip_pools_lookup_by_rack_id_on_connection(
+                                &conn, rack_id,
+                            )
+                            .await
                             .map_err(|e| {
-                                TxnError::Pool(e.into())
+                                TxnError::CustomError(ServiceError::Other(
+                                    e.into(),
+                                ))
                             })?;
 
-                        let external_ip = Self::allocate_service_ip_on_connection(
-                            &conn,
-                            Uuid::new_v4(),
-                            pool.id(),
-                        ).await.map_err(|e| {
-                            TxnError::Pool(e.into())
-                        })?;
+                        let external_ip =
+                            Self::allocate_service_ip_on_connection(
+                                &conn,
+                                Uuid::new_v4(),
+                                pool.id(),
+                            )
+                            .await
+                            .map_err(|e| {
+                                TxnError::CustomError(ServiceError::Other(
+                                    e.into(),
+                                ))
+                            })?;
 
                         Some(external_ip)
                     } else {
@@ -401,9 +417,14 @@ impl DataStore {
                         kind,
                     );
 
-                    let svc = Self::service_upsert_on_connection(&conn, service)
-                        .await
-                        .map_err(|e| TxnError::Pool(e.into()))?;
+                    let svc =
+                        Self::service_upsert_on_connection(&conn, service)
+                            .await
+                            .map_err(|e| {
+                                TxnError::CustomError(ServiceError::Other(
+                                    e.into(),
+                                ))
+                            })?;
                     svcs.push(svc);
                 }
 
@@ -489,9 +510,12 @@ impl DataStore {
                         ServiceKind::InternalDNS,
                     );
 
-                    let svc = Self::service_upsert_on_connection(&conn, service)
-                        .await
-                        .map_err(|e| TxnError::Pool(e.into()))?;
+                    let svc =
+                        Self::service_upsert_on_connection(&conn, service)
+                            .await
+                            .map_err(|e| {
+                                TxnError::CustomError(ServiceError::Other(e))
+                            })?;
 
                     svcs.push(svc);
                 }
