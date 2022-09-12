@@ -100,7 +100,7 @@ trait RoleAssignmentTest {
 async fn test_role_assignments_fleet(cptestctx: &ControlPlaneTestContext) {
     // There's no operation to read the Fleet directly, so we list Sleds as a
     // proxy for something that requires Fleet-level "read" permission.
-    const RESOURCE_URL: &'static str = "/hardware/sleds";
+    const RESOURCE_URL: &'static str = "/system/hardware/sleds";
 
     struct FleetRoleAssignmentTest;
     impl RoleAssignmentTest for FleetRoleAssignmentTest {
@@ -108,7 +108,7 @@ async fn test_role_assignments_fleet(cptestctx: &ControlPlaneTestContext) {
         const ROLE: Self::RoleType = authz::FleetRole::Admin;
         const VISIBLE_TO_UNPRIVILEGED: bool = true;
         fn policy_url(&self) -> String {
-            String::from("/global/policy")
+            String::from("/system/policy")
         }
 
         fn verify_initial<'a, 'b, 'c, 'd>(

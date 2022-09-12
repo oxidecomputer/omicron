@@ -587,7 +587,7 @@ async fn test_sleds_list(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     // Verify that there is one sled to begin with.
-    let sleds_url = "/hardware/sleds";
+    let sleds_url = "/system/hardware/sleds";
     assert_eq!(sleds_list(&client, &sleds_url).await.len(), 1);
 
     // Now start a few more sled agents.

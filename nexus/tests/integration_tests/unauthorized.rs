@@ -254,6 +254,12 @@ lazy_static! {
             url: &*DEMO_INSTANCE_NIC_URL,
             id_routes: vec!["/by-id/network-interfaces/{id}"],
         },
+        // Create a Snapshot in the Project
+        SetupReq::Post {
+            url: &*DEMO_PROJECT_URL_SNAPSHOTS,
+            body: serde_json::to_value(&*DEMO_SNAPSHOT_CREATE).unwrap(),
+            id_routes: vec!["/by-id/snapshots/{id}"],
+        },
         // Create a GlobalImage
         SetupReq::Post {
             url: "/images",

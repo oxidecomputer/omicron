@@ -7,14 +7,42 @@
 use crate::SpIdentifier;
 use gateway_messages::ResponseError;
 use std::io;
-use std::net::SocketAddr;
+use std::net::SocketAddrV6;
 use std::time::Duration;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
+pub enum SpCommunicationError {
+    #[error("failed to send UDP packet to {addr}: {err}")]
+    UdpSendTo { addr: SocketAddrV6, err: io::Error },
+    #[error("failed to recv UDP packet: {0}")]
+    UdpRecv(io::Error),
+    #[error("failed to deserialize SP message from {peer}: {err}")]
+    Deserialize { peer: SocketAddrV6, err: gateway_messages::HubpackError },
+    #[error("RPC call failed (gave up after {0} attempts)")]
+    ExhaustedNumAttempts(usize),
+    #[error(transparent)]
+    BadResponseType(#[from] BadResponseType),
+    #[error("Error response from SP: {0}")]
+    SpError(#[from] ResponseError),
+    #[error("Bogus serial console state; detach and reattach")]
+    BogusSerialConsoleState,
+}
+
+#[derive(Debug, Error)]
+pub enum UpdateError {
+    #[error("update image is too large")]
+    ImageTooLarge,
+    #[error("error starting update: {0}")]
+    Start(SpCommunicationError),
+    #[error("error sending update chunk at offset {offset}: {err}")]
+    Chunk { offset: u32, err: SpCommunicationError },
+}
+
+#[derive(Debug, Error)]
 pub enum StartupError {
     #[error("error binding to UDP address {addr}: {err}")]
-    UdpBind { addr: SocketAddr, err: io::Error },
+    UdpBind { addr: SocketAddrV6, err: io::Error },
     #[error("invalid configuration file: {}", .reasons.join(", "))]
     InvalidConfig { reasons: Vec<String> },
     #[error("error communicating with SP: {0}")]
@@ -39,24 +67,12 @@ pub enum Error {
         "timeout ({timeout:?}) elapsed communicating with {sp:?} on port {port}"
     )]
     Timeout { timeout: Duration, port: usize, sp: Option<SpIdentifier> },
-    #[error("error communicating with SP: {0}")]
-    SpCommunicationFailed(#[from] SpCommunicationError),
-    #[error("serial console is already attached")]
-    SerialConsoleAttached,
-    #[error("websocket connection failure: {0}")]
-    BadWebsocketConnection(&'static str),
-}
-
-#[derive(Debug, Error)]
-pub enum SpCommunicationError {
-    #[error("failed to send UDP packet to {addr}: {err}")]
-    UdpSend { addr: SocketAddr, err: io::Error },
-    #[error("error reported by SP: {0}")]
-    SpError(#[from] ResponseError),
-    #[error(transparent)]
-    BadResponseType(#[from] BadResponseType),
     #[error("bogus SP response: specified unknown ignition target {0}")]
     BadIgnitionTarget(usize),
+    #[error("error communicating with SP: {0}")]
+    SpCommunicationFailed(#[from] SpCommunicationError),
+    #[error("updating SP failed: {0}")]
+    UpdateFailed(#[from] UpdateError),
 }
 
 #[derive(Debug, Error)]

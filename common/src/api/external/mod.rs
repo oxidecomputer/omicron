@@ -54,6 +54,8 @@ pub type ListResultVec<T> = Result<Vec<T>, Error>;
 pub type LookupResult<T> = Result<T, Error>;
 /// Result of an update operation for the specified type
 pub type UpdateResult<T> = Result<T, Error>;
+/// Result of an optional lookup operation for the specified type
+pub type OptionalLookupResult<T> = Result<Option<T>, Error>;
 
 /// A stream of Results, each potentially representing an object in the API
 pub type ObjectStream<T> = BoxStream<'static, Result<T, Error>>;
@@ -626,11 +628,15 @@ pub struct IdentityMetadataUpdateParams {
     JsonSchema,
 )]
 #[serde(rename_all = "snake_case")]
+// TODO-polish: RFD 315
 pub enum InstanceState {
-    Creating, // TODO-polish: paper over Creating in the API with Starting?
+    /// The instance is being created.
+    Creating,
+    /// The instance is currently starting up.
     Starting,
+    /// The instance is currently running.
     Running,
-    /// Implied that a transition to "Stopped" is imminent.
+    /// The instance has been requested to stop and a transition to "Stopped" is imminent.
     Stopping,
     /// The instance is currently stopped.
     Stopped,
@@ -641,8 +647,11 @@ pub enum InstanceState {
     /// in the "migrating" state until the migration process is complete
     /// and the destination propolis is ready to continue execution.
     Migrating,
+    /// The instance is attempting to recover from a failure.
     Repairing,
+    /// The instance has encountered a failure.
     Failed,
+    /// The instance has been deleted.
     Destroyed,
 }
 

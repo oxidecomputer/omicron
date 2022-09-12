@@ -95,6 +95,11 @@ CREATE INDEX ON omicron.public.sled (
 ) WHERE
     time_deleted IS NULL;
 
+CREATE INDEX ON omicron.public.sled (
+    id
+) WHERE
+    time_deleted IS NULL;
+
 /*
  * Services
  */
@@ -222,6 +227,11 @@ CREATE INDEX on omicron.public.Dataset (
     size_used
 ) WHERE size_used IS NOT NULL AND time_deleted IS NULL AND kind = 'crucible';
 
+/* Create an index on the size usage for any dataset */
+CREATE INDEX on omicron.public.Dataset (
+    size_used
+) WHERE size_used IS NOT NULL AND time_deleted IS NULL;
+
 /*
  * A region of space allocated to Crucible Downstairs, within a dataset.
  */
@@ -248,6 +258,13 @@ CREATE TABLE omicron.public.Region (
  */
 CREATE INDEX on omicron.public.Region (
     volume_id
+);
+
+/*
+ * Allow all regions belonging to a dataset to be accessed quickly.
+ */
+CREATE INDEX on omicron.public.Region (
+    dataset_id
 );
 
 /*
@@ -716,6 +733,13 @@ CREATE UNIQUE INDEX on omicron.public.global_image (
 ) WHERE
     time_deleted is NULL;
 
+CREATE TYPE omicron.public.snapshot_state AS ENUM (
+  'creating',
+  'ready',
+  'faulted',
+  'destroyed'
+);
+
 CREATE TABLE omicron.public.snapshot (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
@@ -734,6 +758,10 @@ CREATE TABLE omicron.public.snapshot (
 
     /* Every Snapshot consists of a root volume */
     volume_id UUID NOT NULL,
+
+    gen INT NOT NULL,
+    state omicron.public.snapshot_state NOT NULL,
+    block_size omicron.public.block_size NOT NULL,
 
     /* Disk configuration (from the time the snapshot was taken) */
     size_bytes INT NOT NULL
@@ -1152,15 +1180,17 @@ CREATE TYPE omicron.public.ip_kind AS ENUM (
     'floating',
 
     /*
-     * A service IP is an IP not attached to a project or instance.
+     * A service IP is an IP address not attached to a project nor an instance.
+     * It's intended to be used for internal services.
      */
     'service'
 );
 
 /*
- * External IP addresses used for guest instances
+ * External IP addresses used for guest instances and externally-facing
+ * services.
  */
-CREATE TABLE omicron.public.instance_external_ip (
+CREATE TABLE omicron.public.external_ip (
     /* Identity metadata */
     id UUID PRIMARY KEY,
 
@@ -1198,6 +1228,15 @@ CREATE TABLE omicron.public.instance_external_ip (
     /* The last port in the allowed range, also inclusive. */
     last_port INT4 NOT NULL,
 
+    /*
+     * The project can only be NULL for service IPs.
+     * Additionally, the project MUST be NULL for service IPs.
+     */
+    CONSTRAINT null_project CHECK(
+        (kind != 'service' AND project_id IS NOT NULL) OR
+        (kind = 'service' AND project_id IS NULL)
+    ),
+
     /* The name must be non-NULL iff this is a floating IP. */
     CONSTRAINT null_fip_name CHECK (
         (kind != 'floating' AND name IS NULL) OR
@@ -1225,7 +1264,7 @@ CREATE TABLE omicron.public.instance_external_ip (
  * Index used to support quickly looking up children of the IP Pool range table,
  * when checking for allocated addresses during deletion.
  */
-CREATE INDEX ON omicron.public.instance_external_ip (
+CREATE INDEX ON omicron.public.external_ip (
     ip_pool_id,
     ip_pool_range_id
 )
@@ -1238,13 +1277,13 @@ CREATE INDEX ON omicron.public.instance_external_ip (
  * pools, _and_ on the fact that the number of ports assigned to each instance
  * is fixed at compile time.
  */
-CREATE UNIQUE INDEX ON omicron.public.instance_external_ip (
+CREATE UNIQUE INDEX ON omicron.public.external_ip (
     ip,
     first_port
 )
     WHERE time_deleted IS NULL;
 
-CREATE UNIQUE INDEX ON omicron.public.instance_external_ip (
+CREATE UNIQUE INDEX ON omicron.public.external_ip (
     instance_id,
     id
 )

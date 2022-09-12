@@ -4,10 +4,10 @@
 
 use super::{NexusActionContext, NexusSaga, SagaInitError, ACTION_GENERATE_ID};
 use crate::app::sagas::NexusAction;
+use crate::authn;
 use crate::context::OpContext;
 use crate::db::identity::Resource;
 use crate::db::model::ServiceKind;
-use crate::authn;
 use chrono::Utc;
 use lazy_static::lazy_static;
 use omicron_common::address::Ipv6Subnet;
@@ -60,30 +60,25 @@ lazy_static! {
         mark_rack_balancing,
         mark_rack_balancing_undo,
     );
-
     static ref PICK_DESTINATION_SLEDS: NexusAction = new_action_noop_undo(
         "service-balance.pick-destination-sleds",
         pick_destination_sleds,
     );
-
     static ref CREATE_SERVICE_RECORD: NexusAction = ActionFunc::new_action(
         "service-balance.create-service-record",
         create_service_record,
         create_service_record_undo,
     );
-
     static ref CREATE_INTERNAL_IP: NexusAction = ActionFunc::new_action(
         "service-balance.create-internal-ip",
         create_internal_ip,
         create_internal_ip_undo,
     );
-
     static ref CREATE_EXTERNAL_IP: NexusAction = ActionFunc::new_action(
         "service-balance.create-external-ip",
         create_external_ip,
         destroy_external_ip,
     );
-
     static ref UNMARK_RACK_BALANCING: NexusAction = new_action_noop_undo(
         "service-balance.unmark-rack-balancing",
         unmark_rack_balancing,
@@ -160,8 +155,7 @@ impl NexusSaga for SagaServiceBalance {
                 kind: params.kind,
                 rack_id: params.rack_id,
             };
-            let subsaga_name =
-                SagaName::new(&format!("create-service{i}"));
+            let subsaga_name = SagaName::new(&format!("create-service{i}"));
             let mut subsaga_builder = DagBuilder::new(subsaga_name);
             subsaga_builder.append(Node::action(
                 "internal_ip{i}",
@@ -185,7 +179,6 @@ impl NexusSaga for SagaServiceBalance {
 
         Ok(builder.build()?)
     }
-
 }
 
 async fn mark_rack_balancing(
@@ -257,4 +250,3 @@ async fn pick_destination_sleds(
     // TODO
     Ok(())
 }
-

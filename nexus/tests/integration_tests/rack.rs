@@ -13,7 +13,7 @@ use omicron_nexus::TestInterfaces;
 async fn test_list_own_rack(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    let racks_url = "/hardware/racks";
+    let racks_url = "/system/hardware/racks";
     let racks: Vec<Rack> =
         NexusRequest::iter_collection_authn(client, racks_url, "", None)
             .await
@@ -29,7 +29,7 @@ async fn test_get_own_rack(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     let expected_id = cptestctx.server.apictx.nexus.rack_id();
-    let rack_url = format!("/hardware/racks/{}", expected_id);
+    let rack_url = format!("/system/hardware/racks/{}", expected_id);
     let rack = NexusRequest::object_get(client, &rack_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()

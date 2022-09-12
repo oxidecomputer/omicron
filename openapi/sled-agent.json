@@ -55,6 +55,53 @@
         }
       }
     },
+    "/disks/{disk_id}/snapshot": {
+      "post": {
+        "summary": "Take a snapshot of a disk that is not attached to an instance.",
+        "description": "For disks attached to an instance, see [`instance_issue_disk_snapshot_request`]",
+        "operationId": "issue_disk_snapshot_request",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "disk_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiskSnapshotRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiskSnapshotRequestResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/filesystem": {
       "put": {
         "operationId": "filesystem_put",
@@ -113,6 +160,63 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/InstanceRuntimeState"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/instances/{instance_id}/disks/{disk_id}/snapshot": {
+      "post": {
+        "summary": "Take a snapshot of a disk that is attached to an instance",
+        "description": "For disks not attached to an instance, see [`issue_disk_snapshot_request`]",
+        "operationId": "instance_issue_disk_snapshot_request",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "disk_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "instance_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstanceIssueDiskSnapshotRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstanceIssueDiskSnapshotRequestResponse"
                 }
               }
             }
@@ -530,6 +634,34 @@
           "time_updated"
         ]
       },
+      "DiskSnapshotRequestBody": {
+        "type": "object",
+        "properties": {
+          "snapshot_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "volume_construction_request": {
+            "$ref": "#/components/schemas/VolumeConstructionRequest"
+          }
+        },
+        "required": [
+          "snapshot_id",
+          "volume_construction_request"
+        ]
+      },
+      "DiskSnapshotRequestResponse": {
+        "type": "object",
+        "properties": {
+          "snapshot_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "snapshot_id"
+        ]
+      },
       "DiskState": {
         "description": "State of a Disk (primarily: attached or not)",
         "oneOf": [
@@ -828,6 +960,30 @@
           "nics",
           "runtime",
           "source_nat"
+        ]
+      },
+      "InstanceIssueDiskSnapshotRequestBody": {
+        "type": "object",
+        "properties": {
+          "snapshot_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "snapshot_id"
+        ]
+      },
+      "InstanceIssueDiskSnapshotRequestResponse": {
+        "type": "object",
+        "properties": {
+          "snapshot_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "snapshot_id"
         ]
       },
       "InstanceMigrateParams": {

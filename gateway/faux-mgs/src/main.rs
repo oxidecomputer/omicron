@@ -4,37 +4,30 @@
 
 // Copyright 2022 Oxide Computer Company
 
+use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Context;
 use anyhow::Result;
 use clap::Parser;
 use clap::Subcommand;
-use gateway_messages::version;
-use gateway_messages::Request;
-use gateway_messages::RequestKind;
-use gateway_messages::ResponseError;
-use gateway_messages::ResponseKind;
-use gateway_messages::SerializedSize;
-use gateway_messages::SpMessage;
-use gateway_messages::SpMessageKind;
-use slog::debug;
+use gateway_messages::SpComponent;
+use gateway_sp_comms::SingleSp;
+use gateway_sp_comms::DISCOVERY_MULTICAST_ADDR;
+use slog::info;
 use slog::o;
-use slog::trace;
-use slog::warn;
 use slog::Drain;
 use slog::Level;
 use slog::Logger;
-use std::io;
+use std::fs;
 use std::net::SocketAddrV6;
-use std::net::UdpSocket;
 use std::path::PathBuf;
-use std::sync::atomic::AtomicU32;
-use std::sync::atomic::Ordering;
 use std::time::Duration;
+use tokio::net::UdpSocket;
 
-mod reset;
-mod update;
+mod hubris_archive;
 mod usart;
+
+use self::hubris_archive::HubrisArchive;
 
 /// Command line program that can send MGS messages to a single SP.
 #[derive(Parser, Debug)]
@@ -48,14 +41,27 @@ struct Args {
     )]
     log_level: Level,
 
-    #[clap(long)]
-    sp: SocketAddrV6,
+    /// Address to bind to locally.
+    ///
+    /// May need an interface specification (e.g., `[::%2]:0`), depending
+    /// on the host OS and network setup between the host and SP.
+    #[clap(long, default_value = "[::]:0")]
+    local_addr: SocketAddrV6,
 
-    #[clap(long, short, default_value = "2000")]
-    timeout_millis: u64,
+    /// Listening port for the `mgmt-gateway` task on the SP.
+    #[clap(long, short, default_value = "11111")]
+    discovery_port: u16,
+
+    /// Maximum number of attempts to make when sending requests to the SP.
+    #[clap(long, default_value = "5")]
+    max_attempts: usize,
+
+    /// Timeout (in milliseconds) for each attempt.
+    #[clap(long, default_value = "2000")]
+    per_attempt_timeout_millis: u64,
 
     #[clap(subcommand)]
-    command: Commands,
+    command: Command,
 }
 
 fn level_from_str(s: &str) -> Result<Level> {
@@ -67,10 +73,26 @@ fn level_from_str(s: &str) -> Result<Level> {
 }
 
 #[derive(Subcommand, Debug)]
-enum Commands {
-    /// Ask SP on which port it receives messages from us.
+enum Command {
+    /// Discover a connected SP.
     Discover,
 
+    /// Send a command to a connected SP.
+    Sp {
+        /// Address of the SP.
+        ///
+        /// If not provided, we attempt to discover an SP via the normal
+        /// discovery mechanism (the same as the `discover` subcommand).
+        #[clap(long)]
+        addr: Option<SocketAddrV6>,
+
+        #[clap(subcommand)]
+        command: SpCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum SpCommand {
     /// Ask SP for its current state.
     State,
 
@@ -79,16 +101,34 @@ enum Commands {
         /// Put the local terminal in raw mode.
         #[clap(long)]
         raw: bool,
+
+        /// Amount of time to buffer input from stdin before forwarding to SP.
+        #[clap(long, default_value = "500")]
+        stdin_buffer_time_millis: u64,
     },
 
+    /// Detach any other attached USART connection.
+    UsartDetach,
+
     /// Upload a new image to the SP and have it swap banks (requires reset)
-    Update { image: PathBuf },
+    Update { hubris_archive: PathBuf },
+
+    /// Update a component of the SP.
+    UpdateComponent { component: String, slot: u16, image: PathBuf },
+
+    /// Abort an in-progress update.
+    AbortUpdate {
+        /// Component with an update-in-progress to be aborted. Omit to abort
+        /// updates to the SP itself.
+        component: Option<String>,
+    },
 
     /// Instruct the SP to reset.
-    SysReset,
+    Reset,
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let args = Args::parse();
     let decorator = slog_term::TermDecorator::new().build();
     let drain = slog_term::FullFormat::new(decorator)
@@ -98,130 +138,123 @@ fn main() -> Result<()> {
     let drain = slog_async::Async::new(drain).build().fuse();
     let log = Logger::root(drain, o!("component" => "faux-mgs"));
 
-    let socket = UdpSocket::bind("[::]:0")
-        .with_context(|| "failed to bind UDP socket")?;
-    socket
-        .set_read_timeout(Some(Duration::from_millis(args.timeout_millis)))
-        .with_context(|| "failed to set read timeout on UDP socket")?;
+    let socket = UdpSocket::bind(args.local_addr).await.with_context(|| {
+        format!("failed to bind UDP socket to {}", args.local_addr)
+    })?;
 
-    let request_kind = match args.command {
-        Commands::Discover => RequestKind::Discover,
-        Commands::State => RequestKind::SpState,
-        Commands::SysReset => return reset::run(log, socket, args.sp),
-        Commands::UsartAttach { raw } => {
-            return usart::run(log, socket, args.sp, raw);
+    let per_attempt_timeout =
+        Duration::from_millis(args.per_attempt_timeout_millis);
+
+    let mut discovery_addr =
+        SocketAddrV6::new(DISCOVERY_MULTICAST_ADDR, args.discovery_port, 0, 0);
+    let command = match args.command {
+        Command::Discover => {
+            info!(
+                log, "attempting SP discovery";
+                "discovery_addr" => %discovery_addr,
+            );
+            None
         }
-        Commands::Update { image } => {
-            return update::run(log, socket, args.sp, &image);
+        Command::Sp { addr, command } => {
+            if let Some(addr) = addr {
+                discovery_addr = addr;
+            }
+            Some(command)
         }
     };
 
-    let response = request_response(&log, &socket, args.sp, request_kind)?;
-    println!("{response:?}");
+    let sp = SingleSp::new(
+        socket,
+        discovery_addr,
+        args.max_attempts,
+        per_attempt_timeout,
+        log.clone(),
+    );
+
+    match command {
+        None => {
+            // "None" command indicates only discovery was requested; loop until
+            // discovery completes, then log the result.
+            let mut addr_watch = sp.sp_addr_watch().clone();
+            loop {
+                let current = *addr_watch.borrow();
+                match current {
+                    Some((addr, port)) => {
+                        info!(
+                            log, "SP discovered";
+                            "addr" => %addr,
+                            "port" => ?port,
+                        );
+                        break;
+                    }
+                    None => {
+                        addr_watch.changed().await.unwrap();
+                    }
+                }
+            }
+        }
+        Some(SpCommand::State) => {
+            info!(log, "{:?}", sp.state().await?);
+        }
+        Some(SpCommand::UsartAttach { raw, stdin_buffer_time_millis }) => {
+            usart::run(
+                sp,
+                raw,
+                Duration::from_millis(stdin_buffer_time_millis),
+                log,
+            )
+            .await?;
+        }
+        Some(SpCommand::UsartDetach) => {
+            sp.serial_console_detach().await?;
+            info!(log, "SP serial console detached");
+        }
+        Some(SpCommand::Update { hubris_archive }) => {
+            let mut archive = HubrisArchive::open(&hubris_archive)?;
+            let data = archive.final_bin()?;
+            sp.update(gateway_messages::SpComponent::SP_ITSELF, 0, data)
+                .await
+                .with_context(|| {
+                    format!("updating to {} failed", hubris_archive.display())
+                })?;
+        }
+        Some(SpCommand::UpdateComponent { component, slot, image }) => {
+            let data = fs::read(&image).with_context(|| {
+                format!("failed to read {}", image.display())
+            })?;
+            let sp_component = SpComponent::try_from(component.as_str())
+                .map_err(|_| {
+                    anyhow!("invalid component name: {}", component)
+                })?;
+            sp.update(sp_component, slot, data).await.with_context(|| {
+                format!(
+                    "updating {} slot {} to {} failed",
+                    component,
+                    slot,
+                    image.display()
+                )
+            })?;
+        }
+        Some(SpCommand::AbortUpdate { component }) => {
+            let sp_component = match &component {
+                Some(c) => SpComponent::try_from(c.as_str())
+                    .map_err(|_| anyhow!("invalid component name: {}", c))?,
+                None => SpComponent::SP_ITSELF,
+            };
+            sp.update_abort(sp_component).await.with_context(|| {
+                format!(
+                    "aborting update to {} failed",
+                    component.as_deref().unwrap_or("SP")
+                )
+            })?;
+        }
+        Some(SpCommand::Reset) => {
+            sp.reset_prepare().await?;
+            info!(log, "SP is prepared to reset");
+            sp.reset_trigger().await?;
+            info!(log, "SP reset complete");
+        }
+    }
 
     Ok(())
-}
-
-fn request_response(
-    log: &Logger,
-    socket: &UdpSocket,
-    addr: SocketAddrV6,
-    kind: RequestKind,
-) -> Result<Result<ResponseKind, ResponseError>> {
-    let request_id = send_request(log, socket, addr, kind)?;
-    loop {
-        let message = recv_sp_message(log, socket)?;
-        match message.kind {
-            SpMessageKind::Response { request_id: response_id, result } => {
-                if response_id != request_id {
-                    warn!(
-                        log, "ignoring unexpected response id";
-                        "response_id" => response_id,
-                    );
-                    continue;
-                }
-                return Ok(result);
-            }
-            SpMessageKind::SerialConsole(_) => {
-                debug!(log, "ignoring serial console packet from SP");
-                continue;
-            }
-        }
-    }
-}
-
-// On success, returns the request ID we sent.
-fn send_request(
-    log: &Logger,
-    socket: &UdpSocket,
-    addr: SocketAddrV6,
-    kind: RequestKind,
-) -> Result<u32> {
-    static REQUEST_ID: AtomicU32 = AtomicU32::new(1);
-
-    let version = version::V1;
-    let request_id = REQUEST_ID.fetch_add(1, Ordering::Relaxed);
-    let request = Request { version, request_id, kind };
-
-    let mut buf = [0; Request::MAX_SIZE];
-    trace!(
-        log, "sending request to SP";
-        "request" => ?request,
-        "sp" => %addr,
-    );
-    let n = gateway_messages::serialize(&mut buf[..], &request).unwrap();
-    socket
-        .send_to(&buf[..n], addr)
-        .with_context(|| format!("failed to send to {addr}"))?;
-
-    Ok(request_id)
-}
-
-#[derive(Debug, thiserror::Error)]
-enum RecvError {
-    #[error(transparent)]
-    Io(#[from] io::Error),
-    #[error("failed to deserialize response: {0}")]
-    Deserialize(#[from] gateway_messages::HubpackError),
-    #[error("incorrect message version (expected {expected}, got {got})")]
-    IncorrectVersion { expected: u32, got: u32 },
-}
-
-fn recv_sp_message(
-    log: &Logger,
-    socket: &UdpSocket,
-) -> Result<SpMessage, RecvError> {
-    let mut resp = [0; SpMessage::MAX_SIZE];
-
-    let (n, peer) = socket.recv_from(&mut resp[..])?;
-    let resp = &resp[..n];
-    let (message, _) = gateway_messages::deserialize::<SpMessage>(resp)?;
-    trace!(log, "received response"; "response" => ?message, "peer" => %peer);
-
-    if message.version == version::V1 {
-        Ok(message)
-    } else {
-        Err(RecvError::IncorrectVersion {
-            expected: version::V1,
-            got: message.version,
-        })
-    }
-}
-
-fn recv_sp_message_ignoring_serial_console(
-    log: &Logger,
-    socket: &UdpSocket,
-) -> Result<(u32, Result<ResponseKind, ResponseError>), RecvError> {
-    loop {
-        let message = recv_sp_message(log, socket)?;
-        match message.kind {
-            SpMessageKind::Response { request_id, result } => {
-                return Ok((request_id, result));
-            }
-            SpMessageKind::SerialConsole(_) => {
-                debug!(log, "ignoring serial console packet from SP");
-                continue;
-            }
-        }
-    }
 }

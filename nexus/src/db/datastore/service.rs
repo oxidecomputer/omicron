@@ -16,6 +16,7 @@ use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
 use crate::db::identity::Asset;
+use crate::db::model::ExternalIp;
 use crate::db::model::Service;
 use crate::db::model::ServiceKind;
 use crate::db::model::Sled;
@@ -246,7 +247,9 @@ impl DataStore {
         redundancy: u32,
     ) -> Result<Vec<Service>, Error> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        opctx.authorize(authz::Action::ListChildren, &authz::IP_POOL_LIST).await?;
+        opctx
+            .authorize(authz::Action::ListChildren, &authz::IP_POOL_LIST)
+            .await?;
 
         #[derive(Debug)]
         enum ServiceError {
@@ -358,9 +361,13 @@ impl DataStore {
 
                     // If requested, allocate an external IP address for this
                     // service too.
-                    let external_ip = if matches!(kind, ServiceKind::Nexus) {
-                        let pool = Self::ip_pools_lookup_by_rack_id_sync(conn, rack_id)?;
+                    let external_ip: Option<ExternalIp> = if matches!(kind, ServiceKind::Nexus) {
+                        let pool = Self::ip_pools_lookup_by_rack_id_sync(
+                            conn, rack_id,
+                        )?;
 
+                        todo!("We are deleting the sync version, right?");
+                        /*
                         let external_ip = Self::allocate_service_ip_sync(
                             conn,
                             Uuid::new_v4(),
@@ -370,6 +377,7 @@ impl DataStore {
                         })?;
 
                         Some(external_ip)
+                        */
                     } else {
                         None
                     };
@@ -399,7 +407,7 @@ impl DataStore {
             .map_err(|e| match e {
                 TxnError::CustomError(ServiceError::NotEnoughSleds) => {
                     Error::unavail("Not enough sleds for service allocation")
-                },
+                }
                 TxnError::CustomError(ServiceError::Other(e)) => e,
                 TxnError::Pool(e) => {
                     public_error_from_diesel_pool(e, ErrorHandler::Server)

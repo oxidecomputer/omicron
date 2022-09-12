@@ -17,12 +17,12 @@ regex = "1.6.0"
 reqwest = { version = "0.11.8", features = [ "json" ] }
 schemars = { version = "0.8.10", features = [ "uuid1", "bytes", "chrono" ] }
 serde = { version = "1", features = [ "derive" ] }
-serde_json = "1.0.82"
+serde_json = "1.0.85"
 slog = { version = "2.5", features = [ "max_level_trace", "release_max_level_debug" ] }
 slog-async = "2.6"
 slog-term = "2.9"
-thiserror = "1.0.31"
-tokio = { version = "1.20", features = [ "rt-multi-thread", "macros" ] }
+thiserror = "1.0.34"
+tokio = { version = "1.21", features = [ "rt-multi-thread", "macros" ] }
 uuid = { version = "1.1.0", features = [ "v4", "serde" ] }
 
 [dev-dependencies]

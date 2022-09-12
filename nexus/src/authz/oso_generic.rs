@@ -109,6 +109,7 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         GlobalImageList::get_polar_class(),
         ConsoleSessionList::get_polar_class(),
         DeviceAuthRequestList::get_polar_class(),
+        SiloIdentityProviderList::get_polar_class(),
     ];
     for c in classes {
         oso_builder = oso_builder.register_class(c)?;
@@ -119,6 +120,7 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         Organization::init(),
         Project::init(),
         Disk::init(),
+        Snapshot::init(),
         Instance::init(),
         IpPool::init(),
         NetworkInterface::init(),
@@ -166,7 +168,6 @@ pub enum Action {
     ModifyPolicy,
     CreateChild,
     Delete,
-    ListIdentityProviders, // only used during [`Nexus::identity_provider_list`]
 }
 
 impl oso::PolarClass for Action {
@@ -195,7 +196,6 @@ pub enum Perm {
     Modify,
     ListChildren,
     CreateChild,
-    ListIdentityProviders, // only used during [`Nexus::identity_provider_list`]
 }
 
 impl From<&Action> for Perm {
@@ -209,7 +209,6 @@ impl From<&Action> for Perm {
             Action::Delete => Perm::Modify,
             Action::ListChildren => Perm::ListChildren,
             Action::CreateChild => Perm::CreateChild,
-            Action::ListIdentityProviders => Perm::ListIdentityProviders,
         }
     }
 }
@@ -224,7 +223,6 @@ impl fmt::Display for Perm {
             Perm::Modify => "modify",
             Perm::ListChildren => "list_children",
             Perm::CreateChild => "create_child",
-            Perm::ListIdentityProviders => "list_identity_providers",
         })
     }
 }

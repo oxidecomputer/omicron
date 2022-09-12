@@ -14,17 +14,24 @@ use futures::future::Fuse;
 use futures::future::FusedFuture;
 use futures::prelude::*;
 use gateway_client::types::SpType;
+use gateway_client::types::UpdateBody;
 use slog::o;
 use slog::Drain;
 use slog::Level;
 use slog::Logger;
+use std::borrow::Cow;
+use std::fs;
 use std::net::IpAddr;
 use std::net::ToSocketAddrs;
+use std::path::Path;
+use std::path::PathBuf;
 use std::time::Duration;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use tokio::select;
+use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
+use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::MaybeTlsStream;
 use tokio_tungstenite::WebSocketStream;
@@ -67,6 +74,13 @@ enum Command {
     },
     #[clap(about = "Detach any existing serial console connection")]
     Detach,
+    #[clap(about = "Update the SP")]
+    Update {
+        #[clap(help = "Path to the new image")]
+        path: PathBuf,
+    },
+    #[clap(about = "Reset the SP")]
+    Reset,
 }
 
 fn level_from_str(s: &str) -> Result<Level> {
@@ -115,6 +129,20 @@ impl Client {
         }
     }
 
+    async fn reset(&self) -> Result<()> {
+        self.inner.sp_reset(self.sp_type, self.sled).await?;
+        Ok(())
+    }
+
+    async fn update(&self, path: &Path) -> Result<()> {
+        let image = fs::read(path)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        self.inner
+            .sp_update(self.sp_type, self.sled, &UpdateBody { image })
+            .await?;
+        Ok(())
+    }
+
     async fn detach(&self) -> Result<()> {
         self.inner
             .sp_component_serial_console_detach(
@@ -158,6 +186,12 @@ async fn main() -> Result<()> {
         Command::Attach { raw } => raw, // continue; primary use case
         Command::Detach => {
             return client.detach().await;
+        }
+        Command::Update { path } => {
+            return client.update(&path).await;
+        }
+        Command::Reset => {
+            return client.reset().await;
         }
     };
 
@@ -281,6 +315,10 @@ async fn main() -> Result<()> {
                 match c {
                     None => {
                         // channel is closed
+                        _ = ws.close(Some(CloseFrame {
+                            code: CloseCode::Normal,
+                            reason: Cow::Borrowed("client closed stdin"),
+                        })).await;
                         break;
                     }
                     Some(c) => {

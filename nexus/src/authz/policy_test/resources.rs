@@ -109,6 +109,8 @@ async fn make_silo(
         builder.new_resource(silo.clone());
     }
 
+    builder.new_resource(authz::SiloIdentityProviderList::new(silo.clone()));
+
     let norganizations = if first_branch { 2 } else { 1 };
     for i in 0..norganizations {
         let organization_name = format!("{}-org{}", silo_name, i + 1);
@@ -181,10 +183,12 @@ async fn make_project(
         Uuid::new_v4(),
         LookupType::ByName(instance_name.clone()),
     );
+
+    let disk_name = format!("{}-disk1", project_name);
     builder.new_resource(authz::Disk::new(
         project.clone(),
         Uuid::new_v4(),
-        LookupType::ByName(format!("{}-disk1", project_name)),
+        LookupType::ByName(disk_name.clone()),
     ));
     builder.new_resource(instance.clone());
     builder.new_resource(authz::NetworkInterface::new(
@@ -198,6 +202,12 @@ async fn make_project(
         vpc1,
         Uuid::new_v4(),
         LookupType::ByName(format!("{}-subnet1", vpc1_name)),
+    ));
+
+    builder.new_resource(authz::Snapshot::new(
+        project.clone(),
+        Uuid::new_v4(),
+        LookupType::ByName(format!("{}-snapshot1", disk_name)),
     ));
 }
 

@@ -70,7 +70,7 @@ pub async fn spoof_login(
         return Ok(Response::builder()
             .status(StatusCode::UNAUTHORIZED)
             .header(header::SET_COOKIE, clear_session_cookie_header_value())
-            .body("unauthorized".into())?); // TODO: failed login response body?
+            .body("".into())?); // TODO: failed login response body?
     }
 
     let user_id = user_id.unwrap();
@@ -90,7 +90,7 @@ pub async fn spoof_login(
                 apictx.session_idle_timeout(),
             ),
         )
-        .body("ok".into())?) // TODO: what do we return from login?
+        .body("".into())?) // TODO: what do we return from login?
 }
 
 // Silos have one or more identity providers, and an unauthenticated user will
@@ -376,7 +376,7 @@ pub async fn consume_credentials(
             return Ok(Response::builder()
                 .status(StatusCode::UNAUTHORIZED)
                 .header(header::SET_COOKIE, clear_session_cookie_header_value())
-                .body("unauthorized".into())?); // TODO: failed login response body?
+                .body("".into())?); // TODO: failed login response body?
         }
 
         let user = user.unwrap();
@@ -494,35 +494,35 @@ pub struct LoginUrlQuery {
     state: Option<String>,
 }
 
-/// Generate URL to IdP login form. Optional `state` param is included in query
-/// string if present, and will typically represent the URL to send the user
-/// back to after successful login.
-// TODO this does not know anything about IdPs, and it should. When the user is
-// logged out and hits an auth-gated route, if there are multiple IdPs and we
-// don't known which one they want to use, we need to send them to a page that
-// will allow them to choose among discoverable IdPs. However, there may be ways
-// to give ourselves a hint about which one they want, for example, by storing
-// that info in a browser cookie when they log in. When their session ends, we
-// will not be able to look at the dead session to find the silo or IdP (well,
-// maybe we can but we probably shouldn't) but we can look at the cookie and
-// default to sending them to the IdP indicated (though if they don't want that
-// one we need to make sure they can get to a different one). If there is no
-// cookie, we send them to the selector page. In any case, none of this is done
-// here yet. We go to /spoof_login no matter what.
-fn get_login_url(state: Option<String>) -> String {
-    // assume state is not already URL encoded
-    let query = match state {
-        Some(state) if !state.is_empty() => {
-            serde_urlencoded::to_string(LoginUrlQuery { state: Some(state) })
-                .ok() // in the strange event it's not serializable, no query
-        }
-        _ => None,
-    };
-    // Once we have IdP integration, this will be a URL for the IdP login page.
-    // For now we point to our own placeholder login page.
-    match query {
-        Some(query) => format!("/spoof_login?{query}"),
-        None => "/spoof_login".to_string(),
+/// Generate URI to IdP login form. Optional `redirect_url` represents the URL
+/// to send the user back to after successful login, and is included in `state`
+/// query param if present
+fn get_login_url(redirect_url: Option<String>) -> String {
+    // TODO: Once we have IdP integration, this will be a URL for the IdP login
+    // page. For now we point to our own placeholder login page. When the user
+    // is logged out and hits an auth-gated route, if there are multiple IdPs
+    // and we don't known which one they want to use, we need to send them to a
+    // page that will allow them to choose among discoverable IdPs. However,
+    // there may be ways to give ourselves a hint about which one they want, for
+    // example, by storing that info in a browser cookie when they log in. When
+    // their session ends, we will not be able to look at the dead session to
+    // find the silo or IdP (well, maybe we can but we probably shouldn't) but
+    // we can look at the cookie and default to sending them to the IdP
+    // indicated (though if they don't want that one we need to make sure they
+    // can get to a different one). If there is no cookie, we send them to the
+    // selector page. In any case, none of this is done here yet. We go to
+    // /spoof_login no matter what.
+    let login_uri = "/spoof_login";
+
+    // Stick redirect_url into the state param and URL encode it so it can be
+    // used as a query string. We assume it's not already encoded.
+    let query_data = LoginUrlQuery { state: redirect_url };
+
+    match serde_urlencoded::to_string(query_data) {
+        // only put the ? in front if there's something there
+        Ok(encoded) if !encoded.is_empty() => format!("{login_uri}?{encoded}"),
+        // redirect_url is either None or not url-encodable for some reason
+        _ => login_uri.to_string(),
     }
 }
 
@@ -538,9 +538,10 @@ pub async fn login_redirect(
     query_params: Query<StateParam>,
 ) -> Result<Response<Body>, HttpError> {
     let query = query_params.into_inner();
+    let redirect_url = query.state.filter(|s| !s.trim().is_empty());
     Ok(Response::builder()
         .status(StatusCode::FOUND)
-        .header(http::header::LOCATION, get_login_url(query.state))
+        .header(http::header::LOCATION, get_login_url(redirect_url))
         .body("".into())?)
 }
 
@@ -585,12 +586,22 @@ pub async fn console_index_or_login_redirect(
 
     // otherwise redirect to idp
 
-    // put the current URI in the query string to redirect back to after login
-    let uri = rqctx.request.lock().await.uri().to_string();
+    // Put the current URI in the query string to redirect back to after login.
+    // Right now this is a relative path, which only works as long as we're
+    // using the spoof login page, which is hosted by Nexus. Once we start
+    // sending users to a real external IdP login page, this will need to be a
+    // full URL.
+    let redirect_url = rqctx
+        .request
+        .lock()
+        .await
+        .uri()
+        .path_and_query()
+        .map(|p| p.to_string());
 
     Ok(Response::builder()
         .status(StatusCode::FOUND)
-        .header(http::header::LOCATION, get_login_url(Some(uri)))
+        .header(http::header::LOCATION, get_login_url(redirect_url))
         .body("".into())?)
 }
 

@@ -33,13 +33,17 @@ pub struct DeviceAuthRequest {
 
 impl DeviceAuthRequest {
     // We need the host to construct absolute verification URIs.
-    pub fn into_response(self, host: &str) -> views::DeviceAuthResponse {
+    pub fn into_response(
+        self,
+        tls: bool,
+        host: &str,
+    ) -> views::DeviceAuthResponse {
+        let scheme = if tls { "https" } else { "http" };
         views::DeviceAuthResponse {
-            // TODO-security: use HTTPS
-            verification_uri: format!("http://{}/device/verify", host),
+            verification_uri: format!("{scheme}://{host}/device/verify"),
             verification_uri_complete: format!(
-                "http://{}/device/verify?user_code={}",
-                host, &self.user_code
+                "{scheme}://{host}/device/verify?user_code={}",
+                &self.user_code
             ),
             user_code: self.user_code,
             device_code: self.device_code,

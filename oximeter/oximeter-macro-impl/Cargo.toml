@@ -16,8 +16,8 @@ features = ["serde"]
 version = "1.0.42"
 
 [dependencies.quote]
-version = "1.0.20"
+version = "1.0.21"
 
 [dependencies.syn]
-version = "1.0.95"
+version = "1.0.99"
 features = [ "full", "derive", "extra-traits" ]

@@ -173,7 +173,7 @@ impl PortManager {
         nic: &NetworkInterface,
         source_nat: Option<SourceNatConfig>,
         external_ips: Option<Vec<IpAddr>>,
-    ) -> Result<Port, Error> {
+    ) -> Result<(Port, PortTicket), Error> {
         // TODO-completess: Remove IPv4 restrictions once OPTE supports virtual
         // IPv6 networks.
         let private_ip = match nic.ip {
@@ -335,7 +335,7 @@ impl PortManager {
             vnic_name
         };
 
-        let port = {
+        let (port, ticket) = {
             let mut ports = self.inner.ports.lock().unwrap();
             let ticket = PortTicket::new(
                 instance_id,
@@ -343,7 +343,6 @@ impl PortManager {
                 self.inner.clone(),
             );
             let port = Port::new(
-                ticket,
                 port_name.clone(),
                 nic.ip,
                 subnet,
@@ -366,7 +365,7 @@ impl PortManager {
                 &port_name,
             );
             self.inner.update_secondary_macs(&mut ports)?;
-            port
+            (port, ticket)
         };
 
         // Add a router entry for this interface's subnet, directing traffic to the
@@ -433,11 +432,10 @@ impl PortManager {
             "Created OPTE port for guest";
             "port" => ?&port,
         );
-        Ok(port)
+        Ok((port, ticket))
     }
 }
 
-#[derive(Clone)]
 pub struct PortTicket {
     id: Uuid,
     port_name: String,
@@ -446,15 +444,14 @@ pub struct PortTicket {
 
 impl std::fmt::Debug for PortTicket {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        const SOME: &str = "Some(_)";
-        const NONE: &str = "None";
-        f.debug_struct("PortTicket")
-            .field("id", &self.id)
-            .field(
-                "manager",
-                if self.manager.is_some() { &SOME } else { &NONE },
-            )
-            .finish()
+        if self.manager.is_some() {
+            f.debug_struct("PortTicket")
+                .field("id", &self.id)
+                .field("manager", &"{ .. }")
+                .finish()
+        } else {
+            f.debug_struct("PortTicket").field("id", &self.id).finish()
+        }
     }
 }
 
