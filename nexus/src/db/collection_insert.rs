@@ -10,9 +10,7 @@
 //! 3) inserts the child resource row
 
 use super::pool::DbConnection;
-use async_bb8_diesel::{
-    AsyncRunQueryDsl, ConnectionError, ConnectionManager, PoolError,
-};
+use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionError, PoolError};
 use diesel::associations::HasTable;
 use diesel::helper_types::*;
 use diesel::pg::Pg;
@@ -166,9 +164,6 @@ where
 /// Result of [`InsertIntoCollectionStatement`] when executed asynchronously
 pub type AsyncInsertIntoCollectionResult<Q> = Result<Q, AsyncInsertError>;
 
-/// Result of [`InsertIntoCollectionStatement`] when executed synchronously
-pub type SyncInsertIntoCollectionResult<Q> = Result<Q, SyncInsertError>;
-
 /// Errors returned by [`InsertIntoCollectionStatement`].
 #[derive(Debug)]
 pub enum AsyncInsertError {
@@ -176,15 +171,6 @@ pub enum AsyncInsertError {
     CollectionNotFound,
     /// Other database error
     DatabaseError(PoolError),
-}
-
-/// Errors returned by [`InsertIntoCollectionStatement`].
-#[derive(Debug)]
-pub enum SyncInsertError {
-    /// The collection that the query was inserting into does not exist
-    CollectionNotFound,
-    /// Other database error
-    DatabaseError(diesel::result::Error),
 }
 
 impl<ResourceType, ISR, C> InsertIntoCollectionStatement<ResourceType, ISR, C>
@@ -202,17 +188,20 @@ where
     /// - Ok(new row)
     /// - Error(collection not found)
     /// - Error(other diesel error)
-    pub async fn insert_and_get_result_async(
+    pub async fn insert_and_get_result_async<ConnErr>(
         self,
-        pool: &bb8::Pool<ConnectionManager<DbConnection>>,
+        conn: &(impl async_bb8_diesel::AsyncConnection<DbConnection, ConnErr>
+              + Sync),
     ) -> AsyncInsertIntoCollectionResult<ResourceType>
     where
         // We require this bound to ensure that "Self" is runnable as query.
         Self: query_methods::LoadQuery<'static, DbConnection, ResourceType>,
+        ConnErr: From<diesel::result::Error> + Send + 'static,
+        PoolError: From<ConnErr>,
     {
-        self.get_result_async::<ResourceType>(pool)
+        self.get_result_async::<ResourceType>(conn)
             .await
-            .map_err(Self::translate_async_error)
+            .map_err(|e| Self::translate_async_error(PoolError::from(e)))
     }
 
     /// Issues the CTE asynchronously and parses the result.
@@ -221,53 +210,20 @@ where
     /// - Ok(Vec of new rows)
     /// - Error(collection not found)
     /// - Error(other diesel error)
-    pub async fn insert_and_get_results_async(
+    pub async fn insert_and_get_results_async<ConnErr>(
         self,
-        pool: &bb8::Pool<ConnectionManager<DbConnection>>,
+        conn: &(impl async_bb8_diesel::AsyncConnection<DbConnection, ConnErr>
+              + Sync),
     ) -> AsyncInsertIntoCollectionResult<Vec<ResourceType>>
     where
         // We require this bound to ensure that "Self" is runnable as query.
         Self: query_methods::LoadQuery<'static, DbConnection, ResourceType>,
+        ConnErr: From<diesel::result::Error> + Send + 'static,
+        PoolError: From<ConnErr>,
     {
-        self.get_results_async::<ResourceType>(pool)
+        self.get_results_async::<ResourceType>(conn)
             .await
-            .map_err(Self::translate_async_error)
-    }
-
-    /// Issues the CTE synchronously and parses the result.
-    ///
-    /// The three outcomes are:
-    /// - Ok(new row)
-    /// - Error(collection not found)
-    /// - Error(other diesel error)
-    pub fn insert_and_get_result(
-        self,
-        conn: &mut DbConnection,
-    ) -> SyncInsertIntoCollectionResult<ResourceType>
-    where
-        // We require this bound to ensure that "Self" is runnable as query.
-        Self: query_methods::LoadQuery<'static, DbConnection, ResourceType>,
-    {
-        self.get_result::<ResourceType>(conn)
-            .map_err(Self::translate_sync_error)
-    }
-
-    /// Issues the CTE synchronously and parses the result.
-    ///
-    /// The three outcomes are:
-    /// - Ok(Vec of new rows)
-    /// - Error(collection not found)
-    /// - Error(other diesel error)
-    pub fn insert_and_get_results(
-        self,
-        conn: &mut DbConnection,
-    ) -> SyncInsertIntoCollectionResult<Vec<ResourceType>>
-    where
-        // We require this bound to ensure that "Self" is runnable as query.
-        Self: query_methods::LoadQuery<'static, DbConnection, ResourceType>,
-    {
-        self.get_results::<ResourceType>(conn)
-            .map_err(Self::translate_sync_error)
+            .map_err(|e| Self::translate_async_error(PoolError::from(e)))
     }
 
     /// Check for the intentional division by zero error
@@ -296,16 +252,6 @@ where
                 AsyncInsertError::CollectionNotFound
             }
             other => AsyncInsertError::DatabaseError(other),
-        }
-    }
-
-    /// Translate from diesel errors into SyncInsertError, handling the
-    /// intentional division-by-zero error in the CTE.
-    fn translate_sync_error(err: diesel::result::Error) -> SyncInsertError {
-        if Self::error_is_division_by_zero(&err) {
-            SyncInsertError::CollectionNotFound
-        } else {
-            SyncInsertError::DatabaseError(err)
         }
     }
 }
@@ -446,12 +392,8 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::db::{
-        self, error::TransactionError, identity::Resource as IdentityResource,
-    };
-    use async_bb8_diesel::{
-        AsyncConnection, AsyncRunQueryDsl, AsyncSimpleConnection,
-    };
+    use crate::db::{self, identity::Resource as IdentityResource};
+    use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
     use chrono::{DateTime, NaiveDateTime, Utc};
     use db_macros::Resource;
     use diesel::expression_methods::ExpressionMethods;
@@ -622,41 +564,6 @@ mod test {
         .insert_and_get_result_async(pool.pool())
         .await;
         assert!(matches!(insert, Err(AsyncInsertError::CollectionNotFound)));
-
-        let insert_query = Collection::insert_resource(
-            collection_id,
-            diesel::insert_into(resource::table).values((
-                resource::dsl::id.eq(resource_id),
-                resource::dsl::name.eq("test"),
-                resource::dsl::description.eq("desc"),
-                resource::dsl::time_created.eq(Utc::now()),
-                resource::dsl::time_modified.eq(Utc::now()),
-                resource::dsl::collection_id.eq(collection_id),
-            )),
-        );
-
-        #[derive(Debug)]
-        enum CollectionError {
-            NotFound,
-        }
-        type TxnError = TransactionError<CollectionError>;
-
-        let result = pool
-            .pool()
-            .transaction(move |conn| {
-                insert_query.insert_and_get_result(conn).map_err(|e| match e {
-                    SyncInsertError::CollectionNotFound => {
-                        TxnError::CustomError(CollectionError::NotFound)
-                    }
-                    SyncInsertError::DatabaseError(e) => TxnError::from(e),
-                })
-            })
-            .await;
-
-        assert!(matches!(
-            result,
-            Err(TxnError::CustomError(CollectionError::NotFound))
-        ));
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();

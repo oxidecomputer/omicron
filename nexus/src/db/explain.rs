@@ -115,7 +115,7 @@ mod test {
     use super::*;
 
     use crate::db;
-    use async_bb8_diesel::{AsyncConnection, AsyncSimpleConnection};
+    use async_bb8_diesel::AsyncSimpleConnection;
     use diesel::SelectableHelper;
     use expectorate::assert_contents;
     use nexus_test_utils::db::test_setup_database;
@@ -158,40 +158,6 @@ mod test {
             )
             .await
             .unwrap();
-    }
-
-    // Tests the ".explain()" method in a synchronous context.
-    //
-    // This is often done when calling from transactions, which we demonstrate.
-    #[tokio::test]
-    async fn test_explain() {
-        let logctx = dev::test_setup_log("test_explain");
-        let mut db = test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&cfg);
-
-        create_schema(&pool).await;
-
-        use schema::test_users::dsl;
-        pool.pool()
-            .transaction(
-                move |conn| -> Result<(), db::error::TransactionError<()>> {
-                    let explanation = dsl::test_users
-                        .filter(dsl::id.eq(Uuid::nil()))
-                        .select(User::as_select())
-                        .explain(conn)
-                        .unwrap();
-                    assert_contents(
-                        "tests/output/test-explain-output",
-                        &explanation,
-                    );
-                    Ok(())
-                },
-            )
-            .await
-            .unwrap();
-        db.cleanup().await.unwrap();
-        logctx.cleanup_successful();
     }
 
     // Tests the ".explain_async()" method in an asynchronous context.
