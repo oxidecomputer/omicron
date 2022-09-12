@@ -33,6 +33,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
+use uuid::Uuid;
 
 #[derive(
     Debug,
@@ -471,11 +472,32 @@ async fn sp_component_serial_console_detach(
 // TODO: how can we make this generic enough to support any update mechanism?
 #[derive(Deserialize, JsonSchema)]
 pub struct UpdateBody {
+    /// An identifier for this update.
+    ///
+    /// This ID applies to this single instance of the API call; it is not an
+    /// ID of `image` itself. Multiple API calls with the same `image` should
+    /// use different IDs.
+    pub id: Uuid,
     /// The binary blob containing the update image (component-specific).
     pub image: Vec<u8>,
     /// The update slot to apply this image to. Supply 0 if the component only
     /// has one update slot.
     pub slot: u16,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct UpdateAbortBody {
+    /// The ID of the update to abort.
+    ///
+    /// If the SP is currently receiving an update with this ID, it will be
+    /// aborted.
+    ///
+    /// If the SP is currently receiving an update with a different ID, the
+    /// abort request will fail.
+    ///
+    /// If the SP is not currently receiving any update, the request to abort
+    /// should succeed but will not have actually done anything.
+    pub id: Uuid,
 }
 
 /// Reset an SP
@@ -520,20 +542,12 @@ async fn sp_component_update(
     let comms = Arc::clone(&rqctx.context().sp_comms);
     let PathSpComponent { sp, component } = path.into_inner();
     let component = component_from_str(&component)?;
-    let UpdateBody { image, slot } = body.into_inner();
+    let UpdateBody { id, image, slot } = body.into_inner();
 
-    // Sending an update image to an SP involves multiple round trips to that SP
-    // and may run for several minutes in some cases. We want to run that to
-    // completion, even if our client disconnects (which would cause the future
-    // we're in now to be cancelled). Move the update call into a background
-    // task.
-    let task = tokio::spawn(async move {
-        comms.update(sp.into(), component, slot, image).await
-    })
-    .await
-    .unwrap();
-
-    task.map_err(http_err_from_comms_err)?;
+    comms
+        .start_update(sp.into(), component, id, slot, image)
+        .await
+        .map_err(http_err_from_comms_err)?;
 
     Ok(HttpResponseUpdatedNoContent {})
 }
@@ -551,13 +565,15 @@ async fn sp_component_update(
 async fn sp_component_abort_update(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path: Path<PathSpComponent>,
+    body: TypedBody<UpdateAbortBody>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let comms = &rqctx.context().sp_comms;
     let PathSpComponent { sp, component } = path.into_inner();
     let component = component_from_str(&component)?;
+    let UpdateAbortBody { id } = body.into_inner();
 
     comms
-        .update_abort(sp.into(), component)
+        .update_abort(sp.into(), component, id)
         .await
         .map_err(http_err_from_comms_err)?;
 

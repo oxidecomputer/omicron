@@ -64,10 +64,13 @@ pub enum RequestKind {
     },
     SerialConsoleDetach,
     UpdatePrepare(UpdatePrepare),
-    UpdatePrepareStatus(UpdatePrepareStatusRequest),
     /// `UpdateChunk` always includes trailing raw data.
     UpdateChunk(UpdateChunk),
-    UpdateAbort(SpComponent),
+    UpdateStatus(SpComponent),
+    UpdateAbort {
+        component: SpComponent,
+        id: UpdateId,
+    },
     SysResetPrepare,
     SysResetTrigger,
 }
@@ -90,6 +93,55 @@ pub enum SpPort {
     Two = 2,
 }
 
+#[derive(Debug, Clone, Copy, SerializedSize, Serialize, Deserialize)]
+pub enum UpdateStatus {
+    /// Returned when the SP is still preparing to apply the update with the
+    /// given ID (e.g., erasing a target flash slot).
+    Preparing(UpdatePreparationStatus),
+    /// Returned when an update is currently in progress.
+    InProgress(UpdateInProgressStatus),
+    /// Returned when an update has completed.
+    ///
+    /// The SP has no concept of time, so we cannot indicate how recently this
+    /// update completed. The SP will continue to return this status until a new
+    /// update starts (or the status is reset some other way, such as an SP
+    /// reboot).
+    Complete(UpdateId),
+    /// Returned when an update has been aborted.
+    ///
+    /// The SP has no concept of time, so we cannot indicate how recently this
+    /// abort happened. The SP will continue to return this status until a new
+    /// update starts (or the status is reset some other way, such as an SP
+    /// reboot).
+    Aborted(UpdateId),
+}
+
+/// Current state when the SP is preparing to apply an update.
+#[derive(Debug, Clone, Copy, SerializedSize, Serialize, Deserialize)]
+pub struct UpdatePreparationStatus {
+    pub id: UpdateId,
+    pub progress: Option<UpdatePreparationProgress>,
+}
+
+/// Current progress of preparing for an update.
+///
+/// The initial values reported by the SP should have `current=0` and `total`
+/// defined in some SP-specific unit. `current` should advance toward `total`;
+/// once `current == total` preparation is complete, and the SP should return
+/// `UpdateStatus::InProgress` instead.
+#[derive(Debug, Clone, Copy, SerializedSize, Serialize, Deserialize)]
+pub struct UpdatePreparationProgress {
+    pub current: u32,
+    pub total: u32,
+}
+
+#[derive(Debug, Clone, Copy, SerializedSize, Serialize, Deserialize)]
+pub struct UpdateInProgressStatus {
+    pub id: UpdateId,
+    pub bytes_received: u32,
+    pub total_size: u32,
+}
+
 #[derive(Debug, Clone, SerializedSize, Serialize, Deserialize)]
 pub enum ResponseKind {
     Discover(DiscoverResponse),
@@ -98,8 +150,8 @@ pub enum ResponseKind {
     IgnitionCommandAck,
     SpState(SpState),
     UpdatePrepareAck,
-    UpdatePrepareStatus(UpdatePrepareStatusResponse),
     UpdateChunkAck,
+    UpdateStatus(Option<UpdateStatus>),
     UpdateAbortAck,
     SerialConsoleAttachAck,
     SerialConsoleWriteAck { furthest_ingested_offset: u64 },
@@ -148,12 +200,12 @@ pub enum ResponseError {
     SerialConsoleAlreadyAttached,
     /// An update has not been prepared yet.
     UpdateNotPrepared,
-    /// An update-related message arrived at the SP, but it is already
-    /// processing an update with the stream id `sp_stream_id`.
-    InvalidUpdateStreamId { sp_stream_id: u64 },
+    /// An update-related message arrived at the SP, but its update ID does not
+    /// match the update ID the SP is currently processing.
+    InvalidUpdateId { sp_update_id: UpdateId },
     /// An update is already in progress with the specified amount of data
     /// already provided. MGS should resume the update at that offset.
-    UpdateInProgress { bytes_received: u32 },
+    UpdateInProgress(UpdateStatus),
     /// Received an invalid update chunk; the in-progress update must be
     /// aborted and restarted.
     InvalidUpdateChunk,
@@ -195,11 +247,11 @@ impl fmt::Display for ResponseError {
             ResponseError::UpdateNotPrepared => {
                 write!(f, "SP has not received update prepare request")
             }
-            ResponseError::InvalidUpdateStreamId { sp_stream_id } => {
-                write!(f, "bad update stream ID (update already in progress, stream id {:#x})", sp_stream_id)
+            ResponseError::InvalidUpdateId { sp_update_id } => {
+                write!(f, "bad update ID (update already in progress, ID {:#04x?})", sp_update_id.0)
             }
-            ResponseError::UpdateInProgress { bytes_received } => {
-                write!(f, "update still in progress ({bytes_received} bytes received so far)")
+            ResponseError::UpdateInProgress(status) => {
+                write!(f, "update still in progress ({status:?})")
             }
             ResponseError::UpdateSlotBusy => {
                 write!(f, "update currently unavailable (slot busy)")
@@ -256,14 +308,27 @@ pub enum SpMessageKind {
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, SerializedSize, Serialize, Deserialize,
 )]
+#[repr(transparent)]
+pub struct UpdateId(pub [u8; 16]);
+
+impl From<uuid::Uuid> for UpdateId {
+    fn from(id: uuid::Uuid) -> Self {
+        Self(id.into_bytes())
+    }
+}
+
+impl From<UpdateId> for uuid::Uuid {
+    fn from(id: UpdateId) -> Self {
+        Self::from_bytes(id.0)
+    }
+}
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, SerializedSize, Serialize, Deserialize,
+)]
 pub struct UpdatePrepare {
     pub component: SpComponent,
-    /// MGS sets `stream_id` to a random `u64`, and the SP uses it to correlate
-    /// any subsequent `UpdateChunk` messages with this update. This is a
-    /// safeguard against the SP receiving multiple `UpdateChunk` messages
-    /// concurrently and not being able to tell which are associated with the
-    /// stream it is currently updating.
-    pub stream_id: u64,
+    pub id: UpdateId,
     /// The number of available slots depends on `component`; passing an invalid
     /// slot number will result in a [`ResponseError::InvalidSlotForComponent`].
     pub slot: u16,
@@ -275,26 +340,9 @@ pub struct UpdatePrepare {
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, SerializedSize, Serialize, Deserialize,
 )]
-pub struct UpdatePrepareStatusRequest {
-    pub component: SpComponent,
-    /// See [`UpdatePrepare::stream_id`].
-    pub stream_id: u64,
-}
-
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, SerializedSize, Serialize, Deserialize,
-)]
-pub struct UpdatePrepareStatusResponse {
-    pub done: bool,
-}
-
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, SerializedSize, Serialize, Deserialize,
-)]
 pub struct UpdateChunk {
     pub component: SpComponent,
-    /// See [`UpdatePrepare::stream_id`].
-    pub stream_id: u64,
+    pub id: UpdateId,
     /// Offset in bytes of this chunk from the beginning of the update data.
     pub offset: u32,
 }

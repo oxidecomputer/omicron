@@ -11,6 +11,8 @@ use anyhow::Result;
 use clap::Parser;
 use clap::Subcommand;
 use gateway_messages::SpComponent;
+use gateway_messages::UpdateId;
+use gateway_messages::UpdateStatus;
 use gateway_sp_comms::SingleSp;
 use gateway_sp_comms::DISCOVERY_MULTICAST_ADDR;
 use slog::info;
@@ -23,6 +25,7 @@ use std::net::SocketAddrV6;
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::net::UdpSocket;
+use uuid::Uuid;
 
 mod hubris_archive;
 mod usart;
@@ -110,17 +113,26 @@ enum SpCommand {
     /// Detach any other attached USART connection.
     UsartDetach,
 
-    /// Upload a new image to the SP and have it swap banks (requires reset)
-    Update { hubris_archive: PathBuf },
+    /// Upload a new image to the SP or one of its components.
+    ///
+    /// To update the SP itself:
+    ///
+    /// 1. Use the component name "sp"
+    /// 2. Specify slot 0 (the SP only has a single updateable slot: its
+    ///    alternate bank).
+    /// 3. Pass the path to a hubris archive as `image`.
+    Update { component: String, slot: u16, image: PathBuf },
 
-    /// Update a component of the SP.
-    UpdateComponent { component: String, slot: u16, image: PathBuf },
+    /// Get the status of an update to the specified component.
+    UpdateStatus { component: String },
 
     /// Abort an in-progress update.
-    AbortUpdate {
+    UpdateAbort {
         /// Component with an update-in-progress to be aborted. Omit to abort
         /// updates to the SP itself.
-        component: Option<String>,
+        component: String,
+        /// ID of the update to abort.
+        update_id: Uuid,
     },
 
     /// Instruct the SP to reset.
@@ -209,44 +221,83 @@ async fn main() -> Result<()> {
             sp.serial_console_detach().await?;
             info!(log, "SP serial console detached");
         }
-        Some(SpCommand::Update { hubris_archive }) => {
-            let mut archive = HubrisArchive::open(&hubris_archive)?;
-            let data = archive.final_bin()?;
-            sp.update(gateway_messages::SpComponent::SP_ITSELF, 0, data)
-                .await
-                .with_context(|| {
-                    format!("updating to {} failed", hubris_archive.display())
-                })?;
-        }
-        Some(SpCommand::UpdateComponent { component, slot, image }) => {
-            let data = fs::read(&image).with_context(|| {
-                format!("failed to read {}", image.display())
-            })?;
+        Some(SpCommand::Update { component, slot, image }) => {
             let sp_component = SpComponent::try_from(component.as_str())
                 .map_err(|_| {
                     anyhow!("invalid component name: {}", component)
                 })?;
-            sp.update(sp_component, slot, data).await.with_context(|| {
-                format!(
-                    "updating {} slot {} to {} failed",
-                    component,
-                    slot,
-                    image.display()
-                )
-            })?;
-        }
-        Some(SpCommand::AbortUpdate { component }) => {
-            let sp_component = match &component {
-                Some(c) => SpComponent::try_from(c.as_str())
-                    .map_err(|_| anyhow!("invalid component name: {}", c))?,
-                None => SpComponent::SP_ITSELF,
+            let data = if sp_component == SpComponent::SP_ITSELF {
+                let mut archive = HubrisArchive::open(&image)?;
+                archive.final_bin()?
+            } else {
+                fs::read(&image).with_context(|| {
+                    format!("failed to read {}", image.display())
+                })?
             };
-            sp.update_abort(sp_component).await.with_context(|| {
-                format!(
-                    "aborting update to {} failed",
-                    component.as_deref().unwrap_or("SP")
-                )
-            })?;
+            update(&log, &sp, sp_component, slot, data).await.with_context(
+                || {
+                    format!(
+                        "updating {} slot {} to {} failed",
+                        component,
+                        slot,
+                        image.display()
+                    )
+                },
+            )?;
+        }
+        Some(SpCommand::UpdateStatus { component }) => {
+            let sp_component = SpComponent::try_from(component.as_str())
+                .map_err(|_| anyhow!("invalid component name: {component}"))?;
+            let status =
+                sp.update_status(sp_component).await.with_context(|| {
+                    format!(
+                        "failed to get update status to component {component}"
+                    )
+                })?;
+            match status {
+                Some(UpdateStatus::Preparing(sub_status)) => {
+                    let id = Uuid::from(sub_status.id);
+                    if let Some(progress) = sub_status.progress {
+                        info!(
+                            log, "update still preparing (progress: {}/{})",
+                            progress.current, progress.total;
+                            "id" => %id,
+                        );
+                    } else {
+                        info!(
+                            log, "update still preparing (no progress available)";
+                            "id" => %id,
+                        );
+                    }
+                }
+                Some(UpdateStatus::InProgress(sub_status)) => {
+                    let id = Uuid::from(sub_status.id);
+                    info!(
+                        log, "update in progress";
+                        "id" => %id,
+                        "bytes_received" => sub_status.bytes_received,
+                        "total_size" => sub_status.total_size,
+                    );
+                }
+                Some(UpdateStatus::Complete(id)) => {
+                    let id = Uuid::from(id);
+                    info!(log, "update complete"; "id" => %id);
+                }
+                Some(UpdateStatus::Aborted(id)) => {
+                    let id = Uuid::from(id);
+                    info!(log, "update aborted"; "id" => %id);
+                }
+                None => {
+                    info!(log, "no update status available");
+                }
+            }
+        }
+        Some(SpCommand::UpdateAbort { component, update_id }) => {
+            let sp_component = SpComponent::try_from(component.as_str())
+                .map_err(|_| anyhow!("invalid component name: {component}"))?;
+            sp.update_abort(sp_component, update_id).await.with_context(
+                || format!("aborting update to {} failed", component),
+            )?;
         }
         Some(SpCommand::Reset) => {
             sp.reset_prepare().await?;
@@ -257,4 +308,70 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+async fn update(
+    log: &Logger,
+    sp: &SingleSp,
+    component: SpComponent,
+    slot: u16,
+    data: Vec<u8>,
+) -> Result<()> {
+    let update_id = Uuid::new_v4();
+    info!(log, "generated update ID"; "id" => %update_id);
+    sp.start_update(component, update_id, slot, data)
+        .await
+        .context("failed to start update")?;
+
+    let sp_update_id = UpdateId::from(update_id);
+    loop {
+        let status = sp
+            .update_status(component)
+            .await
+            .context("failed to get update status")?;
+        let status = match status {
+            Some(status) => status,
+            None => bail!("no update status returned by SP (did it reset?)"),
+        };
+        match status {
+            UpdateStatus::Preparing(sub_status) => {
+                if sub_status.id != sp_update_id {
+                    bail!("different update preparing ({:?})", sub_status.id);
+                }
+                if let Some(progress) = sub_status.progress {
+                    info!(
+                        log,
+                        "update preparing: {}/{}",
+                        progress.current,
+                        progress.total,
+                    );
+                } else {
+                    info!(log, "update preparing (no progress available)");
+                }
+            }
+            UpdateStatus::InProgress(sub_status) => {
+                if sub_status.id != sp_update_id {
+                    bail!("different update in progress ({:?})", sub_status.id);
+                }
+                info!(
+                    log, "update in progress";
+                    "bytes_received" => sub_status.bytes_received,
+                    "total_size" => sub_status.total_size,
+                );
+            }
+            UpdateStatus::Complete(id) => {
+                if id != sp_update_id {
+                    bail!("different update complete ({id:?})");
+                }
+                return Ok(());
+            }
+            UpdateStatus::Aborted(id) => {
+                if id != sp_update_id {
+                    bail!("different update aborted ({id:?})");
+                }
+                bail!("update aborted");
+            }
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
 }

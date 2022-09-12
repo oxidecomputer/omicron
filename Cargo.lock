@@ -1470,6 +1470,7 @@ dependencies = [
  "termios",
  "thiserror",
  "tokio",
+ "uuid",
  "zip",
 ]
 
@@ -1748,6 +1749,7 @@ dependencies = [
  "serde_repr",
  "smoltcp",
  "static_assertions",
+ "uuid",
 ]
 
 [[package]]
@@ -1759,7 +1761,6 @@ dependencies = [
  "omicron-common",
  "omicron-test-utils",
  "once_cell",
- "rand 0.8.5",
  "serde",
  "serde_with",
  "slog",
@@ -1767,6 +1768,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "usdt",
+ "uuid",
 ]
 
 [[package]]
