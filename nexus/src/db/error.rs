@@ -37,6 +37,14 @@ impl<T> From<DieselError> for TransactionError<T> {
     }
 }
 
+// Maps a "connection error" into a "pool error", which
+// is already contained within the error type.
+impl<T> From<async_bb8_diesel::ConnectionError> for TransactionError<T> {
+    fn from(err: async_bb8_diesel::ConnectionError) -> Self {
+        Self::Pool(PoolError::Connection(err))
+    }
+}
+
 impl From<PublicError> for TransactionError<PublicError> {
     fn from(err: PublicError) -> Self {
         TransactionError::CustomError(err)

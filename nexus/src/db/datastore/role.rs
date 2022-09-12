@@ -140,14 +140,15 @@ impl DataStore {
         // person attempt to access anything.
 
         self.pool_authorized(opctx).await?
-            .transaction(move |conn| {
+            .transaction_async(|conn| async move {
                 let mut role_assignments = dsl::role_assignment
                     .filter(dsl::identity_type.eq(identity_type.clone()))
                     .filter(dsl::identity_id.eq(identity_id))
                     .filter(dsl::resource_type.eq(resource_type.to_string()))
                     .filter(dsl::resource_id.eq(resource_id))
                     .select(RoleAssignment::as_select())
-                    .load::<RoleAssignment>(conn)?;
+                    .load_async::<RoleAssignment>(&conn)
+                    .await?;
 
                 // Return the roles that a silo user has from their group memberships
                 if identity_type == IdentityType::SiloUser {
@@ -163,7 +164,8 @@ impl DataStore {
                         .filter(dsl::resource_type.eq(resource_type.to_string()))
                         .filter(dsl::resource_id.eq(resource_id))
                         .select(RoleAssignment::as_select())
-                        .load::<RoleAssignment>(conn)?;
+                        .load_async::<RoleAssignment>(&conn)
+                        .await?;
 
                     role_assignments.append(&mut group_role_assignments);
                 }
@@ -259,9 +261,9 @@ impl DataStore {
         // then flip the resource over to using it.
         self.pool_authorized(opctx)
             .await?
-            .transaction(move |conn| {
-                delete_old_query.execute(conn)?;
-                Ok(insert_new_query.get_results(conn)?)
+            .transaction_async(|conn| async move {
+                delete_old_query.execute_async(&conn).await?;
+                Ok(insert_new_query.get_results_async(&conn).await?)
             })
             .await
             .map_err(|e| match e {

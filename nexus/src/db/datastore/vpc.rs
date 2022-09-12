@@ -10,7 +10,6 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::collection_insert::SyncInsertError;
 use crate::db::error::diesel_pool_result_optional;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
@@ -289,22 +288,23 @@ impl DataStore {
         // legibility of CTEs via diesel right now.
         self.pool_authorized(opctx)
             .await?
-            .transaction(move |conn| {
-                delete_old_query.execute(conn)?;
+            .transaction_async(|conn| async move {
+                delete_old_query.execute_async(&conn).await?;
 
                 // The generation count update on the vpc table row will take a
                 // write lock on the row, ensuring that the vpc was not deleted
                 // concurently.
-                insert_new_query.insert_and_get_results(conn).map_err(|e| {
-                    match e {
-                        SyncInsertError::CollectionNotFound => {
+                insert_new_query
+                    .insert_and_get_results_async(&conn)
+                    .await
+                    .map_err(|e| match e {
+                        AsyncInsertError::CollectionNotFound => {
                             TxnError::CustomError(
                                 FirewallUpdateError::CollectionNotFound,
                             )
                         }
-                        SyncInsertError::DatabaseError(e) => e.into(),
-                    }
-                })
+                        AsyncInsertError::DatabaseError(e) => e.into(),
+                    })
             })
             .await
             .map_err(|e| match e {
