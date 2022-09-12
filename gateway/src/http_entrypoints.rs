@@ -528,12 +528,38 @@ async fn sp_component_update(
     // we're in now to be cancelled). Move the update call into a background
     // task.
     let task = tokio::spawn(async move {
-        comms
-        .update(sp.into(), component, slot, image)
-        .await
-    }).await.unwrap();
+        comms.update(sp.into(), component, slot, image).await
+    })
+    .await
+    .unwrap();
 
     task.map_err(http_err_from_comms_err)?;
+
+    Ok(HttpResponseUpdatedNoContent {})
+}
+
+/// Abort any in-progress update an SP component
+///
+/// Aborting an update to the SP itself is done via the component name `sp`.
+///
+/// If this returns successfully, it does not mean an update was actually
+/// aborted; it only means no update is currently in progress.
+#[endpoint {
+    method = POST,
+    path = "/sp/{type}/{slot}/component/{component}/abort-update",
+}]
+async fn sp_component_abort_update(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path: Path<PathSpComponent>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let comms = &rqctx.context().sp_comms;
+    let PathSpComponent { sp, component } = path.into_inner();
+    let component = component_from_str(&component)?;
+
+    comms
+        .update_abort(sp.into(), component)
+        .await
+        .map_err(http_err_from_comms_err)?;
 
     Ok(HttpResponseUpdatedNoContent {})
 }
@@ -689,6 +715,7 @@ pub fn api() -> GatewayApiDescription {
         api.register(sp_component_serial_console_attach)?;
         api.register(sp_component_serial_console_detach)?;
         api.register(sp_component_update)?;
+        api.register(sp_component_abort_update)?;
         api.register(sp_component_power_on)?;
         api.register(sp_component_power_off)?;
         api.register(ignition_list)?;

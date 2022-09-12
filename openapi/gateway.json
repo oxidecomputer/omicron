@@ -342,6 +342,56 @@
         }
       }
     },
+    "/sp/{type}/{slot}/component/{component}/abort-update": {
+      "post": {
+        "summary": "Abort any in-progress update an SP component",
+        "description": "Aborting an update to the SP itself is done via the component name `sp`.\nIf this returns successfully, it does not mean an update was actually aborted; it only means no update is currently in progress.",
+        "operationId": "sp_component_abort_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "component",
+            "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/sp/{type}/{slot}/component/{component}/power-off": {
       "post": {
         "summary": "Power off an SP component",

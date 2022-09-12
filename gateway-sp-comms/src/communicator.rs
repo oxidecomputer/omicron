@@ -208,7 +208,7 @@ impl Communicator {
         Ok(sp.state().await?)
     }
 
-    /// Update a given SP.
+    /// Send an update payload to a given SP.
     pub async fn update(
         &self,
         sp: SpIdentifier,
@@ -219,6 +219,17 @@ impl Communicator {
         let port = self.id_to_port(sp)?;
         let sp = self.switch.sp(port).ok_or(Error::SpAddressUnknown(sp))?;
         Ok(sp.update(component, slot, image).await?)
+    }
+
+    /// Abort an in-progress update.
+    pub async fn update_abort(
+        &self,
+        sp: SpIdentifier,
+        component: SpComponent,
+    ) -> Result<(), Error> {
+        let port = self.id_to_port(sp)?;
+        let sp = self.switch.sp(port).ok_or(Error::SpAddressUnknown(sp))?;
+        Ok(sp.update_abort(component).await?)
     }
 
     /// Reset a given SP.
