@@ -37,7 +37,7 @@ reqwest = { version = "0.11.8", default-features = false, features = ["rustls-tl
 schemars = { version = "0.8.10", features = [ "chrono", "uuid1" ] }
 serde = { version = "1.0", features = [ "derive" ] }
 serde_json = "1.0"
-serde_with = "2.0.0"
+serde_with = "2.0.1"
 sled-agent-client = { path = "../sled-agent-client" }
 slog = { version = "2.5", features = [ "max_level_trace", "release_max_level_debug" ] }
 slog-dtrace = "0.2"
