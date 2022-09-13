@@ -330,7 +330,10 @@ impl DataStore {
     /// Deletes a set of regions.
     ///
     /// Also updates the storage usage on their corresponding datasets.
-    pub async fn regions_hard_delete(&self, region_ids: Vec<Uuid>) -> DeleteResult {
+    pub async fn regions_hard_delete(
+        &self,
+        region_ids: Vec<Uuid>,
+    ) -> DeleteResult {
         if region_ids.is_empty() {
             return Ok(());
         }

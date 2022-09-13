@@ -109,8 +109,11 @@ async fn region_delete(
     let id = path.into_inner().id;
     let crucible = rc.context();
 
-    match crucible.delete(id).await
-        .map_err(|e| HttpError::for_bad_request(None, e.to_string()))? {
+    match crucible
+        .delete(id)
+        .await
+        .map_err(|e| HttpError::for_bad_request(None, e.to_string()))?
+    {
         Some(_) => Ok(HttpResponseDeleted()),
         None => {
             Err(HttpError::for_not_found(None, "Region not found".to_string()))

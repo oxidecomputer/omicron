@@ -24,10 +24,10 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Name;
 use omicron_nexus::external_api::params;
 use omicron_nexus::external_api::views;
-use uuid::Uuid;
-use sled_agent_client::types::VolumeConstructionRequest;
-use rand::{SeedableRng, rngs::StdRng};
 use rand::prelude::SliceRandom;
+use rand::{rngs::StdRng, SeedableRng};
+use sled_agent_client::types::VolumeConstructionRequest;
+use uuid::Uuid;
 
 use httptest::{matchers::*, responders::*, Expectation, ServerBuilder};
 
@@ -160,7 +160,8 @@ async fn test_snapshot_then_delete_disk(cptestctx: &ControlPlaneTestContext) {
         .expect("failed to delete disk");
 
     // Delete the snapshot
-    let snapshot_url = format!("{}/snapshots/{}", get_project_url(), "a-snapshot");
+    let snapshot_url =
+        format!("{}/snapshots/{}", get_project_url(), "a-snapshot");
     NexusRequest::object_delete(client, &snapshot_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -274,7 +275,8 @@ async fn test_delete_snapshot_then_disk(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(snapshot.size, base_disk.size);
 
     // Delete the snapshot
-    let snapshot_url = format!("{}/snapshots/{}", get_project_url(), "a-snapshot");
+    let snapshot_url =
+        format!("{}/snapshots/{}", get_project_url(), "a-snapshot");
     NexusRequest::object_delete(client, &snapshot_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -407,7 +409,8 @@ async fn test_multiple_snapshots(cptestctx: &ControlPlaneTestContext) {
 
     // Delete the snapshots
     for i in 0..4 {
-        let snapshot_url = format!("{}/snapshots/a-snapshot-{}", get_project_url(), i);
+        let snapshot_url =
+            format!("{}/snapshots/a-snapshot-{}", get_project_url(), i);
         NexusRequest::object_delete(client, &snapshot_url)
             .authn_as(AuthnMode::PrivilegedUser)
             .execute()
@@ -420,7 +423,9 @@ async fn test_multiple_snapshots(cptestctx: &ControlPlaneTestContext) {
 }
 
 #[nexus_test]
-async fn test_snapshot_prevents_other_disk(cptestctx: &ControlPlaneTestContext) {
+async fn test_snapshot_prevents_other_disk(
+    cptestctx: &ControlPlaneTestContext,
+) {
     // Test that region remains if there is a snapshot, preventing further
     // allocation.
     let client = &cptestctx.external_client;
@@ -583,7 +588,9 @@ async fn test_snapshot_prevents_other_disk(cptestctx: &ControlPlaneTestContext) 
 }
 
 #[nexus_test]
-async fn test_multiple_disks_multiple_snapshots_order_1(cptestctx: &ControlPlaneTestContext) {
+async fn test_multiple_disks_multiple_snapshots_order_1(
+    cptestctx: &ControlPlaneTestContext,
+) {
     // Test multiple disks with multiple snapshots
     let client = &cptestctx.external_client;
     let disk_test = DiskTest::new(&cptestctx).await;
@@ -690,7 +697,8 @@ async fn test_multiple_disks_multiple_snapshots_order_1(cptestctx: &ControlPlane
         .expect("failed to delete disk");
 
     // Delete the second snapshot
-    let snapshot_url = format!("{}/snapshots/second-snapshot", get_project_url());
+    let snapshot_url =
+        format!("{}/snapshots/second-snapshot", get_project_url());
     NexusRequest::object_delete(client, &snapshot_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -706,7 +714,8 @@ async fn test_multiple_disks_multiple_snapshots_order_1(cptestctx: &ControlPlane
         .expect("failed to delete disk");
 
     // Delete the first snapshot
-    let snapshot_url = format!("{}/snapshots/first-snapshot", get_project_url());
+    let snapshot_url =
+        format!("{}/snapshots/first-snapshot", get_project_url());
     NexusRequest::object_delete(client, &snapshot_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -718,7 +727,9 @@ async fn test_multiple_disks_multiple_snapshots_order_1(cptestctx: &ControlPlane
 }
 
 #[nexus_test]
-async fn test_multiple_disks_multiple_snapshots_order_2(cptestctx: &ControlPlaneTestContext) {
+async fn test_multiple_disks_multiple_snapshots_order_2(
+    cptestctx: &ControlPlaneTestContext,
+) {
     // Test multiple disks with multiple snapshots, varying the delete order
     let client = &cptestctx.external_client;
     let disk_test = DiskTest::new(&cptestctx).await;
@@ -833,7 +844,8 @@ async fn test_multiple_disks_multiple_snapshots_order_2(cptestctx: &ControlPlane
         .expect("failed to delete disk");
 
     // Delete the second snapshot
-    let snapshot_url = format!("{}/snapshots/second-snapshot", get_project_url());
+    let snapshot_url =
+        format!("{}/snapshots/second-snapshot", get_project_url());
     NexusRequest::object_delete(client, &snapshot_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -841,7 +853,8 @@ async fn test_multiple_disks_multiple_snapshots_order_2(cptestctx: &ControlPlane
         .expect("failed to delete snapshot");
 
     // Delete the first snapshot
-    let snapshot_url = format!("{}/snapshots/first-snapshot", get_project_url());
+    let snapshot_url =
+        format!("{}/snapshots/first-snapshot", get_project_url());
     NexusRequest::object_delete(client, &snapshot_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -991,7 +1004,9 @@ async fn prepare_for_test_multiple_layers_of_snapshots(
 }
 
 #[nexus_test]
-async fn test_multiple_layers_of_snapshots_delete_all_disks_first(cptestctx: &ControlPlaneTestContext) {
+async fn test_multiple_layers_of_snapshots_delete_all_disks_first(
+    cptestctx: &ControlPlaneTestContext,
+) {
     // Test layering read-only snapshots through multiple disks:
     // delete all disks, then delete all snapshots
     let client = &cptestctx.external_client;
@@ -1026,7 +1041,9 @@ async fn test_multiple_layers_of_snapshots_delete_all_disks_first(cptestctx: &Co
 }
 
 #[nexus_test]
-async fn test_multiple_layers_of_snapshots_delete_all_snapshots_first(cptestctx: &ControlPlaneTestContext) {
+async fn test_multiple_layers_of_snapshots_delete_all_snapshots_first(
+    cptestctx: &ControlPlaneTestContext,
+) {
     // Test layering read-only snapshots through multiple disks:
     // delete all snapshots, then delete all disks
     let client = &cptestctx.external_client;
@@ -1061,7 +1078,9 @@ async fn test_multiple_layers_of_snapshots_delete_all_snapshots_first(cptestctx:
 }
 
 #[nexus_test]
-async fn test_multiple_layers_of_snapshots_random_delete_order(cptestctx: &ControlPlaneTestContext) {
+async fn test_multiple_layers_of_snapshots_random_delete_order(
+    cptestctx: &ControlPlaneTestContext,
+) {
     // Test layering read-only snapshots through multiple disks:
     // delete snapshots and disks in a random order
     let client = &cptestctx.external_client;
@@ -1082,7 +1101,6 @@ async fn test_multiple_layers_of_snapshots_random_delete_order(cptestctx: &Contr
             DeleteObject::Disk("layer-1-disk".to_string()),
             DeleteObject::Disk("layer-2-disk".to_string()),
             DeleteObject::Disk("layer-3-disk".to_string()),
-
             DeleteObject::Snapshot("layer-1-snapshot".to_string()),
             DeleteObject::Snapshot("layer-2-snapshot".to_string()),
             DeleteObject::Snapshot("layer-3-snapshot".to_string()),
@@ -1110,7 +1128,8 @@ async fn test_multiple_layers_of_snapshots_random_delete_order(cptestctx: &Contr
             }
 
             DeleteObject::Snapshot(name) => {
-                let snapshot_url = format!("{}/snapshots/{}", get_project_url(), name);
+                let snapshot_url =
+                    format!("{}/snapshots/{}", get_project_url(), name);
                 NexusRequest::object_delete(client, &snapshot_url)
                     .authn_as(AuthnMode::PrivilegedUser)
                     .execute()
@@ -1127,21 +1146,26 @@ async fn test_multiple_layers_of_snapshots_random_delete_order(cptestctx: &Contr
 // volume_delete saga node idempotency tests
 
 #[nexus_test]
-async fn test_volume_hard_delete_idempotent(cptestctx: &ControlPlaneTestContext) {
+async fn test_volume_hard_delete_idempotent(
+    cptestctx: &ControlPlaneTestContext,
+) {
     let nexus = &cptestctx.server.apictx.nexus;
     let datastore = nexus.datastore();
 
     let volume_id = Uuid::new_v4();
-    datastore.volume_create(nexus_db_model::Volume::new(
-        volume_id,
-        serde_json::to_string(&VolumeConstructionRequest::File {
-            id: volume_id,
-            block_size: 512,
-            path: "/lol".to_string()
-        }).unwrap(),
-    )).await.unwrap();
+    datastore
+        .volume_create(nexus_db_model::Volume::new(
+            volume_id,
+            serde_json::to_string(&VolumeConstructionRequest::File {
+                id: volume_id,
+                block_size: 512,
+                path: "/lol".to_string(),
+            })
+            .unwrap(),
+        ))
+        .await
+        .unwrap();
 
     datastore.volume_hard_delete(volume_id).await.unwrap();
     datastore.volume_hard_delete(volume_id).await.unwrap();
 }
-

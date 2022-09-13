@@ -490,7 +490,8 @@ async fn ssc_start_running_snapshot(
         // Once snapshot has been validated, and running snapshot has been
         // started, add an entry in the region_snapshot table to correspond to
         // these Crucible resources.
-        osagactx.datastore()
+        osagactx
+            .datastore()
             .region_snapshot_create(db::model::RegionSnapshot {
                 dataset_id: dataset.id(),
                 region_id: region.id(),

@@ -100,8 +100,12 @@ impl CrucibleDataInner {
     fn delete(&mut self, id: RegionId) -> Result<Option<Region>> {
         // Can't delete a ZFS dataset if there are snapshots
         if !self.snapshots_for_region(&id).is_empty() {
-            bail!("must delete snapshots {:?} first!",
-                self.snapshots_for_region(&id).into_iter().map(|s| s.name).collect::<Vec<String>>(),
+            bail!(
+                "must delete snapshots {:?} first!",
+                self.snapshots_for_region(&id)
+                    .into_iter()
+                    .map(|s| s.name)
+                    .collect::<Vec<String>>(),
             );
         }
 
@@ -218,26 +222,18 @@ impl CrucibleDataInner {
 
     /// Return true if there are no undeleted Crucible resources
     pub fn is_empty(&self) -> bool {
-        let non_destroyed_regions: Vec<Region> = self.regions
+        let non_destroyed_regions = self
+            .regions
             .values()
             .filter(|r| r.state != State::Destroyed)
-            .cloned()
-            .collect();
+            .count();
 
-        let snapshots: Vec<Snapshot> = self.snapshots
-            .values()
-            .flatten()
-            .cloned()
-            .collect();
+        let snapshots = self.snapshots.values().flatten().count();
 
-        let running_snapshots: Vec<RunningSnapshot> = self.running_snapshots
-            .values()
-            .map(|hm| hm.values())
-            .flatten()
-            .cloned()
-            .collect();
+        let running_snapshots =
+            self.running_snapshots.values().flat_map(|hm| hm.values()).count();
 
-        non_destroyed_regions.is_empty() && snapshots.is_empty() && running_snapshots.is_empty()
+        non_destroyed_regions == 0 && snapshots == 0 && running_snapshots == 0
     }
 }
 

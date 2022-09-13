@@ -18,22 +18,19 @@ impl super::Nexus {
     /// resources and the user's query shouldn't wait on those DELETE calls.
     pub async fn volume_delete(
         self: &Arc<Self>,
-        volume_id: Uuid
+        volume_id: Uuid,
     ) -> DeleteResult {
         let saga_params = sagas::volume_delete::Params { volume_id };
 
         // TODO execute this in the background instead, not using the usual SEC
         let saga_outputs = self
-            .execute_saga::<sagas::volume_delete::SagaVolumeDelete>(
-                saga_params,
-            )
+            .execute_saga::<sagas::volume_delete::SagaVolumeDelete>(saga_params)
             .await?;
 
-        let volume_deleted = saga_outputs
-            .lookup_node_output::<()>("final_no_result")
-            .map_err(|e| Error::InternalError {
-                internal_message: e.to_string(),
-            })?;
+        let volume_deleted =
+            saga_outputs.lookup_node_output::<()>("final_no_result").map_err(
+                |e| Error::InternalError { internal_message: e.to_string() },
+            )?;
 
         Ok(volume_deleted)
     }

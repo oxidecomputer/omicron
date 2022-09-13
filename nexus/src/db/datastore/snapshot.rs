@@ -157,7 +157,9 @@ impl DataStore {
             .check_if_exists::<Snapshot>(snapshot_id)
             .execute_async(self.pool_authorized(&opctx).await?)
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
+            .map_err(|e| {
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            })?;
 
         Ok(snapshot_id)
     }

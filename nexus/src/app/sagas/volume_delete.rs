@@ -30,7 +30,11 @@ use super::MAX_CONCURRENT_REGION_REQUESTS;
 use crate::app::sagas::NexusAction;
 use crate::db;
 use crate::db::datastore::CrucibleResources;
+use crucible_agent_client::{types::RegionId, Client as CrucibleAgentClient};
+use futures::StreamExt;
 use lazy_static::lazy_static;
+use nexus_types::identity::Asset;
+use omicron_common::api::external::Error;
 use serde::Deserialize;
 use serde::Serialize;
 use std::sync::Arc;
@@ -38,13 +42,6 @@ use steno::new_action_noop_undo;
 use steno::ActionError;
 use steno::Node;
 use uuid::Uuid;
-use omicron_common::api::external::Error;
-use futures::StreamExt;
-use crucible_agent_client::{
-    types::RegionId,
-    Client as CrucibleAgentClient,
-};
-use nexus_types::identity::Asset;
 
 // volume delete saga: input parameters
 
@@ -128,7 +125,7 @@ impl NexusSaga for SagaVolumeDelete {
                 "no_result_2",
                 "DeleteCrucibleSnapshots",
                 DELETE_CRUCIBLE_SNAPSHOTS.as_ref(),
-            )
+            ),
         ]);
 
         // clean up regions that were freed by deleting snapshots
@@ -160,7 +157,9 @@ async fn svd_decrease_crucible_resource_count(
 
     let crucible_resources = osagactx
         .datastore()
-        .decrease_crucible_resource_count_and_soft_delete_volume(params.volume_id)
+        .decrease_crucible_resource_count_and_soft_delete_volume(
+            params.volume_id,
+        )
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -178,19 +177,20 @@ async fn svd_delete_crucible_regions(
 
     // Send DELETE calls to the corresponding Crucible agents
     delete_crucible_regions(
-        crucible_resources_to_delete.datasets_and_regions.clone()
+        crucible_resources_to_delete.datasets_and_regions.clone(),
     )
     .await
     .map_err(ActionError::action_failed)?;
 
     // Remove DB records
-    let region_ids_to_delete = 
-        crucible_resources_to_delete.datasets_and_regions
-            .iter()
-            .map(|(_, r)| r.id())
-            .collect();
+    let region_ids_to_delete = crucible_resources_to_delete
+        .datasets_and_regions
+        .iter()
+        .map(|(_, r)| r.id())
+        .collect();
 
-    osagactx.datastore()
+    osagactx
+        .datastore()
         .regions_hard_delete(region_ids_to_delete)
         .await
         .map_err(ActionError::action_failed)?;
@@ -213,20 +213,24 @@ async fn svd_delete_crucible_snapshots(
 
     // Send DELETE calls to the corresponding Crucible agents
     delete_crucible_snapshots(
-        crucible_resources_to_delete.datasets_and_snapshots.clone()
+        crucible_resources_to_delete.datasets_and_snapshots.clone(),
     )
     .await
     .map_err(ActionError::action_failed)?;
 
     // Remove DB records
-    for (_, region_snapshot) in &crucible_resources_to_delete.datasets_and_snapshots {
-        osagactx.datastore().region_snapshot_remove(
-            region_snapshot.dataset_id,
-            region_snapshot.region_id,
-            region_snapshot.snapshot_id,
-        )
-        .await
-        .map_err(ActionError::action_failed)?;
+    for (_, region_snapshot) in
+        &crucible_resources_to_delete.datasets_and_snapshots
+    {
+        osagactx
+            .datastore()
+            .region_snapshot_remove(
+                region_snapshot.dataset_id,
+                region_snapshot.region_id,
+                region_snapshot.snapshot_id,
+            )
+            .await
+            .map_err(ActionError::action_failed)?;
     }
 
     Ok(())
@@ -248,7 +252,8 @@ async fn svd_delete_freed_crucible_regions(
 
     // Find regions freed up for deletion by a previous saga node deleting the
     // region snapshots.
-    let freed_datasets_regions_and_volumes = osagactx.datastore()
+    let freed_datasets_regions_and_volumes = osagactx
+        .datastore()
         .find_deleted_volume_regions()
         .await
         .map_err(ActionError::action_failed)?;
@@ -258,28 +263,30 @@ async fn svd_delete_freed_crucible_regions(
         freed_datasets_regions_and_volumes
             .iter()
             .map(|(d, r, _)| (d.clone(), r.clone()))
-            .collect()
+            .collect(),
     )
     .await
     .map_err(ActionError::action_failed)?;
 
     // Remove region DB records
-    osagactx.datastore().regions_hard_delete(
-        freed_datasets_regions_and_volumes
-            .iter()
-            .map(|(_, r, _)| r.id())
-            .collect()
+    osagactx
+        .datastore()
+        .regions_hard_delete(
+            freed_datasets_regions_and_volumes
+                .iter()
+                .map(|(_, r, _)| r.id())
+                .collect(),
         )
         .await
         .map_err(ActionError::action_failed)?;
 
     // Remove volume DB records
     for (_, _, volume) in &freed_datasets_regions_and_volumes {
-        osagactx.datastore().volume_hard_delete(
-            volume.id()
-        )
-        .await
-        .map_err(ActionError::action_failed)?;
+        osagactx
+            .datastore()
+            .volume_hard_delete(volume.id())
+            .await
+            .map_err(ActionError::action_failed)?;
     }
 
     Ok(())
@@ -297,7 +304,8 @@ async fn svd_hard_delete_volume_record(
     // deleted, which means we can't delete the region. Later on, deleting the
     // region snapshot will free up the region(s) to be deleted (this occurs in
     // svd_delete_freed_crucible_regions).
-    let allocated_regions = osagactx.datastore()
+    let allocated_regions = osagactx
+        .datastore()
         .get_allocated_regions(params.volume_id)
         .await
         .map_err(ActionError::action_failed)?;
@@ -366,7 +374,10 @@ pub(super) async fn delete_crucible_regions(
 // datasets corresponding Crucible Agent for each running read-only downstairs
 // and snapshot.
 pub(super) async fn delete_crucible_snapshots(
-    datasets_and_snapshots: Vec<(db::model::Dataset, db::model::RegionSnapshot)>,
+    datasets_and_snapshots: Vec<(
+        db::model::Dataset,
+        db::model::RegionSnapshot,
+    )>,
 ) -> Result<(), Error> {
     let request_count = datasets_and_snapshots.len();
     if request_count == 0 {
@@ -440,4 +451,3 @@ pub(super) async fn delete_crucible_snapshots(
 
     Ok(())
 }
-

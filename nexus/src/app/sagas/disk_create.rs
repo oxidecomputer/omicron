@@ -51,14 +51,10 @@ lazy_static! {
         sdc_create_disk_record,
         sdc_create_disk_record_undo
     );
-    static ref REGIONS_ALLOC: NexusAction = new_action_noop_undo(
-        "disk-create.regions-alloc",
-        sdc_alloc_regions,
-    );
-    static ref REGIONS_ENSURE: NexusAction = new_action_noop_undo(
-        "disk-create.regions-ensure",
-        sdc_regions_ensure,
-    );
+    static ref REGIONS_ALLOC: NexusAction =
+        new_action_noop_undo("disk-create.regions-alloc", sdc_alloc_regions,);
+    static ref REGIONS_ENSURE: NexusAction =
+        new_action_noop_undo("disk-create.regions-ensure", sdc_regions_ensure,);
     static ref CREATE_VOLUME_RECORD: NexusAction = ActionFunc::new_action(
         "disk-create.create-volume-record",
         sdc_create_volume_record,

@@ -30,12 +30,7 @@ impl DataStore {
             .returning(RegionSnapshot::as_returning())
             .get_result_async(self.pool())
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::Server,
-                )
-            })
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     pub async fn region_snapshot_remove(
@@ -53,11 +48,6 @@ impl DataStore {
             .execute_async(self.pool())
             .await
             .map(|_rows_deleted| ())
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::Server,
-                )
-            })
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 }
