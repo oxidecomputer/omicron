@@ -544,7 +544,7 @@
     "/sp/{type}/{slot}/component/{component}/update": {
       "post": {
         "summary": "Update an SP component",
-        "description": "Update a component of an SP according to its specific update mechanism. This interface is generic for all component types, but resolves to a mechanism specific to the given component type. This may fail for a variety of reasons including the update bundle being invalid or improperly specified or due to an error originating from the SP itself.\nNote that not all components may be updated; components without known update mechanisms will return an error without any inspection of the update bundle.",
+        "description": "Update a component of an SP according to its specific update mechanism. This interface is generic for all component types, but resolves to a mechanism specific to the given component type. This may fail for a variety of reasons including the update bundle being invalid or improperly specified or due to an error originating from the SP itself.\nNote that not all components may be updated; components without known update mechanisms will return an error without any inspection of the update bundle.\nUpdating the SP itself is done via the component name `sp`.",
         "operationId": "sp_component_update",
         "parameters": [
           {
@@ -589,15 +589,8 @@
           "required": true
         },
         "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SpComponentInfoResultsPage"
-                }
-              }
-            }
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -712,56 +705,6 @@
             "style": "simple"
           }
         ],
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/sp/{type}/{slot}/update": {
-      "post": {
-        "summary": "Update an SP",
-        "description": "Copies a new image to the alternate bank of the SP flash.",
-        "operationId": "sp_update",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "slot",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 0
-            },
-            "style": "simple"
-          },
-          {
-            "in": "path",
-            "name": "type",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/SpType"
-            },
-            "style": "simple"
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateBody"
-              }
-            }
-          },
-          "required": true
-        },
         "responses": {
           "204": {
             "description": "resource updated"
@@ -1029,16 +972,24 @@
         "type": "object",
         "properties": {
           "image": {
+            "description": "The binary blob containing the update image (component-specific).",
             "type": "array",
             "items": {
               "type": "integer",
               "format": "uint8",
               "minimum": 0
             }
+          },
+          "slot": {
+            "description": "The update slot to apply this image to. Supply 0 if the component only has one update slot.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
           }
         },
         "required": [
-          "image"
+          "image",
+          "slot"
         ]
       }
     }

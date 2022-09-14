@@ -27,7 +27,6 @@ use dropshot::ResultsPage;
 use dropshot::TypedBody;
 use dropshot::WhichPage;
 use gateway_messages::IgnitionCommand;
-use gateway_messages::SpComponent;
 use gateway_sp_comms::error::Error as SpCommsError;
 use gateway_sp_comms::Timeout as SpTimeout;
 use schemars::JsonSchema;
@@ -314,22 +313,8 @@ async fn sp_list(
             let details = match result {
                 Ok(details) => details,
                 Err(err) => match &*err {
-                    // TODO Treating "communication failed" and "we don't know
-                    // the IP address" as "unresponsive" may not be right. Do we
-                    // need more refined errors?
-                    SpCommsError::Timeout { .. }
-                    | SpCommsError::SpCommunicationFailed(_)
-                    | SpCommsError::BadIgnitionTarget(_)
-                    | SpCommsError::LocalIgnitionControllerAddressUnknown
-                    | SpCommsError::SpAddressUnknown(_) => {
-                        SpState::Unresponsive
-                    }
-                    // These errors should not be possible for the request we
-                    // made.
-                    SpCommsError::SpDoesNotExist(_)
-                    | SpCommsError::UpdateFailed(_) => {
-                        unreachable!("impossible error {}", err)
-                    }
+                    SpCommsError::Timeout { .. } => SpState::Unresponsive,
+                    _ => return Err(err),
                 },
             };
             Ok(SpInfo {
@@ -486,36 +471,12 @@ async fn sp_component_serial_console_detach(
 // TODO: how can we make this generic enough to support any update mechanism?
 #[derive(Deserialize, JsonSchema)]
 pub struct UpdateBody {
+    /// The binary blob containing the update image (component-specific).
     pub image: Vec<u8>,
+    /// The update slot to apply this image to. Supply 0 if the component only
+    /// has one update slot.
+    pub slot: u16,
 }
-
-/// Update an SP
-///
-/// Copies a new image to the alternate bank of the SP flash.
-#[endpoint {
-    method = POST,
-    path = "/sp/{type}/{slot}/update",
-}]
-async fn sp_update(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path: Path<PathSp>,
-    body: TypedBody<UpdateBody>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let comms = &rqctx.context().sp_comms;
-    let sp = path.into_inner().sp;
-    let image = body.into_inner().image;
-
-    comms
-        .update(sp.into(), SpComponent::SP_ITSELF, 0, image)
-        .await
-        .map_err(http_err_from_comms_err)?;
-
-    Ok(HttpResponseUpdatedNoContent {})
-}
-
-// TODO-completeness: Either add a new endpoint to allow for updating
-// components, or expand the above endpoint to cover that case in addition to
-// updating the SP itself.
 
 /// Reset an SP
 #[endpoint {
@@ -545,16 +506,28 @@ async fn sp_reset(
 /// Note that not all components may be updated; components without known
 /// update mechanisms will return an error without any inspection of the
 /// update bundle.
+///
+/// Updating the SP itself is done via the component name `sp`.
 #[endpoint {
     method = POST,
     path = "/sp/{type}/{slot}/component/{component}/update",
 }]
 async fn sp_component_update(
-    _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    _path: Path<PathSpComponent>,
-    _body: TypedBody<UpdateBody>,
-) -> Result<HttpResponseOk<ResultsPage<SpComponentInfo>>, HttpError> {
-    todo!()
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path: Path<PathSpComponent>,
+    body: TypedBody<UpdateBody>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let comms = &rqctx.context().sp_comms;
+    let PathSpComponent { sp, component } = path.into_inner();
+    let component = component_from_str(&component)?;
+    let UpdateBody { image, slot } = body.into_inner();
+
+    comms
+        .update(sp.into(), component, slot, image)
+        .await
+        .map_err(http_err_from_comms_err)?;
+
+    Ok(HttpResponseUpdatedNoContent {})
 }
 
 /// Power on an SP component
@@ -702,7 +675,6 @@ pub fn api() -> GatewayApiDescription {
     ) -> Result<(), String> {
         api.register(sp_list)?;
         api.register(sp_get)?;
-        api.register(sp_update)?;
         api.register(sp_reset)?;
         api.register(sp_component_list)?;
         api.register(sp_component_get)?;

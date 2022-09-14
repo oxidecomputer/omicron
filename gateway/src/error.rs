@@ -61,7 +61,12 @@ where
             Some("SerialConsoleAttached".to_string()),
             err.to_string(),
         ),
+        SpCommsError::DiscoveryNotYetComplete => HttpError::for_unavail(
+            Some("DiscoveryNotYetComplete".to_string()),
+            err.to_string(),
+        ),
         SpCommsError::SpAddressUnknown(_)
+        | SpCommsError::DiscoveryFailed { .. }
         | SpCommsError::Timeout { .. }
         | SpCommsError::BadIgnitionTarget(_)
         | SpCommsError::LocalIgnitionControllerAddressUnknown

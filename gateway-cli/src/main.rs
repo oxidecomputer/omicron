@@ -74,8 +74,12 @@ enum Command {
     },
     #[clap(about = "Detach any existing serial console connection")]
     Detach,
-    #[clap(about = "Update the SP")]
+    #[clap(about = "Update the SP or one of its componenets")]
     Update {
+        #[clap(help = "Component name")]
+        component: String,
+        #[clap(help = "Update slot of the component")]
+        slot: u16,
         #[clap(help = "Path to the new image")]
         path: PathBuf,
     },
@@ -134,11 +138,21 @@ impl Client {
         Ok(())
     }
 
-    async fn update(&self, path: &Path) -> Result<()> {
+    async fn update(
+        &self,
+        component: &str,
+        slot: u16,
+        path: &Path,
+    ) -> Result<()> {
         let image = fs::read(path)
             .with_context(|| format!("failed to read {}", path.display()))?;
         self.inner
-            .sp_update(self.sp_type, self.sled, &UpdateBody { image })
+            .sp_component_update(
+                self.sp_type,
+                self.sled,
+                component,
+                &UpdateBody { image, slot },
+            )
             .await?;
         Ok(())
     }
@@ -187,8 +201,8 @@ async fn main() -> Result<()> {
         Command::Detach => {
             return client.detach().await;
         }
-        Command::Update { path } => {
-            return client.update(&path).await;
+        Command::Update { component, slot, path } => {
+            return client.update(&component, slot, &path).await;
         }
         Command::Reset => {
             return client.reset().await;

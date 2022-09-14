@@ -47,12 +47,14 @@ pub enum StartupError {
     InvalidConfig { reasons: Vec<String> },
     #[error("error communicating with SP: {0}")]
     SpCommunicationFailed(#[from] SpCommunicationError),
-    #[error("location discovery failed: {reason}")]
-    DiscoveryFailed { reason: String },
 }
 
 #[derive(Debug, Error)]
 pub enum Error {
+    #[error("discovery process not yet complete")]
+    DiscoveryNotYetComplete,
+    #[error("location discovery failed: {reason}")]
+    DiscoveryFailed { reason: String },
     #[error("nonexistent SP (type {:?}, slot {})", .0.typ, .0.slot)]
     SpDoesNotExist(SpIdentifier),
     #[error("unknown socket address for local ignition controller")]

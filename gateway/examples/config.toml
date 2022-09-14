@@ -74,7 +74,6 @@ switch0 = ["sled", 1]
 switch1 = ["sled", 1]
 
 [timeouts]
-discovery_millis = 1_000
 bulk_request_default_millis = 5_000
 bulk_request_max_millis = 60_000
 bulk_request_page_millis = 1_000
@@ -83,7 +82,7 @@ bulk_request_retain_grace_period_millis = 10_000
 [dropshot]
 # IP address and TCP port on which to listen for the external API
 bind_address = "127.0.0.1:12222"
-request_body_max_bytes = 1048576
+request_body_max_bytes = 67108864 # 64 MiB
 
 [log]
 # Show log messages of this level and more severe

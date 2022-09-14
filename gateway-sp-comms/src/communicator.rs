@@ -28,7 +28,6 @@ use gateway_messages::UpdatePrepareStatusResponse;
 use slog::info;
 use slog::o;
 use slog::Logger;
-use tokio::time::Instant;
 
 /// Helper trait that allows us to return an `impl FuturesUnordered<_>` where
 /// the caller can call `.is_empty()` without knowing the type of the future
@@ -54,35 +53,34 @@ pub struct Communicator {
 impl Communicator {
     pub async fn new(
         config: SwitchConfig,
-        discovery_deadline: Instant,
         log: &Logger,
     ) -> Result<Self, StartupError> {
         let log = log.new(o!("component" => "SpCommunicator"));
-        let switch =
-            ManagementSwitch::new(config, discovery_deadline, &log).await?;
+        let switch = ManagementSwitch::new(config, &log).await?;
 
         info!(&log, "started SP communicator");
         Ok(Self { switch })
+    }
+
+    /// Have we completed the discovery process to know how to map logical SP
+    /// positions to switch ports?
+    pub fn is_discovery_complete(&self) -> bool {
+        self.switch.is_discovery_complete()
     }
 
     /// Get the name of our location.
     ///
     /// This matches one of the names specified as a possible location in the
     /// configuration we were given.
-    pub fn location_name(&self) -> &str {
-        &self.switch.location_name()
+    pub fn location_name(&self) -> Result<&str, Error> {
+        self.switch.location_name()
     }
 
-    // convert an identifier to a port number; this is fallible because
-    // identifiers can be constructed arbiatrarily, in contrast to `port_to_id`
-    // below.
     fn id_to_port(&self, sp: SpIdentifier) -> Result<SwitchPort, Error> {
-        self.switch.switch_port(sp).ok_or(Error::SpDoesNotExist(sp))
+        self.switch.switch_port(sp)?.ok_or(Error::SpDoesNotExist(sp))
     }
 
-    // convert a port to an identifier; this is infallible because we construct
-    // `SwitchPort`s and know they map to valid IDs
-    fn port_to_id(&self, port: SwitchPort) -> SpIdentifier {
+    fn port_to_id(&self, port: SwitchPort) -> Result<SpIdentifier, Error> {
         self.switch.switch_port_to_id(port)
     }
 
@@ -100,9 +98,9 @@ impl Communicator {
     /// This method exists to be polled during test setup (to wait for discovery
     /// to happen); it should not be called outside tests. In particular, it
     /// panics instead of running an error if `sp` describes an SP that isn't
-    /// known to this communicator.
+    /// known to this communicator or if discovery isn't complete yet.
     pub fn address_known(&self, sp: SpIdentifier) -> bool {
-        let port = self.switch.switch_port(sp).unwrap();
+        let port = self.switch.switch_port(sp).unwrap().unwrap();
         self.switch.sp(port).is_some()
     }
 
@@ -148,7 +146,7 @@ impl Communicator {
                     .switch
                     .switch_port_from_ignition_target(target)
                     .ok_or(Error::BadIgnitionTarget(target))?;
-                let id = self.port_to_id(port);
+                let id = self.port_to_id(port)?;
                 Ok((id, state))
             })
             .collect()
