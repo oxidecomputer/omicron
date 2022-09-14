@@ -248,7 +248,11 @@ impl fmt::Display for ResponseError {
                 write!(f, "SP has not received update prepare request")
             }
             ResponseError::InvalidUpdateId { sp_update_id } => {
-                write!(f, "bad update ID (update already in progress, ID {:#04x?})", sp_update_id.0)
+                write!(
+                    f,
+                    "bad update ID (update already in progress, ID {:#04x?})",
+                    sp_update_id.0
+                )
             }
             ResponseError::UpdateInProgress(status) => {
                 write!(f, "update still in progress ({status:?})")

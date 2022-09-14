@@ -53,19 +53,13 @@ impl From<UpdateStatus> for SpUpdateStatus {
 
 impl From<gateway_messages::UpdatePreparationProgress> for Progress {
     fn from(progress: gateway_messages::UpdatePreparationProgress) -> Self {
-        Self {
-            current: progress.current,
-            total: progress.total,
-        }
+        Self { current: progress.current, total: progress.total }
     }
 }
 
 impl From<gateway_messages::UpdateInProgressStatus> for Progress {
     fn from(progress: gateway_messages::UpdateInProgressStatus) -> Self {
-        Self {
-            current: progress.bytes_received,
-            total: progress.total_size,
-        }
+        Self { current: progress.bytes_received, total: progress.total_size }
     }
 }
 

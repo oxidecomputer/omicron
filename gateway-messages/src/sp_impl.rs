@@ -4,8 +4,6 @@
 
 //! Behavior implemented by both real and simulated SPs.
 
-use crate::UpdateId;
-use crate::UpdateStatus;
 use crate::version;
 use crate::BulkIgnitionState;
 use crate::DiscoverResponse;
@@ -21,7 +19,9 @@ use crate::SpMessageKind;
 use crate::SpPort;
 use crate::SpState;
 use crate::UpdateChunk;
+use crate::UpdateId;
 use crate::UpdatePrepare;
+use crate::UpdateStatus;
 use core::convert::Infallible;
 use core::mem;
 
@@ -237,7 +237,7 @@ pub fn handle_message<H: SpHandler>(
         RequestKind::UpdateStatus(component) => handler
             .update_status(sender, port, component)
             .map(ResponseKind::UpdateStatus),
-        RequestKind::UpdateAbort {component, id } => handler
+        RequestKind::UpdateAbort { component, id } => handler
             .update_abort(sender, port, component, id)
             .map(|()| ResponseKind::UpdateAbortAck),
         RequestKind::SerialConsoleAttach(component) => handler
