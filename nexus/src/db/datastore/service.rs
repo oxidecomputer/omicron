@@ -289,48 +289,7 @@ impl DataStore {
 
         // NOTE: It's probably possible to do this without the transaction.
         //
-        // Something like this - heavily inspired by the external IP allocation
-        // CTE:
-        //
-        // WITH
-        // existing_count AS (
-        //     SELECT COUNT(1) FROM services WHERE allocated AND not deleted
-        // ),
-        // new_count AS (
-        //     -- Use "GREATEST" to avoid underflow if we've somehow
-        //     -- over-allocated services beyond the redundancy.
-        //     GREATEST(<redundancy>, existing_count) - existing_count
-        // ),
-        // candidate_sleds AS (
-        //     SELECT all sleds in the allocation scope (in the rack?)
-        //     LEFT OUTER JOIN with allocated services
-        //     ON service_type
-        //     WHERE service_type IS NULL (svc not allocated to the sled)
-        //     LIMIT new_count
-        // ),
-        // new_internal_ips AS (
-        //     UPDATE sled
-        //     SET
-        //          last_used_address = last_used_address + 1
-        //     WHERE
-        //          sled_id IN candidate_sleds
-        //     RETURNING
-        //          last_used_address
-        // ),
-        // new_external_ips AS (
-        //     (need to insert the external IP allocation CTE here somehow)
-        // ),
-        // candidate_services AS (
-        //     JOIN all the sleds with the IPs they need
-        // ),
-        // new_services AS (
-        //     INSERT INTO services
-        //     SELECT * FROM candidate_services
-        //     ON CONFLICT (id)
-        //     --- This doesn't actually work for the 'already exists' case, fyi
-        //     DO NOTHING
-        //     RETURNING *
-        // ),
+        // See: services.sql
         self.pool()
             .transaction_async(|conn| async move {
                 let sleds_and_maybe_svcs =
