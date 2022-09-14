@@ -41,8 +41,11 @@ pub enum Error {
     )]
     OldKeySharePrepare { epoch: i32, stored_epoch: i32 },
 
-    #[error("A distinct key share already exists for epoch {epoch}")]
-    KeyShareAlreadyExists { epoch: i32 },
+    #[error("A different prepared key share already exists for epoch {epoch}")]
+    KeySharePrepareAlreadyExists { epoch: i32 },
+
+    #[error("A key share for epoch {epoch} has already been committed")]
+    KeyShareAlreadyCommitted { epoch: i32 },
 
     #[error("Rack UUID mismatch: Expected: {expected}, Actual: {actual:?}")]
     RackUuidMismatch { expected: Uuid, actual: Option<Uuid> },
