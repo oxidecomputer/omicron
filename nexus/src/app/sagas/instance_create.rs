@@ -337,7 +337,22 @@ async fn sic_alloc_server(
     // See https://rfd.shared.oxide.computer/rfd/0205 for a more complete
     // discussion.
     //
-    // Right now, allocate an instance to any random sled agent.
+    // Right now, allocate an instance to any random sled agent. This has a few
+    // problems:
+    //
+    // - There's no consideration for "health of the sled" here, other than
+    //   "time_deleted = Null". If the sled is rebooting, in a known unhealthy
+    //   state, etc, we'd currently provision it here. I don't think this is a
+    //   trivial fix, but it's work we'll need to account for eventually.
+    //
+    // - This is selecting a random sled from all sleds in the cluster. For
+    //   multi-rack, this is going to fling the sled to an arbitrary system.
+    //   Maybe that's okay, but worth knowing about explicitly.
+    //
+    // - This doesn't take into account anti-affinity - users will want to
+    //   schedule instances that belong to a cluster on different failure
+    //   domains. See https://github.com/oxidecomputer/omicron/issues/1705.
+
     osagactx
         .nexus()
         .random_sled_id()
