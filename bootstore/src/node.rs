@@ -289,4 +289,152 @@ mod tests {
 
         logctx.cleanup_successful();
     }
+
+    #[test]
+    fn prepare_is_idempotent() {
+        let (logctx, mut node, share_distributions) = setup();
+        let sd: SerializableShareDistribution =
+            share_distributions[0].clone().into();
+        let rack_uuid = Uuid::new_v4();
+        let ok_ack = Ok(NodeOpResult::CoordinatorAck);
+        let sd_digest =
+            KeyShare::share_distribution_digest(&sd).unwrap().into();
+        let epoch = 0;
+
+        // Successful rack initialization
+        assert_eq!(ok_ack, node.handle_initialize(&rack_uuid, sd.clone()));
+        assert_eq!(
+            ok_ack,
+            node.handle_key_share_commit(&rack_uuid, epoch, sd_digest)
+        );
+
+        // Prepare succeeds
+        let epoch = 1;
+        assert_eq!(
+            ok_ack,
+            node.handle_key_share_prepare(&rack_uuid, epoch, sd.clone())
+        );
+
+        // Same prepare succeeds
+        assert_eq!(
+            ok_ack,
+            node.handle_key_share_prepare(&rack_uuid, epoch, sd.clone())
+        );
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn prepares_for_old_epochs_fail() {
+        let (logctx, mut node, share_distributions) = setup();
+        let sd: SerializableShareDistribution =
+            share_distributions[0].clone().into();
+        let rack_uuid = Uuid::new_v4();
+        let ok_ack = Ok(NodeOpResult::CoordinatorAck);
+        let sd_digest =
+            KeyShare::share_distribution_digest(&sd).unwrap().into();
+        let epoch = 0;
+
+        // Successful rack initialization
+        assert_eq!(ok_ack, node.handle_initialize(&rack_uuid, sd.clone()));
+        assert_eq!(
+            ok_ack,
+            node.handle_key_share_commit(&rack_uuid, epoch, sd_digest)
+        );
+
+        // Prepare succeeds
+        let epoch = 1;
+        assert_eq!(
+            ok_ack,
+            node.handle_key_share_prepare(&rack_uuid, epoch, sd.clone())
+        );
+
+        // Prepare succeeds
+        let epoch = 2;
+        assert_eq!(
+            ok_ack,
+            node.handle_key_share_prepare(&rack_uuid, epoch, sd.clone())
+        );
+
+        // Prepare fails
+        let epoch = 1;
+        assert_eq!(
+            NodeError::Db(db::Error::OldKeySharePrepare {
+                epoch: 1,
+                stored_epoch: 2
+            }),
+            node.handle_key_share_prepare(&rack_uuid, epoch, sd.clone())
+                .unwrap_err()
+        );
+
+        // Idempotent prepare still succeeds
+        let epoch = 2;
+        assert_eq!(
+            ok_ack,
+            node.handle_key_share_prepare(&rack_uuid, epoch, sd.clone())
+        );
+
+        // Commit the prepare
+        assert_eq!(
+            ok_ack,
+            node.handle_key_share_commit(&rack_uuid, epoch, sd_digest)
+        );
+
+        // Old prepare still fails the same way
+        let epoch = 1;
+        assert_eq!(
+            NodeError::Db(db::Error::OldKeySharePrepare {
+                epoch: 1,
+                stored_epoch: 2
+            }),
+            node.handle_key_share_prepare(&rack_uuid, epoch, sd.clone())
+                .unwrap_err()
+        );
+
+        // Now committed prepare fails
+        let epoch = 2;
+        assert_eq!(
+            NodeError::Db(db::Error::KeyShareAlreadyCommitted { epoch }),
+            node.handle_key_share_prepare(&rack_uuid, epoch, sd.clone())
+                .unwrap_err()
+        );
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn mismatched_prepares_fail() {
+        let (logctx, mut node, share_distributions) = setup();
+        let sd: SerializableShareDistribution =
+            share_distributions[0].clone().into();
+        let rack_uuid = Uuid::new_v4();
+        let ok_ack = Ok(NodeOpResult::CoordinatorAck);
+        let sd_digest =
+            KeyShare::share_distribution_digest(&sd).unwrap().into();
+        let epoch = 0;
+
+        // Successful rack initialization
+        assert_eq!(ok_ack, node.handle_initialize(&rack_uuid, sd.clone()));
+        assert_eq!(
+            ok_ack,
+            node.handle_key_share_commit(&rack_uuid, epoch, sd_digest)
+        );
+
+        // Prepare succeeds
+        let epoch = 1;
+        assert_eq!(
+            ok_ack,
+            node.handle_key_share_prepare(&rack_uuid, epoch, sd)
+        );
+
+        // Prepare with a different share_distribution fails
+        let sd2: SerializableShareDistribution =
+            share_distributions[1].clone().into();
+        assert_eq!(
+            NodeError::Db(db::Error::KeySharePrepareAlreadyExists { epoch }),
+            node.handle_key_share_prepare(&rack_uuid, epoch, sd2).unwrap_err()
+        );
+
+        logctx.cleanup_successful();
+    }
 }
