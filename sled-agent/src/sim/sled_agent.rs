@@ -194,6 +194,13 @@ impl SledAgent {
         initial_hardware: InstanceHardware,
         target: InstanceRuntimeStateRequested,
     ) -> Result<InstanceRuntimeState, Error> {
+        let ncpus: i64 = (&initial_hardware.runtime.ncpus).into();
+        if ncpus > 16 {
+            return Err(Error::internal_error(
+                &"instances with more than 16 CPUs not supported!",
+            ));
+        };
+
         for disk in &initial_hardware.disks {
             let initial_state = DiskRuntimeState {
                 disk_state: omicron_common::api::external::DiskState::Attached(
