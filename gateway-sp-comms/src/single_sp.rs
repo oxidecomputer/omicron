@@ -198,6 +198,70 @@ impl SingleSp {
         let log = self.log.clone();
         let inner = self.cmds_tx.clone();
         tokio::spawn(async move {
+            // The choice of interval is relatively arbitrary; we expect update
+            // preparation to generally fall in one of two cases:
+            //
+            // 1. No prep is necessary, and the update can happen immediately
+            //    (we'll never sleep)
+            // 2. Prep is relatively slow (e.g., erasing a flash part)
+            //
+            // We choose a few seconds assuming this polling interval is
+            // primarily hit when the SP is doing something slow.
+            const POLL_UPDATE_STATUS_INTERVAL: Duration =
+                Duration::from_secs(2);
+
+            // Poll SP until update preparation is complete.
+            loop {
+                // Get update status from the SP or give up.
+                let status = match update_status(&inner, component).await {
+                    Ok(Some(status)) => status,
+                    Ok(None) => {
+                        error!(log, "update abandoned by SP");
+                        return;
+                    }
+                    Err(err) => {
+                        error!(
+                            log, "update failed: could not get status from SP";
+                            "err" => %err,
+                        );
+                        return;
+                    }
+                };
+
+                // Either sleep and retry (if still preparing), break out of our
+                // loop (if prep complete), or fail (anything else).
+                match status {
+                    UpdateStatus::Preparing(sub_status) => {
+                        if sub_status.id == id {
+                            debug!(
+                                log,
+                                "SP still preparing; sleeping for {:?}",
+                                POLL_UPDATE_STATUS_INTERVAL
+                            );
+                            tokio::time::sleep(POLL_UPDATE_STATUS_INTERVAL)
+                                .await;
+                            continue;
+                        }
+                    }
+                    UpdateStatus::InProgress(sub_status) => {
+                        if sub_status.id == id {
+                            info!(
+                                log, "update preparation complete";
+                                "update_id" => %update_id,
+                            );
+                            break;
+                        }
+                    }
+                    UpdateStatus::Complete(_) | UpdateStatus::Aborted(_) => (),
+                }
+
+                error!(
+                    log, "update preparation failed";
+                    "update-status" => ?status,
+                );
+                return;
+            }
+
             let mut image = Cursor::new(image);
             let mut offset = 0;
             while !CursorExt::is_empty(&image) {
@@ -259,11 +323,7 @@ impl SingleSp {
         &self,
         component: SpComponent,
     ) -> Result<Option<UpdateStatus>> {
-        self.rpc(RequestKind::UpdateStatus(component)).await.and_then(
-            |(_peer, response)| {
-                response.expect_update_status().map_err(Into::into)
-            },
-        )
+        update_status(&self.cmds_tx, component).await
     }
 
     /// Abort an in-progress update.
@@ -362,6 +422,19 @@ impl SingleSp {
     ) -> Result<(SocketAddrV6, ResponseKind)> {
         rpc(&self.cmds_tx, kind, None).await.result
     }
+}
+
+/// Get the status of any update being applied to the given component.
+async fn update_status(
+    inner_tx: &mpsc::Sender<InnerCommand>,
+    component: SpComponent,
+) -> Result<Option<UpdateStatus>> {
+    rpc(inner_tx, RequestKind::UpdateStatus(component), None)
+        .await
+        .result
+        .and_then(|(_peer, response)| {
+            response.expect_update_status().map_err(Into::into)
+        })
 }
 
 /// Send a portion of an update to the SP.
