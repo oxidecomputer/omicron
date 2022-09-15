@@ -14,6 +14,7 @@ use diesel::prelude::*;
 use diesel::SqliteConnection;
 use slog::Logger;
 use slog::{info, o};
+use std::cell::RefCell;
 use uuid::Uuid;
 
 use crate::trust_quorum::SerializableShareDistribution;
@@ -25,7 +26,7 @@ use models::Share;
 pub struct Db {
     log: Logger,
 
-    conn: SqliteConnection,
+    conn: RefCell<SqliteConnection>,
 }
 
 // Temporary until the using code is written
@@ -62,7 +63,7 @@ impl Db {
         // Create tables
         c.batch_execute(schema)?;
 
-        Ok(Db { log, conn: c })
+        Ok(Db { log, conn: RefCell::new(c) })
     }
 
     /// Write a KeyShare for epoch a along with the rack UUID
@@ -73,7 +74,7 @@ impl Db {
         rack_uuid: &Uuid,
         share_distribution: SerializableShareDistribution,
     ) -> Result<(), Error> {
-        self.conn.immediate_transaction(|tx| {
+        self.conn.get_mut().immediate_transaction(|tx| {
             if is_initialized(tx)? {
                 // If the rack is initialized, a rack uuid must exist
                 let uuid = get_rack_uuid(tx)?.unwrap();
@@ -114,7 +115,7 @@ impl Db {
         assert_ne!(0, epoch);
         use schema::key_shares::dsl;
         let prepare = KeyShare::new(epoch, share_distribution)?;
-        self.conn.immediate_transaction(|tx| {
+        self.conn.get_mut().immediate_transaction(|tx| {
             // Has the rack been initialized?
             if !is_initialized(tx)? {
                 return Err(Error::RackNotInitialized);
@@ -167,7 +168,7 @@ impl Db {
         digest: sprockets_common::Sha3_256Digest,
     ) -> Result<(), Error> {
         use schema::key_shares::dsl;
-        self.conn.immediate_transaction(|tx| {
+        self.conn.get_mut().immediate_transaction(|tx| {
             // Does the rack_uuid match what's stored?
             validate_rack_uuid(tx, rack_uuid)?;
 
@@ -189,19 +190,53 @@ impl Db {
         })
     }
 
-    pub fn get_committed_share(&mut self, epoch: i32) -> Result<Share, Error> {
-        use schema::key_shares::dsl;
-        let share = dsl::key_shares
-            .select(dsl::share)
-            .filter(dsl::epoch.eq(epoch))
-            .filter(dsl::committed.eq(true))
-            .get_result::<Share>(&mut self.conn)
-            .optional()?;
+    pub fn is_initialized(&self, rack_uuid: &Uuid) -> Result<bool, Error> {
+        self.conn.borrow_mut().immediate_transaction(|tx| {
+            validate_rack_uuid(tx, rack_uuid)?;
+            is_initialized(tx)
+        })
+    }
 
-        match share {
-            Some(share) => Ok(share),
-            None => Err(Error::KeyShareNotCommitted { epoch }),
-        }
+    pub fn get_committed_share(
+        &self,
+        rack_uuid: &Uuid,
+        epoch: i32,
+    ) -> Result<Share, Error> {
+        use schema::key_shares::dsl;
+        self.conn.borrow_mut().immediate_transaction(|tx| {
+            validate_rack_uuid(tx, rack_uuid)?;
+            let share = dsl::key_shares
+                .select(dsl::share)
+                .filter(dsl::epoch.eq(epoch))
+                .filter(dsl::committed.eq(true))
+                .get_result::<Share>(tx)
+                .optional()?;
+
+            match share {
+                Some(share) => Ok(share),
+                None => Err(Error::KeyShareNotCommitted { epoch }),
+            }
+        })
+    }
+
+    /// Return `Ok(true)` if there is a KeyShare that is not yet committed for
+    /// the given epoch.
+    pub fn has_key_share_prepare(
+        &self,
+        rack_uuid: &Uuid,
+        epoch: i32,
+    ) -> Result<bool, Error> {
+        use schema::key_shares::dsl;
+        self.conn.borrow_mut().immediate_transaction(|tx| {
+            validate_rack_uuid(tx, rack_uuid)?;
+            Ok(dsl::key_shares
+                .select(dsl::epoch)
+                .filter(dsl::epoch.eq(epoch))
+                .filter(dsl::committed.eq(false))
+                .get_result::<i32>(tx)
+                .optional()?
+                .is_some())
+        })
     }
 }
 
@@ -306,18 +341,19 @@ pub mod tests {
     use assert_matches::assert_matches;
     use omicron_test_utils::dev::test_setup_log;
     use sha3::{Digest, Sha3_256};
+    use std::collections::BTreeSet;
 
     // This is solely so we can test the non-member functions with a properly
     // initialized DB
     impl Db {
-        fn get_conn(&mut self) -> &mut SqliteConnection {
+        fn get_conn(&mut self) -> &mut RefCell<SqliteConnection> {
             &mut self.conn
         }
     }
 
     // TODO: Fill in with actual member certs
     pub fn new_shares() -> Vec<ShareDistribution> {
-        let member_device_id_certs = vec![];
+        let member_device_id_certs = BTreeSet::new();
         let rack_secret_threshold = 3;
         let total_shares = 5;
         let secret = RackSecret::new();
@@ -343,7 +379,7 @@ pub mod tests {
         let shares = new_shares();
         let epoch = 0;
         let expected: SerializableShareDistribution = shares[0].clone().into();
-        let conn = db.get_conn();
+        let conn = db.get_conn().get_mut();
         insert_prepare(conn, epoch, expected.clone()).unwrap();
         let (share, committed) = dsl::key_shares
             .select((dsl::share, dsl::committed))
@@ -401,7 +437,7 @@ pub mod tests {
         let committed = dsl::key_shares
             .select(dsl::committed)
             .filter(dsl::epoch.eq(epoch))
-            .get_result::<bool>(db.get_conn())
+            .get_result::<bool>(db.get_conn().get_mut())
             .unwrap();
         assert_eq!(true, committed);
         logctx.cleanup_successful();
@@ -415,13 +451,13 @@ pub mod tests {
         // One insert succeeds.
         diesel::insert_into(dsl::rack)
             .values(dsl::uuid.eq(Uuid::new_v4().to_string()))
-            .execute(db.get_conn())
+            .execute(db.get_conn().get_mut())
             .unwrap();
 
         // A second fails
         let err = diesel::insert_into(dsl::rack)
             .values(dsl::uuid.eq(Uuid::new_v4().to_string()))
-            .execute(db.get_conn())
+            .execute(db.get_conn().get_mut())
             .unwrap_err();
         assert_matches!(err, diesel::result::Error::DatabaseError(_, s) => {
             assert_eq!("maximum one rack", s.message());
