@@ -14,6 +14,7 @@ use futures::future::Fuse;
 use futures::future::FusedFuture;
 use futures::prelude::*;
 use gateway_client::types::SpType;
+use gateway_client::types::UpdateAbortBody;
 use gateway_client::types::UpdateBody;
 use slog::info;
 use slog::o;
@@ -84,6 +85,13 @@ enum Command {
         slot: u16,
         #[clap(help = "Path to the new image")]
         path: PathBuf,
+    },
+    #[clap(about = "Abort an update the SP or one of its componenets")]
+    UpdateAbort {
+        #[clap(help = "Component name")]
+        component: String,
+        #[clap(help = "ID of the update to abort")]
+        id: Uuid,
     },
     #[clap(about = "Reset the SP")]
     Reset,
@@ -160,6 +168,18 @@ impl Client {
         Ok(())
     }
 
+    async fn update_abort(&self, component: &str, id: Uuid) -> Result<()> {
+        self.inner
+            .sp_component_update_abort(
+                self.sp_type,
+                self.sled,
+                component,
+                &UpdateAbortBody { id },
+            )
+            .await?;
+        Ok(())
+    }
+
     async fn detach(&self) -> Result<()> {
         self.inner
             .sp_component_serial_console_detach(
@@ -208,6 +228,9 @@ async fn main() -> Result<()> {
             let id = Uuid::new_v4();
             info!(log, "generated update ID {id}");
             return client.update(&component, id, slot, &path).await;
+        }
+        Command::UpdateAbort { component, id } => {
+            return client.update_abort(&component, id).await;
         }
         Command::Reset => {
             return client.reset().await;
