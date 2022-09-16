@@ -10,6 +10,7 @@ serde = { version = "1.0.144", default-features = false, features = ["derive"] }
 serde-big-array = "0.4.1"
 serde_repr = { version = "0.1" }
 static_assertions = "1.1.0"
+uuid = { version = "1.1", default-features = false }
 
 hubpack = { git = "https://github.com/cbiffle/hubpack", rev = "df08cc3a6e1f97381cd0472ae348e310f0119e25" }
 

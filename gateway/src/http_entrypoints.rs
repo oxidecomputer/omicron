@@ -33,6 +33,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
+use uuid::Uuid;
 
 #[derive(
     Debug,
@@ -114,6 +115,36 @@ pub enum SpIgnition {
         flt_rot: bool,
         flt_sp: bool,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "state", rename_all = "snake_case")]
+enum SpUpdateStatus {
+    /// The SP has no update status.
+    None,
+    /// The SP is preparing to receive an update.
+    ///
+    /// May or may not include progress, depending on the capabilities of the
+    /// component being updated.
+    Preparing { id: Uuid, progress: Option<UpdatePreparationProgress> },
+    /// The SP is currently receiving an update.
+    InProgress { id: Uuid, bytes_received: u32, total_bytes: u32 },
+    /// The SP has completed receiving an update.
+    Complete { id: Uuid },
+    /// The SP has aborted an in-progress update.
+    Aborted { id: Uuid },
+}
+
+/// Progress of an SP preparing to update.
+///
+/// The units of `current` and `total` are unspecified and defined by the SP;
+/// e.g., if preparing for an update requires erasing a flash device, this may
+/// indicate progress of that erasure without defining units (bytes, pages,
+/// sectors, etc.).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+struct UpdatePreparationProgress {
+    current: u32,
+    total: u32,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -471,11 +502,32 @@ async fn sp_component_serial_console_detach(
 // TODO: how can we make this generic enough to support any update mechanism?
 #[derive(Deserialize, JsonSchema)]
 pub struct UpdateBody {
+    /// An identifier for this update.
+    ///
+    /// This ID applies to this single instance of the API call; it is not an
+    /// ID of `image` itself. Multiple API calls with the same `image` should
+    /// use different IDs.
+    pub id: Uuid,
     /// The binary blob containing the update image (component-specific).
     pub image: Vec<u8>,
     /// The update slot to apply this image to. Supply 0 if the component only
     /// has one update slot.
     pub slot: u16,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct UpdateAbortBody {
+    /// The ID of the update to abort.
+    ///
+    /// If the SP is currently receiving an update with this ID, it will be
+    /// aborted.
+    ///
+    /// If the SP is currently receiving an update with a different ID, the
+    /// abort request will fail.
+    ///
+    /// If the SP is not currently receiving any update, the request to abort
+    /// should succeed but will not have actually done anything.
+    pub id: Uuid,
 }
 
 /// Reset an SP
@@ -517,13 +569,65 @@ async fn sp_component_update(
     path: Path<PathSpComponent>,
     body: TypedBody<UpdateBody>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let comms = Arc::clone(&rqctx.context().sp_comms);
+    let PathSpComponent { sp, component } = path.into_inner();
+    let component = component_from_str(&component)?;
+    let UpdateBody { id, image, slot } = body.into_inner();
+
+    comms
+        .start_update(sp.into(), component, id, slot, image)
+        .await
+        .map_err(http_err_from_comms_err)?;
+
+    Ok(HttpResponseUpdatedNoContent {})
+}
+
+/// Get the status of an update being applied to an SP component
+///
+/// Getting the status of an update to the SP itself is done via the component
+/// name `sp`.
+#[endpoint {
+    method = GET,
+    path = "/sp/{type}/{slot}/component/{component}/update-status",
+}]
+async fn sp_component_update_status(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path: Path<PathSpComponent>,
+) -> Result<HttpResponseOk<SpUpdateStatus>, HttpError> {
+    let comms = Arc::clone(&rqctx.context().sp_comms);
+    let PathSpComponent { sp, component } = path.into_inner();
+    let component = component_from_str(&component)?;
+
+    let status = comms
+        .update_status(sp.into(), component)
+        .await
+        .map_err(http_err_from_comms_err)?;
+
+    Ok(HttpResponseOk(status.into()))
+}
+
+/// Abort any in-progress update an SP component
+///
+/// Aborting an update to the SP itself is done via the component name `sp`.
+///
+/// On a successful return, the update corresponding to the given UUID will no
+/// longer be in progress (either aborted or applied).
+#[endpoint {
+    method = POST,
+    path = "/sp/{type}/{slot}/component/{component}/update-abort",
+}]
+async fn sp_component_update_abort(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path: Path<PathSpComponent>,
+    body: TypedBody<UpdateAbortBody>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let comms = &rqctx.context().sp_comms;
     let PathSpComponent { sp, component } = path.into_inner();
     let component = component_from_str(&component)?;
-    let UpdateBody { image, slot } = body.into_inner();
+    let UpdateAbortBody { id } = body.into_inner();
 
     comms
-        .update(sp.into(), component, slot, image)
+        .update_abort(sp.into(), component, id)
         .await
         .map_err(http_err_from_comms_err)?;
 
@@ -681,6 +785,8 @@ pub fn api() -> GatewayApiDescription {
         api.register(sp_component_serial_console_attach)?;
         api.register(sp_component_serial_console_detach)?;
         api.register(sp_component_update)?;
+        api.register(sp_component_update_status)?;
+        api.register(sp_component_update_abort)?;
         api.register(sp_component_power_on)?;
         api.register(sp_component_power_off)?;
         api.register(ignition_list)?;

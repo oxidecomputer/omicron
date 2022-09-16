@@ -14,7 +14,9 @@ use futures::future::Fuse;
 use futures::future::FusedFuture;
 use futures::prelude::*;
 use gateway_client::types::SpType;
+use gateway_client::types::UpdateAbortBody;
 use gateway_client::types::UpdateBody;
+use slog::info;
 use slog::o;
 use slog::Drain;
 use slog::Level;
@@ -35,6 +37,7 @@ use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::MaybeTlsStream;
 use tokio_tungstenite::WebSocketStream;
+use uuid::Uuid;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -82,6 +85,13 @@ enum Command {
         slot: u16,
         #[clap(help = "Path to the new image")]
         path: PathBuf,
+    },
+    #[clap(about = "Abort an update the SP or one of its componenets")]
+    UpdateAbort {
+        #[clap(help = "Component name")]
+        component: String,
+        #[clap(help = "ID of the update to abort")]
+        id: Uuid,
     },
     #[clap(about = "Reset the SP")]
     Reset,
@@ -141,6 +151,7 @@ impl Client {
     async fn update(
         &self,
         component: &str,
+        id: Uuid,
         slot: u16,
         path: &Path,
     ) -> Result<()> {
@@ -151,7 +162,19 @@ impl Client {
                 self.sp_type,
                 self.sled,
                 component,
-                &UpdateBody { image, slot },
+                &UpdateBody { id, image, slot },
+            )
+            .await?;
+        Ok(())
+    }
+
+    async fn update_abort(&self, component: &str, id: Uuid) -> Result<()> {
+        self.inner
+            .sp_component_update_abort(
+                self.sp_type,
+                self.sled,
+                component,
+                &UpdateAbortBody { id },
             )
             .await?;
         Ok(())
@@ -194,7 +217,7 @@ async fn main() -> Result<()> {
     let drain = slog_async::Async::new(drain).build().fuse();
     let log = Logger::root(drain, o!("component" => "gateway-client"));
 
-    let client = Client::new(args.server, args.port, args.sled, log);
+    let client = Client::new(args.server, args.port, args.sled, log.clone());
 
     let term_raw = match args.command {
         Command::Attach { raw } => raw, // continue; primary use case
@@ -202,7 +225,12 @@ async fn main() -> Result<()> {
             return client.detach().await;
         }
         Command::Update { component, slot, path } => {
-            return client.update(&component, slot, &path).await;
+            let id = Uuid::new_v4();
+            info!(log, "generated update ID {id}");
+            return client.update(&component, id, slot, &path).await;
+        }
+        Command::UpdateAbort { component, id } => {
+            return client.update_abort(&component, id).await;
         }
         Command::Reset => {
             return client.reset().await;

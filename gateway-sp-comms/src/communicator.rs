@@ -24,10 +24,11 @@ use gateway_messages::IgnitionState;
 use gateway_messages::ResponseKind;
 use gateway_messages::SpComponent;
 use gateway_messages::SpState;
-use gateway_messages::UpdatePrepareStatusResponse;
+use gateway_messages::UpdateStatus;
 use slog::info;
 use slog::o;
 use slog::Logger;
+use uuid::Uuid;
 
 /// Helper trait that allows us to return an `impl FuturesUnordered<_>` where
 /// the caller can call `.is_empty()` without knowing the type of the future
@@ -208,17 +209,50 @@ impl Communicator {
         Ok(sp.state().await?)
     }
 
-    /// Update a given SP.
-    pub async fn update(
+    /// Start sending an update payload to the given SP.
+    ///
+    /// This function will return before the update is complete! Once the SP
+    /// acknowledges that we want to apply an update, we spawn a background task
+    /// to stream the update to the SP and then return. Poll the status of the
+    /// update via [`Self::update_status()`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if `image.is_empty()`.
+    pub async fn start_update(
         &self,
         sp: SpIdentifier,
         component: SpComponent,
+        update_id: Uuid,
         slot: u16,
         image: Vec<u8>,
     ) -> Result<(), Error> {
         let port = self.id_to_port(sp)?;
         let sp = self.switch.sp(port).ok_or(Error::SpAddressUnknown(sp))?;
-        Ok(sp.update(component, slot, image).await?)
+        Ok(sp.start_update(component, update_id, slot, image).await?)
+    }
+
+    /// Get the status of an in-progress update.
+    pub async fn update_status(
+        &self,
+        sp: SpIdentifier,
+        component: SpComponent,
+    ) -> Result<UpdateStatus, Error> {
+        let port = self.id_to_port(sp)?;
+        let sp = self.switch.sp(port).ok_or(Error::SpAddressUnknown(sp))?;
+        Ok(sp.update_status(component).await?)
+    }
+
+    /// Abort an in-progress update.
+    pub async fn update_abort(
+        &self,
+        sp: SpIdentifier,
+        component: SpComponent,
+        update_id: Uuid,
+    ) -> Result<(), Error> {
+        let port = self.id_to_port(sp)?;
+        let sp = self.switch.sp(port).ok_or(Error::SpAddressUnknown(sp))?;
+        Ok(sp.update_abort(component, update_id).await?)
     }
 
     /// Reset a given SP.
@@ -300,9 +334,7 @@ pub(crate) trait ResponseKindExt {
 
     fn expect_update_prepare_ack(self) -> Result<(), BadResponseType>;
 
-    fn expect_update_prepare_status(
-        self,
-    ) -> Result<UpdatePrepareStatusResponse, BadResponseType>;
+    fn expect_update_status(self) -> Result<UpdateStatus, BadResponseType>;
 
     fn expect_update_chunk_ack(self) -> Result<(), BadResponseType>;
 
@@ -337,9 +369,7 @@ impl ResponseKindExt for ResponseKind {
             ResponseKind::UpdatePrepareAck => {
                 response_kind_names::UPDATE_PREPARE_ACK
             }
-            ResponseKind::UpdatePrepareStatus(_) => {
-                response_kind_names::UPDATE_PREPARE_STATUS
-            }
+            ResponseKind::UpdateStatus(_) => response_kind_names::UPDATE_STATUS,
             ResponseKind::UpdateAbortAck => {
                 response_kind_names::UPDATE_ABORT_ACK
             }
@@ -446,13 +476,11 @@ impl ResponseKindExt for ResponseKind {
         }
     }
 
-    fn expect_update_prepare_status(
-        self,
-    ) -> Result<UpdatePrepareStatusResponse, BadResponseType> {
+    fn expect_update_status(self) -> Result<UpdateStatus, BadResponseType> {
         match self {
-            ResponseKind::UpdatePrepareStatus(status) => Ok(status),
+            ResponseKind::UpdateStatus(status) => Ok(status),
             other => Err(BadResponseType {
-                expected: response_kind_names::UPDATE_PREPARE_ACK,
+                expected: response_kind_names::UPDATE_STATUS,
                 got: other.name(),
             }),
         }
@@ -502,7 +530,7 @@ mod response_kind_names {
     pub(super) const SERIAL_CONSOLE_DETACH_ACK: &str =
         "serial_console_detach_ack";
     pub(super) const UPDATE_PREPARE_ACK: &str = "update_prepare_ack";
-    pub(super) const UPDATE_PREPARE_STATUS: &str = "update_prepare_status";
+    pub(super) const UPDATE_STATUS: &str = "update_status";
     pub(super) const UPDATE_ABORT_ACK: &str = "update_abort_ack";
     pub(super) const UPDATE_CHUNK_ACK: &str = "update_chunk_ack";
     pub(super) const SYS_RESET_PREPARE_ACK: &str = "sys_reset_prepare_ack";

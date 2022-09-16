@@ -13,6 +13,7 @@ slog-async = "2.6"
 slog-term = "2.9"
 tokio = { version = "1.21", features = [ "rt-multi-thread", "macros", "time" ] }
 tokio-tungstenite = "0.17"
+uuid = { version = "1.1", features = [ "v4" ] }
 
 gateway-client = { path = "../gateway-client" }
 omicron-common = { path = "../common" }
