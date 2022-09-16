@@ -869,26 +869,6 @@
           "request_id"
         ]
       },
-      "Progress": {
-        "description": "Progress of an operation; units of `current` and `total` are defined by the operation.",
-        "type": "object",
-        "properties": {
-          "current": {
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          },
-          "total": {
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "current",
-          "total"
-        ]
-      },
       "SpComponentInfo": {
         "type": "object"
       },
@@ -1105,17 +1085,36 @@
           "switch"
         ]
       },
-      "SpUpdateState": {
+      "SpUpdateStatus": {
         "oneOf": [
           {
-            "description": "The SP is preparing to receive an update.\n\nMay or may not include progress, depending on the capabilities of the component being updated. If progress is present, the units are defined by the SP.",
+            "description": "The SP has no update status.",
             "type": "object",
             "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "none"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "The SP is preparing to receive an update.\n\nMay or may not include progress, depending on the capabilities of the component being updated.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
               "progress": {
                 "nullable": true,
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/Progress"
+                    "$ref": "#/components/schemas/UpdatePreparationProgress"
                   }
                 ]
               },
@@ -1127,32 +1126,50 @@
               }
             },
             "required": [
+              "id",
               "state"
             ]
           },
           {
-            "description": "The SP is currently receiving an update.\n\nThe units of `progress` are bytes.",
+            "description": "The SP is currently receiving an update.",
             "type": "object",
             "properties": {
-              "progress": {
-                "$ref": "#/components/schemas/Progress"
+              "bytes_received": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
               },
               "state": {
                 "type": "string",
                 "enum": [
                   "in_progress"
                 ]
+              },
+              "total_bytes": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
               }
             },
             "required": [
-              "progress",
-              "state"
+              "bytes_received",
+              "id",
+              "state",
+              "total_bytes"
             ]
           },
           {
             "description": "The SP has completed receiving an update.",
             "type": "object",
             "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
               "state": {
                 "type": "string",
                 "enum": [
@@ -1161,6 +1178,7 @@
               }
             },
             "required": [
+              "id",
               "state"
             ]
           },
@@ -1168,6 +1186,10 @@
             "description": "The SP has aborted an in-progress update.",
             "type": "object",
             "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
               "state": {
                 "type": "string",
                 "enum": [
@@ -1176,25 +1198,10 @@
               }
             },
             "required": [
+              "id",
               "state"
             ]
           }
-        ]
-      },
-      "SpUpdateStatus": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "state": {
-            "$ref": "#/components/schemas/SpUpdateState"
-          }
-        },
-        "required": [
-          "id",
-          "state"
         ]
       },
       "UpdateAbortBody": {
@@ -1238,6 +1245,26 @@
           "id",
           "image",
           "slot"
+        ]
+      },
+      "UpdatePreparationProgress": {
+        "description": "Progress of an SP preparing to update.\n\nThe units of `current` and `total` are unspecified and defined by the SP; e.g., if preparing for an update requires erasing a flash device, this may indicate progress of that erasure without defining units (bytes, pages, sectors, etc.).",
+        "type": "object",
+        "properties": {
+          "current": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "total": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "current",
+          "total"
         ]
       }
     }

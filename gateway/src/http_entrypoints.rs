@@ -125,23 +125,24 @@ enum SpUpdateStatus {
     /// The SP is preparing to receive an update.
     ///
     /// May or may not include progress, depending on the capabilities of the
-    /// component being updated. If progress is present, the units are defined
-    /// by the SP.
-    Preparing { id: Uuid, progress: Option<Progress> },
+    /// component being updated.
+    Preparing { id: Uuid, progress: Option<UpdatePreparationProgress> },
     /// The SP is currently receiving an update.
-    ///
-    /// The units of `progress` are bytes.
-    InProgress { id: Uuid, progress: Progress },
+    InProgress { id: Uuid, bytes_received: u32, total_bytes: u32 },
     /// The SP has completed receiving an update.
     Complete { id: Uuid },
     /// The SP has aborted an in-progress update.
     Aborted { id: Uuid },
 }
 
-/// Progress of an operation; units of `current` and `total` are defined by the
-/// operation.
+/// Progress of an SP preparing to update.
+///
+/// The units of `current` and `total` are unspecified and defined by the SP;
+/// e.g., if preparing for an update requires erasing a flash device, this may
+/// indicate progress of that erasure without defining units (bytes, pages,
+/// sectors, etc.).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-struct Progress {
+struct UpdatePreparationProgress {
     current: u32,
     total: u32,
 }

@@ -6,12 +6,12 @@
 
 //! Conversions between externally-defined types and HTTP / JsonSchema types.
 
-use super::Progress;
 use super::SpIdentifier;
 use super::SpIgnition;
 use super::SpState;
 use super::SpType;
 use super::SpUpdateStatus;
+use super::UpdatePreparationProgress;
 use dropshot::HttpError;
 use gateway_messages::IgnitionFlags;
 use gateway_messages::SpComponent;
@@ -37,7 +37,8 @@ impl From<UpdateStatus> for SpUpdateStatus {
             },
             UpdateStatus::InProgress(status) => Self::InProgress {
                 id: status.id.into(),
-                progress: status.into(),
+                bytes_received: status.bytes_received,
+                total_bytes: status.total_size,
             },
             UpdateStatus::Complete(id) => Self::Complete { id: id.into() },
             UpdateStatus::Aborted(id) => Self::Aborted { id: id.into() },
@@ -45,15 +46,11 @@ impl From<UpdateStatus> for SpUpdateStatus {
     }
 }
 
-impl From<gateway_messages::UpdatePreparationProgress> for Progress {
+impl From<gateway_messages::UpdatePreparationProgress>
+    for UpdatePreparationProgress
+{
     fn from(progress: gateway_messages::UpdatePreparationProgress) -> Self {
         Self { current: progress.current, total: progress.total }
-    }
-}
-
-impl From<gateway_messages::UpdateInProgressStatus> for Progress {
-    fn from(progress: gateway_messages::UpdateInProgressStatus) -> Self {
-        Self { current: progress.bytes_received, total: progress.total_size }
     }
 }
 
