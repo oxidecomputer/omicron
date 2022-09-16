@@ -639,7 +639,7 @@ impl super::Nexus {
                 //
                 // Without a richer error type, let the sled-agent tell Nexus
                 // what to do with status codes.
-                error!(self.log, "saw {} from instance_put!", &e,);
+                error!(self.log, "saw {} from instance_put!", e);
 
                 // this is unfortunate, but sled_agent_client::Error doesn't
                 // implement Copy, and can't be match'ed upon below without this
