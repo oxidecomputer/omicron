@@ -10,3 +10,5 @@ tools/cockroach*
 /cockroachdb/
 smf/nexus/root.json
 core
+*.vdev
+debug.out

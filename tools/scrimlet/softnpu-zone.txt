@@ -1,0 +1,23 @@
+create
+set brand=sparse
+set zonepath=/softnpu-zone
+set ip-type=exclusive
+set autoboot=false
+add net
+    set physical=sc0_0
+end
+add net
+    set physical=sr0_0
+end
+add net
+    set physical=sr0_1
+end
+add net
+    set physical=sc0_1
+end
+add fs
+    set dir=/stuff
+    set special=/opt/softnpu/stuff
+    set type=lofs
+end
+commit
