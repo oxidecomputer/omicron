@@ -198,68 +198,27 @@ impl SingleSp {
         let log = self.log.clone();
         let inner = self.cmds_tx.clone();
         tokio::spawn(async move {
-            // The choice of interval is relatively arbitrary; we expect update
-            // preparation to generally fall in one of two cases:
-            //
-            // 1. No prep is necessary, and the update can happen immediately
-            //    (we'll never sleep)
-            // 2. Prep is relatively slow (e.g., erasing a flash part)
-            //
-            // We choose a few seconds assuming this polling interval is
-            // primarily hit when the SP is doing something slow.
-            const POLL_UPDATE_STATUS_INTERVAL: Duration =
-                Duration::from_secs(2);
-
-            // Poll SP until update preparation is complete.
-            loop {
-                // Get update status from the SP or give up.
-                let status = match update_status(&inner, component).await {
-                    Ok(status) => status,
-                    Err(err) => {
-                        error!(
-                            log, "update failed: could not get status from SP";
-                            "err" => %err,
-                        );
-                        return;
-                    }
-                };
-
-                // Either sleep and retry (if still preparing), break out of our
-                // loop (if prep complete), or fail (anything else).
-                match status {
-                    UpdateStatus::Preparing(sub_status) => {
-                        if sub_status.id == id {
-                            debug!(
-                                log,
-                                "SP still preparing; sleeping for {:?}",
-                                POLL_UPDATE_STATUS_INTERVAL
-                            );
-                            tokio::time::sleep(POLL_UPDATE_STATUS_INTERVAL)
-                                .await;
-                            continue;
-                        }
-                    }
-                    UpdateStatus::InProgress(sub_status) => {
-                        if sub_status.id == id {
-                            info!(
-                                log, "update preparation complete";
-                                "update_id" => %update_id,
-                            );
-                            break;
-                        }
-                    }
-                    UpdateStatus::None
-                    | UpdateStatus::Complete(_)
-                    | UpdateStatus::Aborted(_) => (),
+            // Wait until the SP has finished preparing for this update.
+            match poll_until_update_prep_complete(&inner, component, id, &log)
+                .await
+            {
+                Ok(()) => {
+                    info!(
+                        log, "update preparation complete";
+                        "update_id" => %update_id,
+                    );
                 }
-
-                error!(
-                    log, "update preparation failed";
-                    "update-status" => ?status,
-                );
-                return;
+                Err(message) => {
+                    error!(
+                        log, "update preparation failed";
+                        "err" => message,
+                        "update_id" => %update_id,
+                    );
+                    return;
+                }
             }
 
+            // Deliver the update in chunks.
             let mut image = Cursor::new(image);
             let mut offset = 0;
             while !CursorExt::is_empty(&image) {
@@ -419,6 +378,63 @@ impl SingleSp {
         kind: RequestKind,
     ) -> Result<(SocketAddrV6, ResponseKind)> {
         rpc(&self.cmds_tx, kind, None).await.result
+    }
+}
+
+/// Poll an SP until it indicates that preparation for update identified by `id`
+/// has completed.
+async fn poll_until_update_prep_complete(
+    inner_tx: &mpsc::Sender<InnerCommand>,
+    component: SpComponent,
+    id: UpdateId,
+    log: &Logger,
+) -> Result<(), String> {
+    // The choice of interval is relatively arbitrary; we expect update
+    // preparation to generally fall in one of two cases:
+    //
+    // 1. No prep is necessary, and the update can happen immediately
+    //    (we'll never sleep)
+    // 2. Prep is relatively slow (e.g., erasing a flash part)
+    //
+    // We choose a few seconds assuming this polling interval is
+    // primarily hit when the SP is doing something slow.
+    const POLL_UPDATE_STATUS_INTERVAL: Duration = Duration::from_secs(2);
+
+    // Poll SP until update preparation is complete.
+    loop {
+        // Get update status from the SP or give up.
+        let status = match update_status(inner_tx, component).await {
+            Ok(status) => status,
+            Err(err) => {
+                return Err(format!("could not get status from SP: {err}"));
+            }
+        };
+
+        // Either sleep and retry (if still preparing), break out of our
+        // loop (if prep complete), or fail (anything else).
+        match status {
+            UpdateStatus::Preparing(sub_status) => {
+                if sub_status.id == id {
+                    debug!(
+                        log,
+                        "SP still preparing; sleeping for {:?}",
+                        POLL_UPDATE_STATUS_INTERVAL
+                    );
+                    tokio::time::sleep(POLL_UPDATE_STATUS_INTERVAL).await;
+                    continue;
+                }
+            }
+            UpdateStatus::InProgress(sub_status) => {
+                if sub_status.id == id {
+                    return Ok(());
+                }
+            }
+            UpdateStatus::None
+            | UpdateStatus::Complete(_)
+            | UpdateStatus::Aborted(_) => (),
+        }
+
+        return Err(format!("update preparation failed; status = {status:?}"));
     }
 }
 
