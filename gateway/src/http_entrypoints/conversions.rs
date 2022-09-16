@@ -29,24 +29,18 @@ pub(super) fn component_from_str(s: &str) -> Result<SpComponent, HttpError> {
 
 impl From<UpdateStatus> for SpUpdateStatus {
     fn from(status: UpdateStatus) -> Self {
-        use super::SpUpdateState;
         match status {
-            UpdateStatus::Preparing(status) => Self {
+            UpdateStatus::None => Self::None,
+            UpdateStatus::Preparing(status) => Self::Preparing {
                 id: status.id.into(),
-                state: SpUpdateState::Preparing {
-                    progress: status.progress.map(Into::into),
-                },
+                progress: status.progress.map(Into::into),
             },
-            UpdateStatus::InProgress(status) => Self {
+            UpdateStatus::InProgress(status) => Self::InProgress {
                 id: status.id.into(),
-                state: SpUpdateState::InProgress { progress: status.into() },
+                progress: status.into(),
             },
-            UpdateStatus::Complete(id) => {
-                Self { id: id.into(), state: SpUpdateState::Complete }
-            }
-            UpdateStatus::Aborted(id) => {
-                Self { id: id.into(), state: SpUpdateState::Aborted }
-            }
+            UpdateStatus::Complete(id) => Self::Complete { id: id.into() },
+            UpdateStatus::Aborted(id) => Self::Aborted { id: id.into() },
         }
     }
 }

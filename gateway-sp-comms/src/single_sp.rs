@@ -214,11 +214,7 @@ impl SingleSp {
             loop {
                 // Get update status from the SP or give up.
                 let status = match update_status(&inner, component).await {
-                    Ok(Some(status)) => status,
-                    Ok(None) => {
-                        error!(log, "update abandoned by SP");
-                        return;
-                    }
+                    Ok(status) => status,
                     Err(err) => {
                         error!(
                             log, "update failed: could not get status from SP";
@@ -252,7 +248,9 @@ impl SingleSp {
                             break;
                         }
                     }
-                    UpdateStatus::Complete(_) | UpdateStatus::Aborted(_) => (),
+                    UpdateStatus::None
+                    | UpdateStatus::Complete(_)
+                    | UpdateStatus::Aborted(_) => (),
                 }
 
                 error!(
@@ -322,7 +320,7 @@ impl SingleSp {
     pub async fn update_status(
         &self,
         component: SpComponent,
-    ) -> Result<Option<UpdateStatus>> {
+    ) -> Result<UpdateStatus> {
         update_status(&self.cmds_tx, component).await
     }
 
@@ -428,7 +426,7 @@ impl SingleSp {
 async fn update_status(
     inner_tx: &mpsc::Sender<InnerCommand>,
     component: SpComponent,
-) -> Result<Option<UpdateStatus>> {
+) -> Result<UpdateStatus> {
     rpc(inner_tx, RequestKind::UpdateStatus(component), None)
         .await
         .result

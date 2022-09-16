@@ -89,7 +89,7 @@ pub trait SpHandler {
         sender: SocketAddrV6,
         port: SpPort,
         component: SpComponent,
-    ) -> Result<Option<UpdateStatus>, ResponseError>;
+    ) -> Result<UpdateStatus, ResponseError>;
 
     fn update_abort(
         &mut self,

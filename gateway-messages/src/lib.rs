@@ -95,6 +95,8 @@ pub enum SpPort {
 
 #[derive(Debug, Clone, Copy, SerializedSize, Serialize, Deserialize)]
 pub enum UpdateStatus {
+    /// The SP has no update status.
+    None,
     /// Returned when the SP is still preparing to apply the update with the
     /// given ID (e.g., erasing a target flash slot).
     Preparing(UpdatePreparationStatus),
@@ -151,7 +153,7 @@ pub enum ResponseKind {
     SpState(SpState),
     UpdatePrepareAck,
     UpdateChunkAck,
-    UpdateStatus(Option<UpdateStatus>),
+    UpdateStatus(UpdateStatus),
     UpdateAbortAck,
     SerialConsoleAttachAck,
     SerialConsoleWriteAck { furthest_ingested_offset: u64 },

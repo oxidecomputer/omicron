@@ -255,7 +255,7 @@ async fn main() -> Result<()> {
                     )
                 })?;
             match status {
-                Some(UpdateStatus::Preparing(sub_status)) => {
+                UpdateStatus::Preparing(sub_status) => {
                     let id = Uuid::from(sub_status.id);
                     if let Some(progress) = sub_status.progress {
                         info!(
@@ -270,7 +270,7 @@ async fn main() -> Result<()> {
                         );
                     }
                 }
-                Some(UpdateStatus::InProgress(sub_status)) => {
+                UpdateStatus::InProgress(sub_status) => {
                     let id = Uuid::from(sub_status.id);
                     info!(
                         log, "update in progress";
@@ -279,15 +279,15 @@ async fn main() -> Result<()> {
                         "total_size" => sub_status.total_size,
                     );
                 }
-                Some(UpdateStatus::Complete(id)) => {
+                UpdateStatus::Complete(id) => {
                     let id = Uuid::from(id);
                     info!(log, "update complete"; "id" => %id);
                 }
-                Some(UpdateStatus::Aborted(id)) => {
+                UpdateStatus::Aborted(id) => {
                     let id = Uuid::from(id);
                     info!(log, "update aborted"; "id" => %id);
                 }
-                None => {
+                UpdateStatus::None => {
                     info!(log, "no update status available");
                 }
             }
@@ -329,11 +329,10 @@ async fn update(
             .update_status(component)
             .await
             .context("failed to get update status")?;
-        let status = match status {
-            Some(status) => status,
-            None => bail!("no update status returned by SP (did it reset?)"),
-        };
         match status {
+            UpdateStatus::None => {
+                bail!("no update status returned by SP (did it reset?)");
+            }
             UpdateStatus::Preparing(sub_status) => {
                 if sub_status.id != sp_update_id {
                     bail!("different update preparing ({:?})", sub_status.id);

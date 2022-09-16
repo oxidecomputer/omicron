@@ -640,7 +640,7 @@ impl SpHandler for Handler {
         sender: SocketAddrV6,
         port: SpPort,
         component: SpComponent,
-    ) -> Result<Option<gateway_messages::UpdateStatus>, ResponseError> {
+    ) -> Result<gateway_messages::UpdateStatus, ResponseError> {
         warn!(
             &self.log,
             "received update status request; not supported by simulated gimlet";

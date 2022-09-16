@@ -118,28 +118,24 @@ pub enum SpIgnition {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-struct SpUpdateStatus {
-    id: Uuid,
-    state: SpUpdateState,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "state", rename_all = "snake_case")]
-enum SpUpdateState {
+enum SpUpdateStatus {
+    /// The SP has no update status.
+    None,
     /// The SP is preparing to receive an update.
     ///
     /// May or may not include progress, depending on the capabilities of the
     /// component being updated. If progress is present, the units are defined
     /// by the SP.
-    Preparing { progress: Option<Progress> },
+    Preparing { id: Uuid, progress: Option<Progress> },
     /// The SP is currently receiving an update.
     ///
     /// The units of `progress` are bytes.
-    InProgress { progress: Progress },
+    InProgress { id: Uuid, progress: Progress },
     /// The SP has completed receiving an update.
-    Complete,
+    Complete { id: Uuid },
     /// The SP has aborted an in-progress update.
-    Aborted,
+    Aborted { id: Uuid },
 }
 
 /// Progress of an operation; units of `current` and `total` are defined by the
@@ -596,7 +592,7 @@ async fn sp_component_update(
 async fn sp_component_update_status(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path: Path<PathSpComponent>,
-) -> Result<HttpResponseOk<Option<SpUpdateStatus>>, HttpError> {
+) -> Result<HttpResponseOk<SpUpdateStatus>, HttpError> {
     let comms = Arc::clone(&rqctx.context().sp_comms);
     let PathSpComponent { sp, component } = path.into_inner();
     let component = component_from_str(&component)?;
@@ -606,7 +602,7 @@ async fn sp_component_update_status(
         .await
         .map_err(http_err_from_comms_err)?;
 
-    Ok(HttpResponseOk(status.map(Into::into)))
+    Ok(HttpResponseOk(status.into()))
 }
 
 /// Abort any in-progress update an SP component

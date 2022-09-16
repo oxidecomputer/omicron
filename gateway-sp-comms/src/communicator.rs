@@ -237,7 +237,7 @@ impl Communicator {
         &self,
         sp: SpIdentifier,
         component: SpComponent,
-    ) -> Result<Option<UpdateStatus>, Error> {
+    ) -> Result<UpdateStatus, Error> {
         let port = self.id_to_port(sp)?;
         let sp = self.switch.sp(port).ok_or(Error::SpAddressUnknown(sp))?;
         Ok(sp.update_status(component).await?)
@@ -334,9 +334,7 @@ pub(crate) trait ResponseKindExt {
 
     fn expect_update_prepare_ack(self) -> Result<(), BadResponseType>;
 
-    fn expect_update_status(
-        self,
-    ) -> Result<Option<UpdateStatus>, BadResponseType>;
+    fn expect_update_status(self) -> Result<UpdateStatus, BadResponseType>;
 
     fn expect_update_chunk_ack(self) -> Result<(), BadResponseType>;
 
@@ -478,9 +476,7 @@ impl ResponseKindExt for ResponseKind {
         }
     }
 
-    fn expect_update_status(
-        self,
-    ) -> Result<Option<UpdateStatus>, BadResponseType> {
+    fn expect_update_status(self) -> Result<UpdateStatus, BadResponseType> {
         match self {
             ResponseKind::UpdateStatus(status) => Ok(status),
             other => Err(BadResponseType {
