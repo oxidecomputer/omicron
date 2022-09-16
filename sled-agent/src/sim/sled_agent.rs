@@ -194,10 +194,12 @@ impl SledAgent {
         initial_hardware: InstanceHardware,
         target: InstanceRuntimeStateRequested,
     ) -> Result<InstanceRuntimeState, Error> {
+        // respond with a fake 500 level failure if asked to ensure an instance
+        // with more than 16 CPUs.
         let ncpus: i64 = (&initial_hardware.runtime.ncpus).into();
         if ncpus > 16 {
             return Err(Error::internal_error(
-                &"instances with more than 16 CPUs not supported!",
+                &"could not allocate an instance: ran out of CPUs!",
             ));
         };
 

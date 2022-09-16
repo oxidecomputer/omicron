@@ -1847,6 +1847,11 @@ async fn test_instance_fails_to_boot_with_disk(
             name: Name::try_from(String::from("nfs")).unwrap(),
             description: String::from("probably serving data"),
         },
+        // there's a specific line in the simulated sled agent that will return
+        // a 500 if you try to allocate an instance with more than 16 CPUs. a
+        // 500 error is required to exercise the undo nodes of the instance
+        // create saga (where provision fails, instead of just responding with a
+        // bad request).
         ncpus: InstanceCpuCount::try_from(32).unwrap(),
         memory: ByteCount::from_gibibytes_u32(4),
         hostname: String::from("nfs"),
