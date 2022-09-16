@@ -10,6 +10,7 @@ pub mod ip_pool;
 #[macro_use]
 mod next_item;
 pub mod network_interface;
+#[allow(dead_code)]
 pub mod service_provision;
 pub mod vpc;
 pub mod vpc_subnet;

@@ -396,7 +396,6 @@ WITH
       new_internal_ips
     ON
       candidate_sleds.id = new_internal_ips.sled_id
-
   ),
 
   inserted_services AS (
