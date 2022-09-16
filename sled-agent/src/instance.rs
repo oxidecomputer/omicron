@@ -157,7 +157,7 @@ fn propolis_zone_name(id: &Uuid) -> String {
 // state changes.
 enum Reaction {
     Continue,
-    Terminate,
+    Terminate(/*save state*/ bool),
 }
 
 // State associated with a running instance.
@@ -402,12 +402,12 @@ impl InstanceInner {
             InstanceAction::Reboot => {
                 propolis_client::api::InstanceStateRequested::Reboot
             }
-            InstanceAction::Destroy => {
+            InstanceAction::Destroy(save) => {
                 // Unlike the other actions, which update the Propolis state,
                 // the "destroy" action indicates that the service should be
                 // terminated.
                 info!(self.log, "take_action: Taking the Destroy action");
-                return Ok(Reaction::Terminate);
+                return Ok(Reaction::Terminate(save));
             }
         };
         self.propolis_state_put(requested_state).await?;
@@ -738,12 +738,12 @@ impl Instance {
     }
 
     // Terminate the Propolis service.
-    async fn stop(&self) -> Result<(), Error> {
+    async fn stop(&self, save: bool) -> Result<(), Error> {
         let mut inner = self.inner.lock().await;
 
         let zname = propolis_zone_name(inner.propolis_id());
         warn!(inner.log, "Halting and removing zone: {}", zname);
-        Zones::halt_and_remove_logged(&inner.log, &zname).await.unwrap();
+        Zones::halt_and_remove_logged(&inner.log, &zname, save).await.unwrap();
 
         // Remove ourselves from the instance manager's map of instances.
         let running_state = inner.running_state.as_mut().unwrap();
@@ -786,8 +786,8 @@ impl Instance {
 
             match reaction {
                 Reaction::Continue => {}
-                Reaction::Terminate => {
-                    return self.stop().await;
+                Reaction::Terminate(save) => {
+                    return self.stop(save).await;
                 }
             }
 

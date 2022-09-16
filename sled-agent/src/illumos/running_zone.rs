@@ -318,7 +318,7 @@ impl RunningZone {
             self.running = false;
             let log = self.inner.log.clone();
             let name = self.name().to_string();
-            Zones::halt_and_remove_logged(&log, &name)
+            Zones::halt_and_remove_logged(&log, &name, true)
                 .await
                 .map_err(|err| err.to_string())?;
         }
@@ -332,7 +332,7 @@ impl Drop for RunningZone {
             let log = self.inner.log.clone();
             let name = self.name().to_string();
             tokio::task::spawn(async move {
-                match Zones::halt_and_remove_logged(&log, &name).await {
+                match Zones::halt_and_remove_logged(&log, &name, true).await {
                     Ok(()) => {
                         info!(log, "Stopped and uninstalled zone")
                     }

@@ -66,20 +66,39 @@ function get_vnic_name_if_exists {
     dladm show-vnic -p -o LINK "$1" 2> /dev/null || echo ""
 }
 
-# Create VNICs to represent the Chelsio physical links
+function get_simnet_name_if_exists {
+    dladm show-simnet -p -o LINK "$1" 2> /dev/null || echo ""
+}
+
+# Create virtual links to represent the Chelsio physical links
 #
 # Arguments:
 #   $1: Optional name of the physical link to use. If not provided, use the
 #   first physical link available on the machine.
 function ensure_simulated_chelsios {
     local PHYSICAL_LINK="$1"
-    VNIC_NAMES=("net0" "net1")
-    for VNIC in "${VNIC_NAMES[@]}"; do
-        if [[ -z "$(get_vnic_name_if_exists "$VNIC")" ]]; then
-            dladm create-vnic -t -l "$PHYSICAL_LINK" "$VNIC"
+    INDICES=("0" "1")
+    for I in "${INDICES[@]}"; do
+        if [[ -z "$(get_simnet_name_if_exists "net$I")" ]]; then
+            # sidecar ports
+            dladm create-simnet -t "net$I"
+            dladm create-simnet -t "sc${I}_0"
+            dladm modify-simnet -t -p "net$I" "sc${I}_0"
+            dladm set-linkprop -p mtu=1600 "net$I" # encap headroom
+            dladm set-linkprop -p mtu=1600 "sc${I}_0" # encap headroom
+
+            # corresponding scrimlet ports
+            dladm create-simnet -t "sr0_$I"
+            dladm create-simnet -t "scr0_$I"
+            dladm modify-simnet -t -p "sr0_$I" "scr0_$I"
         fi
-        success "VNIC $VNIC exists"
+        success "Simnet net$I/sc${I}_0/sr0_$I/scr0_$I exists"
     done
+
+    if [[ -z "$(get_vnic_name_if_exists "sc0_1")" ]]; then
+        dladm create-vnic -t "sc0_1" -l $PHYSICAL_LINK -m a8:e1:de:01:70:1d
+    fi
+    success "Vnic sc0_1 exists"
 }
 
 function ensure_run_as_root {

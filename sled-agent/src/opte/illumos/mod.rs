@@ -8,7 +8,6 @@ use crate::common::underlay;
 use crate::illumos::dladm;
 use opte_ioctl::OpteHdl;
 use slog::Logger;
-use std::fs;
 use std::path::Path;
 
 mod firewall_rules;
@@ -79,17 +78,6 @@ pub fn initialize_xde_driver(log: &Logger) -> Result<(), Error> {
         return Err(Error::NoXdeConf);
     }
 
-    // TODO-remove
-    //
-    // See https://github.com/oxidecomputer/omicron/issues/1337
-    //
-    // An additional part of the workaround to connect into instances. This is
-    // required to tell OPTE to actually act as a 1-1 NAT when an instance is
-    // provided with an external IP address, rather than do its normal job of
-    // encapsulating the traffic onto the underlay (such as for delivery to
-    // boundary services).
-    use_external_ip_workaround(&log, &xde_conf);
-
     let underlay_nics = underlay::find_nics()?;
     info!(log, "using '{:?}' as data links for xde driver", underlay_nics);
     if underlay_nics.len() < 2 {
@@ -131,37 +119,4 @@ pub fn initialize_xde_driver(log: &Logger) -> Result<(), Error> {
         )) => Ok(()),
         Err(e) => Err(e.into()),
     }
-}
-
-fn use_external_ip_workaround(log: &Logger, xde_conf: &Path) {
-    const NEEDLE: &str = "ext_ip_hack = 0;";
-    const NEW_NEEDLE: &str = "ext_ip_hack = 1;";
-
-    // NOTE: This only works in the real sled agent, which is run as root. The
-    // file is not world-readable.
-    let contents = fs::read_to_string(xde_conf)
-        .expect("Failed to read xde configuration file");
-    let new = contents.replace(NEEDLE, NEW_NEEDLE);
-    if contents == new {
-        info!(
-            log,
-            "xde driver configuration file appears to already use external IP workaround";
-            "conf_file" => ?xde_conf,
-        );
-    } else {
-        info!(
-            log,
-            "updating xde driver configuration file for external IP workaround";
-            "conf_file" => ?xde_conf,
-        );
-        fs::write(xde_conf, &new)
-            .expect("Failed to modify xde configuration file");
-    }
-
-    // Ensure the driver picks up the updated configuration file, if it's been
-    // loaded previously without the workaround.
-    std::process::Command::new(crate::illumos::PFEXEC)
-        .args(&["update_drv", "xde"])
-        .output()
-        .expect("Failed to reload xde driver configuration file");
 }

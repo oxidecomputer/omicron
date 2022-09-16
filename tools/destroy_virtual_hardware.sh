@@ -79,11 +79,25 @@ function try_remove_vnic {
     success "Verified VNIC link $LINK does not exist"
 }
 
+function try_remove_simnet {
+    local LINK="$1"
+    if [[ "$(dladm show-simnet -p -o LINK "$LINK")" ]]; then
+        dladm delete-simnet -t "$LINK" || warn "Failed to delete simnet link $LINK"
+    fi
+    success "Verified simnet link $LINK does not exist"
+}
+
 function try_remove_vnics {
     try_remove_address "lo0/underlay"
-    VNIC_LINKS=("net0" "net1")
-    for LINK in "${VNIC_LINKS[@]}"; do
-        try_remove_interface "$LINK" && try_remove_vnic "$LINK"
+    try_remove_interface sc0_1
+    try_remove_interface net$I
+    try_remove_vnic sc0_1
+    INDICES=("0" "1")
+    for I in "${INDICES[@]}"; do
+        try_remove_simnet "net$I"
+        try_remove_simnet "sc${I}_0"
+        try_remove_simnet "sr0_$I"
+        try_remove_simnet "scr0_$I"
     done
 }
 

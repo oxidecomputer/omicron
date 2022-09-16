@@ -1171,7 +1171,7 @@ mod test {
     // associated VNICs.
     fn drop_service_manager(mgr: ServiceManager) {
         let halt_ctx = MockZones::halt_and_remove_logged_context();
-        halt_ctx.expect().returning(|_, name| {
+        halt_ctx.expect().returning(|_, name, _| {
             assert_eq!(name, EXPECTED_ZONE_NAME);
             Ok(())
         });

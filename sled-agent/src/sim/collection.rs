@@ -425,7 +425,7 @@ mod test {
         // that as a transition to "Running".
         let stopped_states = vec![
             InstanceStateRequested::Stopped,
-            InstanceStateRequested::Destroyed,
+            InstanceStateRequested::Destroyed(false),
         ];
         let mut rprev = r1;
         for state in stopped_states {
@@ -445,7 +445,7 @@ mod test {
                 InstanceStateRequested::Stopped => {
                     assert_eq!(rnext.run_state, InstanceState::Stopped);
                 }
-                InstanceStateRequested::Destroyed => {
+                InstanceStateRequested::Destroyed(_) => {
                     assert_eq!(rnext.run_state, InstanceState::Destroyed);
                 }
                 _ => panic!("Unexpected requested state: {}", state),
@@ -536,7 +536,7 @@ mod test {
         assert!(rx.try_next().is_err());
         let dropped = instance
             .transition(InstanceRuntimeStateRequested {
-                run_state: InstanceStateRequested::Destroyed,
+                run_state: InstanceStateRequested::Destroyed(false),
                 migration_params: None,
             })
             .unwrap();
@@ -610,7 +610,7 @@ mod test {
         // Interrupt the async transition with a new one.
         let dropped = instance
             .transition(InstanceRuntimeStateRequested {
-                run_state: InstanceStateRequested::Destroyed,
+                run_state: InstanceStateRequested::Destroyed(false),
                 migration_params: None,
             })
             .unwrap();

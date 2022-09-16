@@ -449,7 +449,7 @@ impl super::Nexus {
             InstanceState::Rebooting => true,
 
             InstanceState::Migrating => {
-                requested.run_state == InstanceStateRequested::Migrating
+                matches!(requested.run_state, InstanceStateRequested::Migrating)
             }
             InstanceState::Repairing => false,
             InstanceState::Failed => false,

@@ -262,7 +262,7 @@ impl SledAgent {
                 None,
                 |(zone, log)| async move {
                     warn!(log, "Deleting existing zone"; "zone_name" => zone.name());
-                    Zones::halt_and_remove_logged(&log, zone.name()).await
+                    Zones::halt_and_remove_logged(&log, zone.name(), false).await
                 }
             ).await?;
 

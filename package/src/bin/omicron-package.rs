@@ -424,7 +424,7 @@ async fn uninstall_all_omicron_zones() -> Result<()> {
     futures::stream::iter(zone::Zones::get().await?)
         .map(Ok::<_, anyhow::Error>)
         .try_for_each_concurrent(CONCURRENCY_CAP, |zone| async move {
-            zone::Zones::halt_and_remove(zone.name()).await?;
+            zone::Zones::halt_and_remove(zone.name(), false).await?;
             Ok(())
         })
         .await?;
@@ -578,7 +578,7 @@ async fn do_clean(
         artifact_dir.to_string_lossy()
     );
     const ARTIFACTS_TO_KEEP: &[&str] =
-        &["clickhouse", "cockroachdb", "xde", "console-assets", "downloads"];
+        &["clickhouse", "cockroachdb", "xde", "console-assets", "downloads", "softnpu"];
     remove_all_except(artifact_dir, ARTIFACTS_TO_KEEP, &config.log)?;
     info!(
         config.log,

@@ -24,7 +24,7 @@ pub enum Action {
     /// Invoke a reboot of the VM.
     Reboot,
     /// Terminate the VM and associated service.
-    Destroy,
+    Destroy(/*save*/ bool),
 }
 
 fn get_next_desired_state(
@@ -37,7 +37,7 @@ fn get_next_desired_state(
     match (requested, observed) {
         (Requested::Running, Observed::Running) => None,
         (Requested::Stopped, Observed::Stopped) => None,
-        (Requested::Destroyed, Observed::Destroyed) => None,
+        (Requested::Destroyed(_), Observed::Destroyed) => None,
 
         // Reboot requests.
         // - "Stopping" is an expected state on the way to rebooting.
@@ -126,7 +126,7 @@ impl InstanceStates {
         // Nexus), but if the instance reports that it has been destroyed,
         // we should clean it up.
         if matches!(observed, Observed::Destroyed) {
-            Some(Action::Destroy)
+            Some(Action::Destroy(false))
         } else {
             None
         }
@@ -147,7 +147,9 @@ impl InstanceStates {
             InstanceStateRequested::Migrating => {
                 self.request_migrating(target.migration_params)
             }
-            InstanceStateRequested::Destroyed => self.request_destroyed(),
+            InstanceStateRequested::Destroyed(save) => {
+                self.request_destroyed(save)
+            }
         }
     }
 
@@ -335,14 +337,17 @@ impl InstanceStates {
         }
     }
 
-    fn request_destroyed(&mut self) -> Result<Option<Action>, Error> {
+    fn request_destroyed(
+        &mut self,
+        save: bool,
+    ) -> Result<Option<Action>, Error> {
         if self.current.run_state.is_stopped() {
             self.transition(InstanceState::Destroyed, None);
-            return Ok(Some(Action::Destroy));
+            return Ok(Some(Action::Destroy(save)));
         } else {
             self.transition(
                 InstanceState::Stopping,
-                Some(InstanceStateRequested::Destroyed),
+                Some(InstanceStateRequested::Destroyed(save)),
             );
             return Ok(Some(Action::Stop));
         }
@@ -529,15 +534,23 @@ mod test {
         assert_eq!(
             Action::Stop,
             instance
-                .request_transition(&runtime_state(Requested::Destroyed))
+                .request_transition(&runtime_state(Requested::Destroyed(false)))
                 .unwrap()
                 .unwrap()
         );
-        verify_state(&instance, State::Stopping, Some(Requested::Destroyed));
+        verify_state(
+            &instance,
+            State::Stopping,
+            Some(Requested::Destroyed(false)),
+        );
         assert_eq!(None, instance.observe_transition(&Observed::Stopped));
-        verify_state(&instance, State::Stopped, Some(Requested::Destroyed));
+        verify_state(
+            &instance,
+            State::Stopped,
+            Some(Requested::Destroyed(false)),
+        );
         assert_eq!(
-            Action::Destroy,
+            Action::Destroy(false),
             instance.observe_transition(&Observed::Destroyed).unwrap()
         );
         verify_state(&instance, State::Stopped, None);
@@ -548,9 +561,9 @@ mod test {
         let mut instance = make_instance();
         assert_eq!(None, instance.observe_transition(&Observed::Stopped));
         assert_eq!(
-            Action::Destroy,
+            Action::Destroy(false),
             instance
-                .request_transition(&runtime_state(Requested::Destroyed))
+                .request_transition(&runtime_state(Requested::Destroyed(false)))
                 .unwrap()
                 .unwrap()
         );

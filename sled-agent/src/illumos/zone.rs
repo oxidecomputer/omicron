@@ -142,6 +142,7 @@ impl Zones {
     /// zone did not exist.
     pub async fn halt_and_remove(
         name: &str,
+        to_morgue: bool,
     ) -> Result<Option<zone::State>, AdmError> {
         match Self::find(name).await? {
             None => Ok(None),
@@ -167,10 +168,29 @@ impl Zones {
                     })?;
                 }
                 if uninstall {
-                    zone::Adm::new(name)
-                        .uninstall(/* force= */ true)
-                        .await
+                    if to_morgue {
+                        let target = format!("/var/morgue/{}", name);
+                        std::fs::create_dir_all(&target).map_err(|err| {
+                            AdmError {
+                                op: Operation::Uninstall,
+                                zone: name.to_string(),
+                                err: zone::ZoneError::Command(err),
+                            }
+                        })?;
+                        crate::illumos::execute(
+                            std::process::Command::new("cp")
+                                .arg("-r")
+                                .arg(format!("/zone/{}/root/var/svc/log", name))
+                                .arg(target),
+                        )
                         .map_err(|err| AdmError {
+                            op: Operation::Uninstall,
+                            zone: name.to_string(),
+                            err: zone::ZoneError::Parse(err.to_string()),
+                        })?;
+                    }
+                    zone::Adm::new(name).uninstall(/* force= */ true).await.map_err(
+                        |err| AdmError {
                             op: Operation::Uninstall,
                             zone: name.to_string(),
                             err,
@@ -194,8 +214,9 @@ impl Zones {
     pub async fn halt_and_remove_logged(
         log: &Logger,
         name: &str,
+        save_fs: bool,
     ) -> Result<(), AdmError> {
-        if let Some(state) = Self::halt_and_remove(name).await? {
+        if let Some(state) = Self::halt_and_remove(name, save_fs).await? {
             info!(
                 log,
                 "halt_and_remove_logged: Previous zone state: {:?}", state
@@ -232,7 +253,7 @@ impl Zones {
                     "Invalid state; uninstalling and deleting zone {}",
                     zone_name
                 );
-                Zones::halt_and_remove_logged(log, zone.name()).await?;
+                Zones::halt_and_remove_logged(log, zone.name(), false).await?;
             }
         }
 

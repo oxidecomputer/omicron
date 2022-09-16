@@ -68,7 +68,7 @@ impl Simulatable for SimInstance {
                 InstanceStateRequested::Stopped => {
                     PropolisInstanceState::Stopped
                 }
-                InstanceStateRequested::Destroyed => {
+                InstanceStateRequested::Destroyed(_) => {
                     PropolisInstanceState::Destroyed
                 }
                 _ => panic!("Unexpected desired state: {}", desired.run_state),

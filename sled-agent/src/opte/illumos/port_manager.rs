@@ -6,7 +6,6 @@
 
 use crate::illumos::dladm::Dladm;
 use crate::illumos::dladm::PhysicalLink;
-use crate::illumos::dladm::VnicSource;
 use crate::opte::default_boundary_services;
 use crate::opte::opte_firewall_rules;
 use crate::opte::Error;
@@ -41,7 +40,6 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::sync::MutexGuard;
 use uuid::Uuid;
 
 // Prefix used to identify xde data links.
@@ -53,14 +51,6 @@ struct PortManagerInner {
 
     // Sequential identifier for each port on the system.
     next_port_id: AtomicU64,
-
-    // TODO-remove: This is part of the external IP address workaround
-    //
-    // See https://github.com/oxidecomputer/omicron/issues/1335
-    //
-    // We only need to know this while we're setting the secondary MACs of the
-    // link to support OPTE's proxy ARP for the guest's IP.
-    data_link: PhysicalLink,
 
     // TODO-remove: This is part of the external IP address workaround.
     //
@@ -85,56 +75,6 @@ impl PortManagerInner {
             self.next_port_id.fetch_add(1, Ordering::SeqCst)
         )
     }
-
-    // TODO-remove
-    //
-    // See https://github.com/oxidecomputer/omicron/issues/1335
-    //
-    // This is part of the workaround to get external connectivity into
-    // instances, without setting up all of boundary services. Rather than
-    // encap/decap the guest traffic, OPTE just performs 1-1 NAT between the
-    // private IP address of the guest and the external address provided by
-    // the control plane. This call here allows the underlay nic, `net0` to
-    // advertise as having the guest's MAC address.
-    fn update_secondary_macs(
-        &self,
-        ports: &mut MutexGuard<'_, BTreeMap<(Uuid, String), Port>>,
-    ) -> Result<(), Error> {
-        let secondary_macs = ports
-            .values()
-            .filter_map(|port| {
-                // Only advertise Ports with a publicly-visible external IP
-                // address, on the primary interface for this instance.
-                if port.external_ips().is_some() {
-                    Some(port.mac().to_string())
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<_>>()
-            .join(",");
-        if secondary_macs.is_empty() {
-            Dladm::reset_linkprop(self.data_link.name(), "secondary-macs")?;
-            debug!(
-                self.log,
-                "Reset data link secondary MACs link prop for OPTE proxy ARP";
-                "link_name" => self.data_link.name(),
-            );
-        } else {
-            Dladm::set_linkprop(
-                self.data_link.name(),
-                "secondary-macs",
-                &secondary_macs,
-            )?;
-            debug!(
-                self.log,
-                "Updated data link secondary MACs link prop for OPTE proxy ARP";
-                "data_link" => &self.data_link.0,
-                "secondary_macs" => ?secondary_macs,
-            );
-        }
-        Ok(())
-    }
 }
 
 /// The port manager controls all OPTE ports on a single host.
@@ -151,15 +91,9 @@ impl PortManager {
         underlay_ip: Ipv6Addr,
         gateway_mac: MacAddr6,
     ) -> Self {
-        let data_link = crate::common::underlay::find_chelsio_links()
-            .unwrap()
-            .into_iter()
-            .next()
-            .unwrap();
         let inner = Arc::new(PortManagerInner {
             log,
             next_port_id: AtomicU64::new(0),
-            data_link,
             gateway_mac,
             underlay_ip,
             ports: Mutex::new(BTreeMap::new()),
@@ -361,41 +295,38 @@ impl PortManager {
             vnic_name
         };
 
-        let ticket =
-            PortTicket::new(instance_id, port_name.clone(), self.inner.clone());
-        let port = Port::new(
-            port_name.clone(),
-            nic.ip,
-            subnet,
-            mac,
-            nic.slot,
-            vni,
-            self.inner.underlay_ip,
-            source_nat,
-            external_ips,
-            gateway,
-            boundary_services,
-            vnic,
-        );
-
-        // Update the secondary MAC of the underlay.
-        //
-        // TODO-remove: This is part of the external IP hack.
-        //
-        // Acquire the lock _after_ the ticket exists. If the
-        // `update_secondary_mac` call below fails, we'll propagate the
-        // error with `?`. We need the lock guard to be dropped first, so that
-        // the lock acquired when `ticket` is dropped is guaranteed to be free.
-        let mut ports = self.inner.ports.lock().unwrap();
-        let old = ports.insert((instance_id, port_name.clone()), port.clone());
-        assert!(
-            old.is_none(),
-            "Duplicate OPTE port detected: instance_id = {}, port_name = {}",
-            instance_id,
-            &port_name,
-        );
-        self.inner.update_secondary_macs(&mut ports)?;
-        drop(ports);
+        let (port, ticket) = {
+            let mut ports = self.inner.ports.lock().unwrap();
+            let ticket = PortTicket::new(
+                instance_id,
+                port_name.clone(),
+                self.inner.clone(),
+            );
+            let port = Port::new(
+                port_name.clone(),
+                nic.ip,
+                subnet,
+                mac,
+                nic.slot,
+                vni,
+                self.inner.underlay_ip,
+                source_nat,
+                external_ips,
+                gateway,
+                boundary_services,
+                vnic,
+            );
+            let old =
+                ports.insert((instance_id, port_name.clone()), port.clone());
+            assert!(
+                old.is_none(),
+                "Duplicate OPTE port detected: instance_id = {}, port_name = {}",
+                instance_id,
+                &port_name,
+            );
+            //self.inner.update_secondary_macs(&mut ports)?;
+            (port, ticket)
+        };
 
         // Add a router entry for this interface's subnet, directing traffic to the
         // VPC subnet.
@@ -523,6 +454,7 @@ impl PortTicket {
                 "instance_id" => ?self.id,
                 "port_name" => &self.port_name,
             );
+            /*
             if let Err(e) = manager.update_secondary_macs(&mut ports) {
                 warn!(
                     manager.log,
@@ -535,6 +467,8 @@ impl PortTicket {
             } else {
                 return Ok(());
             }
+            */
+            return Ok(());
         }
         Ok(())
     }

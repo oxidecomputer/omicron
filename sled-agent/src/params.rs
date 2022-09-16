@@ -140,7 +140,7 @@ pub struct InstanceMigrateParams {
     Serialize,
     JsonSchema,
 )]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "lowercase", tag = "type", content = "value")]
 pub enum InstanceStateRequested {
     /// Start the instance if it is not already running.
     Running,
@@ -152,7 +152,7 @@ pub enum InstanceStateRequested {
     /// Migrate the instance to another node.
     Migrating,
     /// Stop the instance and delete it.
-    Destroyed,
+    Destroyed(/*save*/ bool),
 }
 
 impl Display for InstanceStateRequested {
@@ -168,7 +168,10 @@ impl InstanceStateRequested {
             InstanceStateRequested::Stopped => "stopped",
             InstanceStateRequested::Reboot => "reboot",
             InstanceStateRequested::Migrating => "migrating",
-            InstanceStateRequested::Destroyed => "destroyed",
+            InstanceStateRequested::Destroyed(true) => "destroyed(save: true)",
+            InstanceStateRequested::Destroyed(false) => {
+                "destroyed(save: false)"
+            }
         }
     }
 
@@ -179,7 +182,7 @@ impl InstanceStateRequested {
             InstanceStateRequested::Stopped => true,
             InstanceStateRequested::Reboot => false,
             InstanceStateRequested::Migrating => false,
-            InstanceStateRequested::Destroyed => true,
+            InstanceStateRequested::Destroyed(_) => true,
         }
     }
 }
