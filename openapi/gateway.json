@@ -604,7 +604,7 @@
     "/sp/{type}/{slot}/component/{component}/update-abort": {
       "post": {
         "summary": "Abort any in-progress update an SP component",
-        "description": "Aborting an update to the SP itself is done via the component name `sp`.\nIf this returns successfully, it does not mean an update was actually aborted; it only means no update is currently in progress.",
+        "description": "Aborting an update to the SP itself is done via the component name `sp`.\nOn a successful return, the update corresponding to the given UUID will no longer be in progress (either aborted or applied).",
         "operationId": "sp_component_update_abort",
         "parameters": [
           {

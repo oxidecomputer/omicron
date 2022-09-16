@@ -610,8 +610,8 @@ async fn sp_component_update_status(
 ///
 /// Aborting an update to the SP itself is done via the component name `sp`.
 ///
-/// If this returns successfully, it does not mean an update was actually
-/// aborted; it only means no update is currently in progress.
+/// On a successful return, the update corresponding to the given UUID will no
+/// longer be in progress (either aborted or applied).
 #[endpoint {
     method = POST,
     path = "/sp/{type}/{slot}/component/{component}/update-abort",
