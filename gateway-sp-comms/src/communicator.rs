@@ -211,7 +211,7 @@ impl Communicator {
 
     /// Start sending an update payload to the given SP.
     ///
-    /// This function will return before the update is compelte! Once the SP
+    /// This function will return before the update is complete! Once the SP
     /// acknowledges that we want to apply an update, we spawn a background task
     /// to stream the update to the SP and then return. Poll the status of the
     /// update via [`Self::update_status()`].
