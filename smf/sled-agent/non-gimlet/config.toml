@@ -31,7 +31,7 @@ zpools = [
 #
 # If empty, this will be equivalent to the first result from:
 # $ dladm show-phys -p -o LINK
-# data_link = "igb0"
+data_link = "igb0"
 
 [log]
 level = "info"

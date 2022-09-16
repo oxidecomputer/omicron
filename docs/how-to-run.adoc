@@ -22,7 +22,8 @@ Any additional prerequisite software may be installed with the following script:
 
 [source,text]
 ----
-$ ./tools/install_prerequisites.sh
+$ source tools/setup_path.sh
+$ pfexec ./tools/install_prerequisites.sh
 ----
 
 This script expects that you are both attempting to compile code and execute
@@ -42,16 +43,26 @@ $ ./tools/install_runner_prerequisites.sh
 The sled agent expects to manage a real Gimlet. However, until those are built,
 developers generally make do with something else, usually a commodity machine.
 To make your machine "look" like a Gimlet, the
-`./tools/create_virtual_hardware.sh` script can be used. This creates a few
+`pfexec ./tools/create_virtual_hardware.sh` script can be used. This creates a few
 file-based ZFS vdevs and ZFS zpools on top of those, and a couple of VNICs. The
 vdevs model the actual U.2s that will be in a Gimlet, and the VNICs model the
 two Chelsio NIC ports.
 
-You can clean up these resources with `./tools/destroy_virtual_hardware.sh`.
+You can clean up these resources with `pfexec ./tools/destroy_virtual_hardware.sh`.
 This script requires Omicron be uninstalled, e.g., with `pfexec
 ./target/release/omicron-package uninstall`, and a warning will be printed if
 that is not the case. The script will then remove the file-based vdevs and the
 VNICs created by `create_virtual_hardware.sh`.
+
+=== Set up a scrimlet/sidecar device.
+
+To access the outside world or other gimlets, we'll need to set up a sidecar
+device for those network paths.
+
+----
+./tools/install_scrimlet_machinery.sh
+./tools/launch_scrimlet.sh
+----
 
 === Make me a certificate!
 
