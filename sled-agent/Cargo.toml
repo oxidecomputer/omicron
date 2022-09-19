@@ -6,7 +6,7 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
-anyhow = "1.0.64"
+anyhow = "1.0.65"
 async-trait = "0.1.53"
 bincode = "1.3.3"
 bytes = "1.2"
