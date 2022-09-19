@@ -256,6 +256,27 @@ impl Communicator {
         Ok(sp.update_abort(component, update_id).await?)
     }
 
+    /// Get the current (SP-controlled) power state.
+    pub async fn power_state(
+        &self,
+        sp: SpIdentifier,
+    ) -> Result<PowerState, Error> {
+        let port = self.id_to_port(sp)?;
+        let sp = self.switch.sp(port).ok_or(Error::SpAddressUnknown(sp))?;
+        Ok(sp.power_state().await?)
+    }
+
+    /// Set the current (SP-controlled) power state.
+    pub async fn set_power_state(
+        &self,
+        sp: SpIdentifier,
+        power_state: PowerState,
+    ) -> Result<(), Error> {
+        let port = self.id_to_port(sp)?;
+        let sp = self.switch.sp(port).ok_or(Error::SpAddressUnknown(sp))?;
+        Ok(sp.set_power_state(power_state).await?)
+    }
+
     /// Reset a given SP.
     pub async fn reset(&self, sp: SpIdentifier) -> Result<(), Error> {
         let port = self.id_to_port(sp)?;

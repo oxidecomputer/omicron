@@ -15,6 +15,7 @@ use gateway_messages::version;
 use gateway_messages::BulkIgnitionState;
 use gateway_messages::IgnitionCommand;
 use gateway_messages::IgnitionState;
+use gateway_messages::PowerState;
 use gateway_messages::Request;
 use gateway_messages::RequestKind;
 use gateway_messages::ResponseError;
@@ -294,6 +295,24 @@ impl SingleSp {
             .and_then(|(_peer, response)| {
                 response.expect_update_abort_ack().map_err(Into::into)
             })
+    }
+
+    /// Get the current power state.
+    pub async fn power_state(&self) -> Result<PowerState> {
+        self.rpc(RequestKind::GetPowerState).await.and_then(
+            |(_peer, response)| {
+                response.expect_power_state().map_err(Into::into)
+            },
+        )
+    }
+
+    /// Set the current power state.
+    pub async fn set_power_state(&self, power_state: PowerState) -> Result<()> {
+        self.rpc(RequestKind::SetPowerState(power_state)).await.and_then(
+            |(_peer, response)| {
+                response.expect_set_power_state_ack().map_err(Into::into)
+            },
+        )
     }
 
     /// Instruct the SP that a reset trigger will be coming.

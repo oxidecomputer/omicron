@@ -793,10 +793,19 @@ async fn ignition_power_off(
     path = "/sp/{type}/{slot}/power-state",
 }]
 async fn sp_power_state_get(
-    _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    _path: Path<PathSp>,
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path: Path<PathSp>,
 ) -> Result<HttpResponseOk<PowerState>, HttpError> {
-    todo!()
+    let apictx = rqctx.context();
+    let sp = path.into_inner().sp;
+
+    let power_state = apictx
+        .sp_comms
+        .power_state(sp.into())
+        .await
+        .map_err(http_err_from_comms_err)?;
+
+    Ok(HttpResponseOk(power_state.into()))
 }
 
 /// Set the current power state of a sled via its SP.
@@ -808,13 +817,22 @@ async fn sp_power_state_get(
     path = "/sp/{type}/{slot}/power-state",
 }]
 async fn sp_power_state_set(
-    _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    _path: Path<PathSp>,
-    _body: TypedBody<PowerState>,
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path: Path<PathSp>,
+    body: TypedBody<PowerState>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    todo!()
-}
+    let apictx = rqctx.context();
+    let sp = path.into_inner().sp;
+    let power_state = body.into_inner();
 
+    apictx
+        .sp_comms
+        .set_power_state(sp.into(), power_state.into())
+        .await
+        .map_err(http_err_from_comms_err)?;
+
+    Ok(HttpResponseUpdatedNoContent {})
+}
 
 // TODO
 // The gateway service will get asynchronous notifications both from directly
