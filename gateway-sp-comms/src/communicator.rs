@@ -21,6 +21,7 @@ use gateway_messages::BulkIgnitionState;
 use gateway_messages::DiscoverResponse;
 use gateway_messages::IgnitionCommand;
 use gateway_messages::IgnitionState;
+use gateway_messages::PowerState;
 use gateway_messages::ResponseKind;
 use gateway_messages::SpComponent;
 use gateway_messages::SpState;
@@ -340,6 +341,10 @@ pub(crate) trait ResponseKindExt {
 
     fn expect_update_abort_ack(self) -> Result<(), BadResponseType>;
 
+    fn expect_power_state(self) -> Result<PowerState, BadResponseType>;
+
+    fn expect_set_power_state_ack(self) -> Result<(), BadResponseType>;
+
     fn expect_sys_reset_prepare_ack(self) -> Result<(), BadResponseType>;
 }
 
@@ -375,6 +380,10 @@ impl ResponseKindExt for ResponseKind {
             }
             ResponseKind::UpdateChunkAck => {
                 response_kind_names::UPDATE_CHUNK_ACK
+            }
+            ResponseKind::PowerState(_) => response_kind_names::POWER_STATE,
+            ResponseKind::SetPowerStateAck => {
+                response_kind_names::SET_POWER_STATE_ACK
             }
             ResponseKind::ResetPrepareAck => {
                 response_kind_names::RESET_PREPARE_ACK
@@ -506,6 +515,26 @@ impl ResponseKindExt for ResponseKind {
         }
     }
 
+    fn expect_power_state(self) -> Result<PowerState, BadResponseType> {
+        match self {
+            ResponseKind::PowerState(power_state) => Ok(power_state),
+            other => Err(BadResponseType {
+                expected: response_kind_names::POWER_STATE,
+                got: other.name(),
+            }),
+        }
+    }
+
+    fn expect_set_power_state_ack(self) -> Result<(), BadResponseType> {
+        match self {
+            ResponseKind::SetPowerStateAck => Ok(()),
+            other => Err(BadResponseType {
+                expected: response_kind_names::SET_POWER_STATE_ACK,
+                got: other.name(),
+            }),
+        }
+    }
+
     fn expect_sys_reset_prepare_ack(self) -> Result<(), BadResponseType> {
         match self {
             ResponseKind::ResetPrepareAck => Ok(()),
@@ -533,5 +562,7 @@ mod response_kind_names {
     pub(super) const UPDATE_STATUS: &str = "update_status";
     pub(super) const UPDATE_ABORT_ACK: &str = "update_abort_ack";
     pub(super) const UPDATE_CHUNK_ACK: &str = "update_chunk_ack";
+    pub(super) const POWER_STATE: &str = "power_state";
+    pub(super) const SET_POWER_STATE_ACK: &str = "set_power_state_ack";
     pub(super) const RESET_PREPARE_ACK: &str = "reset_prepare_ack";
 }

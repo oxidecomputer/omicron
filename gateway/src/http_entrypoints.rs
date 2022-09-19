@@ -205,6 +205,27 @@ pub struct SpIdentifier {
     pub slot: u32,
 }
 
+/// See RFD 81.
+///
+/// This enum only lists power states the SP is able to control; higher power
+/// states are controlled by ignition.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+)]
+enum PowerState {
+    A0,
+    A2,
+}
+
 // We can't use the default `Deserialize` derivation for `SpIdentifier::slot`
 // because it's embedded in other structs via `serde(flatten)`, which does not
 // play well with the way dropshot parses HTTP queries/paths. serde ends up
@@ -717,7 +738,9 @@ async fn ignition_get(
     Ok(HttpResponseOk(info))
 }
 
-/// Power on a sled via Ignition
+/// Power on a sled via a request to its SP.
+///
+/// This corresponds to moving the sled into A2.
 #[endpoint {
     method = POST,
     path = "/ignition/{type}/{slot}/power-on",
@@ -739,6 +762,8 @@ async fn ignition_power_on(
 }
 
 /// Power off a sled via Ignition
+///
+/// This corresponds to moving the sled into A3.
 #[endpoint {
     method = POST,
     path = "/ignition/{type}/{slot}/power-off",
@@ -758,6 +783,38 @@ async fn ignition_power_off(
 
     Ok(HttpResponseUpdatedNoContent {})
 }
+
+/// Get the current power state of a sled via its SP.
+///
+/// Note that if the sled is in A3, the SP is powered off and will not be able
+/// to respond; use the ignition control endpoints for those cases.
+#[endpoint {
+    method = GET,
+    path = "/sp/{type}/{slot}/power-state",
+}]
+async fn sp_power_state_get(
+    _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    _path: Path<PathSp>,
+) -> Result<HttpResponseOk<PowerState>, HttpError> {
+    todo!()
+}
+
+/// Set the current power state of a sled via its SP.
+///
+/// Note that if the sled is in A3, the SP is powered off and will not be able
+/// to respond; use the ignition control endpoints for those cases.
+#[endpoint {
+    method = POST,
+    path = "/sp/{type}/{slot}/power-state",
+}]
+async fn sp_power_state_set(
+    _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    _path: Path<PathSp>,
+    _body: TypedBody<PowerState>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    todo!()
+}
+
 
 // TODO
 // The gateway service will get asynchronous notifications both from directly
@@ -780,6 +837,8 @@ pub fn api() -> GatewayApiDescription {
         api.register(sp_list)?;
         api.register(sp_get)?;
         api.register(sp_reset)?;
+        api.register(sp_power_state_get)?;
+        api.register(sp_power_state_set)?;
         api.register(sp_component_list)?;
         api.register(sp_component_get)?;
         api.register(sp_component_serial_console_attach)?;

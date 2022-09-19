@@ -89,6 +89,7 @@
     "/ignition/{type}/{slot}/power-off": {
       "post": {
         "summary": "Power off a sled via Ignition",
+        "description": "This corresponds to moving the sled into A3.",
         "operationId": "ignition_power_off",
         "parameters": [
           {
@@ -127,7 +128,8 @@
     },
     "/ignition/{type}/{slot}/power-on": {
       "post": {
-        "summary": "Power on a sled via Ignition",
+        "summary": "Power on a sled via a request to its SP.",
+        "description": "This corresponds to moving the sled into A2.",
         "operationId": "ignition_power_on",
         "parameters": [
           {
@@ -796,6 +798,101 @@
         }
       }
     },
+    "/sp/{type}/{slot}/power-state": {
+      "get": {
+        "summary": "Get the current power state of a sled via its SP.",
+        "description": "Note that if the sled is in A3, the SP is powered off and will not be able to respond; use the ignition control endpoints for those cases.",
+        "operationId": "sp_power_state_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PowerState"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Set the current power state of a sled via its SP.",
+        "description": "Note that if the sled is in A3, the SP is powered off and will not be able to respond; use the ignition control endpoints for those cases.",
+        "operationId": "sp_power_state_set",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PowerState"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/sp/{type}/{slot}/reset": {
       "post": {
         "summary": "Reset an SP",
@@ -867,6 +964,14 @@
         "required": [
           "message",
           "request_id"
+        ]
+      },
+      "PowerState": {
+        "description": "See RFD 81.\n\nThis enum only lists power states the SP is able to control; higher power states are controlled by ignition.",
+        "type": "string",
+        "enum": [
+          "A0",
+          "A2"
         ]
       },
       "SpComponentInfo": {

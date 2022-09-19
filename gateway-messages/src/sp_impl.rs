@@ -9,6 +9,7 @@ use crate::BulkIgnitionState;
 use crate::DiscoverResponse;
 use crate::IgnitionCommand;
 use crate::IgnitionState;
+use crate::PowerState;
 use crate::Request;
 use crate::RequestKind;
 use crate::ResponseError;
@@ -97,6 +98,19 @@ pub trait SpHandler {
         port: SpPort,
         component: SpComponent,
         id: UpdateId,
+    ) -> Result<(), ResponseError>;
+
+    fn power_state(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+    ) -> Result<PowerState, ResponseError>;
+
+    fn set_power_state(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+        power_state: PowerState,
     ) -> Result<(), ResponseError>;
 
     fn serial_console_attach(
@@ -251,6 +265,12 @@ pub fn handle_message<H: SpHandler>(
         RequestKind::SerialConsoleDetach => handler
             .serial_console_detach(sender, port)
             .map(|()| ResponseKind::SerialConsoleDetachAck),
+        RequestKind::GetPowerState => {
+            handler.power_state(sender, port).map(ResponseKind::PowerState)
+        }
+        RequestKind::SetPowerState(power_state) => handler
+            .set_power_state(sender, port, power_state)
+            .map(|()| ResponseKind::SetPowerStateAck),
         RequestKind::ResetPrepare => handler
             .reset_prepare(sender, port)
             .map(|()| ResponseKind::ResetPrepareAck),

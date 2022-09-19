@@ -71,6 +71,8 @@ pub enum RequestKind {
         component: SpComponent,
         id: UpdateId,
     },
+    GetPowerState,
+    SetPowerState(PowerState),
     ResetPrepare,
     ResetTrigger,
 }
@@ -118,6 +120,18 @@ pub enum UpdateStatus {
     Aborted(UpdateId),
 }
 
+/// See RFD 81.
+///
+/// This enum only lists power states the SP is able to control; higher power
+/// states are controlled by ignition.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, SerializedSize,
+)]
+pub enum PowerState {
+    A0,
+    A2,
+}
+
 /// Current state when the SP is preparing to apply an update.
 #[derive(Debug, Clone, Copy, SerializedSize, Serialize, Deserialize)]
 pub struct UpdatePreparationStatus {
@@ -158,6 +172,8 @@ pub enum ResponseKind {
     SerialConsoleAttachAck,
     SerialConsoleWriteAck { furthest_ingested_offset: u64 },
     SerialConsoleDetachAck,
+    PowerState(PowerState),
+    SetPowerStateAck,
     ResetPrepareAck,
     // There is intentionally no `ResetTriggerAck` response; the expected
     // "resposne" to `ResetTrigger` is an SP reset, which won't allow for
