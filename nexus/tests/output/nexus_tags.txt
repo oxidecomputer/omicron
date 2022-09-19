@@ -55,21 +55,6 @@ instance_stop                            /organizations/{organization_name}/proj
 instance_view                            /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}
 instance_view_by_id                      /by-id/instances/{id}
 
-API operations found with tag "ip-pools"
-OPERATION ID                             URL PATH
-ip_pool_create                           /ip-pools
-ip_pool_delete                           /ip-pools/{pool_name}
-ip_pool_list                             /ip-pools
-ip_pool_range_add                        /ip-pools/{pool_name}/ranges/add
-ip_pool_range_list                       /ip-pools/{pool_name}/ranges
-ip_pool_range_remove                     /ip-pools/{pool_name}/ranges/remove
-ip_pool_service_range_add                /ip-pools-service/{rack_id}/ranges/add
-ip_pool_service_range_list               /ip-pools-service/{rack_id}/ranges
-ip_pool_service_range_remove             /ip-pools-service/{rack_id}/ranges/remove
-ip_pool_service_view                     /ip-pools-service/{rack_id}
-ip_pool_update                           /ip-pools/{pool_name}
-ip_pool_view                             /ip-pools/{pool_name}
-
 API operations found with tag "login"
 OPERATION ID                             URL PATH
 consume_credentials                      /login/{silo_name}/{provider_name}
@@ -143,6 +128,19 @@ snapshot_view_by_id                      /by-id/snapshots/{id}
 
 API operations found with tag "system"
 OPERATION ID                             URL PATH
+ip_pool_create                           /system/ip-pools
+ip_pool_delete                           /system/ip-pools/{pool_name}
+ip_pool_list                             /system/ip-pools
+ip_pool_range_add                        /system/ip-pools/{pool_name}/ranges/add
+ip_pool_range_list                       /system/ip-pools/{pool_name}/ranges
+ip_pool_range_remove                     /system/ip-pools/{pool_name}/ranges/remove
+ip_pool_service_range_add                /system/ip-pools-service/{rack_id}/ranges/add
+ip_pool_service_range_list               /system/ip-pools-service/{rack_id}/ranges
+ip_pool_service_range_remove             /system/ip-pools-service/{rack_id}/ranges/remove
+ip_pool_service_view                     /system/ip-pools-service/{rack_id}
+ip_pool_update                           /system/ip-pools/{pool_name}
+ip_pool_view                             /system/ip-pools/{pool_name}
+ip_pool_view_by_id                       /system/by-id/ip-pools/{id}
 rack_list                                /system/hardware/racks
 rack_view                                /system/hardware/racks/{rack_id}
 saga_list                                /system/sagas
