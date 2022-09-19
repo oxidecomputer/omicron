@@ -6,11 +6,16 @@
 
 use crate::db::model::Service;
 use crate::db::model::ServiceKind;
-use crate::db::model::Sled;
 use crate::db::pool::DbConnection;
 use crate::db::schema;
 use chrono::DateTime;
 use chrono::Utc;
+use diesel::Column;
+use diesel::ExpressionMethods;
+use diesel::IntoSql;
+use diesel::Insertable;
+use diesel::JoinOnDsl;
+use diesel::NullableExpressionMethods;
 use diesel::pg::Pg;
 use diesel::query_builder::AstPass;
 use diesel::query_builder::AsQuery;
@@ -18,42 +23,13 @@ use diesel::query_builder::Query;
 use diesel::query_builder::QueryFragment;
 use diesel::query_builder::QueryId;
 use diesel::sql_types;
-use diesel::ExpressionMethods;
 use diesel::QueryDsl;
 use diesel::RunQueryDsl;
-
-type FromClause<T> =
-    diesel::internal::table_macro::StaticQueryFragmentInstance<T>;
-type ServiceFromClause = FromClause<schema::service::table>;
-const SERVICE_FROM_CLAUSE: ServiceFromClause = ServiceFromClause::new();
 
 trait CteQuery<ST>: Query<SqlType = ST> + QueryFragment<Pg> {}
 
 impl<T, ST> CteQuery<ST> for T
-where
-    T: Query<SqlType = ST> + QueryFragment<Pg>
-{}
-
-/*
-trait CteQueryClone<ST> {
-    fn clone_box(&self) -> Box<dyn CteQuery<SqlType = ST>>;
-}
-
-impl<T, ST> CteQueryClone<ST> for T
-where
-    T: 'static + CteQuery<SqlType = ST> + Clone,
-{
-    fn clone_box(&self) -> Box<dyn CteQuery<SqlType = ST>> {
-        Box::new(self.clone())
-    }
-}
-
-impl<ST> Clone for Box<dyn CteQuery<SqlType = ST>> {
-    fn clone(&self) -> Box<dyn CteQuery<SqlType = ST>> {
-        self.clone_box()
-    }
-}
-*/
+where T: Query<SqlType = ST> + QueryFragment<Pg> {}
 
 /// Represents a sub-query within a CTE.
 ///
@@ -158,23 +134,17 @@ impl QueryFragment<Pg> for Cte {
     }
 }
 
-trait SameType {}
-impl<T> SameType for (T, T) {}
-fn same_type<A, B>() where (A, B): SameType {}
-
 // ----------------------------- //
 // Above should be for a generic CTE builder
 // Below should be for service provisioning
 // ----------------------------- //
 
 // TODO: I want this to be as lightweight to make as possible!
-struct SledAllocationPoolSubquery {
-    // TODO: How do we bridge the gap of this CteQuery type to the
-    // table?
-    query: Box<dyn CteQuery<(sql_types::Uuid,)>>,
+struct SledAllocationPool {
+    query: Box<dyn CteQuery<sled_allocation_pool::SqlType>>,
 }
 
-impl SledAllocationPoolSubquery {
+impl SledAllocationPool {
     fn new() -> Self {
         use crate::db::schema::sled::dsl;
         Self {
@@ -188,26 +158,22 @@ impl SledAllocationPoolSubquery {
     }
 }
 
-impl AsTable for SledAllocationPoolSubquery {
+impl AsTable for SledAllocationPool {
     type Table = sled_allocation_pool::dsl::sled_allocation_pool;
     fn as_table(&self) -> Self::Table {
         use diesel::internal::table_macro::StaticQueryFragment;
-
-        // TODO: This should either be auto-generated, or checked more
-        // uniformally.
-        same_type::<(sql_types::Uuid,), sled_allocation_pool::SqlType>();
 
         // TODO: Converting this to a compile-time check would be nicer.
         //
         // TODO: Even better, don't have "name()" at all... force the alias
         // to be the intermediate "table" name.
-        assert_eq!(self.name(), sled_allocation_pool::dsl::sled_allocation_pool::STATIC_COMPONENT.0);
+        assert_eq!(self.name(), Self::Table::STATIC_COMPONENT.0);
 
         sled_allocation_pool::dsl::sled_allocation_pool
     }
 }
 
-impl SubQuery for SledAllocationPoolSubquery {
+impl SubQuery for SledAllocationPool {
     fn name(&self) -> &'static str {
         "sled_allocation_pool"
     }
@@ -235,11 +201,11 @@ diesel::table! {
 // - What can be made generic?
 
 struct PreviouslyAllocatedServices {
-    query: Box<dyn CteQuery<crate::db::schema::service::SqlType>>,
+    query: Box<dyn CteQuery<previously_allocated_services::SqlType>>,
 }
 
 impl PreviouslyAllocatedServices {
-    fn new(allocation_pool: &SledAllocationPoolSubquery) -> Self {
+    fn new(allocation_pool: &SledAllocationPool) -> Self {
         use crate::db::schema::service::dsl as service_dsl;
         use sled_allocation_pool::dsl as alloc_pool_dsl;
 
@@ -258,7 +224,7 @@ impl AsTable for PreviouslyAllocatedServices {
     type Table = previously_allocated_services::dsl::previously_allocated_services;
     fn as_table(&self) -> Self::Table {
         use diesel::internal::table_macro::StaticQueryFragment;
-        assert_eq!(self.name(), previously_allocated_services::dsl::previously_allocated_services::STATIC_COMPONENT.0);
+        assert_eq!(self.name(), Self::Table::STATIC_COMPONENT.0);
         previously_allocated_services::dsl::previously_allocated_services
     }
 }
@@ -303,7 +269,7 @@ impl AsTable for OldServiceCount {
     type Table = old_service_count::dsl::old_service_count;
     fn as_table(&self) -> Self::Table {
         use diesel::internal::table_macro::StaticQueryFragment;
-        assert_eq!(self.name(), old_service_count::dsl::old_service_count::STATIC_COMPONENT.0);
+        assert_eq!(self.name(), Self::Table::STATIC_COMPONENT.0);
         old_service_count::dsl::old_service_count
     }
 }
@@ -318,13 +284,13 @@ impl SubQuery for OldServiceCount {
     }
 }
 
-
 diesel::table! {
     old_service_count (count) {
         count -> Int8,
     }
 }
 
+/*
 struct NewServiceCount {
     redundancy: i32,
 }
@@ -370,11 +336,55 @@ impl QueryFragment<Pg> for NewServiceCount {
 impl Query for NewServiceCount {
     type SqlType = sql_types::BigInt;
 }
+*/
+
+struct NewServiceCount {
+    query: Box<dyn CteQuery<sql_types::BigInt>>,
+}
+
+diesel::sql_function!(fn greatest(a: sql_types::BigInt, b: sql_types::BigInt) -> sql_types::BigInt);
+
+impl NewServiceCount {
+    fn new(redundancy: i32, old_service_count: &OldServiceCount) -> Self {
+        let old_count = old_service_count.as_table()
+            .select(old_service_count::dsl::count)
+            .single_value()
+            .assume_not_null();
+        Self {
+            query: Box::new(
+                diesel::select(
+                    greatest(
+                        (redundancy as i64).into_sql::<sql_types::BigInt>(),
+                        old_count,
+                    ) - old_count
+                )
+            )
+        }
+    }
+}
+
+impl SubQuery for NewServiceCount {
+    fn name(&self) -> &'static str {
+        "new_service_count"
+    }
+
+    fn query(&self) -> &dyn QueryFragment<Pg> {
+        &self.query
+    }
+}
 
 struct CandidateSleds {}
 
 impl CandidateSleds {
-    fn new() -> Self {
+    // TODO: This actually does depend on sled_allocation_pool,
+    // previously_allocated_services, and new_service_count.
+    //
+    // Should we make that explicit?
+    fn new(
+        _sled_allocation_pool: &SledAllocationPool,
+        _previously_allocated_services: &PreviouslyAllocatedServices,
+        _new_service_count: &NewServiceCount,
+    ) -> Self {
         Self {}
     }
 }
@@ -388,7 +398,7 @@ impl AsTable for CandidateSleds {
     type Table = candidate_sleds::dsl::candidate_sleds;
     fn as_table(&self) -> Self::Table {
         use diesel::internal::table_macro::StaticQueryFragment;
-        assert_eq!(self.name(), candidate_sleds::dsl::candidate_sleds::STATIC_COMPONENT.0);
+        assert_eq!(self.name(), Self::Table::STATIC_COMPONENT.0);
         candidate_sleds::dsl::candidate_sleds
     }
 }
@@ -482,6 +492,132 @@ diesel::table! {
     }
 }
 
+diesel::allow_tables_to_appear_in_same_query!(
+    candidate_sleds,
+    new_internal_ips,
+);
+
+struct CandidateServices {
+    query: Box<dyn CteQuery<candidate_services::SqlType>>,
+}
+
+diesel::sql_function!(fn gen_random_uuid() -> Uuid);
+diesel::sql_function!(fn now() -> Timestamptz);
+
+impl CandidateServices {
+    fn new(candidate_sleds: &CandidateSleds, new_internal_ips: &NewInternalIps) -> Self {
+        use candidate_sleds::dsl as candidate_sleds_dsl;
+        use new_internal_ips::dsl as new_internal_ips_dsl;
+
+        Self {
+            query: Box::new(
+                candidate_sleds.as_table().inner_join(
+                    new_internal_ips.as_table().on(
+                        candidate_sleds_dsl::id.eq(new_internal_ips_dsl::id)
+                    )
+                ).select(
+                    (
+                        // TODO: I think I still want these to be aliased?
+                        gen_random_uuid(),
+                        now(),
+                        now(),
+//                        diesel::dsl::sql("gen_random_uuid() AS id"),
+//                        diesel::dsl::sql("now() as time_created"),
+//                        diesel::dsl::sql("now() as time_modified"),
+                        diesel::dsl::sql(&format!("{} as sled_id", candidate_sleds_dsl::id::NAME)),
+                        diesel::dsl::sql(&format!("{} as ip", new_internal_ips_dsl::last_used_address::NAME)),
+                        ServiceKind::Nexus.into_sql::<crate::db::model::ServiceKindEnum>(),
+                    ),
+                )
+            )
+        }
+    }
+}
+
+impl AsTable for CandidateServices {
+    type Table = candidate_services::dsl::candidate_services;
+    fn as_table(&self) -> Self::Table {
+        use diesel::internal::table_macro::StaticQueryFragment;
+        assert_eq!(self.name(), Self::Table::STATIC_COMPONENT.0);
+        candidate_services::dsl::candidate_services
+    }
+}
+
+impl SubQuery for CandidateServices {
+    fn name(&self) -> &'static str {
+        "candidate_services"
+    }
+
+    fn query(&self) -> &dyn QueryFragment<Pg> {
+        &self.query
+    }
+}
+
+diesel::table! {
+    candidate_services {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+
+        sled_id -> Uuid,
+        ip -> Inet,
+        kind -> crate::db::model::ServiceKindEnum,
+    }
+}
+
+struct InsertServices {
+    query: Box<dyn CteQuery<schema::service::SqlType>>,
+}
+
+impl InsertServices {
+    fn new(candidate: &CandidateServices) -> Self {
+        use crate::db::schema::service;
+
+        Self {
+            query: Box::new(
+                candidate.as_table().select(
+                    candidate_services::all_columns,
+                ).insert_into(
+                    service::table
+                ).returning(
+                    service::all_columns
+                )
+            )
+        }
+    }
+}
+
+impl AsTable for InsertServices {
+    type Table = inserted_services::dsl::inserted_services;
+    fn as_table(&self) -> Self::Table {
+        use diesel::internal::table_macro::StaticQueryFragment;
+        assert_eq!(self.name(), Self::Table::STATIC_COMPONENT.0);
+        inserted_services::dsl::inserted_services
+    }
+}
+
+impl SubQuery for InsertServices {
+    fn name(&self) -> &'static str {
+        "inserted_services"
+    }
+
+    fn query(&self) -> &dyn QueryFragment<Pg> {
+        &self.query
+    }
+}
+
+diesel::table! {
+    inserted_services {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+
+        sled_id -> Uuid,
+        ip -> Inet,
+        kind -> crate::db::model::ServiceKindEnum,
+    }
+}
+
 /// Provision services of a particular type within a rack.
 ///
 /// TODO: Document
@@ -494,16 +630,24 @@ pub struct ServiceProvision {
 impl ServiceProvision {
     pub fn new(redundancy: i32) -> Self {
         let now = Utc::now();
-        let sled_allocation_pool = SledAllocationPoolSubquery::new();
+        let sled_allocation_pool = SledAllocationPool::new();
         let previously_allocated_services = PreviouslyAllocatedServices::new(&sled_allocation_pool);
         let old_service_count = OldServiceCount::new(&previously_allocated_services);
         let new_service_count = NewServiceCount::new(redundancy, &old_service_count);
-        let candidate_sleds = CandidateSleds::new();
+        let candidate_sleds = CandidateSleds::new(
+            &sled_allocation_pool,
+            &previously_allocated_services,
+            &new_service_count
+        );
         let new_internal_ips = NewInternalIps::new(&candidate_sleds);
+        let candidate_services = CandidateServices::new(&candidate_sleds, &new_internal_ips);
+        let inserted_services = InsertServices::new(&candidate_services);
 
-        // TODO: Reference prior subquery?
-        use crate::db::schema::sled::dsl;
-        let final_select = Box::new(dsl::sled.filter(dsl::time_deleted.is_null()));
+        let final_select = Box::new(
+            inserted_services.as_table().select(
+                inserted_services::all_columns
+            )
+        );
 
         let cte = CteBuilder::new()
             .add_subquery(sled_allocation_pool)
@@ -512,6 +656,8 @@ impl ServiceProvision {
             .add_subquery(new_service_count)
             .add_subquery(candidate_sleds)
             .add_subquery(new_internal_ips)
+            .add_subquery(candidate_services)
+            .add_subquery(inserted_services)
             .build(final_select);
 
         Self {
@@ -655,7 +801,24 @@ mod tests {
                 WHERE \
                     (\"sled\".\"id\" = ANY(SELECT \"candidate_sleds\".\"id\" FROM \"candidate_sleds\")) \
                 RETURNING \"sled\".\"id\", \"sled\".\"last_used_address\"\
+            ), \
+             candidate_services AS (\
+                SELECT \
+                    gen_random_uuid() AS id, \
+                    now() as time_created, \
+                    now() as time_modified, \
+                    \"candidate_sleds\".\"id\", \
+                    \"new_internal_ips\".\"last_used_address\", \
+                    $4 \
+                FROM (\
+                    \"candidate_sleds\" \
+                INNER JOIN \
+                    \"new_internal_ips\" \
+                ON (\
+                    \"candidate_sleds\".\"id\" = \"new_internal_ips\".\"id\"\
+                ))\
             ) \
+            SELECT \"inserted_services\".\"id\", \"inserted_services\".\"time_created\", \"inserted_services\".\"time_modified\", \"inserted_services\".\"sled_id\", \"inserted_services\".\"ip\", \"inserted_services\".\"kind\" FROM \"service\" AS \"inserted_services\"
             SELECT \
                 \"sled\".\"id\", \
                 \"sled\".\"time_created\", \
@@ -670,7 +833,7 @@ mod tests {
             FROM \"sled\" \
             WHERE (\
                 \"sled\".\"time_deleted\" IS NULL\
-            ) -- binds: [Nexus, 3, 1]",
+            ) -- binds: [Nexus, 3, 1, Nexus]",
         );
 
         context.success().await;
