@@ -251,12 +251,12 @@ pub fn handle_message<H: SpHandler>(
         RequestKind::SerialConsoleDetach => handler
             .serial_console_detach(sender, port)
             .map(|()| ResponseKind::SerialConsoleDetachAck),
-        RequestKind::SysResetPrepare => handler
+        RequestKind::ResetPrepare => handler
             .reset_prepare(sender, port)
-            .map(|()| ResponseKind::SysResetPrepareAck),
-        RequestKind::SysResetTrigger => {
+            .map(|()| ResponseKind::ResetPrepareAck),
+        RequestKind::ResetTrigger => {
             handler.reset_trigger(sender, port).map(|infallible| {
-                // A bit of type system magic here; `sys_reset_trigger`'s
+                // A bit of type system magic here; `reset_trigger`'s
                 // success type (`Infallible`) cannot be instantiated. We can
                 // provide an empty match to teach the type system that an
                 // `Infallible` (which can't exist) can be converted to a

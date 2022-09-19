@@ -71,8 +71,8 @@ pub enum RequestKind {
         component: SpComponent,
         id: UpdateId,
     },
-    SysResetPrepare,
-    SysResetTrigger,
+    ResetPrepare,
+    ResetTrigger,
 }
 
 /// Identifier for one of of an SP's KSZ8463 management-network-facing ports.
@@ -158,9 +158,9 @@ pub enum ResponseKind {
     SerialConsoleAttachAck,
     SerialConsoleWriteAck { furthest_ingested_offset: u64 },
     SerialConsoleDetachAck,
-    SysResetPrepareAck,
-    // There is intentionally no `SysResetTriggerAck` response; the expected
-    // "resposne" to `SysResetTrigger` is an SP reset, which won't allow for
+    ResetPrepareAck,
+    // There is intentionally no `ResetTriggerAck` response; the expected
+    // "resposne" to `ResetTrigger` is an SP reset, which won't allow for
     // acks to be sent.
 }
 
@@ -216,10 +216,10 @@ pub enum ResponseError {
     /// An update is not possible at this time (e.g., the target slot is locked
     /// by another device).
     UpdateSlotBusy,
-    /// Received a `SysResetTrigger` request without first receiving a
-    /// `SysResetPrepare` request. This can be used to detect a successful
+    /// Received a `ResetTrigger` request without first receiving a
+    /// `ResetPrepare` request. This can be used to detect a successful
     /// reset.
-    SysResetTriggerWithoutPrepare,
+    ResetTriggerWithoutPrepare,
     /// Request mentioned a slot number for a component that does not have that
     /// slot.
     InvalidSlotForComponent,
@@ -268,7 +268,7 @@ impl fmt::Display for ResponseError {
             ResponseError::UpdateFailed(code) => {
                 write!(f, "update failed (code {})", code)
             }
-            ResponseError::SysResetTriggerWithoutPrepare => {
+            ResponseError::ResetTriggerWithoutPrepare => {
                 write!(f, "sys reset trigger requested without a preceding sys reset prepare")
             }
             ResponseError::InvalidSlotForComponent => {

@@ -376,8 +376,8 @@ impl ResponseKindExt for ResponseKind {
             ResponseKind::UpdateChunkAck => {
                 response_kind_names::UPDATE_CHUNK_ACK
             }
-            ResponseKind::SysResetPrepareAck => {
-                response_kind_names::SYS_RESET_PREPARE_ACK
+            ResponseKind::ResetPrepareAck => {
+                response_kind_names::RESET_PREPARE_ACK
             }
         }
     }
@@ -508,9 +508,9 @@ impl ResponseKindExt for ResponseKind {
 
     fn expect_sys_reset_prepare_ack(self) -> Result<(), BadResponseType> {
         match self {
-            ResponseKind::SysResetPrepareAck => Ok(()),
+            ResponseKind::ResetPrepareAck => Ok(()),
             other => Err(BadResponseType {
-                expected: response_kind_names::SYS_RESET_PREPARE_ACK,
+                expected: response_kind_names::RESET_PREPARE_ACK,
                 got: other.name(),
             }),
         }
@@ -533,5 +533,5 @@ mod response_kind_names {
     pub(super) const UPDATE_STATUS: &str = "update_status";
     pub(super) const UPDATE_ABORT_ACK: &str = "update_abort_ack";
     pub(super) const UPDATE_CHUNK_ACK: &str = "update_chunk_ack";
-    pub(super) const SYS_RESET_PREPARE_ACK: &str = "sys_reset_prepare_ack";
+    pub(super) const RESET_PREPARE_ACK: &str = "reset_prepare_ack";
 }

@@ -307,7 +307,7 @@ impl SingleSp {
     /// needed the reset for has happened (e.g., checking the SP's version, in
     /// the case of updates).
     pub async fn reset_prepare(&self) -> Result<()> {
-        self.rpc(RequestKind::SysResetPrepare).await.and_then(
+        self.rpc(RequestKind::ResetPrepare).await.and_then(
             |(_peer, response)| {
                 response.expect_sys_reset_prepare_ack().map_err(Into::into)
             },
@@ -320,7 +320,7 @@ impl SingleSp {
     pub async fn reset_trigger(&self) -> Result<()> {
         // Reset trigger should retry until we get back an error indicating the
         // SP wasn't expecting a reset trigger (because it has reset!).
-        match self.rpc(RequestKind::SysResetTrigger).await {
+        match self.rpc(RequestKind::ResetTrigger).await {
             Ok((_peer, response)) => {
                 Err(SpCommunicationError::BadResponseType(BadResponseType {
                     expected: "system-reset",
@@ -328,7 +328,7 @@ impl SingleSp {
                 }))
             }
             Err(SpCommunicationError::SpError(
-                ResponseError::SysResetTriggerWithoutPrepare,
+                ResponseError::ResetTriggerWithoutPrepare,
             )) => Ok(()),
             Err(other) => Err(other),
         }
