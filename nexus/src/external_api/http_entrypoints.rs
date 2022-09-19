@@ -108,6 +108,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(ip_pool_list)?;
         api.register(ip_pool_create)?;
         api.register(ip_pool_view)?;
+        api.register(ip_pool_view_by_id)?;
         api.register(ip_pool_delete)?;
         api.register(ip_pool_update)?;
 
@@ -1209,8 +1210,8 @@ pub struct IpPoolPathParam {
 /// List IP pools
 #[endpoint {
     method = GET,
-    path = "/ip-pools",
-    tags = ["ip-pools"],
+    path = "/system/ip-pools",
+    tags = ["system"],
 }]
 async fn ip_pool_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1250,8 +1251,8 @@ async fn ip_pool_list(
 /// Create an IP pool
 #[endpoint {
     method = POST,
-    path = "/ip-pools",
-    tags = ["ip-pools"],
+    path = "/system/ip-pools",
+    tags = ["system"],
 }]
 async fn ip_pool_create(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1271,8 +1272,8 @@ async fn ip_pool_create(
 /// Fetch an IP pool
 #[endpoint {
     method = GET,
-    path = "/ip-pools/{pool_name}",
-    tags = ["ip-pools"],
+    path = "/system/ip-pools/{pool_name}",
+    tags = ["system"],
 }]
 async fn ip_pool_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1290,11 +1291,33 @@ async fn ip_pool_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Fetch an IP pool by id
+#[endpoint {
+    method = GET,
+    path = "/system/by-id/ip-pools/{id}",
+    tags = ["system"],
+}]
+async fn ip_pool_view_by_id(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ByIdPathParams>,
+) -> Result<HttpResponseOk<views::IpPool>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let id = &path.id;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let pool = nexus.ip_pool_fetch_by_id(&opctx, id).await?;
+        Ok(HttpResponseOk(IpPool::from(pool)))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /// Delete an IP Pool
 #[endpoint {
     method = DELETE,
-    path = "/ip-pools/{pool_name}",
-    tags = ["ip-pools"],
+    path = "/system/ip-pools/{pool_name}",
+    tags = ["system"],
 }]
 async fn ip_pool_delete(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1315,8 +1338,8 @@ async fn ip_pool_delete(
 /// Update an IP Pool
 #[endpoint {
     method = PUT,
-    path = "/ip-pools/{pool_name}",
-    tags = ["ip-pools"],
+    path = "/system/ip-pools/{pool_name}",
+    tags = ["system"],
 }]
 async fn ip_pool_update(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1339,8 +1362,8 @@ async fn ip_pool_update(
 /// Fetch an IP pool used for Oxide services.
 #[endpoint {
     method = GET,
-    path = "/ip-pools-service/{rack_id}",
-    tags = ["ip-pools"],
+    path = "/system/ip-pools-service/{rack_id}",
+    tags = ["system"],
 }]
 async fn ip_pool_service_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1365,8 +1388,8 @@ type IpPoolRangePaginationParams = PaginationParams<EmptyScanParams, IpNetwork>;
 /// Ranges are ordered by their first address.
 #[endpoint {
     method = GET,
-    path = "/ip-pools/{pool_name}/ranges",
-    tags = ["ip-pools"],
+    path = "/system/ip-pools/{pool_name}/ranges",
+    tags = ["system"],
 }]
 async fn ip_pool_range_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1409,8 +1432,8 @@ async fn ip_pool_range_list(
 /// Add a range to an IP pool
 #[endpoint {
     method = POST,
-    path = "/ip-pools/{pool_name}/ranges/add",
-    tags = ["ip-pools"],
+    path = "/system/ip-pools/{pool_name}/ranges/add",
+    tags = ["system"],
 }]
 async fn ip_pool_range_add(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1433,8 +1456,8 @@ async fn ip_pool_range_add(
 /// Remove a range from an IP pool
 #[endpoint {
     method = POST,
-    path = "/ip-pools/{pool_name}/ranges/remove",
-    tags = ["ip-pools"],
+    path = "/system/ip-pools/{pool_name}/ranges/remove",
+    tags = ["system"],
 }]
 async fn ip_pool_range_remove(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1464,8 +1487,8 @@ pub struct IpPoolServicePathParam {
 /// Ranges are ordered by their first address.
 #[endpoint {
     method = GET,
-    path = "/ip-pools-service/{rack_id}/ranges",
-    tags = ["ip-pools"],
+    path = "/system/ip-pools-service/{rack_id}/ranges",
+    tags = ["system"],
 }]
 async fn ip_pool_service_range_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1508,8 +1531,8 @@ async fn ip_pool_service_range_list(
 /// Add a range to an IP pool used for Oxide services.
 #[endpoint {
     method = POST,
-    path = "/ip-pools-service/{rack_id}/ranges/add",
-    tags = ["ip-pools"],
+    path = "/system/ip-pools-service/{rack_id}/ranges/add",
+    tags = ["system"],
 }]
 async fn ip_pool_service_range_add(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1533,8 +1556,8 @@ async fn ip_pool_service_range_add(
 /// Remove a range from an IP pool used for Oxide services.
 #[endpoint {
     method = POST,
-    path = "/ip-pools-service/{rack_id}/ranges/remove",
-    tags = ["ip-pools"],
+    path = "/system/ip-pools-service/{rack_id}/ranges/remove",
+    tags = ["system"],
 }]
 async fn ip_pool_service_range_remove(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,

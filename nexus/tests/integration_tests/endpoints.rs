@@ -296,7 +296,7 @@ lazy_static! {
         };
 
     // IP Pools
-    pub static ref DEMO_IP_POOLS_URL: &'static str = "/ip-pools";
+    pub static ref DEMO_IP_POOLS_URL: &'static str = "/system/ip-pools";
     pub static ref DEMO_IP_POOL_NAME: Name = "pool0".parse().unwrap();
     pub static ref DEMO_IP_POOL_CREATE: params::IpPoolCreate =
         params::IpPoolCreate {
@@ -306,7 +306,7 @@ lazy_static! {
             },
             project: None,
         };
-    pub static ref DEMO_IP_POOL_URL: String = format!("/ip-pools/{}", *DEMO_IP_POOL_NAME);
+    pub static ref DEMO_IP_POOL_URL: String = format!("/system/ip-pools/{}", *DEMO_IP_POOL_NAME);
     pub static ref DEMO_IP_POOL_UPDATE: params::IpPoolUpdate =
         params::IpPoolUpdate {
             identity: IdentityMetadataUpdateParams {
@@ -1393,6 +1393,15 @@ lazy_static! {
             url: "/by-id/global-images/{id}",
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::ReadOnly,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
+
+        VerifyEndpoint {
+            url: "/system/by-id/ip-pools/{id}",
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get,
             ],

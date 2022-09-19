@@ -193,7 +193,7 @@ lazy_static! {
         SetupReq::Post {
             url: &*DEMO_IP_POOLS_URL,
             body: serde_json::to_value(&*DEMO_IP_POOL_CREATE).unwrap(),
-            id_routes: vec!["/by-id/ip-pools/{id}"],
+            id_routes: vec!["/system/by-id/ip-pools/{id}"],
         },
         // Create an IP Pool range
         SetupReq::Post {
