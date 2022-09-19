@@ -28,7 +28,7 @@ nexus-client = { path = "../nexus-client" }
 omicron-common = { path = "../common" }
 oximeter = { version = "0.1.0", path = "../oximeter/oximeter" }
 oximeter-producer = { version = "0.1.0", path = "../oximeter/producer" }
-p256 = "0.9.0"
+p256 = "0.10.1"
 percent-encoding = "2.2.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor" }
 propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "c0776be03bf0928651996eb00ad6f3665e99ebe7" }
