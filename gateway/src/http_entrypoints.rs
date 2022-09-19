@@ -223,6 +223,7 @@ pub struct SpIdentifier {
 )]
 enum PowerState {
     A0,
+    A1,
     A2,
 }
 

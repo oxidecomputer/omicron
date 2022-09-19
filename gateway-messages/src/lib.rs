@@ -129,6 +129,7 @@ pub enum UpdateStatus {
 )]
 pub enum PowerState {
     A0,
+    A1,
     A2,
 }
 
@@ -232,6 +233,8 @@ pub enum ResponseError {
     /// An update is not possible at this time (e.g., the target slot is locked
     /// by another device).
     UpdateSlotBusy,
+    /// An error occurred getting or setting the power state.
+    PowerStateError(u32),
     /// Received a `ResetTrigger` request without first receiving a
     /// `ResetPrepare` request. This can be used to detect a successful
     /// reset.
@@ -283,6 +286,9 @@ impl fmt::Display for ResponseError {
             }
             ResponseError::UpdateFailed(code) => {
                 write!(f, "update failed (code {})", code)
+            }
+            ResponseError::PowerStateError(code) => {
+                write!(f, "power state error (code {}))", code)
             }
             ResponseError::ResetTriggerWithoutPrepare => {
                 write!(f, "sys reset trigger requested without a preceding sys reset prepare")

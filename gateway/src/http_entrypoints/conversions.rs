@@ -59,6 +59,7 @@ impl From<gateway_messages::PowerState> for PowerState {
     fn from(power_state: gateway_messages::PowerState) -> Self {
         match power_state {
             gateway_messages::PowerState::A0 => Self::A0,
+            gateway_messages::PowerState::A1 => Self::A1,
             gateway_messages::PowerState::A2 => Self::A2,
         }
     }
@@ -68,6 +69,7 @@ impl From<PowerState> for gateway_messages::PowerState {
     fn from(power_state: PowerState) -> gateway_messages::PowerState {
         match power_state {
             PowerState::A0 => gateway_messages::PowerState::A0,
+            PowerState::A1 => gateway_messages::PowerState::A1,
             PowerState::A2 => gateway_messages::PowerState::A2,
         }
     }
