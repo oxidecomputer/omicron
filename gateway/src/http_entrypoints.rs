@@ -717,10 +717,10 @@ async fn ignition_get(
     Ok(HttpResponseOk(info))
 }
 
-/// Power on an SP via Ignition
+/// Power on a sled via Ignition
 #[endpoint {
     method = POST,
-    path = "/sp/{type}/{slot}/power-on",
+    path = "/ignition/{type}/{slot}/power-on",
 }]
 async fn ignition_power_on(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -738,10 +738,10 @@ async fn ignition_power_on(
     Ok(HttpResponseUpdatedNoContent {})
 }
 
-/// Power off an SP via Ignition
+/// Power off a sled via Ignition
 #[endpoint {
     method = POST,
-    path = "/sp/{type}/{slot}/power-off",
+    path = "/ignition/{type}/{slot}/power-off",
 }]
 async fn ignition_power_off(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
