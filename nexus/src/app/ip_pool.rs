@@ -68,6 +68,18 @@ impl super::Nexus {
         Ok(db_pool)
     }
 
+    pub async fn ip_pool_fetch_by_id(
+        &self,
+        opctx: &OpContext,
+        pool_id: &Uuid,
+    ) -> LookupResult<db::model::IpPool> {
+        let (.., db_pool) = LookupPath::new(opctx, &self.db_datastore)
+            .ip_pool_id(*pool_id)
+            .fetch()
+            .await?;
+        Ok(db_pool)
+    }
+
     pub async fn ip_pool_delete(
         &self,
         opctx: &OpContext,
