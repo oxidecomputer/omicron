@@ -199,7 +199,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
         .expect("failed to make request");
 
     // Verify silo DELETE works
-    NexusRequest::object_delete(&client, &"/silos/discoverable")
+    NexusRequest::object_delete(&client, &"/system/silos/discoverable")
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await

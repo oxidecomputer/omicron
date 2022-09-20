@@ -567,7 +567,7 @@ async fn test_saml_idp_rsa_keypair_ok(cptestctx: &ControlPlaneTestContext) {
         RequestBuilder::new(
             client,
             Method::POST,
-            &format!("/silos/{}/saml-identity-providers", SILO_NAME),
+            &format!("/system/silos/{}/saml-identity-providers", SILO_NAME),
         )
         .body(Some(&params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
