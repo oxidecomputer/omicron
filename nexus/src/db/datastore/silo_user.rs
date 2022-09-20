@@ -73,13 +73,7 @@ impl DataStore {
             .load_async::<SiloUser>(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::SiloUser,
-                        LookupType::ByName(external_id.to_string()),
-                    ),
-                )
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
             })?
             .pop())
     }
