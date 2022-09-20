@@ -91,15 +91,8 @@ impl DataStore {
 
         #[derive(Debug)]
         enum RackInitError {
-            ServiceInsert {
-                err: AsyncInsertError,
-                sled_id: Uuid,
-                svc_id: Uuid,
-            },
-            DatasetInsert {
-                err: AsyncInsertError,
-                zpool_id: Uuid,
-            },
+            ServiceInsert { err: AsyncInsertError, sled_id: Uuid, svc_id: Uuid },
+            DatasetInsert { err: AsyncInsertError, zpool_id: Uuid },
             RackUpdate(PoolError),
         }
         type TxnError = TransactionError<RackInitError>;

@@ -339,8 +339,8 @@ WITH
   -- Calculate the number of new services we need
   new_service_count AS (
     -- XXX: 3 is the user-supplied redundancy
-    SELECT GREATEST(3, (SELECT * FROM old_service_count))
-      - (SELECT * FROM old_service_count)
+    SELECT (greatest(3, (SELECT old_service_count.count FROM old_service_count))
+      - (SELECT old_service_count.count FROM old_service_count))
   ),
 
   -- Get allocation candidates from the pool, as long as they don't already
@@ -389,10 +389,11 @@ WITH
       now() as time_modified,
       candidate_sleds.id as sled_id,
       new_internal_ips.ip as ip,
+      -- XXX service type
       CAST('nexus' AS omicron.public.service_kind) as kind
     FROM
       candidate_sleds
-    LEFT JOIN
+    INNER JOIN
       new_internal_ips
     ON
       candidate_sleds.id = new_internal_ips.sled_id
@@ -401,13 +402,9 @@ WITH
   inserted_services AS (
     INSERT INTO omicron.public.service
       (
-        SELECT
-          candidate_services.id,
-          candidate_services.time_created,
-          candidate_services.time_modified,
-          candidate_services.sled_id,
-          candidate_services.ip,
-          candidate_services.kind
+        -- XXX: "SELECT *" isn't currently possible with Diesel...
+        -- ... but it *COULD* be, when the source is a CTE Query!
+        SELECT *
         FROM candidate_services
       )
     RETURNING *
