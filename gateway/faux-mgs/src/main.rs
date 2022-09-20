@@ -10,6 +10,7 @@ use anyhow::Context;
 use anyhow::Result;
 use clap::Parser;
 use clap::Subcommand;
+use gateway_messages::PowerState;
 use gateway_messages::SpComponent;
 use gateway_messages::UpdateId;
 use gateway_messages::UpdateStatus;
@@ -135,8 +136,25 @@ enum SpCommand {
         update_id: Uuid,
     },
 
+    /// Get or set the power state.
+    PowerState {
+        /// If present, instruct the SP to set this power state. If not present,
+        /// get the current power state instead.
+        #[clap(value_parser = power_state_from_str)]
+        new_power_state: Option<PowerState>,
+    },
+
     /// Instruct the SP to reset.
     Reset,
+}
+
+fn power_state_from_str(s: &str) -> Result<PowerState> {
+    match s {
+        "a0" | "A0" => Ok(PowerState::A0),
+        "a1" | "A1" => Ok(PowerState::A1),
+        "a2" | "A2" => Ok(PowerState::A2),
+        _ => Err(anyhow!("Invalid power state: {s}")),
+    }
 }
 
 #[tokio::main]
@@ -298,6 +316,20 @@ async fn main() -> Result<()> {
             sp.update_abort(sp_component, update_id).await.with_context(
                 || format!("aborting update to {} failed", component),
             )?;
+        }
+        Some(SpCommand::PowerState { new_power_state }) => {
+            if let Some(state) = new_power_state {
+                sp.set_power_state(state).await.with_context(|| {
+                    format!("failed to set power state to {state:?}")
+                })?;
+                info!(log, "successfully set SP power state to {state:?}");
+            } else {
+                let state = sp
+                    .power_state()
+                    .await
+                    .context("failed to get power state")?;
+                info!(log, "SP power state = {state:?}");
+            }
         }
         Some(SpCommand::Reset) => {
             sp.reset_prepare().await?;

@@ -15,6 +15,7 @@ use gateway_messages::version;
 use gateway_messages::BulkIgnitionState;
 use gateway_messages::IgnitionCommand;
 use gateway_messages::IgnitionState;
+use gateway_messages::PowerState;
 use gateway_messages::Request;
 use gateway_messages::RequestKind;
 use gateway_messages::ResponseError;
@@ -296,6 +297,24 @@ impl SingleSp {
             })
     }
 
+    /// Get the current power state.
+    pub async fn power_state(&self) -> Result<PowerState> {
+        self.rpc(RequestKind::GetPowerState).await.and_then(
+            |(_peer, response)| {
+                response.expect_power_state().map_err(Into::into)
+            },
+        )
+    }
+
+    /// Set the current power state.
+    pub async fn set_power_state(&self, power_state: PowerState) -> Result<()> {
+        self.rpc(RequestKind::SetPowerState(power_state)).await.and_then(
+            |(_peer, response)| {
+                response.expect_set_power_state_ack().map_err(Into::into)
+            },
+        )
+    }
+
     /// Instruct the SP that a reset trigger will be coming.
     ///
     /// This is part of a two-phase reset process. MGS should set a
@@ -307,7 +326,7 @@ impl SingleSp {
     /// needed the reset for has happened (e.g., checking the SP's version, in
     /// the case of updates).
     pub async fn reset_prepare(&self) -> Result<()> {
-        self.rpc(RequestKind::SysResetPrepare).await.and_then(
+        self.rpc(RequestKind::ResetPrepare).await.and_then(
             |(_peer, response)| {
                 response.expect_sys_reset_prepare_ack().map_err(Into::into)
             },
@@ -320,7 +339,7 @@ impl SingleSp {
     pub async fn reset_trigger(&self) -> Result<()> {
         // Reset trigger should retry until we get back an error indicating the
         // SP wasn't expecting a reset trigger (because it has reset!).
-        match self.rpc(RequestKind::SysResetTrigger).await {
+        match self.rpc(RequestKind::ResetTrigger).await {
             Ok((_peer, response)) => {
                 Err(SpCommunicationError::BadResponseType(BadResponseType {
                     expected: "system-reset",
@@ -328,7 +347,7 @@ impl SingleSp {
                 }))
             }
             Err(SpCommunicationError::SpError(
-                ResponseError::SysResetTriggerWithoutPrepare,
+                ResponseError::ResetTriggerWithoutPrepare,
             )) => Ok(()),
             Err(other) => Err(other),
         }
