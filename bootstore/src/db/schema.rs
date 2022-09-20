@@ -14,6 +14,12 @@ table! {
 }
 
 table! {
+    rack(uuid) {
+        uuid -> Text,
+    }
+}
+
+table! {
     encrypted_root_secrets(epoch) {
         epoch -> Integer,
         salt -> Binary,

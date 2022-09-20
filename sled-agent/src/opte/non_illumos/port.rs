@@ -6,7 +6,6 @@
 
 use crate::opte::BoundaryServices;
 use crate::opte::Gateway;
-use crate::opte::PortTicket;
 use crate::opte::Vni;
 use crate::params::SourceNatConfig;
 use ipnetwork::IpNetwork;
@@ -18,8 +17,6 @@ use std::sync::Arc;
 #[derive(Debug)]
 #[allow(dead_code)]
 struct PortInner {
-    // Contains instance ID and a pointer to the parent manager
-    ticket: PortTicket,
     // Name of the port as identified by OPTE
     name: String,
     // IP address within the VPC Subnet
@@ -70,7 +67,6 @@ pub struct Port {
 impl Port {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        ticket: PortTicket,
         name: String,
         ip: IpAddr,
         subnet: IpNetwork,
@@ -86,7 +82,6 @@ impl Port {
     ) -> Self {
         Self {
             inner: Arc::new(PortInner {
-                ticket,
                 name,
                 _ip: ip,
                 _subnet: subnet,
@@ -103,10 +98,6 @@ impl Port {
         }
     }
 
-    pub fn source_nat(&self) -> &Option<SourceNatConfig> {
-        &self.inner.source_nat
-    }
-
     pub fn external_ips(&self) -> &Option<Vec<IpAddr>> {
         &self.inner.external_ips
     }
@@ -121,9 +112,5 @@ impl Port {
 
     pub fn slot(&self) -> u8 {
         self.inner.slot
-    }
-
-    pub fn ticket(&self) -> PortTicket {
-        self.inner.ticket.clone()
     }
 }

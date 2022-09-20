@@ -8,10 +8,8 @@ use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::collection_insert::SyncInsertError;
-use crate::db::error::public_error_from_diesel_create;
-use crate::db::error::public_error_from_diesel_lookup;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
@@ -22,6 +20,7 @@ use crate::db::model::Sled;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::PoolError;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
@@ -90,8 +89,8 @@ impl DataStore {
 
         #[derive(Debug)]
         enum RackInitError {
-            ServiceInsert { err: SyncInsertError, sled_id: Uuid, svc_id: Uuid },
-            RackUpdate(diesel::result::Error),
+            ServiceInsert { err: AsyncInsertError, sled_id: Uuid, svc_id: Uuid },
+            RackUpdate(PoolError),
         }
         type TxnError = TransactionError<RackInitError>;
 
@@ -99,14 +98,17 @@ impl DataStore {
         // the low-frequency of calls, this optimization has been deferred.
         self.pool_authorized(opctx)
             .await?
-            .transaction(move |conn| {
+            .transaction_async(|conn| async move {
                 // Early exit if the rack has already been initialized.
                 let rack = rack_dsl::rack
                     .filter(rack_dsl::id.eq(rack_id))
                     .select(Rack::as_select())
-                    .get_result(conn)
+                    .get_result_async(&conn)
+                    .await
                     .map_err(|e| {
-                        TxnError::CustomError(RackInitError::RackUpdate(e))
+                        TxnError::CustomError(RackInitError::RackUpdate(
+                            PoolError::from(e),
+                        ))
                     })?;
                 if rack.initialized {
                     return Ok(rack);
@@ -130,7 +132,8 @@ impl DataStore {
                                     .eq(excluded(service_dsl::kind)),
                             )),
                     )
-                    .insert_and_get_result(conn)
+                    .insert_and_get_result_async(&conn)
+                    .await
                     .map_err(|err| {
                         TxnError::CustomError(RackInitError::ServiceInsert {
                             err,
@@ -146,9 +149,12 @@ impl DataStore {
                         rack_dsl::time_modified.eq(Utc::now()),
                     ))
                     .returning(Rack::as_returning())
-                    .get_result::<Rack>(conn)
+                    .get_result_async::<Rack>(&conn)
+                    .await
                     .map_err(|e| {
-                        TxnError::CustomError(RackInitError::RackUpdate(e))
+                        TxnError::CustomError(RackInitError::RackUpdate(
+                            PoolError::from(e),
+                        ))
                     })
             })
             .await
@@ -158,25 +164,29 @@ impl DataStore {
                     sled_id,
                     svc_id,
                 }) => match err {
-                    SyncInsertError::CollectionNotFound => {
+                    AsyncInsertError::CollectionNotFound => {
                         Error::ObjectNotFound {
                             type_name: ResourceType::Sled,
                             lookup_type: LookupType::ById(sled_id),
                         }
                     }
-                    SyncInsertError::DatabaseError(e) => {
-                        public_error_from_diesel_create(
+                    AsyncInsertError::DatabaseError(e) => {
+                        public_error_from_diesel_pool(
                             e,
-                            ResourceType::Service,
-                            &svc_id.to_string(),
+                            ErrorHandler::Conflict(
+                                ResourceType::Service,
+                                &svc_id.to_string(),
+                            ),
                         )
                     }
                 },
                 TxnError::CustomError(RackInitError::RackUpdate(err)) => {
-                    public_error_from_diesel_lookup(
+                    public_error_from_diesel_pool(
                         err,
-                        ResourceType::Rack,
-                        &LookupType::ById(rack_id),
+                        ErrorHandler::NotFoundByLookup(
+                            ResourceType::Rack,
+                            LookupType::ById(rack_id),
+                        ),
                     )
                 }
                 TxnError::Pool(e) => {

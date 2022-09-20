@@ -14,9 +14,6 @@ use thiserror::Error;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Timeouts {
-    /// Timeout for running the discovery process to determine logical mappings
-    /// of switches/sleds.
-    pub discovery_millis: u64,
     /// Default timeout for requests that collect responses from multiple
     /// targets, if the client doesn't provide one.
     pub bulk_request_default_millis: u64,

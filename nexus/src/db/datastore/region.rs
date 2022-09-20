@@ -147,7 +147,7 @@ impl DataStore {
             params.extent_size() / block_size.to_bytes() as i64;
 
         self.pool()
-            .transaction(move |conn| {
+            .transaction_async(|conn| async move {
                 // First, for idempotency, check if regions are already
                 // allocated to this disk.
                 //
@@ -155,7 +155,8 @@ impl DataStore {
                 // datasets.
                 let datasets_and_regions =
                     Self::get_allocated_regions_query(volume_id)
-                        .get_results::<(Dataset, Region)>(conn)?;
+                        .get_results_async::<(Dataset, Region)>(&conn)
+                        .await?;
                 if !datasets_and_regions.is_empty() {
                     return Ok(datasets_and_regions);
                 }
@@ -168,7 +169,8 @@ impl DataStore {
                 // separately - this is all or nothing.
                 let mut datasets: Vec<Dataset> =
                     Self::get_allocatable_datasets_query()
-                        .get_results::<Dataset>(conn)?;
+                        .get_results_async::<Dataset>(&conn)
+                        .await?;
 
                 if datasets.len() < REGION_REDUNDANCY_THRESHOLD {
                     return Err(TxnError::CustomError(
@@ -196,7 +198,8 @@ impl DataStore {
                 let regions = diesel::insert_into(region_dsl::region)
                     .values(regions)
                     .returning(Region::as_returning())
-                    .get_results(conn)?;
+                    .get_results_async(&conn)
+                    .await?;
 
                 // Update size_used in the source datasets containing those
                 // regions.
@@ -211,7 +214,8 @@ impl DataStore {
                                 * region_dsl::extent_count,
                         ))
                         .nullable()
-                        .get_result(conn)?;
+                        .get_result_async(&conn)
+                        .await?;
 
                     let dataset_total_occupied_size: i64 = if let Some(
                         dataset_total_occupied_size,
@@ -240,7 +244,8 @@ impl DataStore {
                             dataset_dsl::size_used
                                 .eq(dataset_total_occupied_size),
                         )
-                        .execute(conn)?;
+                        .execute_async(&conn)
+                        .await?;
 
                     // Update the results we'll send the caller
                     dataset.size_used = Some(dataset_total_occupied_size);
@@ -261,7 +266,8 @@ impl DataStore {
                         .filter(dataset_dsl::time_deleted.is_null())
                         .select(diesel::dsl::sum(dataset_dsl::size_used))
                         .nullable()
-                        .get_result(conn)?;
+                        .get_result_async(&conn)
+                        .await?;
 
                     let zpool_total_occupied_size: u64 = if let Some(
                         zpool_total_occupied_size,
@@ -287,7 +293,8 @@ impl DataStore {
                     let zpool = zpool_dsl::zpool
                         .filter(zpool_dsl::id.eq(zpool_id))
                         .select(Zpool::as_returning())
-                        .get_result(conn)?;
+                        .get_result_async(&conn)
+                        .await?;
 
                     // Does this go over the zpool's total size?
                     if zpool.total_size.to_bytes() < zpool_total_occupied_size {

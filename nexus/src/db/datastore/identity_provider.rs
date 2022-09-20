@@ -53,7 +53,7 @@ impl DataStore {
         let name = provider.identity().name.to_string();
         self.pool_authorized(opctx)
             .await?
-            .transaction(move |conn| {
+            .transaction_async(|conn| async move {
                 // insert silo identity provider record with type Saml
                 use db::schema::identity_provider::dsl as idp_dsl;
                 diesel::insert_into(idp_dsl::identity_provider)
@@ -69,14 +69,16 @@ impl DataStore {
                         silo_id: provider.silo_id,
                         provider_type: db::model::IdentityProviderType::Saml,
                     })
-                    .execute(conn)?;
+                    .execute_async(&conn)
+                    .await?;
 
                 // insert silo saml identity provider record
                 use db::schema::saml_identity_provider::dsl;
                 let result = diesel::insert_into(dsl::saml_identity_provider)
                     .values(provider)
                     .returning(db::model::SamlIdentityProvider::as_returning())
-                    .get_result(conn)?;
+                    .get_result_async(&conn)
+                    .await?;
 
                 Ok(result)
             })

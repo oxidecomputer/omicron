@@ -8,10 +8,12 @@ use diesel::deserialize::FromSql;
 use diesel::prelude::*;
 use diesel::serialize::ToSql;
 use diesel::FromSqlRow;
+use sha3::{Digest, Sha3_256};
 
 use super::macros::array_new_type;
 use super::macros::bcs_new_type;
 use super::schema::*;
+use super::Error;
 use crate::trust_quorum::SerializableShareDistribution;
 
 bcs_new_type!(Share, SerializableShareDistribution);
@@ -19,7 +21,10 @@ bcs_new_type!(Share, SerializableShareDistribution);
 /// When a [`KeyShareParepare`] message arrives it is stored in a [`KeyShare`]
 /// When a [`KeyShareCommit`] message arrives the `committed` field/column is
 /// set to true.
-#[derive(Debug, Queryable, Insertable)]
+#[derive(
+    Debug, PartialEq, Queryable, Insertable, Identifiable, AsChangeset,
+)]
+#[diesel(primary_key(epoch))]
 pub struct KeyShare {
     pub epoch: i32,
     pub share: Share,
@@ -27,14 +32,47 @@ pub struct KeyShare {
     pub committed: bool,
 }
 
-// A chacha20poly1305 secret encrypted by a chacha20poly1305 secret key
-// derived from the rack secret for the given epoch with the given salt
-//
-// The epoch informs which rack secret should be used to derive the
-// encryptiong key used to encrypt this root secret.
-//
-// TODO-security: We probably don't want to log even the encrypted secret, but
-// it's likely useful for debugging right now.
+impl KeyShare {
+    pub fn new(
+        epoch: i32,
+        share_distribution: SerializableShareDistribution,
+    ) -> Result<KeyShare, Error> {
+        // We save the digest so we don't have to deserialize and recompute most of the time.
+        // We'd only want to do that for a consistency check occasionally.
+        let share_digest =
+            Self::share_distribution_digest(&share_distribution)?;
+        Ok(KeyShare {
+            epoch,
+            share: Share(share_distribution),
+            share_digest,
+            committed: false,
+        })
+    }
+
+    pub fn share_distribution_digest(
+        sd: &SerializableShareDistribution,
+    ) -> Result<Sha3_256Digest, Error> {
+        let val = bcs::to_bytes(&sd)?;
+        Ok(sprockets_common::Sha3_256Digest(Sha3_256::digest(&val).into())
+            .into())
+    }
+}
+
+/// Information about the rack
+#[derive(Debug, Queryable, Insertable)]
+#[diesel(table_name = rack)]
+pub struct Rack {
+    pub uuid: String,
+}
+
+/// A chacha20poly1305 secret encrypted by a chacha20poly1305 secret key
+/// derived from the rack secret for the given epoch with the given salt
+///
+/// The epoch informs which rack secret should be used to derive the
+/// encryption key used to encrypt this root secret.
+///
+/// TODO-security: We probably don't want to log even the encrypted secret, but
+/// it's likely useful for debugging right now.
 #[derive(Debug, Queryable, Insertable)]
 pub struct EncryptedRootSecret {
     /// The epoch of the rack secret rotation or rack reconfiguration
@@ -69,5 +107,11 @@ array_new_type!(AuthTag, TAG_LEN);
 impl From<sprockets_common::Sha3_256Digest> for Sha3_256Digest {
     fn from(digest: sprockets_common::Sha3_256Digest) -> Self {
         Sha3_256Digest(digest.0)
+    }
+}
+
+impl From<Sha3_256Digest> for sprockets_common::Sha3_256Digest {
+    fn from(digest: Sha3_256Digest) -> Self {
+        sprockets_common::Sha3_256Digest(digest.0)
     }
 }

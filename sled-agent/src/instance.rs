@@ -536,14 +536,14 @@ impl Instance {
             } else {
                 (None, None)
             };
-            let port = inner.port_manager.create_port(
+            let (port, port_ticket) = inner.port_manager.create_port(
                 *inner.id(),
                 nic,
                 snat,
                 external_ips,
             )?;
-            port_tickets.push(port.ticket());
             opte_ports.push(port);
+            port_tickets.push(port_ticket);
         }
 
         // Create a zone for the propolis instance, using the previously
@@ -730,13 +730,19 @@ impl Instance {
         running_state.instance_ticket.terminate();
 
         // And remove the OPTE ports from the port manager
+        let mut result = Ok(());
         if let Some(tickets) = running_state.port_tickets.as_mut() {
             for ticket in tickets.iter_mut() {
-                ticket.release()?;
+                // Release the port from the manager, and store any error. We
+                // don't return immediately so that we can try to clean up all
+                // ports, even if early ones fail. Return the last error, which
+                // is OK for now.
+                if let Err(e) = ticket.release() {
+                    result = Err(e.into());
+                }
             }
         }
-
-        Ok(())
+        result
     }
 
     // Monitors propolis until explicitly told to disconnect.

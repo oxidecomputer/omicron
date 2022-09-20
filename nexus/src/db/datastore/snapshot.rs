@@ -160,7 +160,7 @@ impl DataStore {
 
         self.pool_authorized(&opctx)
             .await?
-            .transaction(move |conn| {
+            .transaction_async(|conn| async move {
                 use db::schema::snapshot::dsl;
 
                 diesel::update(dsl::snapshot)
@@ -169,9 +169,10 @@ impl DataStore {
                     .filter(dsl::id.eq(snapshot_id))
                     .set(dsl::time_deleted.eq(now))
                     .check_if_exists::<Snapshot>(snapshot_id)
-                    .execute(conn)?;
+                    .execute_async(&conn)
+                    .await?;
 
-                volume_delete_query.execute(conn)?;
+                volume_delete_query.execute_async(&conn).await?;
 
                 Ok(())
             })
