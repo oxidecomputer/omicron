@@ -112,7 +112,7 @@ pub async fn create_silo(
 ) -> Silo {
     object_create(
         client,
-        "/silos",
+        "/system/silos",
         &params::SiloCreate {
             identity: IdentityMetadataCreateParams {
                 name: silo_name.parse().unwrap(),

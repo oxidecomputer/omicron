@@ -174,7 +174,7 @@ async fn test_role_assignments_silo(cptestctx: &ControlPlaneTestContext) {
         const VISIBLE_TO_UNPRIVILEGED: bool = true;
         fn policy_url(&self) -> String {
             format!(
-                "/silos/{}/policy",
+                "/system/silos/{}/policy",
                 fixed_data::silo::DEFAULT_SILO.identity().name.to_string()
             )
         }
