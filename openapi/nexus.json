@@ -6276,7 +6276,7 @@
         "tags": [
           "system"
         ],
-        "summary": "Fetch a global image by id",
+        "summary": "Fetch a system-wide image by id",
         "operationId": "system_image_view_by_id",
         "parameters": [
           {
@@ -6515,8 +6515,8 @@
         "tags": [
           "system"
         ],
-        "summary": "List global images",
-        "description": "Returns a list of all the global images. Global images are returned sorted by creation date, with the most recent images appearing first.",
+        "summary": "List system-wide images",
+        "description": "Returns a list of all the system-wide images. System-wide images are returned sorted by creation date, with the most recent images appearing first.",
         "operationId": "system_image_list",
         "parameters": [
           {
@@ -6574,8 +6574,8 @@
         "tags": [
           "system"
         ],
-        "summary": "Create a global image",
-        "description": "Create a new global image. This image can then be used by any user as a base for instances.",
+        "summary": "Create a system-wide image",
+        "description": "Create a new system-wide image. This image can then be used by any user in any silo as a base for instances.",
         "operationId": "system_image_create",
         "requestBody": {
           "content": {
@@ -6612,8 +6612,8 @@
         "tags": [
           "system"
         ],
-        "summary": "Fetch a global image",
-        "description": "Returns the details of a specific global image.",
+        "summary": "Fetch a system-wide image",
+        "description": "Returns the details of a specific system-wide image.",
         "operationId": "system_image_view",
         "parameters": [
           {
@@ -6649,8 +6649,8 @@
         "tags": [
           "system"
         ],
-        "summary": "Delete a global image",
-        "description": "Permanently delete a global image. This operation cannot be undone. Any instances using the global image will continue to run, however new instances can not be created with this image.",
+        "summary": "Delete a system-wide image",
+        "description": "Permanently delete a system-wide image. This operation cannot be undone. Any instances using the system-wide image will continue to run, however new instances can not be created with this image.",
         "operationId": "system_image_delete",
         "parameters": [
           {
