@@ -177,7 +177,7 @@ pub enum ResponseKind {
     SetPowerStateAck,
     ResetPrepareAck,
     // There is intentionally no `ResetTriggerAck` response; the expected
-    // "resposne" to `ResetTrigger` is an SP reset, which won't allow for
+    // "response" to `ResetTrigger` is an SP reset, which won't allow for
     // acks to be sent.
 }
 
