@@ -322,7 +322,7 @@ has_relation(silo: Silo, "parent_silo", saml_identity_provider: SamlIdentityProv
 #
 # The resources here do not correspond to anything that appears explicitly in
 # the API or is stored in the database.  These are used either at the top level
-# of the API path (e.g., "/images") or as an implementation detail of the system
+# of the API path (e.g., "/system/images") or as an implementation detail of the system
 # (in the case of console sessions and "Database").  The policies are
 # either statically-defined in this file or driven by role assignments on the
 # Fleet.  None of these resources defines their own roles.
@@ -347,7 +347,7 @@ resource IpPoolList {
 has_relation(fleet: Fleet, "parent_fleet", ip_pool_list: IpPoolList)
 	if ip_pool_list.fleet = fleet;
 
-# Describes the policy for accessing "/images" (in the API)
+# Describes the policy for accessing "/system/images" (in the API)
 resource GlobalImageList {
 	permissions = [
 	    "list_children",

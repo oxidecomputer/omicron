@@ -280,7 +280,7 @@ lazy_static! {
     // Global Images
     pub static ref DEMO_GLOBAL_IMAGE_NAME: Name = "alpine-edge".parse().unwrap();
     pub static ref DEMO_GLOBAL_IMAGE_URL: String =
-        format!("/images/{}", *DEMO_GLOBAL_IMAGE_NAME);
+        format!("/system/images/{}", *DEMO_GLOBAL_IMAGE_NAME);
     pub static ref DEMO_GLOBAL_IMAGE_CREATE: params::GlobalImageCreate =
         params::GlobalImageCreate {
             identity: IdentityMetadataCreateParams {
@@ -1378,7 +1378,7 @@ lazy_static! {
         /* Global Images */
 
         VerifyEndpoint {
-            url: "/images",
+            url: "/system/images",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::ReadOnly,
             allowed_methods: vec![
@@ -1390,7 +1390,7 @@ lazy_static! {
         },
 
         VerifyEndpoint {
-            url: "/by-id/global-images/{id}",
+            url: "/system/by-id/images/{id}",
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::ReadOnly,
             allowed_methods: vec![

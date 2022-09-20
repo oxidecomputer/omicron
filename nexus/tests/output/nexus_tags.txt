@@ -24,14 +24,6 @@ image_list                               /organizations/{organization_name}/proj
 image_view                               /organizations/{organization_name}/projects/{project_name}/images/{image_name}
 image_view_by_id                         /by-id/images/{id}
 
-API operations found with tag "images:global"
-OPERATION ID                             URL PATH
-image_global_create                      /images
-image_global_delete                      /images/{image_name}
-image_global_list                        /images
-image_global_view                        /images/{image_name}
-image_global_view_by_id                  /by-id/global-images/{id}
-
 API operations found with tag "instances"
 OPERATION ID                             URL PATH
 instance_create                          /organizations/{organization_name}/projects/{project_name}/instances
@@ -147,6 +139,11 @@ saga_list                                /system/sagas
 saga_view                                /system/sagas/{saga_id}
 sled_list                                /system/hardware/sleds
 sled_view                                /system/hardware/sleds/{sled_id}
+system_image_create                      /system/images
+system_image_delete                      /system/images/{image_name}
+system_image_list                        /system/images
+system_image_view                        /system/images/{image_name}
+system_image_view_by_id                  /system/by-id/images/{id}
 system_user_list                         /system/user
 system_user_view                         /system/user/{user_name}
 updates_refresh                          /system/updates/refresh
