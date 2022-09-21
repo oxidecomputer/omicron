@@ -170,7 +170,7 @@ async fn test_global_image_read_for_unpriv(
         block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
-    NexusRequest::objects_post(client, "/images", &image_create_params)
+    NexusRequest::objects_post(client, "/system/images", &image_create_params)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -180,7 +180,7 @@ async fn test_global_image_read_for_unpriv(
 
     // - can list global images
     let _images: ResultsPage<views::GlobalImage> =
-        NexusRequest::object_get(client, &"/images")
+        NexusRequest::object_get(client, &"/system/images")
             .authn_as(AuthnMode::SiloUser(new_silo_user_id))
             .execute()
             .await
@@ -190,7 +190,7 @@ async fn test_global_image_read_for_unpriv(
 
     // - can read a global image
     let _image: views::GlobalImage =
-        NexusRequest::object_get(client, &"/images/alpine-edge")
+        NexusRequest::object_get(client, &"/system/images/alpine-edge")
             .authn_as(AuthnMode::SiloUser(new_silo_user_id))
             .execute()
             .await

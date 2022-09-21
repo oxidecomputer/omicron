@@ -235,11 +235,11 @@ pub fn external_api() -> NexusApiDescription {
         api.register(silo_identity_provider_create)?;
         api.register(silo_identity_provider_view)?;
 
-        api.register(image_global_list)?;
-        api.register(image_global_create)?;
-        api.register(image_global_view)?;
-        api.register(image_global_view_by_id)?;
-        api.register(image_global_delete)?;
+        api.register(system_image_list)?;
+        api.register(system_image_create)?;
+        api.register(system_image_view)?;
+        api.register(system_image_view_by_id)?;
+        api.register(system_image_delete)?;
 
         api.register(updates_refresh)?;
         api.register(user_list)?;
@@ -2266,16 +2266,16 @@ async fn instance_disk_detach(
 
 // Images
 
-/// List global images
+/// List system-wide images
 ///
-/// Returns a list of all the global images. Global images are returned sorted
+/// Returns a list of all the system-wide images. System-wide images are returned sorted
 /// by creation date, with the most recent images appearing first.
 #[endpoint {
     method = GET,
-    path = "/images",
-    tags = ["images:global"],
+    path = "/system/images",
+    tags = ["system"],
 }]
-async fn image_global_list(
+async fn system_image_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByName>,
 ) -> Result<HttpResponseOk<ResultsPage<GlobalImage>>, HttpError> {
@@ -2303,16 +2303,16 @@ async fn image_global_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a global image
+/// Create a system-wide image
 ///
-/// Create a new global image. This image can then be used by any user as a
+/// Create a new system-wide image. This image can then be used by any user in any silo as a
 /// base for instances.
 #[endpoint {
     method = POST,
-    path = "/images",
-    tags = ["images:global"]
+    path = "/system/images",
+    tags = ["system"]
 }]
-async fn image_global_create(
+async fn system_image_create(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     new_image: TypedBody<params::GlobalImageCreate>,
 ) -> Result<HttpResponseCreated<GlobalImage>, HttpError> {
@@ -2333,15 +2333,15 @@ struct GlobalImagePathParam {
     image_name: Name,
 }
 
-/// Fetch a global image
+/// Fetch a system-wide image
 ///
-/// Returns the details of a specific global image.
+/// Returns the details of a specific system-wide image.
 #[endpoint {
     method = GET,
-    path = "/images/{image_name}",
-    tags = ["images:global"],
+    path = "/system/images/{image_name}",
+    tags = ["system"],
 }]
-async fn image_global_view(
+async fn system_image_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<GlobalImagePathParam>,
 ) -> Result<HttpResponseOk<GlobalImage>, HttpError> {
@@ -2357,13 +2357,13 @@ async fn image_global_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch a global image by id
+/// Fetch a system-wide image by id
 #[endpoint {
     method = GET,
-    path = "/by-id/global-images/{id}",
-    tags = ["images:global"],
+    path = "/system/by-id/images/{id}",
+    tags = ["system"],
 }]
-async fn image_global_view_by_id(
+async fn system_image_view_by_id(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ByIdPathParams>,
 ) -> Result<HttpResponseOk<GlobalImage>, HttpError> {
@@ -2379,17 +2379,17 @@ async fn image_global_view_by_id(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a global image
+/// Delete a system-wide image
 ///
-/// Permanently delete a global image. This operation cannot be undone. Any
-/// instances using the global image will continue to run, however new instances
+/// Permanently delete a system-wide image. This operation cannot be undone. Any
+/// instances using the system-wide image will continue to run, however new instances
 /// can not be created with this image.
 #[endpoint {
     method = DELETE,
-    path = "/images/{image_name}",
-    tags = ["images:global"],
+    path = "/system/images/{image_name}",
+    tags = ["system"],
 }]
-async fn image_global_delete(
+async fn system_image_delete(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<GlobalImagePathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
