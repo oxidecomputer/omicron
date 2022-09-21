@@ -10,7 +10,7 @@ api_identity = { path = "../api_identity" }
 backoff = { version = "0.4.0", features = [ "tokio" ] }
 chrono = { version = "0.4", features = [ "serde" ] }
 dropshot = {  git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
-futures = "0.3.23"
+futures = "0.3.24"
 http = "0.2.7"
 hyper = "0.14"
 ipnetwork = "0.20"
@@ -22,19 +22,19 @@ schemars = { version = "0.8.10", features = [ "chrono", "uuid1" ] }
 serde = { version = "1.0", features = [ "derive" ] }
 serde_derive = "1.0"
 serde_json = "1.0"
-serde_with = "2.0.0"
+serde_with = "2.0.1"
 slog = { version = "2.5", features = [ "max_level_trace", "release_max_level_debug" ] }
 smf = "0.2"
 steno = "0.2"
 thiserror = "1.0"
-tokio = { version = "1.20", features = [ "full" ] }
+tokio = { version = "1.21", features = [ "full" ] }
 tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1" ] }
 toml = "0.5.9"
 uuid = { version = "1.1.0", features = [ "serde", "v4" ] }
-parse-display = "0.5.4"
+parse-display = "0.6.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor" }
 
 [dev-dependencies]
 expectorate = "1.0.5"
 serde_urlencoded = "0.7.1"
-tokio = { version = "1.20", features = [ "test-util" ] }
+tokio = { version = "1.21", features = [ "test-util" ] }

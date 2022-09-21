@@ -69,6 +69,18 @@ impl super::Nexus {
         Ok(db_silo)
     }
 
+    pub async fn silo_fetch_by_id(
+        &self,
+        opctx: &OpContext,
+        silo_id: &Uuid,
+    ) -> LookupResult<db::model::Silo> {
+        let (.., db_silo) = LookupPath::new(opctx, &self.db_datastore)
+            .silo_id(*silo_id)
+            .fetch()
+            .await?;
+        Ok(db_silo)
+    }
+
     pub async fn silo_delete(
         &self,
         opctx: &OpContext,

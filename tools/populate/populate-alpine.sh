@@ -7,7 +7,7 @@ if ! oxide api images > /dev/null; then
     exit 1
 fi
 
-oxide api /images --method POST --input - <<EOF
+oxide api /system/images --method POST --input - <<EOF
 {
   "name": "alpine",
   "description": "boot from propolis zone blob!",

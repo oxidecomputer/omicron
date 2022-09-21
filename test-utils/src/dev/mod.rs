@@ -11,7 +11,7 @@ pub mod poll;
 pub mod test_cmds;
 
 use anyhow::Context;
-use dropshot::test_util::LogContext;
+pub use dropshot::test_util::LogContext;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingIfExists;
 use dropshot::ConfigLoggingLevel;

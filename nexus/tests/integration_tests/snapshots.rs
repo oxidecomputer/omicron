@@ -91,14 +91,17 @@ async fn test_snapshot(cptestctx: &ControlPlaneTestContext) {
         block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
-    let global_image: views::GlobalImage =
-        NexusRequest::objects_post(client, "/images", &image_create_params)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .unwrap()
-            .parsed_body()
-            .unwrap();
+    let global_image: views::GlobalImage = NexusRequest::objects_post(
+        client,
+        "/system/images",
+        &image_create_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
 
     // Create a disk from this image
     let disk_size = ByteCount::try_from(2u64 * 1024 * 1024 * 1024).unwrap();
@@ -153,6 +156,7 @@ async fn test_snapshot(cptestctx: &ControlPlaneTestContext) {
                 params::InstanceDiskAttach { name: base_disk_name.clone() },
             )],
             external_ips: vec![],
+            start: true,
         },
     )
     .await;
@@ -218,14 +222,17 @@ async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
         block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
-    let global_image: views::GlobalImage =
-        NexusRequest::objects_post(client, "/images", &image_create_params)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .unwrap()
-            .parsed_body()
-            .unwrap();
+    let global_image: views::GlobalImage = NexusRequest::objects_post(
+        client,
+        "/system/images",
+        &image_create_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
 
     // Create a disk from this image
     let disk_size = ByteCount::try_from(2u64 * 1024 * 1024 * 1024).unwrap();

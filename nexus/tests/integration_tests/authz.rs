@@ -170,7 +170,7 @@ async fn test_global_image_read_for_unpriv(
         block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
-    NexusRequest::objects_post(client, "/images", &image_create_params)
+    NexusRequest::objects_post(client, "/system/images", &image_create_params)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -180,7 +180,7 @@ async fn test_global_image_read_for_unpriv(
 
     // - can list global images
     let _images: ResultsPage<views::GlobalImage> =
-        NexusRequest::object_get(client, &"/images")
+        NexusRequest::object_get(client, &"/system/images")
             .authn_as(AuthnMode::SiloUser(new_silo_user_id))
             .execute()
             .await
@@ -190,7 +190,7 @@ async fn test_global_image_read_for_unpriv(
 
     // - can read a global image
     let _image: views::GlobalImage =
-        NexusRequest::object_get(client, &"/images/alpine-edge")
+        NexusRequest::object_get(client, &"/system/images/alpine-edge")
             .authn_as(AuthnMode::SiloUser(new_silo_user_id))
             .execute()
             .await
@@ -260,13 +260,16 @@ async fn test_list_silo_idps_for_unpriv(cptestctx: &ControlPlaneTestContext) {
         .unwrap();
 
     let _users: ResultsPage<views::IdentityProvider> =
-        NexusRequest::object_get(client, &"/silos/authz/identity-providers")
-            .authn_as(AuthnMode::SiloUser(new_silo_user_id))
-            .execute()
-            .await
-            .expect("failed to make GET request")
-            .parsed_body()
-            .unwrap();
+        NexusRequest::object_get(
+            client,
+            &"/system/silos/authz/identity-providers",
+        )
+        .authn_as(AuthnMode::SiloUser(new_silo_user_id))
+        .execute()
+        .await
+        .expect("failed to make GET request")
+        .parsed_body()
+        .unwrap();
 }
 
 // Test that an authenticated, unprivileged user can access /session/me
@@ -319,17 +322,18 @@ async fn test_silo_read_for_unpriv(cptestctx: &ControlPlaneTestContext) {
             .await;
 
     // That user can access their own silo
-    let _silo: views::Silo = NexusRequest::object_get(client, &"/silos/authz")
-        .authn_as(AuthnMode::SiloUser(new_silo_user_id))
-        .execute()
-        .await
-        .expect("failed to make GET request")
-        .parsed_body()
-        .unwrap();
+    let _silo: views::Silo =
+        NexusRequest::object_get(client, &"/system/silos/authz")
+            .authn_as(AuthnMode::SiloUser(new_silo_user_id))
+            .execute()
+            .await
+            .expect("failed to make GET request")
+            .parsed_body()
+            .unwrap();
 
     // But not others
     NexusRequest::new(
-        RequestBuilder::new(client, http::Method::GET, &"/silos/other")
+        RequestBuilder::new(client, http::Method::GET, &"/system/silos/other")
             .expect_status(Some(http::StatusCode::NOT_FOUND)),
     )
     .authn_as(AuthnMode::SiloUser(new_silo_user_id))

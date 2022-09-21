@@ -16,7 +16,7 @@ use super::cte_utils::{
     QueryFromClause, QuerySqlType,
 };
 use super::pool::DbConnection;
-use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager, PoolError};
+use async_bb8_diesel::{AsyncRunQueryDsl, PoolError};
 use diesel::associations::HasTable;
 use diesel::expression::{AsExpression, Expression};
 use diesel::helper_types::*;
@@ -232,10 +232,6 @@ where
 pub type AsyncDetachFromCollectionResult<ResourceType, C> =
     Result<ResourceType, DetachError<ResourceType, C, PoolError>>;
 
-/// Result of [`DetachFromCollectionStatement`] when executed synchronously
-pub type SyncDetachFromCollectionResult<ResourceType, C> =
-    Result<ResourceType, DetachError<ResourceType, C, diesel::result::Error>>;
-
 /// Errors returned by [`DetachFromCollectionStatement`].
 #[derive(Debug)]
 pub enum DetachError<ResourceType, C, E> {
@@ -269,7 +265,8 @@ where
     /// Issues the CTE asynchronously and parses the result.
     pub async fn detach_and_get_result_async(
         self,
-        pool: &bb8::Pool<ConnectionManager<DbConnection>>,
+        conn: &(impl async_bb8_diesel::AsyncConnection<DbConnection, PoolError>
+              + Sync),
     ) -> AsyncDetachFromCollectionResult<ResourceType, C>
     where
         // We require this bound to ensure that "Self" is runnable as query.
@@ -279,29 +276,11 @@ where
             RawOutput<ResourceType, C>,
         >,
     {
-        self.get_result_async::<RawOutput<ResourceType, C>>(pool)
+        self.get_result_async::<RawOutput<ResourceType, C>>(conn)
             .await
             // If the database returns an error, propagate it right away.
             .map_err(DetachError::DatabaseError)
             // Otherwise, parse the output to determine if the CTE succeeded.
-            .and_then(Self::parse_result)
-    }
-
-    /// Issues the CTE synchronously and parses the result.
-    pub fn detach_and_get_result(
-        self,
-        conn: &mut DbConnection,
-    ) -> SyncDetachFromCollectionResult<ResourceType, C>
-    where
-        // We require this bound to ensure that "Self" is runnable as query.
-        Self: query_methods::LoadQuery<
-            'static,
-            DbConnection,
-            RawOutput<ResourceType, C>,
-        >,
-    {
-        self.get_result::<RawOutput<ResourceType, C>>(conn)
-            .map_err(DetachError::DatabaseError)
             .and_then(Self::parse_result)
     }
 
@@ -502,12 +481,8 @@ where
 mod test {
     use super::*;
     use crate::db::collection_attach::DatastoreAttachTarget;
-    use crate::db::{
-        self, error::TransactionError, identity::Resource as IdentityResource,
-    };
-    use async_bb8_diesel::{
-        AsyncConnection, AsyncRunQueryDsl, AsyncSimpleConnection,
-    };
+    use crate::db::{self, identity::Resource as IdentityResource};
+    use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
     use chrono::Utc;
     use db_macros::Resource;
     use diesel::expression_methods::ExpressionMethods;
@@ -893,57 +868,6 @@ mod test {
         let returned_resource = detach.expect("Detach should have worked");
         assert!(returned_resource.collection_id.is_none(),);
         // The returned value should be the latest value in the DB.
-        assert_eq!(returned_resource, get_resource(resource_id, &pool).await);
-
-        db.cleanup().await.unwrap();
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn test_detach_once_synchronous() {
-        let logctx = dev::test_setup_log("test_detach_once_synchronous");
-        let mut db = test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&cfg);
-
-        setup_db(&pool).await;
-
-        let collection_id = uuid::Uuid::new_v4();
-        let resource_id = uuid::Uuid::new_v4();
-
-        // Create the collection and resource.
-        let _collection =
-            insert_collection(collection_id, "collection", &pool).await;
-        let _resource = insert_resource(resource_id, "resource", &pool).await;
-        attach_resource(collection_id, resource_id, &pool).await;
-
-        // Detach the resource from the collection.
-        let detach_query = Collection::detach_resource(
-            collection_id,
-            resource_id,
-            collection::table.into_boxed(),
-            resource::table.into_boxed(),
-            diesel::update(resource::table)
-                .set(resource::dsl::collection_id.eq(Option::<Uuid>::None)),
-        );
-
-        type TxnError = TransactionError<
-            DetachError<Resource, Collection, diesel::result::Error>,
-        >;
-        let result = pool
-            .pool()
-            .transaction(move |conn| {
-                detach_query.detach_and_get_result(conn).map_err(|e| match e {
-                    DetachError::DatabaseError(e) => TxnError::from(e),
-                    e => TxnError::CustomError(e),
-                })
-            })
-            .await;
-
-        // "detach_and_get_result" should return the "detached" resource.
-        let returned_resource = result.expect("Detach should have worked");
-        assert!(returned_resource.collection_id.is_none());
-        // The returned values should be the latest value in the DB.
         assert_eq!(returned_resource, get_resource(resource_id, &pool).await);
 
         db.cleanup().await.unwrap();

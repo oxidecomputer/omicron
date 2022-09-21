@@ -168,7 +168,7 @@ table! {
 }
 
 table! {
-    instance_external_ip (id) {
+    external_ip (id) {
         id -> Uuid,
         name -> Nullable<Text>,
         description -> Nullable<Text>,
@@ -177,7 +177,7 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         ip_pool_id -> Uuid,
         ip_pool_range_id -> Uuid,
-        project_id -> Uuid,
+        project_id -> Nullable<Uuid>,
         instance_id -> Nullable<Uuid>,
         kind -> crate::IpKindEnum,
         ip -> Inet,

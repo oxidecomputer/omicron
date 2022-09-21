@@ -264,6 +264,11 @@ impl Agent {
             return Ok(SledAgentResponse { id: server.id() });
         }
 
+        if let Some(share) = trust_quorum_share.clone() {
+            self.establish_sled_quorum(share.clone()).await?;
+            *self.share.lock().await = Some(share);
+        }
+
         // TODO(https://github.com/oxidecomputer/omicron/issues/823):
         // Currently, the prescence or abscence of RSS is our signal
         // for "is this a scrimlet or not".
@@ -287,8 +292,6 @@ impl Agent {
         })?;
         maybe_agent.replace(server);
         info!(&self.log, "Sled Agent loaded; recording configuration");
-
-        *self.share.lock().await = trust_quorum_share.clone();
 
         // Record this request so the sled agent can be automatically
         // initialized on the next boot.
@@ -481,20 +484,12 @@ impl Agent {
 
     /// Performs device initialization:
     ///
-    /// - Communicates with other sled agents to establish a trust quorum if a
-    /// ShareDistribution file exists on the host. Otherwise, the sled operates
-    /// as a single node cluster.
     /// - Verifies, unpacks, and launches other services.
     pub async fn initialize(
         &self,
         config: &Config,
     ) -> Result<(), BootstrapError> {
         info!(&self.log, "bootstrap service initializing");
-
-        let maybe_share = self.share.lock().await.clone();
-        if let Some(share) = maybe_share {
-            self.establish_sled_quorum(share).await?;
-        }
 
         self.start_rss(config).await?;
 

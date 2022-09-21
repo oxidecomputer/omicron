@@ -6,7 +6,7 @@
 //! services.
 
 use crate::impl_enum_type;
-use crate::schema::instance_external_ip;
+use crate::schema::external_ip;
 use crate::Name;
 use crate::SqlU16;
 use chrono::DateTime;
@@ -32,9 +32,11 @@ impl_enum_type!(
      SNat => b"snat"
      Ephemeral => b"ephemeral"
      Floating => b"floating"
+     Service => b"service"
 );
 
-/// The main model type for external IP addresses for instances.
+/// The main model type for external IP addresses for instances
+/// and externally-facing services.
 ///
 /// This encompasses the three flavors of external IPs: automatic source NAT
 /// IPs, Ephemeral IPs, and Floating IPs. The first two are similar in that they
@@ -44,8 +46,8 @@ impl_enum_type!(
 /// API at all, and only provide outbound connectivity to instances, not
 /// inbound.
 #[derive(Debug, Clone, Selectable, Queryable, Insertable)]
-#[diesel(table_name = instance_external_ip)]
-pub struct InstanceExternalIp {
+#[diesel(table_name = external_ip)]
+pub struct ExternalIp {
     pub id: Uuid,
     // Only Some(_) for Floating IPs
     pub name: Option<Name>,
@@ -56,7 +58,7 @@ pub struct InstanceExternalIp {
     pub time_deleted: Option<DateTime<Utc>>,
     pub ip_pool_id: Uuid,
     pub ip_pool_range_id: Uuid,
-    pub project_id: Uuid,
+    pub project_id: Option<Uuid>,
     // This is Some(_) for:
     //  - all instance SNAT IPs
     //  - all ephemeral IPs
@@ -68,8 +70,8 @@ pub struct InstanceExternalIp {
     pub last_port: SqlU16,
 }
 
-impl From<InstanceExternalIp> for sled_agent_client::types::SourceNatConfig {
-    fn from(eip: InstanceExternalIp) -> Self {
+impl From<ExternalIp> for sled_agent_client::types::SourceNatConfig {
+    fn from(eip: ExternalIp) -> Self {
         Self {
             ip: eip.ip.ip(),
             first_port: eip.first_port.0,
@@ -78,21 +80,32 @@ impl From<InstanceExternalIp> for sled_agent_client::types::SourceNatConfig {
     }
 }
 
+/// Describes where the IP candidates for allocation come from: either
+/// from an IP pool, or from a project.
+///
+/// This ensures that a source is always specified, and a caller cannot
+/// request an external IP allocation without providing at least one of
+/// these options.
+#[derive(Debug, Clone, Copy)]
+pub enum IpSource {
+    Instance { project_id: Uuid, pool_id: Option<Uuid> },
+    Service { pool_id: Uuid },
+}
+
 /// An incomplete external IP, used to store state required for issuing the
 /// database query that selects an available IP and stores the resulting record.
 #[derive(Debug, Clone)]
-pub struct IncompleteInstanceExternalIp {
+pub struct IncompleteExternalIp {
     id: Uuid,
     name: Option<Name>,
     description: Option<String>,
     time_created: DateTime<Utc>,
     kind: IpKind,
-    project_id: Uuid,
     instance_id: Option<Uuid>,
-    pool_id: Option<Uuid>,
+    source: IpSource,
 }
 
-impl IncompleteInstanceExternalIp {
+impl IncompleteExternalIp {
     pub fn for_instance_source_nat(
         id: Uuid,
         project_id: Uuid,
@@ -105,9 +118,8 @@ impl IncompleteInstanceExternalIp {
             description: None,
             time_created: Utc::now(),
             kind: IpKind::SNat,
-            project_id,
             instance_id: Some(instance_id),
-            pool_id,
+            source: IpSource::Instance { project_id, pool_id },
         }
     }
 
@@ -123,9 +135,8 @@ impl IncompleteInstanceExternalIp {
             description: None,
             time_created: Utc::now(),
             kind: IpKind::Ephemeral,
-            project_id,
             instance_id: Some(instance_id),
-            pool_id,
+            source: IpSource::Instance { project_id, pool_id },
         }
     }
 
@@ -142,9 +153,20 @@ impl IncompleteInstanceExternalIp {
             description: Some(description.to_string()),
             time_created: Utc::now(),
             kind: IpKind::Floating,
-            project_id,
             instance_id: None,
-            pool_id,
+            source: IpSource::Instance { project_id, pool_id },
+        }
+    }
+
+    pub fn for_service(id: Uuid, pool_id: Uuid) -> Self {
+        Self {
+            id,
+            name: None,
+            description: None,
+            time_created: Utc::now(),
+            kind: IpKind::Service,
+            instance_id: None,
+            source: IpSource::Service { pool_id },
         }
     }
 
@@ -168,16 +190,12 @@ impl IncompleteInstanceExternalIp {
         &self.kind
     }
 
-    pub fn project_id(&self) -> &Uuid {
-        &self.project_id
-    }
-
     pub fn instance_id(&self) -> &Option<Uuid> {
         &self.instance_id
     }
 
-    pub fn pool_id(&self) -> &Option<Uuid> {
-        &self.pool_id
+    pub fn source(&self) -> &IpSource {
+        &self.source
     }
 }
 
@@ -195,10 +213,10 @@ impl TryFrom<IpKind> for shared::IpKind {
     }
 }
 
-impl TryFrom<InstanceExternalIp> for views::ExternalIp {
+impl TryFrom<ExternalIp> for views::ExternalIp {
     type Error = Error;
 
-    fn try_from(ip: InstanceExternalIp) -> Result<Self, Self::Error> {
+    fn try_from(ip: ExternalIp) -> Result<Self, Self::Error> {
         let kind = ip.kind.try_into()?;
         Ok(views::ExternalIp { kind, ip: ip.ip.ip() })
     }

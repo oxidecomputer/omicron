@@ -184,7 +184,7 @@ impl PortManager {
         nic: &NetworkInterface,
         source_nat: Option<SourceNatConfig>,
         external_ips: Option<Vec<IpAddr>>,
-    ) -> Result<Port, Error> {
+    ) -> Result<(Port, PortTicket), Error> {
         // TODO-completess: Remove IPv4 restrictions once OPTE supports virtual
         // IPv6 networks.
         let private_ip = match nic.ip {
@@ -346,39 +346,41 @@ impl PortManager {
             vnic_name
         };
 
-        let port = {
-            let mut ports = self.inner.ports.lock().unwrap();
-            let ticket = PortTicket::new(
-                instance_id,
-                port_name.clone(),
-                self.inner.clone(),
-            );
-            let port = Port::new(
-                ticket,
-                port_name.clone(),
-                nic.ip,
-                subnet,
-                mac,
-                nic.slot,
-                vni,
-                self.inner.underlay_ip,
-                source_nat,
-                external_ips,
-                gateway,
-                boundary_services,
-                vnic,
-            );
-            let old =
-                ports.insert((instance_id, port_name.clone()), port.clone());
-            assert!(
-                old.is_none(),
-                "Duplicate OPTE port detected: instance_id = {}, port_name = {}",
-                instance_id,
-                &port_name,
-            );
-            self.inner.update_secondary_macs(&mut ports)?;
-            port
-        };
+        let ticket =
+            PortTicket::new(instance_id, port_name.clone(), self.inner.clone());
+        let port = Port::new(
+            port_name.clone(),
+            nic.ip,
+            subnet,
+            mac,
+            nic.slot,
+            vni,
+            self.inner.underlay_ip,
+            source_nat,
+            external_ips,
+            gateway,
+            boundary_services,
+            vnic,
+        );
+
+        // Update the secondary MAC of the underlay.
+        //
+        // TODO-remove: This is part of the external IP hack.
+        //
+        // Acquire the lock _after_ the ticket exists. If the
+        // `update_secondary_mac` call below fails, we'll propagate the
+        // error with `?`. We need the lock guard to be dropped first, so that
+        // the lock acquired when `ticket` is dropped is guaranteed to be free.
+        let mut ports = self.inner.ports.lock().unwrap();
+        let old = ports.insert((instance_id, port_name.clone()), port.clone());
+        assert!(
+            old.is_none(),
+            "Duplicate OPTE port detected: instance_id = {}, port_name = {}",
+            instance_id,
+            &port_name,
+        );
+        self.inner.update_secondary_macs(&mut ports)?;
+        drop(ports);
 
         // Add a router entry for this interface's subnet, directing traffic to the
         // VPC subnet.
@@ -444,7 +446,7 @@ impl PortManager {
             "Created OPTE port for guest";
             "port" => ?&port,
         );
-        Ok(port)
+        Ok((port, ticket))
     }
 
     pub fn firewall_rules_ensure(
@@ -573,7 +575,6 @@ fn opte_firewall_rules(
         .collect::<Vec<FirewallRule>>()
 }
 
-#[derive(Clone)]
 pub struct PortTicket {
     id: Uuid,
     port_name: String,
@@ -582,15 +583,14 @@ pub struct PortTicket {
 
 impl std::fmt::Debug for PortTicket {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        const SOME: &str = "Some(_)";
-        const NONE: &str = "None";
-        f.debug_struct("PortTicket")
-            .field("id", &self.id)
-            .field(
-                "manager",
-                if self.manager.is_some() { &SOME } else { &NONE },
-            )
-            .finish()
+        if self.manager.is_some() {
+            f.debug_struct("PortTicket")
+                .field("id", &self.id)
+                .field("manager", &"{ .. }")
+                .finish()
+        } else {
+            f.debug_struct("PortTicket").field("id", &self.id).finish()
+        }
     }
 }
 

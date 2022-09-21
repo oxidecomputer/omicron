@@ -27,6 +27,7 @@ use anyhow::anyhow;
 use futures::lock::{Mutex, MutexGuard};
 use omicron_common::address::NEXUS_INTERNAL_PORT;
 use omicron_common::address::PROPOLIS_PORT;
+use omicron_common::api::external::InstanceState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::backoff;
 use propolis_client::api::DiskRequest;
@@ -508,6 +509,24 @@ impl Instance {
         &self,
         inner: &mut MutexGuard<'_, InstanceInner>,
     ) -> Result<PropolisSetup, Error> {
+        // Update nexus with an in-progress state while we set up the instance.
+        let desired = inner.state.desired().clone();
+        inner
+            .state
+            .transition(InstanceState::Starting, desired.map(|d| d.run_state));
+        inner
+            .lazy_nexus_client
+            .get()
+            .await?
+            .cpapi_instances_put(
+                inner.id(),
+                &nexus_client::types::InstanceRuntimeState::from(
+                    inner.state.current().clone(),
+                ),
+            )
+            .await
+            .map_err(|e| Error::Notification(e))?;
+
         // Create OPTE ports for the instance
         let mut opte_ports = Vec::with_capacity(inner.requested_nics.len());
         let mut port_tickets = Vec::with_capacity(inner.requested_nics.len());
@@ -517,14 +536,14 @@ impl Instance {
             } else {
                 (None, None)
             };
-            let port = inner.port_manager.create_port(
+            let (port, port_ticket) = inner.port_manager.create_port(
                 *inner.id(),
                 nic,
                 snat,
                 external_ips,
             )?;
-            port_tickets.push(port.ticket());
             opte_ports.push(port);
+            port_tickets.push(port_ticket);
         }
 
         // Create a zone for the propolis instance, using the previously
@@ -711,13 +730,19 @@ impl Instance {
         running_state.instance_ticket.terminate();
 
         // And remove the OPTE ports from the port manager
+        let mut result = Ok(());
         if let Some(tickets) = running_state.port_tickets.as_mut() {
             for ticket in tickets.iter_mut() {
-                ticket.release()?;
+                // Release the port from the manager, and store any error. We
+                // don't return immediately so that we can try to clean up all
+                // ports, even if early ones fail. Return the last error, which
+                // is OK for now.
+                if let Err(e) = ticket.release() {
+                    result = Err(e.into());
+                }
             }
         }
-
-        Ok(())
+        result
     }
 
     // Monitors propolis until explicitly told to disconnect.

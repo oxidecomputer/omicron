@@ -17,9 +17,12 @@ pub use self::location_map::LocationConfig;
 pub use self::location_map::LocationDeterminationConfig;
 use self::location_map::LocationMap;
 pub use self::location_map::SwitchPortConfig;
+use self::location_map::ValidatedLocationConfig;
 
+use crate::error::Error;
 use crate::error::StartupError;
 use crate::single_sp::SingleSp;
+use once_cell::sync::OnceCell;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_with::serde_as;
@@ -27,10 +30,11 @@ use serde_with::DisplayFromStr;
 use slog::o;
 use slog::Logger;
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::UdpSocket;
-use tokio::time::Instant;
+use tokio::task::JoinHandle;
 
 #[serde_as]
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -88,13 +92,21 @@ impl SwitchPort {
 pub(crate) struct ManagementSwitch {
     local_ignition_controller_port: SwitchPort,
     sockets: Arc<HashMap<SwitchPort, SingleSp>>,
-    location_map: LocationMap,
+    location_map: Arc<OnceCell<Result<LocationMap, String>>>,
+    discovery_task: JoinHandle<()>,
+}
+
+impl Drop for ManagementSwitch {
+    fn drop(&mut self) {
+        // We should only be dropped in tests, in general, but dont' leave a
+        // stray spawned task running (if it still is).
+        self.discovery_task.abort();
+    }
 }
 
 impl ManagementSwitch {
     pub(crate) async fn new(
         config: SwitchConfig,
-        discovery_deadline: Instant,
         log: &Logger,
     ) -> Result<Self, StartupError> {
         // begin by binding to all our configured ports; insert them into a map
@@ -137,27 +149,63 @@ impl ManagementSwitch {
             });
         }
 
-        // run discovery to figure out the physical location of ourselves (and
-        // therefore all SPs we talk to)
+        // Start running discovery to figure out the physical location of
+        // ourselves (and therefore all SPs we talk to). We don't block waiting
+        // for this, but we won't be able to service requests until it
+        // completes (because we won't be able to map "the SP of sled 7" to a
+        // correct switch port).
         let sockets = Arc::new(sockets);
-        let location_map = LocationMap::run_discovery(
-            config.location,
-            ports,
-            Arc::clone(&sockets),
-            discovery_deadline,
-            log,
-        )
-        .await?;
+        let location_map = Arc::new(OnceCell::new());
+        let discovery_task = {
+            let log = log.clone();
+            let sockets = Arc::clone(&sockets);
+            let location_map = Arc::clone(&location_map);
+            let config =
+                ValidatedLocationConfig::try_from((&ports, config.location))?;
 
-        Ok(Self { local_ignition_controller_port, location_map, sockets })
+            tokio::spawn(async move {
+                let result = LocationMap::run_discovery(
+                    config,
+                    ports,
+                    Arc::clone(&sockets),
+                    &log,
+                )
+                .await;
+
+                // We are the only setter of the `location_map` once cell; all
+                // other access in this file are `get()`s, so we can unwrap.
+                location_map.set(result).unwrap();
+            })
+        };
+
+        Ok(Self {
+            local_ignition_controller_port,
+            location_map,
+            sockets,
+            discovery_task,
+        })
+    }
+
+    /// Have we completed the discovery process to know how to map logical SP
+    /// positions to switch ports?
+    pub(super) fn is_discovery_complete(&self) -> bool {
+        self.location_map.get().is_some()
+    }
+
+    fn location_map(&self) -> Result<&LocationMap, Error> {
+        let discovery_result =
+            self.location_map.get().ok_or(Error::DiscoveryNotYetComplete)?;
+        discovery_result
+            .as_ref()
+            .map_err(|s| Error::DiscoveryFailed { reason: s.clone() })
     }
 
     /// Get the name of our location.
     ///
     /// This matches one of the names specified as a possible location in the
     /// configuration we were given.
-    pub(super) fn location_name(&self) -> &str {
-        &self.location_map.location_name()
+    pub(super) fn location_name(&self) -> Result<&str, Error> {
+        self.location_map().map(|m| m.location_name())
     }
 
     /// Get the socket to use to communicate with an SP and the socket address
@@ -183,11 +231,17 @@ impl ManagementSwitch {
         }
     }
 
-    pub(crate) fn switch_port(&self, id: SpIdentifier) -> Option<SwitchPort> {
-        self.location_map.id_to_port(id)
+    pub(crate) fn switch_port(
+        &self,
+        id: SpIdentifier,
+    ) -> Result<Option<SwitchPort>, Error> {
+        self.location_map().map(|m| m.id_to_port(id))
     }
 
-    pub(crate) fn switch_port_to_id(&self, port: SwitchPort) -> SpIdentifier {
-        self.location_map.port_to_id(port)
+    pub(crate) fn switch_port_to_id(
+        &self,
+        port: SwitchPort,
+    ) -> Result<SpIdentifier, Error> {
+        self.location_map().map(|m| m.port_to_id(port))
     }
 }

@@ -329,10 +329,40 @@ async fn sic_alloc_server(
     sagactx: NexusActionContext,
 ) -> Result<Uuid, ActionError> {
     let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params::<Params>()?;
+
+    // ALLOCATION POLICY
+    //
+    // NOTE: This policy can - and should! - be changed.
+    //
+    // See https://rfd.shared.oxide.computer/rfd/0205 for a more complete
+    // discussion.
+    //
+    // Right now, allocate an instance to any random sled agent. This has a few
+    // problems:
+    //
+    // - There's no consideration for "health of the sled" here, other than
+    //   "time_deleted = Null". If the sled is rebooting, in a known unhealthy
+    //   state, etc, we'd currently provision it here. I don't think this is a
+    //   trivial fix, but it's work we'll need to account for eventually.
+    //
+    // - This is selecting a random sled from all sleds in the cluster. For
+    //   multi-rack, this is going to fling the sled to an arbitrary system.
+    //   Maybe that's okay, but worth knowing about explicitly.
+    //
+    // - This doesn't take into account anti-affinity - users will want to
+    //   schedule instances that belong to a cluster on different failure
+    //   domains. See https://github.com/oxidecomputer/omicron/issues/1705.
+
     osagactx
-        .alloc_server(&params.create_params)
+        .nexus()
+        .random_sled_id()
         .await
+        .map_err(ActionError::action_failed)?
+        .ok_or_else(|| Error::ServiceUnavailable {
+            internal_message: String::from(
+                "no sleds available for new Instance",
+            ),
+        })
         .map_err(ActionError::action_failed)
 }
 
@@ -605,7 +635,7 @@ async fn sic_allocate_instance_snat_ip_undo(
         OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
     let ip_id = sagactx.lookup::<Uuid>("snat_ip_id")?;
     datastore
-        .deallocate_instance_external_ip(&opctx, ip_id)
+        .deallocate_external_ip(&opctx, ip_id)
         .await
         .map_err(ActionError::action_failed)?;
     Ok(())
@@ -668,7 +698,7 @@ async fn sic_allocate_instance_external_ip_undo(
         OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
     let ip_id = repeat_saga_params.new_id;
     datastore
-        .deallocate_instance_external_ip(&opctx, ip_id)
+        .deallocate_external_ip(&opctx, ip_id)
         .await
         .map_err(ActionError::action_failed)?;
     Ok(())
@@ -940,16 +970,47 @@ async fn sic_instance_ensure(
         .await
         .map_err(ActionError::action_failed)?;
 
-    osagactx
-        .nexus()
-        .instance_set_runtime(
-            &opctx,
-            &authz_instance,
-            &db_instance,
-            runtime_params,
-        )
-        .await
-        .map_err(ActionError::action_failed)?;
+    if !params.create_params.start {
+        let instance_id = db_instance.id();
+        // If we don't need to start the instance, we can skip the ensure
+        // and just update the instance runtime state to `Stopped`
+        let runtime_state = db::model::InstanceRuntimeState {
+            state: db::model::InstanceState::new(InstanceState::Stopped),
+            // Must update the generation, or the database query will fail.
+            //
+            // The runtime state of the instance record is only changed as a result
+            // of the successful completion of the saga (i.e. after ensure which we're
+            // skipping in this case) or during saga unwinding. So we're guaranteed
+            // that the cached generation in the saga log is the most recent in the database.
+            gen: db::model::Generation::from(
+                db_instance.runtime_state.gen.next(),
+            ),
+            ..db_instance.runtime_state
+        };
+
+        let updated = datastore
+            .instance_update_runtime(&instance_id, &runtime_state)
+            .await
+            .map_err(ActionError::action_failed)?;
+
+        if !updated {
+            warn!(
+                osagactx.log(),
+                "failed to update instance runtime state from creating to stopped",
+            );
+        }
+    } else {
+        osagactx
+            .nexus()
+            .instance_set_runtime(
+                &opctx,
+                &authz_instance,
+                &db_instance,
+                runtime_params,
+            )
+            .await
+            .map_err(ActionError::action_failed)?;
+    }
 
     Ok(())
 }

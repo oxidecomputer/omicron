@@ -25,21 +25,19 @@ pub enum SpCommunicationError {
     BadResponseType(#[from] BadResponseType),
     #[error("Error response from SP: {0}")]
     SpError(#[from] ResponseError),
+    #[error("Bogus serial console state; detach and reattach")]
+    BogusSerialConsoleState,
 }
 
 #[derive(Debug, Error)]
 pub enum UpdateError {
+    #[error("update image cannot be empty")]
+    ImageEmpty,
     #[error("update image is too large")]
     ImageTooLarge,
-    #[error("error starting update: {0}")]
-    Start(SpCommunicationError),
-    #[error("error sending update chunk at offset {offset}: {err}")]
-    Chunk { offset: u32, err: SpCommunicationError },
+    #[error("failed to send update message to SP: {0}")]
+    Communication(#[from] SpCommunicationError),
 }
-
-#[derive(Debug, Error)]
-#[error("serial console already attached")]
-pub struct SerialConsoleAlreadyAttached;
 
 #[derive(Debug, Error)]
 pub enum StartupError {
@@ -49,12 +47,14 @@ pub enum StartupError {
     InvalidConfig { reasons: Vec<String> },
     #[error("error communicating with SP: {0}")]
     SpCommunicationFailed(#[from] SpCommunicationError),
-    #[error("location discovery failed: {reason}")]
-    DiscoveryFailed { reason: String },
 }
 
 #[derive(Debug, Error)]
 pub enum Error {
+    #[error("discovery process not yet complete")]
+    DiscoveryNotYetComplete,
+    #[error("location discovery failed: {reason}")]
+    DiscoveryFailed { reason: String },
     #[error("nonexistent SP (type {:?}, slot {})", .0.typ, .0.slot)]
     SpDoesNotExist(SpIdentifier),
     #[error("unknown socket address for local ignition controller")]
@@ -75,14 +75,6 @@ pub enum Error {
     SpCommunicationFailed(#[from] SpCommunicationError),
     #[error("updating SP failed: {0}")]
     UpdateFailed(#[from] UpdateError),
-    #[error("serial console is already attached")]
-    SerialConsoleAttached,
-}
-
-impl From<SerialConsoleAlreadyAttached> for Error {
-    fn from(_: SerialConsoleAlreadyAttached) -> Self {
-        Self::SerialConsoleAttached
-    }
 }
 
 #[derive(Debug, Error)]

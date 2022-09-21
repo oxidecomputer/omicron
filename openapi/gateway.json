@@ -86,6 +86,86 @@
         }
       }
     },
+    "/ignition/{type}/{slot}/power-off": {
+      "post": {
+        "summary": "Power off a sled via Ignition",
+        "description": "This corresponds to moving the sled into A3.",
+        "operationId": "ignition_power_off",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/ignition/{type}/{slot}/power-on": {
+      "post": {
+        "summary": "Power on a sled via a request to its SP.",
+        "description": "This corresponds to moving the sled into A2.",
+        "operationId": "ignition_power_on",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/sp": {
       "get": {
         "summary": "List SPs",
@@ -544,7 +624,7 @@
     "/sp/{type}/{slot}/component/{component}/update": {
       "post": {
         "summary": "Update an SP component",
-        "description": "Update a component of an SP according to its specific update mechanism. This interface is generic for all component types, but resolves to a mechanism specific to the given component type. This may fail for a variety of reasons including the update bundle being invalid or improperly specified or due to an error originating from the SP itself.\nNote that not all components may be updated; components without known update mechanisms will return an error without any inspection of the update bundle.",
+        "description": "Update a component of an SP according to its specific update mechanism. This interface is generic for all component types, but resolves to a mechanism specific to the given component type. This may fail for a variety of reasons including the update bundle being invalid or improperly specified or due to an error originating from the SP itself.\nNote that not all components may be updated; components without known update mechanisms will return an error without any inspection of the update bundle.\nUpdating the SP itself is done via the component name `sp`.",
         "operationId": "sp_component_update",
         "parameters": [
           {
@@ -589,12 +669,122 @@
           "required": true
         },
         "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/sp/{type}/{slot}/component/{component}/update-abort": {
+      "post": {
+        "summary": "Abort any in-progress update an SP component",
+        "description": "Aborting an update to the SP itself is done via the component name `sp`.\nOn a successful return, the update corresponding to the given UUID will no longer be in progress (either aborted or applied).",
+        "operationId": "sp_component_update_abort",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "component",
+            "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateAbortBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/sp/{type}/{slot}/component/{component}/update-status": {
+      "get": {
+        "summary": "Get the status of an update being applied to an SP component",
+        "description": "Getting the status of an update to the SP itself is done via the component name `sp`.",
+        "operationId": "sp_component_update_status",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "component",
+            "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
           "200": {
             "description": "successful operation",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SpComponentInfoResultsPage"
+                  "$ref": "#/components/schemas/SpUpdateStatus"
                 }
               }
             }
@@ -608,10 +798,11 @@
         }
       }
     },
-    "/sp/{type}/{slot}/power-off": {
-      "post": {
-        "summary": "Power off an SP via Ignition",
-        "operationId": "ignition_power_off",
+    "/sp/{type}/{slot}/power-state": {
+      "get": {
+        "summary": "Get the current power state of a sled via its SP.",
+        "description": "Note that if the sled is in A3, the SP is powered off and will not be able to respond; use the ignition control endpoints for those cases.",
+        "operationId": "sp_power_state_get",
         "parameters": [
           {
             "in": "path",
@@ -635,8 +826,15 @@
           }
         ],
         "responses": {
-          "204": {
-            "description": "resource updated"
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PowerState"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -645,12 +843,11 @@
             "$ref": "#/components/responses/Error"
           }
         }
-      }
-    },
-    "/sp/{type}/{slot}/power-on": {
+      },
       "post": {
-        "summary": "Power on an SP via Ignition",
-        "operationId": "ignition_power_on",
+        "summary": "Set the current power state of a sled via its SP.",
+        "description": "Note that if the sled is in A3, the SP is powered off and will not be able to respond; use the ignition control endpoints for those cases.",
+        "operationId": "sp_power_state_set",
         "parameters": [
           {
             "in": "path",
@@ -673,6 +870,16 @@
             "style": "simple"
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PowerState"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "204": {
             "description": "resource updated"
@@ -724,56 +931,6 @@
           }
         }
       }
-    },
-    "/sp/{type}/{slot}/update": {
-      "post": {
-        "summary": "Update an SP",
-        "description": "Copies a new image to the alternate bank of the SP flash.",
-        "operationId": "sp_update",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "slot",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 0
-            },
-            "style": "simple"
-          },
-          {
-            "in": "path",
-            "name": "type",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/SpType"
-            },
-            "style": "simple"
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
     }
   },
   "components": {
@@ -807,6 +964,15 @@
         "required": [
           "message",
           "request_id"
+        ]
+      },
+      "PowerState": {
+        "description": "See RFD 81.\n\nThis enum only lists power states the SP is able to control; higher power states are controlled by ignition.",
+        "type": "string",
+        "enum": [
+          "A0",
+          "A1",
+          "A2"
         ]
       },
       "SpComponentInfo": {
@@ -1025,20 +1191,186 @@
           "switch"
         ]
       },
+      "SpUpdateStatus": {
+        "oneOf": [
+          {
+            "description": "The SP has no update status.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "none"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "The SP is preparing to receive an update.\n\nMay or may not include progress, depending on the capabilities of the component being updated.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "progress": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/UpdatePreparationProgress"
+                  }
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "preparing"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "state"
+            ]
+          },
+          {
+            "description": "The SP is currently receiving an update.",
+            "type": "object",
+            "properties": {
+              "bytes_received": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "in_progress"
+                ]
+              },
+              "total_bytes": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "bytes_received",
+              "id",
+              "state",
+              "total_bytes"
+            ]
+          },
+          {
+            "description": "The SP has completed receiving an update.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "state"
+            ]
+          },
+          {
+            "description": "The SP has aborted an in-progress update.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "aborted"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "state"
+            ]
+          }
+        ]
+      },
+      "UpdateAbortBody": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The ID of the update to abort.\n\nIf the SP is currently receiving an update with this ID, it will be aborted.\n\nIf the SP is currently receiving an update with a different ID, the abort request will fail.\n\nIf the SP is not currently receiving any update, the request to abort should succeed but will not have actually done anything.",
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
       "UpdateBody": {
         "type": "object",
         "properties": {
+          "id": {
+            "description": "An identifier for this update.\n\nThis ID applies to this single instance of the API call; it is not an ID of `image` itself. Multiple API calls with the same `image` should use different IDs.",
+            "type": "string",
+            "format": "uuid"
+          },
           "image": {
+            "description": "The binary blob containing the update image (component-specific).",
             "type": "array",
             "items": {
               "type": "integer",
               "format": "uint8",
               "minimum": 0
             }
+          },
+          "slot": {
+            "description": "The update slot to apply this image to. Supply 0 if the component only has one update slot.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
           }
         },
         "required": [
-          "image"
+          "id",
+          "image",
+          "slot"
+        ]
+      },
+      "UpdatePreparationProgress": {
+        "description": "Progress of an SP preparing to update.\n\nThe units of `current` and `total` are unspecified and defined by the SP; e.g., if preparing for an update requires erasing a flash device, this may indicate progress of that erasure without defining units (bytes, pages, sectors, etc.).",
+        "type": "object",
+        "properties": {
+          "current": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "total": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "current",
+          "total"
         ]
       }
     }

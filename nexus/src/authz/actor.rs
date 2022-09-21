@@ -82,6 +82,14 @@ impl oso::PolarClass for AuthenticatedActor {
                 },
                 "USER_DB_INIT",
             )
+            .add_constant(
+                AuthenticatedActor {
+                    actor_id: authn::USER_INTERNAL_API.id,
+                    silo_id: None,
+                    roles: RoleSet::new(),
+                },
+                "USER_INTERNAL_API",
+            )
             .add_attribute_getter("silo", |a: &AuthenticatedActor| {
                 a.silo_id.map(|silo_id| {
                     super::Silo::new(

@@ -7,7 +7,6 @@
 use crate::illumos::dladm::Dladm;
 use crate::opte::BoundaryServices;
 use crate::opte::Gateway;
-use crate::opte::PortTicket;
 use crate::opte::Vni;
 use crate::params::SourceNatConfig;
 use ipnetwork::IpNetwork;
@@ -18,8 +17,6 @@ use std::sync::Arc;
 
 #[derive(Debug)]
 struct PortInner {
-    // Contains instance ID and a pointer to the parent manager
-    ticket: PortTicket,
     // Name of the port as identified by OPTE
     name: String,
     // IP address within the VPC Subnet
@@ -36,7 +33,7 @@ struct PortInner {
     _underlay_ip: Ipv6Addr,
     // The external IP address and port range provided for this port, to allow
     // outbound network connectivity.
-    source_nat: Option<SourceNatConfig>,
+    _source_nat: Option<SourceNatConfig>,
     // The external IP addresses provided to this port, to allow _inbound_
     // network connectivity.
     external_ips: Option<Vec<IpAddr>>,
@@ -105,7 +102,6 @@ pub struct Port {
 impl Port {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        ticket: PortTicket,
         name: String,
         ip: IpAddr,
         subnet: IpNetwork,
@@ -121,7 +117,6 @@ impl Port {
     ) -> Self {
         Self {
             inner: Arc::new(PortInner {
-                ticket,
                 name,
                 _ip: ip,
                 _subnet: subnet,
@@ -129,17 +124,13 @@ impl Port {
                 slot,
                 vni: vni,
                 _underlay_ip: underlay_ip,
-                source_nat,
+                _source_nat: source_nat,
                 external_ips,
                 _gateway: gateway,
                 _boundary_services: boundary_services,
                 vnic,
             }),
         }
-    }
-
-    pub fn source_nat(&self) -> &Option<SourceNatConfig> {
-        &self.inner.source_nat
     }
 
     pub fn external_ips(&self) -> &Option<Vec<IpAddr>> {
@@ -160,9 +151,5 @@ impl Port {
 
     pub fn slot(&self) -> u8 {
         self.inner.slot
-    }
-
-    pub fn ticket(&self) -> PortTicket {
-        self.inner.ticket.clone()
     }
 }

@@ -21,12 +21,15 @@ use gateway_messages::BulkIgnitionState;
 use gateway_messages::DiscoverResponse;
 use gateway_messages::IgnitionCommand;
 use gateway_messages::IgnitionState;
+use gateway_messages::PowerState;
 use gateway_messages::ResponseKind;
+use gateway_messages::SpComponent;
 use gateway_messages::SpState;
+use gateway_messages::UpdateStatus;
 use slog::info;
 use slog::o;
 use slog::Logger;
-use tokio::time::Instant;
+use uuid::Uuid;
 
 /// Helper trait that allows us to return an `impl FuturesUnordered<_>` where
 /// the caller can call `.is_empty()` without knowing the type of the future
@@ -52,35 +55,34 @@ pub struct Communicator {
 impl Communicator {
     pub async fn new(
         config: SwitchConfig,
-        discovery_deadline: Instant,
         log: &Logger,
     ) -> Result<Self, StartupError> {
         let log = log.new(o!("component" => "SpCommunicator"));
-        let switch =
-            ManagementSwitch::new(config, discovery_deadline, &log).await?;
+        let switch = ManagementSwitch::new(config, &log).await?;
 
         info!(&log, "started SP communicator");
         Ok(Self { switch })
+    }
+
+    /// Have we completed the discovery process to know how to map logical SP
+    /// positions to switch ports?
+    pub fn is_discovery_complete(&self) -> bool {
+        self.switch.is_discovery_complete()
     }
 
     /// Get the name of our location.
     ///
     /// This matches one of the names specified as a possible location in the
     /// configuration we were given.
-    pub fn location_name(&self) -> &str {
-        &self.switch.location_name()
+    pub fn location_name(&self) -> Result<&str, Error> {
+        self.switch.location_name()
     }
 
-    // convert an identifier to a port number; this is fallible because
-    // identifiers can be constructed arbiatrarily, in contrast to `port_to_id`
-    // below.
     fn id_to_port(&self, sp: SpIdentifier) -> Result<SwitchPort, Error> {
-        self.switch.switch_port(sp).ok_or(Error::SpDoesNotExist(sp))
+        self.switch.switch_port(sp)?.ok_or(Error::SpDoesNotExist(sp))
     }
 
-    // convert a port to an identifier; this is infallible because we construct
-    // `SwitchPort`s and know they map to valid IDs
-    fn port_to_id(&self, port: SwitchPort) -> SpIdentifier {
+    fn port_to_id(&self, port: SwitchPort) -> Result<SpIdentifier, Error> {
         self.switch.switch_port_to_id(port)
     }
 
@@ -98,9 +100,9 @@ impl Communicator {
     /// This method exists to be polled during test setup (to wait for discovery
     /// to happen); it should not be called outside tests. In particular, it
     /// panics instead of running an error if `sp` describes an SP that isn't
-    /// known to this communicator.
+    /// known to this communicator or if discovery isn't complete yet.
     pub fn address_known(&self, sp: SpIdentifier) -> bool {
-        let port = self.switch.switch_port(sp).unwrap();
+        let port = self.switch.switch_port(sp).unwrap().unwrap();
         self.switch.sp(port).is_some()
     }
 
@@ -127,14 +129,18 @@ impl Communicator {
             .ok_or(Error::LocalIgnitionControllerAddressUnknown)?;
         let bulk_state = controller.bulk_ignition_state().await?;
 
-        // deserializing checks that `num_targets` is reasonably sized, so we
-        // don't need to guard that here
-        let targets =
-            &bulk_state.targets[..usize::from(bulk_state.num_targets)];
-
         // map ignition target indices back to `SpIdentifier`s for our caller
-        targets
+        bulk_state
+            .targets
             .iter()
+            .filter(|state| {
+                // TODO-cleanup `state.id` should match one of the constants
+                // defined in RFD 142 section 5.2.2, all of which are nonzero.
+                // What does the real ignition controller return for unpopulated
+                // sleds? Our simulator returns 0 for unpopulated targets;
+                // filter those out.
+                state.id != 0
+            })
             .copied()
             .enumerate()
             .map(|(target, state)| {
@@ -142,7 +148,7 @@ impl Communicator {
                     .switch
                     .switch_port_from_ignition_target(target)
                     .ok_or(Error::BadIgnitionTarget(target))?;
-                let id = self.port_to_id(port);
+                let id = self.port_to_id(port)?;
                 Ok((id, state))
             })
             .collect()
@@ -178,10 +184,11 @@ impl Communicator {
     pub async fn serial_console_attach(
         &self,
         sp: SpIdentifier,
+        component: SpComponent,
     ) -> Result<AttachedSerialConsole, Error> {
         let port = self.id_to_port(sp)?;
         let sp = self.switch.sp(port).ok_or(Error::SpAddressUnknown(sp))?;
-        Ok(sp.serial_console_attach().await?)
+        Ok(sp.serial_console_attach(component).await?)
     }
 
     /// Detach any existing connection to the given SP component's serial
@@ -192,7 +199,7 @@ impl Communicator {
     ) -> Result<(), Error> {
         let port = self.id_to_port(sp)?;
         let sp = self.switch.sp(port).ok_or(Error::SpAddressUnknown(sp))?;
-        sp.serial_console_detach().await;
+        sp.serial_console_detach().await?;
         Ok(())
     }
 
@@ -203,15 +210,71 @@ impl Communicator {
         Ok(sp.state().await?)
     }
 
-    /// Update a given SP.
-    pub async fn update(
+    /// Start sending an update payload to the given SP.
+    ///
+    /// This function will return before the update is complete! Once the SP
+    /// acknowledges that we want to apply an update, we spawn a background task
+    /// to stream the update to the SP and then return. Poll the status of the
+    /// update via [`Self::update_status()`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if `image.is_empty()`.
+    pub async fn start_update(
         &self,
         sp: SpIdentifier,
-        image: &[u8],
+        component: SpComponent,
+        update_id: Uuid,
+        slot: u16,
+        image: Vec<u8>,
     ) -> Result<(), Error> {
         let port = self.id_to_port(sp)?;
         let sp = self.switch.sp(port).ok_or(Error::SpAddressUnknown(sp))?;
-        Ok(sp.update(image).await?)
+        Ok(sp.start_update(component, update_id, slot, image).await?)
+    }
+
+    /// Get the status of an in-progress update.
+    pub async fn update_status(
+        &self,
+        sp: SpIdentifier,
+        component: SpComponent,
+    ) -> Result<UpdateStatus, Error> {
+        let port = self.id_to_port(sp)?;
+        let sp = self.switch.sp(port).ok_or(Error::SpAddressUnknown(sp))?;
+        Ok(sp.update_status(component).await?)
+    }
+
+    /// Abort an in-progress update.
+    pub async fn update_abort(
+        &self,
+        sp: SpIdentifier,
+        component: SpComponent,
+        update_id: Uuid,
+    ) -> Result<(), Error> {
+        let port = self.id_to_port(sp)?;
+        let sp = self.switch.sp(port).ok_or(Error::SpAddressUnknown(sp))?;
+        Ok(sp.update_abort(component, update_id).await?)
+    }
+
+    /// Get the current (SP-controlled) power state.
+    pub async fn power_state(
+        &self,
+        sp: SpIdentifier,
+    ) -> Result<PowerState, Error> {
+        let port = self.id_to_port(sp)?;
+        let sp = self.switch.sp(port).ok_or(Error::SpAddressUnknown(sp))?;
+        Ok(sp.power_state().await?)
+    }
+
+    /// Set the current (SP-controlled) power state.
+    pub async fn set_power_state(
+        &self,
+        sp: SpIdentifier,
+        power_state: PowerState,
+    ) -> Result<(), Error> {
+        let port = self.id_to_port(sp)?;
+        let sp = self.switch.sp(port).ok_or(Error::SpAddressUnknown(sp))?;
+        Ok(sp.set_power_state(power_state).await?)
     }
 
     /// Reset a given SP.
@@ -285,11 +348,23 @@ pub(crate) trait ResponseKindExt {
 
     fn expect_sp_state(self) -> Result<SpState, BadResponseType>;
 
-    fn expect_serial_console_write_ack(self) -> Result<(), BadResponseType>;
+    fn expect_serial_console_attach_ack(self) -> Result<(), BadResponseType>;
 
-    fn expect_update_start_ack(self) -> Result<(), BadResponseType>;
+    fn expect_serial_console_write_ack(self) -> Result<u64, BadResponseType>;
+
+    fn expect_serial_console_detach_ack(self) -> Result<(), BadResponseType>;
+
+    fn expect_update_prepare_ack(self) -> Result<(), BadResponseType>;
+
+    fn expect_update_status(self) -> Result<UpdateStatus, BadResponseType>;
 
     fn expect_update_chunk_ack(self) -> Result<(), BadResponseType>;
+
+    fn expect_update_abort_ack(self) -> Result<(), BadResponseType>;
+
+    fn expect_power_state(self) -> Result<PowerState, BadResponseType>;
+
+    fn expect_set_power_state_ack(self) -> Result<(), BadResponseType>;
 
     fn expect_sys_reset_prepare_ack(self) -> Result<(), BadResponseType>;
 }
@@ -308,17 +383,31 @@ impl ResponseKindExt for ResponseKind {
                 response_kind_names::IGNITION_COMMAND_ACK
             }
             ResponseKind::SpState(_) => response_kind_names::SP_STATE,
-            ResponseKind::SerialConsoleWriteAck => {
+            ResponseKind::SerialConsoleAttachAck => {
+                response_kind_names::SERIAL_CONSOLE_ATTACH_ACK
+            }
+            ResponseKind::SerialConsoleWriteAck { .. } => {
                 response_kind_names::SERIAL_CONSOLE_WRITE_ACK
             }
-            ResponseKind::UpdateStartAck => {
-                response_kind_names::UPDATE_START_ACK
+            ResponseKind::SerialConsoleDetachAck => {
+                response_kind_names::SERIAL_CONSOLE_DETACH_ACK
+            }
+            ResponseKind::UpdatePrepareAck => {
+                response_kind_names::UPDATE_PREPARE_ACK
+            }
+            ResponseKind::UpdateStatus(_) => response_kind_names::UPDATE_STATUS,
+            ResponseKind::UpdateAbortAck => {
+                response_kind_names::UPDATE_ABORT_ACK
             }
             ResponseKind::UpdateChunkAck => {
                 response_kind_names::UPDATE_CHUNK_ACK
             }
-            ResponseKind::SysResetPrepareAck => {
-                response_kind_names::SYS_RESET_PREPARE_ACK
+            ResponseKind::PowerState(_) => response_kind_names::POWER_STATE,
+            ResponseKind::SetPowerStateAck => {
+                response_kind_names::SET_POWER_STATE_ACK
+            }
+            ResponseKind::ResetPrepareAck => {
+                response_kind_names::RESET_PREPARE_ACK
             }
         }
     }
@@ -375,9 +464,9 @@ impl ResponseKindExt for ResponseKind {
         }
     }
 
-    fn expect_serial_console_write_ack(self) -> Result<(), BadResponseType> {
+    fn expect_serial_console_attach_ack(self) -> Result<(), BadResponseType> {
         match self {
-            ResponseKind::SerialConsoleWriteAck => Ok(()),
+            ResponseKind::SerialConsoleAttachAck => Ok(()),
             other => Err(BadResponseType {
                 expected: response_kind_names::SP_STATE,
                 got: other.name(),
@@ -385,11 +474,43 @@ impl ResponseKindExt for ResponseKind {
         }
     }
 
-    fn expect_update_start_ack(self) -> Result<(), BadResponseType> {
+    fn expect_serial_console_write_ack(self) -> Result<u64, BadResponseType> {
         match self {
-            ResponseKind::UpdateStartAck => Ok(()),
+            ResponseKind::SerialConsoleWriteAck {
+                furthest_ingested_offset,
+            } => Ok(furthest_ingested_offset),
             other => Err(BadResponseType {
-                expected: response_kind_names::UPDATE_START_ACK,
+                expected: response_kind_names::SP_STATE,
+                got: other.name(),
+            }),
+        }
+    }
+
+    fn expect_serial_console_detach_ack(self) -> Result<(), BadResponseType> {
+        match self {
+            ResponseKind::SerialConsoleDetachAck => Ok(()),
+            other => Err(BadResponseType {
+                expected: response_kind_names::SP_STATE,
+                got: other.name(),
+            }),
+        }
+    }
+
+    fn expect_update_prepare_ack(self) -> Result<(), BadResponseType> {
+        match self {
+            ResponseKind::UpdatePrepareAck => Ok(()),
+            other => Err(BadResponseType {
+                expected: response_kind_names::UPDATE_PREPARE_ACK,
+                got: other.name(),
+            }),
+        }
+    }
+
+    fn expect_update_status(self) -> Result<UpdateStatus, BadResponseType> {
+        match self {
+            ResponseKind::UpdateStatus(status) => Ok(status),
+            other => Err(BadResponseType {
+                expected: response_kind_names::UPDATE_STATUS,
                 got: other.name(),
             }),
         }
@@ -405,11 +526,41 @@ impl ResponseKindExt for ResponseKind {
         }
     }
 
+    fn expect_update_abort_ack(self) -> Result<(), BadResponseType> {
+        match self {
+            ResponseKind::UpdateAbortAck => Ok(()),
+            other => Err(BadResponseType {
+                expected: response_kind_names::UPDATE_ABORT_ACK,
+                got: other.name(),
+            }),
+        }
+    }
+
+    fn expect_power_state(self) -> Result<PowerState, BadResponseType> {
+        match self {
+            ResponseKind::PowerState(power_state) => Ok(power_state),
+            other => Err(BadResponseType {
+                expected: response_kind_names::POWER_STATE,
+                got: other.name(),
+            }),
+        }
+    }
+
+    fn expect_set_power_state_ack(self) -> Result<(), BadResponseType> {
+        match self {
+            ResponseKind::SetPowerStateAck => Ok(()),
+            other => Err(BadResponseType {
+                expected: response_kind_names::SET_POWER_STATE_ACK,
+                got: other.name(),
+            }),
+        }
+    }
+
     fn expect_sys_reset_prepare_ack(self) -> Result<(), BadResponseType> {
         match self {
-            ResponseKind::SysResetPrepareAck => Ok(()),
+            ResponseKind::ResetPrepareAck => Ok(()),
             other => Err(BadResponseType {
-                expected: response_kind_names::SYS_RESET_PREPARE_ACK,
+                expected: response_kind_names::RESET_PREPARE_ACK,
                 got: other.name(),
             }),
         }
@@ -422,9 +573,17 @@ mod response_kind_names {
     pub(super) const BULK_IGNITION_STATE: &str = "bulk_ignition_state";
     pub(super) const IGNITION_COMMAND_ACK: &str = "ignition_command_ack";
     pub(super) const SP_STATE: &str = "sp_state";
+    pub(super) const SERIAL_CONSOLE_ATTACH_ACK: &str =
+        "serial_console_attach_ack";
     pub(super) const SERIAL_CONSOLE_WRITE_ACK: &str =
         "serial_console_write_ack";
-    pub(super) const UPDATE_START_ACK: &str = "update_start_ack";
+    pub(super) const SERIAL_CONSOLE_DETACH_ACK: &str =
+        "serial_console_detach_ack";
+    pub(super) const UPDATE_PREPARE_ACK: &str = "update_prepare_ack";
+    pub(super) const UPDATE_STATUS: &str = "update_status";
+    pub(super) const UPDATE_ABORT_ACK: &str = "update_abort_ack";
     pub(super) const UPDATE_CHUNK_ACK: &str = "update_chunk_ack";
-    pub(super) const SYS_RESET_PREPARE_ACK: &str = "sys_reset_prepare_ack";
+    pub(super) const POWER_STATE: &str = "power_state";
+    pub(super) const SET_POWER_STATE_ACK: &str = "set_power_state_ack";
+    pub(super) const RESET_PREPARE_ACK: &str = "reset_prepare_ack";
 }

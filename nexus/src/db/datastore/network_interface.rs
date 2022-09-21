@@ -356,15 +356,18 @@ impl DataStore {
         #[derive(Debug)]
         enum NetworkInterfaceUpdateError {
             InstanceNotStopped,
-            FailedToUnsetPrimary(diesel::result::Error),
+            FailedToUnsetPrimary(async_bb8_diesel::ConnectionError),
         }
         type TxnError = TransactionError<NetworkInterfaceUpdateError>;
 
         let pool = self.pool_authorized(opctx).await?;
         if primary {
-            pool.transaction(move |conn| {
-                let instance_state =
-                    instance_query.get_result(conn)?.runtime_state.state;
+            pool.transaction_async(|conn| async move {
+                let instance_state = instance_query
+                    .get_result_async(&conn)
+                    .await?
+                    .runtime_state
+                    .state;
                 if instance_state != stopped {
                     return Err(TxnError::CustomError(
                         NetworkInterfaceUpdateError::InstanceNotStopped,
@@ -372,8 +375,8 @@ impl DataStore {
                 }
 
                 // First, get the primary interface
-                let primary_interface = find_primary_query.get_result(conn)?;
-
+                let primary_interface =
+                    find_primary_query.get_result_async(&conn).await?;
                 // If the target and primary are different, we need to toggle
                 // the primary into a secondary.
                 if primary_interface.identity.id != interface_id {
@@ -381,7 +384,8 @@ impl DataStore {
                         .filter(dsl::id.eq(primary_interface.identity.id))
                         .filter(dsl::time_deleted.is_null())
                         .set(dsl::is_primary.eq(false))
-                        .execute(conn)
+                        .execute_async(&conn)
+                        .await
                     {
                         return Err(TxnError::CustomError(
                             NetworkInterfaceUpdateError::FailedToUnsetPrimary(
@@ -392,7 +396,7 @@ impl DataStore {
                 }
 
                 // In any case, update the actual target
-                Ok(update_target_query.get_result(conn)?)
+                Ok(update_target_query.get_result_async(&conn).await?)
             })
         } else {
             // In this case, we can just directly apply the updates. By
@@ -400,15 +404,18 @@ impl DataStore {
             // be done there. The other columns always need to be updated, and
             // we're only hitting a single row. Note that we still need to
             // verify the instance is stopped.
-            pool.transaction(move |conn| {
-                let instance_state =
-                    instance_query.get_result(conn)?.runtime_state.state;
+            pool.transaction_async(|conn| async move {
+                let instance_state = instance_query
+                    .get_result_async(&conn)
+                    .await?
+                    .runtime_state
+                    .state;
                 if instance_state != stopped {
                     return Err(TxnError::CustomError(
                         NetworkInterfaceUpdateError::InstanceNotStopped,
                     ));
                 }
-                Ok(update_target_query.get_result(conn)?)
+                Ok(update_target_query.get_result_async(&conn).await?)
             })
         }
         .await
