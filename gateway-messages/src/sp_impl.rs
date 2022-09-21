@@ -9,6 +9,7 @@ use crate::BulkIgnitionState;
 use crate::DiscoverResponse;
 use crate::IgnitionCommand;
 use crate::IgnitionState;
+use crate::PowerState;
 use crate::Request;
 use crate::RequestKind;
 use crate::ResponseError;
@@ -19,9 +20,9 @@ use crate::SpMessageKind;
 use crate::SpPort;
 use crate::SpState;
 use crate::UpdateChunk;
+use crate::UpdateId;
 use crate::UpdatePrepare;
-use crate::UpdatePrepareStatusRequest;
-use crate::UpdatePrepareStatusResponse;
+use crate::UpdateStatus;
 use core::convert::Infallible;
 use core::mem;
 
@@ -76,13 +77,6 @@ pub trait SpHandler {
         update: UpdatePrepare,
     ) -> Result<(), ResponseError>;
 
-    fn update_prepare_status(
-        &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
-        request: UpdatePrepareStatusRequest,
-    ) -> Result<UpdatePrepareStatusResponse, ResponseError>;
-
     fn update_chunk(
         &mut self,
         sender: SocketAddrV6,
@@ -91,11 +85,32 @@ pub trait SpHandler {
         data: &[u8],
     ) -> Result<(), ResponseError>;
 
+    fn update_status(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+        component: SpComponent,
+    ) -> Result<UpdateStatus, ResponseError>;
+
     fn update_abort(
         &mut self,
         sender: SocketAddrV6,
         port: SpPort,
         component: SpComponent,
+        id: UpdateId,
+    ) -> Result<(), ResponseError>;
+
+    fn power_state(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+    ) -> Result<PowerState, ResponseError>;
+
+    fn set_power_state(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+        power_state: PowerState,
     ) -> Result<(), ResponseError>;
 
     fn serial_console_attach(
@@ -230,14 +245,14 @@ pub fn handle_message<H: SpHandler>(
         RequestKind::UpdatePrepare(update) => handler
             .update_prepare(sender, port, update)
             .map(|()| ResponseKind::UpdatePrepareAck),
-        RequestKind::UpdatePrepareStatus(req) => handler
-            .update_prepare_status(sender, port, req)
-            .map(ResponseKind::UpdatePrepareStatus),
         RequestKind::UpdateChunk(chunk) => handler
             .update_chunk(sender, port, chunk, trailing_data)
             .map(|()| ResponseKind::UpdateChunkAck),
-        RequestKind::UpdateAbort(component) => handler
-            .update_abort(sender, port, component)
+        RequestKind::UpdateStatus(component) => handler
+            .update_status(sender, port, component)
+            .map(ResponseKind::UpdateStatus),
+        RequestKind::UpdateAbort { component, id } => handler
+            .update_abort(sender, port, component, id)
             .map(|()| ResponseKind::UpdateAbortAck),
         RequestKind::SerialConsoleAttach(component) => handler
             .serial_console_attach(sender, port, component)
@@ -250,12 +265,18 @@ pub fn handle_message<H: SpHandler>(
         RequestKind::SerialConsoleDetach => handler
             .serial_console_detach(sender, port)
             .map(|()| ResponseKind::SerialConsoleDetachAck),
-        RequestKind::SysResetPrepare => handler
+        RequestKind::GetPowerState => {
+            handler.power_state(sender, port).map(ResponseKind::PowerState)
+        }
+        RequestKind::SetPowerState(power_state) => handler
+            .set_power_state(sender, port, power_state)
+            .map(|()| ResponseKind::SetPowerStateAck),
+        RequestKind::ResetPrepare => handler
             .reset_prepare(sender, port)
-            .map(|()| ResponseKind::SysResetPrepareAck),
-        RequestKind::SysResetTrigger => {
+            .map(|()| ResponseKind::ResetPrepareAck),
+        RequestKind::ResetTrigger => {
             handler.reset_trigger(sender, port).map(|infallible| {
-                // A bit of type system magic here; `sys_reset_trigger`'s
+                // A bit of type system magic here; `reset_trigger`'s
                 // success type (`Infallible`) cannot be instantiated. We can
                 // provide an empty match to teach the type system that an
                 // `Infallible` (which can't exist) can be converted to a

@@ -123,7 +123,7 @@ pub async fn spoof_login(
 //
 // TODO If the user does not have this information it's unclear what should
 // happen.  If they know the silo name they are trying to log into, they could
-// `GET /silos/{silo_name}/identity_providers` in order to list available
+// `GET /system/silos/{silo_name}/identity_providers` in order to list available
 // identity providers. If not, TODO.
 //
 // Once the appropriate login URL is created, the user's browser is redirected:

@@ -21,7 +21,7 @@ p256 = "0.9.0"
 pq-sys = "*"
 rand = { version = "0.8.5", features = ["getrandom"] }
 serde = { version = "1.0", features = [ "derive" ] }
-sha3 = "0.10.4"
+sha3 = "0.10.5"
 slog = { version = "2.5", features = [ "max_level_trace", "release_max_level_debug" ] }
 sprockets-common = { git = "http://github.com/oxidecomputer/sprockets", rev = "0361fd13ff19cda6696242fe40f1325fca30d3d1" }
 sprockets-host = { git = "http://github.com/oxidecomputer/sprockets", rev = "0361fd13ff19cda6696242fe40f1325fca30d3d1" }

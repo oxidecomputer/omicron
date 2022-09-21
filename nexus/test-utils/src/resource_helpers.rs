@@ -85,7 +85,7 @@ pub async fn create_ip_pool(
     });
     let pool = object_create(
         client,
-        "/ip-pools",
+        "/system/ip-pools",
         &params::IpPoolCreate {
             identity: IdentityMetadataCreateParams {
                 name: pool_name.parse().unwrap(),
@@ -97,7 +97,7 @@ pub async fn create_ip_pool(
     .await;
     let range = object_create(
         client,
-        format!("/ip-pools/{}/ranges/add", pool_name).as_str(),
+        format!("/system/ip-pools/{}/ranges/add", pool_name).as_str(),
         &ip_range,
     )
     .await;
@@ -112,7 +112,7 @@ pub async fn create_silo(
 ) -> Silo {
     object_create(
         client,
-        "/silos",
+        "/system/silos",
         &params::SiloCreate {
             identity: IdentityMetadataCreateParams {
                 name: silo_name.parse().unwrap(),

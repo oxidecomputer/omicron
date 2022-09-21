@@ -10,6 +10,7 @@ use dropshot::HttpError;
 use gateway_messages::ResponseError;
 use gateway_sp_comms::error::Error as SpCommsError;
 use gateway_sp_comms::error::SpCommunicationError;
+use gateway_sp_comms::error::UpdateError;
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum Error {
@@ -61,7 +62,50 @@ where
             Some("SerialConsoleAttached".to_string()),
             err.to_string(),
         ),
+        SpCommsError::SpCommunicationFailed(SpCommunicationError::SpError(
+            ResponseError::RequestUnsupportedForSp,
+        )) => HttpError::for_bad_request(
+            Some("RequestUnsupportedForSp".to_string()),
+            err.to_string(),
+        ),
+        SpCommsError::SpCommunicationFailed(SpCommunicationError::SpError(
+            ResponseError::RequestUnsupportedForComponent,
+        )) => HttpError::for_bad_request(
+            Some("RequestUnsupportedForComponent".to_string()),
+            err.to_string(),
+        ),
+        SpCommsError::SpCommunicationFailed(SpCommunicationError::SpError(
+            ResponseError::InvalidSlotForComponent,
+        )) => HttpError::for_bad_request(
+            Some("InvalidSlotForComponent".to_string()),
+            err.to_string(),
+        ),
+        SpCommsError::UpdateFailed(UpdateError::ImageTooLarge) => {
+            HttpError::for_bad_request(
+                Some("ImageTooLarge".to_string()),
+                err.to_string(),
+            )
+        }
+        SpCommsError::UpdateFailed(UpdateError::Communication(
+            SpCommunicationError::SpError(ResponseError::UpdateSlotBusy),
+        )) => HttpError::for_unavail(
+            Some("UpdateSlotBusy".to_string()),
+            err.to_string(),
+        ),
+        SpCommsError::UpdateFailed(UpdateError::Communication(
+            SpCommunicationError::SpError(ResponseError::UpdateInProgress {
+                ..
+            }),
+        )) => HttpError::for_unavail(
+            Some("UpdateInProgress".to_string()),
+            err.to_string(),
+        ),
+        SpCommsError::DiscoveryNotYetComplete => HttpError::for_unavail(
+            Some("DiscoveryNotYetComplete".to_string()),
+            err.to_string(),
+        ),
         SpCommsError::SpAddressUnknown(_)
+        | SpCommsError::DiscoveryFailed { .. }
         | SpCommsError::Timeout { .. }
         | SpCommsError::BadIgnitionTarget(_)
         | SpCommsError::LocalIgnitionControllerAddressUnknown

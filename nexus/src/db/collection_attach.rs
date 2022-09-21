@@ -17,7 +17,7 @@ use super::cte_utils::{
     QueryFromClause, QuerySqlType, TableDefaultWhereClause,
 };
 use super::pool::DbConnection;
-use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager, PoolError};
+use async_bb8_diesel::{AsyncRunQueryDsl, PoolError};
 use diesel::associations::HasTable;
 use diesel::expression::{AsExpression, Expression};
 use diesel::helper_types::*;
@@ -301,12 +301,6 @@ where
 pub type AsyncAttachToCollectionResult<ResourceType, C> =
     Result<(C, ResourceType), AttachError<ResourceType, C, PoolError>>;
 
-/// Result of [`AttachToCollectionStatement`] when executed synchronously
-pub type SyncAttachToCollectionResult<ResourceType, C> = Result<
-    (C, ResourceType),
-    AttachError<ResourceType, C, diesel::result::Error>,
->;
-
 /// Errors returned by [`AttachToCollectionStatement`].
 #[derive(Debug)]
 pub enum AttachError<ResourceType, C, E> {
@@ -338,9 +332,10 @@ where
     AttachToCollectionStatement<ResourceType, V, C>: Send,
 {
     /// Issues the CTE asynchronously and parses the result.
-    pub async fn attach_and_get_result_async(
+    pub async fn attach_and_get_result_async<ConnErr>(
         self,
-        pool: &bb8::Pool<ConnectionManager<DbConnection>>,
+        conn: &(impl async_bb8_diesel::AsyncConnection<DbConnection, ConnErr>
+              + Sync),
     ) -> AsyncAttachToCollectionResult<ResourceType, C>
     where
         // We require this bound to ensure that "Self" is runnable as query.
@@ -349,30 +344,14 @@ where
             DbConnection,
             RawOutput<ResourceType, C>,
         >,
+        ConnErr: From<diesel::result::Error> + Send + 'static,
+        PoolError: From<ConnErr>,
     {
-        self.get_result_async::<RawOutput<ResourceType, C>>(pool)
+        self.get_result_async::<RawOutput<ResourceType, C>>(conn)
             .await
             // If the database returns an error, propagate it right away.
-            .map_err(AttachError::DatabaseError)
+            .map_err(|e| AttachError::DatabaseError(PoolError::from(e)))
             // Otherwise, parse the output to determine if the CTE succeeded.
-            .and_then(Self::parse_result)
-    }
-
-    /// Issues the CTE synchronously and parses the result.
-    pub fn attach_and_get_result(
-        self,
-        conn: &mut DbConnection,
-    ) -> SyncAttachToCollectionResult<ResourceType, C>
-    where
-        // We require this bound to ensure that "Self" is runnable as query.
-        Self: query_methods::LoadQuery<
-            'static,
-            DbConnection,
-            RawOutput<ResourceType, C>,
-        >,
-    {
-        self.get_result::<RawOutput<ResourceType, C>>(conn)
-            .map_err(AttachError::DatabaseError)
             .and_then(Self::parse_result)
     }
 
@@ -1012,16 +991,17 @@ mod test {
                 .set(resource::dsl::collection_id.eq(collection_id)),
         );
 
-        type TxnError = TransactionError<
-            AttachError<Resource, Collection, diesel::result::Error>,
-        >;
+        type TxnError =
+            TransactionError<AttachError<Resource, Collection, PoolError>>;
         let result = pool
             .pool()
-            .transaction(move |conn| {
-                attach_query.attach_and_get_result(conn).map_err(|e| match e {
-                    AttachError::DatabaseError(e) => TxnError::from(e),
-                    e => TxnError::CustomError(e),
-                })
+            .transaction_async(|conn| async move {
+                attach_query.attach_and_get_result_async(&conn).await.map_err(
+                    |e| match e {
+                        AttachError::DatabaseError(e) => TxnError::from(e),
+                        e => TxnError::CustomError(e),
+                    },
+                )
             })
             .await;
 

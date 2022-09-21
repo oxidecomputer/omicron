@@ -206,14 +206,14 @@ running in, at least if you'd like to be able to SSH into the guest. This is
 most often a private address range, like `10.0.0.0/8` or `192.168.0.0/16`, but
 the exact addresses that are available depends on the environment.
 
-    oxide api /ip-pools --method POST --input - <<EOF
+    oxide api /system/ip-pools --method POST --input - <<EOF
     {
       "name": "mypool",
       "description": "an IP pool"
     }
     EOF
 
-    oxide api /ip-pools/mypool/ranges/add --method POST --input - <<EOF
+    oxide api /system/ip-pools/mypool/ranges/add --method POST --input - <<EOF
     {
       "first": "172.20.15.227",
       "last": "172.20.15.239"
@@ -224,7 +224,7 @@ the exact addresses that are available depends on the environment.
 
  a. This can be the alpine.iso image that ships with propolis:
 
-    oxide api /images --method POST --input - <<EOF
+    oxide api /system/images --method POST --input - <<EOF
     {
       "name": "alpine",
       "description": "boot from propolis zone blob!",
@@ -241,7 +241,7 @@ the exact addresses that are available depends on the environment.
 
  b. Or an ISO / raw disk image / etc hosted at a URL:
 
-    oxide api /images --method POST --input - <<EOF
+    oxide api /system/images --method POST --input - <<EOF
     {
       "name": "crucible-tester-sparse",
       "description": "boot from a url!",
@@ -267,7 +267,7 @@ the exact addresses that are available depends on the environment.
       "size": 1073741824,
       "disk_source": {
           "type": "global_image",
-          "image_id": "$(oxide api /images/alpine | jq -r .id)"
+          "image_id": "$(oxide api /system/images/alpine | jq -r .id)"
       }
     }
     EOF

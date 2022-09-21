@@ -101,6 +101,7 @@ impl Db {
     /// The rules for inserting a KeyShare are:
     ///   1. A KeyShare for the given epoch does not exist unless it is identical
     ///   2. A KeyShare for a later epoch does not exist
+    ///   3. This KeyShare is not already committed
     ///
     /// Calling this method with an epoch of 0 is a programmer error so we
     /// assert.
@@ -122,6 +123,16 @@ impl Db {
             // Does the rack_uuid match what's stored?
             validate_rack_uuid(tx, rack_uuid)?;
 
+            // We don't allow shares for old epochs
+            if let Some(stored_epoch) = dsl::key_shares
+                .select(dsl::epoch)
+                .filter(dsl::epoch.gt(epoch))
+                .get_result::<i32>(tx)
+                .optional()?
+            {
+                return Err(Error::OldKeySharePrepare { epoch, stored_epoch });
+            }
+
             // Check for idempotence
             if let Some(stored_key_share) = dsl::key_shares
                 .filter(dsl::epoch.eq(epoch))
@@ -131,18 +142,11 @@ impl Db {
                 if prepare == stored_key_share {
                     return Ok(());
                 } else {
-                    return Err(Error::KeyShareAlreadyExists { epoch });
+                    if stored_key_share.committed {
+                        return Err(Error::KeyShareAlreadyCommitted { epoch });
+                    }
+                    return Err(Error::KeySharePrepareAlreadyExists { epoch });
                 }
-            }
-
-            // We don't allow shares for old epochs
-            if let Some(stored_epoch) = dsl::key_shares
-                .select(dsl::epoch)
-                .filter(dsl::epoch.gt(epoch))
-                .get_result::<i32>(tx)
-                .optional()?
-            {
-                return Err(Error::OldKeySharePrepare { epoch, stored_epoch });
             }
 
             info!(

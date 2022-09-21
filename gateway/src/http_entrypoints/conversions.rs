@@ -6,13 +6,17 @@
 
 //! Conversions between externally-defined types and HTTP / JsonSchema types.
 
+use super::PowerState;
 use super::SpIdentifier;
 use super::SpIgnition;
 use super::SpState;
 use super::SpType;
+use super::SpUpdateStatus;
+use super::UpdatePreparationProgress;
 use dropshot::HttpError;
 use gateway_messages::IgnitionFlags;
 use gateway_messages::SpComponent;
+use gateway_messages::UpdateStatus;
 
 // wrap `SpComponent::try_from(&str)` into a usable form for dropshot endpoints
 pub(super) fn component_from_str(s: &str) -> Result<SpComponent, HttpError> {
@@ -22,6 +26,53 @@ pub(super) fn component_from_str(s: &str) -> Result<SpComponent, HttpError> {
             "invalid SP component name".to_string(),
         )
     })
+}
+
+impl From<UpdateStatus> for SpUpdateStatus {
+    fn from(status: UpdateStatus) -> Self {
+        match status {
+            UpdateStatus::None => Self::None,
+            UpdateStatus::Preparing(status) => Self::Preparing {
+                id: status.id.into(),
+                progress: status.progress.map(Into::into),
+            },
+            UpdateStatus::InProgress(status) => Self::InProgress {
+                id: status.id.into(),
+                bytes_received: status.bytes_received,
+                total_bytes: status.total_size,
+            },
+            UpdateStatus::Complete(id) => Self::Complete { id: id.into() },
+            UpdateStatus::Aborted(id) => Self::Aborted { id: id.into() },
+        }
+    }
+}
+
+impl From<gateway_messages::UpdatePreparationProgress>
+    for UpdatePreparationProgress
+{
+    fn from(progress: gateway_messages::UpdatePreparationProgress) -> Self {
+        Self { current: progress.current, total: progress.total }
+    }
+}
+
+impl From<gateway_messages::PowerState> for PowerState {
+    fn from(power_state: gateway_messages::PowerState) -> Self {
+        match power_state {
+            gateway_messages::PowerState::A0 => Self::A0,
+            gateway_messages::PowerState::A1 => Self::A1,
+            gateway_messages::PowerState::A2 => Self::A2,
+        }
+    }
+}
+
+impl From<PowerState> for gateway_messages::PowerState {
+    fn from(power_state: PowerState) -> gateway_messages::PowerState {
+        match power_state {
+            PowerState::A0 => gateway_messages::PowerState::A0,
+            PowerState::A1 => gateway_messages::PowerState::A1,
+            PowerState::A2 => gateway_messages::PowerState::A2,
+        }
+    }
 }
 
 impl From<gateway_messages::SpState> for SpState {

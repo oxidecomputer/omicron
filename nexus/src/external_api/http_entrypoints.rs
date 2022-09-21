@@ -108,6 +108,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(ip_pool_list)?;
         api.register(ip_pool_create)?;
         api.register(ip_pool_view)?;
+        api.register(ip_pool_view_by_id)?;
         api.register(ip_pool_delete)?;
         api.register(ip_pool_update)?;
 
@@ -225,6 +226,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(silo_list)?;
         api.register(silo_create)?;
         api.register(silo_view)?;
+        api.register(silo_view_by_id)?;
         api.register(silo_delete)?;
         api.register(silo_identity_provider_list)?;
         api.register(silo_policy_view)?;
@@ -233,11 +235,11 @@ pub fn external_api() -> NexusApiDescription {
         api.register(silo_identity_provider_create)?;
         api.register(silo_identity_provider_view)?;
 
-        api.register(image_global_list)?;
-        api.register(image_global_create)?;
-        api.register(image_global_view)?;
-        api.register(image_global_view_by_id)?;
-        api.register(image_global_delete)?;
+        api.register(system_image_list)?;
+        api.register(system_image_create)?;
+        api.register(system_image_view)?;
+        api.register(system_image_view_by_id)?;
+        api.register(system_image_delete)?;
 
         api.register(updates_refresh)?;
         api.register(user_list)?;
@@ -428,8 +430,8 @@ async fn policy_update(
 /// Lists silos that are discoverable based on the current permissions.
 #[endpoint {
     method = GET,
-    path = "/silos",
-    tags = ["silos"],
+    path = "/system/silos",
+    tags = ["system"],
 }]
 async fn silo_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -471,8 +473,8 @@ async fn silo_list(
 /// Create a silo
 #[endpoint {
     method = POST,
-    path = "/silos",
-    tags = ["silos"],
+    path = "/system/silos",
+    tags = ["system"],
 }]
 async fn silo_create(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -501,8 +503,8 @@ struct SiloPathParam {
 /// Fetch a silo by name.
 #[endpoint {
     method = GET,
-    path = "/silos/{silo_name}",
-    tags = ["silos"],
+    path = "/system/silos/{silo_name}",
+    tags = ["system"],
 }]
 async fn silo_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -520,13 +522,35 @@ async fn silo_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Fetch a silo by id
+#[endpoint {
+    method = GET,
+    path = "/system/by-id/silos/{id}",
+    tags = ["system"]
+}]
+async fn silo_view_by_id(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ByIdPathParams>,
+) -> Result<HttpResponseOk<Silo>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let id = &path.id;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let silo = nexus.silo_fetch_by_id(&opctx, id).await?;
+        Ok(HttpResponseOk(silo.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /// Delete a silo
 ///
 /// Delete a silo by name.
 #[endpoint {
     method = DELETE,
-    path = "/silos/{silo_name}",
-    tags = ["silos"],
+    path = "/system/silos/{silo_name}",
+    tags = ["system"],
 }]
 async fn silo_delete(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -547,8 +571,8 @@ async fn silo_delete(
 /// Fetch a silo's IAM policy
 #[endpoint {
     method = GET,
-    path = "/silos/{silo_name}/policy",
-    tags = ["silos"],
+    path = "/system/silos/{silo_name}/policy",
+    tags = ["system"],
 }]
 async fn silo_policy_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -571,8 +595,8 @@ async fn silo_policy_view(
 /// Update a silo's IAM policy
 #[endpoint {
     method = PUT,
-    path = "/silos/{silo_name}/policy",
-    tags = ["silos"],
+    path = "/system/silos/{silo_name}/policy",
+    tags = ["system"],
 }]
 async fn silo_policy_update(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -603,8 +627,8 @@ async fn silo_policy_update(
 /// List a silo's IDPs
 #[endpoint {
     method = GET,
-    path = "/silos/{silo_name}/identity-providers",
-    tags = ["silos"],
+    path = "/system/silos/{silo_name}/identity-providers",
+    tags = ["system"],
 }]
 async fn silo_identity_provider_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -640,8 +664,8 @@ async fn silo_identity_provider_list(
 /// Create a SAML IDP
 #[endpoint {
     method = POST,
-    path = "/silos/{silo_name}/saml-identity-providers",
-    tags = ["silos"],
+    path = "/system/silos/{silo_name}/saml-identity-providers",
+    tags = ["system"],
 }]
 async fn silo_identity_provider_create(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -677,8 +701,8 @@ struct SiloSamlPathParam {
 /// Fetch a SAML IDP
 #[endpoint {
     method = GET,
-    path = "/silos/{silo_name}/saml-identity-providers/{provider_name}",
-    tags = ["silos"],
+    path = "/system/silos/{silo_name}/saml-identity-providers/{provider_name}",
+    tags = ["system"],
 }]
 async fn silo_identity_provider_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1209,8 +1233,8 @@ pub struct IpPoolPathParam {
 /// List IP pools
 #[endpoint {
     method = GET,
-    path = "/ip-pools",
-    tags = ["ip-pools"],
+    path = "/system/ip-pools",
+    tags = ["system"],
 }]
 async fn ip_pool_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1250,8 +1274,8 @@ async fn ip_pool_list(
 /// Create an IP pool
 #[endpoint {
     method = POST,
-    path = "/ip-pools",
-    tags = ["ip-pools"],
+    path = "/system/ip-pools",
+    tags = ["system"],
 }]
 async fn ip_pool_create(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1271,8 +1295,8 @@ async fn ip_pool_create(
 /// Fetch an IP pool
 #[endpoint {
     method = GET,
-    path = "/ip-pools/{pool_name}",
-    tags = ["ip-pools"],
+    path = "/system/ip-pools/{pool_name}",
+    tags = ["system"],
 }]
 async fn ip_pool_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1290,11 +1314,33 @@ async fn ip_pool_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Fetch an IP pool by id
+#[endpoint {
+    method = GET,
+    path = "/system/by-id/ip-pools/{id}",
+    tags = ["system"],
+}]
+async fn ip_pool_view_by_id(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ByIdPathParams>,
+) -> Result<HttpResponseOk<views::IpPool>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let id = &path.id;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let pool = nexus.ip_pool_fetch_by_id(&opctx, id).await?;
+        Ok(HttpResponseOk(IpPool::from(pool)))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /// Delete an IP Pool
 #[endpoint {
     method = DELETE,
-    path = "/ip-pools/{pool_name}",
-    tags = ["ip-pools"],
+    path = "/system/ip-pools/{pool_name}",
+    tags = ["system"],
 }]
 async fn ip_pool_delete(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1315,8 +1361,8 @@ async fn ip_pool_delete(
 /// Update an IP Pool
 #[endpoint {
     method = PUT,
-    path = "/ip-pools/{pool_name}",
-    tags = ["ip-pools"],
+    path = "/system/ip-pools/{pool_name}",
+    tags = ["system"],
 }]
 async fn ip_pool_update(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1339,8 +1385,8 @@ async fn ip_pool_update(
 /// Fetch an IP pool used for Oxide services.
 #[endpoint {
     method = GET,
-    path = "/ip-pools-service/{rack_id}",
-    tags = ["ip-pools"],
+    path = "/system/ip-pools-service/{rack_id}",
+    tags = ["system"],
 }]
 async fn ip_pool_service_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1365,8 +1411,8 @@ type IpPoolRangePaginationParams = PaginationParams<EmptyScanParams, IpNetwork>;
 /// Ranges are ordered by their first address.
 #[endpoint {
     method = GET,
-    path = "/ip-pools/{pool_name}/ranges",
-    tags = ["ip-pools"],
+    path = "/system/ip-pools/{pool_name}/ranges",
+    tags = ["system"],
 }]
 async fn ip_pool_range_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1409,8 +1455,8 @@ async fn ip_pool_range_list(
 /// Add a range to an IP pool
 #[endpoint {
     method = POST,
-    path = "/ip-pools/{pool_name}/ranges/add",
-    tags = ["ip-pools"],
+    path = "/system/ip-pools/{pool_name}/ranges/add",
+    tags = ["system"],
 }]
 async fn ip_pool_range_add(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1433,8 +1479,8 @@ async fn ip_pool_range_add(
 /// Remove a range from an IP pool
 #[endpoint {
     method = POST,
-    path = "/ip-pools/{pool_name}/ranges/remove",
-    tags = ["ip-pools"],
+    path = "/system/ip-pools/{pool_name}/ranges/remove",
+    tags = ["system"],
 }]
 async fn ip_pool_range_remove(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1464,8 +1510,8 @@ pub struct IpPoolServicePathParam {
 /// Ranges are ordered by their first address.
 #[endpoint {
     method = GET,
-    path = "/ip-pools-service/{rack_id}/ranges",
-    tags = ["ip-pools"],
+    path = "/system/ip-pools-service/{rack_id}/ranges",
+    tags = ["system"],
 }]
 async fn ip_pool_service_range_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1508,8 +1554,8 @@ async fn ip_pool_service_range_list(
 /// Add a range to an IP pool used for Oxide services.
 #[endpoint {
     method = POST,
-    path = "/ip-pools-service/{rack_id}/ranges/add",
-    tags = ["ip-pools"],
+    path = "/system/ip-pools-service/{rack_id}/ranges/add",
+    tags = ["system"],
 }]
 async fn ip_pool_service_range_add(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -1533,8 +1579,8 @@ async fn ip_pool_service_range_add(
 /// Remove a range from an IP pool used for Oxide services.
 #[endpoint {
     method = POST,
-    path = "/ip-pools-service/{rack_id}/ranges/remove",
-    tags = ["ip-pools"],
+    path = "/system/ip-pools-service/{rack_id}/ranges/remove",
+    tags = ["system"],
 }]
 async fn ip_pool_service_range_remove(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -2220,16 +2266,16 @@ async fn instance_disk_detach(
 
 // Images
 
-/// List global images
+/// List system-wide images
 ///
-/// Returns a list of all the global images. Global images are returned sorted
+/// Returns a list of all the system-wide images. System-wide images are returned sorted
 /// by creation date, with the most recent images appearing first.
 #[endpoint {
     method = GET,
-    path = "/images",
-    tags = ["images:global"],
+    path = "/system/images",
+    tags = ["system"],
 }]
-async fn image_global_list(
+async fn system_image_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedByName>,
 ) -> Result<HttpResponseOk<ResultsPage<GlobalImage>>, HttpError> {
@@ -2257,16 +2303,16 @@ async fn image_global_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a global image
+/// Create a system-wide image
 ///
-/// Create a new global image. This image can then be used by any user as a
+/// Create a new system-wide image. This image can then be used by any user in any silo as a
 /// base for instances.
 #[endpoint {
     method = POST,
-    path = "/images",
-    tags = ["images:global"]
+    path = "/system/images",
+    tags = ["system"]
 }]
-async fn image_global_create(
+async fn system_image_create(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     new_image: TypedBody<params::GlobalImageCreate>,
 ) -> Result<HttpResponseCreated<GlobalImage>, HttpError> {
@@ -2287,15 +2333,15 @@ struct GlobalImagePathParam {
     image_name: Name,
 }
 
-/// Fetch a global image
+/// Fetch a system-wide image
 ///
-/// Returns the details of a specific global image.
+/// Returns the details of a specific system-wide image.
 #[endpoint {
     method = GET,
-    path = "/images/{image_name}",
-    tags = ["images:global"],
+    path = "/system/images/{image_name}",
+    tags = ["system"],
 }]
-async fn image_global_view(
+async fn system_image_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<GlobalImagePathParam>,
 ) -> Result<HttpResponseOk<GlobalImage>, HttpError> {
@@ -2311,13 +2357,13 @@ async fn image_global_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch a global image by id
+/// Fetch a system-wide image by id
 #[endpoint {
     method = GET,
-    path = "/by-id/global-images/{id}",
-    tags = ["images:global"],
+    path = "/system/by-id/images/{id}",
+    tags = ["system"],
 }]
-async fn image_global_view_by_id(
+async fn system_image_view_by_id(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<ByIdPathParams>,
 ) -> Result<HttpResponseOk<GlobalImage>, HttpError> {
@@ -2333,17 +2379,17 @@ async fn image_global_view_by_id(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a global image
+/// Delete a system-wide image
 ///
-/// Permanently delete a global image. This operation cannot be undone. Any
-/// instances using the global image will continue to run, however new instances
+/// Permanently delete a system-wide image. This operation cannot be undone. Any
+/// instances using the system-wide image will continue to run, however new instances
 /// can not be created with this image.
 #[endpoint {
     method = DELETE,
-    path = "/images/{image_name}",
-    tags = ["images:global"],
+    path = "/system/images/{image_name}",
+    tags = ["system"],
 }]
-async fn image_global_delete(
+async fn system_image_delete(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<GlobalImagePathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {

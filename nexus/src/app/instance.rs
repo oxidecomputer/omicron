@@ -604,25 +604,84 @@ impl super::Nexus {
 
         let sa = self.instance_sled(&db_instance).await?;
 
-        let new_runtime = sa
+        let instance_put_result = sa
             .instance_put(
                 &db_instance.id(),
                 &sled_agent_client::types::InstanceEnsureBody {
                     initial: instance_hardware,
-                    target: requested,
+                    target: requested.clone(),
                     migrate: None,
                 },
             )
-            .await
-            .map_err(Error::from)?;
+            .await;
 
-        let new_runtime: nexus::InstanceRuntimeState =
-            new_runtime.into_inner().into();
+        match instance_put_result {
+            Ok(new_runtime) => {
+                let new_runtime: nexus::InstanceRuntimeState =
+                    new_runtime.into_inner().into();
 
-        self.db_datastore
-            .instance_update_runtime(&db_instance.id(), &new_runtime.into())
-            .await
-            .map(|_| ())
+                self.db_datastore
+                    .instance_update_runtime(
+                        &db_instance.id(),
+                        &new_runtime.into(),
+                    )
+                    .await
+                    .map(|_| ())
+            }
+
+            Err(e) => {
+                // The sled-agent has told us that it can't do what we
+                // requested, but does that mean a failure? One example would be
+                // if we try to "reboot" a stopped instance. That shouldn't
+                // transition the instance to failed. But if the sled-agent
+                // *can't* boot a stopped instance, that should transition
+                // to failed.
+                //
+                // Without a richer error type, let the sled-agent tell Nexus
+                // what to do with status codes.
+                error!(self.log, "saw {} from instance_put!", e);
+
+                // this is unfortunate, but sled_agent_client::Error doesn't
+                // implement Copy, and can't be match'ed upon below without this
+                // line.
+                let e = e.into();
+
+                match &e {
+                    // Bad request shouldn't change the instance state.
+                    Error::InvalidRequest { .. } => Err(e),
+
+                    // Internal server error (or anything else) should change
+                    // the instance state to failed, we don't know what state
+                    // the instance is in.
+                    _ => {
+                        let new_runtime = db::model::InstanceRuntimeState {
+                            state: db::model::InstanceState::new(
+                                InstanceState::Failed,
+                            ),
+                            gen: db_instance.runtime_state.gen.next().into(),
+                            ..db_instance.runtime_state.clone()
+                        };
+
+                        // XXX what if this fails?
+                        let result = self
+                            .db_datastore
+                            .instance_update_runtime(
+                                &db_instance.id(),
+                                &new_runtime,
+                            )
+                            .await;
+
+                        error!(
+                            self.log,
+                            "saw {:?} from setting InstanceState::Failed after bad instance_put",
+                            result,
+                        );
+
+                        Err(e)
+                    }
+                }
+            }
+        }
     }
 
     /// Lists disks attached to the instance.

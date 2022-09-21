@@ -126,13 +126,14 @@ impl DataStore {
 
         self.pool_authorized(opctx)
             .await?
-            .transaction(move |conn| {
+            .transaction_async(|conn| async move {
                 use db::schema::silo_group_membership::dsl;
 
                 // Delete existing memberships for user
                 diesel::delete(dsl::silo_group_membership)
                     .filter(dsl::silo_user_id.eq(silo_user_id))
-                    .execute(conn)?;
+                    .execute_async(&conn)
+                    .await?;
 
                 // Create new memberships for user
                 let silo_group_memberships: Vec<
@@ -147,7 +148,8 @@ impl DataStore {
 
                 diesel::insert_into(dsl::silo_group_membership)
                     .values(silo_group_memberships)
-                    .execute(conn)?;
+                    .execute_async(&conn)
+                    .await?;
 
                 Ok(())
             })
@@ -173,7 +175,7 @@ impl DataStore {
 
         self.pool_authorized(opctx)
             .await?
-            .transaction(move |conn| {
+            .transaction_async(|conn| async move {
                 use db::schema::silo_group_membership;
 
                 // Don't delete groups that still have memberships
@@ -185,7 +187,8 @@ impl DataStore {
                         )
                         .select(SiloGroupMembership::as_returning())
                         .limit(1)
-                        .load(conn)?;
+                        .load_async(&conn)
+                        .await?;
 
                 if !group_memberships.is_empty() {
                     return Err(TxnError::CustomError(
@@ -199,7 +202,8 @@ impl DataStore {
                     .filter(dsl::id.eq(group_id))
                     .filter(dsl::time_deleted.is_null())
                     .set(dsl::time_deleted.eq(Utc::now()))
-                    .execute(conn)?;
+                    .execute_async(&conn)
+                    .await?;
 
                 Ok(())
             })

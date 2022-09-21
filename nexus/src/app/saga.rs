@@ -81,8 +81,10 @@ impl super::Nexus {
         };
 
         let saga_id = SagaId(Uuid::new_v4());
-        let saga_logger =
-            self.log.new(o!("saga_name" => saga.saga_name().to_string()));
+        let saga_logger = self.log.new(o!(
+            "saga_name" => saga.saga_name().to_string(),
+            "saga_id" => saga_id.to_string()
+        ));
         let saga_context = Arc::new(Arc::new(SagaContext::new(
             Arc::clone(self),
             saga_logger,

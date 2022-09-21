@@ -132,18 +132,18 @@ impl DataStore {
 
         self.pool_authorized(opctx)
             .await?
-            .transaction(move |conn| {
-                let silo = silo_create_query.get_result(conn)?;
+            .transaction_async(|conn| async move {
+                let silo = silo_create_query.get_result_async(&conn).await?;
 
                 if let Some(query) = silo_admin_group_ensure_query {
-                    query.get_result(conn)?;
+                    query.get_result_async(&conn).await?;
                 }
 
                 if let Some(queries) = silo_admin_group_role_assignment_queries
                 {
                     let (delete_old_query, insert_new_query) = queries;
-                    delete_old_query.execute(conn)?;
-                    insert_new_query.execute(conn)?;
+                    delete_old_query.execute_async(&conn).await?;
+                    insert_new_query.execute_async(&conn).await?;
                 }
 
                 Ok(silo)
