@@ -42,8 +42,10 @@ pub(crate) fn derive_impl(tokens: TokenStream) -> syn::Result<TokenStream> {
         )
     })?;
 
-    // TODO: ensure that a field named "query" exists within this struct.
-    // Don't bother parsing type; we use it when impl'ing Subquery though.
+    // TODO: We should ensure that a field named "query" exists within this
+    // struct. We currently rely on it existing.
+    //
+    // Don't bother parsing type, but we use it when impl'ing Subquery.
 
     let as_query_source_impl =
         build_query_source_impl(name, &subquery_nv.value);
@@ -55,6 +57,9 @@ pub(crate) fn derive_impl(tokens: TokenStream) -> syn::Result<TokenStream> {
     })
 }
 
+// TODO: Should we use diesel's "QuerySource" and "AsQuery" here?
+//
+// I think that could work for most "select" queries, but might break joins.
 fn build_query_source_impl(
     name: &syn::Ident,
     subquery_module: &syn::Path,
@@ -74,9 +79,10 @@ fn build_subquery_impl(
     subquery_module: &syn::Path,
 ) -> TokenStream {
     quote! {
-        impl crate::db::subquery::SubQuery for #name {
+        impl crate::db::subquery::Subquery for #name {
             fn name(&self) -> &'static str {
-                stringify!(#subquery_module)
+                use ::diesel::internal::table_macro::StaticQueryFragment;
+                #subquery_module::table::STATIC_COMPONENT.0
             }
             fn query(&self) -> &dyn ::diesel::query_builder::QueryFragment<::diesel::pg::Pg> {
                 &self.query

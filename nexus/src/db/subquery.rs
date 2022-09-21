@@ -19,6 +19,9 @@ use diesel::query_builder::QueryId;
 // JOIN, etc), but we don't want this to be an INSERT/UPDATE/DELETE target.
 //
 // Similarly, we don't want to force callers to supply a "primary key".
+//
+// TODO: It might be worth looking at "diesel_dynamic_schema" for inspiration.
+// Although we shouldn't use that exactly, we may recreate a variant of it?
 #[macro_export]
 macro_rules! subquery {
     ($($tokens:tt)*) => {
@@ -41,7 +44,7 @@ macro_rules! subquery {
 /// "bar as ...".
 // This trait intentionally is agnostic to the SQL type of the subquery,
 // meaning that it can be used by the [`CteBuilder`] within a [`Vec`].
-pub trait SubQuery {
+pub trait Subquery {
     fn name(&self) -> &'static str;
     fn query(&self) -> &dyn QueryFragment<Pg>;
 }
@@ -74,10 +77,10 @@ pub trait CteQuery: Query + QueryFragment<Pg> {}
 
 impl<T> CteQuery for T where T: Query + QueryFragment<Pg> {}
 
-/// A thin wrapper around a [`SubQuery`].
+/// A thin wrapper around a [`SubQUery`].
 ///
 /// Used to avoid orphan rules while creating blanket implementations.
-pub struct CteSubquery(Box<dyn SubQuery>);
+pub struct CteSubquery(Box<dyn Subquery>);
 
 impl QueryId for CteSubquery {
     type QueryId = ();
@@ -108,13 +111,13 @@ impl CteBuilder {
         Self { subqueries: vec![] }
     }
 
-    pub fn add_subquery<Q: SubQuery + 'static>(mut self, subquery: Q) -> Self {
+    pub fn add_subquery<Q: Subquery + 'static>(mut self, subquery: Q) -> Self {
         self.subqueries.push(CteSubquery(Box::new(subquery)));
         self
     }
 
     // TODO: It would be nice if this could be typed?
-    // It's not necessarily a SubQuery, but it's probably a "Query" object
+    // It's not necessarily a Subquery, but it's probably a "Query" object
     // with a particular SQL type.
     pub fn build(self, statement: Box<dyn QueryFragment<Pg>>) -> Cte {
         Cte { subqueries: self.subqueries, statement }

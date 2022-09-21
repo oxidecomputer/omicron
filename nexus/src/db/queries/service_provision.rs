@@ -9,7 +9,7 @@ use crate::db::model::Service;
 use crate::db::model::ServiceKind;
 use crate::db::pool::DbConnection;
 use crate::db::schema;
-use crate::db::subquery::{AsQuerySource, Cte, CteBuilder, CteQuery, SubQuery};
+use crate::db::subquery::{AsQuerySource, Cte, CteBuilder, CteQuery};
 use crate::subquery;
 use chrono::DateTime;
 use chrono::Utc;
@@ -29,6 +29,7 @@ use diesel::NullableExpressionMethods;
 use diesel::QueryDsl;
 use diesel::RunQueryDsl;
 
+/// A subquery to find all sleds that could run services.
 #[derive(Subquery)]
 #[subquery(name = sled_allocation_pool)]
 struct SledAllocationPool {
@@ -36,13 +37,13 @@ struct SledAllocationPool {
 }
 
 impl SledAllocationPool {
-    fn new() -> Self {
+    fn new(rack_id: uuid::Uuid) -> Self {
         use crate::db::schema::sled::dsl;
         Self {
             query: Box::new(
                 dsl::sled
                     .filter(dsl::time_deleted.is_null())
-                    // TODO: Filter by rack?
+                    .filter(dsl::rack_id.eq(rack_id))
                     .select((dsl::id,)),
             ),
         }
@@ -55,6 +56,8 @@ subquery! {
     }
 }
 
+/// A subquery to find all services of a particular type which have already been
+/// allocated.
 #[derive(Subquery)]
 #[subquery(name = previously_allocated_services)]
 struct PreviouslyAllocatedServices {
@@ -62,7 +65,7 @@ struct PreviouslyAllocatedServices {
 }
 
 impl PreviouslyAllocatedServices {
-    fn new(allocation_pool: &SledAllocationPool) -> Self {
+    fn new(allocation_pool: &SledAllocationPool, kind: ServiceKind) -> Self {
         use crate::db::schema::service::dsl as service_dsl;
         use sled_allocation_pool::dsl as alloc_pool_dsl;
 
@@ -73,7 +76,7 @@ impl PreviouslyAllocatedServices {
         Self {
             query: Box::new(
                 service_dsl::service
-                    .filter(service_dsl::kind.eq(ServiceKind::Nexus))
+                    .filter(service_dsl::kind.eq(kind))
                     .filter(service_dsl::sled_id.eq_any(select_from_pool)),
             ),
         }
@@ -92,6 +95,7 @@ subquery! {
     }
 }
 
+/// A subquery to find the number of old services.
 #[derive(Subquery)]
 #[subquery(name = old_service_count)]
 struct OldServiceCount {
@@ -116,6 +120,10 @@ subquery! {
     }
 }
 
+/// A subquery to find the number of additional services which should be
+/// provisioned.
+#[derive(Subquery)]
+#[subquery(name = new_service_count)]
 struct NewServiceCount {
     query: Box<dyn CteQuery<SqlType = sql_types::BigInt>>,
 }
@@ -131,25 +139,24 @@ impl NewServiceCount {
             .assume_not_null();
         Self {
             query: Box::new(diesel::select(
-                greatest(
-                    (redundancy as i64).into_sql::<sql_types::BigInt>(),
-                    old_count,
-                ) - old_count,
+                ExpressionAlias::new::<new_service_count::dsl::count>(
+                    greatest(
+                        (redundancy as i64).into_sql::<sql_types::BigInt>(),
+                        old_count,
+                    ) - old_count,
+                )
             )),
         }
     }
 }
 
-impl SubQuery for NewServiceCount {
-    fn name(&self) -> &'static str {
-        "new_service_count"
-    }
-
-    fn query(&self) -> &dyn QueryFragment<Pg> {
-        &self.query
+subquery! {
+    new_service_count (count) {
+        count -> Int8,
     }
 }
 
+/// A subquery to find new sleds to host the proposed services.
 #[derive(Subquery)]
 #[subquery(name = candidate_sleds)]
 struct CandidateSleds {
@@ -200,6 +207,7 @@ subquery! {
     }
 }
 
+/// A subquery to provision internal IPs for all the new services.
 #[derive(Subquery)]
 #[subquery(name = new_internal_ips)]
 struct NewInternalIps {
@@ -244,6 +252,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     new_internal_ips,
 );
 
+/// A subquery to create the new services which should be inserted.
 #[derive(Subquery)]
 #[subquery(name = candidate_services)]
 struct CandidateServices {
@@ -257,6 +266,7 @@ impl CandidateServices {
     fn new(
         candidate_sleds: &CandidateSleds,
         new_internal_ips: &NewInternalIps,
+        kind: ServiceKind,
     ) -> Self {
         use candidate_sleds::dsl as candidate_sleds_dsl;
         use new_internal_ips::dsl as new_internal_ips_dsl;
@@ -275,7 +285,7 @@ impl CandidateServices {
                         ExpressionAlias::new::<service_dsl::time_modified>(now()),
                         ExpressionAlias::new::<service_dsl::sled_id>(candidate_sleds_dsl::id),
                         ExpressionAlias::new::<service_dsl::ip>(new_internal_ips_dsl::last_used_address),
-                        ExpressionAlias::new::<service_dsl::kind>(ServiceKind::Nexus.into_sql::<crate::db::model::ServiceKindEnum>()),
+                        ExpressionAlias::new::<service_dsl::kind>(kind.into_sql::<crate::db::model::ServiceKindEnum>()),
                     ),
                 )
             )
@@ -295,6 +305,7 @@ subquery! {
     }
 }
 
+/// A subquery to insert the new services.
 #[derive(Subquery)]
 #[subquery(name = inserted_services)]
 struct InsertServices {
@@ -317,6 +328,9 @@ impl InsertServices {
     }
 }
 
+// TODO: It's worth looking at Diesel's aliasing facilities to see
+// what we can do for these cases where we're trying to generate
+// a table identical to an existing one, but with a new name.
 subquery! {
     inserted_services {
         id -> Uuid,
@@ -339,11 +353,11 @@ pub struct ServiceProvision {
 }
 
 impl ServiceProvision {
-    pub fn new(redundancy: i32) -> Self {
+    pub fn new(redundancy: i32, rack_id: uuid::Uuid, kind: ServiceKind) -> Self {
         let now = Utc::now();
-        let sled_allocation_pool = SledAllocationPool::new();
+        let sled_allocation_pool = SledAllocationPool::new(rack_id);
         let previously_allocated_services =
-            PreviouslyAllocatedServices::new(&sled_allocation_pool);
+            PreviouslyAllocatedServices::new(&sled_allocation_pool, kind);
         let old_service_count =
             OldServiceCount::new(&previously_allocated_services);
         let new_service_count =
@@ -355,7 +369,7 @@ impl ServiceProvision {
         );
         let new_internal_ips = NewInternalIps::new(&candidate_sleds);
         let candidate_services =
-            CandidateServices::new(&candidate_sleds, &new_internal_ips);
+            CandidateServices::new(&candidate_sleds, &new_internal_ips, kind);
         let inserted_services = InsertServices::new(&candidate_services);
 
         let final_select = Box::new(
@@ -420,15 +434,10 @@ impl RunQueryDsl<DbConnection> for ServiceProvision {}
 mod tests {
     use crate::context::OpContext;
     use crate::db::datastore::DataStore;
-    use crate::db::identity::Resource;
-    use crate::db::model::Name;
-    use async_bb8_diesel::AsyncRunQueryDsl;
     use diesel::pg::Pg;
     use dropshot::test_util::LogContext;
     use nexus_test_utils::db::test_setup_database;
     use nexus_test_utils::RACK_UUID;
-    use omicron_common::api::external::Error;
-    use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev;
     use omicron_test_utils::dev::db::CockroachInstance;
     use std::sync::Arc;
@@ -465,22 +474,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_foobar() {
-        let context = TestContext::new("test_foobar").await;
+    async fn test_query_output() {
+        let context = TestContext::new("test_query_output").await;
 
-        let query = ServiceProvision::new(3);
+        let redundancy = 3;
+        let query = ServiceProvision::new(
+            redundancy,
+            Uuid::parse_str(RACK_UUID).unwrap(),
+            crate::db::model::ServiceKind::Nexus
+        );
 
-        let stringified = diesel::debug_query::<Pg, _>(&query).to_string();
-
-        assert_eq!(
-            stringified,
+        pretty_assertions::assert_eq!(
+            diesel::debug_query::<Pg, _>(&query).to_string(),
+            format!(
             "WITH \
-            sled_allocation_pool AS (\
+             sled_allocation_pool AS (\
                 SELECT \
                     \"sled\".\"id\" \
                 FROM \"sled\" \
                 WHERE (\
-                    \"sled\".\"time_deleted\" IS NULL\
+                    (\"sled\".\"time_deleted\" IS NULL) AND \
+                    (\"sled\".\"rack_id\" = $1)\
                 )\
             ), \
             previously_allocated_services AS (\
@@ -493,7 +507,7 @@ mod tests {
                     \"service\".\"kind\" \
                 FROM \"service\" \
                 WHERE (\
-                    (\"service\".\"kind\" = $1) AND \
+                    (\"service\".\"kind\" = $2) AND \
                     (\"service\".\"sled_id\" = \
                         ANY(SELECT \"sled_allocation_pool\".\"id\" FROM \"sled_allocation_pool\")\
                     )\
@@ -505,10 +519,11 @@ mod tests {
             new_service_count AS (\
                 SELECT (\
                     greatest(\
-                        $2, \
-                        (SELECT \"old_service_count\".\"count\" FROM \"old_service_count\" LIMIT $3)\
-                    ) - (SELECT \"old_service_count\".\"count\" FROM \"old_service_count\" LIMIT $4)\
-                )\
+                        $3, \
+                        (SELECT \"old_service_count\".\"count\" FROM \"old_service_count\" LIMIT $4)\
+                    ) - (SELECT \"old_service_count\".\"count\" FROM \"old_service_count\" LIMIT $5)\
+                ) \
+                AS count\
             ), \
             candidate_sleds AS (\
                 SELECT \
@@ -527,7 +542,7 @@ mod tests {
                 UPDATE \
                     \"sled\" \
                 SET \
-                    \"last_used_address\" = (\"sled\".\"last_used_address\" + $5) \
+                    \"last_used_address\" = (\"sled\".\"last_used_address\" + $6) \
                 WHERE \
                     (\"sled\".\"id\" = ANY(SELECT \"candidate_sleds\".\"id\" FROM \"candidate_sleds\")) \
                 RETURNING \
@@ -541,21 +556,54 @@ mod tests {
                     now() AS time_modified, \
                     \"candidate_sleds\".\"id\" AS sled_id, \
                     \"new_internal_ips\".\"last_used_address\" AS ip, \
-                    $6 AS kind \
+                    $7 AS kind \
                 FROM (\
                     \"candidate_sleds\" \
                 INNER JOIN \
                     \"new_internal_ips\" \
                 ON (\
-                    \"candidate_sleds\".\"id\" = \"new_internal_ips\".\"id\"
-                ))
-            ),
+                    \"candidate_sleds\".\"id\" = \"new_internal_ips\".\"id\"\
+                ))\
+            ), \
             inserted_services AS (\
-                INSERT INTO \
-                    \"service\" \
-                (\"id\", \"time_created\", \"time_modified\", \"sled_id\", \"ip\", \"kind\") SELECT \"candidate_services\".\"id\", \"candidate_services\".\"time_created\", \"candidate_services\".\"time_modified\", \"candidate_services\".\"sled_id\", \"candidate_services\".\"ip\", \"candidate_services\".\"kind\" FROM \"candidate_services\" RETURNING \"service\".\"id\", \"service\".\"time_created\", \"service\".\"time_modified\", \"service\".\"sled_id\", \"service\".\"ip\", \"service\".\"kind\")
-            SELECT \"inserted_services\".\"id\", \"inserted_services\".\"time_created\", \"inserted_services\".\"time_modified\", \"inserted_services\".\"sled_id\", \"inserted_services\".\"ip\", \"inserted_services\".\"kind\" FROM \"inserted_services\"
-            ) -- binds: [Nexus, 3, 1, Nexus]",
+                INSERT INTO \"service\" \
+                    (\"id\", \"time_created\", \"time_modified\", \"sled_id\", \"ip\", \"kind\") \
+                SELECT \
+                    \"candidate_services\".\"id\", \
+                    \"candidate_services\".\"time_created\", \
+                    \"candidate_services\".\"time_modified\", \
+                    \"candidate_services\".\"sled_id\", \
+                    \"candidate_services\".\"ip\", \
+                    \"candidate_services\".\"kind\" \
+                FROM \"candidate_services\" \
+                RETURNING \
+                    \"service\".\"id\", \
+                    \"service\".\"time_created\", \
+                    \"service\".\"time_modified\", \
+                    \"service\".\"sled_id\", \
+                    \"service\".\"ip\", \"service\".\"kind\"\
+            ) \
+            (\
+                SELECT \
+                    \"previously_allocated_services\".\"id\", \
+                    \"previously_allocated_services\".\"time_created\", \
+                    \"previously_allocated_services\".\"time_modified\", \
+                    \"previously_allocated_services\".\"sled_id\", \
+                    \"previously_allocated_services\".\"ip\", \
+                    \"previously_allocated_services\".\"kind\" \
+                FROM \"previously_allocated_services\"\
+            ) UNION \
+            (\
+                SELECT \
+                    \"inserted_services\".\"id\", \
+                    \"inserted_services\".\"time_created\", \
+                    \"inserted_services\".\"time_modified\", \
+                    \"inserted_services\".\"sled_id\", \
+                    \"inserted_services\".\"ip\", \
+                    \"inserted_services\".\"kind\" \
+                FROM \"inserted_services\"\
+            ) -- binds: [{RACK_UUID}, Nexus, {redundancy}, 1, 1, 1, Nexus]",
+            ),
         );
 
         context.success().await;
