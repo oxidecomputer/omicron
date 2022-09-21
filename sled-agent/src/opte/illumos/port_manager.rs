@@ -369,6 +369,7 @@ impl PortManager {
             &port_name,
         );
         self.inner.update_secondary_macs(&mut ports)?;
+        drop(ports);
 
         // Add a router entry for this interface's subnet, directing traffic to the
         // VPC subnet.
