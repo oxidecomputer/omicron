@@ -378,8 +378,8 @@ dependencies = [
  "serde",
  "sha3",
  "slog",
- "sprockets-common 0.1.0 (git+http://github.com/oxidecomputer/sprockets?rev=77df31efa5619d0767ffc837ef7468101608aee9)",
- "sprockets-host 0.1.0 (git+http://github.com/oxidecomputer/sprockets?rev=77df31efa5619d0767ffc837ef7468101608aee9)",
+ "sprockets-common",
+ "sprockets-host",
  "thiserror",
  "uuid",
  "vsss-rs",
@@ -694,7 +694,8 @@ checksum = "5827cebf4670468b8772dd191856768aedcb1b0278a04f989f7766351917b9dc"
 [[package]]
 name = "corncobs"
 version = "0.1.1"
-source = "git+https://github.com/cbiffle/corncobs?tag=v0.1.1#06a276928075fd5638802d46ed2d3d0c31d2d0c3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4603158882fa02a5f92b3ee716316f0495b962543141597751eaa5992a55f25b"
 
 [[package]]
 name = "cortex-m"
@@ -3144,8 +3145,8 @@ dependencies = [
  "socket2",
  "sp-sim",
  "spdm",
- "sprockets-common 0.1.0 (git+http://github.com/oxidecomputer/sprockets?rev=0361fd13ff19cda6696242fe40f1325fca30d3d1)",
- "sprockets-host 0.1.0 (git+http://github.com/oxidecomputer/sprockets?rev=0361fd13ff19cda6696242fe40f1325fca30d3d1)",
+ "sprockets-common",
+ "sprockets-host",
  "subprocess",
  "tar",
  "tempfile",
@@ -5296,19 +5297,6 @@ dependencies = [
 [[package]]
 name = "sprockets-common"
 version = "0.1.0"
-source = "git+http://github.com/oxidecomputer/sprockets?rev=0361fd13ff19cda6696242fe40f1325fca30d3d1#0361fd13ff19cda6696242fe40f1325fca30d3d1"
-dependencies = [
- "derive_more",
- "hubpack",
- "rand 0.8.5",
- "salty",
- "serde",
- "serde-big-array 0.4.1",
-]
-
-[[package]]
-name = "sprockets-common"
-version = "0.1.0"
 source = "git+http://github.com/oxidecomputer/sprockets?rev=77df31efa5619d0767ffc837ef7468101608aee9#77df31efa5619d0767ffc837ef7468101608aee9"
 dependencies = [
  "derive_more",
@@ -5317,25 +5305,6 @@ dependencies = [
  "salty",
  "serde",
  "serde-big-array 0.4.1",
-]
-
-[[package]]
-name = "sprockets-host"
-version = "0.1.0"
-source = "git+http://github.com/oxidecomputer/sprockets?rev=0361fd13ff19cda6696242fe40f1325fca30d3d1#0361fd13ff19cda6696242fe40f1325fca30d3d1"
-dependencies = [
- "anyhow",
- "clap",
- "derive_more",
- "futures",
- "pin-project",
- "ring",
- "serde",
- "slog",
- "sprockets-common 0.1.0 (git+http://github.com/oxidecomputer/sprockets?rev=0361fd13ff19cda6696242fe40f1325fca30d3d1)",
- "sprockets-session 0.1.0 (git+http://github.com/oxidecomputer/sprockets?rev=0361fd13ff19cda6696242fe40f1325fca30d3d1)",
- "thiserror",
- "tokio",
 ]
 
 [[package]]
@@ -5351,8 +5320,8 @@ dependencies = [
  "ring",
  "serde",
  "slog",
- "sprockets-common 0.1.0 (git+http://github.com/oxidecomputer/sprockets?rev=77df31efa5619d0767ffc837ef7468101608aee9)",
- "sprockets-session 0.1.0 (git+http://github.com/oxidecomputer/sprockets?rev=77df31efa5619d0767ffc837ef7468101608aee9)",
+ "sprockets-common",
+ "sprockets-session",
  "thiserror",
  "tokio",
 ]
@@ -5360,7 +5329,7 @@ dependencies = [
 [[package]]
 name = "sprockets-rot"
 version = "0.1.0"
-source = "git+http://github.com/oxidecomputer/sprockets?rev=0361fd13ff19cda6696242fe40f1325fca30d3d1#0361fd13ff19cda6696242fe40f1325fca30d3d1"
+source = "git+http://github.com/oxidecomputer/sprockets?rev=77df31efa5619d0767ffc837ef7468101608aee9#77df31efa5619d0767ffc837ef7468101608aee9"
 dependencies = [
  "corncobs",
  "derive_more",
@@ -5368,28 +5337,8 @@ dependencies = [
  "rand 0.8.5",
  "salty",
  "serde",
- "sprockets-common 0.1.0 (git+http://github.com/oxidecomputer/sprockets?rev=0361fd13ff19cda6696242fe40f1325fca30d3d1)",
+ "sprockets-common",
  "tinyvec",
-]
-
-[[package]]
-name = "sprockets-session"
-version = "0.1.0"
-source = "git+http://github.com/oxidecomputer/sprockets?rev=0361fd13ff19cda6696242fe40f1325fca30d3d1#0361fd13ff19cda6696242fe40f1325fca30d3d1"
-dependencies = [
- "chacha20poly1305",
- "derive_more",
- "ed25519",
- "ed25519-dalek",
- "hkdf",
- "hmac 0.12.1",
- "hubpack",
- "rand_core 0.6.3",
- "serde",
- "sha3",
- "sprockets-common 0.1.0 (git+http://github.com/oxidecomputer/sprockets?rev=0361fd13ff19cda6696242fe40f1325fca30d3d1)",
- "x25519-dalek",
- "zeroize",
 ]
 
 [[package]]
@@ -5407,7 +5356,7 @@ dependencies = [
  "rand_core 0.6.3",
  "serde",
  "sha3",
- "sprockets-common 0.1.0 (git+http://github.com/oxidecomputer/sprockets?rev=77df31efa5619d0767ffc837ef7468101608aee9)",
+ "sprockets-common",
  "x25519-dalek",
  "zeroize",
 ]

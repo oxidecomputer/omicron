@@ -14,7 +14,7 @@ omicron-package = { path = "../package" }
 serde = { version = "1.0", features = [ "derive" ] }
 serde_derive = "1.0"
 sp-sim = { path = "../sp-sim" }
-sprockets-rot = { git = "http://github.com/oxidecomputer/sprockets", rev = "0361fd13ff19cda6696242fe40f1325fca30d3d1" }
+sprockets-rot = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
 thiserror = "1.0"
 toml = "0.5.9"
 

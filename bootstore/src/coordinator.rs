@@ -36,6 +36,12 @@ pub enum Error {
     #[error(transparent)]
     NodeResponseError(#[from] NodeError),
 
+    #[error("Invalid Version: Expected: {expected}, Actual: {actual}")]
+    BadVersion { expected: u32, actual: u32 },
+
+    #[error("Invalid Coordinator ID. Expected: {expected}, Actual: actual")]
+    BadCoordinatorId { expected: u64, actual: u64 },
+
     #[error(
         "PrepareOk received with wrong rack UUID: Expected: {expected}, \
     Actual: {actual}"
@@ -101,6 +107,7 @@ struct CoordinatorState {
     // A monotonic counter incremented and maintained by nexus everytime a new
     // coordinator takes over.
     id: u64,
+    #[allow(unused)]
     log: Logger,
     rack_uuid: Uuid,
     total_nodes: usize,
@@ -143,8 +150,77 @@ trait CoordinatorOperation {
 
 /// A [`CoordinatorOperation`] for rack initialization
 struct InitializeOperation {
-    members: BTreeSet<Ed25519Certificate>,
     share_distributions: BTreeMap<Ed25519Certificate, ShareDistribution>,
+}
+
+impl InitializeOperation {
+    fn handle_prepare_ok(
+        &mut self,
+        state: &mut CoordinatorState,
+        from: Ed25519Certificate,
+        result: NodeOpResult,
+    ) -> Result<bool, Error> {
+        match result {
+            NodeOpResult::PrepareOk { rack_uuid, epoch } => {
+                if rack_uuid != state.rack_uuid {
+                    return Err(Error::PrepareOkBadRackUuid {
+                        from,
+                        expected: state.rack_uuid,
+                        actual: rack_uuid,
+                    });
+                }
+                if epoch != 0 {
+                    return Err(Error::PrepareOkBadEpoch {
+                        from,
+                        expected: 0,
+                        actual: epoch,
+                    });
+                }
+                state.ackd_prepares.insert(from);
+                Ok(false)
+            }
+            NodeOpResult::CommitOk { rack_uuid, epoch } => {
+                Err(Error::UnexpectedCommitOk { from, epoch, rack_uuid })
+            }
+            NodeOpResult::Share { epoch, .. } => {
+                Err(Error::UnexpectedShare { from, epoch })
+            }
+        }
+    }
+
+    fn handle_commit_ok(
+        &mut self,
+        state: &mut CoordinatorState,
+        from: Ed25519Certificate,
+        result: NodeOpResult,
+    ) -> Result<bool, Error> {
+        match result {
+            NodeOpResult::CommitOk { rack_uuid, epoch } => {
+                if rack_uuid != state.rack_uuid {
+                    return Err(Error::CommitOkBadRackUuid {
+                        from,
+                        expected: state.rack_uuid,
+                        actual: rack_uuid,
+                    });
+                }
+                if epoch != 0 {
+                    return Err(Error::CommitOkBadEpoch {
+                        from,
+                        expected: 0,
+                        actual: epoch,
+                    });
+                }
+                state.ackd_commits.insert(from);
+                Ok(state.commit_complete())
+            }
+            NodeOpResult::PrepareOk { rack_uuid, epoch } => {
+                Err(Error::UnexpectedPrepareOk { from, epoch, rack_uuid })
+            }
+            NodeOpResult::Share { epoch, .. } => {
+                Err(Error::UnexpectedShare { from, epoch })
+            }
+        }
+    }
 }
 
 impl CoordinatorOperation for InitializeOperation {
@@ -205,7 +281,7 @@ impl CoordinatorOperation for InitializeOperation {
         from: Ed25519Certificate,
         result: NodeOpResult,
     ) -> Result<bool, Error> {
-        if !self.members.contains(&from) {
+        if !self.share_distributions.keys().any(|&cert| cert == from) {
             return Err(Error::NotAMember {
                 from,
                 epoch: 0,
@@ -214,71 +290,10 @@ impl CoordinatorOperation for InitializeOperation {
         }
 
         if !state.prepare_complete() {
-            // We're expecting a `PrepareOk`
-            match result {
-                NodeOpResult::PrepareOk { rack_uuid, epoch } => {
-                    if rack_uuid != state.rack_uuid {
-                        return Err(Error::PrepareOkBadRackUuid {
-                            from,
-                            expected: state.rack_uuid,
-                            actual: rack_uuid,
-                        });
-                    }
-                    if epoch != 0 {
-                        return Err(Error::PrepareOkBadEpoch {
-                            from,
-                            expected: 0,
-                            actual: epoch,
-                        });
-                    }
-                    state.ackd_prepares.insert(from);
-                    return Ok(false);
-                }
-                NodeOpResult::CommitOk { rack_uuid, epoch } => {
-                    return Err(Error::UnexpectedCommitOk {
-                        from,
-                        epoch,
-                        rack_uuid,
-                    });
-                }
-                NodeOpResult::Share { epoch, .. } => {
-                    return Err(Error::UnexpectedShare { from, epoch });
-                }
-            }
+            self.handle_prepare_ok(state, from, result)
+        } else {
+            self.handle_commit_ok(state, from, result)
         }
-
-        // Handle CommitOk messages
-        match result {
-            NodeOpResult::CommitOk { rack_uuid, epoch } => {
-                if rack_uuid != state.rack_uuid {
-                    return Err(Error::CommitOkBadRackUuid {
-                        from,
-                        expected: state.rack_uuid,
-                        actual: rack_uuid,
-                    });
-                }
-                if epoch != 0 {
-                    return Err(Error::CommitOkBadEpoch {
-                        from,
-                        expected: 0,
-                        actual: epoch,
-                    });
-                }
-                state.ackd_commits.insert(from);
-            }
-            NodeOpResult::PrepareOk { rack_uuid, epoch } => {
-                return Err(Error::UnexpectedPrepareOk {
-                    from,
-                    epoch,
-                    rack_uuid,
-                });
-            }
-            NodeOpResult::Share { epoch, .. } => {
-                return Err(Error::UnexpectedShare { from, epoch });
-            }
-        }
-
-        Ok(state.commit_complete())
     }
 }
 
@@ -296,9 +311,9 @@ struct ReconfigureOperation {
 
 /// A coordinator for the bootstore's 2PC protocol
 ///
-/// The coordinatore is responsible for creating the [`trust_quorum::RackSecret`]
-/// splitting it into share sand distributing those shares along with the
-/// relevant information to the participant nodes.
+/// The coordinator is responsible for creating the
+/// [`trust_quorum::RackSecret`], splitting it into shares, and distributing
+/// those shares along with the relevant information to the participant nodes.
 pub struct Coordinator {
     state: CoordinatorState,
     op: Box<dyn CoordinatorOperation>,
@@ -307,7 +322,7 @@ pub struct Coordinator {
 impl Coordinator {
     /// Create a coordinator used to initialize a rack
     pub fn new_initialize(
-        log: Logger,
+        log: &Logger,
         rack_uuid: Uuid,
         members: BTreeSet<Ed25519Certificate>,
     ) -> Result<Coordinator, Error> {
@@ -340,7 +355,7 @@ impl Coordinator {
         };
         Ok(Coordinator {
             state,
-            op: Box::new(InitializeOperation { members, share_distributions }),
+            op: Box::new(InitializeOperation { share_distributions }),
         })
     }
 
@@ -353,22 +368,15 @@ impl Coordinator {
         from: Ed25519Certificate,
         rsp: NodeResponse,
     ) -> Result<bool, Error> {
-        // TODO: Should  these conditions be passed up as errors?
-        // If we pass them up, should we also log them?
         if rsp.version != 1 {
-            error!(
-                self.state.log,
-                "Invalid version for response: {}", rsp.version
-            );
+            return Err(Error::BadVersion { expected: 1, actual: rsp.version });
         }
 
         if rsp.coordinator_id != self.state.id {
-            error!(
-                self.state.log,
-                "Invalid Coordinator ID. Expected: {}, Actual: {}",
-                self.state.id,
-                rsp.coordinator_id
-            );
+            return Err(Error::BadCoordinatorId {
+                expected: self.state.id,
+                actual: rsp.coordinator_id,
+            });
         }
 
         match rsp.result {

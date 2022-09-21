@@ -163,7 +163,7 @@ proptest! {
         let rack_uuid = Uuid::new_v4();
         // Create a coordinator for rack initialization
         let mut coordinator = Coordinator::new_initialize(
-            logctx.log.clone(),
+            &logctx.log,
             rack_uuid.clone(),
             members.clone(),
         )?;
@@ -196,7 +196,7 @@ proptest! {
         // Pass the responses back to the coordinator
         for (from, response) in responses {
             // `false` indicates that the transaction is not complete. This is
-            // true because we haven't committed yet.
+            // correct because we haven't committed yet.
             prop_assert_eq!(false, coordinator.handle(from, response)?);
         }
 
