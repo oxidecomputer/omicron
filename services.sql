@@ -409,7 +409,6 @@ WITH
       )
     RETURNING *
   )
-SELECT * FROM
   (
     SELECT
       -- XXX: Do we care about the new/not new distinction?

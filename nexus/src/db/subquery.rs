@@ -29,7 +29,32 @@ macro_rules! subquery {
     }
 }
 
-/// Represents a subquery within a CTE.
+// TODO: I'd like to make a version of the macro that says:
+//
+// ```
+// subquery_alias!(existing_table as alias_name);
+// ```
+//
+// And which generates an AliasSource - very similar to the `alias!` macro
+// in diesel, but which lets callers control the "AS" position.
+//
+// The existing alias macro implements QueryFragment as:
+//
+// "<SOURCE> as <ALIAS NAME>"
+//
+// but we actually want this relationship flipped, kinda.
+//
+// We want:
+//
+// "<ALIAS NAME> as ..."
+// #[macro_export]
+// macro_rules! subquery_alias {
+//     ($table_name:ident as $alias_name:ident) => {
+//         ::diesel::alias!($table_name as $alias_name)
+//     }
+// }
+
+/// Represents a named subquery within a CTE.
 ///
 /// For an expression like:
 ///
@@ -44,8 +69,11 @@ macro_rules! subquery {
 /// "bar as ...".
 // This trait intentionally is agnostic to the SQL type of the subquery,
 // meaning that it can be used by the [`CteBuilder`] within a [`Vec`].
-pub trait Subquery {
-    fn name(&self) -> &'static str;
+pub trait Subquery: QueryFragment<Pg> {
+    /// Returns the underlying query fragment.
+    ///
+    /// For "<ALIAS> as <QUERY>", this refers to the "QUERY" portion
+    /// of SQL.
     fn query(&self) -> &dyn QueryFragment<Pg>;
 }
 
@@ -77,7 +105,7 @@ pub trait CteQuery: Query + QueryFragment<Pg> {}
 
 impl<T> CteQuery for T where T: Query + QueryFragment<Pg> {}
 
-/// A thin wrapper around a [`SubQUery`].
+/// A thin wrapper around a [`Subquery`].
 ///
 /// Used to avoid orphan rules while creating blanket implementations.
 pub struct CteSubquery(Box<dyn Subquery>);
@@ -94,7 +122,7 @@ impl QueryFragment<Pg> for CteSubquery {
     ) -> diesel::QueryResult<()> {
         out.unsafe_to_cache_prepared();
 
-        out.push_sql(self.0.name());
+        self.0.walk_ast(out.reborrow())?;
         out.push_sql(" AS (");
         self.0.query().walk_ast(out.reborrow())?;
         out.push_sql(")");

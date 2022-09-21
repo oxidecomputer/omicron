@@ -61,7 +61,7 @@ subquery! {
 #[derive(Subquery)]
 #[subquery(name = previously_allocated_services)]
 struct PreviouslyAllocatedServices {
-    query: Box<dyn CteQuery<SqlType = previously_allocated_services::SqlType>>,
+    query: Box<dyn CteQuery<SqlType = schema::service::SqlType>>,
 }
 
 impl PreviouslyAllocatedServices {
@@ -99,7 +99,7 @@ subquery! {
 #[derive(Subquery)]
 #[subquery(name = old_service_count)]
 struct OldServiceCount {
-    query: Box<dyn CteQuery<SqlType = sql_types::BigInt>>,
+    query: Box<dyn CteQuery<SqlType = old_service_count::SqlType>>,
 }
 
 impl OldServiceCount {
@@ -108,7 +108,8 @@ impl OldServiceCount {
     ) -> Self {
         Self {
             query: Box::new(
-                previously_allocated_services.query_source().count(),
+                previously_allocated_services.query_source()
+                    .select((diesel::dsl::count_star(),)),
             ),
         }
     }
@@ -125,7 +126,7 @@ subquery! {
 #[derive(Subquery)]
 #[subquery(name = new_service_count)]
 struct NewServiceCount {
-    query: Box<dyn CteQuery<SqlType = sql_types::BigInt>>,
+    query: Box<dyn CteQuery<SqlType = new_service_count::SqlType>>,
 }
 
 diesel::sql_function!(fn greatest(a: sql_types::BigInt, b: sql_types::BigInt) -> sql_types::BigInt);
@@ -139,12 +140,12 @@ impl NewServiceCount {
             .assume_not_null();
         Self {
             query: Box::new(diesel::select(
-                ExpressionAlias::new::<new_service_count::dsl::count>(
+                ExpressionAlias::new::<new_service_count::dsl::count>((
                     greatest(
                         (redundancy as i64).into_sql::<sql_types::BigInt>(),
                         old_count,
                     ) - old_count,
-                )
+                ),)
             )),
         }
     }
@@ -160,7 +161,7 @@ subquery! {
 #[derive(Subquery)]
 #[subquery(name = candidate_sleds)]
 struct CandidateSleds {
-    query: Box<dyn CteQuery<SqlType = sql_types::Uuid>>,
+    query: Box<dyn CteQuery<SqlType = candidate_sleds::SqlType>>,
 }
 
 impl CandidateSleds {
@@ -180,7 +181,7 @@ impl CandidateSleds {
                 sled_allocation_pool::dsl::id
                     .ne_all(select_from_previously_allocated),
             )
-            .select(sled_allocation_pool::dsl::id)
+            .select((sled_allocation_pool::dsl::id,))
             .into_boxed();
 
         // TODO: I'd really prefer to just pass the 'new_service_count' as the
@@ -256,7 +257,7 @@ diesel::allow_tables_to_appear_in_same_query!(
 #[derive(Subquery)]
 #[subquery(name = candidate_services)]
 struct CandidateServices {
-    query: Box<dyn CteQuery<SqlType = candidate_services::SqlType>>,
+    query: Box<dyn CteQuery<SqlType = schema::service::SqlType>>,
 }
 
 diesel::sql_function!(fn gen_random_uuid() -> Uuid);
@@ -272,6 +273,7 @@ impl CandidateServices {
         use new_internal_ips::dsl as new_internal_ips_dsl;
         use schema::service::dsl as service_dsl;
 
+        let kind = kind.into_sql::<crate::db::model::ServiceKindEnum>();
         Self {
             query: Box::new(
                 candidate_sleds.query_source().inner_join(
@@ -285,7 +287,7 @@ impl CandidateServices {
                         ExpressionAlias::new::<service_dsl::time_modified>(now()),
                         ExpressionAlias::new::<service_dsl::sled_id>(candidate_sleds_dsl::id),
                         ExpressionAlias::new::<service_dsl::ip>(new_internal_ips_dsl::last_used_address),
-                        ExpressionAlias::new::<service_dsl::kind>(kind.into_sql::<crate::db::model::ServiceKindEnum>()),
+                        ExpressionAlias::new::<service_dsl::kind>(kind),
                     ),
                 )
             )
@@ -484,11 +486,11 @@ mod tests {
             crate::db::model::ServiceKind::Nexus
         );
 
-        pretty_assertions::assert_eq!(
+       pretty_assertions::assert_eq!(
             diesel::debug_query::<Pg, _>(&query).to_string(),
             format!(
             "WITH \
-             sled_allocation_pool AS (\
+             \"sled_allocation_pool\" AS (\
                 SELECT \
                     \"sled\".\"id\" \
                 FROM \"sled\" \
@@ -497,7 +499,7 @@ mod tests {
                     (\"sled\".\"rack_id\" = $1)\
                 )\
             ), \
-            previously_allocated_services AS (\
+            \"previously_allocated_services\" AS (\
                 SELECT \
                     \"service\".\"id\", \
                     \"service\".\"time_created\", \
@@ -513,10 +515,10 @@ mod tests {
                     )\
                 )\
             ), \
-            old_service_count AS (\
+            \"old_service_count\" AS (\
                 SELECT COUNT(*) FROM \"previously_allocated_services\"\
             ), \
-            new_service_count AS (\
+            \"new_service_count\" AS (\
                 SELECT (\
                     greatest(\
                         $3, \
@@ -525,7 +527,7 @@ mod tests {
                 ) \
                 AS count\
             ), \
-            candidate_sleds AS (\
+            \"candidate_sleds\" AS (\
                 SELECT \
                     \"sled_allocation_pool\".\"id\" \
                 FROM \"sled_allocation_pool\" \
@@ -538,7 +540,7 @@ mod tests {
                 ) \
                 LIMIT SELECT * FROM new_service_count\
             ), \
-            new_internal_ips AS (\
+            \"new_internal_ips\" AS (\
                 UPDATE \
                     \"sled\" \
                 SET \
@@ -549,7 +551,7 @@ mod tests {
                     \"sled\".\"id\", \
                     \"sled\".\"last_used_address\"\
             ), \
-            candidate_services AS (\
+            \"candidate_services\" AS (\
                 SELECT \
                     gen_random_uuid() AS id, \
                     now() AS time_created, \
@@ -565,7 +567,7 @@ mod tests {
                     \"candidate_sleds\".\"id\" = \"new_internal_ips\".\"id\"\
                 ))\
             ), \
-            inserted_services AS (\
+            \"inserted_services\" AS (\
                 INSERT INTO \"service\" \
                     (\"id\", \"time_created\", \"time_modified\", \"sled_id\", \"ip\", \"kind\") \
                 SELECT \

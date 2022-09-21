@@ -79,11 +79,17 @@ fn build_subquery_impl(
     subquery_module: &syn::Path,
 ) -> TokenStream {
     quote! {
-        impl crate::db::subquery::Subquery for #name {
-            fn name(&self) -> &'static str {
-                use ::diesel::internal::table_macro::StaticQueryFragment;
-                #subquery_module::table::STATIC_COMPONENT.0
+        impl ::diesel::query_builder::QueryFragment<::diesel::pg::Pg> for #name {
+            fn walk_ast<'a>(
+                &'a self,
+                mut out: ::diesel::query_builder::AstPass<'_, 'a, ::diesel::pg::Pg>
+            ) -> ::diesel::QueryResult<()> {
+                #subquery_module::table.walk_ast(out)?;
+                Ok(())
             }
+        }
+
+        impl crate::db::subquery::Subquery for #name {
             fn query(&self) -> &dyn ::diesel::query_builder::QueryFragment<::diesel::pg::Pg> {
                 &self.query
             }
