@@ -11,6 +11,7 @@ use p256::{NonZeroScalar, ProjectivePoint, Scalar, SecretKey};
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use vsss_rs::{Feldman, FeldmanVerifier, Share};
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// A `RackSecret` is a shared secret used to perform a "rack-level" unlock.
 ///
@@ -40,6 +41,7 @@ use vsss_rs::{Feldman, FeldmanVerifier, Share};
 /// `rack unlock`. The establishment of secure channels and the ability to trust
 /// the validity of a participating peer is outside the scope of this particular
 /// type and orthogonal to its implementation.
+#[derive(Zeroize, ZeroizeOnDrop)]
 pub struct RackSecret {
     secret: NonZeroScalar,
 }
@@ -71,7 +73,6 @@ impl Verifier {
 }
 
 // Temporary until the using code is written
-#[allow(dead_code)]
 impl RackSecret {
     /// Create a secret based on the NIST P-256 curve
     pub fn new() -> RackSecret {
@@ -94,6 +95,7 @@ impl RackSecret {
     }
 
     /// Combine a set of shares and return a RackSecret
+    #[allow(dead_code)] // not used yet
     pub fn combine_shares(
         threshold: usize,
         total_shares: usize,
