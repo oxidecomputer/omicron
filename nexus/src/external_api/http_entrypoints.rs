@@ -226,6 +226,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(silo_list)?;
         api.register(silo_create)?;
         api.register(silo_view)?;
+        api.register(silo_view_by_id)?;
         api.register(silo_delete)?;
         api.register(silo_identity_provider_list)?;
         api.register(silo_policy_view)?;
@@ -429,8 +430,8 @@ async fn policy_update(
 /// Lists silos that are discoverable based on the current permissions.
 #[endpoint {
     method = GET,
-    path = "/silos",
-    tags = ["silos"],
+    path = "/system/silos",
+    tags = ["system"],
 }]
 async fn silo_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -472,8 +473,8 @@ async fn silo_list(
 /// Create a silo
 #[endpoint {
     method = POST,
-    path = "/silos",
-    tags = ["silos"],
+    path = "/system/silos",
+    tags = ["system"],
 }]
 async fn silo_create(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -502,8 +503,8 @@ struct SiloPathParam {
 /// Fetch a silo by name.
 #[endpoint {
     method = GET,
-    path = "/silos/{silo_name}",
-    tags = ["silos"],
+    path = "/system/silos/{silo_name}",
+    tags = ["system"],
 }]
 async fn silo_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -521,13 +522,35 @@ async fn silo_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Fetch a silo by id
+#[endpoint {
+    method = GET,
+    path = "/system/by-id/silos/{id}",
+    tags = ["system"]
+}]
+async fn silo_view_by_id(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<ByIdPathParams>,
+) -> Result<HttpResponseOk<Silo>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let id = &path.id;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let silo = nexus.silo_fetch_by_id(&opctx, id).await?;
+        Ok(HttpResponseOk(silo.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /// Delete a silo
 ///
 /// Delete a silo by name.
 #[endpoint {
     method = DELETE,
-    path = "/silos/{silo_name}",
-    tags = ["silos"],
+    path = "/system/silos/{silo_name}",
+    tags = ["system"],
 }]
 async fn silo_delete(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -548,8 +571,8 @@ async fn silo_delete(
 /// Fetch a silo's IAM policy
 #[endpoint {
     method = GET,
-    path = "/silos/{silo_name}/policy",
-    tags = ["silos"],
+    path = "/system/silos/{silo_name}/policy",
+    tags = ["system"],
 }]
 async fn silo_policy_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -572,8 +595,8 @@ async fn silo_policy_view(
 /// Update a silo's IAM policy
 #[endpoint {
     method = PUT,
-    path = "/silos/{silo_name}/policy",
-    tags = ["silos"],
+    path = "/system/silos/{silo_name}/policy",
+    tags = ["system"],
 }]
 async fn silo_policy_update(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -604,8 +627,8 @@ async fn silo_policy_update(
 /// List a silo's IDPs
 #[endpoint {
     method = GET,
-    path = "/silos/{silo_name}/identity-providers",
-    tags = ["silos"],
+    path = "/system/silos/{silo_name}/identity-providers",
+    tags = ["system"],
 }]
 async fn silo_identity_provider_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -641,8 +664,8 @@ async fn silo_identity_provider_list(
 /// Create a SAML IDP
 #[endpoint {
     method = POST,
-    path = "/silos/{silo_name}/saml-identity-providers",
-    tags = ["silos"],
+    path = "/system/silos/{silo_name}/saml-identity-providers",
+    tags = ["system"],
 }]
 async fn silo_identity_provider_create(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -678,8 +701,8 @@ struct SiloSamlPathParam {
 /// Fetch a SAML IDP
 #[endpoint {
     method = GET,
-    path = "/silos/{silo_name}/saml-identity-providers/{provider_name}",
-    tags = ["silos"],
+    path = "/system/silos/{silo_name}/saml-identity-providers/{provider_name}",
+    tags = ["system"],
 }]
 async fn silo_identity_provider_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,

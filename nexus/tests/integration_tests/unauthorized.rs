@@ -185,9 +185,9 @@ lazy_static! {
     static ref SETUP_REQUESTS: Vec<SetupReq> = vec![
         // Create a separate Silo (not used for anything else)
         SetupReq::Post {
-            url: "/silos",
+            url: "/system/silos",
             body: serde_json::to_value(&*DEMO_SILO_CREATE).unwrap(),
-            id_routes: vec!["/by-id/silos/{id}"],
+            id_routes: vec!["/system/by-id/silos/{id}"],
         },
         // Create an IP pool
         SetupReq::Post {

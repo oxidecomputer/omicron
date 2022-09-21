@@ -82,9 +82,9 @@ When Nexus decides that credentials weren't specified at all, one possible reaso
 [source,text]
 ----
 [2022-07-07T20:54:10.61484323Z] TRACE: ee3947d6-0adc-4e37-86ab-f49dcda0e886/dropshot_external/12898 on ivanova: authn: trying SchemeName("spoof") (req_id=a6febc45-7f95-4d79-86d5-93f7c2be4109, method=GET, remote_addr=127.0.0.1:36233, local_addr=127.0.0.1:63725)
-    uri: /silos/default-silo/saml_identity_providers/demo-saml-provider
+    uri: /system/silos/default-silo/saml_identity_providers/demo-saml-provider
 [2022-07-07T20:54:10.615229923Z] TRACE: ee3947d6-0adc-4e37-86ab-f49dcda0e886/dropshot_external/12898 on ivanova: authn: trying SchemeName("session_cookie") (req_id=a6febc45-7f95-4d79-86d5-93f7c2be4109, method=GET, remote_addr=127.0.0.1:36233, local_addr=127.0.0.1:63725)
-    uri: /silos/default-silo/saml_identity_providers/demo-saml-provider
+    uri: /system/silos/default-silo/saml_identity_providers/demo-saml-provider
 [2022-07-07T20:54:10.615630513Z] TRACE: ee3947d6-0adc-4e37-86ab-f49dcda0e886/dropshot_external/12898 on ivanova: authn result: Ok(Context { kind: Unauthenticated, schemes_tried: [SchemeName("spoof"), SchemeName("session_cookie")] }) (req_id=a6febc45-7f95-4d79-86d5-93f7c2be4109, method=GET, remote_addr=127.0.0.1:36233, local_addr=127.0.0.1:63725)
 ----
 
