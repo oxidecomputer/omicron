@@ -335,38 +335,40 @@ impl PortManager {
             vnic_name
         };
 
-        let (port, ticket) = {
-            let mut ports = self.inner.ports.lock().unwrap();
-            let ticket = PortTicket::new(
-                instance_id,
-                port_name.clone(),
-                self.inner.clone(),
-            );
-            let port = Port::new(
-                port_name.clone(),
-                nic.ip,
-                subnet,
-                mac,
-                nic.slot,
-                vni,
-                self.inner.underlay_ip,
-                source_nat,
-                external_ips,
-                gateway,
-                boundary_services,
-                vnic,
-            );
-            let old =
-                ports.insert((instance_id, port_name.clone()), port.clone());
-            assert!(
-                old.is_none(),
-                "Duplicate OPTE port detected: instance_id = {}, port_name = {}",
-                instance_id,
-                &port_name,
-            );
-            self.inner.update_secondary_macs(&mut ports)?;
-            (port, ticket)
-        };
+        let ticket =
+            PortTicket::new(instance_id, port_name.clone(), self.inner.clone());
+        let port = Port::new(
+            port_name.clone(),
+            nic.ip,
+            subnet,
+            mac,
+            nic.slot,
+            vni,
+            self.inner.underlay_ip,
+            source_nat,
+            external_ips,
+            gateway,
+            boundary_services,
+            vnic,
+        );
+
+        // Update the secondary MAC of the underlay.
+        //
+        // TODO-remove: This is part of the external IP hack.
+        //
+        // Acquire the lock _after_ the ticket exists. If the
+        // `update_secondary_mac` call below fails, we'll propagate the
+        // error with `?`. We need the lock guard to be dropped first, so that
+        // the lock acquired when `ticket` is dropped is guaranteed to be free.
+        let mut ports = self.inner.ports.lock().unwrap();
+        let old = ports.insert((instance_id, port_name.clone()), port.clone());
+        assert!(
+            old.is_none(),
+            "Duplicate OPTE port detected: instance_id = {}, port_name = {}",
+            instance_id,
+            &port_name,
+        );
+        self.inner.update_secondary_macs(&mut ports)?;
 
         // Add a router entry for this interface's subnet, directing traffic to the
         // VPC subnet.
