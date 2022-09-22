@@ -113,12 +113,14 @@ fn get_field_with_name<'a>(
 
 /// Implements the [`Subquery`] trait.
 ///
-/// Additionally, implements [`diesel::query_builder::QueryFragment`], which
-/// refers to the subquery by the name supplied as input.
+/// Additionally, implements
+/// [`diesel::query_builder::QueryFragment`](https://docs.diesel.rs/master/diesel/query_builder/trait.QueryFragment.html),
+/// which refers to the subquery by the name supplied as input.
 ///
-/// Callers should also derive [`diesel::query_builder::QueryId`], as it should
-/// be implemented for structures which implement
-/// [`diesel::query_builder::QueryFragment`].
+/// Callers should also derive
+/// [`diesel::query_builder::QueryId`](https://docs.diesel.rs/master/diesel/query_builder/trait.QueryId.html),
+/// as it should be implemented for structures which implement
+/// [`diesel::query_builder::QueryFragment`](https://docs.diesel.rs/master/diesel/query_builder/trait.QueryFragment.html).
 ///
 /// Example usage:
 ///
