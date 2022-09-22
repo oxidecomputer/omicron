@@ -5,8 +5,6 @@
 //! [`DataStore`] methods on [`Dataset`]s.
 
 use super::DataStore;
-use super::RunnableQuery;
-use super::REGION_REDUNDANCY_THRESHOLD;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
@@ -14,7 +12,6 @@ use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Asset;
 use crate::db::model::Dataset;
-use crate::db::model::DatasetKind;
 use crate::db::model::Zpool;
 use chrono::Utc;
 use diesel::prelude::*;
@@ -64,19 +61,5 @@ impl DataStore {
                 )
             }
         })
-    }
-
-    pub(super) fn get_allocatable_datasets_query() -> impl RunnableQuery<Dataset>
-    {
-        use db::schema::dataset::dsl;
-
-        dsl::dataset
-            // We look for valid datasets (non-deleted crucible datasets).
-            .filter(dsl::size_used.is_not_null())
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::kind.eq(DatasetKind::Crucible))
-            .order(dsl::size_used.asc())
-            .select(Dataset::as_select())
-            .limit(REGION_REDUNDANCY_THRESHOLD.try_into().unwrap())
     }
 }

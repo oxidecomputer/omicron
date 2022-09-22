@@ -53,6 +53,7 @@ mod silo_user;
 mod sled;
 mod snapshot;
 mod ssh_key;
+pub mod subquery;
 mod u16;
 mod update_artifact;
 mod user_builtin;

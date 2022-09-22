@@ -38,9 +38,6 @@ pub struct Dataset {
     ip: ipnetwork::IpNetwork,
     port: SqlU16,
 
-    quota: i64,
-    reservation: i64,
-
     kind: DatasetKind,
     pub size_used: Option<i64>,
 }
@@ -63,12 +60,6 @@ impl Dataset {
             pool_id,
             ip: addr.ip().into(),
             port: addr.port().into(),
-            // TODO: So we *should* set these values, but we can't really do so
-            // when the sled agent is upserting datasets to nexus.
-            /*
-            quota: 0,
-            reservation: 0,
-            */
             kind,
             size_used,
         }

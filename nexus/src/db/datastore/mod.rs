@@ -71,7 +71,7 @@ mod zpool;
 
 // Number of unique datasets required to back a region.
 // TODO: This should likely turn into a configuration option.
-const REGION_REDUNDANCY_THRESHOLD: usize = 3;
+pub(crate) const REGION_REDUNDANCY_THRESHOLD: usize = 3;
 
 // Represents a query that is ready to be executed.
 //
@@ -664,9 +664,12 @@ mod test {
             .region_allocate(&opctx, volume1_id, &params)
             .await
             .unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("Not enough datasets to allocate disks"));
+
+        let expected = "Not enough datasets to allocate disks";
+        assert!(
+            err.to_string().contains(expected),
+            "Saw error: \'{err}\', but expected \'{expected}\'"
+        );
 
         assert!(matches!(err, Error::ServiceUnavailable { .. }));
 
@@ -733,16 +736,6 @@ mod test {
         let datastore = DataStore::new(Arc::new(pool));
 
         let explanation = DataStore::get_allocated_regions_query(Uuid::nil())
-            .explain_async(datastore.pool())
-            .await
-            .unwrap();
-        assert!(
-            !explanation.contains("FULL SCAN"),
-            "Found an unexpected FULL SCAN: {}",
-            explanation
-        );
-
-        let explanation = DataStore::get_allocatable_datasets_query()
             .explain_async(datastore.pool())
             .await
             .unwrap();
