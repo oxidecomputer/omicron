@@ -28,10 +28,7 @@ use std::time::Duration;
 use tokio::net::UdpSocket;
 use uuid::Uuid;
 
-mod hubris_archive;
 mod usart;
-
-use self::hubris_archive::HubrisArchive;
 
 /// Command line program that can send MGS messages to a single SP.
 #[derive(Parser, Debug)]
@@ -244,14 +241,9 @@ async fn main() -> Result<()> {
                 .map_err(|_| {
                     anyhow!("invalid component name: {}", component)
                 })?;
-            let data = if sp_component == SpComponent::SP_ITSELF {
-                let mut archive = HubrisArchive::open(&image)?;
-                archive.final_bin()?
-            } else {
-                fs::read(&image).with_context(|| {
-                    format!("failed to read {}", image.display())
-                })?
-            };
+            let data = fs::read(&image).with_context(|| {
+                format!("failed to read {}", image.display())
+            })?;
             update(&log, &sp, sp_component, slot, data).await.with_context(
                 || {
                     format!(

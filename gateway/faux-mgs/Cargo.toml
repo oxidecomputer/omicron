@@ -14,7 +14,6 @@ termios = "0.3"
 thiserror = "1.0"
 tokio = { version = "1.21", features = ["full"] }
 uuid = { version = "1.1", features = ["v4"] }
-zip = { version = "0.6.2", default-features = false, features = ["deflate","bzip2"] }
 
 gateway-messages = { path = "../../gateway-messages", features = ["std"] }
 gateway-sp-comms = { path = "../../gateway-sp-comms" }

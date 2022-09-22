@@ -10,6 +10,7 @@ use crate::communicator::ResponseKindExt;
 use crate::error::BadResponseType;
 use crate::error::SpCommunicationError;
 use crate::error::UpdateError;
+use crate::hubris_archive::HubrisArchive;
 use gateway_messages::sp_impl;
 use gateway_messages::version;
 use gateway_messages::BulkIgnitionState;
@@ -181,6 +182,19 @@ impl SingleSp {
         if image.is_empty() {
             return Err(UpdateError::ImageEmpty);
         }
+
+        // If we're updating the SP, we expect `image` to be a hubris archive;
+        // extract the SP image from it.
+        //
+        // TODO 1: We will need to pull other data out of the archive (aux flash
+        //         images).
+        // TODO 2: Are we sticking with hubris archives as the delivery format?
+        let image = if component == SpComponent::SP_ITSELF {
+            let mut archive = HubrisArchive::new(image)?;
+            archive.final_bin()?
+        } else {
+            image
+        };
 
         let total_size = image
             .len()
