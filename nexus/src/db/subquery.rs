@@ -13,50 +13,6 @@ use diesel::query_builder::QueryId;
 use diesel::Expression;
 use diesel::SelectableExpression;
 
-/// Specifies that a subquery has a particular name, and associated columns.
-///
-/// The syntax currently matches that of the [`diesel::table`] macro.
-// TODO: We're currently piggy-backing on the table macro for convenience.
-// We actually do not want to generate an entire table for each subquery - we'd
-// like to have a query source (which we can use to generate SELECT statements,
-// JOIN, etc), but we don't want this to be an INSERT/UPDATE/DELETE target.
-//
-// Similarly, we don't want to force callers to supply a "primary key".
-//
-// TODO: It might be worth looking at "diesel_dynamic_schema" for inspiration.
-// Although we shouldn't use that exactly, we may recreate a variant of it?
-#[macro_export]
-macro_rules! subquery {
-    ($($tokens:tt)*) => {
-        ::diesel::table! { $($tokens)* }
-    }
-}
-
-// TODO: I'd like to make a version of the macro that says:
-//
-// ```
-// subquery_alias!(existing_table as alias_name);
-// ```
-//
-// And which generates an AliasSource - very similar to the `alias!` macro
-// in diesel, but which lets callers control the "AS" position.
-//
-// The existing alias macro implements QueryFragment as:
-//
-// "<SOURCE> as <ALIAS NAME>"
-//
-// but we actually want this relationship flipped, kinda.
-//
-// We want:
-//
-// "<ALIAS NAME> as ..."
-// #[macro_export]
-// macro_rules! subquery_alias {
-//     ($table_name:ident as $alias_name:ident) => {
-//         ::diesel::alias!($table_name as $alias_name)
-//     }
-// }
-
 /// Represents a named subquery within a CTE.
 ///
 /// For an expression like:

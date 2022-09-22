@@ -79,11 +79,6 @@ fn build_subquery_impl(
     subquery_module: &syn::Path,
 ) -> TokenStream {
     quote! {
-        impl QueryId for #name {
-            type QueryId = ();
-            const HAS_STATIC_QUERY_ID: bool = false;
-        }
-
         impl ::diesel::query_builder::QueryFragment<::diesel::pg::Pg> for #name {
             fn walk_ast<'a>(
                 &'a self,

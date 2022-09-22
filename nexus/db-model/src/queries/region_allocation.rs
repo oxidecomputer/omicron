@@ -8,6 +8,20 @@
 //! usage. However, certain Diesel traits (such as those enabling joins)
 //! require the table structures to be defined in the same crate.
 
+// TODO: We're currently piggy-backing on the table macro for convenience.
+// We actually do not want to generate an entire table for each subquery - we'd
+// like to have a query source (which we can use to generate SELECT statements,
+// JOIN, etc), but we don't want this to be an INSERT/UPDATE/DELETE target.
+//
+// Similarly, we don't want to force callers to supply a "primary key".
+//
+// I've looked into Diesel's `alias!` macro for this purpose, but unfortunately
+// that implementation is too opinionated about the output QueryFragment.
+// It expects to use the form:
+//
+// "<SOURCE> as <ALIAS NAME>", which is actually the opposite of what we want in
+// a CTE (where we want the alias name to come first).
+
 use crate::schema::dataset;
 use crate::schema::zpool;
 

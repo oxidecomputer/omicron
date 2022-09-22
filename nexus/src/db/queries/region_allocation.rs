@@ -6,42 +6,25 @@
 
 use crate::db::alias::ExpressionAlias;
 use crate::db::datastore::REGION_REDUNDANCY_THRESHOLD;
-use crate::db::model::DatasetKind;
-use crate::db::model::Region;
+use crate::db::model::{DatasetKind, Region};
 use crate::db::pool::DbConnection;
 use crate::db::subquery::{
     AsQuerySource, Cte, CteBuilder, CteQuery, TrueOrCastError,
 };
-use crate::subquery;
 use db_macros::Subquery;
 use diesel::pg::Pg;
-use diesel::query_builder::AstPass;
-use diesel::query_builder::Query;
-use diesel::query_builder::QueryFragment;
-use diesel::query_builder::QueryId;
-use diesel::sql_types;
-use diesel::BoolExpressionMethods;
-use diesel::Column;
-use diesel::CombineDsl;
-use diesel::ExpressionMethods;
-use diesel::Insertable;
-use diesel::IntoSql;
-use diesel::JoinOnDsl;
-use diesel::NullableExpressionMethods;
-use diesel::QueryDsl;
-use diesel::RunQueryDsl;
+use diesel::query_builder::{AstPass, Query, QueryFragment, QueryId};
+use diesel::{
+    sql_types, BoolExpressionMethods, Column, CombineDsl, ExpressionMethods,
+    Insertable, IntoSql, JoinOnDsl, NullableExpressionMethods, QueryDsl,
+    RunQueryDsl,
+};
+use nexus_db_model::queries::region_allocation::{
+    candidate_datasets, candidate_regions, candidate_zpools, do_insert,
+    inserted_regions, old_regions, old_zpool_usage, proposed_dataset_changes,
+    proposed_datasets_fit, updated_datasets, zpool_size_delta,
+};
 use nexus_db_model::schema;
-use nexus_db_model::subquery::candidate_datasets;
-use nexus_db_model::subquery::candidate_regions;
-use nexus_db_model::subquery::candidate_zpools;
-use nexus_db_model::subquery::do_insert;
-use nexus_db_model::subquery::inserted_regions;
-use nexus_db_model::subquery::old_regions;
-use nexus_db_model::subquery::old_zpool_usage;
-use nexus_db_model::subquery::proposed_dataset_changes;
-use nexus_db_model::subquery::proposed_datasets_fit;
-use nexus_db_model::subquery::updated_datasets;
-use nexus_db_model::subquery::zpool_size_delta;
 use nexus_db_model::ByteCount;
 use omicron_common::api::external;
 
@@ -52,6 +35,8 @@ fn bool_parse_error(sentinel: &'static str) -> String {
     format!("could not parse \"{sentinel}\" as type bool: invalid bool value")
 }
 
+/// Translates a generic pool error to an external error based
+/// on messages which may be emitted during region provisioning.
 pub fn from_pool(e: async_bb8_diesel::PoolError) -> external::Error {
     use crate::db::error;
     use async_bb8_diesel::ConnectionError;
@@ -85,8 +70,8 @@ pub fn from_pool(e: async_bb8_diesel::PoolError) -> external::Error {
     error::public_error_from_diesel_pool(e, error::ErrorHandler::Server)
 }
 
-/// A subquery to find all old regions.
-#[derive(Subquery)]
+/// A subquery to find all old regions associated with a particular volume.
+#[derive(Subquery, QueryId)]
 #[subquery(name = old_regions)]
 struct OldRegions {
     query: Box<dyn CteQuery<SqlType = schema::region::SqlType>>,
@@ -101,7 +86,8 @@ impl OldRegions {
     }
 }
 
-#[derive(Subquery)]
+/// A subquery to find datasets which could be used for provisioning regions.
+#[derive(Subquery, QueryId)]
 #[subquery(name = candidate_datasets)]
 struct CandidateDatasets {
     query: Box<dyn CteQuery<SqlType = candidate_datasets::SqlType>>,
@@ -125,7 +111,8 @@ impl CandidateDatasets {
     }
 }
 
-#[derive(Subquery)]
+/// A subquery to find the total size of zpools containing candidate datasets.
+#[derive(Subquery, QueryId)]
 #[subquery(name = candidate_zpools)]
 struct CandidateZpools {
     query: Box<dyn CteQuery<SqlType = candidate_zpools::SqlType>>,
@@ -151,7 +138,8 @@ impl CandidateZpools {
     }
 }
 
-#[derive(Subquery)]
+/// A subquery to create the regions-to-be-inserted for the volume.
+#[derive(Subquery, QueryId)]
 #[subquery(name = candidate_regions)]
 struct CandidateRegions {
     query: Box<dyn CteQuery<SqlType = schema::region::SqlType>>,
@@ -172,7 +160,6 @@ impl CandidateRegions {
         use schema::region;
 
         let volume_id = volume_id.into_sql::<sql_types::Uuid>();
-        // TODO
         let block_size = block_size.into_sql::<sql_types::BigInt>();
         let blocks_per_extent =
             blocks_per_extent.into_sql::<sql_types::BigInt>();
@@ -196,7 +183,12 @@ impl CandidateRegions {
     }
 }
 
-#[derive(Subquery)]
+/// A subquery which summarizes the changes we intend to make, showing:
+///
+/// 1. Which datasets will have size adjustments
+/// 2. Which pools those datasets belong to
+/// 3. The delta in size-used
+#[derive(Subquery, QueryId)]
 #[subquery(name = proposed_dataset_changes)]
 struct ProposedChanges {
     query: Box<dyn CteQuery<SqlType = proposed_dataset_changes::SqlType>>,
@@ -230,7 +222,9 @@ impl ProposedChanges {
     }
 }
 
-#[derive(Subquery)]
+/// A subquery which calculates the old size being used by zpools
+/// under consideration as targets for region allocation.
+#[derive(Subquery, QueryId)]
 #[subquery(name = old_zpool_usage)]
 struct OldPoolUsage {
     query: Box<dyn CteQuery<SqlType = old_zpool_usage::SqlType>>,
@@ -262,7 +256,9 @@ impl OldPoolUsage {
     }
 }
 
-#[derive(Subquery)]
+/// A subquery which calculates the sum of all dataset size changes
+/// on the appropriate zpools.
+#[derive(Subquery, QueryId)]
 #[subquery(name = zpool_size_delta)]
 struct ZpoolSizeDelta {
     query: Box<dyn CteQuery<SqlType = zpool_size_delta::SqlType>>,
@@ -283,7 +279,9 @@ impl ZpoolSizeDelta {
     }
 }
 
-#[derive(Subquery)]
+/// A subquery which identifies if the proposed size changes will
+/// fit on the corresponding zpools.
+#[derive(Subquery, QueryId)]
 #[subquery(name = proposed_datasets_fit)]
 struct ProposedDatasetsFit {
     query: Box<dyn CteQuery<SqlType = proposed_datasets_fit::SqlType>>,
@@ -329,7 +327,14 @@ diesel::sql_function! {
     fn bool_and(b: sql_types::Bool) -> sql_types::Bool;
 }
 
-#[derive(Subquery)]
+/// A subquery which confirms whether or not the insertion and updates should
+/// occur.
+///
+/// This subquery additionally exits the CTE early with an error if either:
+/// 1. Not enough datasets exist to provision regions with our required
+///    redundancy, or
+/// 2. Not enough space exists on zpools to perform the provisioning.
+#[derive(Subquery, QueryId)]
 #[subquery(name = do_insert)]
 struct DoInsert {
     query: Box<dyn CteQuery<SqlType = do_insert::SqlType>>,
@@ -378,7 +383,8 @@ impl DoInsert {
     }
 }
 
-#[derive(Subquery)]
+/// A subquery which actually inserts the regions.
+#[derive(Subquery, QueryId)]
 #[subquery(name = inserted_regions)]
 struct InsertRegions {
     query: Box<dyn CteQuery<SqlType = schema::region::SqlType>>,
@@ -407,7 +413,8 @@ impl InsertRegions {
     }
 }
 
-#[derive(Subquery)]
+/// A subquery which updates dataset size usage based on inserted regions.
+#[derive(Subquery, QueryId)]
 #[subquery(name = updated_datasets)]
 struct UpdateDatasets {
     query: Box<dyn CteQuery<SqlType = updated_datasets::SqlType>>,
@@ -452,7 +459,9 @@ impl UpdateDatasets {
     }
 }
 
-/// TODO: Document
+/// Constructs a CTE for allocating new regions, and updating the datasets to
+/// which those regions belong.
+#[derive(QueryId)]
 pub struct RegionAllocate {
     cte: Cte,
 }
@@ -514,19 +523,6 @@ impl RegionAllocate {
     }
 }
 
-// TODO:
-// We could probably make this generic over the Cte "build" method, enforce the
-// type there, and auto-impl:
-// - QueryId
-// - QueryFragment
-// - Query
-//
-// If we know what the SqlType is supposed to be.
-impl QueryId for RegionAllocate {
-    type QueryId = ();
-    const HAS_STATIC_QUERY_ID: bool = false;
-}
-
 impl QueryFragment<Pg> for RegionAllocate {
     fn walk_ast<'a>(
         &'a self,
@@ -546,97 +542,3 @@ impl Query for RegionAllocate {
 }
 
 impl RunQueryDsl<DbConnection> for RegionAllocate {}
-
-#[cfg(test)]
-mod tests {
-    use crate::context::OpContext;
-    use crate::db::datastore::DataStore;
-    use diesel::pg::Pg;
-    use dropshot::test_util::LogContext;
-    use nexus_test_utils::db::test_setup_database;
-    use omicron_test_utils::dev;
-    use omicron_test_utils::dev::db::CockroachInstance;
-    use std::sync::Arc;
-    use uuid::Uuid;
-
-    use super::RegionAllocate;
-
-    struct TestContext {
-        logctx: LogContext,
-        opctx: OpContext,
-        db: CockroachInstance,
-        db_datastore: Arc<DataStore>,
-    }
-
-    impl TestContext {
-        async fn new(test_name: &str) -> Self {
-            let logctx = dev::test_setup_log(test_name);
-            let log = logctx.log.new(o!());
-            let db = test_setup_database(&log).await;
-            crate::db::datastore::datastore_test(&logctx, &db).await;
-            let cfg = crate::db::Config { url: db.pg_config().clone() };
-            let pool = Arc::new(crate::db::Pool::new(&cfg));
-            let db_datastore =
-                Arc::new(crate::db::DataStore::new(Arc::clone(&pool)));
-            let opctx =
-                OpContext::for_tests(log.new(o!()), db_datastore.clone());
-            Self { logctx, opctx, db, db_datastore }
-        }
-
-        async fn success(mut self) {
-            self.db.cleanup().await.unwrap();
-            self.logctx.cleanup_successful();
-        }
-    }
-
-    #[tokio::test]
-    async fn test_query_output() {
-        let context = TestContext::new("test_query_output").await;
-
-        let volume_id = Uuid::new_v4();
-        let query = RegionAllocate::new(
-            volume_id,
-            nexus_db_model::BlockSize::Traditional.into(),
-            456,
-            789,
-        );
-        pretty_assertions::assert_eq!(
-            diesel::debug_query::<Pg, _>(&query).to_string(),
-            format!(
-            "WITH \
-                \"old_regions\" AS (\
-                    SELECT \
-                        \"region\".\"id\", \
-                        \"region\".\"time_created\", \
-                        \"region\".\"time_modified\", \
-                        \"region\".\"dataset_id\", \
-                        \"region\".\"volume_id\", \
-                        \"region\".\"block_size\", \
-                        \"region\".\"blocks_per_extent\", \
-                        \"region\".\"extent_count\" \
-                    FROM \"region\" \
-                    WHERE \
-                        (\"region\".\"volume_id\" = $1)\
-                ), \
-                \"candidate_datasets\" AS (\
-                    SELECT \
-                        \"dataset\".\"id\", \
-                        \"dataset\".\"pool_id\" \
-                    FROM \"dataset\" \
-                    WHERE \
-                        (((\"dataset\".\"time_deleted\" IS NULL) AND (\"dataset\".\"size_used\" IS NOT NULL)) AND (\"dataset\".\"kind\" = $2)) \
-                    ORDER BY \"dataset\".\"size_used\" ASC  LIMIT $3\
-                ), \
-                \"candidate_zpools\" AS (SELECT \"zpool\".\"id\" FROM (\"zpool\" INNER JOIN \"candidate_datasets\" ON (\"candidate_datasets\".\"pool_id\" = \"zpool\".\"id\"))), \
-                \"candidate_regions\" AS (SELECT gen_random_uuid() AS id, now() AS time_created, now() AS time_modified, \"candidate_datasets\".\"id\" AS dataset_id, $4 AS volume_id, $5 AS block_size, $6 AS blocks_per_extent, $7 AS extent_count FROM \"candidate_datasets\"), \
-                \"proposed_dataset_changes\" AS (SELECT \"candidate_regions\".\"dataset_id\" AS id, ((\"candidate_regions\".\"block_size\" * \"candidate_regions\".\"blocks_per_extent\") * \"candidate_regions\".\"extent_count\") AS size_used_delta FROM (\"candidate_regions\" LEFT OUTER JOIN \"dataset\" ON (\"dataset\".\"id\" = \"candidate_regions\".\"dataset_id\"))), \
-                \"do_insert\" AS (SELECT (((SELECT COUNT(*) FROM \"old_regions\" LIMIT $8) < $9) AND ((SELECT COUNT(*) FROM \"candidate_regions\" LIMIT $10) >= $11)) AS insert), \
-                \"inserted_regions\" AS (INSERT INTO \"region\" (\"id\", \"time_created\", \"time_modified\", \"dataset_id\", \"volume_id\", \"block_size\", \"blocks_per_extent\", \"extent_count\") SELECT \"candidate_regions\".\"id\", \"candidate_regions\".\"time_created\", \"candidate_regions\".\"time_modified\", \"candidate_regions\".\"dataset_id\", \"candidate_regions\".\"volume_id\", \"candidate_regions\".\"block_size\", \"candidate_regions\".\"blocks_per_extent\", \"candidate_regions\".\"extent_count\" FROM \"candidate_regions\" WHERE (SELECT \"do_insert\".\"insert\" FROM \"do_insert\" LIMIT $12) RETURNING \"region\".\"id\", \"region\".\"time_created\", \"region\".\"time_modified\", \"region\".\"dataset_id\", \"region\".\"volume_id\", \"region\".\"block_size\", \"region\".\"blocks_per_extent\", \"region\".\"extent_count\"), \
-                \"updated_datasets\" AS (UPDATE \"dataset\" SET \"size_used\" = (\"dataset\".\"size_used\" + (SELECT \"proposed_dataset_changes\".\"size_used_delta\" FROM \"proposed_dataset_changes\" WHERE (\"proposed_dataset_changes\".\"id\" = \"dataset\".\"id\") LIMIT $13)) WHERE ((\"dataset\".\"id\" = ANY(SELECT \"proposed_dataset_changes\".\"id\" FROM \"proposed_dataset_changes\")) AND (SELECT \"do_insert\".\"insert\" FROM \"do_insert\" LIMIT $14)) RETURNING \"dataset\".\"id\") \
-                (SELECT \"old_regions\".\"id\", \"old_regions\".\"time_created\", \"old_regions\".\"time_modified\", \"old_regions\".\"dataset_id\", \"old_regions\".\"volume_id\", \"old_regions\".\"block_size\", \"old_regions\".\"blocks_per_extent\", \"old_regions\".\"extent_count\" FROM \"old_regions\") UNION (SELECT \"inserted_regions\".\"id\", \"inserted_regions\".\"time_created\", \"inserted_regions\".\"time_modified\", \"inserted_regions\".\"dataset_id\", \"inserted_regions\".\"volume_id\", \"inserted_regions\".\"block_size\", \"inserted_regions\".\"blocks_per_extent\", \"inserted_regions\".\"extent_count\" FROM \"inserted_regions\") -- binds: [eb55547f-3322-4930-9986-db752d157cd0, Crucible, 3, eb55547f-3322-4930-9986-db752d157cd0, ByteCount(ByteCount(512)), 456, 789, 1, 2, 1, 2, 1, 1, 1]"
-             ),
-         );
-
-        context.success().await;
-    }
-}

@@ -111,9 +111,24 @@ fn get_field_with_name<'a>(
     }
 }
 
-/// Implements the `Subquery` trait.
+/// Implements the [`Subquery`] trait.
 ///
-/// TODO: more docs.
+/// Additionally, implements [`diesel::query_builder::QueryFragment`], which
+/// refers to the subquery by the name supplied as input.
+///
+/// Callers should also derive [`diesel::query_builder::QueryId`], as it should
+/// be implemented for structures which implement
+/// [`diesel::query_builder::QueryFragment`].
+///
+/// Example usage:
+///
+/// ```ignore
+/// #[derive(Subquery, QueryId)]
+/// #[subquery(name = my_table)]
+/// struct MyQuery {
+///   query: Box<dyn CteQuery<SqlType = my_table::SqlType>>
+/// }
+/// ```
 #[proc_macro_derive(Subquery, attributes(subquery))]
 pub fn subquery_target(
     input: proc_macro::TokenStream,
