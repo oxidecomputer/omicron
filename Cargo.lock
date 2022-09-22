@@ -1474,7 +1474,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "uuid",
- "zip",
 ]
 
 [[package]]
@@ -1773,6 +1772,7 @@ dependencies = [
  "tokio-stream",
  "usdt",
  "uuid",
+ "zip",
 ]
 
 [[package]]
