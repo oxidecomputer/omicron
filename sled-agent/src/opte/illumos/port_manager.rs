@@ -265,23 +265,57 @@ impl PortManager {
         //
         // The Port object's drop implementation will clean up both of those, if
         // any of the remaining fallible operations fail.
-        let port_name = self.inner.next_port_name();
         let hdl = OpteHdl::open(OpteHdl::DLD_CTL)?;
-        hdl.create_xde(
-            &port_name,
-            MacAddr::from(mac.into_array()),
-            private_ip,
-            opte_subnet,
-            MacAddr::from(gateway.mac.into_array()),
-            gateway_ip,
-            boundary_services.ip,
-            boundary_services.vni,
-            vni,
-            self.inner.underlay_ip,
-            snat,
-            external_ip,
-            /* passthru = */ false,
-        )?;
+        let mut port_name = self.inner.next_port_name();
+        loop {
+            match hdl.create_xde(
+                &port_name,
+                MacAddr::from(mac.into_array()),
+                private_ip,
+                opte_subnet,
+                MacAddr::from(gateway.mac.into_array()),
+                gateway_ip,
+                boundary_services.ip,
+                boundary_services.vni,
+                vni,
+                self.inner.underlay_ip,
+                snat.clone(),
+                external_ip,
+                /* passthru = */ false,
+            ) {
+                Err(e) => {
+                    // TODO: This error handling is exclusively useful as a
+                    // workaround for
+                    // https://github.com/oxidecomputer/omicron/issues/1679.
+                    //
+                    // There are a handful of things we should do to improve
+                    // this:
+                    // - We shouldn't be matching on a string.
+                    // OPTE/libnet could propagate the errno "EEXISTS" up
+                    // directly; relying on this string is brittle.
+                    // - We should fix the underlying problem which causes these
+                    // defunct devices to exist in the first place.
+                    match e {
+                        opte_ioctl::Error::NetadmFailed(
+                            libnet::Error::Dlmgmtd(ref s),
+                        ) => {
+                            if s.contains("link id creation failed: 17") {
+                                warn!(
+                                    self.inner.log,
+                                    "Failed to create xde device; retrying with a new port name";
+                                    "port_name" => &port_name,
+                                );
+                                port_name = self.inner.next_port_name();
+                                continue;
+                            }
+                        }
+                        _ => (),
+                    };
+                    return Err(e.into());
+                }
+                Ok(_) => break,
+            }
+        }
         debug!(
             self.inner.log,
             "Created xde device for guest port";
