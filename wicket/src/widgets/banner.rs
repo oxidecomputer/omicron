@@ -72,7 +72,6 @@ impl<'a> Widget for Banner<'a> {
                 } else {
                     if let Some(bg) = self.style.bg {
                         cell.set_bg(bg);
-                        cell.set_symbol(" ");
                     }
                 }
                 len = x as u16;
