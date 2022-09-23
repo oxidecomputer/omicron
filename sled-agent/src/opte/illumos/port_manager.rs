@@ -184,6 +184,7 @@ impl PortManager {
         nic: &NetworkInterface,
         source_nat: Option<SourceNatConfig>,
         external_ips: Option<Vec<IpAddr>>,
+        firewall_rules: &[VpcFirewallRule],
     ) -> Result<(Port, PortTicket), Error> {
         // TODO-completess: Remove IPv4 restrictions once OPTE supports virtual
         // IPv6 networks.
@@ -298,6 +299,19 @@ impl PortManager {
             "Created xde device for guest port";
             "port_name" => &port_name,
         );
+
+        // Initialize firewall rules for the new port.
+        {
+            let port_name = port_name.clone();
+            let rules = opte_firewall_rules(firewall_rules, &vni, &mac);
+            debug!(
+                self.inner.log,
+                "Setting firewall rules";
+                "port_name" => ?&port_name,
+                "rules" => ?&rules,
+            );
+            hdl.set_fw_rules(&SetFwRulesReq { port_name, rules })?;
+        }
 
         // Create a VNIC on top of this device, to hook Viona into.
         //
@@ -455,7 +469,7 @@ impl PortManager {
     ) -> Result<(), Error> {
         let hdl = OpteHdl::open(OpteHdl::DLD_CTL)?;
         for ((_, port_name), port) in self.inner.ports.lock().unwrap().iter() {
-            let rules = opte_firewall_rules(port, rules);
+            let rules = opte_firewall_rules(rules, port.vni(), port.mac());
             let port_name = port_name.clone();
             info!(
                 self.inner.log,
@@ -474,8 +488,9 @@ impl PortManager {
 /// single host address and protocol, so we must unroll rules with multiple
 /// hosts/protocols.
 fn opte_firewall_rules(
-    port: &Port,
     rules: &[VpcFirewallRule],
+    vni: &Vni,
+    mac: &MacAddr6,
 ) -> Vec<FirewallRule> {
     rules
         .iter()
@@ -487,8 +502,7 @@ fn opte_firewall_rules(
             rule.targets.is_empty() // no targets means apply everywhere
                 || rule.targets.iter().any(|nic| {
                     // (VNI, MAC) is a unique identifier for the NIC.
-                    u32::from(nic.vni) == u32::from(*port.vni())
-                        && nic.mac.0 == *port.mac()
+                    u32::from(nic.vni) == u32::from(*vni) && nic.mac.0 == *mac
                 })
         })
         .map(|rule| {

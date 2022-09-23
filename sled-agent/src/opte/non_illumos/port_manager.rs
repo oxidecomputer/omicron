@@ -112,6 +112,7 @@ impl PortManager {
         nic: &NetworkInterface,
         source_nat: Option<SourceNatConfig>,
         external_ips: Option<Vec<IpAddr>>,
+        _firewall_rules: &[VpcFirewallRule],
     ) -> Result<(Port, PortTicket), Error> {
         // TODO-completess: Remove IPv4 restrictions once OPTE supports virtual
         // IPv6 networks.
