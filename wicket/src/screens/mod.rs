@@ -52,3 +52,15 @@ impl Screens {
         }
     }
 }
+
+/// Oxide specific colors
+/// Thanks JMC!
+pub mod colors {
+    use tui::style::Color;
+    pub const OX_YELLOW: Color = Color::Rgb(0xF5, 0xCF, 0x75);
+    pub const OX_OFF_WHITE: Color = Color::Rgb(0xE0, 0xE0, 0xE0);
+    pub const OX_RED: Color = Color::Rgb(255, 145, 173);
+    pub const OX_GREEN_LIGHT: Color = Color::Rgb(0x48, 0xD5, 0x97);
+    pub const OX_GREEN_DARK: Color = Color::Rgb(0x11, 0x27, 0x25);
+    pub const OX_GREEN_DARKEST: Color = Color::Rgb(0x0B, 0x14, 0x18);
+}
