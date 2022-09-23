@@ -23,6 +23,7 @@ use tui::widgets::{Block, Borders};
 use tui::Terminal;
 
 mod screens;
+mod widgets;
 
 use screens::{InventoryScreen, Screen, ScreenId, Screens};
 
