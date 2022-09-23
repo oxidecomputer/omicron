@@ -9,6 +9,7 @@
 //! that will guide the user through the steps the need to take
 //! in an intuitive manner.
 
+use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen,
     LeaveAlternateScreen,
@@ -23,7 +24,10 @@ use tui::{Frame, Terminal};
 
 mod screens;
 
-use screens::Screen;
+use screens::{InventoryScreen, Screen, ScreenId, Screens};
+
+// We can avoid a bunch of unnecessary type parameters by picking them ahead of time.
+pub type Term = Terminal<CrosstermBackend<Stdout>>;
 
 /// The core type of this library is the `Wizard`.
 ///
@@ -34,12 +38,11 @@ use screens::Screen;
 /// communicates with other threads and async tasks to receive user input
 /// and drive backend services.
 pub struct Wizard {
-    // All screens are stored in this map. However, not all screens are
-    // necessarily accesible from the wizard UI at any point in time.
-    screens: BTreeMap<ScreenId, Box<dyn Screen>>,
-
     // The currently active screen
     active_screen: ScreenId,
+
+    // All the screens managed by the [`Wizard`]
+    screens: Screens,
 
     // The [`Wizard`] is purely single threaded. Every interaction with the
     // outside world is via channels.  All receiving from the outside world
@@ -78,12 +81,12 @@ pub struct Wizard {
     rss: RssManager,
 
     // The terminal we are rendering to
-    terminal: Terminal<CrosstermBackend<Stdout>>,
+    terminal: Term,
 }
 
 impl Wizard {
     pub fn new() -> Wizard {
-        let screens = BTreeMap::new();
+        let screens = Screens::new();
         let (events_tx, events_rx) = channel();
         let state = State::default();
         let backend = CrosstermBackend::new(stdout());
@@ -103,8 +106,18 @@ impl Wizard {
     pub fn run(&mut self) -> anyhow::Result<()> {
         // TODO: Spawn off threads required for input and downstream service interaction
         enable_raw_mode()?;
-        loop {}
+        execute!(self.terminal.backend_mut(), EnterAlternateScreen)?;
+        self.mainloop()?;
         disable_raw_mode()?;
+        execute!(self.terminal.backend_mut(), LeaveAlternateScreen)?;
+        Ok(())
+    }
+
+    fn mainloop(&mut self) -> anyhow::Result<()> {
+        let screen = self.screens.get(self.active_screen);
+        screen.draw(&self.state, &mut self.terminal)?;
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        Ok(())
     }
 }
 
@@ -170,13 +183,6 @@ pub enum ScreenEvent {
 
     /// The tick of a timer
     Tick,
-}
-
-/// An identifier for a specific [`Screen`] in the [`Wizard`]
-pub enum ScreenId {
-    Inventory,
-    Update,
-    RackInit,
 }
 
 #[derive(Debug)]
