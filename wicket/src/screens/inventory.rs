@@ -6,6 +6,7 @@
 
 use super::colors::*;
 use super::Screen;
+use crate::widgets::Banner;
 use crate::Frame;
 use crate::State;
 use tui::layout::{Alignment, Constraint, Direction, Layout};
@@ -14,14 +15,16 @@ use tui::text::Span;
 use tui::widgets::{Block, Borders};
 
 /// Show the rack inventory as learned from MGS
-pub struct InventoryScreen {}
+pub struct InventoryScreen {
+    watermark: &'static str,
+}
 
 impl InventoryScreen {
     pub fn new() -> InventoryScreen {
-        InventoryScreen {}
+        InventoryScreen { watermark: include_str!("../../banners/oxide.txt") }
     }
 
-    pub fn draw_background(&self, f: &mut Frame) {
+    fn draw_background(&self, f: &mut Frame) {
         let style = Style::default().fg(OX_OFF_WHITE).bg(OX_GREEN_DARK);
         let block = Block::default()
             .style(style)
@@ -30,6 +33,21 @@ impl InventoryScreen {
             .title_alignment(Alignment::Center);
 
         f.render_widget(block, f.size());
+    }
+
+    fn draw_watermark(&self, f: &mut Frame) {
+        let style = Style::default().fg(OX_GREEN_LIGHT).bg(OX_GREEN_DARK);
+        let banner = Banner::new(self.watermark).style(style);
+        let height = banner.height();
+        let width = banner.width();
+
+        let mut rect = f.size();
+        rect.x = rect.width - width - 1;
+        rect.y = rect.height - height - 1;
+        rect.width = width;
+        rect.height = height;
+
+        f.render_widget(banner, rect);
     }
 }
 
@@ -41,6 +59,7 @@ impl Screen for InventoryScreen {
     ) -> anyhow::Result<()> {
         terminal.draw(|f| {
             self.draw_background(f);
+            self.draw_watermark(f);
         })?;
         Ok(())
     }
