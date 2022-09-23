@@ -16,12 +16,16 @@ use tui::widgets::{Block, Borders};
 
 /// Show the rack inventory as learned from MGS
 pub struct InventoryScreen {
+    count: u64,
     watermark: &'static str,
 }
 
 impl InventoryScreen {
     pub fn new() -> InventoryScreen {
-        InventoryScreen { watermark: include_str!("../../banners/oxide.txt") }
+        InventoryScreen {
+            count: 0,
+            watermark: include_str!("../../banners/oxide.txt"),
+        }
     }
 
     fn draw_background(&self, f: &mut Frame) {
@@ -41,7 +45,12 @@ impl InventoryScreen {
         let height = banner.height();
         let width = banner.width();
 
+        // Position the watermark in the lower right hand corner of the screen
         let mut rect = f.size();
+        if width >= rect.width || height >= rect.height {
+            // The banner won't fit.
+            return;
+        }
         rect.x = rect.width - width - 1;
         rect.y = rect.height - height - 1;
         rect.width = width;
@@ -49,17 +58,34 @@ impl InventoryScreen {
 
         f.render_widget(banner, rect);
     }
+
+    fn draw_center_block(&self, f: &mut Frame) {
+        if self.count % 2 == 0 {
+            return;
+        }
+        let mut rect = f.size();
+        rect.x = rect.width / 2 - 5;
+        rect.y = rect.height / 2 - 5;
+        rect.width = 10;
+        rect.height = 10;
+
+        let style = Style::default().bg(OX_OFF_WHITE);
+        let block = Block::default().style(style);
+        f.render_widget(block, rect);
+    }
 }
 
 impl Screen for InventoryScreen {
     fn draw(
-        &self,
+        &mut self,
         state: &State,
         terminal: &mut crate::Term,
     ) -> anyhow::Result<()> {
+        self.count += 1;
         terminal.draw(|f| {
             self.draw_background(f);
             self.draw_watermark(f);
+            self.draw_center_block(f);
         })?;
         Ok(())
     }

@@ -864,6 +864,7 @@ checksum = "e64e6c0fbe2c17357405f7c758c1ef960fce08bdfb2c03d88d2a18d7e09c4b67"
 dependencies = [
  "bitflags",
  "crossterm_winapi",
+ "futures-core",
  "libc",
  "mio",
  "parking_lot 0.12.1",
@@ -6560,6 +6561,11 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "crossterm",
+ "futures",
+ "slog",
+ "slog-async",
+ "slog-term",
+ "tokio",
  "tui",
 ]
 

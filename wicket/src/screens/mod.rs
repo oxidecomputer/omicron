@@ -19,7 +19,11 @@ pub enum ScreenId {
 
 pub trait Screen {
     /// Draw the [`Screen`]
-    fn draw(&self, state: &State, terminal: &mut Term) -> anyhow::Result<()>;
+    fn draw(
+        &mut self,
+        state: &State,
+        terminal: &mut Term,
+    ) -> anyhow::Result<()>;
 
     /// Handle a [`ScreenEvent`] to update internal display state and output
     /// any necessary actions for the system to take.
@@ -45,7 +49,7 @@ impl Screens {
         }
     }
 
-    pub fn get_mut(&mut self, id: ScreenId) -> &dyn Screen {
+    pub fn get_mut(&mut self, id: ScreenId) -> &mut dyn Screen {
         match id {
             ScreenId::Inventory => &mut self.inventory,
             _ => unimplemented!(),

@@ -9,14 +9,20 @@
 //! that will guide the user through the steps the need to take
 //! in an intuitive manner.
 
+use anyhow::anyhow;
+use crossterm::event::EventStream;
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen,
     LeaveAlternateScreen,
 };
+use futures::StreamExt;
+use slog::{error, info, Drain};
 use std::collections::BTreeMap;
 use std::io::{stdout, Stdout};
 use std::sync::mpsc::{channel, Receiver, Sender};
+use std::thread;
+use tokio::time::{interval, Duration, Interval};
 use tui::backend::{Backend, CrosstermBackend};
 use tui::layout::{Constraint, Direction, Layout};
 use tui::widgets::{Block, Borders};
@@ -84,6 +90,12 @@ pub struct Wizard {
 
     // The terminal we are rendering to
     terminal: Term,
+
+    // Our friendly neighborhood logger
+    log: slog::Logger,
+
+    // The tokio runtime for everything outside the main thread
+    tokio_rt: tokio::runtime::Runtime,
 }
 
 impl Wizard {
@@ -93,6 +105,11 @@ impl Wizard {
         let state = State::default();
         let backend = CrosstermBackend::new(stdout());
         let terminal = Terminal::new(backend).unwrap();
+        let log = Self::setup_log("/tmp/wicket.log").unwrap();
+        let tokio_rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
         Wizard {
             screens,
             active_screen: ScreenId::Inventory,
@@ -102,11 +119,28 @@ impl Wizard {
             mgs: MgsManager {},
             rss: RssManager {},
             terminal,
+            log,
+            tokio_rt,
         }
+    }
+
+    pub fn setup_log(path: &str) -> anyhow::Result<slog::Logger> {
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(path)?;
+
+        let decorator = slog_term::PlainDecorator::new(file);
+        let drain = slog_term::FullFormat::new(decorator).build().fuse();
+        let drain = slog_async::Async::new(drain).build().fuse();
+
+        Ok(slog::Logger::root(drain, slog::o!()))
     }
 
     pub fn run(&mut self) -> anyhow::Result<()> {
         // TODO: Spawn off threads required for input and downstream service interaction
+        self.start_tokio_runtime();
         enable_raw_mode()?;
         execute!(self.terminal.backend_mut(), EnterAlternateScreen)?;
         self.mainloop()?;
@@ -116,11 +150,65 @@ impl Wizard {
     }
 
     fn mainloop(&mut self) -> anyhow::Result<()> {
-        let screen = self.screens.get(self.active_screen);
-        screen.draw(&self.state, &mut self.terminal)?;
-        std::thread::sleep(std::time::Duration::from_secs(3));
+        let screen = self.screens.get_mut(self.active_screen);
+        for i in 0..300 {
+            // Unwrap safe, because we always hold onto a Sender
+            let event = self.events_rx.recv().unwrap();
+            match event {
+                Event::Tick => screen.draw(&self.state, &mut self.terminal)?,
+                _ => info!(self.log, "{:?}", event),
+            }
+        }
         Ok(())
     }
+
+    fn start_tokio_runtime(&mut self) {
+        let events_tx = self.events_tx.clone();
+        let log = self.log.clone();
+        self.tokio_rt.block_on(async {
+            run_event_listener(log.clone(), events_tx).await;
+        });
+    }
+}
+
+/// Listen for terminal related events
+async fn run_event_listener(log: slog::Logger, events_tx: Sender<Event>) {
+    info!(log, "Starting event listener");
+    tokio::spawn(async move {
+        let mut events = EventStream::new();
+        let mut ticker = interval(Duration::from_millis(10));
+        loop {
+            tokio::select! {
+                _ = ticker.tick() => {
+                        if let Err(_) = events_tx.send(Event::Tick) {
+                            info!(log, "Event listener completed");
+                            // The receiver was dropped. Program is ending.
+                            return;
+                        }
+                    }
+                event = events.next() => {
+                        let event = match event {
+                            None => {
+                            error!(log, "Event stream completed. Shutting down.");
+                            return;
+                           }
+                            Some(Ok(event)) => event,
+                            Some(Err(e)) => {
+                              // TODO: Issue a shutdown
+                              error!(log, "Failed to receive event: {:?}", e);
+                              return;
+                            }
+                        };
+                        if let Err(_) = events_tx.send(Event::Term(event)) {
+                            info!(log, "Event listener completed");
+                            // The receiver was dropped. Program is ending.
+                            return;
+                        }
+
+                }
+            }
+        }
+    });
 }
 
 /// The data state of the Wizard
@@ -153,6 +241,7 @@ pub struct Inventory {
 /// An event that will update state in the wizard
 ///
 /// This can be a keypress, mouse event, or response from a downstream service.
+#[derive(Debug)]
 pub enum Event {
     /// An input event from the terminal
     Term(crossterm::event::Event),
@@ -222,6 +311,7 @@ pub struct FakePscInfo {
 }
 
 /// TODO: Use real inventory received from MGS
+#[derive(Debug)]
 pub enum FakeInventoryUpdate {
     Sled(FakeSledInfo),
     Switch(FakeSwitchInfo),
