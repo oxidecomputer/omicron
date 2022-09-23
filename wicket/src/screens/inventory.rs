@@ -7,6 +7,7 @@
 use super::colors::*;
 use super::Screen;
 use crate::widgets::Banner;
+use crate::Action;
 use crate::Frame;
 use crate::State;
 use tui::layout::{Alignment, Constraint, Direction, Layout};
@@ -81,7 +82,6 @@ impl Screen for InventoryScreen {
         state: &State,
         terminal: &mut crate::Term,
     ) -> anyhow::Result<()> {
-        self.count += 1;
         terminal.draw(|f| {
             self.draw_background(f);
             self.draw_watermark(f);
@@ -90,11 +90,8 @@ impl Screen for InventoryScreen {
         Ok(())
     }
 
-    fn on(
-        &mut self,
-        state: &State,
-        event: crate::ScreenEvent,
-    ) -> Vec<crate::Action> {
-        unimplemented!()
+    fn on(&mut self, state: &State, event: crate::ScreenEvent) -> Vec<Action> {
+        self.count += 1;
+        vec![Action::Redraw]
     }
 }

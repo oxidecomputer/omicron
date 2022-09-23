@@ -10,7 +10,11 @@
 //! in an intuitive manner.
 
 use anyhow::anyhow;
+use crossterm::event::Event as TermEvent;
 use crossterm::event::EventStream;
+use crossterm::event::{
+    KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers,
+};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen,
@@ -139,7 +143,6 @@ impl Wizard {
     }
 
     pub fn run(&mut self) -> anyhow::Result<()> {
-        // TODO: Spawn off threads required for input and downstream service interaction
         self.start_tokio_runtime();
         enable_raw_mode()?;
         execute!(self.terminal.backend_mut(), EnterAlternateScreen)?;
@@ -150,13 +153,38 @@ impl Wizard {
     }
 
     fn mainloop(&mut self) -> anyhow::Result<()> {
-        let screen = self.screens.get_mut(self.active_screen);
-        for i in 0..300 {
-            // Unwrap safe, because we always hold onto a Sender
+        loop {
+            let screen = self.screens.get_mut(self.active_screen);
+            // unwrap is safe because we always hold onto a Sender
             let event = self.events_rx.recv().unwrap();
             match event {
-                Event::Tick => screen.draw(&self.state, &mut self.terminal)?,
+                Event::Tick => {
+                    screen.draw(&self.state, &mut self.terminal)?;
+                }
+                Event::Term(TermEvent::Key(key_event)) => {
+                    if is_control_c(&key_event) {
+                        info!(self.log, "CTRL-C Pressed. Exiting.");
+                        break;
+                    }
+                    let actions = screen.on(
+                        &self.state,
+                        ScreenEvent::Term(TermEvent::Key(key_event)),
+                    );
+                    self.handle_actions(actions)?;
+                }
                 _ => info!(self.log, "{:?}", event),
+            }
+        }
+        Ok(())
+    }
+
+    fn handle_actions(&mut self, actions: Vec<Action>) -> anyhow::Result<()> {
+        for action in actions {
+            match action {
+                Action::Redraw => {
+                    let screen = self.screens.get_mut(self.active_screen);
+                    screen.draw(&self.state, &mut self.terminal)?;
+                }
             }
         }
         Ok(())
@@ -171,12 +199,17 @@ impl Wizard {
     }
 }
 
+fn is_control_c(key_event: &KeyEvent) -> bool {
+    key_event.code == KeyCode::Char('c')
+        && key_event.modifiers == KeyModifiers::CONTROL
+}
+
 /// Listen for terminal related events
 async fn run_event_listener(log: slog::Logger, events_tx: Sender<Event>) {
     info!(log, "Starting event listener");
     tokio::spawn(async move {
         let mut events = EventStream::new();
-        let mut ticker = interval(Duration::from_millis(10));
+        let mut ticker = interval(Duration::from_millis(50));
         loop {
             tokio::select! {
                 _ = ticker.tick() => {
@@ -244,7 +277,7 @@ pub struct Inventory {
 #[derive(Debug)]
 pub enum Event {
     /// An input event from the terminal
-    Term(crossterm::event::Event),
+    Term(TermEvent),
 
     /// An Inventory Update Event
     ///
@@ -263,7 +296,9 @@ pub enum Event {
 /// service. Screens never take actions directly, but they are the only ones
 /// that know what visual content an input such as a key press or mouse event
 /// is meant for and what action should be taken in that case.
-pub enum Action {}
+pub enum Action {
+    Redraw,
+}
 
 /// Events sent to a screen
 ///
