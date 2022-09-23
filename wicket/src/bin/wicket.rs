@@ -6,7 +6,7 @@ use std::error::Error;
 use wicket::Wizard;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let wizard = Wizard::new();
+    let mut wizard = Wizard::new();
     wizard.run()?;
 
     Ok(())
