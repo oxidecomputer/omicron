@@ -9,8 +9,21 @@
 //! that will guide the user through the steps the need to take
 //! in an intuitive manner.
 
+use crossterm::terminal::{
+    disable_raw_mode, enable_raw_mode, EnterAlternateScreen,
+    LeaveAlternateScreen,
+};
 use std::collections::BTreeMap;
-use std::sync::mpsc::Receiver;
+use std::io::{stdout, Stdout};
+use std::sync::mpsc::{channel, Receiver, Sender};
+use tui::backend::{Backend, CrosstermBackend};
+use tui::layout::{Constraint, Direction, Layout};
+use tui::widgets::{Block, Borders};
+use tui::{Frame, Terminal};
+
+mod screens;
+
+use screens::Screen;
 
 /// The core type of this library is the `Wizard`.
 ///
@@ -23,25 +36,84 @@ use std::sync::mpsc::Receiver;
 pub struct Wizard {
     // All screens are stored in this map. However, not all screens are
     // necessarily accesible from the wizard UI at any point in time.
-    screens: BTreeMap<ScreenId, Screen>,
+    screens: BTreeMap<ScreenId, Box<dyn Screen>>,
 
+    // The currently active screen
+    active_screen: ScreenId,
+
+    // The [`Wizard`] is purely single threaded. Every interaction with the
+    // outside world is via channels.  All receiving from the outside world
+    // comes in via an `Event` over a single channel.
+    //
+    // Doing this allows us to record and replay all received events, which
+    // will deterministically draw the output of the UI, as long as we disable
+    // any output to downstream services.
+    //
+    // This effectively acts as a way to mock real responses from servers
+    // without ever having to run those servers or even send the requests that
+    // triggered the incoming events!
+    //
+    // Note that for resize events or other terminal specific events we'll
+    // likely have to "output" them to fake the same interaction.
     events_rx: Receiver<Event>,
 
-    inventory: Inventory,
+    // We save a copy here so we can hand it out to event producers
+    events_tx: Sender<Event>,
 
-    /// The mechanism for sending requests to MGS
-    ///
-    /// Replies always come in as [`Event`]s.
-    ///
+    // The internal state of the Wizard
+    // This contains all updatable data
+    state: State,
+
+    // The mechanism for sending requests to MGS
+    //
+    // Replies always come in as [`Event`]s.
     mgs: MgsManager,
 
-    /// The mechanism for sending request to the RSS
-    ///
-    /// TODO: Should this really go through the bootstrap agent server or
-    /// should it be it's own dropshot server?
-    ///
-    /// Replies always come in as events
+    // The mechanism for sending request to the RSS
+    //
+    // TODO: Should this really go through the bootstrap agent server or
+    // should it be it's own dropshot server?
+    //
+    // Replies always come in as events
     rss: RssManager,
+
+    // The terminal we are rendering to
+    terminal: Terminal<CrosstermBackend<Stdout>>,
+}
+
+impl Wizard {
+    pub fn new() -> Wizard {
+        let screens = BTreeMap::new();
+        let (events_tx, events_rx) = channel();
+        let state = State::default();
+        let backend = CrosstermBackend::new(stdout());
+        let terminal = Terminal::new(backend).unwrap();
+        Wizard {
+            screens,
+            active_screen: ScreenId::Inventory,
+            events_rx,
+            events_tx,
+            state,
+            mgs: MgsManager {},
+            rss: RssManager {},
+            terminal,
+        }
+    }
+
+    pub fn run(&mut self) -> anyhow::Result<()> {
+        // TODO: Spawn off threads required for input and downstream service interaction
+        enable_raw_mode()?;
+        loop {}
+        disable_raw_mode()?;
+    }
+}
+
+/// The data state of the Wizard
+///
+/// Data is not tied to any specific screen and is updated upon event receipt.
+#[derive(Debug, Default)]
+pub struct State {
+    inventory: Inventory,
 }
 
 /// Send requests to MGS
@@ -56,7 +128,12 @@ pub struct RssManager {}
 
 /// Inventory is the most recent information about rack composition as
 /// received from MGS.
-pub struct Inventory {}
+#[derive(Debug, Default)]
+pub struct Inventory {
+    sleds: [Option<FakeSledInfo>; 32],
+    switches: [Option<FakeSwitchInfo>; 2],
+    psc: Option<FakePscInfo>,
+}
 
 /// An event that will update state in the wizard
 ///
@@ -76,6 +153,25 @@ pub enum Event {
     //... TODO: Replies from MGS & RSS
 }
 
+/// An action for the system to take.
+///
+/// This can be something like a screen transition or calling a downstream
+/// service. Screens never take actions directly, but they are the only ones
+/// that know what visual content an input such as a key press or mouse event
+/// is meant for and what action should be taken in that case.
+pub enum Action {}
+
+/// Events sent to a screen
+///
+/// These are a subset of [`Event`]
+pub enum ScreenEvent {
+    /// An input event from the terminal
+    Term(crossterm::event::Event),
+
+    /// The tick of a timer
+    Tick,
+}
+
 /// An identifier for a specific [`Screen`] in the [`Wizard`]
 pub enum ScreenId {
     Inventory,
@@ -83,36 +179,43 @@ pub enum ScreenId {
     RackInit,
 }
 
-/// An individual screen in the [`Wizard`]
-pub struct Screen {}
-
+#[derive(Debug)]
 pub enum SwitchLocation {
     Top,
     Bottom,
 }
 
+#[derive(Debug)]
+pub struct FakeSledInfo {
+    slot: u16,
+    serial_number: String,
+    part_number: String,
+    sp_version: String,
+    rot_version: String,
+    host_os_version: String,
+    control_plane_version: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct FakeSwitchInfo {
+    location: SwitchLocation,
+    serial_number: String,
+    part_number: String,
+    sp_version: String,
+    rot_version: String,
+}
+
+#[derive(Debug)]
+pub struct FakePscInfo {
+    serial_number: String,
+    part_number: String,
+    sp_version: String,
+    rot_version: String,
+}
+
 /// TODO: Use real inventory received from MGS
 pub enum FakeInventoryUpdate {
-    Sled {
-        slot: u16,
-        serial_number: String,
-        part_number: String,
-        sp_version: String,
-        rot_version: String,
-        host_os_version: String,
-        control_plane_version: Option<String>,
-    },
-    Switch {
-        location: SwitchLocation,
-        serial_number: String,
-        part_number: String,
-        sp_version: String,
-        rot_version: String,
-    },
-    Psc {
-        serial_number: String,
-        part_number: String,
-        sp_version: String,
-        rot_version: String,
-    },
+    Sled(FakeSledInfo),
+    Switch(FakeSwitchInfo),
+    Psc(FakePscInfo),
 }
