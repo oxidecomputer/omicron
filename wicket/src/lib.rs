@@ -20,7 +20,7 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use tui::backend::{Backend, CrosstermBackend};
 use tui::layout::{Constraint, Direction, Layout};
 use tui::widgets::{Block, Borders};
-use tui::{Frame, Terminal};
+use tui::Terminal;
 
 mod screens;
 
@@ -28,6 +28,7 @@ use screens::{InventoryScreen, Screen, ScreenId, Screens};
 
 // We can avoid a bunch of unnecessary type parameters by picking them ahead of time.
 pub type Term = Terminal<CrosstermBackend<Stdout>>;
+pub type Frame<'a> = tui::Frame<'a, CrosstermBackend<Stdout>>;
 
 /// The core type of this library is the `Wizard`.
 ///
@@ -116,7 +117,7 @@ impl Wizard {
     fn mainloop(&mut self) -> anyhow::Result<()> {
         let screen = self.screens.get(self.active_screen);
         screen.draw(&self.state, &mut self.terminal)?;
-        std::thread::sleep(std::time::Duration::from_secs(1));
+        std::thread::sleep(std::time::Duration::from_secs(3));
         Ok(())
     }
 }

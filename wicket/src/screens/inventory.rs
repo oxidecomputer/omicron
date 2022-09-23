@@ -4,7 +4,9 @@
 
 //! The inventory [`Screen`]
 
+use super::colors::*;
 use super::Screen;
+use crate::Frame;
 use crate::State;
 use tui::layout::{Alignment, Constraint, Direction, Layout};
 use tui::style::{Color, Modifier, Style};
@@ -18,6 +20,17 @@ impl InventoryScreen {
     pub fn new() -> InventoryScreen {
         InventoryScreen {}
     }
+
+    pub fn draw_background(&self, f: &mut Frame) {
+        let style = Style::default().fg(OX_OFF_WHITE).bg(OX_GREEN_DARK);
+        let block = Block::default()
+            .style(style)
+            .borders(Borders::NONE)
+            .title("Inventory: Fuck yeah!")
+            .title_alignment(Alignment::Center);
+
+        f.render_widget(block, f.size());
+    }
 }
 
 impl Screen for InventoryScreen {
@@ -27,12 +40,7 @@ impl Screen for InventoryScreen {
         terminal: &mut crate::Term,
     ) -> anyhow::Result<()> {
         terminal.draw(|f| {
-            let block = Block::default()
-                .borders(Borders::NONE)
-                .title("Inventory: Fuck yeah!")
-                .title_alignment(Alignment::Center);
-
-            f.render_widget(block, f.size());
+            self.draw_background(f);
         })?;
         Ok(())
     }
