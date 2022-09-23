@@ -952,6 +952,12 @@
               "format": "ip"
             }
           },
+          "firewall_rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VpcFirewallRule"
+            }
+          },
           "nics": {
             "type": "array",
             "items": {
@@ -968,6 +974,7 @@
         "required": [
           "disks",
           "external_ips",
+          "firewall_rules",
           "nics",
           "runtime",
           "source_nat"

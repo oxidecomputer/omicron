@@ -303,6 +303,7 @@ mod test {
                 last_port: 1 << 14 - 1,
             },
             external_ips: vec![],
+            firewall_rules: vec![],
             disks: vec![],
             cloud_init_bytes: None,
         }

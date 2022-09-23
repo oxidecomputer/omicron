@@ -227,6 +227,8 @@ async fn sim_instance_migrate(
         nics: vec![],
         source_nat,
         external_ips,
+        // TODO: populate firewall rules
+        firewall_rules: vec![],
         // TODO: populate disks
         disks: vec![],
         // TODO: populate cloud init bytes

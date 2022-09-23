@@ -101,6 +101,7 @@ pub struct InstanceHardware {
     /// Zero or more external IP addresses (either floating or ephemeral),
     /// provided to an instance to allow inbound connectivity.
     pub external_ips: Vec<IpAddr>,
+    pub firewall_rules: Vec<VpcFirewallRule>,
     pub disks: Vec<propolis_client::api::DiskRequest>,
     pub cloud_init_bytes: Option<String>,
 }

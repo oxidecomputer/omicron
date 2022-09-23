@@ -184,14 +184,7 @@ impl super::Nexus {
         self.db_datastore
             .vpc_update_firewall_rules(opctx, &authz_vpc, rules.clone())
             .await?;
-        self.send_sled_agents_firewall_rules(
-            opctx,
-            organization_name,
-            project_name,
-            &db_vpc,
-            &rules,
-        )
-        .await?;
+        self.send_sled_agents_firewall_rules(opctx, &db_vpc, &rules).await?;
 
         Ok(db_vpc)
     }
@@ -350,14 +343,7 @@ impl super::Nexus {
             .db_datastore
             .vpc_update_firewall_rules(opctx, &authz_vpc, rules)
             .await?;
-        self.send_sled_agents_firewall_rules(
-            opctx,
-            organization_name,
-            project_name,
-            &db_vpc,
-            &rules,
-        )
-        .await?;
+        self.send_sled_agents_firewall_rules(opctx, &db_vpc, &rules).await?;
         Ok(rules)
     }
 
@@ -408,19 +394,11 @@ impl super::Nexus {
     async fn send_sled_agents_firewall_rules(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
         vpc: &db::model::Vpc,
         rules: &[db::model::VpcFirewallRule],
     ) -> Result<(), Error> {
         let rules_for_sled = self
-            .resolve_firewall_rules_for_sled_agent(
-                opctx,
-                organization_name,
-                project_name,
-                &vpc,
-                rules,
-            )
+            .resolve_firewall_rules_for_sled_agent(opctx, &vpc, rules)
             .await?;
         debug!(self.log, "resolved {} rules for sleds", rules_for_sled.len());
         let sled_rules_request =
@@ -467,11 +445,9 @@ impl super::Nexus {
         Ok(())
     }
 
-    async fn resolve_firewall_rules_for_sled_agent(
+    pub(crate) async fn resolve_firewall_rules_for_sled_agent(
         &self,
         opctx: &OpContext,
-        organization_name: &Name,
-        project_name: &Name,
         vpc: &db::model::Vpc,
         rules: &[db::model::VpcFirewallRule],
     ) -> Result<Vec<sled_agent_client::types::VpcFirewallRule>, Error> {
@@ -541,8 +517,7 @@ impl super::Nexus {
         for instance_name in &instances {
             let (.., authz_instance) =
                 LookupPath::new(opctx, &self.db_datastore)
-                    .organization_name(organization_name)
-                    .project_name(project_name)
+                    .project_id(vpc.project_id)
                     .instance_name(instance_name)
                     .lookup_for(authz::Action::ListChildren)
                     .await?;
@@ -561,8 +536,7 @@ impl super::Nexus {
         let mut vpc_interfaces: NicMap = HashMap::new();
         for vpc_name in &vpcs {
             let (.., authz_vpc) = LookupPath::new(opctx, &self.db_datastore)
-                .organization_name(organization_name)
-                .project_name(project_name)
+                .project_id(vpc.project_id)
                 .vpc_name(vpc_name)
                 .lookup_for(authz::Action::ListChildren)
                 .await?;
@@ -581,8 +555,7 @@ impl super::Nexus {
         let mut subnet_interfaces: NicMap = HashMap::new();
         for subnet_name in &subnets {
             let (.., authz_subnet) = LookupPath::new(opctx, &self.db_datastore)
-                .organization_name(organization_name)
-                .project_name(project_name)
+                .project_id(vpc.project_id)
                 .vpc_name(&Name::from(vpc.name().clone()))
                 .vpc_subnet_name(subnet_name)
                 .lookup_for(authz::Action::ListChildren)

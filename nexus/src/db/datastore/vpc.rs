@@ -21,6 +21,7 @@ use crate::db::model::NetworkInterface;
 use crate::db::model::RouterRoute;
 use crate::db::model::RouterRouteUpdate;
 use crate::db::model::Sled;
+use crate::db::model::Vni;
 use crate::db::model::Vpc;
 use crate::db::model::VpcFirewallRule;
 use crate::db::model::VpcRouter;
@@ -43,6 +44,7 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
+use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
@@ -740,5 +742,29 @@ impl DataStore {
             entry.push(IpNetwork::V6(subnet.ipv6_block.0 .0));
         }
         Ok(result)
+    }
+
+    /// Look up a VPC by VNI.
+    pub async fn resolve_vni_to_vpc(
+        &self,
+        opctx: &OpContext,
+        vni: Vni,
+    ) -> LookupResult<Vpc> {
+        use db::schema::vpc::dsl;
+        dsl::vpc
+            .filter(dsl::vni.eq(vni))
+            .filter(dsl::time_deleted.is_null())
+            .select(Vpc::as_select())
+            .get_result_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Vpc,
+                        LookupType::ByCompositeId("VNI".to_string()),
+                    ),
+                )
+            })
     }
 }
