@@ -12,6 +12,7 @@
 use anyhow::anyhow;
 use crossterm::event::Event as TermEvent;
 use crossterm::event::EventStream;
+use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use crossterm::event::{
     KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers,
 };
@@ -145,7 +146,11 @@ impl Wizard {
     pub fn run(&mut self) -> anyhow::Result<()> {
         self.start_tokio_runtime();
         enable_raw_mode()?;
-        execute!(self.terminal.backend_mut(), EnterAlternateScreen)?;
+        execute!(
+            self.terminal.backend_mut(),
+            EnterAlternateScreen,
+            EnableMouseCapture
+        )?;
         self.mainloop()?;
         disable_raw_mode()?;
         execute!(self.terminal.backend_mut(), LeaveAlternateScreen)?;

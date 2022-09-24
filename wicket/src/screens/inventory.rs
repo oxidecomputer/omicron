@@ -6,6 +6,7 @@
 
 use super::colors::*;
 use super::Screen;
+use super::{Height, Width};
 use crate::widgets::Banner;
 use crate::Action;
 use crate::Frame;
@@ -40,8 +41,8 @@ impl InventoryScreen {
         f.render_widget(block, f.size());
     }
 
-    fn draw_watermark(&self, f: &mut Frame) {
-        let style = Style::default().fg(OX_GREEN_LIGHT).bg(OX_GREEN_DARK);
+    fn draw_watermark(&self, f: &mut Frame) -> (Height, Width) {
+        let style = Style::default().fg(OX_GREEN_DARKEST).bg(OX_GREEN_DARK);
         let banner = Banner::new(self.watermark).style(style);
         let height = banner.height();
         let width = banner.width();
@@ -50,7 +51,7 @@ impl InventoryScreen {
         let mut rect = f.size();
         if width >= rect.width || height >= rect.height {
             // The banner won't fit.
-            return;
+            return (Height(1), Width(1));
         }
         rect.x = rect.width - width - 1;
         rect.y = rect.height - height - 1;
@@ -58,21 +59,46 @@ impl InventoryScreen {
         rect.height = height;
 
         f.render_widget(banner, rect);
+
+        (Height(height), Width(width))
     }
 
-    fn draw_center_block(&self, f: &mut Frame) {
+    /// Draw the rack in the center of the screen.
+    /// Scale it to look nice.
+    fn draw_rack(&self, f: &mut Frame, border: Height) {
         if self.count % 2 == 0 {
             return;
         }
-        let mut rect = f.size();
-        rect.x = rect.width / 2 - 5;
-        rect.y = rect.height / 2 - 5;
-        rect.width = 10;
-        rect.height = 10;
 
-        let style = Style::default().bg(OX_OFF_WHITE);
-        let block = Block::default().style(style);
-        f.render_widget(block, rect);
+        let mut rect = f.size();
+        let width = rect.width;
+
+        // Scale proportionally and center
+        rect.y = border.0 - 1;
+        rect.height = rect.height - (border.0 * 2) - 2;
+        rect.width = rect.height * 2 / 3;
+        rect.x = width / 2 - rect.width / 2;
+
+        // Divide the rack into three vertical sections:
+        //  * Top sleds
+        //  * Switches
+        //  * Bottom sleds
+        let divs = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(&[
+                Constraint::Percentage(45),
+                Constraint::Percentage(10),
+                Constraint::Percentage(45),
+            ])
+            .split(rect);
+
+        let sleds = Block::default().style(Style::default().bg(OX_GREEN_LIGHT));
+        let switches =
+            Block::default().style(Style::default().bg(OX_OFF_WHITE));
+
+        f.render_widget(sleds.clone(), divs[0]);
+        f.render_widget(switches, divs[1]);
+        f.render_widget(sleds, divs[2]);
     }
 }
 
@@ -84,8 +110,8 @@ impl Screen for InventoryScreen {
     ) -> anyhow::Result<()> {
         terminal.draw(|f| {
             self.draw_background(f);
-            self.draw_watermark(f);
-            self.draw_center_block(f);
+            let (height, _) = self.draw_watermark(f);
+            self.draw_rack(f, height);
         })?;
         Ok(())
     }
