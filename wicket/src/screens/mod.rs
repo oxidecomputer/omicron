@@ -17,6 +17,9 @@ pub enum ScreenId {
     RackInit,
 }
 
+pub struct Height(u16);
+pub struct Width(u16);
+
 pub trait Screen {
     /// Draw the [`Screen`]
     fn draw(
