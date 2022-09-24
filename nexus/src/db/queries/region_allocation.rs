@@ -313,7 +313,7 @@ impl ProposedDatasetsFit {
                         >(
                             (old_zpool_usage::dsl::size_used
                                 + zpool_size_delta::dsl::size_used_delta)
-                                .lt(diesel::dsl::sql(
+                                .le(diesel::dsl::sql(
                                     zpool_dsl::total_size::NAME,
                                 )),
                         ),)),
