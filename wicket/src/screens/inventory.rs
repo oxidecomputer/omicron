@@ -5,12 +5,16 @@
 //! The inventory [`Screen`]
 
 use super::colors::*;
+use super::make_even;
 use super::Screen;
 use super::{Height, Width};
 use crate::widgets::Banner;
 use crate::Action;
 use crate::Frame;
 use crate::State;
+use slog::info;
+use slog::Logger;
+use tui::layout::Rect;
 use tui::layout::{Alignment, Constraint, Direction, Layout};
 use tui::style::{Color, Modifier, Style};
 use tui::text::Span;
@@ -18,13 +22,15 @@ use tui::widgets::{Block, Borders};
 
 /// Show the rack inventory as learned from MGS
 pub struct InventoryScreen {
+    log: Logger,
     count: u64,
     watermark: &'static str,
 }
 
 impl InventoryScreen {
-    pub fn new() -> InventoryScreen {
+    pub fn new(log: &Logger) -> InventoryScreen {
         InventoryScreen {
+            log: log.clone(),
             count: 0,
             watermark: include_str!("../../banners/oxide.txt"),
         }
@@ -70,35 +76,54 @@ impl InventoryScreen {
             return;
         }
 
-        let mut rect = f.size();
-        let width = rect.width;
+        let rect = f.size();
 
-        // Scale proportionally and center
-        rect.y = border.0 - 1;
-        rect.height = rect.height - (border.0 * 2) - 2;
-        rect.width = rect.height * 2 / 3;
-        rect.x = width / 2 - rect.width / 2;
+        let chunks = Self::split_rack(rect, border);
+        info!(self.log, "{chunks:?}");
 
-        // Divide the rack into three vertical sections:
-        //  * Top sleds
-        //  * Switches
-        //  * Bottom sleds
-        let divs = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints(&[
-                Constraint::Percentage(45),
-                Constraint::Percentage(10),
-                Constraint::Percentage(45),
-            ])
-            .split(rect);
-
-        let sleds = Block::default().style(Style::default().bg(OX_GREEN_LIGHT));
         let switches =
             Block::default().style(Style::default().bg(OX_OFF_WHITE));
 
-        f.render_widget(sleds.clone(), divs[0]);
-        f.render_widget(switches, divs[1]);
-        f.render_widget(sleds, divs[2]);
+        let sled = Block::default()
+            .style(Style::default().bg(Color::Gray))
+            .borders(Borders::ALL);
+
+        for i in 0..8 {
+            f.render_widget(sled.clone(), chunks[i]);
+        }
+        for i in 8..10 {
+            f.render_widget(switches.clone(), chunks[i]);
+        }
+        for i in 10..18 {
+            f.render_widget(sled.clone(), chunks[i]);
+        }
+    }
+
+    // Split the rect into 18 vertical chunks. 1 for each sled bay, 1 per switch.
+    fn split_rack(mut rect: Rect, border: Height) -> Vec<Rect> {
+        let width = rect.width;
+        let max_height = rect.height;
+
+        // Scale proportionally and center the rack horizontally
+        rect.height = make_even(rect.height - (border.0 * 2) - 2);
+        rect.width = make_even(rect.height * 2 / 3);
+        rect.x = width / 2 - rect.width / 2;
+
+        // Make the max_height divisible by 18.
+        let actual_height = rect.height / 18 * 18;
+        rect.height = actual_height;
+
+        // Center the rack vertically
+        rect.y = make_even((max_height - actual_height) / 2);
+
+        let constraints: Vec<_> =
+            (0..18).map(|_| Constraint::Ratio(1, 18)).collect();
+        let mut chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(&*constraints)
+            .split(rect);
+        chunks[17].height = chunks[16].height;
+        chunks
     }
 }
 
