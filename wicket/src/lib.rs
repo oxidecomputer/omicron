@@ -105,7 +105,8 @@ pub struct Wizard {
 
 impl Wizard {
     pub fn new() -> Wizard {
-        let screens = Screens::new();
+        let log = Self::setup_log("/tmp/wicket.log").unwrap();
+        let screens = Screens::new(&log);
         let (events_tx, events_rx) = channel();
         let state = State::default();
         let backend = CrosstermBackend::new(stdout());
@@ -153,7 +154,11 @@ impl Wizard {
         )?;
         self.mainloop()?;
         disable_raw_mode()?;
-        execute!(self.terminal.backend_mut(), LeaveAlternateScreen)?;
+        execute!(
+            self.terminal.backend_mut(),
+            LeaveAlternateScreen,
+            DisableMouseCapture
+        )?;
         Ok(())
     }
 

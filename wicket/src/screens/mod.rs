@@ -8,6 +8,7 @@ use crate::Action;
 use crate::ScreenEvent;
 use crate::State;
 use crate::Term;
+use slog::Logger;
 
 /// An identifier for a specific [`Screen`] in the [`Wizard`]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -19,6 +20,15 @@ pub enum ScreenId {
 
 pub struct Height(u16);
 pub struct Width(u16);
+
+/// Ensure that a u16 is an even number by subtracting 1 if necessary.
+pub fn make_even(val: u16) -> u16 {
+    if val % 2 == 0 {
+        val
+    } else {
+        val - 1
+    }
+}
 
 pub trait Screen {
     /// Draw the [`Screen`]
@@ -41,8 +51,8 @@ pub struct Screens {
 }
 
 impl Screens {
-    pub fn new() -> Screens {
-        Screens { inventory: InventoryScreen::new() }
+    pub fn new(log: &Logger) -> Screens {
+        Screens { inventory: InventoryScreen::new(log) }
     }
 
     pub fn get(&self, id: ScreenId) -> &dyn Screen {
