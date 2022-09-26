@@ -294,30 +294,26 @@ impl ProposedDatasetsFit {
     ) -> Self {
         use schema::zpool::dsl as zpool_dsl;
 
+        let with_zpool = zpool_dsl::zpool
+            .on(zpool_dsl::id.eq(old_zpool_usage::dsl::pool_id));
+        let with_zpool_size_delta =
+            zpool_size_delta.query_source().on(zpool_size_delta::dsl::pool_id
+                .eq(old_zpool_usage::dsl::pool_id));
+
+        let it_will_fit = (old_zpool_usage::dsl::size_used
+            + zpool_size_delta::dsl::size_used_delta)
+            .le(diesel::dsl::sql(zpool_dsl::total_size::NAME));
+
         Self {
-            query:
-                Box::new(
-                    old_zpool_usage
-                        .query_source()
-                        .inner_join(zpool_dsl::zpool.on(
-                            zpool_dsl::id.eq(old_zpool_usage::dsl::pool_id),
-                        ))
-                        .inner_join(
-                            zpool_size_delta
-                                .query_source()
-                                .on(zpool_size_delta::dsl::pool_id
-                                    .eq(old_zpool_usage::dsl::pool_id)),
-                        )
-                        .select((ExpressionAlias::new::<
-                            proposed_datasets_fit::dsl::fits,
-                        >(
-                            (old_zpool_usage::dsl::size_used
-                                + zpool_size_delta::dsl::size_used_delta)
-                                .le(diesel::dsl::sql(
-                                    zpool_dsl::total_size::NAME,
-                                )),
-                        ),)),
-                ),
+            query: Box::new(
+                old_zpool_usage
+                    .query_source()
+                    .inner_join(with_zpool)
+                    .inner_join(with_zpool_size_delta)
+                    .select((ExpressionAlias::new::<
+                        proposed_datasets_fit::dsl::fits,
+                    >(it_will_fit),)),
+            ),
         }
     }
 }
