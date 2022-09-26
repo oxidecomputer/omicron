@@ -65,13 +65,6 @@ impl From<BlockSize> for ByteCount {
     }
 }
 
-// TODO: actually calling this causes a stack overflow.
-//
-// Repro with:
-//
-// ```
-// let _: ByteCount = 123.into()
-// ```
 impl From<i64> for ByteCount {
     fn from(i: i64) -> Self {
         i.into()
