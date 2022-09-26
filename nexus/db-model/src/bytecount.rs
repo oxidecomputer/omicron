@@ -65,9 +65,10 @@ impl From<BlockSize> for ByteCount {
     }
 }
 
-impl From<i64> for ByteCount {
-    fn from(i: i64) -> Self {
-        i.into()
+impl TryFrom<i64> for ByteCount {
+    type Error = <external::ByteCount as TryFrom<i64>>::Error;
+    fn try_from(i: i64) -> Result<Self, Self::Error> {
+        Ok(external::ByteCount::try_from(i)?.into())
     }
 }
 
@@ -214,5 +215,13 @@ mod test {
         }
         .try_into();
         assert_eq!(result.unwrap().to_bytes(), 999999999999);
+    }
+
+    #[test]
+    fn test_bytecount_i64_conversions() {
+        let i: i64 = 123;
+        let b: ByteCount = ByteCount::try_from(i).unwrap();
+
+        assert_eq!(i64::from(b), i);
     }
 }
