@@ -13,6 +13,7 @@ thiserror = "1.0.35"
 tokio-stream = "0.1.10"
 usdt = "0.3.1"
 uuid = "1.1.0"
+zip = { version = "0.6.2", default-features = false, features = ["deflate","bzip2"] }
 
 gateway-messages = { path = "../gateway-messages", features = ["std"] }
 omicron-common = { path = "../common" }
