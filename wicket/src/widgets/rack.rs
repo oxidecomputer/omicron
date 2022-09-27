@@ -5,6 +5,8 @@
 use crate::screens::make_even;
 use crate::screens::Height;
 use crate::screens::RectState;
+use slog::debug;
+use slog::Logger;
 use tui::buffer::Buffer;
 use tui::layout::Rect;
 use tui::style::Color;
@@ -18,12 +20,12 @@ use tui::widgets::Widget;
 pub struct Rack {
     sled_style: Style,
     sled_selected_style: Style,
-    sled_border_style: Style,
-    sled_selected_border_style: Style,
     switch_style: Style,
     switch_selected_style: Style,
     power_shelf_style: Style,
     power_shelf_selected_style: Style,
+    border_style: Style,
+    border_selected_style: Style,
 }
 
 impl Rack {
@@ -33,14 +35,6 @@ impl Rack {
     }
     pub fn sled_selected_style(mut self, style: Style) -> Self {
         self.sled_selected_style = style;
-        self
-    }
-    pub fn sled_border_style(mut self, style: Style) -> Self {
-        self.sled_border_style = style;
-        self
-    }
-    pub fn sled_selected_border_style(mut self, style: Style) -> Self {
-        self.sled_selected_border_style = style;
         self
     }
     pub fn switch_style(mut self, style: Style) -> Self {
@@ -59,6 +53,14 @@ impl Rack {
         self.power_shelf_selected_style = style;
         self
     }
+    pub fn border_style(mut self, style: Style) -> Self {
+        self.border_style = style;
+        self
+    }
+    pub fn border_selected_style(mut self, style: Style) -> Self {
+        self.border_selected_style = style;
+        self
+    }
 
     pub fn draw_sled(&self, buf: &mut Buffer, sled: &RectState, i: usize) {
         let mut block =
@@ -66,11 +68,10 @@ impl Rack {
         if sled.tabbed {
             block = block
                 .style(self.sled_selected_style)
-                .border_style(self.sled_selected_border_style);
+                .border_style(self.border_selected_style);
         } else {
-            block = block
-                .style(self.sled_style)
-                .border_style(self.sled_border_style);
+            block =
+                block.style(self.sled_style).border_style(self.border_style);
         }
 
         let inner = block.inner(sled.rect);
@@ -94,19 +95,63 @@ impl Rack {
         }
     }
 
-    pub fn draw_switch(&self, buf: &mut Buffer, switch: &RectState) {
+    pub fn draw_switch(&self, buf: &mut Buffer, switch: &RectState, i: usize) {
+        let mut block = Block::default()
+            .title(format!("switch {}", i))
+            .borders(Borders::ALL);
         if switch.tabbed {
-            buf.set_style(switch.rect, self.switch_selected_style);
+            block = block
+                .style(self.switch_selected_style)
+                .border_style(self.border_selected_style);
         } else {
-            buf.set_style(switch.rect, self.switch_style);
+            block =
+                block.style(self.switch_style).border_style(self.border_style);
+        }
+
+        let inner = block.inner(switch.rect);
+        block.render(switch.rect, buf);
+
+        for x in inner.left()..inner.right() {
+            for y in inner.top()..inner.bottom() {
+                let cell = buf.get_mut(x, y).set_symbol("❒");
+            }
         }
     }
 
-    pub fn draw_power_shelf(&self, buf: &mut Buffer, power_shelf: &RectState) {
+    pub fn draw_power_shelf(
+        &self,
+        buf: &mut Buffer,
+        power_shelf: &RectState,
+        i: usize,
+        log: &Logger,
+    ) {
+        let mut block = Block::default()
+            .title(format!("power {}", i))
+            .borders(Borders::ALL);
         if power_shelf.tabbed {
-            buf.set_style(power_shelf.rect, self.power_shelf_selected_style);
+            block = block
+                .style(self.power_shelf_selected_style)
+                .border_style(self.border_selected_style);
         } else {
-            buf.set_style(power_shelf.rect, self.power_shelf_style);
+            block = block
+                .style(self.power_shelf_style)
+                .border_style(self.border_style);
+        }
+
+        let inner = block.inner(power_shelf.rect);
+        block.render(power_shelf.rect, buf);
+
+        let width = inner.right() - inner.left();
+        let step = width / 6;
+        let border = (width - step * 6) / 2;
+        debug!(log, "width = {width}, step = {step}, border = {border}");
+
+        for x in inner.left() + border..inner.right() - border {
+            for y in inner.top()..inner.bottom() {
+                if x % step != 0 {
+                    buf.get_mut(x, y).set_symbol("█");
+                }
+            }
         }
     }
 }
@@ -119,12 +164,12 @@ impl StatefulWidget for Rack {
             self.draw_sled(buf, s, i);
         }
 
-        for s in state.switches.iter() {
-            self.draw_switch(buf, s);
+        for (i, s) in state.switches.iter().enumerate() {
+            self.draw_switch(buf, s, i);
         }
 
-        for s in state.power_shelves.iter() {
-            self.draw_power_shelf(buf, s);
+        for (i, s) in state.power_shelves.iter().enumerate() {
+            self.draw_power_shelf(buf, s, i, state.log.as_ref().unwrap());
         }
     }
 }
@@ -133,6 +178,7 @@ impl StatefulWidget for Rack {
 #[derive(Debug, Default)]
 pub struct RackState {
     // The starting TabIndex for the Rack.
+    pub log: Option<Logger>,
     pub tab_start: u16,
     pub rect: Rect,
     pub sleds: [RectState; 32],
@@ -141,10 +187,8 @@ pub struct RackState {
 }
 
 impl RackState {
-    pub fn new(rect: &Rect, watermark_height: &Height) -> RackState {
-        let mut rack = RackState::default();
-        rack.resize(rect, watermark_height);
-        rack
+    pub fn set_logger(&mut self, log: Logger) {
+        self.log = Some(log);
     }
 
     // Split the rect into 20 vertical chunks. 1 for each sled bay, 1 per

@@ -40,10 +40,12 @@ pub struct InventoryScreen {
 
 impl InventoryScreen {
     pub fn new(log: &Logger) -> InventoryScreen {
+        let mut rack_state = RackState::default();
+        rack_state.set_logger(log.clone());
         InventoryScreen {
             log: log.clone(),
             watermark: include_str!("../../banners/oxide.txt"),
-            rack_state: RackState::default(),
+            rack_state,
             tab_index: TabIndex::new(MAX_TAB_INDEX),
         }
     }
@@ -91,10 +93,12 @@ impl InventoryScreen {
             .power_shelf_style(Style::default().bg(OX_GRAY))
             .sled_style(Style::default().bg(OX_GREEN_LIGHT).fg(Color::Black))
             .sled_selected_style(
-                Style::default().bg(OX_GREEN_DARK).fg(OX_WHITE),
+                Style::default().fg(Color::Black).bg(OX_GRAY_DARK),
             )
-            .sled_border_style(Style::default().fg(Color::Black))
-            .sled_selected_border_style(Style::default().fg(OX_OFF_WHITE));
+            .border_style(Style::default().fg(Color::Black))
+            .border_selected_style(Style::default().fg(OX_YELLOW))
+            .switch_selected_style(Style::default().bg(OX_GRAY_DARK))
+            .power_shelf_selected_style(Style::default().bg(OX_GRAY_DARK));
 
         let area = self.rack_state.rect.clone();
         f.render_stateful_widget(rack, area, &mut self.rack_state);
