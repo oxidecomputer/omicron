@@ -32,9 +32,9 @@ lazy_static! {
         // underlying regions.
         sdd_delete_disk_record
     );
-    static ref DELETE_VOLUME_RECORD: NexusAction = new_action_noop_undo(
-        "disk-delete.delete-volume-record",
-        sdd_delete_volume_record
+    static ref DELETE_VOLUME: NexusAction = new_action_noop_undo(
+        "disk-delete.delete-volume",
+        sdd_delete_volume
     );
 }
 
@@ -48,7 +48,7 @@ impl NexusSaga for SagaDiskDelete {
 
     fn register_actions(registry: &mut ActionRegistry) {
         registry.register(Arc::clone(&*DELETE_DISK_RECORD));
-        registry.register(Arc::clone(&*DELETE_VOLUME_RECORD));
+        registry.register(Arc::clone(&*DELETE_VOLUME));
     }
 
     fn make_saga_dag(
@@ -62,8 +62,8 @@ impl NexusSaga for SagaDiskDelete {
         ));
         builder.append(Node::action(
             "no_result",
-            "DeleteVolumeRecord",
-            DELETE_VOLUME_RECORD.as_ref(),
+            "DeleteVolume",
+            DELETE_VOLUME.as_ref(),
         ));
         Ok(builder.build()?)
     }
@@ -85,7 +85,7 @@ async fn sdd_delete_disk_record(
     Ok(volume_id)
 }
 
-async fn sdd_delete_volume_record(
+async fn sdd_delete_volume(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
