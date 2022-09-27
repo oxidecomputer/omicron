@@ -117,7 +117,7 @@ features = [ "serde", "v4" ]
 [dev-dependencies]
 criterion = { version = "0.4", features = [ "async_tokio" ] }
 expectorate = "1.0.5"
-itertools = "0.10.4"
+itertools = "0.10.5"
 nexus-test-utils-macros = { path = "test-utils-macros" }
 nexus-test-utils = { path = "test-utils" }
 omicron-test-utils = { path = "../test-utils" }
