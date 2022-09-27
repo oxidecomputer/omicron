@@ -151,6 +151,9 @@ async fn test_snapshot_then_delete_disk(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(snapshot.disk_id, base_disk.identity.id);
     assert_eq!(snapshot.size, base_disk.size);
 
+    // The Crucible regions and snapshot still remains
+    assert!(!disk_test.crucible_resources_deleted().await);
+
     // Delete the disk
     let disk_url = format!("{}/{}", disks_url, base_disk_name);
     NexusRequest::object_delete(client, &disk_url)
@@ -158,6 +161,9 @@ async fn test_snapshot_then_delete_disk(cptestctx: &ControlPlaneTestContext) {
         .execute()
         .await
         .expect("failed to delete disk");
+
+    // The Crucible snapshot still remains
+    assert!(!disk_test.crucible_resources_deleted().await);
 
     // Delete the snapshot
     let snapshot_url =
@@ -274,6 +280,9 @@ async fn test_delete_snapshot_then_disk(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(snapshot.disk_id, base_disk.identity.id);
     assert_eq!(snapshot.size, base_disk.size);
 
+    // The Crucible regions and snapshot still remain
+    assert!(!disk_test.crucible_resources_deleted().await);
+
     // Delete the snapshot
     let snapshot_url =
         format!("{}/snapshots/{}", get_project_url(), "a-snapshot");
@@ -282,6 +291,9 @@ async fn test_delete_snapshot_then_disk(cptestctx: &ControlPlaneTestContext) {
         .execute()
         .await
         .expect("failed to delete snapshot");
+
+    // The Crucible regions still remain
+    assert!(!disk_test.crucible_resources_deleted().await);
 
     // Delete the disk
     let disk_url = format!("{}/{}", disks_url, base_disk_name);
@@ -399,6 +411,9 @@ async fn test_multiple_snapshots(cptestctx: &ControlPlaneTestContext) {
         assert_eq!(snapshot.size, base_disk.size);
     }
 
+    // The Crucible regions and snapshots still remain
+    assert!(!disk_test.crucible_resources_deleted().await);
+
     // Delete the disk
     let disk_url = format!("{}/{}", disks_url, base_disk_name);
     NexusRequest::object_delete(client, &disk_url)
@@ -409,6 +424,9 @@ async fn test_multiple_snapshots(cptestctx: &ControlPlaneTestContext) {
 
     // Delete the snapshots
     for i in 0..4 {
+        // The Crucible snapshots still remain
+        assert!(!disk_test.crucible_resources_deleted().await);
+
         let snapshot_url =
             format!("{}/snapshots/a-snapshot-{}", get_project_url(), i);
         NexusRequest::object_delete(client, &snapshot_url)
@@ -521,6 +539,9 @@ async fn test_snapshot_prevents_other_disk(
     assert_eq!(snapshot.disk_id, base_disk.identity.id);
     assert_eq!(snapshot.size, base_disk.size);
 
+    // The Crucible regions and snapshots still remain
+    assert!(!disk_test.crucible_resources_deleted().await);
+
     // Delete the disk
     let disk_url = format!("{}/{}", disks_url, base_disk_name);
     NexusRequest::object_delete(client, &disk_url)
@@ -528,6 +549,9 @@ async fn test_snapshot_prevents_other_disk(
         .execute()
         .await
         .expect("failed to delete disk");
+
+    // The Crucible snapshots still remain
+    assert!(!disk_test.crucible_resources_deleted().await);
 
     // Attempt disk allocation, which will fail - the presense of the snapshot
     // means the region wasn't deleted.
@@ -561,6 +585,9 @@ async fn test_snapshot_prevents_other_disk(
         .execute()
         .await
         .expect("failed to delete snapshot");
+
+    // All resources were deleted
+    assert!(disk_test.crucible_resources_deleted().await);
 
     // Disk allocation will work now
     let _next_disk: Disk = NexusRequest::new(
@@ -688,6 +715,8 @@ async fn test_multiple_disks_multiple_snapshots_order_1(
     assert_eq!(second_snapshot.disk_id, second_disk.identity.id);
     assert_eq!(second_snapshot.size, second_disk.size);
 
+    assert!(!disk_test.crucible_resources_deleted().await);
+
     // Delete the first disk
     let disk_url = format!("{}/{}", disks_url, first_disk_name);
     NexusRequest::object_delete(client, &disk_url)
@@ -695,6 +724,8 @@ async fn test_multiple_disks_multiple_snapshots_order_1(
         .execute()
         .await
         .expect("failed to delete disk");
+
+    assert!(!disk_test.crucible_resources_deleted().await);
 
     // Delete the second snapshot
     let snapshot_url =
@@ -705,6 +736,8 @@ async fn test_multiple_disks_multiple_snapshots_order_1(
         .await
         .expect("failed to delete snapshot");
 
+    assert!(!disk_test.crucible_resources_deleted().await);
+
     // Delete the second disk
     let disk_url = format!("{}/{}", disks_url, second_disk_name);
     NexusRequest::object_delete(client, &disk_url)
@@ -712,6 +745,8 @@ async fn test_multiple_disks_multiple_snapshots_order_1(
         .execute()
         .await
         .expect("failed to delete disk");
+
+    assert!(!disk_test.crucible_resources_deleted().await);
 
     // Delete the first snapshot
     let snapshot_url =
@@ -827,6 +862,8 @@ async fn test_multiple_disks_multiple_snapshots_order_2(
     assert_eq!(second_snapshot.disk_id, second_disk.identity.id);
     assert_eq!(second_snapshot.size, second_disk.size);
 
+    assert!(!disk_test.crucible_resources_deleted().await);
+
     // Delete the first disk
     let disk_url = format!("{}/{}", disks_url, first_disk_name);
     NexusRequest::object_delete(client, &disk_url)
@@ -834,6 +871,8 @@ async fn test_multiple_disks_multiple_snapshots_order_2(
         .execute()
         .await
         .expect("failed to delete disk");
+
+    assert!(!disk_test.crucible_resources_deleted().await);
 
     // Delete the second disk
     let disk_url = format!("{}/{}", disks_url, second_disk_name);
@@ -843,6 +882,8 @@ async fn test_multiple_disks_multiple_snapshots_order_2(
         .await
         .expect("failed to delete disk");
 
+    assert!(!disk_test.crucible_resources_deleted().await);
+
     // Delete the second snapshot
     let snapshot_url =
         format!("{}/snapshots/second-snapshot", get_project_url());
@@ -851,6 +892,8 @@ async fn test_multiple_disks_multiple_snapshots_order_2(
         .execute()
         .await
         .expect("failed to delete snapshot");
+
+    assert!(!disk_test.crucible_resources_deleted().await);
 
     // Delete the first snapshot
     let snapshot_url =
@@ -1018,6 +1061,8 @@ async fn test_multiple_layers_of_snapshots_delete_all_disks_first(
 
     // Delete the disks
     for name in ["layer-1-disk", "layer-2-disk", "layer-3-disk"] {
+        assert!(!disk_test.crucible_resources_deleted().await);
+
         let disk_url = format!("{}/{}", get_disks_url(), name);
         NexusRequest::object_delete(client, &disk_url)
             .authn_as(AuthnMode::PrivilegedUser)
@@ -1028,6 +1073,8 @@ async fn test_multiple_layers_of_snapshots_delete_all_disks_first(
 
     // Delete the snapshots
     for name in ["layer-1-snapshot", "layer-2-snapshot", "layer-3-snapshot"] {
+        assert!(!disk_test.crucible_resources_deleted().await);
+
         let snapshot_url = format!("{}/snapshots/{}", get_project_url(), name);
         NexusRequest::object_delete(client, &snapshot_url)
             .authn_as(AuthnMode::PrivilegedUser)
@@ -1055,6 +1102,8 @@ async fn test_multiple_layers_of_snapshots_delete_all_snapshots_first(
 
     // Delete the snapshots
     for name in ["layer-1-snapshot", "layer-2-snapshot", "layer-3-snapshot"] {
+        assert!(!disk_test.crucible_resources_deleted().await);
+
         let snapshot_url = format!("{}/snapshots/{}", get_project_url(), name);
         NexusRequest::object_delete(client, &snapshot_url)
             .authn_as(AuthnMode::PrivilegedUser)
@@ -1065,6 +1114,8 @@ async fn test_multiple_layers_of_snapshots_delete_all_snapshots_first(
 
     // Delete the disks
     for name in ["layer-1-disk", "layer-2-disk", "layer-3-disk"] {
+        assert!(!disk_test.crucible_resources_deleted().await);
+
         let disk_url = format!("{}/{}", get_disks_url(), name);
         NexusRequest::object_delete(client, &disk_url)
             .authn_as(AuthnMode::PrivilegedUser)
@@ -1117,6 +1168,8 @@ async fn test_multiple_layers_of_snapshots_random_delete_order(
     dbg!(&objects);
 
     for object in &objects {
+        assert!(!disk_test.crucible_resources_deleted().await);
+
         match object {
             DeleteObject::Disk(name) => {
                 let disk_url = format!("{}/{}", get_disks_url(), name);
