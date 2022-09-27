@@ -276,13 +276,13 @@ impl DataStore {
                         .get_result(conn)
                         .optional()?;
 
-                    if volume.is_none() {
+                    let volume = if let Some(v) = volume {
+                        v
+                    } else {
                         // the volume was hard-deleted, return an empty
                         // CrucibleResources
                         return Ok(CrucibleResources::default());
-                    }
-
-                    let volume = volume.unwrap();
+                    };
 
                     if volume.time_deleted.is_none() {
                         // a volume record exists, and was not deleted - this is the
