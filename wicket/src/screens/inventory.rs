@@ -6,12 +6,19 @@
 
 use super::colors::*;
 use super::make_even;
+use super::RectState;
 use super::Screen;
+use super::TabIndex;
 use super::{Height, Width};
-use crate::widgets::Banner;
+use crate::widgets::{Banner, Rack, RackState};
 use crate::Action;
 use crate::Frame;
+use crate::ScreenEvent;
 use crate::State;
+use crossterm::event::Event as TermEvent;
+use crossterm::event::{
+    KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers,
+};
 use slog::info;
 use slog::Logger;
 use tui::layout::Rect;
@@ -20,133 +27,15 @@ use tui::style::{Color, Modifier, Style};
 use tui::text::Span;
 use tui::widgets::{Block, BorderType, Borders};
 
-// This is the visual state of the screen. It's used both to perform stateful
-// renders as well as provide a source for rectangle / point intersection.
-struct DisplayState {
-    rack: RackState,
-}
-
-/// How a specific Rect should be displayed.
-#[derive(Debug, Default)]
-struct RectState {
-    rect: Rect,
-    // Whether the mouse is hovering over the Rect
-    hovered: bool,
-    // Whether the tab is currently on this Rect
-    tabbed: bool,
-
-    // Whether the user has clicked or hit enter on a tabbed Rect
-    selected: bool,
-
-    // If the Rect is currently accessible. It can become inactive if, for
-    // example, a sled has not reported inventory yet.
-    active: bool,
-}
-
-// The visual state of the rack
-#[derive(Debug, Default)]
-struct RackState {
-    rect: Rect,
-    sleds: [RectState; 32],
-    power_shelves: [RectState; 2],
-    switches: [RectState; 2],
-}
-
-impl RackState {
-    fn new(rect: &Rect, watermark_height: &Height) -> RackState {
-        let mut rack = RackState::default();
-        rack.resize(rect, watermark_height);
-        rack
-    }
-
-    // Split the rect into 20 vertical chunks. 1 for each sled bay, 1 per
-    // switch, 1 per power shelf.
-    // Divide each rack chunk into two horizontal chunks, one per sled.
-    fn resize(&mut self, rect: &Rect, watermark_height: &Height) {
-        let width = rect.width;
-        let max_height = rect.height;
-        let mut rack = rect.clone();
-
-        // Scale proportionally and center the rack horizontally
-        rack.height = make_even(rack.height - (watermark_height.0 * 2) - 2);
-        rack.width = make_even(rack.height * 2 / 3);
-        rack.x = width / 2 - rack.width / 2;
-
-        // Make the max_height divisible by 20
-        let actual_height = rack.height / 20 * 20;
-        rack.height = actual_height;
-
-        // Center the rack vertically
-        rack.y = (max_height - actual_height) / 2 - 1;
-
-        self.rect = rack.clone();
-
-        let sled_height = rack.height / 20;
-        let sled_width = rack.width / 2;
-
-        // Top Sleds
-        for i in 0..16 {
-            self.size_sled(i, &rack, sled_height, sled_width);
-        }
-
-        // Top Switch
-        let switch = &mut self.switches[0];
-        switch.rect.y = rack.y + sled_height * 8;
-        switch.rect.x = rack.x;
-        switch.rect.height = sled_height;
-        switch.rect.width = sled_width * 2;
-
-        // Power Shelves
-        for i in [17, 18] {
-            let shelf = &mut self.power_shelves[i - 17];
-            shelf.rect.y = rack.y + sled_height * (i as u16 / 2 + 1);
-            shelf.rect.x = rack.x;
-            shelf.rect.height = sled_height;
-            shelf.rect.width = sled_width * 2;
-        }
-
-        // Bottom Switch
-        let switch = &mut self.switches[1];
-        switch.rect.y = rack.y + sled_height * (11);
-        switch.rect.x = rack.x;
-        switch.rect.height = sled_height;
-        switch.rect.width = sled_width * 2;
-
-        // Bottom Sleds
-        // We treat each non-sled as 2 sleds for layout purposes
-        for i in 24..40 {
-            self.size_sled(i, &rack, sled_height, sled_width);
-        }
-    }
-
-    fn size_sled(
-        &mut self,
-        i: usize,
-        rack: &Rect,
-        sled_height: u16,
-        sled_width: u16,
-    ) {
-        // The power shelves and switches are in between in the layout
-        let index = if i < 16 { i } else { i - 8 };
-        let sled = &mut self.sleds[index];
-        sled.rect.y = rack.y + sled_height * (i as u16 / 2);
-        if i % 2 == 0 {
-            // left sled
-            sled.rect.x = rack.x
-        } else {
-            // right sled
-            sled.rect.x = rack.x + sled_width;
-        }
-        sled.rect.height = sled_height;
-        sled.rect.width = sled_width;
-    }
-}
+// Currently we only allow tabbing through the rack
+const MAX_TAB_INDEX: u16 = 35;
 
 /// Show the rack inventory as learned from MGS
 pub struct InventoryScreen {
     log: Logger,
     watermark: &'static str,
     rack_state: RackState,
+    tab_index: TabIndex,
 }
 
 impl InventoryScreen {
@@ -155,6 +44,7 @@ impl InventoryScreen {
             log: log.clone(),
             watermark: include_str!("../../banners/oxide.txt"),
             rack_state: RackState::default(),
+            tab_index: TabIndex::new(MAX_TAB_INDEX),
         }
     }
 
@@ -196,28 +86,76 @@ impl InventoryScreen {
     fn draw_rack(&mut self, f: &mut Frame, watermark_height: Height) {
         self.rack_state.resize(&f.size(), &watermark_height);
 
-        let switches =
-            Block::default().style(Style::default().bg(OX_OFF_WHITE));
+        let mut rack = Rack::default()
+            .switch_style(Style::default().bg(OX_GRAY_DARK))
+            .power_shelf_style(Style::default().bg(OX_GRAY))
+            .sled_style(Style::default().bg(OX_GREEN_LIGHT))
+            .sled_selected_style(Style::default().bg(OX_GREEN_DARK))
+            .sled_border_style(Style::default().fg(Color::Black))
+            .sled_selected_border_style(Style::default().fg(OX_OFF_WHITE));
 
-        let power_shelves =
-            Block::default().style(Style::default().bg(OX_YELLOW));
+        let area = self.rack_state.rect.clone();
+        f.render_stateful_widget(rack, area, &mut self.rack_state);
+    }
 
-        let sled = Block::default()
-            .style(Style::default().bg(Color::Gray))
-            .borders(Borders::TOP | Borders::RIGHT)
-            .border_style(Style::default().fg(Color::White));
-
-        for (i, s) in self.rack_state.sleds.iter().enumerate() {
-            let sled = sled.clone().title(format!("sled {}", i + 1));
-            f.render_widget(sled, s.rect.clone());
+    fn handle_key_event(
+        &mut self,
+        state: &State,
+        event: KeyEvent,
+    ) -> Vec<Action> {
+        match event.code {
+            KeyCode::Tab => {
+                self.clear_tabbed();
+                self.tab_index.inc();
+                self.set_tabbed();
+            }
+            KeyCode::BackTab => {
+                self.clear_tabbed();
+                self.tab_index.dec();
+                self.set_tabbed();
+            }
+            KeyCode::Esc => {
+                self.clear_tabbed();
+                self.tab_index.clear();
+            }
+            _ => (),
         }
+        vec![Action::Redraw]
+    }
 
-        for (i, s) in self.rack_state.switches.iter().enumerate() {
-            f.render_widget(switches.clone(), s.rect.clone());
-        }
+    // Set the tabbed boolean to `true` for the current tab indexed rect
+    fn set_tabbed(&mut self) {
+        self.update_tabbed(true);
+    }
 
-        for (i, s) in self.rack_state.power_shelves.iter().enumerate() {
-            f.render_widget(power_shelves.clone(), s.rect.clone());
+    // Set the tabbed boolean to `false` for the current tab indexed rect
+    fn clear_tabbed(&mut self) {
+        self.update_tabbed(false);
+    }
+
+    fn update_tabbed(&mut self, val: bool) {
+        if let Some(i) = self.tab_index.get() {
+            let i = usize::from(i);
+            // Sleds
+            if i < 16 {
+                self.rack_state.sleds[i].tabbed = val;
+            }
+            if i > 19 {
+                self.rack_state.sleds[i - 4].tabbed = val;
+            }
+
+            // Switches
+            if i == 16 {
+                self.rack_state.switches[0].tabbed = val;
+            }
+            if i == 19 {
+                self.rack_state.switches[1].tabbed = val;
+            }
+
+            // Power Shelves
+            if i == 18 || i == 19 {
+                self.rack_state.power_shelves[i - 18].tabbed = val;
+            }
         }
     }
 }
@@ -236,7 +174,12 @@ impl Screen for InventoryScreen {
         Ok(())
     }
 
-    fn on(&mut self, state: &State, event: crate::ScreenEvent) -> Vec<Action> {
-        vec![Action::Redraw]
+    fn on(&mut self, state: &State, event: ScreenEvent) -> Vec<Action> {
+        match event {
+            ScreenEvent::Term(TermEvent::Key(key_event)) => {
+                self.handle_key_event(state, key_event)
+            }
+            _ => unimplemented!(),
+        }
     }
 }
