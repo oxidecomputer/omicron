@@ -284,7 +284,8 @@ CREATE TABLE omicron.public.volume (
 
     /*
      * A JSON document describing what resources to clean up when deleting this
-     * volume.
+     * volume. The Rust type of this column should be the CrucibleResources
+     * enum.
      */
     resources_to_clean_up TEXT
 );

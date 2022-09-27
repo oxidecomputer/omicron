@@ -281,7 +281,9 @@ impl DataStore {
                     } else {
                         // the volume was hard-deleted, return an empty
                         // CrucibleResources
-                        return Ok(CrucibleResources::default());
+                        return Ok(CrucibleResources::V1(
+                            CrucibleResourcesV1::default(),
+                        ));
                     };
 
                     if volume.time_deleted.is_none() {
@@ -313,7 +315,9 @@ impl DataStore {
                             // sets time_deleted at the same time as
                             // resources_to_clean_up! But, instead of a panic here,
                             // just return an empty CrucibleResources.
-                            return Ok(CrucibleResources::default());
+                            return Ok(CrucibleResources::V1(
+                                CrucibleResourcesV1::default(),
+                            ));
                         }
                     }
                 };
@@ -349,7 +353,7 @@ impl DataStore {
                 }
 
                 // Return what results can be cleaned up
-                let result = CrucibleResources {
+                let result = CrucibleResources::V1(CrucibleResourcesV1 {
                     // The only use of a read-write region will be at the top level of a
                     // Volume. These are not shared, but if any snapshots are taken this
                     // will prevent deletion of the region. Filter out any regions that
@@ -404,7 +408,7 @@ impl DataStore {
                             ))
                             .get_results::<(Dataset, RegionSnapshot)>(conn)?
                     },
-                };
+                });
 
                 // Soft delete this volume, and serialize the resources that are to
                 // be cleaned up.
@@ -450,8 +454,15 @@ struct CrucibleTargets {
     read_only_targets: Vec<String>,
 }
 
+// Serialize this enum into the `resources_to_clean_up` column to handle
+// different versions over time.
+#[derive(Debug, Serialize, Deserialize)]
+pub enum CrucibleResources {
+    V1(CrucibleResourcesV1),
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
-pub struct CrucibleResources {
+pub struct CrucibleResourcesV1 {
     pub datasets_and_regions: Vec<(Dataset, Region)>,
     pub datasets_and_snapshots: Vec<(Dataset, RegionSnapshot)>,
 }
