@@ -7,6 +7,7 @@ use crate::screens::Height;
 use crate::screens::RectState;
 use tui::buffer::Buffer;
 use tui::layout::Rect;
+use tui::style::Color;
 use tui::style::Style;
 use tui::widgets::Block;
 use tui::widgets::Borders;
@@ -72,9 +73,25 @@ impl Rack {
                 .border_style(self.sled_border_style);
         }
 
+        let inner = block.inner(sled.rect);
         block.render(sled.rect, buf);
 
-        // TODO: Draw some U.2 bays :)
+        // Draw some U.2 bays
+        // TODO: Draw 10 only? - That may not scale down as well
+        for x in inner.left()..inner.right() {
+            for y in inner.top()..inner.bottom() {
+                let cell = buf.get_mut(x, y).set_symbol("▕");
+                if sled.tabbed {
+                    if let Some(color) = self.sled_selected_style.fg {
+                        cell.set_fg(color);
+                    }
+                } else {
+                    if let Some(color) = self.sled_style.fg {
+                        cell.set_fg(color);
+                    }
+                }
+            }
+        }
     }
 
     pub fn draw_switch(&self, buf: &mut Buffer, switch: &RectState) {

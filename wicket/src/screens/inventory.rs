@@ -89,8 +89,10 @@ impl InventoryScreen {
         let mut rack = Rack::default()
             .switch_style(Style::default().bg(OX_GRAY_DARK))
             .power_shelf_style(Style::default().bg(OX_GRAY))
-            .sled_style(Style::default().bg(OX_GREEN_LIGHT))
-            .sled_selected_style(Style::default().bg(OX_GREEN_DARK))
+            .sled_style(Style::default().bg(OX_GREEN_LIGHT).fg(Color::Black))
+            .sled_selected_style(
+                Style::default().bg(OX_GREEN_DARK).fg(OX_WHITE),
+            )
             .sled_border_style(Style::default().fg(Color::Black))
             .sled_selected_border_style(Style::default().fg(OX_OFF_WHITE));
 
