@@ -12,10 +12,16 @@ use uuid::Uuid;
 
 impl super::Nexus {
     /// Kick off a saga to delete a volume (and clean up any Crucible resources
-    /// as a result). Importantly, this should not be a sub-saga - whoever is
-    /// calling this should not block on cleaning up Crucible Resources, because
-    /// the deletion of a "disk" or "snapshot" could free up a *lot* of Crucible
-    /// resources and the user's query shouldn't wait on those DELETE calls.
+    /// as a result). Note that this does not unconditionally delete the volume
+    /// record: if the allocated Crucible regions associated with this volume
+    /// still have references, we cannot delete it, so it will be soft-deleted.
+    /// Only when all the associated resources have been cleaned up does Nexus
+    /// hard delete the volume record.
+    ///
+    /// Importantly, this should not be a sub-saga - whoever is calling this
+    /// should not block on cleaning up Crucible Resources, because the deletion
+    /// of a "disk" or "snapshot" could free up a *lot* of Crucible resources
+    /// and the user's query shouldn't wait on those DELETE calls.
     pub async fn volume_delete(
         self: &Arc<Self>,
         volume_id: Uuid,
