@@ -4,6 +4,8 @@
 
 //! Custom tui widgets
 
-pub mod banner;
+mod banner;
+mod rack;
 
 pub use banner::Banner;
+pub use rack::{Rack, RackState};
