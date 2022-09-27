@@ -5,7 +5,9 @@
 //! Custom tui widgets
 
 mod banner;
+mod inventory;
 mod rack;
 
 pub use banner::Banner;
+pub use inventory::{InventoryModal, InventoryModalState};
 pub use rack::{Rack, RackState};

@@ -2,6 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+//! A rendering of the Oxide rack
+
 use crate::screens::make_even;
 use crate::screens::Height;
 use crate::screens::RectState;
@@ -9,7 +11,6 @@ use slog::debug;
 use slog::Logger;
 use tui::buffer::Buffer;
 use tui::layout::Rect;
-use tui::style::Color;
 use tui::style::Style;
 use tui::widgets::Block;
 use tui::widgets::Borders;
@@ -144,7 +145,6 @@ impl Rack {
         let width = inner.right() - inner.left();
         let step = width / 6;
         let border = (width - step * 6) / 2;
-        debug!(log, "width = {width}, step = {step}, border = {border}");
 
         for x in inner.left() + border..inner.right() - border {
             for y in inner.top()..inner.bottom() {

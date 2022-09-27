@@ -51,7 +51,7 @@ impl InventoryScreen {
     }
 
     fn draw_background(&self, f: &mut Frame) {
-        let style = Style::default().fg(OX_OFF_WHITE).bg(OX_GREEN_DARK);
+        let style = Style::default().fg(OX_GREEN_DARK).bg(OX_GRAY);
         let block = Block::default()
             .style(style)
             .borders(Borders::NONE)
@@ -62,7 +62,7 @@ impl InventoryScreen {
     }
 
     fn draw_watermark(&self, f: &mut Frame) -> (Height, Width) {
-        let style = Style::default().fg(OX_GREEN_DARKEST).bg(OX_GREEN_DARK);
+        let style = Style::default().fg(OX_GRAY_DARK).bg(OX_GRAY);
         let banner = Banner::new(self.watermark).style(style);
         let height = banner.height();
         let width = banner.width();
@@ -88,17 +88,17 @@ impl InventoryScreen {
     fn draw_rack(&mut self, f: &mut Frame, watermark_height: Height) {
         self.rack_state.resize(&f.size(), &watermark_height);
 
-        let mut rack = Rack::default()
-            .switch_style(Style::default().bg(OX_GRAY_DARK))
-            .power_shelf_style(Style::default().bg(OX_GRAY))
+        let rack = Rack::default()
+            .switch_style(Style::default().bg(OX_GRAY_DARK).fg(OX_WHITE))
+            .power_shelf_style(Style::default().bg(OX_GRAY).fg(OX_OFF_WHITE))
             .sled_style(Style::default().bg(OX_GREEN_LIGHT).fg(Color::Black))
             .sled_selected_style(
                 Style::default().fg(Color::Black).bg(OX_GRAY_DARK),
             )
-            .border_style(Style::default().fg(Color::Black))
+            .border_style(Style::default().fg(OX_GRAY).bg(Color::Black))
             .border_selected_style(Style::default().fg(OX_YELLOW))
             .switch_selected_style(Style::default().bg(OX_GRAY_DARK))
-            .power_shelf_selected_style(Style::default().bg(OX_GRAY_DARK));
+            .power_shelf_selected_style(Style::default().bg(OX_GRAY));
 
         let area = self.rack_state.rect.clone();
         f.render_stateful_widget(rack, area, &mut self.rack_state);
