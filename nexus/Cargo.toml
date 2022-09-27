@@ -44,7 +44,7 @@ parse-display = "0.6.0"
 pq-sys = "*"
 rand = "0.8.5"
 ref-cast = "1.0"
-reqwest = { version = "0.11.8", features = [ "json" ] }
+reqwest = { version = "0.11.12", features = [ "json" ] }
 ring = "0.16"
 samael = { git = "https://github.com/njaremko/samael", features = ["xmlsec"], branch = "master" }
 serde_json = "1.0"

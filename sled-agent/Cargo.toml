@@ -33,7 +33,7 @@ percent-encoding = "2.2.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor" }
 propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "c0776be03bf0928651996eb00ad6f3665e99ebe7" }
 rand = { version = "0.8.5", features = ["getrandom"] }
-reqwest = { version = "0.11.8", default-features = false, features = ["rustls-tls", "stream"] }
+reqwest = { version = "0.11.12", default-features = false, features = ["rustls-tls", "stream"] }
 schemars = { version = "0.8.10", features = [ "chrono", "uuid1" ] }
 serde = { version = "1.0", features = [ "derive" ] }
 serde_json = "1.0"
