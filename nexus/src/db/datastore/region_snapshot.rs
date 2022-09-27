@@ -19,17 +19,15 @@ impl DataStore {
     pub async fn region_snapshot_create(
         &self,
         region_snapshot: RegionSnapshot,
-    ) -> CreateResult<RegionSnapshot> {
+    ) -> CreateResult<()> {
         use db::schema::region_snapshot::dsl;
 
-        // TODO https://github.com/oxidecomputer/omicron/issues/1168
         diesel::insert_into(dsl::region_snapshot)
             .values(region_snapshot.clone())
-            .on_conflict((dsl::dataset_id, dsl::region_id, dsl::snapshot_id))
-            .do_nothing()
-            .returning(RegionSnapshot::as_returning())
-            .get_result_async(self.pool())
+            .on_conflict_do_nothing()
+            .execute_async(self.pool())
             .await
+            .map(|_| ())
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
