@@ -153,8 +153,8 @@ impl InventoryScreen {
             }
 
             // Power Shelves
-            if i == 18 || i == 19 {
-                self.rack_state.power_shelves[i - 18].tabbed = val;
+            if i == 17 || i == 18 {
+                self.rack_state.power_shelves[i - 17].tabbed = val;
             }
         }
     }
