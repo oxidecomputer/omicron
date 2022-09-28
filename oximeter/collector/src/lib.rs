@@ -37,7 +37,7 @@ pub enum Error {
     #[error("Error running Oximeter collector server: {0}")]
     Server(String),
 
-    #[error("Error collecting metric data from collector id={:0}: {1}")]
+    #[error("Error collecting metric data from collector id={0}: {1}")]
     CollectionError(Uuid, String),
 
     #[error(transparent)]
