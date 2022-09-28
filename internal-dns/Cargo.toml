@@ -5,31 +5,31 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
-anyhow = "1.0"
-clap = { version = "3.2", features = [ "derive" ] }
+anyhow.workspace = true
+clap.workspace = true
 internal-dns-client = { path = "../internal-dns-client" }
-dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
+dropshot.workspace = true
 pretty-hex = "0.3.0"
-schemars = "0.8.10"
-serde = { version = "1.0", features = [ "derive" ] }
-serde_json = "1.0"
-sled = "0.34"
-slog = { version = "2.5.0", features = [ "max_level_trace", "release_max_level_debug" ] }
-slog-term = "2.7"
-slog-async = "2.7"
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sled.workspace = true
+slog.workspace = true
+slog-term.workspace = true
+slog-async.workspace = true
 slog-envlogger = "2.2"
 tempdir = "0.3"
-tokio = { version = "1.21", features = [ "full" ] }
-toml = "0.5"
-trust-dns-proto = "0.22"
+tokio = { workspace = true, features = [ "full" ] }
+toml.workspace = true
+trust-dns-proto.workspace = true
 trust-dns-server = "0.22"
 trust-dns-client = "0.22"
 
 [dev-dependencies]
-expectorate = "1.0.5"
+expectorate.workspace = true
 omicron-test-utils = { path = "../test-utils" }
-openapiv3 = "1.0"
-openapi-lint = { git = "https://github.com/oxidecomputer/openapi-lint", branch = "main" }
-serde_json = "1.0"
-subprocess = "0.2.9"
-trust-dns-resolver = "0.22"
+openapiv3.workspace = true
+openapi-lint.workspace = true
+serde_json.workspace = true
+subprocess.workspace = true
+trust-dns-resolver.workspace = true

@@ -6,28 +6,28 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
-anyhow = "1.0"
-clap = { version = "3.2", features = ["derive"] }
-futures = "0.3.24"
-hex = "0.4.3"
+anyhow.workspace = true
+clap.workspace = true
+futures.workspace = true
+hex.workspace = true
 indicatif = { version = "0.17.1", features = ["rayon"] }
 omicron-common = { path = "../common" }
 omicron-sled-agent = { path = "../sled-agent" }
-omicron-zone-package = "0.3.2"
+omicron-zone-package.workspace = true
 rayon = "1.5"
-reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"] }
-ring = "0.16"
-serde = { version = "1.0", features = [ "derive" ] }
-serde_derive = "1.0"
-slog = { version = "2.5", features = [ "max_level_trace", "release_max_level_debug"] }
-slog-async = "2.7"
-slog-term = "2.9"
-smf = "0.2"
-tar = "0.4"
-tempfile = "3.3"
-thiserror = "1.0"
-tokio = { version = "1.21", features = [ "full" ] }
-toml = "0.5.9"
+reqwest = { workspace = true, default-features = false, features = ["rustls-tls"] }
+ring.workspace = true
+serde.workspace = true
+serde_derive.workspace = true
+slog.workspace = true
+slog-async.workspace = true
+slog-term.workspace = true
+smf.workspace = true
+tar.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = [ "full" ] }
+toml.workspace = true
 walkdir = "2.3"
 
 # Disable doc builds by default for our binaries to work around issue

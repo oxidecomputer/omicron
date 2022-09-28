@@ -6,16 +6,16 @@ description = "Crate for producing metric data to be collected by the Oxide cont
 license = "MPL-2.0"
 
 [dependencies]
-chrono = { version = "0.4.19", features = [ "serde" ] }
-dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ]}
+chrono.workspace = true
+dropshot.workspace = true
 nexus-client = { path = "../../nexus-client" }
 omicron-common = { path = "../../common" }
 oximeter = { path = "../oximeter" }
-reqwest = { version = "0.11.12", features = [ "json" ] }
-schemars = { version = "0.8.10", features = [ "uuid1", "bytes", "chrono" ] }
-serde = { version = "1", features = [ "derive" ] }
-slog = { version = "2.5", features = [ "max_level_trace", "release_max_level_debug" ] }
-slog-dtrace = "0.2"
-tokio = "1.21"
-thiserror = "1.0.36"
-uuid = { version = "1.1.0", features = [ "v4", "serde" ] }
+reqwest = { workspace = true, features = [ "json" ] }
+schemars = { workspace = true, features = [ "uuid1", "bytes", "chrono" ] }
+serde.workspace = true
+slog.workspace = true
+slog-dtrace.workspace = true
+tokio.workspace = true
+thiserror.workspace = true
+uuid.workspace = true

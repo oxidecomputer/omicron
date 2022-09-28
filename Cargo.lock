@@ -3109,7 +3109,6 @@ dependencies = [
  "crucible-agent-client",
  "crucible-client-types",
  "ddm-admin-client",
- "diesel",
  "dropshot",
  "expectorate",
  "futures",
@@ -3147,7 +3146,6 @@ dependencies = [
  "smf",
  "socket2",
  "sp-sim",
- "spdm",
  "sprockets-common",
  "sprockets-host",
  "subprocess",
@@ -5260,17 +5258,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "toml",
-]
-
-[[package]]
-name = "spdm"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/spdm?rev=9742f6e#9742f6eae7b86cc8bc8bc2fb0feeb44f770a1fb6"
-dependencies = [
- "bitflags",
- "rand 0.8.5",
- "ring",
- "webpki",
 ]
 
 [[package]]

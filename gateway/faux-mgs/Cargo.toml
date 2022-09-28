@@ -5,15 +5,15 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
-anyhow = "1.0"
-clap = { version = "3.2", features = ["derive"] }
-slog = { version = "2.7", features = ["max_level_trace", "release_max_level_debug"] }
-slog-async = "2.6"
-slog-term = "2.9"
+anyhow.workspace = true
+clap.workspace = true
+slog.workspace = true
+slog-async.workspace = true
+slog-term.workspace = true
 termios = "0.3"
-thiserror = "1.0"
-tokio = { version = "1.21", features = ["full"] }
-uuid = { version = "1.1", features = ["v4"] }
+thiserror.workspace = true
+tokio = { workspace = true, features = ["full"] }
+uuid.workspace = true
 
 gateway-messages = { path = "../../gateway-messages", features = ["std"] }
 gateway-sp-comms = { path = "../../gateway-sp-comms" }

@@ -5,39 +5,33 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
-clap = { version = "3.2", features = ["derive"] }
-dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
-futures = "0.3.24"
-hex = "0.4"
-http = "0.2.7"
-hyper = "0.14.20"
-schemars = "0.8"
-serde = { version = "1.0", features = ["derive"] }
-slog-dtrace = "0.2"
-thiserror = "1.0.36"
-tokio-tungstenite = "0.17"
-toml = "0.5.9"
-uuid = "1.1.0"
+clap.workspace = true
+dropshot.workspace = true
+futures.workspace = true
+hex.workspace = true
+http.workspace = true
+hyper.workspace = true
+schemars.workspace = true
+serde.workspace = true
+slog.workspace = true
+slog-dtrace.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = [ "full" ] }
+tokio-tungstenite.workspace = true
+toml.workspace = true
+uuid.workspace = true
 
 gateway-messages = { path = "../gateway-messages", features = ["std"] }
 gateway-sp-comms = { path = "../gateway-sp-comms" }
 omicron-common = { path = "../common" }
 
-[dependencies.slog]
-version = "2.7"
-features = [ "max_level_trace", "release_max_level_debug" ]
-
-[dependencies.tokio]
-version = "1.21"
-features = [ "full" ]
-
 [dev-dependencies]
-expectorate = "1.0.5"
-http = "0.2.7"
+expectorate.workspace = true
+http.workspace = true
 omicron-test-utils = { path = "../test-utils" }
-openapi-lint = { git = "https://github.com/oxidecomputer/openapi-lint", branch = "main" }
-openapiv3 = "1.0"
-serde_json = "1.0"
+openapi-lint.workspace = true
+openapiv3.workspace = true
+serde_json.workspace = true
 sp-sim = { path = "../sp-sim" }
-subprocess = "0.2.9"
-tokio-tungstenite = "0.17"
+subprocess.workspace = true
+tokio-tungstenite.workspace = true

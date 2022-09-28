@@ -5,26 +5,20 @@ edition = "2018"
 license = "MPL-2.0"
 
 [dependencies]
-futures = "0.3.24"
+futures.workspace = true
 once_cell = "1.15.0"
-serde = { version = "1.0", features = ["derive"] }
-serde_with = "2.0.1"
-thiserror = "1.0.36"
+serde.workspace = true
+serde_with.workspace = true
+slog.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = [ "full" ] }
 tokio-stream = "0.1.10"
-usdt = "0.3.1"
-uuid = "1.1.0"
+usdt.workspace = true
+uuid.workspace = true
 zip = { version = "0.6.2", default-features = false, features = ["deflate","bzip2"] }
 
 gateway-messages = { path = "../gateway-messages", features = ["std"] }
 omicron-common = { path = "../common" }
-
-[dependencies.slog]
-version = "2.7"
-features = [ "max_level_trace", "release_max_level_debug" ]
-
-[dependencies.tokio]
-version = "1.21"
-features = [ "full" ]
 
 [dev-dependencies]
 omicron-test-utils = { path = "../test-utils" }

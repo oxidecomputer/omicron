@@ -6,17 +6,17 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
-anyhow = "1.0"
-clap = { version = "3.2", features = ["derive"] }
+anyhow.workspace = true
+clap.workspace = true
 crossbeam = "0.8"
 omicron-sled-agent = { path = "../sled-agent" }
 omicron-package = { path = "../package" }
-serde = { version = "1.0", features = [ "derive" ] }
-serde_derive = "1.0"
+serde.workspace = true
+serde_derive.workspace = true
 sp-sim = { path = "../sp-sim" }
-sprockets-rot = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
-thiserror = "1.0"
-toml = "0.5.9"
+sprockets-rot.workspace = true
+thiserror.workspace = true
+toml.workspace = true
 
 # Disable doc builds by default for our binaries to work around issue
 # rust-lang/cargo#8373.  These docs would not be very useful anyway.
