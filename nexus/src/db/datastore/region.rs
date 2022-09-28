@@ -11,7 +11,6 @@ use crate::db;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
-use crate::db::identity::Asset;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Dataset;
 use crate::db::model::Region;
@@ -102,8 +101,6 @@ impl DataStore {
         volume_id: Uuid,
         params: &params::DiskCreate,
     ) -> Result<Vec<(Dataset, Region)>, Error> {
-        use db::schema::dataset::dsl as dataset_dsl;
-
         // ALLOCATION POLICY
         //
         // NOTE: This policy can - and should! - be changed.
@@ -129,7 +126,7 @@ impl DataStore {
         let blocks_per_extent =
             params.extent_size() / block_size.to_bytes() as i64;
 
-        let mut regions: Vec<Region> =
+        let dataset_and_regions: Vec<(Dataset, Region)> =
             crate::db::queries::region_allocation::RegionAllocate::new(
                 volume_id,
                 block_size.into(),
@@ -140,24 +137,7 @@ impl DataStore {
             .await
             .map_err(|e| crate::db::queries::region_allocation::from_pool(e))?;
 
-        let dataset_ids: Vec<Uuid> =
-            regions.iter().map(|r| r.dataset_id()).collect();
-
-        let mut datasets: Vec<Dataset> = dataset_dsl::dataset
-            .filter(dataset_dsl::id.eq_any(dataset_ids))
-            .select(Dataset::as_select())
-            .get_results_async(self.pool())
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
-            })?;
-
-        datasets.sort_by(|a, b| a.id().partial_cmp(&b.id()).unwrap());
-        regions.sort_by(|a, b| {
-            a.dataset_id().partial_cmp(&b.dataset_id()).unwrap()
-        });
-
-        Ok(datasets.into_iter().zip(regions).collect())
+        Ok(dataset_and_regions)
     }
 
     /// Deletes all regions backing a disk.

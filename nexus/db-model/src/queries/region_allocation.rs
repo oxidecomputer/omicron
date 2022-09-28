@@ -119,8 +119,20 @@ table! {
 }
 
 table! {
-    updated_datasets {
+    updated_datasets (id) {
         id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        rcgen -> Int8,
+
+        pool_id -> Uuid,
+
+        ip -> Inet,
+        port -> Int4,
+
+        kind -> crate::DatasetKindEnum,
+        size_used -> Nullable<Int8>,
     }
 }
 
@@ -145,4 +157,11 @@ diesel::allow_tables_to_appear_in_same_query!(
     zpool,
     zpool_size_delta,
     proposed_dataset_changes,
+);
+
+diesel::allow_tables_to_appear_in_same_query!(old_regions, dataset,);
+
+diesel::allow_tables_to_appear_in_same_query!(
+    inserted_regions,
+    updated_datasets,
 );

@@ -6,7 +6,7 @@
 
 use crate::db::alias::ExpressionAlias;
 use crate::db::datastore::REGION_REDUNDANCY_THRESHOLD;
-use crate::db::model::{DatasetKind, Region};
+use crate::db::model::{Dataset, DatasetKind, Region};
 use crate::db::pool::DbConnection;
 use crate::db::subquery::{
     AsQuerySource, Cte, CteBuilder, CteQuery, TrueOrCastError,
@@ -449,7 +449,7 @@ impl UpdateDatasets {
                             .single_value()
                     )
                 )
-                .returning((dataset_dsl::id,))
+                .returning(crate::db::schema::dataset::all_columns)
             )
         }
     }
@@ -493,12 +493,43 @@ impl RegionAllocate {
         let updated_datasets =
             UpdateDatasets::new(&do_insert, &proposed_changes);
 
+        // Gather together all "(dataset, region)" rows for all regions which
+        // are allocated to the volume.
+        //
+        // This roughly translates to:
+        //
+        // old_regions INNER JOIN old_datasets
+        // UNION
+        // new_regions INNER JOIN updated_datasets
+        //
+        // Note that we cannot simply JOIN the old + new regions, and query for
+        // their associated datasets: doing so would return the pre-UPDATE
+        // values of datasets that are updated by this CTE.
         let final_select = Box::new(
-            old_regions.query_source().select(old_regions::all_columns).union(
-                insert_regions
-                    .query_source()
-                    .select(inserted_regions::all_columns),
-            ),
+            old_regions
+                .query_source()
+                .inner_join(
+                    crate::db::schema::dataset::dsl::dataset
+                        .on(old_regions::dataset_id
+                            .eq(crate::db::schema::dataset::dsl::id)),
+                )
+                .select((
+                    crate::db::schema::dataset::all_columns,
+                    old_regions::all_columns,
+                ))
+                .union(
+                    insert_regions
+                        .query_source()
+                        .inner_join(
+                            updated_datasets::dsl::updated_datasets
+                                .on(inserted_regions::dataset_id
+                                    .eq(updated_datasets::id)),
+                        )
+                        .select((
+                            updated_datasets::all_columns,
+                            inserted_regions::all_columns,
+                        )),
+                ),
         );
 
         let cte = CteBuilder::new()
@@ -531,10 +562,12 @@ impl QueryFragment<Pg> for RegionAllocate {
     }
 }
 
+type SelectableSql<T> = <
+    <T as diesel::Selectable<Pg>>::SelectExpression as diesel::Expression
+>::SqlType;
+
 impl Query for RegionAllocate {
-    type SqlType = <
-        <Region as diesel::Selectable<Pg>>::SelectExpression as diesel::Expression
-    >::SqlType;
+    type SqlType = (SelectableSql<Dataset>, SelectableSql<Region>);
 }
 
 impl RunQueryDsl<DbConnection> for RegionAllocate {}
