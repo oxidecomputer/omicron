@@ -1307,6 +1307,32 @@
               "id",
               "state"
             ]
+          },
+          {
+            "description": "The update process failed.",
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "failed"
+                ]
+              }
+            },
+            "required": [
+              "code",
+              "id",
+              "state"
+            ]
           }
         ]
       },

@@ -6,6 +6,7 @@
 
 use crate::version;
 use crate::BulkIgnitionState;
+use crate::ComponentUpdatePrepare;
 use crate::DiscoverResponse;
 use crate::IgnitionCommand;
 use crate::IgnitionState;
@@ -19,9 +20,9 @@ use crate::SpMessage;
 use crate::SpMessageKind;
 use crate::SpPort;
 use crate::SpState;
+use crate::SpUpdatePrepare;
 use crate::UpdateChunk;
 use crate::UpdateId;
-use crate::UpdatePrepare;
 use crate::UpdateStatus;
 use core::convert::Infallible;
 use core::mem;
@@ -70,11 +71,18 @@ pub trait SpHandler {
         port: SpPort,
     ) -> Result<SpState, ResponseError>;
 
-    fn update_prepare(
+    fn sp_update_prepare(
         &mut self,
         sender: SocketAddrV6,
         port: SpPort,
-        update: UpdatePrepare,
+        update: SpUpdatePrepare,
+    ) -> Result<(), ResponseError>;
+
+    fn component_update_prepare(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+        update: ComponentUpdatePrepare,
     ) -> Result<(), ResponseError>;
 
     fn update_chunk(
@@ -242,9 +250,12 @@ pub fn handle_message<H: SpHandler>(
         RequestKind::SpState => {
             handler.sp_state(sender, port).map(ResponseKind::SpState)
         }
-        RequestKind::UpdatePrepare(update) => handler
-            .update_prepare(sender, port, update)
-            .map(|()| ResponseKind::UpdatePrepareAck),
+        RequestKind::SpUpdatePrepare(update) => handler
+            .sp_update_prepare(sender, port, update)
+            .map(|()| ResponseKind::SpUpdatePrepareAck),
+        RequestKind::ComponentUpdatePrepare(update) => handler
+            .component_update_prepare(sender, port, update)
+            .map(|()| ResponseKind::ComponentUpdatePrepareAck),
         RequestKind::UpdateChunk(chunk) => handler
             .update_chunk(sender, port, chunk, trailing_data)
             .map(|()| ResponseKind::UpdateChunkAck),

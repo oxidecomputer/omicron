@@ -354,7 +354,10 @@ pub(crate) trait ResponseKindExt {
 
     fn expect_serial_console_detach_ack(self) -> Result<(), BadResponseType>;
 
-    fn expect_update_prepare_ack(self) -> Result<(), BadResponseType>;
+    fn expect_sp_update_prepare_ack(self) -> Result<(), BadResponseType>;
+
+    fn expect_component_update_prepare_ack(self)
+        -> Result<(), BadResponseType>;
 
     fn expect_update_status(self) -> Result<UpdateStatus, BadResponseType>;
 
@@ -392,8 +395,11 @@ impl ResponseKindExt for ResponseKind {
             ResponseKind::SerialConsoleDetachAck => {
                 response_kind_names::SERIAL_CONSOLE_DETACH_ACK
             }
-            ResponseKind::UpdatePrepareAck => {
-                response_kind_names::UPDATE_PREPARE_ACK
+            ResponseKind::SpUpdatePrepareAck => {
+                response_kind_names::SP_UPDATE_PREPARE_ACK
+            }
+            ResponseKind::ComponentUpdatePrepareAck => {
+                response_kind_names::COMPONENT_UPDATE_PREPARE_ACK
             }
             ResponseKind::UpdateStatus(_) => response_kind_names::UPDATE_STATUS,
             ResponseKind::UpdateAbortAck => {
@@ -496,11 +502,23 @@ impl ResponseKindExt for ResponseKind {
         }
     }
 
-    fn expect_update_prepare_ack(self) -> Result<(), BadResponseType> {
+    fn expect_sp_update_prepare_ack(self) -> Result<(), BadResponseType> {
         match self {
-            ResponseKind::UpdatePrepareAck => Ok(()),
+            ResponseKind::SpUpdatePrepareAck => Ok(()),
             other => Err(BadResponseType {
-                expected: response_kind_names::UPDATE_PREPARE_ACK,
+                expected: response_kind_names::SP_UPDATE_PREPARE_ACK,
+                got: other.name(),
+            }),
+        }
+    }
+
+    fn expect_component_update_prepare_ack(
+        self,
+    ) -> Result<(), BadResponseType> {
+        match self {
+            ResponseKind::ComponentUpdatePrepareAck => Ok(()),
+            other => Err(BadResponseType {
+                expected: response_kind_names::COMPONENT_UPDATE_PREPARE_ACK,
                 got: other.name(),
             }),
         }
@@ -579,7 +597,9 @@ mod response_kind_names {
         "serial_console_write_ack";
     pub(super) const SERIAL_CONSOLE_DETACH_ACK: &str =
         "serial_console_detach_ack";
-    pub(super) const UPDATE_PREPARE_ACK: &str = "update_prepare_ack";
+    pub(super) const SP_UPDATE_PREPARE_ACK: &str = "sp_update_prepare_ack";
+    pub(super) const COMPONENT_UPDATE_PREPARE_ACK: &str =
+        "component_update_prepare_ack";
     pub(super) const UPDATE_STATUS: &str = "update_status";
     pub(super) const UPDATE_ABORT_ACK: &str = "update_abort_ack";
     pub(super) const UPDATE_CHUNK_ACK: &str = "update_chunk_ack";
