@@ -89,6 +89,7 @@ async fn region_get(
 ) -> Result<HttpResponseOk<Region>, HttpError> {
     let id = path.into_inner().id;
     let crucible = rc.context();
+
     match crucible.get(id).await {
         Some(region) => Ok(HttpResponseOk(region)),
         None => {
@@ -108,15 +109,11 @@ async fn region_delete(
     let id = path.into_inner().id;
     let crucible = rc.context();
 
-    // Can't delete a ZFS dataset if there are snapshots
-    if !crucible.snapshots_for_region(&id).await.is_empty() {
-        return Err(HttpError::for_bad_request(
-            None,
-            "must delete snapshots first!".to_string(),
-        ));
-    }
-
-    match crucible.delete(id).await {
+    match crucible
+        .delete(id)
+        .await
+        .map_err(|e| HttpError::for_bad_request(None, e.to_string()))?
+    {
         Some(_) => Ok(HttpResponseDeleted()),
         None => {
             Err(HttpError::for_not_found(None, "Region not found".to_string()))
