@@ -306,7 +306,7 @@ async fn serve_request_before_quorum_initialization(
             *initial_share.lock().await = trust_quorum_share.clone();
 
             match bootstrap_agent
-                .request_agent(&*request, &trust_quorum_share)
+                .request_agent(&request, &trust_quorum_share)
                 .await
             {
                 Ok(response) => {
