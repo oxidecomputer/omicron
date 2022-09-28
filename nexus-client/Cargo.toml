@@ -11,7 +11,7 @@ reqwest = { workspace = true, features = ["rustls-tls", "stream"] }
 serde.workspace = true
 serde_json.workspace = true
 slog.workspace = true
-uuid.workspace = true
+uuid = { workspace = true, features = [ "serde", "v4" ] }
 
 [dependencies.omicron-common]
 path = "../common"

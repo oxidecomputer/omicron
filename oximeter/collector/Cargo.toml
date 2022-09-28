@@ -20,7 +20,7 @@ slog-dtrace.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 toml.workspace = true
-uuid.workspace = true
+uuid = { workspace = true, features = [ "serde", "v4" ] }
 
 [dev-dependencies]
 expectorate.workspace = true

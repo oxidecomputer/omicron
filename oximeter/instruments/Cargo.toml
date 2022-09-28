@@ -10,7 +10,7 @@ dropshot.workspace = true
 futures.workspace = true
 oximeter = { path = "../oximeter" }
 http = { workspace = true, optional = true }
-uuid.workspace = true
+uuid = { workspace = true, features = [ "serde", "v4" ] }
 
 [features]
 default = ["http-instruments"]

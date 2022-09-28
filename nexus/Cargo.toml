@@ -63,7 +63,7 @@ tokio = { workspace = true, features = [ "full" ] }
 tokio-postgres = { workspace = true, features = [ "with-serde_json-1" ] }
 toml.workspace = true
 tough = { version = "0.12", features = [ "http" ] }
-uuid.workspace = true
+uuid = { workspace = true, features = [ "serde", "v4" ] }
 usdt = "0.3.1"
 
 authz-macros = { path = "authz-macros" }

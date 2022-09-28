@@ -52,7 +52,7 @@ tokio = { workspace = true, features = [ "full" ] }
 tokio-tungstenite.workspace = true
 tokio-util = { version = "0.7", features = ["codec"] }
 toml.workspace = true
-uuid.workspace = true
+uuid = { workspace = true, features = [ "serde", "v4" ] }
 vsss-rs.workspace = true
 zone = "0.1"
 

@@ -18,4 +18,4 @@ slog.workspace = true
 slog-dtrace.workspace = true
 tokio.workspace = true
 thiserror.workspace = true
-uuid.workspace = true
+uuid = { workspace = true, features = [ "serde", "v4" ] }

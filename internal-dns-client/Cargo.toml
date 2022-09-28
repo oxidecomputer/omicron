@@ -15,7 +15,7 @@ slog.workspace = true
 thiserror.workspace = true
 trust-dns-proto.workspace = true
 trust-dns-resolver.workspace = true
-uuid.workspace = true
+uuid = { workspace = true, features = [ "serde", "v4" ] }
 
 [dev-dependencies]
 dropshot.workspace = true

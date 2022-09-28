@@ -23,7 +23,7 @@ ref-cast.workspace = true
 schemars = { workspace = true, features = ["chrono", "uuid1"] }
 serde.workspace = true
 serde_json.workspace = true
-uuid.workspace = true
+uuid = { workspace = true, features = [ "serde", "v4" ] }
 steno.workspace = true
 
 db-macros = { path = "../db-macros" }

@@ -19,7 +19,7 @@ thiserror.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
 tokio-tungstenite.workspace = true
 toml.workspace = true
-uuid.workspace = true
+uuid = { workspace = true, features = [ "serde", "v4" ] }
 
 gateway-messages = { path = "../gateway-messages", features = ["std"] }
 gateway-sp-comms = { path = "../gateway-sp-comms" }

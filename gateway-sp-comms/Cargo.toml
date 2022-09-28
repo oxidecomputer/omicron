@@ -14,7 +14,7 @@ thiserror.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
 tokio-stream = "0.1.10"
 usdt.workspace = true
-uuid.workspace = true
+uuid = { workspace = true, features = [ "serde", "v4" ] }
 zip = { version = "0.6.2", default-features = false, features = ["deflate","bzip2"] }
 
 gateway-messages = { path = "../gateway-messages", features = ["std"] }

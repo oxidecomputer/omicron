@@ -13,7 +13,7 @@ oximeter-macro-impl = { path = "../oximeter-macro-impl" }
 schemars = { workspace = true, features = [ "uuid1", "bytes", "chrono" ] }
 serde.workspace = true
 thiserror.workspace = true
-uuid.workspace = true
+uuid = { workspace = true, features = [ "serde", "v4" ] }
 
 [dev-dependencies]
 trybuild = "1.0.65"

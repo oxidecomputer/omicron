@@ -12,4 +12,4 @@ regress.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-uuid.workspace = true
+uuid = { workspace = true, features = [ "serde", "v4" ] }

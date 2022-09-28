@@ -23,7 +23,7 @@ slog-async.workspace = true
 slog-term.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = [ "rt-multi-thread", "macros" ] }
-uuid.workspace = true
+uuid = { workspace = true, features = [ "serde", "v4" ] }
 
 [dev-dependencies]
 itertools.workspace = true
