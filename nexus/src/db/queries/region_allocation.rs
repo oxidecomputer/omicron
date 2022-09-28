@@ -41,12 +41,12 @@ pub fn from_pool(e: async_bb8_diesel::PoolError) -> external::Error {
         match sentinel {
             NOT_ENOUGH_DATASETS_SENTINEL => {
                 return external::Error::unavail(
-                    "Not enough zpool space to allocate disks",
+                    "Not enough datasets to allocate disks",
                 );
             }
             NOT_ENOUGH_ZPOOL_SPACE_SENTINEL => {
                 return external::Error::unavail(
-                    "Not enough datasets to allocate disks",
+                    "Not enough zpool space to allocate disks",
                 );
             }
             // Fall-through to the generic error conversion.
