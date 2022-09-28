@@ -283,6 +283,16 @@ impl ProposedDatasetsFit {
             zpool_size_delta.query_source().on(zpool_size_delta::dsl::pool_id
                 .eq(old_zpool_usage::dsl::pool_id));
 
+        // Why are we using raw `diesel::dsl::sql` here?
+        //
+        // When SQL performs the "SUM" operation on "bigint" type, the result
+        // is promoted to "numeric" (see: old_zpool_usage::dsl::size_used).
+        //
+        // However, we'd like to compare that value with a different value
+        // (zpool_dsl::total_size) which is still a "bigint". This comparison
+        // is safe (after all, we basically want to promote "total_size" to a
+        // Numeric too) but Diesel demands that the input and output SQL types
+        // of expression methods like ".le" match exactly.
         let it_will_fit = (old_zpool_usage::dsl::size_used
             + zpool_size_delta::dsl::size_used_delta)
             .le(diesel::dsl::sql(zpool_dsl::total_size::NAME));
