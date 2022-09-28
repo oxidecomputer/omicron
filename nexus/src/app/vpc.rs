@@ -669,6 +669,10 @@ impl super::Nexus {
                     }
                 }
             }
+            if !rule.targets.is_empty() && targets.is_empty() {
+                // Target not found; skip this rule.
+                continue;
+            }
 
             let filter_hosts = match &rule.filter_hosts {
                 None => None,
@@ -711,6 +715,10 @@ impl super::Nexus {
                                 }
                             }
                         }
+                    }
+                    if !hosts.is_empty() && host_addrs.is_empty() {
+                        // Filter host not found; skip this rule.
+                        continue;
                     }
                     Some(host_addrs)
                 }
