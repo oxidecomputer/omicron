@@ -145,7 +145,8 @@ impl DataStore {
         // - What sort of loads we'd like to create (even split across all disks
         // may not be preferable, especially if maintenance is expected)
 
-        let block_size = self.get_block_size_from_disk_source(opctx, &disk_source).await?;
+        let block_size =
+            self.get_block_size_from_disk_source(opctx, &disk_source).await?;
         let (blocks_per_extent, extent_count) =
             Self::get_crucible_allocation(&block_size, size);
 
