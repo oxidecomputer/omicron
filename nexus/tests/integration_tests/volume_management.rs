@@ -371,7 +371,7 @@ async fn test_multiple_snapshots(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
 
     // Create a disk from this image
-    let disk_size = ByteCount::try_from(2u64 * 1024 * 1024 * 1024).unwrap();
+    let disk_size = ByteCount::try_from(1u64 * 1024 * 1024 * 1024).unwrap();
     let base_disk_name: Name = "base-disk".parse().unwrap();
     let base_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
@@ -926,7 +926,7 @@ async fn prepare_for_test_multiple_layers_of_snapshots(
     let disks_url = get_disks_url();
 
     // Create a blank disk
-    let disk_size = ByteCount::try_from(2u64 * 1024 * 1024 * 1024).unwrap();
+    let disk_size = ByteCount::try_from(1u64 * 1024 * 1024 * 1024).unwrap();
     let layer_1_disk_name: Name = "layer-1-disk".parse().unwrap();
     let layer_1_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {

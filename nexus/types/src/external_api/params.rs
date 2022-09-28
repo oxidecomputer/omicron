@@ -727,21 +727,6 @@ pub struct DiskCreate {
     pub size: ByteCount,
 }
 
-const EXTENT_SIZE: u32 = 64_u32 << 20; // 64 MiB
-
-impl DiskCreate {
-    pub fn extent_size(&self) -> i64 {
-        EXTENT_SIZE as i64
-    }
-
-    pub fn extent_count(&self) -> i64 {
-        let extent_size = EXTENT_SIZE as i64;
-        let size = self.size.to_bytes() as i64;
-        size / extent_size
-            + ((size % extent_size) + extent_size - 1) / extent_size
-    }
-}
-
 /// Parameters for the [`Disk`](omicron_common::api::external::Disk) to be
 /// attached or detached to an instance
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -868,72 +853,4 @@ pub struct ResourceMetrics {
     pub start_time: DateTime<Utc>,
     /// An exclusive end time of metrics.
     pub end_time: DateTime<Utc>,
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-    use std::convert::TryFrom;
-
-    const BLOCK_SIZE: u32 = 4096;
-
-    fn new_disk_create_params(size: ByteCount) -> DiskCreate {
-        DiskCreate {
-            identity: IdentityMetadataCreateParams {
-                name: Name::try_from("myobject".to_string()).unwrap(),
-                description: "desc".to_string(),
-            },
-            disk_source: DiskSource::Blank {
-                block_size: BlockSize(BLOCK_SIZE),
-            },
-            size,
-        }
-    }
-
-    #[test]
-    fn test_extent_count() {
-        let params = new_disk_create_params(ByteCount::try_from(0u64).unwrap());
-        assert_eq!(0, params.extent_count());
-
-        let params = new_disk_create_params(ByteCount::try_from(1u64).unwrap());
-        assert_eq!(1, params.extent_count());
-        let params = new_disk_create_params(
-            ByteCount::try_from(EXTENT_SIZE - 1).unwrap(),
-        );
-        assert_eq!(1, params.extent_count());
-        let params =
-            new_disk_create_params(ByteCount::try_from(EXTENT_SIZE).unwrap());
-        assert_eq!(1, params.extent_count());
-
-        let params = new_disk_create_params(
-            ByteCount::try_from(EXTENT_SIZE + 1).unwrap(),
-        );
-        assert_eq!(2, params.extent_count());
-
-        // Mostly just checking we don't blow up on an unwrap here.
-        let _params =
-            new_disk_create_params(ByteCount::try_from(i64::MAX).unwrap());
-
-        // Note that i64::MAX bytes is an invalid disk size as it's not
-        // divisible by 4096.
-        let max_disk_size = i64::MAX - (i64::MAX % (BLOCK_SIZE as i64));
-        let params =
-            new_disk_create_params(ByteCount::try_from(max_disk_size).unwrap());
-        let blocks_per_extent: u64 =
-            params.extent_size() as u64 / BLOCK_SIZE as u64;
-
-        // We should still be rounding up to the nearest extent size.
-        assert_eq!(
-            params.extent_count() as u128 * EXTENT_SIZE as u128,
-            i64::MAX as u128 + 1,
-        );
-
-        // Assert that the regions allocated will fit this disk
-        assert!(
-            params.size.to_bytes() as u64
-                <= (params.extent_count() as u64)
-                    * blocks_per_extent
-                    * BLOCK_SIZE as u64
-        );
-    }
 }

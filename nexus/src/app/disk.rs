@@ -510,8 +510,11 @@ impl super::Nexus {
             .project_delete_snapshot(opctx, &authz_snapshot, &db_snapshot)
             .await?;
 
-        // Kick off volume deletion saga
+        // Kick off volume deletion saga(s)
         self.volume_delete(db_snapshot.volume_id).await?;
+        if let Some(volume_id) = db_snapshot.destination_volume_id {
+            self.volume_delete(volume_id).await?;
+        }
 
         Ok(())
     }

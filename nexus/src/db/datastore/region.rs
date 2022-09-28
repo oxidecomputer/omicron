@@ -18,6 +18,7 @@ use crate::external_api::params;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
+use omicron_common::api::external;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use uuid::Uuid;
@@ -52,12 +53,12 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    async fn get_block_size_from_disk_create(
+    async fn get_block_size_from_disk_source(
         &self,
         opctx: &OpContext,
-        disk_create: &params::DiskCreate,
+        disk_source: &params::DiskSource,
     ) -> Result<db::model::BlockSize, Error> {
-        match &disk_create.disk_source {
+        match &disk_source {
             params::DiskSource::Blank { block_size } => {
                 Ok(db::model::BlockSize::try_from(*block_size)
                     .map_err(|e| Error::invalid_request(&e.to_string()))?)
@@ -91,6 +92,28 @@ impl DataStore {
         }
     }
 
+    // TODO for now, extent size is fixed at 64 MiB. In the future, this may be
+    // tunable at runtime.
+    pub const EXTENT_SIZE: i64 = 64_i64 << 20;
+
+    /// Given a block size and total disk size, get Crucible allocation values
+    pub fn get_crucible_allocation(
+        block_size: &db::model::BlockSize,
+        size: external::ByteCount,
+    ) -> (i64, i64) {
+        let blocks_per_extent =
+            Self::EXTENT_SIZE / block_size.to_bytes() as i64;
+
+        let size = size.to_bytes() as i64;
+
+        // allocate enough extents to fit all the disk blocks, rounding up.
+        let extent_count = size / Self::EXTENT_SIZE
+            + ((size % Self::EXTENT_SIZE) + Self::EXTENT_SIZE - 1)
+                / Self::EXTENT_SIZE;
+
+        (blocks_per_extent, extent_count)
+    }
+
     /// Idempotently allocates enough regions to back a disk.
     ///
     /// Returns the allocated regions, as well as the datasets to which they
@@ -99,7 +122,8 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         volume_id: Uuid,
-        params: &params::DiskCreate,
+        disk_source: &params::DiskSource,
+        size: external::ByteCount,
     ) -> Result<Vec<(Dataset, Region)>, Error> {
         // ALLOCATION POLICY
         //
@@ -120,18 +144,17 @@ impl DataStore {
         // - Sled placement of datasets
         // - What sort of loads we'd like to create (even split across all disks
         // may not be preferable, especially if maintenance is expected)
-        let params: params::DiskCreate = params.clone();
-        let block_size =
-            self.get_block_size_from_disk_create(opctx, &params).await?;
-        let blocks_per_extent =
-            params.extent_size() / block_size.to_bytes() as i64;
+
+        let block_size = self.get_block_size_from_disk_source(opctx, &disk_source).await?;
+        let (blocks_per_extent, extent_count) =
+            Self::get_crucible_allocation(&block_size, size);
 
         let dataset_and_regions: Vec<(Dataset, Region)> =
             crate::db::queries::region_allocation::RegionAllocate::new(
                 volume_id,
                 block_size.into(),
                 blocks_per_extent,
-                params.extent_count(),
+                extent_count,
             )
             .get_results_async(self.pool())
             .await
@@ -253,5 +276,80 @@ impl DataStore {
         } else {
             Ok(0)
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::db::model::BlockSize;
+    use omicron_common::api::external::ByteCount;
+
+    #[test]
+    fn test_extent_count() {
+        // Zero sized disks should get zero extents
+        let (_, extent_count) = DataStore::get_crucible_allocation(
+            &BlockSize::Traditional,
+            ByteCount::try_from(0u64).unwrap(),
+        );
+        assert_eq!(0, extent_count);
+
+        // Test 1 byte disk
+        let (_, extent_count) = DataStore::get_crucible_allocation(
+            &BlockSize::Traditional,
+            ByteCount::try_from(1u64).unwrap(),
+        );
+        assert_eq!(1, extent_count);
+
+        // Test 1 less than the (current) maximum extent size
+        let (_, extent_count) = DataStore::get_crucible_allocation(
+            &BlockSize::Traditional,
+            ByteCount::try_from(DataStore::EXTENT_SIZE - 1).unwrap(),
+        );
+        assert_eq!(1, extent_count);
+
+        // Test at than the (current) maximum extent size
+        let (_, extent_count) = DataStore::get_crucible_allocation(
+            &BlockSize::Traditional,
+            ByteCount::try_from(DataStore::EXTENT_SIZE).unwrap(),
+        );
+        assert_eq!(1, extent_count);
+
+        // Test at 1 byte more than the (current) maximum extent size
+        let (_, extent_count) = DataStore::get_crucible_allocation(
+            &BlockSize::Traditional,
+            ByteCount::try_from(DataStore::EXTENT_SIZE + 1).unwrap(),
+        );
+        assert_eq!(2, extent_count);
+
+        // Mostly just checking we don't blow up on an unwrap here.
+        let (_, _extent_count) = DataStore::get_crucible_allocation(
+            &BlockSize::Traditional,
+            ByteCount::try_from(i64::MAX).unwrap(),
+        );
+
+        // Note that i64::MAX bytes is an invalid disk size as it's not
+        // divisible by 4096. Create the maximum sized disk here.
+        let max_disk_size = i64::MAX
+            - (i64::MAX % (BlockSize::AdvancedFormat.to_bytes() as i64));
+        let (blocks_per_extent, extent_count) =
+            DataStore::get_crucible_allocation(
+                &BlockSize::AdvancedFormat,
+                ByteCount::try_from(max_disk_size).unwrap(),
+            );
+
+        // We should still be rounding up to the nearest extent size.
+        assert_eq!(
+            extent_count as u128 * DataStore::EXTENT_SIZE as u128,
+            i64::MAX as u128 + 1,
+        );
+
+        // Assert that the regions allocated will fit this disk
+        assert!(
+            max_disk_size as u128
+                <= extent_count as u128
+                    * blocks_per_extent as u128
+                    * DataStore::EXTENT_SIZE as u128
+        );
     }
 }

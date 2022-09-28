@@ -421,6 +421,7 @@ async fn test_reject_creating_disk_from_snapshot(
                 project_id,
                 disk_id: Uuid::new_v4(),
                 volume_id: Uuid::new_v4(),
+                destination_volume_id: None,
 
                 gen: db::model::Generation::new(),
                 state: db::model::SnapshotState::Creating,
@@ -577,6 +578,7 @@ async fn test_reject_creating_disk_from_illegal_snapshot(
                 project_id,
                 disk_id: Uuid::new_v4(),
                 volume_id: Uuid::new_v4(),
+                destination_volume_id: None,
 
                 gen: db::model::Generation::new(),
                 state: db::model::SnapshotState::Creating,
@@ -634,6 +636,64 @@ async fn test_reject_creating_disk_from_illegal_snapshot(
     );
 }
 
+#[nexus_test]
+async fn test_cannot_snapshot_if_no_space(cptestctx: &ControlPlaneTestContext) {
+    // Test that snapshots cannot be created if there is no space for the blocks
+    let client = &cptestctx.external_client;
+    DiskTest::new(&cptestctx).await;
+    create_ip_pool(&client, "p0", None, None).await;
+    create_org_and_project(client).await;
+    let disks_url = get_disks_url();
+
+    // Create a disk at just over half the capacity of what DiskTest allocates
+    let gibibytes: u64 = DiskTest::DEFAULT_ZPOOL_SIZE_GIB as u64 / 2 + 1;
+    let disk_size =
+        ByteCount::try_from(gibibytes * 1024 * 1024 * 1024).unwrap();
+    let base_disk_name: Name = "base-disk".parse().unwrap();
+    let base_disk = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: base_disk_name.clone(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
+        size: disk_size,
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&base_disk))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("unexpected error creating disk");
+
+    // Issue snapshot request, expect it to fail
+    let snapshots_url = format!(
+        "/organizations/{}/projects/{}/snapshots",
+        ORG_NAME, PROJECT_NAME
+    );
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &snapshots_url)
+            .body(Some(&params::SnapshotCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "not-attached".parse().unwrap(),
+                    description: "not attached to instance".into(),
+                },
+                disk: base_disk_name,
+            }))
+            .expect_status(Some(StatusCode::SERVICE_UNAVAILABLE)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("unexpected success creating snapshot");
+}
+
 // Test that the code that Saga nodes call is idempotent
 
 #[nexus_test]
@@ -662,6 +722,7 @@ async fn test_create_snapshot_record_idempotent(
         project_id,
         disk_id: Uuid::new_v4(),
         volume_id: Uuid::new_v4(),
+        destination_volume_id: None,
 
         gen: db::model::Generation::new(),
         state: db::model::SnapshotState::Creating,
