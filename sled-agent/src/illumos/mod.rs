@@ -17,20 +17,33 @@ pub mod zpool;
 
 pub const PFEXEC: &str = "/usr/bin/pfexec";
 
+#[derive(Debug)]
+pub struct CommandFailureInfo {
+    command: String,
+    status: std::process::ExitStatus,
+    stdout: String,
+    stderr: String,
+}
+
+impl std::fmt::Display for CommandFailureInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "Command [{}] executed and failed with status: {}",
+            self.command, self.status
+        )?;
+        write!(f, "  stdout: {}", self.stdout)?;
+        write!(f, "  stderr: {}", self.stderr)
+    }
+}
+
 #[derive(thiserror::Error, Debug)]
 pub enum ExecutionError {
     #[error("Failed to start execution of [{command}]: {err}")]
     ExecutionStart { command: String, err: std::io::Error },
 
-    #[error(
-        "Command [{command}] executed and failed with status: {status}. Stdout: {stdout}, Stderr: {stderr}"
-    )]
-    CommandFailure {
-        command: String,
-        status: std::process::ExitStatus,
-        stdout: String,
-        stderr: String,
-    },
+    #[error("{0}")]
+    CommandFailure(Box<CommandFailureInfo>),
 }
 
 // We wrap this method in an inner module to make it possible to mock
@@ -57,16 +70,18 @@ mod inner {
         })?;
 
         if !output.status.success() {
-            return Err(ExecutionError::CommandFailure {
-                command: command
-                    .get_args()
-                    .map(|s| s.to_string_lossy().into())
-                    .collect::<Vec<String>>()
-                    .join(" "),
-                status: output.status,
-                stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-                stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-            });
+            return Err(ExecutionError::CommandFailure(Box::new(
+                CommandFailureInfo {
+                    command: command
+                        .get_args()
+                        .map(|s| s.to_string_lossy().into())
+                        .collect::<Vec<String>>()
+                        .join(" "),
+                    status: output.status,
+                    stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+                    stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+                },
+            )));
         }
 
         Ok(output)
