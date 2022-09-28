@@ -184,20 +184,16 @@ struct ProposedChanges {
 impl ProposedChanges {
     fn new(candidate_regions: &CandidateRegions) -> Self {
         use crate::db::schema::dataset::dsl as dataset_dsl;
-        use crate::db::schema::zpool::dsl as zpool_dsl;
         use candidate_regions::dsl as candidate_regions_dsl;
         Self {
             query: Box::new(
                 candidate_regions.query_source()
-                    .left_join(
+                    .inner_join(
                         dataset_dsl::dataset.on(dataset_dsl::id.eq(candidate_regions_dsl::dataset_id))
-                    )
-                    .left_join(
-                        zpool_dsl::zpool.on(zpool_dsl::id.eq(dataset_dsl::pool_id))
                     )
                     .select((
                         ExpressionAlias::new::<proposed_dataset_changes::id>(candidate_regions_dsl::dataset_id),
-                        ExpressionAlias::new::<proposed_dataset_changes::pool_id>(dataset_dsl::pool_id.nullable().assume_not_null()),
+                        ExpressionAlias::new::<proposed_dataset_changes::pool_id>(dataset_dsl::pool_id),
                         ExpressionAlias::new::<proposed_dataset_changes::size_used_delta>(
                             candidate_regions_dsl::block_size *
                             candidate_regions_dsl::blocks_per_extent *
