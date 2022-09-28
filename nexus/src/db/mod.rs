@@ -27,6 +27,7 @@ pub(crate) mod queries;
 mod saga_recovery;
 mod sec_store;
 pub(crate) mod subquery;
+pub(crate) mod true_or_cast_error;
 mod update_and_check;
 
 #[cfg(test)]

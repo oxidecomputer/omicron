@@ -4,14 +4,11 @@
 
 //! Subquery-related traits which may be derived for DB structures.
 
-use diesel::expression::ValidGrouping;
 use diesel::pg::Pg;
 use diesel::query_builder::AstPass;
 use diesel::query_builder::Query;
 use diesel::query_builder::QueryFragment;
 use diesel::query_builder::QueryId;
-use diesel::Expression;
-use diesel::SelectableExpression;
 
 /// Represents a named subquery within a CTE.
 ///
@@ -133,68 +130,6 @@ impl QueryFragment<Pg> for Cte {
             }
         }
         self.statement.walk_ast(out.reborrow())?;
-        Ok(())
-    }
-}
-
-/// Generates a wrapper around a boolean expression.
-///
-/// If the underlying expression is "true", this acts as a no-op.
-/// If the underlying expression is "false", the error message is cast to a
-/// boolean, which will probably fail, causing a casting error.
-///
-/// This can be useful for forcing an error condition out of a CTE.
-#[derive(ValidGrouping, QueryId)]
-pub struct TrueOrCastError<E> {
-    expression: E,
-    error: &'static str,
-}
-
-impl<E> TrueOrCastError<E>
-where
-    E: Expression<SqlType = diesel::sql_types::Bool>,
-{
-    pub fn new(expression: E, error: &'static str) -> Self {
-        Self { expression, error }
-    }
-}
-
-impl<E> Expression for TrueOrCastError<E>
-where
-    E: Expression,
-{
-    type SqlType = E::SqlType;
-}
-
-impl<E, QS> diesel::AppearsOnTable<QS> for TrueOrCastError<E> where
-    E: diesel::AppearsOnTable<QS>
-{
-}
-
-impl<E, T> SelectableExpression<T> for TrueOrCastError<E> where
-    E: SelectableExpression<T>
-{
-}
-
-impl<E> QueryFragment<Pg> for TrueOrCastError<E>
-where
-    E: QueryFragment<Pg>,
-{
-    fn walk_ast<'a>(
-        &'a self,
-        mut out: AstPass<'_, 'a, Pg>,
-    ) -> diesel::QueryResult<()> {
-        out.unsafe_to_cache_prepared();
-
-        out.push_sql("CAST(IF(");
-        // If this expression evaluates to "TRUE", then we treat the
-        // entire fragment as CAST('TRUE' AS BOOL), which is a no-op boolean.
-        self.expression.walk_ast(out.reborrow())?;
-        out.push_sql(", \'TRUE\', \'");
-        // However, if the expression evaluated to "FALSE", we try to cast
-        // this string to a boolean.
-        out.push_sql(self.error);
-        out.push_sql("\') AS BOOL)");
         Ok(())
     }
 }

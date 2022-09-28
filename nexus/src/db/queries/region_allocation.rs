@@ -8,9 +8,8 @@ use crate::db::alias::ExpressionAlias;
 use crate::db::datastore::REGION_REDUNDANCY_THRESHOLD;
 use crate::db::model::{Dataset, DatasetKind, Region};
 use crate::db::pool::DbConnection;
-use crate::db::subquery::{
-    AsQuerySource, Cte, CteBuilder, CteQuery, TrueOrCastError,
-};
+use crate::db::subquery::{AsQuerySource, Cte, CteBuilder, CteQuery};
+use crate::db::true_or_cast_error::{matches_sentinel, TrueOrCastError};
 use db_macros::Subquery;
 use diesel::pg::Pg;
 use diesel::query_builder::{AstPass, Query, QueryFragment, QueryId};
@@ -31,40 +30,28 @@ use omicron_common::api::external;
 const NOT_ENOUGH_DATASETS_SENTINEL: &'static str = "Not enough datasets";
 const NOT_ENOUGH_ZPOOL_SPACE_SENTINEL: &'static str = "Not enough space";
 
-fn bool_parse_error(sentinel: &'static str) -> String {
-    format!("could not parse \"{sentinel}\" as type bool: invalid bool value")
-}
-
 /// Translates a generic pool error to an external error based
 /// on messages which may be emitted during region provisioning.
 pub fn from_pool(e: async_bb8_diesel::PoolError) -> external::Error {
     use crate::db::error;
-    use async_bb8_diesel::ConnectionError;
-    use async_bb8_diesel::PoolError;
-    use diesel::result::DatabaseErrorKind;
-    use diesel::result::Error;
 
-    match e {
-        // Catch the specific errors designed to communicate the failures we
-        // want to distinguish
-        PoolError::Connection(ConnectionError::Query(
-            Error::DatabaseError(DatabaseErrorKind::Unknown, ref info),
-        )) => {
-            if info.message() == bool_parse_error(NOT_ENOUGH_DATASETS_SENTINEL)
-            {
-                return external::Error::unavail(
-                    "Not enough datasets to allocate disks",
-                );
-            } else if info.message()
-                == bool_parse_error(NOT_ENOUGH_ZPOOL_SPACE_SENTINEL)
-            {
+    let sentinels =
+        [NOT_ENOUGH_DATASETS_SENTINEL, NOT_ENOUGH_ZPOOL_SPACE_SENTINEL];
+    if let Some(sentinel) = matches_sentinel(&e, &sentinels) {
+        match sentinel {
+            NOT_ENOUGH_DATASETS_SENTINEL => {
                 return external::Error::unavail(
                     "Not enough zpool space to allocate disks",
                 );
             }
+            NOT_ENOUGH_ZPOOL_SPACE_SENTINEL => {
+                return external::Error::unavail(
+                    "Not enough datasets to allocate disks",
+                );
+            }
+            // Fall-through to the generic error conversion.
+            _ => {}
         }
-        // Any other error at all is a bug
-        _ => {}
     }
 
     error::public_error_from_diesel_pool(e, error::ErrorHandler::Server)
