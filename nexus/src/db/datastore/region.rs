@@ -6,17 +6,14 @@
 
 use super::DataStore;
 use super::RunnableQuery;
-use super::REGION_REDUNDANCY_THRESHOLD;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
-use crate::db::identity::Asset;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Dataset;
 use crate::db::model::Region;
-use crate::db::model::Zpool;
 use crate::external_api::params;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -104,10 +101,6 @@ impl DataStore {
         volume_id: Uuid,
         params: &params::DiskCreate,
     ) -> Result<Vec<(Dataset, Region)>, Error> {
-        use db::schema::dataset::dsl as dataset_dsl;
-        use db::schema::region::dsl as region_dsl;
-        use db::schema::zpool::dsl as zpool_dsl;
-
         // ALLOCATION POLICY
         //
         // NOTE: This policy can - and should! - be changed.
@@ -127,204 +120,24 @@ impl DataStore {
         // - Sled placement of datasets
         // - What sort of loads we'd like to create (even split across all disks
         // may not be preferable, especially if maintenance is expected)
-        #[derive(Debug, thiserror::Error)]
-        enum RegionAllocateError {
-            #[error("Not enough datasets for replicated allocation: {0}")]
-            NotEnoughDatasets(usize),
-
-            #[error("Not enough avaiable space for regions")]
-            NotEnoughAvailableSpace,
-
-            #[error("Numeric error: {0}")]
-            NumericError(String),
-        }
-        type TxnError = TransactionError<RegionAllocateError>;
-
         let params: params::DiskCreate = params.clone();
         let block_size =
             self.get_block_size_from_disk_create(opctx, &params).await?;
         let blocks_per_extent =
             params.extent_size() / block_size.to_bytes() as i64;
 
-        self.pool()
-            .transaction_async(|conn| async move {
-                // First, for idempotency, check if regions are already
-                // allocated to this disk.
-                //
-                // If they are, return those regions and the associated
-                // datasets.
-                let datasets_and_regions =
-                    Self::get_allocated_regions_query(volume_id)
-                        .get_results_async::<(Dataset, Region)>(&conn)
-                        .await?;
-                if !datasets_and_regions.is_empty() {
-                    return Ok(datasets_and_regions);
-                }
-
-                // Return the REGION_REDUNDANCY_THRESHOLD datasets with the most
-                // amount of available space.
-                //
-                // Note: it only returns REGION_REDUNDANCY_THRESHOLD datasets,
-                // and as a result does not support allocating chunks of a disk
-                // separately - this is all or nothing.
-                let mut datasets: Vec<Dataset> =
-                    Self::get_allocatable_datasets_query()
-                        .get_results_async::<Dataset>(&conn)
-                        .await?;
-
-                if datasets.len() < REGION_REDUNDANCY_THRESHOLD {
-                    return Err(TxnError::CustomError(
-                        RegionAllocateError::NotEnoughDatasets(datasets.len()),
-                    ));
-                }
-
-                // Create identical regions on each of the following datasets.
-                let source_datasets =
-                    &mut datasets[0..REGION_REDUNDANCY_THRESHOLD];
-                let regions: Vec<Region> = source_datasets
-                    .iter()
-                    .map(|dataset| {
-                        Region::new(
-                            dataset.id(),
-                            volume_id,
-                            block_size.into(),
-                            blocks_per_extent,
-                            params.extent_count(),
-                        )
-                    })
-                    .collect();
-
-                // Insert regions into the DB
-                let regions = diesel::insert_into(region_dsl::region)
-                    .values(regions)
-                    .returning(Region::as_returning())
-                    .get_results_async(&conn)
-                    .await?;
-
-                // Update size_used in the source datasets containing those
-                // regions.
-                for dataset in source_datasets.iter_mut() {
-                    let dataset_total_occupied_size: Option<
-                        diesel::pg::data_types::PgNumeric,
-                    > = region_dsl::region
-                        .filter(region_dsl::dataset_id.eq(dataset.id()))
-                        .select(diesel::dsl::sum(
-                            region_dsl::block_size
-                                * region_dsl::blocks_per_extent
-                                * region_dsl::extent_count,
-                        ))
-                        .nullable()
-                        .get_result_async(&conn)
-                        .await?;
-
-                    let dataset_total_occupied_size: i64 = if let Some(
-                        dataset_total_occupied_size,
-                    ) =
-                        dataset_total_occupied_size
-                    {
-                        let dataset_total_occupied_size: db::model::ByteCount =
-                            dataset_total_occupied_size.try_into().map_err(
-                                |e: anyhow::Error| {
-                                    TxnError::CustomError(
-                                        RegionAllocateError::NumericError(
-                                            e.to_string(),
-                                        ),
-                                    )
-                                },
-                            )?;
-
-                        dataset_total_occupied_size.into()
-                    } else {
-                        0
-                    };
-
-                    diesel::update(dataset_dsl::dataset)
-                        .filter(dataset_dsl::id.eq(dataset.id()))
-                        .set(
-                            dataset_dsl::size_used
-                                .eq(dataset_total_occupied_size),
-                        )
-                        .execute_async(&conn)
-                        .await?;
-
-                    // Update the results we'll send the caller
-                    dataset.size_used = Some(dataset_total_occupied_size);
-                }
-
-                // Validate that the total of each dataset's size_used isn't
-                // larger the zpool's total_size
-                for dataset in source_datasets.iter() {
-                    let zpool_id = dataset.pool_id;
-
-                    // Add up size used by all regions in all datasets in the
-                    // zpool
-                    let zpool_total_occupied_size: Option<
-                        diesel::pg::data_types::PgNumeric,
-                    > = dataset_dsl::dataset
-                        .filter(dataset_dsl::pool_id.eq(zpool_id))
-                        .filter(dataset_dsl::size_used.is_not_null())
-                        .filter(dataset_dsl::time_deleted.is_null())
-                        .select(diesel::dsl::sum(dataset_dsl::size_used))
-                        .nullable()
-                        .get_result_async(&conn)
-                        .await?;
-
-                    let zpool_total_occupied_size: u64 = if let Some(
-                        zpool_total_occupied_size,
-                    ) =
-                        zpool_total_occupied_size
-                    {
-                        let zpool_total_occupied_size: db::model::ByteCount =
-                            zpool_total_occupied_size.try_into().map_err(
-                                |e: anyhow::Error| {
-                                    TxnError::CustomError(
-                                        RegionAllocateError::NumericError(
-                                            e.to_string(),
-                                        ),
-                                    )
-                                },
-                            )?;
-
-                        zpool_total_occupied_size.to_bytes()
-                    } else {
-                        0
-                    };
-
-                    let zpool = zpool_dsl::zpool
-                        .filter(zpool_dsl::id.eq(zpool_id))
-                        .select(Zpool::as_returning())
-                        .get_result_async(&conn)
-                        .await?;
-
-                    // Does this go over the zpool's total size?
-                    if zpool.total_size.to_bytes() < zpool_total_occupied_size {
-                        return Err(TxnError::CustomError(
-                            RegionAllocateError::NotEnoughAvailableSpace,
-                        ));
-                    }
-                }
-
-                // Return the regions with the datasets to which they were allocated.
-                Ok(source_datasets
-                    .into_iter()
-                    .map(|d| d.clone())
-                    .zip(regions)
-                    .collect())
-            })
+        let dataset_and_regions: Vec<(Dataset, Region)> =
+            crate::db::queries::region_allocation::RegionAllocate::new(
+                volume_id,
+                block_size.into(),
+                blocks_per_extent,
+                params.extent_count(),
+            )
+            .get_results_async(self.pool())
             .await
-            .map_err(|e| match e {
-                TxnError::CustomError(
-                    RegionAllocateError::NotEnoughDatasets(_),
-                ) => Error::unavail("Not enough datasets to allocate disks"),
-                TxnError::CustomError(
-                    RegionAllocateError::NotEnoughAvailableSpace,
-                ) => Error::unavail(
-                    "Not enough available space to allocate disks",
-                ),
-                _ => {
-                    Error::internal_error(&format!("Transaction error: {}", e))
-                }
-            })
+            .map_err(|e| crate::db::queries::region_allocation::from_pool(e))?;
+
+        Ok(dataset_and_regions)
     }
 
     /// Deletes all regions backing a disk.
