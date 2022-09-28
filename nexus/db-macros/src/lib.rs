@@ -19,6 +19,7 @@ use syn::spanned::Spanned;
 use syn::{Data, DataStruct, DeriveInput, Error, Fields, Ident};
 
 mod lookup;
+mod subquery;
 
 /// Defines a structure and helper functions for looking up resources
 ///
@@ -110,6 +111,35 @@ fn get_field_with_name<'a>(
     }
 }
 
+/// Implements the [`Subquery`] trait.
+///
+/// Additionally, implements
+/// [`diesel::query_builder::QueryFragment`](https://docs.diesel.rs/master/diesel/query_builder/trait.QueryFragment.html),
+/// which refers to the subquery by the name supplied as input.
+///
+/// Callers should also derive
+/// [`diesel::query_builder::QueryId`](https://docs.diesel.rs/master/diesel/query_builder/trait.QueryId.html),
+/// as it should be implemented for structures which implement
+/// [`diesel::query_builder::QueryFragment`](https://docs.diesel.rs/master/diesel/query_builder/trait.QueryFragment.html).
+///
+/// Example usage:
+///
+/// ```ignore
+/// #[derive(Subquery, QueryId)]
+/// #[subquery(name = my_table)]
+/// struct MyQuery {
+///   query: Box<dyn CteQuery<SqlType = my_table::SqlType>>
+/// }
+/// ```
+#[proc_macro_derive(Subquery, attributes(subquery))]
+pub fn subquery_target(
+    input: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    subquery::derive_impl(input.into())
+        .unwrap_or_else(|e| e.to_compile_error())
+        .into()
+}
+
 // Describes which derive macro is being used; allows sharing common code.
 enum IdentityVariant {
     Asset,
@@ -153,7 +183,7 @@ pub fn asset_target(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 }
 
 #[derive(Debug)]
-struct NameValue {
+pub(crate) struct NameValue {
     name: syn::Path,
     _eq_token: syn::token::Eq,
     value: syn::Path,

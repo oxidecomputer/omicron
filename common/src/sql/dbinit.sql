@@ -175,7 +175,13 @@ CREATE TABLE omicron.public.Dataset (
     kind omicron.public.dataset_kind NOT NULL,
 
     /* An upper bound on the amount of space that might be in-use */
-    size_used INT
+    size_used INT,
+
+    /* Crucible must make use of 'size_used'; other datasets manage their own storage */
+    CONSTRAINT size_used_column_set_for_crucible CHECK (
+      (kind != 'crucible') OR
+      (kind = 'crucible' AND size_used IS NOT NULL)
+    )
 );
 
 /* Create an index on the size usage for Crucible's allocation */

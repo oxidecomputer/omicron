@@ -422,7 +422,6 @@ table! {
         port -> Int4,
 
         kind -> crate::DatasetKindEnum,
-
         size_used -> Nullable<Int8>,
     }
 }
@@ -638,5 +637,4 @@ allow_tables_to_appear_in_same_query!(
     user_builtin,
     role_builtin,
     role_assignment,
-    zpool,
 );
