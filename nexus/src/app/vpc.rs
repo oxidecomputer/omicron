@@ -475,9 +475,10 @@ impl super::Nexus {
                         }
                         vpcs.insert(name.clone().into());
                     }
-                    // We don't need to resolve anything for Ip(Net)s.
-                    external::VpcFirewallRuleTarget::Ip(_) => (),
-                    external::VpcFirewallRuleTarget::IpNet(_) => (),
+                    external::VpcFirewallRuleTarget::Ip(_)
+                    | external::VpcFirewallRuleTarget::IpNet(_) => {
+                        vpcs.insert(vpc.name().clone().into());
+                    }
                 }
             }
 
@@ -638,11 +639,33 @@ impl super::Nexus {
                             .iter()
                             .for_each(&mut push_target_nic);
                     }
-                    external::VpcFirewallRuleTarget::Ip(_addr) => {
-                        todo!("target addr")
+                    external::VpcFirewallRuleTarget::Ip(addr) => {
+                        vpc_interfaces
+                            .get(vpc.name())
+                            .unwrap_or(&no_interfaces)
+                            .iter()
+                            .filter(|nic| nic.ip == *addr)
+                            .for_each(&mut push_target_nic);
                     }
-                    external::VpcFirewallRuleTarget::IpNet(_net) => {
-                        todo!("target net")
+                    external::VpcFirewallRuleTarget::IpNet(net) => {
+                        vpc_interfaces
+                            .get(vpc.name())
+                            .unwrap_or(&no_interfaces)
+                            .iter()
+                            .filter(|nic| {
+                                use external::IpNet;
+                                use std::net::IpAddr;
+                                match (IpNet::from(*net), IpAddr::from(nic.ip)) {
+                                    (IpNet::V4(net), IpAddr::V4(ip)) => {
+                                        net.contains(ip)
+                                    }
+                                    (IpNet::V6(net), IpAddr::V6(ip)) => {
+                                        net.contains(ip)
+                                    }
+                                    (_, _) => false,
+                                }
+                            })
+                            .for_each(&mut push_target_nic);
                     }
                 }
             }
