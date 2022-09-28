@@ -72,6 +72,17 @@ default-members = [
 ]
 resolver = "2"
 
+[workspace.dependencies]
+async-trait = "0.1.56"
+chrono = { version = "0.4", features = [ "serde" ] }
+futures = "0.3.24"
+progenitor = { git = "https://github.com/oxidecomputer/progenitor" }
+regress = "0.4.1"
+reqwest = { version = "0.11", default-features = false, features = ["rustls-tls", "stream"] }
+serde = { version = "1.0", features = [ "derive" ] }
+serde_json = "1.0.85"
+uuid = { version = "1.1.0", features = [ "serde", "v4" ] }
+
 [profile.dev]
 panic = "abort"
 
