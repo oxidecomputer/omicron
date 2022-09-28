@@ -39,8 +39,13 @@ mod organization;
 mod oximeter_info;
 mod producer_endpoint;
 mod project;
+// These actually represent subqueries, not real table.
+// However, they must be defined in the same crate as our tables
+// for join-based marker trait generation.
+pub mod queries;
 mod rack;
 mod region;
+mod region_snapshot;
 mod role_assignment;
 mod role_builtin;
 pub mod saga_types;
@@ -106,6 +111,7 @@ pub use producer_endpoint::*;
 pub use project::*;
 pub use rack::*;
 pub use region::*;
+pub use region_snapshot::*;
 pub use role_assignment::*;
 pub use role_builtin::*;
 pub use service::*;

@@ -123,28 +123,16 @@ pub struct Params {
 
 // snapshot create saga: actions
 
-/// A no-op action used because if saga nodes fail their undo action isn't run!
-async fn ssc_noop(_sagactx: NexusActionContext) -> Result<(), ActionError> {
-    Ok(())
-}
-
 lazy_static! {
     static ref CREATE_SNAPSHOT_RECORD: NexusAction = ActionFunc::new_action(
         "snapshot-create.create-snapshot-record",
         ssc_create_snapshot_record,
         ssc_create_snapshot_record_undo,
     );
-    static ref SEND_SNAPSHOT_REQUEST: NexusAction = ActionFunc::new_action(
+    static ref SEND_SNAPSHOT_REQUEST: NexusAction = new_action_noop_undo(
         "snapshot-create.send-snapshot-request",
         ssc_send_snapshot_request,
-        ssc_send_snapshot_request_undo,
     );
-    static ref NOOP_FOR_START_RUNNING_SNAPSHOT: NexusAction =
-        ActionFunc::new_action(
-            "snapshot-create.noop-for-start-running-snapshot",
-            ssc_noop,
-            ssc_start_running_snapshot_undo,
-        );
     static ref START_RUNNING_SNAPSHOT: NexusAction = new_action_noop_undo(
         "snapshot-create.start-running-snapshot",
         ssc_start_running_snapshot,
@@ -171,7 +159,6 @@ impl NexusSaga for SagaSnapshotCreate {
     fn register_actions(registry: &mut ActionRegistry) {
         registry.register(Arc::clone(&*CREATE_SNAPSHOT_RECORD));
         registry.register(Arc::clone(&*SEND_SNAPSHOT_REQUEST));
-        registry.register(Arc::clone(&*NOOP_FOR_START_RUNNING_SNAPSHOT));
         registry.register(Arc::clone(&*START_RUNNING_SNAPSHOT));
         registry.register(Arc::clone(&*CREATE_VOLUME_RECORD));
         registry.register(Arc::clone(&*FINALIZE_SNAPSHOT_RECORD));
@@ -208,27 +195,7 @@ impl NexusSaga for SagaSnapshotCreate {
             SEND_SNAPSHOT_REQUEST.as_ref(),
         ));
 
-        // The following saga action iterates over the datasets and regions for a
-        // disk and make requests for each tuple, and this violates the saga's
-        // mental model where actions should do one thing at a time and be
-        // idempotent + atomic. If only a few of the requests succeed, the saga will
-        // leave things in a partial state because the undo function of a node is
-        // not run when the action fails.
-        //
-        // Use a noop action and an undo, followed by an action + no undo, to work
-        // around this:
-        //
-        // - [noop, undo function]
-        // - [action function, noop]
-        //
-        // With this, if the action function fails, the undo function will run.
-
         // Validate with crucible agent and start snapshot downstairs
-        builder.append(Node::action(
-            "noop_for_replace_sockets_map",
-            "NoopForStartRunningSnapshot",
-            NOOP_FOR_START_RUNNING_SNAPSHOT.as_ref(),
-        ));
         builder.append(Node::action(
             "replace_sockets_map",
             "StartRunningSnapshot",
@@ -442,50 +409,6 @@ async fn ssc_send_snapshot_request(
     Ok(())
 }
 
-async fn ssc_send_snapshot_request_undo(
-    sagactx: NexusActionContext,
-) -> Result<(), anyhow::Error> {
-    let log = sagactx.user_data().log();
-    let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
-
-    let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
-
-    let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
-        .project_id(params.project_id)
-        .disk_name(&params.create_params.disk.clone().into())
-        .fetch()
-        .await
-        .map_err(ActionError::action_failed)?;
-
-    // Delete any snapshots created by this saga
-    let datasets_and_regions = osagactx
-        .datastore()
-        .get_allocated_regions(disk.volume_id)
-        .await
-        .map_err(ActionError::action_failed)?;
-
-    for (dataset, region) in datasets_and_regions {
-        // Create a Crucible agent client
-        let url = format!("http://{}", dataset.address());
-        let client = CrucibleAgentClient::new(&url);
-
-        // Delete snapshot, it was created by this saga
-        info!(log, "deleting snapshot {} {} {}", url, region.id(), snapshot_id);
-        client
-            .region_delete_snapshot(
-                &RegionId(region.id().to_string()),
-                &snapshot_id.to_string(),
-            )
-            .await
-            .map_err(|e| e.to_string())
-            .map_err(ActionError::action_failed)?;
-    }
-
-    Ok(())
-}
-
 async fn ssc_start_running_snapshot(
     sagactx: NexusActionContext,
 ) -> Result<BTreeMap<String, String>, ActionError> {
@@ -562,60 +485,25 @@ async fn ssc_start_running_snapshot(
             dataset.address_with_port(crucible_running_snapshot.port_number)
         );
         info!(log, "map {} to {}", region_addr, snapshot_addr);
-        map.insert(region_addr, snapshot_addr);
-    }
+        map.insert(region_addr, snapshot_addr.clone());
 
-    Ok(map)
-}
-
-async fn ssc_start_running_snapshot_undo(
-    sagactx: NexusActionContext,
-) -> Result<(), anyhow::Error> {
-    let log = sagactx.user_data().log();
-    let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
-
-    let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
-
-    let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
-        .project_id(params.project_id)
-        .disk_name(&params.create_params.disk.clone().into())
-        .fetch()
-        .await
-        .map_err(ActionError::action_failed)?;
-
-    // Delete any running snapshots created by this saga
-    let datasets_and_regions = osagactx
-        .datastore()
-        .get_allocated_regions(disk.volume_id)
-        .await
-        .map_err(ActionError::action_failed)?;
-
-    for (dataset, region) in datasets_and_regions {
-        // Create a Crucible agent client
-        let url = format!("http://{}", dataset.address());
-        let client = CrucibleAgentClient::new(&url);
-
-        // Delete running snapshot
-        info!(
-            log,
-            "deleting running snapshot {} {} {}",
-            url,
-            region.id(),
-            snapshot_id
-        );
-        client
-            .region_delete_running_snapshot(
-                &RegionId(region.id().to_string()),
-                &snapshot_id.to_string(),
-            )
+        // Once snapshot has been validated, and running snapshot has been
+        // started, add an entry in the region_snapshot table to correspond to
+        // these Crucible resources.
+        osagactx
+            .datastore()
+            .region_snapshot_create(db::model::RegionSnapshot {
+                dataset_id: dataset.id(),
+                region_id: region.id(),
+                snapshot_id,
+                snapshot_addr,
+                volume_references: 0, // to be filled later
+            })
             .await
-            .map_err(|e| e.to_string())
             .map_err(ActionError::action_failed)?;
     }
 
-    Ok(())
+    Ok(map)
 }
 
 async fn ssc_create_volume_record(
@@ -679,6 +567,7 @@ async fn ssc_create_volume_record(
     info!(log, "snapshot volume construction request {}", volume_data);
     let volume = db::model::Volume::new(volume_id, volume_data);
 
+    // Insert volume record into the DB
     let volume_created = osagactx
         .datastore()
         .volume_create(volume)
@@ -696,8 +585,9 @@ async fn ssc_create_volume_record_undo(
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
+
     info!(log, "deleting volume {}", volume_id);
-    osagactx.datastore().volume_delete(volume_id).await?;
+    osagactx.nexus().volume_delete(volume_id).await?;
 
     Ok(())
 }

@@ -319,7 +319,7 @@ impl Client {
             );
             timeseries.measurements.push(measurement);
         }
-        Ok(timeseries_by_key.into_iter().map(|(_, item)| item).collect())
+        Ok(timeseries_by_key.into_values().collect())
     }
 
     // Initialize ClickHouse with the database and metric table schema.

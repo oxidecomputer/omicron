@@ -209,7 +209,7 @@ async fn handle_req<'a, 'b, 'c>(
 
     let mresp = rb.build(
         header,
-        response_records.iter().map(|r| &*r).collect::<Vec<&Record>>(),
+        response_records.iter().collect::<Vec<&Record>>(),
         vec![],
         vec![],
         vec![],

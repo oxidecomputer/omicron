@@ -4,7 +4,7 @@
 
 use super::{
     ActionRegistry, NexusActionContext, NexusSaga, SagaInitError,
-    ACTION_GENERATE_ID,
+    ACTION_GENERATE_ID, MAX_CONCURRENT_REGION_REQUESTS,
 };
 use crate::app::sagas::NexusAction;
 use crate::context::OpContext;
@@ -51,16 +51,10 @@ lazy_static! {
         sdc_create_disk_record,
         sdc_create_disk_record_undo
     );
-    static ref REGIONS_ALLOC: NexusAction = ActionFunc::new_action(
-        "disk-create.regions-alloc",
-        sdc_alloc_regions,
-        sdc_alloc_regions_undo
-    );
-    static ref REGIONS_ENSURE: NexusAction = ActionFunc::new_action(
-        "disk-create.regions-ensure",
-        sdc_regions_ensure,
-        sdc_regions_ensure_undo
-    );
+    static ref REGIONS_ALLOC: NexusAction =
+        new_action_noop_undo("disk-create.regions-alloc", sdc_alloc_regions,);
+    static ref REGIONS_ENSURE: NexusAction =
+        new_action_noop_undo("disk-create.regions-ensure", sdc_regions_ensure,);
     static ref CREATE_VOLUME_RECORD: NexusAction = ActionFunc::new_action(
         "disk-create.create-volume-record",
         sdc_create_volume_record,
@@ -231,6 +225,7 @@ async fn sdc_alloc_regions(
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
     let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
+
     // Ensure the disk is backed by appropriate regions.
     //
     // This allocates regions in the database, but the disk state is still
@@ -251,16 +246,7 @@ async fn sdc_alloc_regions(
     Ok(datasets_and_regions)
 }
 
-async fn sdc_alloc_regions_undo(
-    sagactx: NexusActionContext,
-) -> Result<(), anyhow::Error> {
-    let osagactx = sagactx.user_data();
-
-    let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
-    osagactx.datastore().regions_hard_delete(volume_id).await?;
-    Ok(())
-}
-
+/// Call out to Crucible agent and perform region creation.
 async fn ensure_region_in_dataset(
     log: &Logger,
     dataset: &db::model::Dataset,
@@ -317,10 +303,7 @@ async fn ensure_region_in_dataset(
     Ok(region.into_inner())
 }
 
-// Arbitrary limit on concurrency, for operations issued
-// on multiple regions within a disk at the same time.
-const MAX_CONCURRENT_REGION_REQUESTS: usize = 3;
-
+/// Call out to Crucible agent and perform region creation.
 async fn sdc_regions_ensure(
     sagactx: NexusActionContext,
 ) -> Result<String, ActionError> {
@@ -379,7 +362,7 @@ async fn sdc_regions_ensure(
 
     let block_size = datasets_and_regions[0].1.block_size;
 
-    // If requested, back disk by image
+    // If a disk source was requested, set the read-only parent of this disk.
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
     let log = osagactx.log();
@@ -497,7 +480,7 @@ async fn sdc_regions_ensure(
         );
     }
 
-    // Store volume details in db
+    // Create volume construction request for this disk
     let mut rng = StdRng::from_entropy();
     let volume_construction_request = VolumeConstructionRequest::Volume {
         id: disk_id,
@@ -554,55 +537,6 @@ async fn sdc_regions_ensure(
     Ok(volume_data)
 }
 
-pub(super) async fn delete_regions(
-    datasets_and_regions: Vec<(db::model::Dataset, db::model::Region)>,
-) -> Result<(), Error> {
-    let request_count = datasets_and_regions.len();
-    futures::stream::iter(datasets_and_regions)
-        .map(|(dataset, region)| async move {
-            let url = format!("http://{}", dataset.address());
-            let client = CrucibleAgentClient::new(&url);
-            let id = RegionId(region.id().to_string());
-            client.region_delete(&id).await.map_err(|e| match e {
-                crucible_agent_client::Error::ErrorResponse(rv) => {
-                    match rv.status() {
-                        http::StatusCode::SERVICE_UNAVAILABLE => {
-                            Error::unavail(&rv.message)
-                        }
-                        status if status.is_client_error() => {
-                            Error::invalid_request(&rv.message)
-                        }
-                        _ => Error::internal_error(&rv.message),
-                    }
-                }
-                _ => Error::internal_error(
-                    "unexpected failure during `region_delete`",
-                ),
-            })
-        })
-        // Execute the allocation requests concurrently.
-        .buffer_unordered(std::cmp::min(
-            request_count,
-            MAX_CONCURRENT_REGION_REQUESTS,
-        ))
-        .collect::<Vec<Result<_, _>>>()
-        .await
-        .into_iter()
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(())
-}
-
-async fn sdc_regions_ensure_undo(
-    sagactx: NexusActionContext,
-) -> Result<(), anyhow::Error> {
-    let datasets_and_regions = sagactx
-        .lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
-            "datasets_and_regions",
-        )?;
-    delete_regions(datasets_and_regions).await?;
-    Ok(())
-}
-
 async fn sdc_create_volume_record(
     sagactx: NexusActionContext,
 ) -> Result<db::model::Volume, ActionError> {
@@ -628,7 +562,7 @@ async fn sdc_create_volume_record_undo(
     let osagactx = sagactx.user_data();
 
     let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
-    osagactx.datastore().volume_delete(volume_id).await?;
+    osagactx.nexus().volume_delete(volume_id).await?;
     Ok(())
 }
 
@@ -647,6 +581,7 @@ async fn sdc_finalize_disk_record(
         .lookup_for(authz::Action::Modify)
         .await
         .map_err(ActionError::action_failed)?;
+
     // TODO-security Review whether this can ever fail an authz check.  We don't
     // want this to ever fail the authz check here -- if it did, we would have
     // wanted to catch that a lot sooner.  It wouldn't make sense for it to fail
@@ -665,6 +600,7 @@ async fn sdc_finalize_disk_record(
         )
         .await
         .map_err(ActionError::action_failed)?;
+
     Ok(())
 }
 

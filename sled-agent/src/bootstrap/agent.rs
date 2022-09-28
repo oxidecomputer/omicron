@@ -212,7 +212,7 @@ impl Agent {
             let trust_quorum_share =
                 sled_request.trust_quorum_share.map(ShareDistribution::from);
             agent
-                .request_agent(&*sled_request.request, &trust_quorum_share)
+                .request_agent(&sled_request.request, &trust_quorum_share)
                 .await?;
             TrustQuorumMembership::Known(Arc::new(trust_quorum_share))
         } else {

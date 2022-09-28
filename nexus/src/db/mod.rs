@@ -4,6 +4,7 @@
 
 //! Facilities for working with the Omicron database
 
+pub(crate) mod alias;
 // This is not intended to be public, but this is necessary to use it from
 // doctests
 pub mod collection_attach;
@@ -25,6 +26,8 @@ mod pool;
 pub(crate) mod queries;
 mod saga_recovery;
 mod sec_store;
+pub(crate) mod subquery;
+pub(crate) mod true_or_cast_error;
 mod update_and_check;
 
 #[cfg(test)]

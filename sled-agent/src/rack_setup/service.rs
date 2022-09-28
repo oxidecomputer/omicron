@@ -610,32 +610,30 @@ impl ServiceInner {
             .expect("DNS servers should only be set once");
 
         // Issue the dataset initialization requests to all sleds.
-        futures::future::join_all(plan.iter().map(
-            |(_, allocation)| async move {
-                let sled_address = SocketAddr::V6(get_sled_address(
-                    allocation.initialization_request.subnet,
-                ));
-                self.initialize_datasets(
-                    sled_address,
-                    &allocation.services_request.datasets,
-                )
-                .await?;
+        futures::future::join_all(plan.values().map(|allocation| async move {
+            let sled_address = SocketAddr::V6(get_sled_address(
+                allocation.initialization_request.subnet,
+            ));
+            self.initialize_datasets(
+                sled_address,
+                &allocation.services_request.datasets,
+            )
+            .await?;
 
-                let mut records = HashMap::new();
-                for dataset in &allocation.services_request.datasets {
-                    records
-                        .entry(dataset.srv())
-                        .or_insert_with(Vec::new)
-                        .push((dataset.aaaa(), dataset.address()));
-                }
-                self.dns_servers
-                    .get()
-                    .expect("DNS servers must be initialized first")
-                    .insert_dns_records(&records)
-                    .await?;
-                Ok(())
-            },
-        ))
+            let mut records = HashMap::new();
+            for dataset in &allocation.services_request.datasets {
+                records
+                    .entry(dataset.srv())
+                    .or_insert_with(Vec::new)
+                    .push((dataset.aaaa(), dataset.address()));
+            }
+            self.dns_servers
+                .get()
+                .expect("DNS servers must be initialized first")
+                .insert_dns_records(&records)
+                .await?;
+            Ok(())
+        }))
         .await
         .into_iter()
         .collect::<Result<_, SetupServiceError>>()?;
@@ -647,37 +645,35 @@ impl ServiceInner {
         // Note that this must happen *after* the dataset initialization,
         // to ensure that CockroachDB has been initialized before Nexus
         // starts.
-        futures::future::join_all(plan.iter().map(
-            |(_, allocation)| async move {
-                let sled_address = SocketAddr::V6(get_sled_address(
-                    allocation.initialization_request.subnet,
-                ));
+        futures::future::join_all(plan.values().map(|allocation| async move {
+            let sled_address = SocketAddr::V6(get_sled_address(
+                allocation.initialization_request.subnet,
+            ));
 
-                let all_services = allocation
-                    .services_request
-                    .services
-                    .iter()
-                    .chain(allocation.services_request.dns_services.iter())
-                    .map(|s| s.clone())
-                    .collect::<Vec<_>>();
+            let all_services = allocation
+                .services_request
+                .services
+                .iter()
+                .chain(allocation.services_request.dns_services.iter())
+                .map(|s| s.clone())
+                .collect::<Vec<_>>();
 
-                self.initialize_services(sled_address, &all_services).await?;
+            self.initialize_services(sled_address, &all_services).await?;
 
-                let mut records = HashMap::new();
-                for service in &all_services {
-                    records
-                        .entry(service.srv())
-                        .or_insert_with(Vec::new)
-                        .push((service.aaaa(), service.address()));
-                }
-                self.dns_servers
-                    .get()
-                    .expect("DNS servers must be initialized first")
-                    .insert_dns_records(&records)
-                    .await?;
-                Ok(())
-            },
-        ))
+            let mut records = HashMap::new();
+            for service in &all_services {
+                records
+                    .entry(service.srv())
+                    .or_insert_with(Vec::new)
+                    .push((service.aaaa(), service.address()));
+            }
+            self.dns_servers
+                .get()
+                .expect("DNS servers must be initialized first")
+                .insert_dns_records(&records)
+                .await?;
+            Ok(())
+        }))
         .await
         .into_iter()
         .collect::<Result<Vec<()>, SetupServiceError>>()?;
