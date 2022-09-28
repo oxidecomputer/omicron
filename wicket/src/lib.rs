@@ -33,9 +33,11 @@ use tui::layout::{Constraint, Direction, Layout};
 use tui::widgets::{Block, Borders};
 use tui::Terminal;
 
+pub(crate) mod inventory;
 mod screens;
 mod widgets;
 
+use inventory::{Component, Inventory};
 use screens::{InventoryScreen, Screen, ScreenId, Screens};
 
 // We can avoid a bunch of unnecessary type parameters by picking them ahead of time.
@@ -272,15 +274,6 @@ pub struct MgsManager {}
 /// Replies come in as [`Event`]s
 pub struct RssManager {}
 
-/// Inventory is the most recent information about rack composition as
-/// received from MGS.
-#[derive(Debug, Default)]
-pub struct Inventory {
-    sleds: [Option<FakeSledInfo>; 32],
-    switches: [Option<FakeSwitchInfo>; 2],
-    psc: Option<FakePscInfo>,
-}
-
 /// An event that will update state in the wizard
 ///
 /// This can be a keypress, mouse event, or response from a downstream service.
@@ -292,7 +285,7 @@ pub enum Event {
     /// An Inventory Update Event
     ///
     /// TODO: This should be real information returned from MGS
-    Inventory(FakeInventoryUpdate),
+    Inventory(Component),
 
     /// The tick of a Timer
     /// This can be used to draw a frame to the terminal
@@ -319,46 +312,4 @@ pub enum ScreenEvent {
 
     /// The tick of a timer
     Tick,
-}
-
-#[derive(Debug)]
-pub enum SwitchLocation {
-    Top,
-    Bottom,
-}
-
-#[derive(Debug)]
-pub struct FakeSledInfo {
-    slot: u16,
-    serial_number: String,
-    part_number: String,
-    sp_version: String,
-    rot_version: String,
-    host_os_version: String,
-    control_plane_version: Option<String>,
-}
-
-#[derive(Debug)]
-pub struct FakeSwitchInfo {
-    location: SwitchLocation,
-    serial_number: String,
-    part_number: String,
-    sp_version: String,
-    rot_version: String,
-}
-
-#[derive(Debug)]
-pub struct FakePscInfo {
-    serial_number: String,
-    part_number: String,
-    sp_version: String,
-    rot_version: String,
-}
-
-/// TODO: Use real inventory received from MGS
-#[derive(Debug)]
-pub enum FakeInventoryUpdate {
-    Sled(FakeSledInfo),
-    Switch(FakeSwitchInfo),
-    Psc(FakePscInfo),
 }

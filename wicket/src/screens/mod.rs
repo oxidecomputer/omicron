@@ -19,7 +19,10 @@ pub enum ScreenId {
     RackInit,
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct Height(pub u16);
+
+#[derive(Debug, Clone, Copy)]
 pub struct Width(pub u16);
 
 /// Ensure that a u16 is an even number by subtracting 1 if necessary.
@@ -76,6 +79,7 @@ impl Screens {
 //
 // Each screen maintains a mapping of TabIndex to the appropriate screen
 // objects/widgets.
+#[derive(Debug)]
 pub struct TabIndex {
     current: Option<u16>,
     max: u16,
@@ -96,6 +100,16 @@ impl TabIndex {
     // Get the current tab index
     pub fn get(&self) -> Option<u16> {
         self.current
+    }
+
+    // Get the next tab index
+    pub fn next(&self) -> Option<u16> {
+        self.current.as_ref().map(|&i| if i == self.max { 0 } else { i + 1 })
+    }
+
+    // Get the previous tab index
+    pub fn prev(&self) -> Option<u16> {
+        self.current.as_ref().map(|&i| if i == 0 { self.max } else { i - 1 })
     }
 
     // Increment the current value
