@@ -34,10 +34,12 @@ use tui::widgets::{Block, Borders};
 use tui::Terminal;
 
 pub(crate) mod inventory;
+mod mgs;
 mod screens;
 mod widgets;
 
 use inventory::{Component, Inventory};
+use mgs::{MgsHandle, MgsManager};
 use screens::{InventoryScreen, Screen, ScreenId, Screens};
 
 // We can avoid a bunch of unnecessary type parameters by picking them ahead of time.
@@ -82,18 +84,12 @@ pub struct Wizard {
     // This contains all updatable data
     state: State,
 
-    // The mechanism for sending requests to MGS
-    //
-    // Replies always come in as [`Event`]s.
-    mgs: MgsManager,
+    // A mechanism for interacting with MGS
+    mgs: MgsHandle,
 
-    // The mechanism for sending request to the RSS
-    //
-    // TODO: Should this really go through the bootstrap agent server or
-    // should it be it's own dropshot server?
-    //
-    // Replies always come in as events
-    rss: RssManager,
+    // When the Wizard is run, this will be extracted and moved
+    // into a tokio task.
+    mgs_manager: Option<MgsManager>,
 
     // The terminal we are rendering to
     terminal: Term,
@@ -118,14 +114,15 @@ impl Wizard {
             .enable_all()
             .build()
             .unwrap();
+        let (mgs, mgs_manager) = MgsManager::new(&log, events_tx.clone());
         Wizard {
             screens,
             active_screen: ScreenId::Inventory,
             events_rx,
             events_tx,
             state,
-            mgs: MgsManager {},
-            rss: RssManager {},
+            mgs,
+            mgs_manager: Some(mgs_manager),
             terminal,
             log,
             tokio_rt,
@@ -205,8 +202,14 @@ impl Wizard {
     fn start_tokio_runtime(&mut self) {
         let events_tx = self.events_tx.clone();
         let log = self.log.clone();
+        let mgs_manager = self.mgs_manager.take().unwrap();
         self.tokio_rt.block_on(async {
             run_event_listener(log.clone(), events_tx).await;
+            tokio::spawn(async move {
+                mgs_manager.run().await;
+            })
+            .await
+            .unwrap();
         });
     }
 }
@@ -263,11 +266,6 @@ async fn run_event_listener(log: slog::Logger, events_tx: Sender<Event>) {
 pub struct State {
     inventory: Inventory,
 }
-
-/// Send requests to MGS
-///
-/// Replies come in as [`Event`]s
-pub struct MgsManager {}
 
 /// Send requests to RSS
 ///
