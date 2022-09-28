@@ -548,8 +548,8 @@ impl SelectQuery {
                 let mut from_statements = String::new();
                 for (i, subquery) in self
                     .field_selectors
-                    .iter()
-                    .map(|(_, sel)| {
+                    .values()
+                    .map(|sel| {
                         sel.as_query(&self.timeseries_schema.timeseries_name)
                     })
                     .enumerate()
