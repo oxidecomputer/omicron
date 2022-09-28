@@ -95,7 +95,7 @@ async fn test_snapshot_then_delete_disk(cptestctx: &ControlPlaneTestContext) {
     };
 
     let global_image: views::GlobalImage =
-        NexusRequest::objects_post(client, "/images", &image_create_params)
+        NexusRequest::objects_post(client, "/system/images", &image_create_params)
             .authn_as(AuthnMode::PrivilegedUser)
             .execute()
             .await
@@ -224,7 +224,7 @@ async fn test_delete_snapshot_then_disk(cptestctx: &ControlPlaneTestContext) {
     };
 
     let global_image: views::GlobalImage =
-        NexusRequest::objects_post(client, "/images", &image_create_params)
+        NexusRequest::objects_post(client, "/system/images", &image_create_params)
             .authn_as(AuthnMode::PrivilegedUser)
             .execute()
             .await
@@ -353,7 +353,7 @@ async fn test_multiple_snapshots(cptestctx: &ControlPlaneTestContext) {
     };
 
     let global_image: views::GlobalImage =
-        NexusRequest::objects_post(client, "/images", &image_create_params)
+        NexusRequest::objects_post(client, "/system/images", &image_create_params)
             .authn_as(AuthnMode::PrivilegedUser)
             .execute()
             .await
@@ -483,7 +483,7 @@ async fn test_snapshot_prevents_other_disk(
     };
 
     let global_image: views::GlobalImage =
-        NexusRequest::objects_post(client, "/images", &image_create_params)
+        NexusRequest::objects_post(client, "/system/images", &image_create_params)
             .authn_as(AuthnMode::PrivilegedUser)
             .execute()
             .await
