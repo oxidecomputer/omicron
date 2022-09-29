@@ -96,7 +96,8 @@ panic = "abort"
 # uncomment one of these blocks.
 #
 [patch."https://github.com/oxidecomputer/dropshot"]
-dropshot = { path = "../dropshot/dropshot" }
+dropshot = { git = "https://github.com/oxidecomputer/dropshot?rev=9a45f74a118d07ca71b96a9e2dfb212554ac7e87", branch = "redirects" }
+
 #[patch."https://github.com/oxidecomputer/steno"]
 #steno = { path = "../steno" }
 #[patch."https://github.com/oxidecomputer/propolis"]
