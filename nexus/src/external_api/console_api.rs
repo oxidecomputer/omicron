@@ -71,7 +71,7 @@ pub async fn login_spoof(
 
     if user_id.is_none() {
         Err(Error::Unauthenticated {
-            internal_message: format!("unknown user specified"),
+            internal_message: String::from("unknown user specified"),
         })?;
     }
 
@@ -371,7 +371,7 @@ pub async fn login_saml(
 
         if user.is_none() {
             Err(Error::Unauthenticated {
-                internal_message: format!(
+                internal_message: String::from(
                     "no matching user found or credentials were not valid"
                 ),
             })?;
@@ -547,7 +547,7 @@ pub async fn login_begin(
     let query = query_params.into_inner();
     let redirect_url = query.state.filter(|s| !s.trim().is_empty());
     let login_url = get_login_url(redirect_url);
-    http_response_found(login_url.clone())
+    http_response_found(login_url)
 }
 
 /// Fetch the user associated with the current session
