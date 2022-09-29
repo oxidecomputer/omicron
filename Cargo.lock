@@ -1021,7 +1021,7 @@ name = "ddm-admin-client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "omicron-zone-package",
+ "omicron-zone-package 0.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "progenitor",
  "progenitor-client",
  "quote",
@@ -3073,7 +3073,7 @@ dependencies = [
  "indicatif",
  "omicron-common",
  "omicron-sled-agent",
- "omicron-zone-package",
+ "omicron-zone-package 0.3.2 (git+https://github.com/oxidecomputer/omicron-package?branch=target-filtering)",
  "rayon",
  "reqwest",
  "ring",
@@ -3191,6 +3191,26 @@ name = "omicron-zone-package"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b45da86a08794bc3e038552e9777724f204bdd55c8669f098e6b90df3f5bacd0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "filetime",
+ "flate2",
+ "reqwest",
+ "serde",
+ "serde_derive",
+ "tar",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "toml",
+ "walkdir",
+]
+
+[[package]]
+name = "omicron-zone-package"
+version = "0.3.2"
+source = "git+https://github.com/oxidecomputer/omicron-package?branch=target-filtering#7b337e369f2b9eb81ad73bb0b13df6d2b513698b"
 dependencies = [
  "anyhow",
  "chrono",

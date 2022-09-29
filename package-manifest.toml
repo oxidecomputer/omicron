@@ -134,10 +134,34 @@ commit = "2be097ddd1d3fd8e7f56bc0a4bfd696253b11454"
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
 sha256 = "94218915ec6fed75dcc81d736bd5e9ef62c9eb651a67a943b297d94d6b390941"
 
-[external_package.dendrite]
+[external_package.dendrite_tofino_stub]
 service_name = "dendrite"
 zone = true
-[external_package.dendrite.source]
+[external_package.dendrite_tofino_stub.only_for_targets]
+switch_variant = "tofino_stub"
+[external_package.dendrite_tofino_stub.source]
+# To manually override the package source:
+#
+# 1. Build the zone image manually
+#   1a. cd <dendrite tree>
+#   1b. cargo build --features=<tofino_stub|tofino_asic|softnpu>
+#   1c. cargo xtask dist -o
+# 2. Copy the output zone image from dendrite/out to omicron/out
+# 3. Use type = "manual" instead of the "prebuilt"
+type = "prebuilt"
+repo = "dendrite"
+commit = "9963f4bbfcc4cc2a9c4b3e59c392a8f753d458d8"
+sha256 = "c78ffa466fd0b6db6775b774639f0e787f214f6a0ba1e818778779cc0c5ea5a5"
+
+# TODO(nils): This commit is actually wrong - we should be using a different
+# pre-built for the softnpu variant.
+# TODO(nils): We could also add a variant for "dendrite_tofino_asic".
+[external_package.dendrite_softnpu]
+service_name = "dendrite"
+zone = true
+[external_package.dendrite_softnpu.only_for_targets]
+switch_variant = "softnpu"
+[external_package.dendrite_softnpu.source]
 # To manually override the package source:
 #
 # 1. Build the zone image manually
