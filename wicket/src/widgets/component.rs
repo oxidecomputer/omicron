@@ -124,12 +124,17 @@ impl<'a> ComponentModal<'a> {
         buf: &mut Buffer,
         state: &mut ComponentModalState,
     ) {
-        let text = match state.inventory.get_inventory(&state.current) {
+        let mut text =
+            Text::styled("INVENTORY:\n\n", self.status_bar_selected_style);
+        match state.inventory.get_inventory(&state.current) {
             Some(inventory) => {
-                Text::styled(format!("{:#?}", inventory), self.inventory_style)
+                text.extend(Text::styled(
+                    format!("{:#?}", inventory),
+                    self.inventory_style,
+                ));
             }
-            None => Text::styled("UNKNOWN", self.inventory_style),
-        };
+            None => text.extend(Text::styled("UNKNOWN", self.inventory_style)),
+        }
 
         debug!(state.log, "area = {:#?}", area);
         debug!(

@@ -121,10 +121,10 @@ impl InventoryScreen {
         }
 
         let component = ComponentModal::default()
-            .style(Style::default().fg(OX_YELLOW).bg(OX_GRAY_DARK))
+            .style(Style::default().fg(OX_YELLOW).bg(Color::Black))
             .status_bar_style(Style::default().bg(OX_GREEN_DARK).fg(OX_GRAY))
             .status_bar_selected_style(Style::default().fg(OX_GREEN_LIGHT))
-            .inventory_style(Style::default().fg(OX_YELLOW));
+            .inventory_style(Style::default().fg(OX_YELLOW_DIM));
 
         let mut rect = f.size();
         rect.y = vertical_border.0;
