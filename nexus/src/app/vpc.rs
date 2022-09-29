@@ -34,6 +34,7 @@ use sled_agent_client::types::{IpNet, NetworkInterface};
 use futures::future::join_all;
 use ipnetwork::IpNetwork;
 use std::collections::{HashMap, HashSet};
+use std::net::IpAddr;
 use uuid::Uuid;
 
 impl super::Nexus {
@@ -652,19 +653,14 @@ impl super::Nexus {
                             .get(vpc.name())
                             .unwrap_or(&no_interfaces)
                             .iter()
-                            .filter(|nic| {
-                                use external::IpNet;
-                                use std::net::IpAddr;
-                                match (IpNet::from(*net), IpAddr::from(nic.ip))
-                                {
-                                    (IpNet::V4(net), IpAddr::V4(ip)) => {
-                                        net.contains(ip)
-                                    }
-                                    (IpNet::V6(net), IpAddr::V6(ip)) => {
-                                        net.contains(ip)
-                                    }
-                                    (_, _) => false,
+                            .filter(|nic| match (net, nic.ip) {
+                                (external::IpNet::V4(net), IpAddr::V4(ip)) => {
+                                    net.contains(ip)
                                 }
+                                (external::IpNet::V6(net), IpAddr::V6(ip)) => {
+                                    net.contains(ip)
+                                }
+                                (_, _) => false,
                             })
                             .for_each(&mut push_target_nic);
                     }
