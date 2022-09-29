@@ -7,6 +7,7 @@
 use slog::{o, Logger};
 use std::sync::mpsc::Sender;
 
+use crate::inventory::{ComponentId, PowerState};
 use crate::Event;
 
 // Assume that these requests are periodic on the order of seconds or the
@@ -51,5 +52,32 @@ impl MgsManager {
     /// * that can be utilized by the UI.
     ///
     /// TODO: Uh, um, make this not completely fake
-    pub async fn run(mut self) {}
+    pub async fn run(mut self) {
+        for i in 0..32 {
+            let state = {
+                match i % 4 {
+                    0 => PowerState::A0,
+                    1 => PowerState::A2,
+                    2 => PowerState::A3,
+                    3 => PowerState::A4,
+                    _ => unreachable!(),
+                }
+            };
+            self.wizard_tx
+                .send(Event::Power(ComponentId::Sled(i), state))
+                .unwrap();
+        }
+        self.wizard_tx
+            .send(Event::Power(ComponentId::Switch(0), PowerState::A0))
+            .unwrap();
+        self.wizard_tx
+            .send(Event::Power(ComponentId::Switch(1), PowerState::A0))
+            .unwrap();
+        self.wizard_tx
+            .send(Event::Power(ComponentId::Psc(0), PowerState::A0))
+            .unwrap();
+        self.wizard_tx
+            .send(Event::Power(ComponentId::Psc(1), PowerState::A4))
+            .unwrap();
+    }
 }

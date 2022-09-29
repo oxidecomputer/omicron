@@ -7,7 +7,6 @@
 use crate::screens::make_even;
 use crate::screens::Height;
 use crate::screens::RectState;
-use slog::debug;
 use slog::Logger;
 use tui::buffer::Buffer;
 use tui::layout::Rect;
