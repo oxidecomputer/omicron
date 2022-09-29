@@ -129,17 +129,17 @@ repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-commit = "2be097ddd1d3fd8e7f56bc0a4bfd696253b11454"
+commit = "21fd8236c23dc38fea5d1e4c8196be685c251da2"
 # The SHA256 digest is automatically posted to:
-# https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-sha256 = "94218915ec6fed75dcc81d736bd5e9ef62c9eb651a67a943b297d94d6b390941"
+# https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/maghemite.sha256.txt
+sha256 = "039c9b3e97b0d61012850c1476574742c0cb9274ffa86cfeb15d619854ebacfa"
 
-[external_package.dendrite_tofino_stub]
+[external_package.dendrite-stub]
 service_name = "dendrite"
 zone = true
-[external_package.dendrite_tofino_stub.only_for_targets]
-switch_variant = "tofino_stub"
-[external_package.dendrite_tofino_stub.source]
+[external_package.dendrite-stub.only_for_targets]
+switch_variant = "stub"
+[external_package.dendrite-stub.source]
 # To manually override the package source:
 #
 # 1. Build the zone image manually
@@ -150,18 +150,15 @@ switch_variant = "tofino_stub"
 # 3. Use type = "manual" instead of the "prebuilt"
 type = "prebuilt"
 repo = "dendrite"
-commit = "9963f4bbfcc4cc2a9c4b3e59c392a8f753d458d8"
-sha256 = "c78ffa466fd0b6db6775b774639f0e787f214f6a0ba1e818778779cc0c5ea5a5"
+commit = "e5ae7508778d02e079d9a10942ac14ec2064ccb7"
+sha256 = "db426f820cdb0de97c3ba3e80d50bad66e4b68e8882088a8cf64e1beb52b0e98"
 
-# TODO(nils): This commit is actually wrong - we should be using a different
-# pre-built for the softnpu variant.
-# TODO(nils): We could also add a variant for "dendrite_tofino_asic".
-[external_package.dendrite_softnpu]
+[external_package.dendrite-asic]
 service_name = "dendrite"
 zone = true
-[external_package.dendrite_softnpu.only_for_targets]
+[external_package.dendrite-asic.only_for_targets]
 switch_variant = "softnpu"
-[external_package.dendrite_softnpu.source]
+[external_package.dendrite-asic.source]
 # To manually override the package source:
 #
 # 1. Build the zone image manually
@@ -172,5 +169,5 @@ switch_variant = "softnpu"
 # 3. Use type = "manual" instead of the "prebuilt"
 type = "prebuilt"
 repo = "dendrite"
-commit = "9963f4bbfcc4cc2a9c4b3e59c392a8f753d458d8"
-sha256 = "c78ffa466fd0b6db6775b774639f0e787f214f6a0ba1e818778779cc0c5ea5a5"
+commit = "e5ae7508778d02e079d9a10942ac14ec2064ccb7"
+sha256 = "f5fdde40e15d63387e3c35105209a6e4f9dcf4a001d0a3ee36ad857937a65c62"

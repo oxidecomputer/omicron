@@ -115,7 +115,7 @@ fn parse_target(s: &str) -> Result<Target, TargetParseError> {
 // involvement. If we choose to remove it, having users pick one of a few
 // "build profiles" (in other words, a curated list of target strings)
 // seems like a promising alternative.
-const DEFAULT_TARGET: &str = "switch_variant=tofino_stub";
+const DEFAULT_TARGET: &str = "switch_variant=stub";
 
 #[derive(Debug, Parser)]
 #[clap(name = "packaging tool")]
@@ -252,8 +252,9 @@ async fn get_external_package(
     match &external_package.source {
         ExternalPackageSource::Prebuilt { repo, commit, sha256 } => {
             let expected_digest = hex::decode(&sha256)?;
-            let path =
-                external_package.package.get_output_path(&output_directory);
+            let path = external_package
+                .package
+                .get_output_path(package_name, &output_directory);
 
             let should_download = if path.exists() {
                 // Re-download the package if the SHA doesn't match.
@@ -308,8 +309,9 @@ async fn get_external_package(
             }
         }
         ExternalPackageSource::Manual => {
-            let path =
-                external_package.package.get_output_path(&output_directory);
+            let path = external_package
+                .package
+                .get_output_path(package_name, &output_directory);
             if !path.exists() {
                 bail!(
                     "The package for {} (expected at {}) does not exist.",
@@ -370,7 +372,7 @@ async fn do_package(config: &Config, output_directory: &Path) -> Result<()> {
                     ui.add_package(package_name.to_string(), total_work);
                 progress.set_message("bundle package".to_string());
                 package
-                    .create_with_progress(&progress, &output_directory)
+                    .create_with_progress(&progress, package_name, &output_directory)
                     .await
                     .with_context(|| {
                         let msg = format!("failed to create {package_name} in {output_directory:?}");
@@ -402,24 +404,22 @@ fn do_unpack(
     // Copy all packages to the install location in parallel.
     let packages = config.all_packages_for_target();
 
-    packages.into_par_iter().try_for_each(|(_, package)| -> Result<()> {
-        let tarfile = if package.zone {
-            artifact_dir.join(format!("{}.tar.gz", package.service_name))
-        } else {
-            artifact_dir.join(format!("{}.tar", package.service_name))
-        };
-
-        let src = tarfile.as_path();
-        let dst = install_dir.join(src.strip_prefix(artifact_dir)?);
-        info!(
-            &config.log,
-            "Installing service";
-            "src" => %src.to_string_lossy(),
-            "dst" => %dst.to_string_lossy(),
-        );
-        std::fs::copy(&src, &dst)?;
-        Ok(())
-    })?;
+    packages.into_par_iter().try_for_each(
+        |(package_name, package)| -> Result<()> {
+            let tarfile = package.get_output_path(&package_name, artifact_dir);
+            let src = tarfile.as_path();
+            let dst =
+                package.get_output_path(&package.service_name, install_dir);
+            info!(
+                &config.log,
+                "Installing service";
+                "src" => %src.to_string_lossy(),
+                "dst" => %dst.to_string_lossy(),
+            );
+            std::fs::copy(&src, &dst)?;
+            Ok(())
+        },
+    )?;
 
     if env::var("OMICRON_NO_UNINSTALL").is_err() {
         // Ensure we start from a clean slate - remove all zones & packages.
