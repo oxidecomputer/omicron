@@ -655,7 +655,8 @@ impl super::Nexus {
                             .filter(|nic| {
                                 use external::IpNet;
                                 use std::net::IpAddr;
-                                match (IpNet::from(*net), IpAddr::from(nic.ip)) {
+                                match (IpNet::from(*net), IpAddr::from(nic.ip))
+                                {
                                     (IpNet::V4(net), IpAddr::V4(ip)) => {
                                         net.contains(ip)
                                     }
