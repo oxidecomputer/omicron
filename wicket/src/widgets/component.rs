@@ -10,7 +10,7 @@ use std::marker::PhantomData;
 use tui::buffer::Buffer;
 use tui::layout::Alignment;
 use tui::layout::Rect;
-use tui::style::Style;
+use tui::style::{Modifier, Style};
 use tui::text::{Span, Spans, Text};
 use tui::widgets::Block;
 use tui::widgets::Paragraph;
@@ -124,32 +124,36 @@ impl<'a> ComponentModal<'a> {
         buf: &mut Buffer,
         state: &mut ComponentModalState,
     ) {
-        let mut text =
-            Text::styled("INVENTORY:\n\n", self.status_bar_selected_style);
-        match state.inventory.get_inventory(&state.current) {
-            Some(inventory) => {
-                text.extend(Text::styled(
-                    format!("{:#?}", inventory),
-                    self.inventory_style,
-                ));
-            }
-            None => text.extend(Text::styled("UNKNOWN", self.inventory_style)),
-        }
+        // Draw the header
+        let mut header_style = self.status_bar_selected_style;
+        header_style =
+            header_style.add_modifier(Modifier::UNDERLINED | Modifier::BOLD);
 
-        debug!(state.log, "area = {:#?}", area);
-        debug!(
-            state.log,
-            "text (width, height) = ({}, {})",
-            text.width(),
-            text.height()
-        );
-        area.y = area.y + 10;
-        area.height = area.height - 10;
+        let text = Text::styled("INVENTORY\n\n", header_style);
+        let mut rect = area.clone();
+        rect.y = area.y + 6;
+        rect.height = area.height - 6;
+        let center = (area.width - text.width() as u16) / 2;
+        rect.x = area.x + center;
+        rect.width = area.width - center;
+        let header = Paragraph::new(text);
+        header.render(rect, buf);
+
+        // Draw the contents
+
+        let text = match state.inventory.get_inventory(&state.current) {
+            Some(inventory) => {
+                Text::styled(format!("{:#?}", inventory), self.inventory_style)
+            }
+            None => Text::styled("UNKNOWN", self.inventory_style),
+        };
+
+        area.y = area.y + 9;
+        area.height = area.height - 9;
 
         let center = (area.width - text.width() as u16) / 2;
         area.x = area.x + center;
         area.width = area.width - center;
-        debug!(state.log, "NEW area = {:#?}", area);
 
         let inventory = Paragraph::new(text);
 
