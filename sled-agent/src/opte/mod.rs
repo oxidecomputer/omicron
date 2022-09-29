@@ -14,30 +14,27 @@ cfg_if::cfg_if! {
 
 use ipnetwork::IpNetwork;
 use macaddr::MacAddr6;
+pub use oxide_vpc::api::BoundaryServices;
 use std::net::IpAddr;
-use std::net::Ipv6Addr;
 
-/// Location information for reaching Boundary Services, for directing
-/// inter-sled or off-rack traffic from guests.
-#[derive(Debug, Clone, Copy)]
-pub struct BoundaryServices {
-    pub ip: Ipv6Addr,
-    pub vni: Vni,
-}
+fn default_boundary_services() -> BoundaryServices {
+    use oxide_vpc::api::Ipv6Addr;
+    use oxide_vpc::api::MacAddr;
+    // TODO-completeness: Don't hardcode any of these values.
+    //
+    // Boundary Services will be started on several Sidecars during rack
+    // setup, and those addresses and VNIs will need to be propagated here.
+    // See https://github.com/oxidecomputer/omicron/issues/1382
+    let ip = Ipv6Addr::from([0xfd00, 0x99, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01]);
 
-impl Default for BoundaryServices {
-    fn default() -> Self {
-        // TODO-completeness: Don't hardcode this.
-        //
-        // Boundary Services will be started on several Sidecars during rack
-        // setup, and those addresses will need to be propagated here.
-        // See https://github.com/oxidecomputer/omicron/issues/1382
-        const BOUNDARY_SERVICES_ADDR: Ipv6Addr =
-            Ipv6Addr::new(0xfd00, 0x99, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01);
-        let boundary_services_vni = Vni::new(99_u32).unwrap();
-
-        Self { ip: BOUNDARY_SERVICES_ADDR, vni: boundary_services_vni }
-    }
+    // This MAC address is entirely irrelevant to the functionality of OPTE and
+    // the Oxide VPC. It's never used to actually forward packets. It only
+    // represents the "logical" destination of Boundary Services as a
+    // destination that OPTE as a virtual gateway forwards packets to as its
+    // next hop.
+    let mac = MacAddr::from_const([0xa8, 0x25, 0x40, 0xf9, 0x99, 0x99]);
+    let vni = Vni::new(99_u32).unwrap();
+    BoundaryServices { ip, mac, vni }
 }
 
 /// Information about the gateway for an OPTE port
