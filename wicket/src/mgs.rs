@@ -7,7 +7,9 @@
 use slog::{o, Logger};
 use std::sync::mpsc::Sender;
 
-use crate::inventory::{ComponentId, PowerState};
+use crate::inventory::{
+    Component, ComponentId, FakePsc, FakeSled, FakeSwitch, PowerState,
+};
 use crate::Event;
 
 // Assume that these requests are periodic on the order of seconds or the
@@ -53,6 +55,11 @@ impl MgsManager {
     ///
     /// TODO: Uh, um, make this not completely fake
     pub async fn run(mut self) {
+        self.announce_fake_power_states();
+        self.announce_fake_inventory();
+    }
+
+    pub fn announce_fake_power_states(&self) {
         for i in 0..32 {
             let state = {
                 match i % 4 {
@@ -78,6 +85,58 @@ impl MgsManager {
             .unwrap();
         self.wizard_tx
             .send(Event::Power(ComponentId::Psc(1), PowerState::A4))
+            .unwrap();
+    }
+
+    // Send an Inventory message to the Wizard for each component
+    // in state A2 or greater.
+    // TODO: Replace this
+    fn announce_fake_inventory(&self) {
+        for i in 0..32u8 {
+            let state = i % 4;
+            if state == 0 || state == 1 {
+                self.wizard_tx
+                    .send(Event::Inventory(
+                        ComponentId::Sled(i),
+                        Component::Sled(FakeSled {
+                            slot: i,
+                            serial_number: format!("sled-{}", i),
+                            part_number: "Gimlet v1".into(),
+                            sp_version: "1.0".into(),
+                            rot_version: "1.0".into(),
+                            host_os_version: "1.0".into(),
+                            control_plane_version: None,
+                        }),
+                    ))
+                    .unwrap();
+            }
+        }
+        for i in 0..2u8 {
+            self.wizard_tx
+                .send(Event::Inventory(
+                    ComponentId::Switch(i),
+                    Component::Switch(FakeSwitch {
+                        slot: i,
+                        serial_number: format!("switch-{}", i),
+                        part_number: "Sidecar v1".into(),
+                        sp_version: "1.0".into(),
+                        rot_version: "1.0".into(),
+                    }),
+                ))
+                .unwrap();
+        }
+
+        self.wizard_tx
+            .send(Event::Inventory(
+                ComponentId::Psc(0),
+                Component::Psc(FakePsc {
+                    slot: 0u8,
+                    serial_number: format!("PSC-{}", 0),
+                    part_number: "Sidecar v1".into(),
+                    sp_version: "1.0".into(),
+                    rot_version: "1.0".into(),
+                }),
+            ))
             .unwrap();
     }
 }
