@@ -38,7 +38,7 @@ mod mgs;
 mod screens;
 mod widgets;
 
-use inventory::{Component, Inventory};
+use inventory::{Component, ComponentId, Inventory, PowerState};
 use mgs::{MgsHandle, MgsManager};
 use screens::{InventoryScreen, Screen, ScreenId, Screens};
 
@@ -181,6 +181,15 @@ impl Wizard {
                     );
                     self.handle_actions(actions)?;
                 }
+                Event::Power(component_id, power_state) => {
+                    if let Err(e) = self
+                        .state
+                        .inventory
+                        .update_power_state(component_id, power_state)
+                    {
+                        error!(self.log, "Failed to update power state: {e}");
+                    }
+                }
                 _ => info!(self.log, "{:?}", event),
             }
         }
@@ -284,6 +293,9 @@ pub enum Event {
     ///
     /// TODO: This should be real information returned from MGS
     Inventory(Component),
+
+    /// PowerState changes
+    Power(ComponentId, PowerState),
 
     /// The tick of a Timer
     /// This can be used to draw a frame to the terminal
