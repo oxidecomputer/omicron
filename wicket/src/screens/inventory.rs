@@ -10,6 +10,7 @@ use super::RectState;
 use super::Screen;
 use super::TabIndex;
 use super::{Height, Width};
+use crate::inventory::ComponentId;
 use crate::widgets::{
     Banner, ComponentModal, ComponentModalState, Rack, RackState,
 };
@@ -131,17 +132,17 @@ impl InventoryScreen {
         rect.width = rect.width - vertical_border.0 * 2;
 
         // Unwraps are safe because we verified self.tab_index.get().is_some() above.
-        let current_name = self.component_name(self.tab_index.get().unwrap());
-        let next_name = self.component_name(self.tab_index.next().unwrap());
-        let prev_name = self.component_name(self.tab_index.prev().unwrap());
+        let current = self.component_id(self.tab_index.get().unwrap());
+        let next = self.component_id(self.tab_index.next().unwrap());
+        let prev = self.component_id(self.tab_index.prev().unwrap());
 
         // TODO: Fill in with actual inventory
         let current_component = None;
 
         let mut modal_state = ComponentModalState {
-            prev_name,
-            next_name,
-            current_name,
+            prev,
+            next,
+            current,
             current_component,
             inventory: &state.inventory,
         };
@@ -224,25 +225,28 @@ impl InventoryScreen {
         }
     }
 
-    // Return the component name for a given TabIndex value
-    fn component_name(&self, i: u16) -> String {
+    // Return the ComponentId for a given TabIndex value
+    //
+    // XXX: If the TabIndex for the rack components changes, this method must
+    // also.
+    fn component_id(&self, i: u16) -> ComponentId {
         // Sleds
         if i < 16 {
-            format!("sled {}", i)
+            ComponentId::Sled(i.try_into().unwrap())
         } else if i > 19 {
-            format!("sled {}", i - 4)
+            ComponentId::Sled((i - 4).try_into().unwrap())
         } else
         // Switches
         if i == 16 {
-            "switch 0".to_string()
+            ComponentId::Switch(0)
         } else if i == 19 {
-            "switch 1".to_string()
+            ComponentId::Switch(1)
         } else
         // Power Shelves
         // We actually want to return the active component here, so
         // we name it "psc X"
         if i == 17 || i == 18 {
-            format!("psc {}", i - 17)
+            ComponentId::Psc((i - 17).try_into().unwrap())
         } else {
             unreachable!();
         }

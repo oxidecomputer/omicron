@@ -18,6 +18,10 @@ pub struct Inventory {
 }
 
 impl Inventory {
+    pub fn get_power_state(&self, id: &ComponentId) -> Option<&PowerState> {
+        self.power.get(id)
+    }
+
     pub fn update_power_state(
         &mut self,
         id: ComponentId,
@@ -100,6 +104,16 @@ pub enum ComponentId {
     Sled(u8),
     Switch(u8),
     Psc(u8),
+}
+
+impl ComponentId {
+    pub fn name(&self) -> String {
+        match self {
+            ComponentId::Sled(i) => format!("sled {}", i),
+            ComponentId::Switch(i) => format!("switch {}", i),
+            ComponentId::Psc(i) => format!("psc {}", i),
+        }
+    }
 }
 
 #[derive(Debug)]
