@@ -157,7 +157,7 @@ sha256 = "db426f820cdb0de97c3ba3e80d50bad66e4b68e8882088a8cf64e1beb52b0e98"
 service_name = "dendrite"
 zone = true
 [external_package.dendrite-asic.only_for_targets]
-switch_variant = "softnpu"
+switch_variant = "asic"
 [external_package.dendrite-asic.source]
 # To manually override the package source:
 #
