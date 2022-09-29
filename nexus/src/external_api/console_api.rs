@@ -25,14 +25,15 @@ use crate::{
 };
 use anyhow::Context;
 use dropshot::{
-    endpoint, http_response_see_other, http_response_temporary_redirect,
-    HttpError, HttpResponseOk, HttpResponseSeeOther,
-    HttpResponseTemporaryRedirect, Path, Query, RequestContext, TypedBody,
+    endpoint, http_response_found, http_response_see_other, HttpError,
+    HttpResponseFound, HttpResponseOk, HttpResponseSeeOther, Path, Query,
+    RequestContext, TypedBody,
 };
 use http::{header, Response, StatusCode};
 use hyper::Body;
 use lazy_static::lazy_static;
 use mime_guess;
+use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -83,7 +84,7 @@ pub async fn login_spoof(
     let session = nexus.session_create(&authn_opctx, user_id).await?;
 
     Ok(Response::builder()
-        .status(StatusCode::OK)
+        .status(StatusCode::NO_CONTENT)
         .header(
             header::SET_COOKIE,
             session_cookie_header_value(
@@ -91,7 +92,7 @@ pub async fn login_spoof(
                 apictx.session_idle_timeout(),
             ),
         )
-        .body("".into())?) // TODO: what do we return from login?
+        .body(Body::empty())?)
 }
 
 // Silos have one or more identity providers, and an unauthenticated user will
@@ -236,10 +237,10 @@ impl RelayState {
    path = "/login/{silo_name}/{provider_name}",
    tags = ["login"],
 }]
-pub async fn login_begin(
+pub async fn login_saml_begin(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<LoginToProviderPathParam>,
-) -> Result<HttpResponseTemporaryRedirect, HttpError> {
+) -> Result<HttpResponseFound, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
@@ -299,7 +300,7 @@ pub async fn login_begin(
                         |e| HttpError::for_internal_error(e.to_string()),
                     )?;
 
-                Ok(http_response_temporary_redirect(sign_in_url))
+                http_response_found(sign_in_url)
             }
         }
     };
@@ -401,18 +402,25 @@ pub async fn login_saml(
             user.id(),
         );
 
-        let mut response_with_headers = http_response_see_other(next_url);
+        let mut response_with_headers = http_response_see_other(next_url)?;
+
         {
-            let mut headers = response_with_headers.headers_mut();
+            let headers = response_with_headers.headers_mut();
             headers.append(
                 header::SET_COOKIE,
-                session_cookie_header_value(
+                http::HeaderValue::from_str(&session_cookie_header_value(
                     &session.token,
                     apictx.session_idle_timeout(),
-                ),
+                ))
+                .map_err(|error| {
+                    HttpError::for_internal_error(format!(
+                        "unsupported cookie value: {:#}",
+                        error
+                    ))
+                })?,
             );
         }
-        Ok(response_with_headers);
+        Ok(response_with_headers)
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -471,7 +479,7 @@ pub struct RestPathParam {
    path = "/spoof_login",
    unpublished = true,
 }]
-pub async fn spoof_login_form(
+pub async fn login_spoof_begin(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
 ) -> Result<Response<Body>, HttpError> {
     serve_console_index(rqctx.context()).await
@@ -531,16 +539,15 @@ fn get_login_url(redirect_url: Option<String>) -> String {
    path = "/login",
    unpublished = true,
 }]
-pub async fn login_redirect(
+pub async fn login_begin(
     _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<StateParam>,
-) -> Result<Response<Body>, HttpError> {
+) -> Result<HttpResponseFound, HttpError> {
+    // TODO metrics
     let query = query_params.into_inner();
     let redirect_url = query.state.filter(|s| !s.trim().is_empty());
-    Ok(Response::builder()
-        .status(StatusCode::FOUND)
-        .header(http::header::LOCATION, get_login_url(redirect_url))
-        .body("".into())?)
+    let login_url = get_login_url(redirect_url);
+    http_response_found(login_url.clone())
 }
 
 /// Fetch the user associated with the current session
