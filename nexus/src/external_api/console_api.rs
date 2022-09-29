@@ -26,7 +26,8 @@ use crate::{
 use anyhow::Context;
 use dropshot::{
     endpoint, http_response_found, http_response_see_other, HttpError,
-    HttpResponseFound, HttpResponseOk, HttpResponseSeeOther, Path, Query,
+    HttpResponseFound, HttpResponseHeaders, HttpResponseOk,
+    HttpResponseSeeOther, HttpResponseUpdatedNoContent, Path, Query,
     RequestContext, TypedBody,
 };
 use http::{header, Response, StatusCode};
@@ -59,7 +60,9 @@ pub struct SpoofLoginBody {
 pub async fn login_spoof(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     params: TypedBody<SpoofLoginBody>,
-) -> Result<Response<Body>, HttpError> {
+) -> Result<HttpResponseHeaders<HttpResponseUpdatedNoContent>, HttpError> {
+    // TODO metrics
+
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let params = params.into_inner();
@@ -83,16 +86,25 @@ pub async fn login_spoof(
     let authn_opctx = nexus.opctx_external_authn();
     let session = nexus.session_create(&authn_opctx, user_id).await?;
 
-    Ok(Response::builder()
-        .status(StatusCode::NO_CONTENT)
-        .header(
+    let mut response =
+        HttpResponseHeaders::new_unnamed(HttpResponseUpdatedNoContent());
+    {
+        let headers = response.headers_mut();
+        headers.append(
             header::SET_COOKIE,
-            session_cookie_header_value(
+            http::HeaderValue::from_str(&session_cookie_header_value(
                 &session.token,
                 apictx.session_idle_timeout(),
-            ),
-        )
-        .body(Body::empty())?)
+            ))
+            .map_err(|error| {
+                HttpError::for_internal_error(format!(
+                    "unsupported cookie value: {:#}",
+                    error
+                ))
+            })?,
+        );
+    };
+    Ok(response)
 }
 
 // Silos have one or more identity providers, and an unauthenticated user will
@@ -372,7 +384,7 @@ pub async fn login_saml(
         if user.is_none() {
             Err(Error::Unauthenticated {
                 internal_message: String::from(
-                    "no matching user found or credentials were not valid"
+                    "no matching user found or credentials were not valid",
                 ),
             })?;
         }
@@ -437,7 +449,8 @@ pub async fn login_saml(
 pub async fn logout(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     cookies: Cookies,
-) -> Result<Response<Body>, HttpError> {
+) -> Result<HttpResponseHeaders<HttpResponseUpdatedNoContent>, HttpError> {
+    // TODO metrics
     let nexus = &rqctx.context().nexus;
     let opctx = OpContext::for_external_api(&rqctx).await;
     let token = cookies.get(SESSION_COOKIE_COOKIE_NAME);
@@ -457,11 +470,23 @@ pub async fn logout(
     // we would for a normal request. They are in fact logged out like they
     // intended, and we should send the standard success response.
 
-    Ok(Response::builder()
-        .status(StatusCode::NO_CONTENT)
-        .header(header::SET_COOKIE, clear_session_cookie_header_value())
-        .body(Body::empty())?)
-    // TODO no metrics here
+    let mut response =
+        HttpResponseHeaders::new_unnamed(HttpResponseUpdatedNoContent());
+    {
+        let headers = response.headers_mut();
+        headers.append(
+            header::SET_COOKIE,
+            http::HeaderValue::from_str(&clear_session_cookie_header_value())
+                .map_err(|error| {
+                HttpError::for_internal_error(format!(
+                    "unsupported cookie value: {:#}",
+                    error
+                ))
+            })?,
+        );
+    };
+
+    Ok(response)
 }
 
 #[derive(Deserialize, JsonSchema)]
