@@ -9,13 +9,10 @@
 //! that will guide the user through the steps the need to take
 //! in an intuitive manner.
 
-use anyhow::anyhow;
 use crossterm::event::Event as TermEvent;
 use crossterm::event::EventStream;
 use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
-use crossterm::event::{
-    KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers,
-};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen,
@@ -23,14 +20,10 @@ use crossterm::terminal::{
 };
 use futures::StreamExt;
 use slog::{error, info, Drain};
-use std::collections::BTreeMap;
 use std::io::{stdout, Stdout};
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::thread;
-use tokio::time::{interval, Duration, Interval};
-use tui::backend::{Backend, CrosstermBackend};
-use tui::layout::{Constraint, Direction, Layout};
-use tui::widgets::{Block, Borders};
+use tokio::time::{interval, Duration};
+use tui::backend::CrosstermBackend;
 use tui::Terminal;
 
 pub(crate) mod inventory;
@@ -40,7 +33,7 @@ mod widgets;
 
 use inventory::{Component, ComponentId, Inventory, PowerState};
 use mgs::{MgsHandle, MgsManager};
-use screens::{InventoryScreen, Screen, ScreenId, Screens};
+use screens::{ScreenId, Screens};
 
 // We can avoid a bunch of unnecessary type parameters by picking them ahead of time.
 pub type Term = Terminal<CrosstermBackend<Stdout>>;
@@ -188,6 +181,13 @@ impl Wizard {
                 }
                 Event::Term(TermEvent::Resize(_, _)) => {
                     screen.draw(&self.state, &mut self.terminal)?;
+                }
+                Event::Term(TermEvent::Mouse(mouse_event)) => {
+                    let actions = screen.on(
+                        &self.state,
+                        ScreenEvent::Term(TermEvent::Mouse(mouse_event)),
+                    );
+                    self.handle_actions(actions)?;
                 }
                 Event::Power(component_id, power_state) => {
                     if let Err(e) = self

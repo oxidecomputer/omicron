@@ -17,9 +17,11 @@ use crate::Frame;
 use crate::ScreenEvent;
 use crate::State;
 use crossterm::event::Event as TermEvent;
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{
+    KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKind,
+};
 use slog::Logger;
-use tui::layout::Alignment;
+use tui::layout::{Alignment, Rect};
 use tui::style::{Color, Style};
 use tui::widgets::{Block, Borders};
 
@@ -32,6 +34,7 @@ pub struct InventoryScreen {
     watermark: &'static str,
     rack_state: RackState,
     tab_index: TabIndex,
+    hovered: Option<ComponentId>,
     modal_active: bool,
 }
 
@@ -44,6 +47,7 @@ impl InventoryScreen {
             watermark: include_str!("../../banners/oxide.txt"),
             rack_state,
             tab_index: TabIndex::new(MAX_TAB_INDEX),
+            hovered: None,
             modal_active: false,
         }
     }
@@ -94,7 +98,10 @@ impl InventoryScreen {
                 Style::default().fg(Color::Black).bg(OX_GRAY_DARK),
             )
             .border_style(Style::default().fg(OX_GRAY).bg(Color::Black))
-            .border_selected_style(Style::default().fg(OX_YELLOW))
+            .border_selected_style(
+                Style::default().fg(OX_YELLOW).bg(OX_GRAY_DARK),
+            )
+            .border_hover_style(Style::default().fg(OX_PINK).bg(OX_GRAY_DARK))
             .switch_selected_style(Style::default().bg(OX_GRAY_DARK))
             .power_shelf_selected_style(Style::default().bg(OX_GRAY));
 
@@ -183,6 +190,61 @@ impl InventoryScreen {
         vec![Action::Redraw]
     }
 
+    fn handle_mouse_event(
+        &mut self,
+        state: &State,
+        event: MouseEvent,
+    ) -> Vec<Action> {
+        match event.kind {
+            MouseEventKind::Moved => {
+                self.set_hover_state(event.column, event.row)
+            }
+            _ => vec![],
+        }
+    }
+
+    // Discover which rect the mouse is hovering over, remove any previous
+    // hover state, and set any new state.
+    fn set_hover_state(&mut self, x: u16, y: u16) -> Vec<Action> {
+        let id = self.find_rect_intersection(x, y);
+        if id == self.hovered {
+            // No change
+            vec![]
+        } else {
+            if let Some(id) = self.hovered {
+                // Clear the old hover state
+                self.rack_state.component_rects.get_mut(&id).unwrap().hovered =
+                    false;
+            }
+            self.hovered = id;
+            if let Some(id) = id {
+                // Set the new state
+                self.rack_state.component_rects.get_mut(&id).unwrap().hovered =
+                    true;
+            }
+            vec![Action::Redraw]
+        }
+    }
+
+    // See if the mouse is hovering over any part of the rack and return
+    // the component if it is.
+    fn find_rect_intersection(&self, x: u16, y: u16) -> Option<ComponentId> {
+        let mouse_pointer = Rect { x, y, width: 1, height: 1 };
+        if !self.rack_state.rect.intersects(mouse_pointer) {
+            return None;
+        }
+
+        // Find the interesecting component.
+        // I'm sure there's a faster way to do this with percentages, etc..,
+        // but this works for now.
+        for (id, rect_state) in self.rack_state.component_rects.iter() {
+            if rect_state.rect.intersects(mouse_pointer) {
+                return Some(*id);
+            }
+        }
+        None
+    }
+
     // Set the tabbed boolean to `true` for the current tab indexed rect
     fn set_tabbed(&mut self) {
         self.update_tabbed(true);
@@ -249,6 +311,9 @@ impl Screen for InventoryScreen {
         match event {
             ScreenEvent::Term(TermEvent::Key(key_event)) => {
                 self.handle_key_event(state, key_event)
+            }
+            ScreenEvent::Term(TermEvent::Mouse(mouse_event)) => {
+                self.handle_mouse_event(state, mouse_event)
             }
             ScreenEvent::Tick => {
                 vec![]
