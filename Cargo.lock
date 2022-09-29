@@ -3051,7 +3051,6 @@ dependencies = [
  "omicron-test-utils",
  "openapi-lint",
  "openapiv3",
- "opte",
  "opte-ioctl",
  "oxide-vpc",
  "oximeter",
