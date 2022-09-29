@@ -12,9 +12,7 @@ use std::collections::BTreeMap;
 #[derive(Debug, Default)]
 pub struct Inventory {
     power: BTreeMap<ComponentId, PowerState>,
-    sleds: [Option<FakeSled>; 32],
-    switches: [Option<FakeSwitch>; 2],
-    psc: Option<FakePsc>,
+    inventory: BTreeMap<ComponentId, Component>,
 }
 
 impl Inventory {
@@ -29,6 +27,20 @@ impl Inventory {
     ) -> anyhow::Result<()> {
         Self::validate_component_id(id)?;
         self.power.insert(id, state);
+        Ok(())
+    }
+
+    pub fn get_inventory(&self, id: &ComponentId) -> Option<&Component> {
+        self.inventory.get(id)
+    }
+
+    pub fn update_inventory(
+        &mut self,
+        id: ComponentId,
+        component: Component,
+    ) -> anyhow::Result<()> {
+        Self::validate_component_id(id)?;
+        self.inventory.insert(id, component);
         Ok(())
     }
 
@@ -51,33 +63,33 @@ impl Inventory {
 #[derive(Debug)]
 pub struct FakeSled {
     // 0-31
-    slot: u8,
-    serial_number: String,
-    part_number: String,
-    sp_version: String,
-    rot_version: String,
-    host_os_version: String,
-    control_plane_version: Option<String>,
+    pub slot: u8,
+    pub serial_number: String,
+    pub part_number: String,
+    pub sp_version: String,
+    pub rot_version: String,
+    pub host_os_version: String,
+    pub control_plane_version: Option<String>,
 }
 
 #[derive(Debug)]
 pub struct FakeSwitch {
     // Top is 0, bottom is 1
-    slot: u8,
-    serial_number: String,
-    part_number: String,
-    sp_version: String,
-    rot_version: String,
+    pub slot: u8,
+    pub serial_number: String,
+    pub part_number: String,
+    pub sp_version: String,
+    pub rot_version: String,
 }
 
 #[derive(Debug)]
 pub struct FakePsc {
     // Top is 0 power shelf, 1 is bottom
-    slot: u8,
-    serial_number: String,
-    part_number: String,
-    sp_version: String,
-    rot_version: String,
+    pub slot: u8,
+    pub serial_number: String,
+    pub part_number: String,
+    pub sp_version: String,
+    pub rot_version: String,
 }
 
 /// TODO: Use real inventory received from MGS

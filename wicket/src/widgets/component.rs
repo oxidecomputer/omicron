@@ -4,27 +4,21 @@
 
 //! A Modal for displaying rack inventory
 
-use crate::inventory::{
-    Component, ComponentId, FakePsc, FakeSled, FakeSwitch, Inventory,
-};
-use crate::screens::make_even;
-use crate::screens::Height;
-use crate::screens::RectState;
-use slog::debug;
-use slog::Logger;
+use crate::inventory::{Component, ComponentId, Inventory};
+use slog::{debug, Logger};
 use std::marker::PhantomData;
 use tui::buffer::Buffer;
-use tui::buffer::Cell;
 use tui::layout::Alignment;
 use tui::layout::Rect;
 use tui::style::Style;
-use tui::text::{Span, Spans};
+use tui::text::{Span, Spans, Text};
 use tui::widgets::Block;
-use tui::widgets::Borders;
+use tui::widgets::Paragraph;
 use tui::widgets::StatefulWidget;
 use tui::widgets::Widget;
 
 pub struct ComponentModalState<'a> {
+    pub log: Logger,
     pub prev: ComponentId,
     pub next: ComponentId,
     pub current: ComponentId,
@@ -37,6 +31,7 @@ pub struct ComponentModal<'a> {
     style: Style,
     status_bar_style: Style,
     status_bar_selected_style: Style,
+    inventory_style: Style,
     phantom: PhantomData<&'a usize>,
 }
 
@@ -53,6 +48,11 @@ impl<'a> ComponentModal<'a> {
 
     pub fn status_bar_selected_style(mut self, style: Style) -> Self {
         self.status_bar_selected_style = style;
+        self
+    }
+
+    pub fn inventory_style(mut self, style: Style) -> Self {
+        self.inventory_style = style;
         self
     }
 }
@@ -117,6 +117,39 @@ impl<'a> ComponentModal<'a> {
         clear_buf(area.clone(), buf, self.style);
         block.render(area, buf);
     }
+
+    fn draw_inventory(
+        &self,
+        mut area: Rect,
+        buf: &mut Buffer,
+        state: &mut ComponentModalState,
+    ) {
+        let text = match state.inventory.get_inventory(&state.current) {
+            Some(inventory) => {
+                Text::styled(format!("{:#?}", inventory), self.inventory_style)
+            }
+            None => Text::styled("UNKNOWN", self.inventory_style),
+        };
+
+        debug!(state.log, "area = {:#?}", area);
+        debug!(
+            state.log,
+            "text (width, height) = ({}, {})",
+            text.width(),
+            text.height()
+        );
+        area.y = area.y + 10;
+        area.height = area.height - 10;
+
+        let center = (area.width - text.width() as u16) / 2;
+        area.x = area.x + center;
+        area.width = area.width - center;
+        debug!(state.log, "NEW area = {:#?}", area);
+
+        let inventory = Paragraph::new(text);
+
+        inventory.render(area, buf);
+    }
 }
 
 impl<'a> StatefulWidget for ComponentModal<'a> {
@@ -125,6 +158,7 @@ impl<'a> StatefulWidget for ComponentModal<'a> {
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
         self.draw_background(area, buf);
         self.draw_status_bar(area, buf, state);
+        self.draw_inventory(area, buf, state);
     }
 }
 

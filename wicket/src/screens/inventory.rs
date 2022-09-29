@@ -123,7 +123,8 @@ impl InventoryScreen {
         let component = ComponentModal::default()
             .style(Style::default().fg(OX_YELLOW).bg(OX_GRAY_DARK))
             .status_bar_style(Style::default().bg(OX_GREEN_DARK).fg(OX_GRAY))
-            .status_bar_selected_style(Style::default().fg(OX_GREEN_LIGHT));
+            .status_bar_selected_style(Style::default().fg(OX_GREEN_LIGHT))
+            .inventory_style(Style::default().fg(OX_YELLOW));
 
         let mut rect = f.size();
         rect.y = vertical_border.0;
@@ -140,6 +141,7 @@ impl InventoryScreen {
         let current_component = None;
 
         let mut modal_state = ComponentModalState {
+            log: self.log.clone(),
             prev,
             next,
             current,

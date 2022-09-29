@@ -195,7 +195,24 @@ impl Wizard {
                         .inventory
                         .update_power_state(component_id, power_state)
                     {
-                        error!(self.log, "Failed to update power state: {e}");
+                        error!(
+                            self.log,
+                            "Failed to update power state for {}: {e}",
+                            component_id.name()
+                        );
+                    }
+                }
+                Event::Inventory(component_id, component) => {
+                    if let Err(e) = self
+                        .state
+                        .inventory
+                        .update_inventory(component_id, component)
+                    {
+                        error!(
+                            self.log,
+                            "Failed to update inventory for {}: {e}",
+                            component_id.name()
+                        );
                     }
                 }
                 _ => info!(self.log, "{:?}", event),
@@ -300,7 +317,7 @@ pub enum Event {
     /// An Inventory Update Event
     ///
     /// TODO: This should be real information returned from MGS
-    Inventory(Component),
+    Inventory(ComponentId, Component),
 
     /// PowerState changes
     Power(ComponentId, PowerState),
