@@ -4,7 +4,9 @@
 
 //! A Modal for displaying rack inventory
 
-use crate::inventory::{Component, FakePsc, FakeSled, FakeSwitch, Inventory};
+use crate::inventory::{
+    Component, ComponentId, FakePsc, FakeSled, FakeSwitch, Inventory,
+};
 use crate::screens::make_even;
 use crate::screens::Height;
 use crate::screens::RectState;
@@ -23,9 +25,9 @@ use tui::widgets::StatefulWidget;
 use tui::widgets::Widget;
 
 pub struct ComponentModalState<'a> {
-    pub prev_name: String,
-    pub next_name: String,
-    pub current_name: String,
+    pub prev: ComponentId,
+    pub next: ComponentId,
+    pub current: ComponentId,
     pub current_component: Option<Component>,
     pub inventory: &'a Inventory,
 }
@@ -69,16 +71,14 @@ impl<'a> ComponentModal<'a> {
 
         status_bar_block.render(rect, buf);
 
-        // The title is the current component in the middle with the previous
-        // on the left and next on the right.
-        //
+        // Draw the components list
         // TODO: Some sliding style animation?
         let title = Spans::from(vec![
-            Span::styled(&state.prev_name, self.status_bar_style),
+            Span::styled(state.prev.name(), self.status_bar_style),
             Span::raw("   "),
-            Span::styled(&state.current_name, self.status_bar_selected_style),
+            Span::styled(state.current.name(), self.status_bar_selected_style),
             Span::raw("   "),
-            Span::styled(&state.next_name, self.status_bar_style),
+            Span::styled(state.next.name(), self.status_bar_style),
         ]);
 
         let mut rect = area.clone();
@@ -89,6 +89,27 @@ impl<'a> ComponentModal<'a> {
             .title(title)
             .title_alignment(Alignment::Center);
         title_block.render(rect, buf);
+
+        // Draw the power state
+        let title = match state.inventory.get_power_state(&state.current) {
+            Some(s) => {
+                format!(
+                    "⌁ Power State: {}",
+                    s.description().to_ascii_uppercase()
+                )
+            }
+            None => "⌁ Power State: UNKNOWN".to_string(),
+        };
+
+        let mut rect = area.clone();
+        rect.height = 1;
+        rect.y = area.y + 3;
+        let power_state_block = Block::default()
+            .style(self.status_bar_selected_style)
+            .title(title)
+            .title_alignment(Alignment::Center);
+
+        power_state_block.render(rect, buf);
     }
 
     fn draw_background(&self, area: Rect, buf: &mut Buffer) {
