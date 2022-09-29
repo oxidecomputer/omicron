@@ -6712,3 +6712,7 @@ dependencies = [
  "quote",
  "syn",
 ]
+
+[[patch.unused]]
+name = "dropshot"
+version = "0.8.1-dev"

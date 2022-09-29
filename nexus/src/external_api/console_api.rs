@@ -25,7 +25,9 @@ use crate::{
 };
 use anyhow::Context;
 use dropshot::{
-    endpoint, HttpError, HttpResponseOk, Path, Query, RequestContext, TypedBody,
+    endpoint, http_response_see_other, http_response_temporary_redirect,
+    HttpError, HttpResponseOk, HttpResponseSeeOther,
+    HttpResponseTemporaryRedirect, Path, Query, RequestContext, TypedBody,
 };
 use http::{header, Response, StatusCode};
 use hyper::Body;
@@ -53,7 +55,7 @@ pub struct SpoofLoginBody {
    // console to use the generated client for this request
    tags = ["hidden"],
 }]
-pub async fn spoof_login(
+pub async fn login_spoof(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     params: TypedBody<SpoofLoginBody>,
 ) -> Result<Response<Body>, HttpError> {
@@ -67,10 +69,9 @@ pub async fn spoof_login(
     };
 
     if user_id.is_none() {
-        return Ok(Response::builder()
-            .status(StatusCode::UNAUTHORIZED)
-            .header(header::SET_COOKIE, clear_session_cookie_header_value())
-            .body("".into())?); // TODO: failed login response body?
+        Err(Error::Unauthenticated {
+            internal_message: format!("unknown user specified"),
+        })?;
     }
 
     let user_id = user_id.unwrap();
@@ -235,10 +236,10 @@ impl RelayState {
    path = "/login/{silo_name}/{provider_name}",
    tags = ["login"],
 }]
-pub async fn login(
+pub async fn login_begin(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<LoginToProviderPathParam>,
-) -> Result<Response<Body>, HttpError> {
+) -> Result<HttpResponseTemporaryRedirect, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
@@ -259,8 +260,8 @@ pub async fn login(
 
         match identity_provider {
             IdentityProviderType::Saml(saml_identity_provider) => {
-                // Relay state is sent to the IDP, to be sent back to the SP after a
-                // successful login.
+                // Relay state is sent to the IDP, to be sent back to the SP
+                // after a successful login.
                 let relay_state: Option<String> = if let Some(value) =
                     request.headers().get(hyper::header::REFERER)
                 {
@@ -298,16 +299,12 @@ pub async fn login(
                         |e| HttpError::for_internal_error(e.to_string()),
                     )?;
 
-                Ok(Response::builder()
-                    .status(StatusCode::FOUND)
-                    .header(http::header::LOCATION, sign_in_url)
-                    .body("".into())?)
+                Ok(http_response_temporary_redirect(sign_in_url))
             }
         }
     };
-    // TODO this doesn't work because the response is Response<Body>
-    //apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-    handler.await
+
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 /// Authenticate a user
@@ -319,11 +316,11 @@ pub async fn login(
    path = "/login/{silo_name}/{provider_name}",
    tags = ["login"],
 }]
-pub async fn consume_credentials(
+pub async fn login_saml(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<LoginToProviderPathParam>,
     body_bytes: dropshot::UntypedBody,
-) -> Result<Response<Body>, HttpError> {
+) -> Result<HttpResponseSeeOther, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
@@ -372,11 +369,11 @@ pub async fn consume_credentials(
             .await?;
 
         if user.is_none() {
-            info!(&apictx.log, "user is none");
-            return Ok(Response::builder()
-                .status(StatusCode::UNAUTHORIZED)
-                .header(header::SET_COOKIE, clear_session_cookie_header_value())
-                .body("".into())?); // TODO: failed login response body?
+            Err(Error::Unauthenticated {
+                internal_message: format!(
+                    "no matching user found or credentials were not valid"
+                ),
+            })?;
         }
 
         let user = user.unwrap();
@@ -396,28 +393,28 @@ pub async fn consume_credentials(
 
         debug!(
             &apictx.log,
-            "successful login to silo {} using provider {}: authenticated subject {} = user id {}",
+            "successful login to silo {} using provider {}: authenticated \
+            subject {} = user id {}",
             path_params.silo_name,
             path_params.provider_name,
             authenticated_subject.external_id,
             user.id(),
         );
 
-        Ok(Response::builder()
-            .status(StatusCode::FOUND)
-            .header(http::header::LOCATION, next_url)
-            .header(
+        let mut response_with_headers = http_response_see_other(next_url);
+        {
+            let mut headers = response_with_headers.headers_mut();
+            headers.append(
                 header::SET_COOKIE,
                 session_cookie_header_value(
                     &session.token,
                     apictx.session_idle_timeout(),
                 ),
-            )
-            .body("".into())?) // TODO: what do we return from login?
+            );
+        }
+        Ok(response_with_headers);
     };
-    // TODO this doesn't work because the response is Response<Body>
-    //apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-    handler.await
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 // Log user out of web console by deleting session in both server and browser
@@ -455,7 +452,8 @@ pub async fn logout(
     Ok(Response::builder()
         .status(StatusCode::NO_CONTENT)
         .header(header::SET_COOKIE, clear_session_cookie_header_value())
-        .body("".into())?)
+        .body(Body::empty())?)
+    // TODO no metrics here
 }
 
 #[derive(Deserialize, JsonSchema)]
