@@ -28,6 +28,10 @@ impl HubrisArchive {
         self.extract_by_name("img/final.bin")
     }
 
+    pub(crate) fn aux_image(&mut self) -> Result<Vec<u8>, UpdateError> {
+        self.extract_by_name("img/auxi.tlvc")
+    }
+
     fn extract_by_name(&mut self, name: &str) -> Result<Vec<u8>, UpdateError> {
         let mut f = self.archive.by_name(name).map_err(|err| {
             UpdateError::SpUpdateFileNotFound { path: name.to_string(), err }
