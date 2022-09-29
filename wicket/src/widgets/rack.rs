@@ -28,6 +28,7 @@ pub struct Rack {
     power_shelf_selected_style: Style,
     border_style: Style,
     border_selected_style: Style,
+    border_hover_style: Style,
 }
 
 impl Rack {
@@ -64,6 +65,11 @@ impl Rack {
         self
     }
 
+    pub fn border_hover_style(mut self, style: Style) -> Self {
+        self.border_hover_style = style;
+        self
+    }
+
     pub fn draw_sled(&self, buf: &mut Buffer, sled: &RectState, i: u8) {
         let mut block =
             Block::default().title(format!("sled {}", i)).borders(Borders::ALL);
@@ -74,6 +80,10 @@ impl Rack {
         } else {
             block =
                 block.style(self.sled_style).border_style(self.border_style);
+
+            if sled.hovered {
+                block = block.border_style(self.border_hover_style)
+            }
         }
 
         let inner = block.inner(sled.rect);
@@ -108,6 +118,9 @@ impl Rack {
         } else {
             block =
                 block.style(self.switch_style).border_style(self.border_style);
+            if switch.hovered {
+                block = block.border_style(self.border_hover_style)
+            }
         }
 
         let inner = block.inner(switch.rect);
@@ -138,6 +151,9 @@ impl Rack {
             block = block
                 .style(self.power_shelf_style)
                 .border_style(self.border_style);
+            if power_shelf.hovered {
+                block = block.border_style(self.border_hover_style)
+            }
         }
 
         let inner = block.inner(power_shelf.rect);
