@@ -728,13 +728,13 @@ pub async fn asset(
     Ok(resp.body(file_contents.into())?)
 }
 
-fn cache_control_value(apictx: &Arc<ServerContext>) -> String {
+fn cache_control_value(apictx: &ServerContext) -> String {
     let max_age = apictx.console_config.cache_control_max_age.num_seconds();
     format!("max-age={max_age}")
 }
 
 pub async fn serve_console_index(
-    apictx: &Arc<ServerContext>,
+    apictx: &ServerContext,
 ) -> Result<Response<Body>, HttpError> {
     let static_dir = &apictx
         .console_config

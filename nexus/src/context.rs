@@ -44,7 +44,7 @@ pub struct ServerContext {
     /// debug log
     pub log: Logger,
     /// authenticator for external HTTP requests
-    pub external_authn: authn::external::Authenticator<Arc<ServerContext>>,
+    pub external_authn: authn::external::Authenticator<ServerContext>,
     /// authentication context used for internal HTTP requests
     pub internal_authn: Arc<authn::Context>,
     /// authorizer
@@ -83,15 +83,15 @@ impl ServerContext {
             .authn
             .schemes_external
             .iter()
-            .map::<Box<dyn HttpAuthnScheme<Arc<ServerContext>>>, _>(|name| {
-                match name {
+            .map::<Box<dyn HttpAuthnScheme<ServerContext>>, _>(
+                |name| match name {
                     config::SchemeName::Spoof => Box::new(HttpAuthnSpoof),
                     config::SchemeName::SessionCookie => {
                         Box::new(HttpAuthnSessionCookie)
                     }
                     config::SchemeName::AccessToken => Box::new(HttpAuthnToken),
-                }
-            })
+                },
+            )
             .collect();
         let external_authn = authn::external::Authenticator::new(nexus_schemes);
         let internal_authn = Arc::new(authn::Context::internal_api());
@@ -534,7 +534,7 @@ mod test {
 }
 
 #[async_trait]
-impl authn::external::SiloUserSilo for Arc<ServerContext> {
+impl authn::external::SiloUserSilo for ServerContext {
     async fn silo_user_silo(
         &self,
         silo_user_id: Uuid,
@@ -545,7 +545,7 @@ impl authn::external::SiloUserSilo for Arc<ServerContext> {
 }
 
 #[async_trait]
-impl authn::external::token::TokenContext for Arc<ServerContext> {
+impl authn::external::token::TokenContext for ServerContext {
     async fn token_actor(
         &self,
         token: String,
@@ -556,7 +556,7 @@ impl authn::external::token::TokenContext for Arc<ServerContext> {
 }
 
 #[async_trait]
-impl SessionStore for Arc<ServerContext> {
+impl SessionStore for ServerContext {
     type SessionModel = ConsoleSessionWithSiloId;
 
     async fn session_fetch(&self, token: String) -> Option<Self::SessionModel> {
