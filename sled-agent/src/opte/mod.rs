@@ -15,6 +15,7 @@ cfg_if::cfg_if! {
 use ipnetwork::IpNetwork;
 use macaddr::MacAddr6;
 pub use oxide_vpc::api::BoundaryServices;
+pub use oxide_vpc::api::Vni;
 use std::net::IpAddr;
 
 fn default_boundary_services() -> BoundaryServices {
@@ -32,7 +33,7 @@ fn default_boundary_services() -> BoundaryServices {
     // represents the "logical" destination of Boundary Services as a
     // destination that OPTE as a virtual gateway forwards packets to as its
     // next hop.
-    let mac = MacAddr::from_const([0xa8, 0x25, 0x40, 0xf9, 0x99, 0x99]);
+    let mac = MacAddr::from_const([0xa8, 0x40, 0x25, 0xf9, 0x99, 0x99]);
     let vni = Vni::new(99_u32).unwrap();
     BoundaryServices { ip, mac, vni }
 }

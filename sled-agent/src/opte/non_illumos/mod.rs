@@ -13,23 +13,6 @@ pub use port::Port;
 pub use port_manager::PortManager;
 pub use port_manager::PortTicket;
 
-#[derive(Debug, Clone, Copy)]
-pub struct Vni(u32);
-
-impl Vni {
-    pub fn new<N>(n: N) -> Result<Self, Error>
-    where
-        N: Into<u32>,
-    {
-        let x = n.into();
-        if x <= 0x00_FF_FF_FF {
-            Ok(Self(x))
-        } else {
-            Err(Error::InvalidArgument(format!("invalid VNI: {}", x)))
-        }
-    }
-}
-
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("Invalid argument: {0}")]

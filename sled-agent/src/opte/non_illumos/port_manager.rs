@@ -139,7 +139,7 @@ impl PortManager {
                 "IPv6 is not yet supported for guest interfaces",
             ))),
         }?;
-        let boundary_services = BoundaryServices::default();
+        let boundary_services = default_boundary_services();
         let port_name = self.inner.next_port_name();
         let vnic = format!("v{}", port_name);
         let (port, ticket) = {

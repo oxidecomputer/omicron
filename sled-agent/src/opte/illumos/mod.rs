@@ -11,8 +11,6 @@ use slog::Logger;
 use std::fs;
 use std::path::Path;
 
-pub use oxide_vpc::api::Vni;
-
 mod port;
 mod port_manager;
 

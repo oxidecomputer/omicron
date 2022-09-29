@@ -280,6 +280,11 @@ impl PortManager {
             phys_ip: self.inner.underlay_ip.into(),
             boundary_services,
             // TODO-remove: Part of the external IP hack.
+            //
+            // NOTE: This value of this flag is irrelevant, since the driver
+            // always overwrites it. The field itself is used in the `oxide-vpc`
+            // code though, to determine how to set up the ARP layer, which is
+            // why it's still here.
             proxy_arp_enable: true,
             phys_gw_mac: Some(MacAddr::from(
                 self.inner.gateway_mac.into_array(),
