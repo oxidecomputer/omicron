@@ -162,13 +162,18 @@ impl Wizard {
     }
 
     fn mainloop(&mut self) -> anyhow::Result<()> {
+        // Draw the initial screen
+        let screen = self.screens.get_mut(self.active_screen);
+        screen.draw(&self.state, &mut self.terminal)?;
+
         loop {
             let screen = self.screens.get_mut(self.active_screen);
             // unwrap is safe because we always hold onto a Sender
             let event = self.events_rx.recv().unwrap();
             match event {
                 Event::Tick => {
-                    screen.draw(&self.state, &mut self.terminal)?;
+                    let actions = screen.on(&self.state, ScreenEvent::Tick);
+                    self.handle_actions(actions)?;
                 }
                 Event::Term(TermEvent::Key(key_event)) => {
                     if is_control_c(&key_event) {
@@ -180,6 +185,9 @@ impl Wizard {
                         ScreenEvent::Term(TermEvent::Key(key_event)),
                     );
                     self.handle_actions(actions)?;
+                }
+                Event::Term(TermEvent::Resize(_, _)) => {
+                    screen.draw(&self.state, &mut self.terminal)?;
                 }
                 Event::Power(component_id, power_state) => {
                     if let Err(e) = self

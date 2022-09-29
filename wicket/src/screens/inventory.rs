@@ -120,7 +120,9 @@ impl InventoryScreen {
         }
 
         let component = ComponentModal::default()
-            .style(Style::default().fg(OX_PINK).bg(OX_GRAY_DARK));
+            .style(Style::default().fg(OX_YELLOW).bg(OX_GRAY_DARK))
+            .status_bar_style(Style::default().bg(OX_GREEN_DARK).fg(OX_GRAY))
+            .status_bar_selected_style(Style::default().fg(OX_GREEN_LIGHT));
 
         let mut rect = f.size();
         rect.y = vertical_border.0;
@@ -268,6 +270,9 @@ impl Screen for InventoryScreen {
         match event {
             ScreenEvent::Term(TermEvent::Key(key_event)) => {
                 self.handle_key_event(state, key_event)
+            }
+            ScreenEvent::Tick => {
+                vec![]
             }
             _ => unimplemented!(),
         }
