@@ -24,11 +24,13 @@ use uuid::Uuid;
 pub struct Volume {
     #[diesel(embed)]
     identity: VolumeIdentity,
-    time_deleted: Option<DateTime<Utc>>,
+    pub time_deleted: Option<DateTime<Utc>>,
 
     rcgen: Generation,
 
     data: String,
+
+    pub resources_to_clean_up: Option<String>,
 }
 
 impl Volume {
@@ -38,6 +40,7 @@ impl Volume {
             time_deleted: None,
             rcgen: Generation::new(),
             data,
+            resources_to_clean_up: None,
         }
     }
 

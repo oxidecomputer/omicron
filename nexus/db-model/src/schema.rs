@@ -442,6 +442,16 @@ table! {
 }
 
 table! {
+    region_snapshot (dataset_id, region_id, snapshot_id) {
+        dataset_id -> Uuid,
+        region_id -> Uuid,
+        snapshot_id -> Uuid,
+        snapshot_addr -> Text,
+        volume_references -> Int8,
+    }
+}
+
+table! {
     volume (id) {
         id -> Uuid,
         time_created -> Timestamptz,
@@ -450,7 +460,12 @@ table! {
         rcgen -> Int8,
 
         data -> Text,
-        /* TODO: some sort of refcount? */
+
+        /*
+         * During volume deletion, a serialized list of Crucible resources to
+         * clean up will be written here, along with setting time_deleted.
+         */
+        resources_to_clean_up -> Nullable<Text>,
     }
 }
 
@@ -622,6 +637,7 @@ allow_tables_to_appear_in_same_query!(
     project,
     rack,
     region,
+    region_snapshot,
     saga,
     saga_node_event,
     silo,
@@ -630,6 +646,7 @@ allow_tables_to_appear_in_same_query!(
     service,
     sled,
     router_route,
+    volume,
     vpc,
     vpc_subnet,
     vpc_router,

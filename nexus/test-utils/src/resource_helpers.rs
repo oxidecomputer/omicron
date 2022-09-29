@@ -492,4 +492,21 @@ impl DiskTest {
             }
         }
     }
+
+    /// Returns true if all Crucible resources were cleaned up, false otherwise.
+    pub async fn crucible_resources_deleted(&self) -> bool {
+        for zpool in &self.zpools {
+            for dataset in &zpool.datasets {
+                let crucible = self
+                    .sled_agent
+                    .get_crucible_dataset(zpool.id, dataset.id)
+                    .await;
+                if !crucible.is_empty().await {
+                    return false;
+                }
+            }
+        }
+
+        true
+    }
 }

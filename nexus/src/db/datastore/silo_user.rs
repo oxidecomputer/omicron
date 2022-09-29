@@ -22,7 +22,6 @@ use diesel::prelude::*;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
-use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use uuid::Uuid;
 
@@ -73,13 +72,7 @@ impl DataStore {
             .load_async::<SiloUser>(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::SiloUser,
-                        LookupType::ByName(external_id.to_string()),
-                    ),
-                )
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
             })?
             .pop())
     }

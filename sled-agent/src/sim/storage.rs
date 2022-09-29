@@ -97,11 +97,25 @@ impl CrucibleDataInner {
         self.regions.get_mut(&id)
     }
 
-    fn delete(&mut self, id: RegionId) -> Option<Region> {
+    fn delete(&mut self, id: RegionId) -> Result<Option<Region>> {
+        // Can't delete a ZFS dataset if there are snapshots
+        if !self.snapshots_for_region(&id).is_empty() {
+            bail!(
+                "must delete snapshots {:?} first!",
+                self.snapshots_for_region(&id)
+                    .into_iter()
+                    .map(|s| s.name)
+                    .collect::<Vec<String>>(),
+            );
+        }
+
         let id = Uuid::from_str(&id.0).unwrap();
-        let mut region = self.regions.get_mut(&id)?;
-        region.state = State::Destroyed;
-        Some(region.clone())
+        if let Some(mut region) = self.regions.get_mut(&id) {
+            region.state = State::Destroyed;
+            Ok(Some(region.clone()))
+        } else {
+            Ok(None)
+        }
     }
 
     fn create_snapshot(
@@ -143,7 +157,8 @@ impl CrucibleDataInner {
     }
 
     fn delete_snapshot(&mut self, id: &RegionId, name: &str) -> Result<()> {
-        if !self.running_snapshots_for_id(id).is_empty() {
+        let running_snapshots_for_id = self.running_snapshots_for_id(id);
+        if running_snapshots_for_id.contains_key(name) {
             bail!("downstairs running for region {} snapshot {}", id.0, name,);
         }
 
@@ -204,6 +219,22 @@ impl CrucibleDataInner {
 
         Ok(())
     }
+
+    /// Return true if there are no undeleted Crucible resources
+    pub fn is_empty(&self) -> bool {
+        let non_destroyed_regions = self
+            .regions
+            .values()
+            .filter(|r| r.state != State::Destroyed)
+            .count();
+
+        let snapshots = self.snapshots.values().flatten().count();
+
+        let running_snapshots =
+            self.running_snapshots.values().flat_map(|hm| hm.values()).count();
+
+        non_destroyed_regions == 0 && snapshots == 0 && running_snapshots == 0
+    }
 }
 
 /// Represents a running Crucible Agent. Contains regions.
@@ -232,7 +263,7 @@ impl CrucibleData {
         self.inner.lock().await.get(id)
     }
 
-    pub async fn delete(&self, id: RegionId) -> Option<Region> {
+    pub async fn delete(&self, id: RegionId) -> Result<Option<Region>> {
         self.inner.lock().await.delete(id)
     }
 
@@ -286,6 +317,10 @@ impl CrucibleData {
         name: &str,
     ) -> Result<()> {
         self.inner.lock().await.delete_running_snapshot(id, name)
+    }
+
+    pub async fn is_empty(&self) -> bool {
+        self.inner.lock().await.is_empty()
     }
 }
 
