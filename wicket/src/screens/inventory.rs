@@ -5,8 +5,6 @@
 //! The inventory [`Screen`]
 
 use super::colors::*;
-use super::make_even;
-use super::RectState;
 use super::Screen;
 use super::TabIndex;
 use super::{Height, Width};
@@ -19,16 +17,11 @@ use crate::Frame;
 use crate::ScreenEvent;
 use crate::State;
 use crossterm::event::Event as TermEvent;
-use crossterm::event::{
-    KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers,
-};
-use slog::info;
+use crossterm::event::{KeyCode, KeyEvent};
 use slog::Logger;
-use tui::layout::Rect;
-use tui::layout::{Alignment, Constraint, Direction, Layout};
-use tui::style::{Color, Modifier, Style};
-use tui::text::Span;
-use tui::widgets::{Block, BorderType, Borders};
+use tui::layout::Alignment;
+use tui::style::{Color, Style};
+use tui::widgets::{Block, Borders};
 
 // Currently we only allow tabbing through the rack
 const MAX_TAB_INDEX: u16 = 35;
@@ -44,7 +37,7 @@ pub struct InventoryScreen {
 
 impl InventoryScreen {
     pub fn new(log: &Logger) -> InventoryScreen {
-        let mut rack_state = RackState::default();
+        let mut rack_state = RackState::new();
         rack_state.set_logger(log.clone());
         InventoryScreen {
             log: log.clone(),
@@ -202,28 +195,8 @@ impl InventoryScreen {
 
     fn update_tabbed(&mut self, val: bool) {
         if let Some(i) = self.tab_index.get() {
-            let i = usize::from(i);
-
-            // Sleds
-            if i < 16 {
-                self.rack_state.sleds[i].tabbed = val;
-            }
-            if i > 19 {
-                self.rack_state.sleds[i - 4].tabbed = val;
-            }
-
-            // Switches
-            if i == 16 {
-                self.rack_state.switches[0].tabbed = val;
-            }
-            if i == 19 {
-                self.rack_state.switches[1].tabbed = val;
-            }
-
-            // Power Shelves
-            if i == 17 || i == 18 {
-                self.rack_state.power_shelves[i - 17].tabbed = val;
-            }
+            let id = self.component_id(i);
+            self.rack_state.component_rects.get_mut(&id).unwrap().tabbed = val;
         }
     }
 
