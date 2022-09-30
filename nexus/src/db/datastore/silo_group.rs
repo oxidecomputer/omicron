@@ -12,7 +12,6 @@ use crate::db::datastore::RunnableQuery;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
-use crate::db::lookup::LookupPath;
 use crate::db::model::SiloGroup;
 use crate::db::model::SiloGroupMembership;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -116,13 +115,10 @@ impl DataStore {
     pub async fn silo_group_membership_replace_for_user(
         &self,
         opctx: &OpContext,
-        silo_user_id: Uuid,
+        authz_silo_user: &authz::SiloUser,
         silo_group_ids: Vec<Uuid>,
     ) -> UpdateResult<()> {
-        let (_authz_silo_user, ..) = LookupPath::new(opctx, &self)
-            .silo_user_id(silo_user_id)
-            .fetch_for(authz::Action::Modify)
-            .await?;
+        opctx.authorize(authz::Action::Modify, authz_silo_user).await?;
 
         self.pool_authorized(opctx)
             .await?
@@ -130,6 +126,7 @@ impl DataStore {
                 use db::schema::silo_group_membership::dsl;
 
                 // Delete existing memberships for user
+                let silo_user_id = authz_silo_user.id();
                 diesel::delete(dsl::silo_group_membership)
                     .filter(dsl::silo_user_id.eq(silo_user_id))
                     .execute_async(&conn)
