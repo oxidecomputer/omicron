@@ -108,10 +108,10 @@ pub enum SiloIdentityMode {
 }
 
 impl SiloIdentityMode {
-    pub fn authn_type(&self) -> Option<AuthenticationMode> {
+    pub fn authentication_mode(&self) -> AuthenticationMode {
         match self {
-            SiloIdentityMode::LocalOnly => None,
-            SiloIdentityMode::SamlJit => Some(AuthenticationMode::Saml),
+            SiloIdentityMode::LocalOnly => AuthenticationMode::Local,
+            SiloIdentityMode::SamlJit => AuthenticationMode::Saml,
         }
     }
 
@@ -130,6 +130,9 @@ impl SiloIdentityMode {
 pub enum AuthenticationMode {
     /// Authentication is via SAML using an external authentication provider
     Saml,
+
+    /// Authentication is local to the Oxide system
+    Local,
 }
 
 // XXX-dap remove from "shared"?

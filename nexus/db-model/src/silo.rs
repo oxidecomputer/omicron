@@ -11,7 +11,40 @@ use nexus_types::external_api::shared::SiloIdentityMode;
 use nexus_types::external_api::views;
 use nexus_types::external_api::{params, shared};
 use nexus_types::identity::Resource;
+use omicron_common::api::external::Error;
 use uuid::Uuid;
+
+impl_enum_type!(
+    #[derive(SqlType, Debug, QueryId)]
+    #[diesel(postgres_type(name = "authentication_mode"))]
+    pub struct AuthenticationModeEnum;
+
+    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
+    #[diesel(sql_type = AuthenticationModeEnum)]
+    pub enum AuthenticationMode;
+
+    // Enum values
+    Local => b"local"
+    Saml => b"saml"
+);
+
+impl From<shared::AuthenticationMode> for AuthenticationMode {
+    fn from(params: shared::AuthenticationMode) -> Self {
+        match params {
+            shared::AuthenticationMode::Local => AuthenticationMode::Local,
+            shared::AuthenticationMode::Saml => AuthenticationMode::Saml,
+        }
+    }
+}
+
+impl From<AuthenticationMode> for shared::AuthenticationMode {
+    fn from(model: AuthenticationMode) -> Self {
+        match model {
+            AuthenticationMode::Local => Self::Local,
+            AuthenticationMode::Saml => Self::Saml,
+        }
+    }
+}
 
 impl_enum_type!(
     #[derive(SqlType, Debug, QueryId)]
@@ -54,6 +87,7 @@ pub struct Silo {
 
     pub discoverable: bool,
 
+    pub authentication_mode: AuthenticationMode,
     pub user_provision_type: UserProvisionType,
 
     /// child resource generation number, per RFD 192
@@ -70,6 +104,10 @@ impl Silo {
         Self {
             identity: SiloIdentity::new(id, params.identity),
             discoverable: params.discoverable,
+            authentication_mode: params
+                .identity_mode
+                .authentication_mode()
+                .into(),
             user_provision_type: params
                 .identity_mode
                 .user_provision_type()
@@ -79,19 +117,34 @@ impl Silo {
     }
 }
 
-impl From<Silo> for views::Silo {
-    fn from(silo: Silo) -> Self {
-        // In the future, we'll want to store the authentication mode and look
-        // at that here, too.
-        let identity_mode = match silo.user_provision_type {
-            UserProvisionType::Jit => SiloIdentityMode::SamlJit,
-            UserProvisionType::ApiOnly => SiloIdentityMode::LocalOnly,
-        };
-        Self {
+impl TryFrom<Silo> for views::Silo {
+    type Error = Error;
+    fn try_from(silo: Silo) -> Result<Self, Self::Error> {
+        let authn_mode = &silo.authentication_mode;
+        let user_type = &silo.user_provision_type;
+        let identity_mode = match (authn_mode, user_type) {
+            (AuthenticationMode::Saml, UserProvisionType::Jit) => {
+                Some(SiloIdentityMode::SamlJit)
+            }
+            (AuthenticationMode::Saml, UserProvisionType::ApiOnly) => None,
+            (AuthenticationMode::Local, UserProvisionType::ApiOnly) => {
+                Some(SiloIdentityMode::LocalOnly)
+            }
+            (AuthenticationMode::Local, UserProvisionType::Jit) => None,
+        }
+        .ok_or_else(|| {
+            Error::internal_error(&format!(
+                "unsupported combination of authentication mode ({:?}) and \
+                user provision type ({:?})",
+                authn_mode, user_type
+            ))
+        })?;
+
+        Ok(Self {
             identity: silo.identity(),
             discoverable: silo.discoverable,
             identity_mode,
-        }
+        })
     }
 }
 

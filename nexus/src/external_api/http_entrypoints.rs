@@ -460,8 +460,8 @@ async fn silo_list(
             }
         }
         .into_iter()
-        .map(|p| p.into())
-        .collect();
+        .map(|p| p.try_into())
+        .collect::<Result<Vec<_>, Error>>()?;
         Ok(HttpResponseOk(ScanByNameOrId::results_page(
             &query,
             silos,
@@ -487,7 +487,7 @@ async fn silo_create(
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let silo =
             nexus.silo_create(&opctx, new_silo_params.into_inner()).await?;
-        Ok(HttpResponseCreated(silo.into()))
+        Ok(HttpResponseCreated(silo.try_into()?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -518,7 +518,7 @@ async fn silo_view(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let silo = nexus.silo_fetch(&opctx, &silo_name).await?;
-        Ok(HttpResponseOk(silo.into()))
+        Ok(HttpResponseOk(silo.try_into()?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -540,7 +540,7 @@ async fn silo_view_by_id(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let silo = nexus.silo_fetch_by_id(&opctx, id).await?;
-        Ok(HttpResponseOk(silo.into()))
+        Ok(HttpResponseOk(silo.try_into()?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
