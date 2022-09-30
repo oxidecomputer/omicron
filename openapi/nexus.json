@@ -548,7 +548,7 @@
         },
         "responses": {
           "303": {
-            "description": "redirect (303)",
+            "description": "redirect (see other)",
             "headers": {
               "location": {
                 "description": "HTTP \"Location\" header",
@@ -599,7 +599,7 @@
         ],
         "responses": {
           "302": {
-            "description": "redirect (302)",
+            "description": "redirect (found)",
             "headers": {
               "location": {
                 "description": "HTTP \"Location\" header",
@@ -659,7 +659,7 @@
         },
         "responses": {
           "303": {
-            "description": "redirect (303)",
+            "description": "redirect (see other)",
             "headers": {
               "location": {
                 "description": "HTTP \"Location\" header",
