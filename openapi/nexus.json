@@ -10592,6 +10592,14 @@
             "type": "string",
             "format": "uuid"
           },
+          "identity_mode": {
+            "description": "How users and groups are managed in this Silo",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SiloIdentityMode"
+              }
+            ]
+          },
           "name": {
             "description": "unique, mutable, user-controlled identifier for each resource",
             "allOf": [
@@ -10609,24 +10617,16 @@
             "description": "timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
-          },
-          "user_provision_type": {
-            "description": "User provision type",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/UserProvisionType"
-              }
-            ]
           }
         },
         "required": [
           "description",
           "discoverable",
           "id",
+          "identity_mode",
           "name",
           "time_created",
-          "time_modified",
-          "user_provision_type"
+          "time_modified"
         ]
       },
       "SiloCreate": {
@@ -10644,18 +10644,26 @@
           "discoverable": {
             "type": "boolean"
           },
+          "identity_mode": {
+            "$ref": "#/components/schemas/SiloIdentityMode"
+          },
           "name": {
             "$ref": "#/components/schemas/Name"
-          },
-          "user_provision_type": {
-            "$ref": "#/components/schemas/UserProvisionType"
           }
         },
         "required": [
           "description",
           "discoverable",
-          "name",
-          "user_provision_type"
+          "identity_mode",
+          "name"
+        ]
+      },
+      "SiloIdentityMode": {
+        "description": "Describes how identities are managed and users are authenticated in this Silo",
+        "type": "string",
+        "enum": [
+          "saml_jit",
+          "local_only"
         ]
       },
       "SiloResultsPage": {
@@ -11124,14 +11132,6 @@
         },
         "required": [
           "items"
-        ]
-      },
-      "UserProvisionType": {
-        "description": "How users will be provisioned in a silo during authentication.",
-        "type": "string",
-        "enum": [
-          "fixed",
-          "jit"
         ]
       },
       "UserResultsPage": {

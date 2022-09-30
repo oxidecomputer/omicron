@@ -28,7 +28,7 @@ pub struct SiloCreate {
 
     pub discoverable: bool,
 
-    pub user_provision_type: shared::UserProvisionType,
+    pub identity_mode: shared::SiloIdentityMode,
 
     /// If set, this group will be created during Silo creation and granted the
     /// "Silo Admin" role. Identity providers can assert that users belong to

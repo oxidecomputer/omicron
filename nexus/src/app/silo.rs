@@ -181,9 +181,9 @@ impl super::Nexus {
                 // external id. The next action depends on the silo's user
                 // provision type.
                 match db_silo.user_provision_type {
-                    // If the user provision type is fixed, do not a new user if
-                    // one does not exist.
-                    db::model::UserProvisionType::Fixed => {
+                    // If the user provision type is ApiOnly, do not a new user
+                    // if one does not exist.
+                    db::model::UserProvisionType::ApiOnly => {
                         return Ok(None);
                     }
 
@@ -212,7 +212,7 @@ impl super::Nexus {
 
         for group in &authenticated_subject.groups {
             let silo_group = match db_silo.user_provision_type {
-                db::model::UserProvisionType::Fixed => {
+                db::model::UserProvisionType::ApiOnly => {
                     self.db_datastore
                         .silo_group_optional_lookup(
                             opctx,

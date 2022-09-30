@@ -108,7 +108,7 @@ pub async fn create_silo(
     client: &ClientTestContext,
     silo_name: &str,
     discoverable: bool,
-    user_provision_type: shared::UserProvisionType,
+    identity_mode: shared::SiloIdentityMode,
 ) -> Silo {
     object_create(
         client,
@@ -119,7 +119,7 @@ pub async fn create_silo(
                 description: "a silo".to_string(),
             },
             discoverable,
-            user_provision_type,
+            identity_mode,
             admin_group_name: None,
         },
     )

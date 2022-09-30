@@ -7,6 +7,7 @@ use crate::collection::DatastoreCollectionConfig;
 use crate::impl_enum_type;
 use crate::schema::{organization, silo};
 use db_macros::Resource;
+use nexus_types::external_api::shared::SiloIdentityMode;
 use nexus_types::external_api::views;
 use nexus_types::external_api::{params, shared};
 use nexus_types::identity::Resource;
@@ -22,14 +23,14 @@ impl_enum_type!(
     pub enum UserProvisionType;
 
     // Enum values
-    Fixed => b"fixed"
+    ApiOnly => b"api_only"
     Jit => b"jit"
 );
 
 impl From<shared::UserProvisionType> for UserProvisionType {
     fn from(params: shared::UserProvisionType) -> Self {
         match params {
-            shared::UserProvisionType::Fixed => UserProvisionType::Fixed,
+            shared::UserProvisionType::ApiOnly => UserProvisionType::ApiOnly,
             shared::UserProvisionType::Jit => UserProvisionType::Jit,
         }
     }
@@ -38,7 +39,7 @@ impl From<shared::UserProvisionType> for UserProvisionType {
 impl From<UserProvisionType> for shared::UserProvisionType {
     fn from(model: UserProvisionType) -> Self {
         match model {
-            UserProvisionType::Fixed => Self::Fixed,
+            UserProvisionType::ApiOnly => Self::ApiOnly,
             UserProvisionType::Jit => Self::Jit,
         }
     }
@@ -69,7 +70,10 @@ impl Silo {
         Self {
             identity: SiloIdentity::new(id, params.identity),
             discoverable: params.discoverable,
-            user_provision_type: params.user_provision_type.into(),
+            user_provision_type: params
+                .identity_mode
+                .user_provision_type()
+                .into(),
             rcgen: Generation::new(),
         }
     }
@@ -77,10 +81,16 @@ impl Silo {
 
 impl From<Silo> for views::Silo {
     fn from(silo: Silo) -> Self {
+        // In the future, we'll want to store the authentication mode and look
+        // at that here, too.
+        let identity_mode = match silo.user_provision_type {
+            UserProvisionType::Jit => SiloIdentityMode::SamlJit,
+            UserProvisionType::ApiOnly => SiloIdentityMode::LocalOnly,
+        };
         Self {
             identity: silo.identity(),
             discoverable: silo.discoverable,
-            user_provision_type: silo.user_provision_type.into(),
+            identity_mode,
         }
     }
 }

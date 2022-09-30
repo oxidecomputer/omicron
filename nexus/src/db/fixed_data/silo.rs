@@ -19,7 +19,7 @@ lazy_static! {
                 description: "default silo".to_string(),
             },
             discoverable: false,
-            user_provision_type: shared::UserProvisionType::Fixed,
+            identity_mode: shared::SiloIdentityMode::LocalOnly,
             admin_group_name: None,
         }
     );

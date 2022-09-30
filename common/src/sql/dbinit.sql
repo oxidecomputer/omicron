@@ -306,7 +306,7 @@ CREATE INDEX on omicron.public.volume (
  */
 
 CREATE TYPE omicron.public.user_provision_type AS ENUM (
-  'fixed',
+  'api_only',
   'jit'
 );
 
