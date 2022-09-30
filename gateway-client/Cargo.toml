@@ -6,13 +6,11 @@ license = "MPL-2.0"
 
 [dependencies]
 chrono.workspace = true
+omicron-common.workspace = true
 progenitor.workspace = true
 reqwest = { workspace = true, default-features = false, features = ["rustls-tls", "stream"] }
 serde.workspace = true
 serde_json.workspace = true
 slog.workspace = true
 futures.workspace = true
-uuid = { workspace = true, features = [ "serde", "v4" ] }
-
-[dependencies.omicron-common]
-path = "../common"
+uuid.workspace = true

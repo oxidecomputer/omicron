@@ -8,9 +8,9 @@ license = "MPL-2.0"
 [dependencies]
 chrono.workspace = true
 dropshot.workspace = true
-nexus-client = { path = "../../nexus-client" }
-omicron-common = { path = "../../common" }
-oximeter = { path = "../oximeter" }
+nexus-client.workspace = true
+omicron-common.workspace = true
+oximeter.workspace = true
 reqwest = { workspace = true, features = [ "json" ] }
 schemars = { workspace = true, features = [ "uuid1", "bytes", "chrono" ] }
 serde.workspace = true
@@ -18,4 +18,4 @@ slog.workspace = true
 slog-dtrace.workspace = true
 tokio.workspace = true
 thiserror.workspace = true
-uuid = { workspace = true, features = [ "serde", "v4" ] }
+uuid.workspace = true

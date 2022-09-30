@@ -12,7 +12,7 @@ bytes = { workspace = true, features = [ "serde" ] }
 chrono.workspace = true
 clap.workspace = true
 dropshot.workspace = true
-oximeter = { path = "../oximeter" }
+oximeter.workspace = true
 regex.workspace = true
 reqwest = { workspace = true, features = [ "json" ] }
 schemars = { workspace = true, features = [ "uuid1", "bytes", "chrono" ] }
@@ -23,11 +23,11 @@ slog-async.workspace = true
 slog-term.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = [ "rt-multi-thread", "macros" ] }
-uuid = { workspace = true, features = [ "serde", "v4" ] }
+uuid.workspace = true
 
 [dev-dependencies]
 itertools.workspace = true
-omicron-test-utils = { path = "../../test-utils" }
+omicron-test-utils.workspace = true
 slog-dtrace.workspace = true
 
 [[bin]]

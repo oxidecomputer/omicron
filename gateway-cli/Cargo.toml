@@ -14,7 +14,7 @@ slog-async.workspace = true
 slog-term.workspace = true
 tokio = { workspace = true, features = [ "rt-multi-thread", "macros", "time" ] }
 tokio-tungstenite.workspace = true
-uuid = { workspace = true, features = [ "serde", "v4" ] }
+uuid.workspace = true
 
-gateway-client = { path = "../gateway-client" }
-omicron-common = { path = "../common" }
+gateway-client.workspace = true
+omicron-common.workspace = true

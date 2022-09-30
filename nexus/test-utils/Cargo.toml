@@ -12,22 +12,22 @@ dropshot.workspace = true
 headers.workspace = true
 http.workspace = true
 hyper.workspace = true
-omicron-common = { path = "../../common" }
-omicron-nexus = { path = ".." }
-omicron-sled-agent = { path = "../../sled-agent" }
-omicron-test-utils = { path = "../../test-utils" }
-oximeter = { path = "../../oximeter/oximeter" }
-oximeter-client = { path = "../../oximeter-client" }
-oximeter-collector = { path = "../../oximeter/collector" }
-oximeter-producer = { path = "../../oximeter/producer" }
+omicron-common.workspace = true
+omicron-nexus.workspace = true
+omicron-sled-agent.workspace = true
+omicron-test-utils.workspace = true
+oximeter.workspace = true
+oximeter-client.workspace = true
+oximeter-collector.workspace = true
+oximeter-producer.workspace = true
 parse-display.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_urlencoded.workspace = true
 slog.workspace = true
-uuid = { workspace = true, features = [ "serde", "v4" ] }
+uuid.workspace = true
 
 [build-dependencies]
 dropshot.workspace = true
-omicron-test-utils = { path = "../../test-utils" }
+omicron-test-utils.workspace = true
 tokio.workspace = true

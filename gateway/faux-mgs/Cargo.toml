@@ -13,7 +13,7 @@ slog-term.workspace = true
 termios.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
-uuid = { workspace = true, features = [ "serde", "v4" ] }
+uuid.workspace = true
 
-gateway-messages = { path = "../../gateway-messages", features = ["std"] }
-gateway-sp-comms = { path = "../../gateway-sp-comms" }
+gateway-messages.workspace = true
+gateway-sp-comms.workspace = true

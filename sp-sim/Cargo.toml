@@ -10,9 +10,9 @@ async-trait.workspace = true
 clap.workspace = true
 dropshot.workspace = true
 futures.workspace = true
-gateway-messages = { path = "../gateway-messages", default-features = false, features = ["std"] }
+gateway-messages.workspace = true
 hex = { workspace = true, features = [ "serde" ] }
-omicron-common = { path = "../common" }
+omicron-common.workspace = true
 serde.workspace = true
 slog.workspace = true
 slog-dtrace.workspace = true

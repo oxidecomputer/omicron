@@ -17,4 +17,4 @@ serde_tokenstream.workspace = true
 syn.workspace = true
 
 [dev-dependencies]
-rustfmt-wrapper = "0.2"
+rustfmt-wrapper.workspace = true

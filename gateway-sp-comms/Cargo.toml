@@ -14,11 +14,11 @@ thiserror.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
 tokio-stream.workspace = true
 usdt.workspace = true
-uuid = { workspace = true, features = [ "serde", "v4" ] }
+uuid.workspace = true
 zip.workspace = true
 
-gateway-messages = { path = "../gateway-messages", features = ["std"] }
-omicron-common = { path = "../common" }
+gateway-messages.workspace = true
+omicron-common.workspace = true
 
 [dev-dependencies]
-omicron-test-utils = { path = "../test-utils" }
+omicron-test-utils.workspace = true

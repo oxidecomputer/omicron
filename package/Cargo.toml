@@ -11,8 +11,8 @@ clap.workspace = true
 futures.workspace = true
 hex.workspace = true
 indicatif.workspace = true
-omicron-common = { path = "../common" }
-omicron-sled-agent = { path = "../sled-agent" }
+omicron-common.workspace = true
+omicron-sled-agent.workspace = true
 omicron-zone-package.workspace = true
 rayon.workspace = true
 reqwest = { workspace = true, default-features = false, features = ["rustls-tls"] }

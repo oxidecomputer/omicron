@@ -7,7 +7,7 @@ license = "MPL-2.0"
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
-internal-dns-client = { path = "../internal-dns-client" }
+internal-dns-client.workspace = true
 dropshot.workspace = true
 pretty-hex.workspace = true
 schemars.workspace = true
@@ -27,7 +27,7 @@ trust-dns-client.workspace = true
 
 [dev-dependencies]
 expectorate.workspace = true
-omicron-test-utils = { path = "../test-utils" }
+omicron-test-utils.workspace = true
 openapiv3.workspace = true
 openapi-lint.workspace = true
 serde_json.workspace = true

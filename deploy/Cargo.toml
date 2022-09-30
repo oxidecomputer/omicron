@@ -9,11 +9,11 @@ license = "MPL-2.0"
 anyhow.workspace = true
 clap.workspace = true
 crossbeam.workspace = true
-omicron-sled-agent = { path = "../sled-agent" }
-omicron-package = { path = "../package" }
+omicron-sled-agent.workspace = true
+omicron-package.workspace = true
 serde.workspace = true
 serde_derive.workspace = true
-sp-sim = { path = "../sp-sim" }
+sp-sim.workspace = true
 sprockets-rot.workspace = true
 thiserror.workspace = true
 toml.workspace = true

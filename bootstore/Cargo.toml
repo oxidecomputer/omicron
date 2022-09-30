@@ -26,12 +26,12 @@ slog.workspace = true
 sprockets-common.workspace = true
 sprockets-host.workspace = true
 thiserror.workspace = true
-uuid = { workspace = true, features = [ "serde", "v4" ] }
+uuid.workspace = true
 vsss-rs.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]
 assert_matches.workspace = true
 bincode.workspace = true
-omicron-test-utils = { path = "../test-utils" }
+omicron-test-utils.workspace = true
 proptest.workspace = true

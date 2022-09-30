@@ -8,9 +8,9 @@ license = "MPL-2.0"
 chrono.workspace = true
 dropshot.workspace = true
 futures.workspace = true
-oximeter = { path = "../oximeter" }
+oximeter.workspace = true
 http = { workspace = true, optional = true }
-uuid = { workspace = true, features = [ "serde", "v4" ] }
+uuid.workspace = true
 
 [features]
 default = ["http-instruments"]

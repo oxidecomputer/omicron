@@ -23,11 +23,11 @@ ref-cast.workspace = true
 schemars = { workspace = true, features = ["chrono", "uuid1"] }
 serde.workspace = true
 serde_json.workspace = true
-uuid = { workspace = true, features = [ "serde", "v4" ] }
+uuid.workspace = true
 steno.workspace = true
 
-db-macros = { path = "../db-macros" }
-omicron-common = { path = "../../common" }
-nexus-defaults = { path = "../defaults" }
-nexus-types = { path = "../types" }
-sled-agent-client = { path = "../../sled-agent-client" }
+db-macros.workspace = true
+omicron-common.workspace = true
+nexus-defaults.workspace = true
+nexus-types.workspace = true
+sled-agent-client.workspace = true
