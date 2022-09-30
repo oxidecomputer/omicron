@@ -9,8 +9,8 @@ license = "MPL-2.0"
 path = "../rpaths"
 
 [dependencies]
-bcs = "0.1.3"
-derive_more = "0.99.17"
+bcs.workspace = true
+derive_more.workspace = true
 diesel = { workspace = true, features = ["sqlite", "uuid"] }
 p256.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
@@ -21,17 +21,17 @@ p256.workspace = true
 pq-sys = "*"
 rand = { workspace = true, features = ["getrandom"] }
 serde.workspace = true
-sha3 = "0.10.5"
+sha3.workspace = true
 slog.workspace = true
 sprockets-common.workspace = true
 sprockets-host.workspace = true
 thiserror.workspace = true
 uuid = { workspace = true, features = [ "serde", "v4" ] }
 vsss-rs.workspace = true
-zeroize = { version = "1.5.7", features = ["zeroize_derive", "std"] }
+zeroize.workspace = true
 
 [dev-dependencies]
-assert_matches = "1.5.0"
+assert_matches.workspace = true
 bincode.workspace = true
 omicron-test-utils = { path = "../test-utils" }
-proptest = "1.0.0"
+proptest.workspace = true

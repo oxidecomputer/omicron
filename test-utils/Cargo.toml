@@ -11,8 +11,9 @@ dropshot.workspace = true
 futures.workspace = true
 libc.workspace = true
 omicron-common = { path = "../common" }
-postgres-protocol = "0.6.4"
-signal-hook = "0.3"
+postgres-protocol.workspace = true
+signal-hook.workspace = true
+signal-hook-tokio.workspace = true
 slog.workspace = true
 subprocess.workspace = true
 tempfile.workspace = true
@@ -20,10 +21,6 @@ thiserror.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
 tokio-postgres.workspace = true
 usdt.workspace = true
-
-[dependencies.signal-hook-tokio]
-version = "0.3"
-features = [ "futures-v0_3" ]
 
 [dev-dependencies]
 expectorate.workspace = true

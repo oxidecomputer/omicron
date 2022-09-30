@@ -8,7 +8,7 @@ license = "MPL-2.0"
 [dependencies]
 bytes = { workspace = true, features = [ "serde" ] }
 chrono.workspace = true
-num-traits = "0.2.15"
+num-traits.workspace = true
 oximeter-macro-impl = { path = "../oximeter-macro-impl" }
 schemars = { workspace = true, features = [ "uuid1", "bytes", "chrono" ] }
 serde.workspace = true
@@ -16,4 +16,4 @@ thiserror.workspace = true
 uuid = { workspace = true, features = [ "serde", "v4" ] }
 
 [dev-dependencies]
-trybuild = "1.0.65"
+trybuild.workspace = true

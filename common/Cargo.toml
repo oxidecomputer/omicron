@@ -7,7 +7,7 @@ license = "MPL-2.0"
 [dependencies]
 anyhow.workspace = true
 api_identity = { path = "../api_identity" }
-backoff = { version = "0.4.0", features = [ "tokio" ] }
+backoff.workspace = true
 chrono.workspace = true
 dropshot.workspace = true
 futures.workspace = true

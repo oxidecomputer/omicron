@@ -10,7 +10,7 @@ clap.workspace = true
 slog.workspace = true
 slog-async.workspace = true
 slog-term.workspace = true
-termios = "0.3"
+termios.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
 uuid = { workspace = true, features = [ "serde", "v4" ] }

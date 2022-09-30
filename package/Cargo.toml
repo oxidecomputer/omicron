@@ -10,11 +10,11 @@ anyhow.workspace = true
 clap.workspace = true
 futures.workspace = true
 hex.workspace = true
-indicatif = { version = "0.17.1", features = ["rayon"] }
+indicatif.workspace = true
 omicron-common = { path = "../common" }
 omicron-sled-agent = { path = "../sled-agent" }
 omicron-zone-package.workspace = true
-rayon = "1.5"
+rayon.workspace = true
 reqwest = { workspace = true, default-features = false, features = ["rustls-tls"] }
 ring.workspace = true
 serde.workspace = true
@@ -28,7 +28,7 @@ tempfile.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
 toml.workspace = true
-walkdir = "2.3"
+walkdir.workspace = true
 
 # Disable doc builds by default for our binaries to work around issue
 # rust-lang/cargo#8373.  These docs would not be very useful anyway.

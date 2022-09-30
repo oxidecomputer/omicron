@@ -8,7 +8,7 @@ license = "MPL-2.0"
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
-crossbeam = "0.8"
+crossbeam.workspace = true
 omicron-sled-agent = { path = "../sled-agent" }
 omicron-package = { path = "../package" }
 serde.workspace = true

@@ -10,11 +10,11 @@ anyhow.workspace = true
 async-trait.workspace = true
 bincode.workspace = true
 bytes.workspace = true
-cfg-if = "1.0"
+cfg-if.workspace = true
 chrono.workspace = true
 clap.workspace = true
 # Only used by the simulated sled agent.
-crucible-client-types = { git = "https://github.com/oxidecomputer/crucible", rev = "bacffd142fc38a01fe255407b0c8d5d0aacfe778" }
+crucible-client-types.workspace = true
 crucible-agent-client.workspace = true
 ddm-admin-client = { path = "../ddm-admin-client" }
 dropshot.workspace = true
@@ -28,9 +28,9 @@ omicron-common = { path = "../common" }
 oximeter = { path = "../oximeter/oximeter" }
 oximeter-producer = { path = "../oximeter/producer" }
 p256.workspace = true
-percent-encoding = "2.2.0"
+percent-encoding.workspace = true
 progenitor.workspace = true
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "c0776be03bf0928651996eb00ad6f3665e99ebe7" }
+propolis-client.workspace = true
 rand = { workspace = true, features = ["getrandom"] }
 reqwest = { workspace = true, features = ["rustls-tls", "stream"] }
 schemars = { workspace = true, features = [ "chrono", "uuid1" ] }
@@ -44,30 +44,28 @@ smf.workspace = true
 sp-sim = { path = "../sp-sim" }
 sprockets-common.workspace = true
 sprockets-host.workspace = true
-socket2 = { version = "0.4", features = [ "all" ] }
 tar.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
 tokio-tungstenite.workspace = true
-tokio-util = { version = "0.7", features = ["codec"] }
 toml.workspace = true
 uuid = { workspace = true, features = [ "serde", "v4" ] }
 vsss-rs.workspace = true
-zone = "0.1"
+zone.workspace = true
 
 [target.'cfg(target_os = "illumos")'.dependencies]
-opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "52176b99cc578f5b7b90f9bae8935013f961086c" }
-opte = { git = "https://github.com/oxidecomputer/opte", rev = "52176b99cc578f5b7b90f9bae8935013f961086c", features = [ "api", "std" ] }
+opte-ioctl.workspace = true
+opte.workspace = true
 
 [dev-dependencies]
 expectorate.workspace = true
 http.workspace = true
-mockall = "0.11"
+mockall.workspace = true
 omicron-test-utils = { path = "../test-utils" }
 openapi-lint.workspace = true
 openapiv3.workspace = true
-serial_test = "0.9"
+serial_test.workspace = true
 subprocess.workspace = true
 slog-async.workspace = true
 slog-term.workspace = true

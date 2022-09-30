@@ -9,7 +9,7 @@ anyhow.workspace = true
 clap.workspace = true
 internal-dns-client = { path = "../internal-dns-client" }
 dropshot.workspace = true
-pretty-hex = "0.3.0"
+pretty-hex.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -17,13 +17,13 @@ sled.workspace = true
 slog.workspace = true
 slog-term.workspace = true
 slog-async.workspace = true
-slog-envlogger = "2.2"
-tempdir = "0.3"
+slog-envlogger.workspace = true
+tempdir.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
 toml.workspace = true
 trust-dns-proto.workspace = true
-trust-dns-server = "0.22"
-trust-dns-client = "0.22"
+trust-dns-server.workspace = true
+trust-dns-client.workspace = true
 
 [dev-dependencies]
 expectorate.workspace = true
