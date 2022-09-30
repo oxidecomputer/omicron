@@ -97,7 +97,8 @@ pub enum IdentityType {
 pub enum SiloIdentityMode {
     /// Users are authenticated with SAML using an external authentication
     /// provider.  The system updates information about users and groups only
-    /// during authentication (i.e,. "JIT provisioning" of users and groups).
+    /// during successful authentication (i.e,. "JIT provisioning" of users and
+    /// groups).
     SamlJit,
 
     /// The system is the source of truth about users.  There is no linkage to

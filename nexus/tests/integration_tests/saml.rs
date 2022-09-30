@@ -32,7 +32,7 @@ async fn test_create_a_saml_idp(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::LocalOnly)
+    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlJit)
         .await;
     let silo: Silo = NexusRequest::object_get(
         &client,
@@ -151,7 +151,7 @@ async fn test_create_a_saml_idp_invalid_descriptor_truncated(
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::LocalOnly)
+    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlJit)
         .await;
 
     let saml_idp_descriptor = {
@@ -211,7 +211,7 @@ async fn test_create_a_saml_idp_invalid_descriptor_no_redirect_binding(
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::LocalOnly)
+    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlJit)
         .await;
 
     let saml_idp_descriptor = {
@@ -281,7 +281,7 @@ async fn test_create_a_hidden_silo_saml_idp(
 ) {
     let client = &cptestctx.external_client;
 
-    create_silo(&client, "hidden", false, shared::SiloIdentityMode::LocalOnly)
+    create_silo(&client, "hidden", false, shared::SiloIdentityMode::SamlJit)
         .await;
 
     // Valid IdP descriptor
@@ -350,7 +350,7 @@ async fn test_saml_idp_metadata_url_404(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::LocalOnly)
+    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlJit)
         .await;
 
     let server = Server::run();
@@ -404,7 +404,7 @@ async fn test_saml_idp_metadata_url_invalid(
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::LocalOnly)
+    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlJit)
         .await;
 
     NexusRequest::new(
@@ -465,7 +465,7 @@ async fn test_saml_idp_reject_keypair(cptestctx: &ControlPlaneTestContext) {
     );
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::LocalOnly)
+    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlJit)
         .await;
 
     let test_cases = vec![
@@ -560,7 +560,7 @@ async fn test_saml_idp_rsa_keypair_ok(cptestctx: &ControlPlaneTestContext) {
     );
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::LocalOnly)
+    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlJit)
         .await;
 
     NexusRequest::new(

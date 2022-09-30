@@ -303,11 +303,13 @@ async fn test_silo_admin_group(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_listing_identity_providers(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
+    create_silo(&client, "test-silo", true, shared::SiloIdentityMode::SamlJit)
+        .await;
 
     // List providers - should be none
     let providers = objects_list_page_authz::<IdentityProvider>(
         client,
-        "/system/silos/default-silo/identity-providers",
+        "/system/silos/test-silo/identity-providers",
     )
     .await
     .items;
@@ -326,7 +328,7 @@ async fn test_listing_identity_providers(cptestctx: &ControlPlaneTestContext) {
 
     let silo_saml_idp_1: SamlIdentityProvider = object_create(
         client,
-        &"/system/silos/default-silo/identity-providers/saml",
+        &"/system/silos/test-silo/identity-providers/saml",
         &params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "some-totally-real-saml-provider"
@@ -355,7 +357,7 @@ async fn test_listing_identity_providers(cptestctx: &ControlPlaneTestContext) {
 
     let silo_saml_idp_2: SamlIdentityProvider = object_create(
         client,
-        &"/system/silos/default-silo/identity-providers/saml",
+        &"/system/silos/test-silo/identity-providers/saml",
         &params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "another-totally-real-saml-provider"
@@ -385,7 +387,7 @@ async fn test_listing_identity_providers(cptestctx: &ControlPlaneTestContext) {
     // List providers again - expect 2
     let providers = objects_list_page_authz::<IdentityProvider>(
         client,
-        "/system/silos/default-silo/identity-providers",
+        "/system/silos/test-silo/identity-providers",
     )
     .await
     .items;
@@ -405,7 +407,9 @@ async fn test_deleting_a_silo_deletes_the_idp(
 ) {
     let client = &cptestctx.external_client;
 
-    const SILO_NAME: &str = "default-silo";
+    const SILO_NAME: &str = "test-silo";
+    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlJit)
+        .await;
 
     let saml_idp_descriptor = SAML_IDP_DESCRIPTOR;
 
@@ -512,7 +516,7 @@ async fn test_saml_idp_metadata_data_valid(
 ) {
     let client = &cptestctx.external_client;
 
-    create_silo(&client, "blahblah", true, shared::SiloIdentityMode::LocalOnly)
+    create_silo(&client, "blahblah", true, shared::SiloIdentityMode::SamlJit)
         .await;
 
     let silo_saml_idp: SamlIdentityProvider = object_create(
@@ -573,7 +577,7 @@ async fn test_saml_idp_metadata_data_truncated(
 ) {
     let client = &cptestctx.external_client;
 
-    create_silo(&client, "blahblah", true, shared::SiloIdentityMode::LocalOnly)
+    create_silo(&client, "blahblah", true, shared::SiloIdentityMode::SamlJit)
         .await;
 
     NexusRequest::new(
@@ -626,7 +630,7 @@ async fn test_saml_idp_metadata_data_invalid(
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::LocalOnly)
+    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlJit)
         .await;
 
     NexusRequest::new(
@@ -678,14 +682,14 @@ async fn test_silo_user_provision_types(cptestctx: &ControlPlaneTestContext) {
     let nexus = &cptestctx.server.apictx.nexus;
 
     let test_cases: Vec<TestSiloUserProvisionTypes> = vec![
-        // A silo configured with a "fixed" user provision type should fetch a
+        // A silo configured with a "ApiOnly" user provision type should fetch a
         // user if it exists already.
         TestSiloUserProvisionTypes {
             identity_mode: shared::SiloIdentityMode::LocalOnly,
             existing_silo_user: true,
             expect_user: true,
         },
-        // A silo configured with a "fixed" user provision type should not
+        // A silo configured with a "ApiOnly" user provision type should not
         // create a user if one does not exist already.
         TestSiloUserProvisionTypes {
             identity_mode: shared::SiloIdentityMode::LocalOnly,
@@ -1455,4 +1459,6 @@ async fn test_ensure_same_silo_group(cptestctx: &ControlPlaneTestContext) {
         .await
         .expect("silo_user_from_authenticated_subject 2")
         .unwrap();
+
+    // TODO-coverage were we intending to verify something here?
 }

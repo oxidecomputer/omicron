@@ -56,7 +56,7 @@ lazy_static! {
                 description: String::from(""),
             },
             discoverable: true,
-            identity_mode: shared::SiloIdentityMode::LocalOnly,
+            identity_mode: shared::SiloIdentityMode::SamlJit,
             admin_group_name: None,
         };
 
