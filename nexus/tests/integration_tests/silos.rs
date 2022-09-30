@@ -326,7 +326,7 @@ async fn test_listing_identity_providers(cptestctx: &ControlPlaneTestContext) {
 
     let silo_saml_idp_1: SamlIdentityProvider = object_create(
         client,
-        &"/system/silos/default-silo/saml-identity-providers",
+        &"/system/silos/default-silo/identity-providers/saml",
         &params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "some-totally-real-saml-provider"
@@ -355,7 +355,7 @@ async fn test_listing_identity_providers(cptestctx: &ControlPlaneTestContext) {
 
     let silo_saml_idp_2: SamlIdentityProvider = object_create(
         client,
-        &"/system/silos/default-silo/saml-identity-providers",
+        &"/system/silos/default-silo/identity-providers/saml",
         &params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "another-totally-real-saml-provider"
@@ -417,7 +417,7 @@ async fn test_deleting_a_silo_deletes_the_idp(
 
     let silo_saml_idp: SamlIdentityProvider = object_create(
         client,
-        &format!("/system/silos/{}/saml-identity-providers", SILO_NAME),
+        &format!("/system/silos/{}/identity-providers/saml", SILO_NAME),
         &params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "some-totally-real-saml-provider"
@@ -493,7 +493,10 @@ async fn test_deleting_a_silo_deletes_the_idp(
         RequestBuilder::new(
             client,
             Method::GET,
-            &format!("/login/{}/{}", SILO_NAME, silo_saml_idp.identity.name),
+            &format!(
+                "/login/{}/saml/{}",
+                SILO_NAME, silo_saml_idp.identity.name
+            ),
         )
         .expect_status(Some(StatusCode::NOT_FOUND)),
     )
@@ -514,7 +517,7 @@ async fn test_saml_idp_metadata_data_valid(
 
     let silo_saml_idp: SamlIdentityProvider = object_create(
         client,
-        "/system/silos/blahblah/saml-identity-providers",
+        "/system/silos/blahblah/identity-providers/saml",
         &params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "some-totally-real-saml-provider"
@@ -546,7 +549,7 @@ async fn test_saml_idp_metadata_data_valid(
         RequestBuilder::new(
             client,
             Method::GET,
-            &format!("/login/blahblah/{}", silo_saml_idp.identity.name),
+            &format!("/login/blahblah/saml/{}", silo_saml_idp.identity.name),
         )
         .expect_status(Some(StatusCode::FOUND)),
     )
@@ -577,7 +580,7 @@ async fn test_saml_idp_metadata_data_truncated(
         RequestBuilder::new(
             client,
             Method::POST,
-            "/system/silos/blahblah/saml-identity-providers",
+            "/system/silos/blahblah/identity-providers/saml",
         )
         .body(Some(&params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
@@ -630,7 +633,7 @@ async fn test_saml_idp_metadata_data_invalid(
         RequestBuilder::new(
             client,
             Method::POST,
-            &format!("/system/silos/{}/saml-identity-providers", SILO_NAME),
+            &format!("/system/silos/{}/identity-providers/saml", SILO_NAME),
         )
         .body(Some(&params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {

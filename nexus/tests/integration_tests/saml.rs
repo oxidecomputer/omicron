@@ -55,7 +55,7 @@ async fn test_create_a_saml_idp(cptestctx: &ControlPlaneTestContext) {
 
     let silo_saml_idp: views::SamlIdentityProvider = object_create(
         client,
-        &format!("/system/silos/{}/saml-identity-providers", SILO_NAME),
+        &format!("/system/silos/{}/identity-providers/saml", SILO_NAME),
         &params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "some-totally-real-saml-provider"
@@ -124,7 +124,7 @@ async fn test_create_a_saml_idp(cptestctx: &ControlPlaneTestContext) {
             client,
             Method::GET,
             &format!(
-                "/login/{}/{}",
+                "/login/{}/saml/{}",
                 silo.identity.name, silo_saml_idp.identity.name
             ),
         )
@@ -170,7 +170,7 @@ async fn test_create_a_saml_idp_invalid_descriptor_truncated(
         RequestBuilder::new(
             client,
             Method::POST,
-            &format!("/system/silos/{}/saml-identity-providers", SILO_NAME),
+            &format!("/system/silos/{}/identity-providers/saml", SILO_NAME),
         )
         .body(Some(&params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
@@ -241,7 +241,7 @@ async fn test_create_a_saml_idp_invalid_descriptor_no_redirect_binding(
         RequestBuilder::new(
             client,
             Method::POST,
-            &format!("/system/silos/{}/saml-identity-providers", SILO_NAME),
+            &format!("/system/silos/{}/identity-providers/saml", SILO_NAME),
         )
         .body(Some(&params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
@@ -295,7 +295,7 @@ async fn test_create_a_hidden_silo_saml_idp(
 
     let silo_saml_idp: views::SamlIdentityProvider = object_create(
         client,
-        "/system/silos/hidden/saml-identity-providers",
+        "/system/silos/hidden/identity-providers/saml",
         &params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "some-totally-real-saml-provider"
@@ -327,7 +327,7 @@ async fn test_create_a_hidden_silo_saml_idp(
         RequestBuilder::new(
             client,
             Method::GET,
-            &format!("/login/hidden/{}", silo_saml_idp.identity.name),
+            &format!("/login/hidden/saml/{}", silo_saml_idp.identity.name),
         )
         .expect_status(Some(StatusCode::FOUND)),
     )
@@ -363,7 +363,7 @@ async fn test_saml_idp_metadata_url_404(cptestctx: &ControlPlaneTestContext) {
         RequestBuilder::new(
             client,
             Method::POST,
-            &format!("/system/silos/{}/saml-identity-providers", SILO_NAME),
+            &format!("/system/silos/{}/identity-providers/saml", SILO_NAME),
         )
         .body(Some(&params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
@@ -411,7 +411,7 @@ async fn test_saml_idp_metadata_url_invalid(
         RequestBuilder::new(
             client,
             Method::POST,
-            &format!("/system/silos/{}/saml-identity-providers", SILO_NAME),
+            &format!("/system/silos/{}/identity-providers/saml", SILO_NAME),
         )
         .body(Some(&params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
@@ -510,7 +510,7 @@ async fn test_saml_idp_reject_keypair(cptestctx: &ControlPlaneTestContext) {
             RequestBuilder::new(
                 client,
                 Method::POST,
-                &format!("/system/silos/{}/saml-identity-providers", SILO_NAME),
+                &format!("/system/silos/{}/identity-providers/saml", SILO_NAME),
             )
             .body(Some(&params::SamlIdentityProviderCreate {
                 identity: IdentityMetadataCreateParams {
@@ -567,7 +567,7 @@ async fn test_saml_idp_rsa_keypair_ok(cptestctx: &ControlPlaneTestContext) {
         RequestBuilder::new(
             client,
             Method::POST,
-            &format!("/system/silos/{}/saml-identity-providers", SILO_NAME),
+            &format!("/system/silos/{}/identity-providers/saml", SILO_NAME),
         )
         .body(Some(&params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
@@ -936,7 +936,7 @@ async fn test_post_saml_response(cptestctx: &ControlPlaneTestContext) {
 
     let _silo_saml_idp: views::SamlIdentityProvider = object_create(
         client,
-        &format!("/system/silos/{}/saml-identity-providers", SILO_NAME),
+        &format!("/system/silos/{}/identity-providers/saml", SILO_NAME),
         &params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "some-totally-real-saml-provider"
@@ -976,7 +976,10 @@ async fn test_post_saml_response(cptestctx: &ControlPlaneTestContext) {
         RequestBuilder::new(
             client,
             Method::POST,
-            &format!("/login/{}/some-totally-real-saml-provider", SILO_NAME),
+            &format!(
+                "/login/{}/saml/some-totally-real-saml-provider",
+                SILO_NAME
+            ),
         )
         .raw_body(Some(
             serde_urlencoded::to_string(SamlLoginPost {
@@ -1029,7 +1032,7 @@ async fn test_post_saml_response_with_relay_state(
 
     let _silo_saml_idp: views::SamlIdentityProvider = object_create(
         client,
-        &format!("/system/silos/{}/saml-identity-providers", SILO_NAME),
+        &format!("/system/silos/{}/identity-providers/saml", SILO_NAME),
         &params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "some-totally-real-saml-provider"
@@ -1069,7 +1072,10 @@ async fn test_post_saml_response_with_relay_state(
         RequestBuilder::new(
             client,
             Method::POST,
-            &format!("/login/{}/some-totally-real-saml-provider", SILO_NAME),
+            &format!(
+                "/login/{}/saml/some-totally-real-saml-provider",
+                SILO_NAME
+            ),
         )
         .raw_body(Some(
             serde_urlencoded::to_string(SamlLoginPost {

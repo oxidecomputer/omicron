@@ -361,7 +361,7 @@ lazy_static! {
 lazy_static! {
     // Identity providers
     pub static ref IDENTITY_PROVIDERS_URL: String = format!("/system/silos/default-silo/identity-providers");
-    pub static ref SAML_IDENTITY_PROVIDERS_URL: String = format!("/system/silos/default-silo/saml-identity-providers");
+    pub static ref SAML_IDENTITY_PROVIDERS_URL: String = format!("/system/silos/default-silo/identity-providers/saml");
 
     pub static ref DEMO_SAML_IDENTITY_PROVIDER_NAME: Name = "demo-saml-provider".parse().unwrap();
     pub static ref SPECIFIC_SAML_IDENTITY_PROVIDER_URL: String = format!("{}/{}", *SAML_IDENTITY_PROVIDERS_URL, *DEMO_SAML_IDENTITY_PROVIDER_NAME);
