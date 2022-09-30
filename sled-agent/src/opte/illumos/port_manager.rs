@@ -7,7 +7,7 @@
 use crate::illumos::dladm::Dladm;
 use crate::illumos::dladm::PhysicalLink;
 use crate::illumos::dladm::VnicSource;
-use crate::opte::BoundaryServices;
+use crate::opte::default_boundary_services;
 use crate::opte::Error;
 use crate::opte::Gateway;
 use crate::opte::Port;
@@ -16,14 +16,17 @@ use crate::params::NetworkInterface;
 use crate::params::SourceNatConfig;
 use ipnetwork::IpNetwork;
 use macaddr::MacAddr6;
-use opte::api::IpCidr;
-use opte::api::Ipv4Cidr;
-use opte::api::Ipv4PrefixLen;
-use opte::api::MacAddr;
-use opte::oxide_vpc::api::AddRouterEntryIpv4Req;
-use opte::oxide_vpc::api::RouterTarget;
-use opte::oxide_vpc::api::SNatCfg;
 use opte_ioctl::OpteHdl;
+use oxide_vpc::api::AddRouterEntryReq;
+use oxide_vpc::api::IpCfg;
+use oxide_vpc::api::IpCidr;
+use oxide_vpc::api::Ipv4Cfg;
+use oxide_vpc::api::Ipv4Cidr;
+use oxide_vpc::api::Ipv4PrefixLen;
+use oxide_vpc::api::MacAddr;
+use oxide_vpc::api::RouterTarget;
+use oxide_vpc::api::SNat4Cfg;
+use oxide_vpc::api::VpcCfg;
 use slog::debug;
 use slog::info;
 use slog::warn;
@@ -177,7 +180,7 @@ impl PortManager {
         // TODO-completess: Remove IPv4 restrictions once OPTE supports virtual
         // IPv6 networks.
         let private_ip = match nic.ip {
-            IpAddr::V4(ip) => Ok(ip),
+            IpAddr::V4(ip) => Ok(oxide_vpc::api::Ipv4Addr::from(ip)),
             IpAddr::V6(_) => Err(opte_ioctl::Error::InvalidArgument(
                 String::from("IPv6 is not yet supported for guest interfaces"),
             )),
@@ -203,17 +206,17 @@ impl PortManager {
             }
         };
         let gateway_ip = match gateway.ip {
-            IpAddr::V4(ip) => Ok(ip),
+            IpAddr::V4(ip) => Ok(oxide_vpc::api::Ipv4Addr::from(ip)),
             IpAddr::V6(_) => Err(opte_ioctl::Error::InvalidArgument(
                 String::from("IPv6 is not yet supported for guest interfaces"),
             )),
         }?;
-        let boundary_services = BoundaryServices::default();
+        let boundary_services = default_boundary_services();
 
         // Describe the source NAT for this instance.
         let snat = match source_nat {
             Some(snat) => {
-                let public_ip = match snat.ip {
+                let external_ip = match snat.ip {
                     IpAddr::V4(ip) => ip.into(),
                     IpAddr::V6(_) => {
                         return Err(opte_ioctl::Error::InvalidArgument(
@@ -222,13 +225,7 @@ impl PortManager {
                     }
                 };
                 let ports = snat.first_port..=snat.last_port;
-                Some(SNatCfg {
-                    public_ip,
-                    ports,
-                    phys_gw_mac: MacAddr::from(
-                        self.inner.gateway_mac.into_array(),
-                    ),
-                })
+                Some(SNat4Cfg { external_ip, ports })
             }
             None => None,
         };
@@ -267,21 +264,33 @@ impl PortManager {
         // any of the remaining fallible operations fail.
         let port_name = self.inner.next_port_name();
         let hdl = OpteHdl::open(OpteHdl::DLD_CTL)?;
-        hdl.create_xde(
-            &port_name,
-            MacAddr::from(mac.into_array()),
-            private_ip,
-            opte_subnet,
-            MacAddr::from(gateway.mac.into_array()),
-            gateway_ip,
-            boundary_services.ip,
-            boundary_services.vni,
+
+        // TODO-completeness: Add support for IPv6.
+        let vpc_cfg = VpcCfg {
+            ip_cfg: IpCfg::Ipv4(Ipv4Cfg {
+                vpc_subnet: opte_subnet,
+                private_ip,
+                gateway_ip,
+                snat,
+                external_ips: external_ip,
+            }),
+            private_mac: MacAddr::from(mac.into_array()),
+            gateway_mac: MacAddr::from(gateway.mac.into_array()),
             vni,
-            self.inner.underlay_ip,
-            snat,
-            external_ip,
-            /* passthru = */ false,
-        )?;
+            phys_ip: self.inner.underlay_ip.into(),
+            boundary_services,
+            // TODO-remove: Part of the external IP hack.
+            //
+            // NOTE: This value of this flag is irrelevant, since the driver
+            // always overwrites it. The field itself is used in the `oxide-vpc`
+            // code though, to determine how to set up the ARP layer, which is
+            // why it's still here.
+            proxy_arp_enable: true,
+            phys_gw_mac: Some(MacAddr::from(
+                self.inner.gateway_mac.into_array(),
+            )),
+        };
+        hdl.create_xde(&port_name, vpc_cfg, /* passthru = */ false)?;
         debug!(
             self.inner.log,
             "Created xde device for guest port";
@@ -382,13 +391,14 @@ impl PortManager {
                             e
                         ))
                     })?;
-                let cidr = Ipv4Cidr::new(opte::api::Ipv4Addr::from(ip), prefix);
-                let route = AddRouterEntryIpv4Req {
+                let cidr =
+                    Ipv4Cidr::new(oxide_vpc::api::Ipv4Addr::from(ip), prefix);
+                let route = AddRouterEntryReq {
                     port_name: port_name.clone(),
-                    dest: cidr,
+                    dest: cidr.into(),
                     target: RouterTarget::VpcSubnet(IpCidr::Ip4(cidr)),
                 };
-                hdl.add_router_entry_ip4(&route)?;
+                hdl.add_router_entry(&route)?;
                 debug!(
                     self.inner.log,
                     "Added IPv4 VPC Subnet router entry for OPTE port";
@@ -424,9 +434,9 @@ impl PortManager {
         let dest =
             Ipv4Cidr::new(std::net::Ipv4Addr::UNSPECIFIED.into(), prefix);
         let target = RouterTarget::InternetGateway;
-        hdl.add_router_entry_ip4(&AddRouterEntryIpv4Req {
+        hdl.add_router_entry(&AddRouterEntryReq {
             port_name,
-            dest,
+            dest: dest.into(),
             target,
         })?;
 

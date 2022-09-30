@@ -256,6 +256,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(console_api::console_page)?;
         api.register(console_api::console_root)?;
         api.register(console_api::console_settings_page)?;
+        api.register(console_api::console_system_page)?;
         api.register(console_api::asset)?;
 
         api.register(device_auth::device_auth_request)?;

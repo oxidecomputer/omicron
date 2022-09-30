@@ -10,6 +10,7 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::datastore::IdentityMetadataCreateParams;
+use crate::db::datastore::LookupType;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::model::Name;
@@ -19,10 +20,11 @@ use crate::db::pagination::paginated;
 use crate::external_api::params;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
+use nexus_types::identity::Asset;
+use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
-use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use uuid::Uuid;
 
@@ -30,8 +32,10 @@ impl DataStore {
     /// Create a silo user
     pub async fn silo_user_create(
         &self,
+        authz_silo: &authz::Silo,
         silo_user: SiloUser,
-    ) -> Result<SiloUser, Error> {
+    ) -> CreateResult<(authz::SiloUser, SiloUser)> {
+        // TODO-security This needs an authz check.
         use db::schema::silo_user::dsl;
 
         let silo_user_external_id = silo_user.external_id.clone();
@@ -49,10 +53,20 @@ impl DataStore {
                     ),
                 )
             })
+            .map(|db_silo_user: SiloUser| {
+                let silo_user_id = db_silo_user.id();
+                let authz_silo_user = authz::SiloUser::new(
+                    authz_silo.clone(),
+                    silo_user_id,
+                    LookupType::ById(silo_user_id),
+                );
+                (authz_silo_user, db_silo_user)
+            })
     }
 
     /// Given an external ID, return
-    /// - Ok(Some(SiloUser)) if that external id refers to an existing silo user
+    /// - Ok(Some((authz::SiloUser, SiloUser))) if that external id refers to an
+    ///   existing silo user
     /// - Ok(None) if it does not
     /// - Err(...) if there was an error doing this lookup.
     pub async fn silo_user_fetch_by_external_id(
@@ -60,7 +74,7 @@ impl DataStore {
         opctx: &OpContext,
         authz_silo: &authz::Silo,
         external_id: &str,
-    ) -> Result<Option<SiloUser>, Error> {
+    ) -> Result<Option<(authz::SiloUser, SiloUser)>, Error> {
         opctx.authorize(authz::Action::ListChildren, authz_silo).await?;
 
         use db::schema::silo_user::dsl;
@@ -73,15 +87,17 @@ impl DataStore {
             .load_async::<SiloUser>(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::SiloUser,
-                        LookupType::ByName(external_id.to_string()),
-                    ),
-                )
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
             })?
-            .pop())
+            .pop()
+            .map(|db_silo_user| {
+                let authz_silo_user = authz::SiloUser::new(
+                    authz_silo.clone(),
+                    db_silo_user.id(),
+                    LookupType::ByName(external_id.to_owned()),
+                );
+                (authz_silo_user, db_silo_user)
+            }))
     }
 
     pub async fn silo_users_list_by_id(
