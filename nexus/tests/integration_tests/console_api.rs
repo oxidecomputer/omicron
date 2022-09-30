@@ -163,6 +163,7 @@ async fn test_console_pages(cptestctx: &ControlPlaneTestContext) {
         "/",
         "/orgs/irrelevant-path",
         "/settings/irrelevant-path",
+        "/sys/irrelevant-path",
         "/device/success",
         "/device/verify",
     ];
