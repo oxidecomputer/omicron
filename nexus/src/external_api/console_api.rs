@@ -639,6 +639,18 @@ pub async fn console_settings_page(
 
 #[endpoint {
    method = GET,
+   path = "/sys/{path:.*}",
+   unpublished = true,
+}]
+pub async fn console_system_page(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    _path_params: Path<RestPathParam>,
+) -> Result<Response<Body>, HttpError> {
+    console_index_or_login_redirect(rqctx).await
+}
+
+#[endpoint {
+   method = GET,
    path = "/",
    unpublished = true,
 }]
