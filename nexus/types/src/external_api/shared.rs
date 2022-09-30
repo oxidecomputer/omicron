@@ -123,7 +123,6 @@ impl SiloIdentityMode {
     }
 }
 
-// XXX-dap remove from "shared"?
 /// How users are authenticated in this Silo
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -135,7 +134,6 @@ pub enum AuthenticationMode {
     Local,
 }
 
-// XXX-dap remove from "shared"?
 /// How users will be provisioned in a silo during authentication.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
