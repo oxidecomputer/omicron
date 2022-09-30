@@ -70,9 +70,10 @@ impl Rack {
         self
     }
 
-    pub fn draw_sled(&self, buf: &mut Buffer, sled: &RectState, i: u8) {
-        let mut block =
-            Block::default().title(format!("sled {}", i)).borders(Borders::ALL);
+    fn draw_sled(&self, buf: &mut Buffer, sled: &RectState, i: u8) {
+        let mut block = Block::default()
+            .title(format!("sled {}", i))
+            .borders(borders(sled.rect.height));
         if sled.tabbed {
             block = block
                 .style(self.sled_selected_style)
@@ -107,10 +108,10 @@ impl Rack {
         }
     }
 
-    pub fn draw_switch(&self, buf: &mut Buffer, switch: &RectState, i: u8) {
+    fn draw_switch(&self, buf: &mut Buffer, switch: &RectState, i: u8) {
         let mut block = Block::default()
             .title(format!("switch {}", i))
-            .borders(Borders::ALL);
+            .borders(borders(switch.rect.height));
         if switch.tabbed {
             block = block
                 .style(self.switch_selected_style)
@@ -128,21 +129,21 @@ impl Rack {
 
         for x in inner.left()..inner.right() {
             for y in inner.top()..inner.bottom() {
-                let cell = buf.get_mut(x, y).set_symbol("❒");
+                buf.get_mut(x, y).set_symbol("❒");
             }
         }
     }
 
-    pub fn draw_power_shelf(
+    fn draw_power_shelf(
         &self,
         buf: &mut Buffer,
         power_shelf: &RectState,
         i: u8,
-        log: &Logger,
+        _log: &Logger,
     ) {
         let mut block = Block::default()
             .title(format!("power {}", i))
-            .borders(Borders::ALL);
+            .borders(borders(power_shelf.rect.height));
         if power_shelf.tabbed {
             block = block
                 .style(self.power_shelf_selected_style)
@@ -173,10 +174,21 @@ impl Rack {
     }
 }
 
+// Each of the top and bottom borders take one line. The rendering looks
+// better with all borders, but to save space, we don't draw the bottom
+// border if we don't have 3 lines available.
+fn borders(height: u16) -> Borders {
+    if height < 3 {
+        Borders::TOP | Borders::LEFT | Borders::RIGHT
+    } else {
+        Borders::ALL
+    }
+}
+
 impl StatefulWidget for Rack {
     type State = RackState;
 
-    fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
+    fn render(self, _area: Rect, buf: &mut Buffer, state: &mut Self::State) {
         for (id, rect) in state.component_rects.iter() {
             match id {
                 ComponentId::Sled(i) => self.draw_sled(buf, rect, *i),
@@ -225,42 +237,88 @@ impl RackState {
         self.log = Some(log);
     }
 
-    // Split the rect into 20 vertical chunks. 1 for each sled bay, 1 per
-    // switch, 1 per power shelf.
-    // Divide each rack chunk into two horizontal chunks, one per sled.
-    pub fn resize(&mut self, rect: &Rect, watermark_height: &Height) {
-        let width = rect.width;
-        let max_height = rect.height;
-        let mut rack = rect.clone();
+    // We need to size the rack for large and small terminals
+    // Width is not the issue, but height is.
+    // We have the following constraints:
+    //
+    //  * Sleds, switches, and power shelves must be at least 2 lines high
+    //    so they have a top border with label and black margin and one line for
+    //    content drawing.
+    //  * The top borders give a bottom border automatically to each component
+    //    above them, and the top of the rack. However we also need a bottom
+    //    border, so that's one more line.
+    //
+    // Therefore the minimum height of the rack is 2*16 + 2*2 + 2*2 + 1 = 41 lines.
+    //
+    // With a 5 line margin at the top, the minimum size of the terminal is 46
+    // lines.
+    //
+    // If the terminal is smaller than 46 lines, the artistic rendering will
+    // get progressively worse. XXX: We may want to bail on this instead.
+    //
+    // As much as possible we would like to also have a bottom margin, but we
+    // don't sweat it.
+    //
+    // The calculations below follow from this logic
+    pub fn resize(&mut self, rect: &Rect, margin: &Height) {
+        // Give ourself room for a top margin
+        let max_height = rect.height - margin.0;
+
+        // Let's size our components
+        let (rack_height, sled_height, other_height): (u16, u16, u16) =
+            if max_height < 20 {
+                panic!(
+                    "Terminal size must be at least {} lines long",
+                    20 + margin.0
+                );
+            } else if max_height < 37 {
+                (21, 1, 1)
+            } else if max_height < 41 {
+                (37, 2, 1)
+            } else if max_height < 56 {
+                (41, 2, 2)
+            } else if max_height < 60 {
+                (56, 3, 2)
+            } else if max_height < 80 {
+                // 80 = 4*16 (sled bays) + 4*2 (power shelves) + 4*2 (switches)
+                (60, 3, 3)
+            } else {
+                // Just divide evenly by 20 (16 sleds + 2 power shelves + 2 switches)
+                let component_height = max_height / 20;
+                (component_height * 20, component_height, component_height)
+            };
+
+        let mut rect = rect.clone();
+        rect.height = rack_height;
+
+        slog::debug!(self.log.as_ref().unwrap(), "rack_height = {rack_height}, sled_height = {sled_height}, other_height = {other_height}, 
+            max_height = {max_height}");
+
+        // Center the rack vertically as much as possible
+        let extra_margin = (max_height - rack_height) / 2;
+        rect.y = margin.0 + extra_margin;
 
         // Scale proportionally and center the rack horizontally
-        rack.height = make_even(rack.height - (watermark_height.0 * 2) - 2);
-        rack.width = make_even(rack.height * 2 / 3);
-        rack.x = width / 2 - rack.width / 2;
+        let width = rect.width;
+        rect.width = make_even(rack_height * 2 / 3);
+        rect.x = width / 2 - rect.width / 2;
 
-        // Make the max_height divisible by 20
-        let actual_height = rack.height / 20 * 20;
-        rack.height = actual_height;
+        let sled_width = rect.width / 2;
 
-        // Center the rack vertically
-        rack.y = (max_height - actual_height) / 2 - 1;
-
-        self.rect = rack.clone();
-
-        let sled_height = rack.height / 20;
-        let sled_width = rack.width / 2;
+        // Save our rack rect for later
+        self.rect = rect.clone();
 
         // Top Sleds
         for i in 0..16u8 {
-            self.size_sled(i, &rack, sled_height, sled_width);
+            self.size_sled(i, &rect, sled_height, sled_width, other_height);
         }
 
         // Top Switch
         let switch =
             self.component_rects.get_mut(&ComponentId::Switch(0)).unwrap();
-        switch.rect.y = rack.y + sled_height * 8;
-        switch.rect.x = rack.x;
-        switch.rect.height = sled_height;
+        switch.rect.y = rect.y + sled_height * 8;
+        switch.rect.x = rect.x;
+        switch.rect.height = other_height;
         switch.rect.width = sled_width * 2;
 
         // Power Shelves
@@ -269,24 +327,25 @@ impl RackState {
                 .component_rects
                 .get_mut(&ComponentId::Psc(i - 17))
                 .unwrap();
-            shelf.rect.y = rack.y + sled_height * (i as u16 / 2 + 1);
-            shelf.rect.x = rack.x;
-            shelf.rect.height = sled_height;
+            shelf.rect.y =
+                rect.y + sled_height * 8 + other_height * (i as u16 - 16);
+            shelf.rect.x = rect.x;
+            shelf.rect.height = other_height;
             shelf.rect.width = sled_width * 2;
         }
 
         // Bottom Switch
         let switch =
             self.component_rects.get_mut(&ComponentId::Switch(1)).unwrap();
-        switch.rect.y = rack.y + sled_height * (11);
-        switch.rect.x = rack.x;
-        switch.rect.height = sled_height;
+        switch.rect.y = rect.y + sled_height * 8 + 3 * other_height;
+        switch.rect.x = rect.x;
+        switch.rect.height = other_height;
         switch.rect.width = sled_width * 2;
 
         // Bottom Sleds
         // We treat each non-sled as 2 sleds for layout purposes
         for i in 24..40 {
-            self.size_sled(i, &rack, sled_height, sled_width);
+            self.size_sled(i, &rect, sled_height, sled_width, other_height);
         }
     }
 
@@ -296,20 +355,33 @@ impl RackState {
         rack: &Rect,
         sled_height: u16,
         sled_width: u16,
+        other_height: u16,
     ) {
         // The power shelves and switches are in between in the layout
         let index = if i < 16 { i } else { i - 8 };
         let sled =
             self.component_rects.get_mut(&ComponentId::Sled(index)).unwrap();
-        sled.rect.y = rack.y + sled_height * (i as u16 / 2);
-        if i % 2 == 0 {
+
+        if index < 16 {
+            sled.rect.y = rack.y + sled_height * (index as u16 / 2);
+        } else {
+            sled.rect.y =
+                rack.y + sled_height * (index as u16 / 2) + other_height * 4;
+        }
+
+        if index % 2 == 0 {
             // left sled
             sled.rect.x = rack.x
         } else {
             // right sled
             sled.rect.x = rack.x + sled_width;
         }
-        sled.rect.height = sled_height;
+        if (index == 30 || index == 31) && sled_height == 2 {
+            // We saved space for a bottom border
+            sled.rect.height = 3;
+        } else {
+            sled.rect.height = sled_height;
+        }
         sled.rect.width = sled_width;
     }
 }

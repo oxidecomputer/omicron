@@ -68,13 +68,14 @@ impl InventoryScreen {
         let banner = Banner::new(self.watermark).style(style);
         let height = banner.height();
         let width = banner.width();
-
-        // Position the watermark in the lower right hand corner of the screen
         let mut rect = f.size();
-        if width >= rect.width || height >= rect.height {
-            // The banner won't fit.
-            return (Height(1), Width(1));
+
+        // Only draw the banner if there is enough horizontal whitespace to
+        // make it look good.
+        if self.rack_state.rect.width * 3 + width > rect.width {
+            return (Height(0), Width(0));
         }
+
         rect.x = rect.width - width - 1;
         rect.y = rect.height - height - 1;
         rect.width = width;
@@ -290,6 +291,7 @@ impl InventoryScreen {
     }
 }
 
+const MARGIN: Height = Height(5);
 impl Screen for InventoryScreen {
     fn draw(
         &mut self,
@@ -298,11 +300,11 @@ impl Screen for InventoryScreen {
     ) -> anyhow::Result<()> {
         terminal.draw(|f| {
             self.draw_background(f);
-            let (height, _) = self.draw_watermark(f);
-            self.draw_rack(f, height);
+            self.draw_rack(f, MARGIN);
             if self.modal_active {
-                self.draw_modal(state, f, height);
+                self.draw_modal(state, f, MARGIN);
             }
+            self.draw_watermark(f);
         })?;
         Ok(())
     }
