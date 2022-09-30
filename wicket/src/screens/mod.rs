@@ -25,12 +25,12 @@ pub struct Height(pub u16);
 #[derive(Debug, Clone, Copy)]
 pub struct Width(pub u16);
 
-/// Ensure that a u16 is an even number by subtracting 1 if necessary.
+/// Ensure that a u16 is an even number by adding 1 if necessary.
 pub fn make_even(val: u16) -> u16 {
     if val % 2 == 0 {
         val
     } else {
-        val - 1
+        val + 1
     }
 }
 
