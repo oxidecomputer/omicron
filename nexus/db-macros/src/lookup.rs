@@ -116,8 +116,8 @@ impl Config {
         let child_resources = input.children;
         let parent = input.ancestors.last().map(|s| Resource::for_name(&s));
         // XXX-dap
-        let siloed = resource.name != "SamlIdentityProvider" &&
-            input.ancestors.iter().any(|s| s == "Silo");
+        let siloed = resource.name != "SamlIdentityProvider"
+            && input.ancestors.iter().any(|s| s == "Silo");
 
         Config {
             resource,
