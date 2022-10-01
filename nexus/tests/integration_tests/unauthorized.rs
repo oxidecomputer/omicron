@@ -80,6 +80,15 @@ async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
                     .unwrap(),
                 id_routes,
             ),
+            SetupReq::Put { url, body, id_routes } => (
+                url,
+                NexusRequest::object_put(client, url, Some(body))
+                    .authn_as(AuthnMode::PrivilegedUser)
+                    .execute()
+                    .await
+                    .unwrap(),
+                id_routes,
+            ),
         };
 
         setup_results.insert(url, result.clone());
@@ -137,11 +146,11 @@ G GET  PUT  POST DEL  TRCE G  URL
 /// Describes a request made during the setup phase to create a resource that
 /// we'll use later in the verification phase
 ///
-/// The setup phase takes a list of `SetupReq` enums and issues a `GET` or `POST`
-/// request to each one's `url`. `id_results` is a list of URLs that are associated
-/// to the results of the setup request with any `{id}` params in the URL replaced with
-/// the result's URL. This is used to later verify ID endpoints without first having to
-/// know the ID.
+/// The setup phase takes a list of `SetupReq` enums and issues a `GET` or
+/// `POST` request to each one's `url`. `id_results` is a list of URLs that are
+/// associated to the results of the setup request with any `{id}` params in the
+/// URL replaced with the result's URL. This is used to later verify ID
+/// endpoints without first having to know the ID.
 
 enum SetupReq {
     Get {
@@ -149,6 +158,11 @@ enum SetupReq {
         id_routes: Vec<&'static str>,
     },
     Post {
+        url: &'static str,
+        body: serde_json::Value,
+        id_routes: Vec<&'static str>,
+    },
+    Put {
         url: &'static str,
         body: serde_json::Value,
         id_routes: Vec<&'static str>,
@@ -183,11 +197,18 @@ lazy_static! {
 
     /// List of requests to execute at setup time
     static ref SETUP_REQUESTS: Vec<SetupReq> = vec![
-        // Create a separate Silo (not used for anything else)
+        // Create a separate Silo
         SetupReq::Post {
             url: "/system/silos",
             body: serde_json::to_value(&*DEMO_SILO_CREATE).unwrap(),
             id_routes: vec!["/system/by-id/silos/{id}"],
+        },
+        // Grant the privileged test user admin privileges on the demo Silo so
+        // that it can see the identity providers.
+        SetupReq::Put {
+            url: &*DEMO_SILO_POLICY_URL,
+            body: serde_json::to_value(&*DEMO_SILO_POLICY).unwrap(),
+            id_routes: vec![],
         },
         // Create an IP pool
         SetupReq::Post {
