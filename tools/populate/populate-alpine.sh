@@ -1,8 +1,8 @@
 #!/bin/bash
 # Simple script to install the alpine image included with propolis.
 
-if ! oxide api images > /dev/null; then
-        echo "Problem detected running the oxide CLI"
+if ! oxide api /system/images > /dev/null; then
+    echo "Problem detected running the oxide CLI"
     echo "Please install, set path, or setup authorization"
     exit 1
 fi

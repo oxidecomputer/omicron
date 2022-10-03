@@ -336,12 +336,20 @@ mod test {
             .unwrap();
 
         // Associate silo with user
+        let authz_silo = authz::Silo::new(
+            authz::FLEET,
+            *SILO_ID,
+            LookupType::ById(*SILO_ID),
+        );
         datastore
-            .silo_user_create(SiloUser::new(
-                *SILO_ID,
-                silo_user_id,
-                "external_id".into(),
-            ))
+            .silo_user_create(
+                &authz_silo,
+                SiloUser::new(
+                    authz_silo.id(),
+                    silo_user_id,
+                    "external_id".into(),
+                ),
+            )
             .await
             .unwrap();
 
@@ -889,13 +897,21 @@ mod test {
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
         // Create a new Silo user so that we can lookup their keys.
+        let authz_silo = authz::Silo::new(
+            authz::FLEET,
+            *SILO_ID,
+            LookupType::ById(*SILO_ID),
+        );
         let silo_user_id = Uuid::new_v4();
         datastore
-            .silo_user_create(SiloUser::new(
-                *SILO_ID,
-                silo_user_id,
-                "external@id".into(),
-            ))
+            .silo_user_create(
+                &authz_silo,
+                SiloUser::new(
+                    authz_silo.id(),
+                    silo_user_id,
+                    "external@id".into(),
+                ),
+            )
             .await
             .unwrap();
 
