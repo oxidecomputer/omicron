@@ -127,20 +127,6 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    pub(super) fn get_allocatable_datasets_query() -> impl RunnableQuery<Dataset>
-    {
-        use db::schema::dataset::dsl;
-
-        dsl::dataset
-            // We look for valid datasets (non-deleted crucible datasets).
-            .filter(dsl::size_used.is_not_null())
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::kind.eq(DatasetKind::Crucible))
-            .order(dsl::size_used.asc())
-            .select(Dataset::as_select())
-            .limit(REGION_REDUNDANCY_THRESHOLD.try_into().unwrap())
-    }
-
     async fn sled_zpool_and_dataset_list_on_connection(
         conn: &async_bb8_diesel::Connection<DbConnection>,
         rack_id: Uuid,
@@ -289,5 +275,19 @@ impl DataStore {
                     public_error_from_diesel_pool(e, ErrorHandler::Server)
                 }
             })
+    }
+
+    pub(super) fn get_allocatable_datasets_query() -> impl RunnableQuery<Dataset>
+    {
+        use db::schema::dataset::dsl;
+
+        dsl::dataset
+            // We look for valid datasets (non-deleted crucible datasets).
+            .filter(dsl::size_used.is_not_null())
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::kind.eq(DatasetKind::Crucible))
+            .order(dsl::size_used.asc())
+            .select(Dataset::as_select())
+            .limit(REGION_REDUNDANCY_THRESHOLD.try_into().unwrap())
     }
 }

@@ -13,6 +13,7 @@
 //! The primary entry point is [`Communicator`].
 
 mod communicator;
+mod hubris_archive;
 mod management_switch;
 mod single_sp;
 mod timeout;

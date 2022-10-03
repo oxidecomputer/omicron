@@ -27,7 +27,7 @@ hyper = "0.14"
 internal-dns-client = { path = "../internal-dns-client" }
 ipnetwork = "0.20"
 lazy_static = "1.4.0"
-libc = "0.2.132"
+libc = "0.2.133"
 macaddr = { version = "1.0.1", features = [ "serde_std" ]}
 mime_guess = "2.0.4"
 newtype_derive = "0.1.6"
@@ -44,7 +44,7 @@ parse-display = "0.6.0"
 pq-sys = "*"
 rand = "0.8.5"
 ref-cast = "1.0"
-reqwest = { version = "0.11.8", features = [ "json" ] }
+reqwest = { version = "0.11.12", features = [ "json" ] }
 ring = "0.16"
 samael = { git = "https://github.com/njaremko/samael", features = ["xmlsec"], branch = "master" }
 serde_json = "1.0"
@@ -117,7 +117,7 @@ features = [ "serde", "v4" ]
 [dev-dependencies]
 criterion = { version = "0.4", features = [ "async_tokio" ] }
 expectorate = "1.0.5"
-itertools = "0.10.3"
+itertools = "0.10.5"
 nexus-test-utils-macros = { path = "test-utils-macros" }
 nexus-test-utils = { path = "test-utils" }
 omicron-test-utils = { path = "../test-utils" }

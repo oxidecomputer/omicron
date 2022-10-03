@@ -13,7 +13,7 @@ slog-term = "2.9"
 termios = "0.3"
 thiserror = "1.0"
 tokio = { version = "1.21", features = ["full"] }
-zip = { version = "0.6.2", default-features = false, features = ["deflate","bzip2"] }
+uuid = { version = "1.1", features = ["v4"] }
 
 gateway-messages = { path = "../../gateway-messages", features = ["std"] }
 gateway-sp-comms = { path = "../../gateway-sp-comms" }

@@ -462,12 +462,12 @@ fn delete_addresses_matching_prefixes(
     let cmd = cmd.args(&[IPADM, "show-addr", "-p", "-o", "ADDROBJ"]);
     let output = execute(cmd)?;
     for addrobj in output.stdout.lines().flatten() {
-        warn!(
-            log,
-            "Deleting existing Omicron IP address";
-            "addrobj" => addrobj.as_str(),
-        );
         if prefixes.iter().any(|prefix| addrobj.starts_with(prefix)) {
+            warn!(
+                log,
+                "Deleting existing Omicron IP address";
+                "addrobj" => addrobj.as_str(),
+            );
             let mut cmd = Command::new(PFEXEC);
             let cmd = cmd.args(&[IPADM, "delete-addr", addrobj.as_str()]);
             execute(cmd)?;

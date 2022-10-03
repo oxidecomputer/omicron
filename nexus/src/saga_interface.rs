@@ -4,7 +4,6 @@
 
 //! Interfaces available to saga actions and undo actions
 
-use crate::external_api::params;
 use crate::Nexus;
 use crate::{authz, db};
 use omicron_common::api::external::Error;
@@ -42,22 +41,6 @@ impl SagaContext {
         &self.log
     }
 
-    // TODO-design This interface should not exist.  Instead, sleds should be
-    // represented in the database.  Reservations will wind up writing to the
-    // database.  Allocating a server will thus be a saga action, complete with
-    // an undo action.  The only thing needed at this layer is a way to read and
-    // write to the database, which we already have.
-    //
-    // Note: the parameters appear here (unused) to make sure callers make sure
-    // to have them available.  They're not used now, but they will be in a real
-    // implementation.
-    pub async fn alloc_server(
-        &self,
-        _params: &params::InstanceCreate,
-    ) -> Result<Uuid, Error> {
-        self.nexus.sled_allocate().await
-    }
-
     pub fn authz(&self) -> &Arc<authz::Authz> {
         &self.authz
     }
@@ -67,7 +50,7 @@ impl SagaContext {
     }
 
     pub fn datastore(&self) -> &db::DataStore {
-        &*self.nexus.datastore()
+        self.nexus.datastore()
     }
 
     pub async fn sled_client(

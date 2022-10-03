@@ -91,14 +91,17 @@ async fn test_snapshot(cptestctx: &ControlPlaneTestContext) {
         block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
-    let global_image: views::GlobalImage =
-        NexusRequest::objects_post(client, "/images", &image_create_params)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .unwrap()
-            .parsed_body()
-            .unwrap();
+    let global_image: views::GlobalImage = NexusRequest::objects_post(
+        client,
+        "/system/images",
+        &image_create_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
 
     // Create a disk from this image
     let disk_size = ByteCount::try_from(2u64 * 1024 * 1024 * 1024).unwrap();
@@ -219,14 +222,17 @@ async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
         block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
-    let global_image: views::GlobalImage =
-        NexusRequest::objects_post(client, "/images", &image_create_params)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .unwrap()
-            .parsed_body()
-            .unwrap();
+    let global_image: views::GlobalImage = NexusRequest::objects_post(
+        client,
+        "/system/images",
+        &image_create_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
 
     // Create a disk from this image
     let disk_size = ByteCount::try_from(2u64 * 1024 * 1024 * 1024).unwrap();
@@ -703,4 +709,26 @@ async fn test_create_snapshot_record_idempotent(
         .project_delete_snapshot(&opctx, &authz_snapshot, &db_snapshot)
         .await
         .unwrap();
+}
+
+#[nexus_test]
+async fn test_region_snapshot_create_idempotent(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let nexus = &cptestctx.server.apictx.nexus;
+    let datastore = nexus.datastore();
+
+    let region_snapshot = db::model::RegionSnapshot {
+        dataset_id: Uuid::new_v4(),
+        region_id: Uuid::new_v4(),
+        snapshot_id: Uuid::new_v4(),
+
+        snapshot_addr: "[::]:12345".to_string(),
+
+        volume_references: 1,
+    };
+
+    datastore.region_snapshot_create(region_snapshot.clone()).await.unwrap();
+
+    datastore.region_snapshot_create(region_snapshot).await.unwrap();
 }

@@ -31,12 +31,18 @@ pub enum SpCommunicationError {
 
 #[derive(Debug, Error)]
 pub enum UpdateError {
+    #[error("update image cannot be empty")]
+    ImageEmpty,
     #[error("update image is too large")]
     ImageTooLarge,
-    #[error("error starting update: {0}")]
-    Start(SpCommunicationError),
-    #[error("error sending update chunk at offset {offset}: {err}")]
-    Chunk { offset: u32, err: SpCommunicationError },
+    #[error("failed to parse SP update as a zip file: {0}")]
+    SpUpdateNotZip(zip::result::ZipError),
+    #[error("failed to find `{path}` within SP update: {err}")]
+    SpUpdateFileNotFound { path: String, err: zip::result::ZipError },
+    #[error("failed to decompress `{path}` within SP update: {err}")]
+    SpUpdateDecompressionFailed { path: String, err: io::Error },
+    #[error("failed to send update message to SP: {0}")]
+    Communication(#[from] SpCommunicationError),
 }
 
 #[derive(Debug, Error)]
@@ -47,12 +53,14 @@ pub enum StartupError {
     InvalidConfig { reasons: Vec<String> },
     #[error("error communicating with SP: {0}")]
     SpCommunicationFailed(#[from] SpCommunicationError),
-    #[error("location discovery failed: {reason}")]
-    DiscoveryFailed { reason: String },
 }
 
 #[derive(Debug, Error)]
 pub enum Error {
+    #[error("discovery process not yet complete")]
+    DiscoveryNotYetComplete,
+    #[error("location discovery failed: {reason}")]
+    DiscoveryFailed { reason: String },
     #[error("nonexistent SP (type {:?}, slot {})", .0.typ, .0.slot)]
     SpDoesNotExist(SpIdentifier),
     #[error("unknown socket address for local ignition controller")]

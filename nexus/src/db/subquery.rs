@@ -10,50 +10,6 @@ use diesel::query_builder::Query;
 use diesel::query_builder::QueryFragment;
 use diesel::query_builder::QueryId;
 
-/// Specifies that a subquery has a particular name, and associated columns.
-///
-/// The syntax currently matches that of the [`diesel::table`] macro.
-// TODO: We're currently piggy-backing on the table macro for convenience.
-// We actually do not want to generate an entire table for each subquery - we'd
-// like to have a query source (which we can use to generate SELECT statements,
-// JOIN, etc), but we don't want this to be an INSERT/UPDATE/DELETE target.
-//
-// Similarly, we don't want to force callers to supply a "primary key".
-//
-// TODO: It might be worth looking at "diesel_dynamic_schema" for inspiration.
-// Although we shouldn't use that exactly, we may recreate a variant of it?
-#[macro_export]
-macro_rules! subquery {
-    ($($tokens:tt)*) => {
-        ::diesel::table! { $($tokens)* }
-    }
-}
-
-// TODO: I'd like to make a version of the macro that says:
-//
-// ```
-// subquery_alias!(existing_table as alias_name);
-// ```
-//
-// And which generates an AliasSource - very similar to the `alias!` macro
-// in diesel, but which lets callers control the "AS" position.
-//
-// The existing alias macro implements QueryFragment as:
-//
-// "<SOURCE> as <ALIAS NAME>"
-//
-// but we actually want this relationship flipped, kinda.
-//
-// We want:
-//
-// "<ALIAS NAME> as ..."
-// #[macro_export]
-// macro_rules! subquery_alias {
-//     ($table_name:ident as $alias_name:ident) => {
-//         ::diesel::alias!($table_name as $alias_name)
-//     }
-// }
-
 /// Represents a named subquery within a CTE.
 ///
 /// For an expression like:
@@ -69,7 +25,7 @@ macro_rules! subquery {
 /// "bar as ...".
 // This trait intentionally is agnostic to the SQL type of the subquery,
 // meaning that it can be used by the [`CteBuilder`] within a [`Vec`].
-pub trait Subquery: QueryFragment<Pg> {
+pub trait Subquery: QueryFragment<Pg> + Send {
     /// Returns the underlying query fragment.
     ///
     /// For "<ALIAS> as <QUERY>", this refers to the "QUERY" portion
@@ -101,9 +57,9 @@ pub trait AsQuerySource {
 /// - (Query) It must be a complete SQL query with a specific return type
 /// - (QueryFragment) It must be capable of emitting a SQL string
 // TODO: In the future, we may force this subquery to have named columns.
-pub trait CteQuery: Query + QueryFragment<Pg> {}
+pub trait CteQuery: Query + QueryFragment<Pg> + Send {}
 
-impl<T> CteQuery for T where T: Query + QueryFragment<Pg> {}
+impl<T> CteQuery for T where T: Query + QueryFragment<Pg> + Send {}
 
 /// A thin wrapper around a [`Subquery`].
 ///
@@ -147,14 +103,14 @@ impl CteBuilder {
     // TODO: It would be nice if this could be typed?
     // It's not necessarily a Subquery, but it's probably a "Query" object
     // with a particular SQL type.
-    pub fn build(self, statement: Box<dyn QueryFragment<Pg>>) -> Cte {
+    pub fn build(self, statement: Box<dyn QueryFragment<Pg> + Send>) -> Cte {
         Cte { subqueries: self.subqueries, statement }
     }
 }
 
 pub struct Cte {
     subqueries: Vec<CteSubquery>,
-    statement: Box<dyn QueryFragment<Pg>>,
+    statement: Box<dyn QueryFragment<Pg> + Send>,
 }
 
 impl QueryFragment<Pg> for Cte {

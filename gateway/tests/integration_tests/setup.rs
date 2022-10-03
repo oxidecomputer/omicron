@@ -125,18 +125,11 @@ pub async fn test_setup_with_config(
             .await
             .unwrap();
 
-    // Make sure it discovered the location we expect
-    assert_eq!(server.apictx.sp_comms.location_name(), expected_location);
-
     // Build a list of all SPs defined in our config
     let mut all_sp_ids = Vec::new();
     for port_config in server_config.switch.port.values() {
         all_sp_ids.push(
-            port_config
-                .location
-                .get(server.apictx.sp_comms.location_name())
-                .copied()
-                .unwrap(),
+            port_config.location.get(&expected_location).copied().unwrap(),
         );
     }
 
@@ -144,7 +137,8 @@ pub async fn test_setup_with_config(
     poll::wait_for_condition::<(), Infallible, _, _>(
         || {
             let comms = &server.apictx.sp_comms;
-            let result = if comms.local_ignition_controller_address_known()
+            let result = if comms.is_discovery_complete()
+                && comms.local_ignition_controller_address_known()
                 && all_sp_ids.iter().all(|&id| comms.address_known(id))
             {
                 Ok(())
@@ -158,6 +152,12 @@ pub async fn test_setup_with_config(
     )
     .await
     .unwrap();
+
+    // Make sure it discovered the location we expect
+    assert_eq!(
+        server.apictx.sp_comms.location_name().unwrap(),
+        expected_location
+    );
 
     let client = ClientTestContext::new(
         server.http_server.local_addr(),

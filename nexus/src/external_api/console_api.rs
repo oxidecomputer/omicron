@@ -123,7 +123,7 @@ pub async fn spoof_login(
 //
 // TODO If the user does not have this information it's unclear what should
 // happen.  If they know the silo name they are trying to log into, they could
-// `GET /silos/{silo_name}/identity_providers` in order to list available
+// `GET /system/silos/{silo_name}/identity_providers` in order to list available
 // identity providers. If not, TODO.
 //
 // Once the appropriate login URL is created, the user's browser is redirected:
@@ -639,6 +639,18 @@ pub async fn console_settings_page(
 
 #[endpoint {
    method = GET,
+   path = "/sys/{path:.*}",
+   unpublished = true,
+}]
+pub async fn console_system_page(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    _path_params: Path<RestPathParam>,
+) -> Result<Response<Body>, HttpError> {
+    console_index_or_login_redirect(rqctx).await
+}
+
+#[endpoint {
+   method = GET,
    path = "/",
    unpublished = true,
 }]
@@ -728,13 +740,13 @@ pub async fn asset(
     Ok(resp.body(file_contents.into())?)
 }
 
-fn cache_control_value(apictx: &Arc<ServerContext>) -> String {
+fn cache_control_value(apictx: &ServerContext) -> String {
     let max_age = apictx.console_config.cache_control_max_age.num_seconds();
     format!("max-age={max_age}")
 }
 
 pub async fn serve_console_index(
-    apictx: &Arc<ServerContext>,
+    apictx: &ServerContext,
 ) -> Result<Response<Body>, HttpError> {
     let static_dir = &apictx
         .console_config

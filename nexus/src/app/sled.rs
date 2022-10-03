@@ -69,36 +69,6 @@ impl super::Nexus {
         Ok(db_sled)
     }
 
-    // TODO-design This interface should not exist.  See
-    // SagaContext::alloc_server().
-    pub async fn sled_allocate(&self) -> Result<Uuid, Error> {
-        // We need an OpContext to query the database.  Normally we'd use
-        // one from the current operation, usually a saga action or API call.
-        // In this case, though, the caller may not have permissions to access
-        // the sleds in the system.  We're really doing this as Nexus itself,
-        // operating on behalf of the caller.
-        let opctx = &self.opctx_alloc;
-
-        // TODO: replace this with a real allocation policy.
-        //
-        // This implementation always assigns the first sled (by ID order).
-        let pagparams = DataPageParams {
-            marker: None,
-            direction: dropshot::PaginationOrder::Ascending,
-            limit: std::num::NonZeroU32::new(1).unwrap(),
-        };
-        let sleds = self.db_datastore.sled_list(&opctx, &pagparams).await?;
-
-        sleds
-            .first()
-            .ok_or_else(|| Error::ServiceUnavailable {
-                internal_message: String::from(
-                    "no sleds available for new Instance",
-                ),
-            })
-            .map(|s| s.id())
-    }
-
     pub async fn sled_client(
         &self,
         id: &Uuid,

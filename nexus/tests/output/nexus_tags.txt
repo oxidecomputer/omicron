@@ -24,14 +24,6 @@ image_list                               /organizations/{organization_name}/proj
 image_view                               /organizations/{organization_name}/projects/{project_name}/images/{image_name}
 image_view_by_id                         /by-id/images/{id}
 
-API operations found with tag "images:global"
-OPERATION ID                             URL PATH
-image_global_create                      /images
-image_global_delete                      /images/{image_name}
-image_global_list                        /images
-image_global_view                        /images/{image_name}
-image_global_view_by_id                  /by-id/global-images/{id}
-
 API operations found with tag "instances"
 OPERATION ID                             URL PATH
 instance_create                          /organizations/{organization_name}/projects/{project_name}/instances
@@ -54,21 +46,6 @@ instance_start                           /organizations/{organization_name}/proj
 instance_stop                            /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/stop
 instance_view                            /organizations/{organization_name}/projects/{project_name}/instances/{instance_name}
 instance_view_by_id                      /by-id/instances/{id}
-
-API operations found with tag "ip-pools"
-OPERATION ID                             URL PATH
-ip_pool_create                           /ip-pools
-ip_pool_delete                           /ip-pools/{pool_name}
-ip_pool_list                             /ip-pools
-ip_pool_range_add                        /ip-pools/{pool_name}/ranges/add
-ip_pool_range_list                       /ip-pools/{pool_name}/ranges
-ip_pool_range_remove                     /ip-pools/{pool_name}/ranges/remove
-ip_pool_service_range_add                /ip-pools-service/{rack_id}/ranges/add
-ip_pool_service_range_list               /ip-pools-service/{rack_id}/ranges
-ip_pool_service_range_remove             /ip-pools-service/{rack_id}/ranges/remove
-ip_pool_service_view                     /ip-pools-service/{rack_id}
-ip_pool_update                           /ip-pools/{pool_name}
-ip_pool_view                             /ip-pools/{pool_name}
 
 API operations found with tag "login"
 OPERATION ID                             URL PATH
@@ -122,15 +99,6 @@ API operations found with tag "silos"
 OPERATION ID                             URL PATH
 policy_update                            /policy
 policy_view                              /policy
-silo_create                              /silos
-silo_delete                              /silos/{silo_name}
-silo_identity_provider_create            /silos/{silo_name}/saml-identity-providers
-silo_identity_provider_list              /silos/{silo_name}/identity-providers
-silo_identity_provider_view              /silos/{silo_name}/saml-identity-providers/{provider_name}
-silo_list                                /silos
-silo_policy_update                       /silos/{silo_name}/policy
-silo_policy_view                         /silos/{silo_name}/policy
-silo_view                                /silos/{silo_name}
 user_list                                /users
 
 API operations found with tag "snapshots"
@@ -143,12 +111,40 @@ snapshot_view_by_id                      /by-id/snapshots/{id}
 
 API operations found with tag "system"
 OPERATION ID                             URL PATH
+ip_pool_create                           /system/ip-pools
+ip_pool_delete                           /system/ip-pools/{pool_name}
+ip_pool_list                             /system/ip-pools
+ip_pool_range_add                        /system/ip-pools/{pool_name}/ranges/add
+ip_pool_range_list                       /system/ip-pools/{pool_name}/ranges
+ip_pool_range_remove                     /system/ip-pools/{pool_name}/ranges/remove
+ip_pool_service_range_add                /system/ip-pools-service/{rack_id}/ranges/add
+ip_pool_service_range_list               /system/ip-pools-service/{rack_id}/ranges
+ip_pool_service_range_remove             /system/ip-pools-service/{rack_id}/ranges/remove
+ip_pool_service_view                     /system/ip-pools-service/{rack_id}
+ip_pool_update                           /system/ip-pools/{pool_name}
+ip_pool_view                             /system/ip-pools/{pool_name}
+ip_pool_view_by_id                       /system/by-id/ip-pools/{id}
 rack_list                                /system/hardware/racks
 rack_view                                /system/hardware/racks/{rack_id}
 saga_list                                /system/sagas
 saga_view                                /system/sagas/{saga_id}
+silo_create                              /system/silos
+silo_delete                              /system/silos/{silo_name}
+silo_identity_provider_create            /system/silos/{silo_name}/saml-identity-providers
+silo_identity_provider_list              /system/silos/{silo_name}/identity-providers
+silo_identity_provider_view              /system/silos/{silo_name}/saml-identity-providers/{provider_name}
+silo_list                                /system/silos
+silo_policy_update                       /system/silos/{silo_name}/policy
+silo_policy_view                         /system/silos/{silo_name}/policy
+silo_view                                /system/silos/{silo_name}
+silo_view_by_id                          /system/by-id/silos/{id}
 sled_list                                /system/hardware/sleds
 sled_view                                /system/hardware/sleds/{sled_id}
+system_image_create                      /system/images
+system_image_delete                      /system/images/{image_name}
+system_image_list                        /system/images
+system_image_view                        /system/images/{image_name}
+system_image_view_by_id                  /system/by-id/images/{id}
 system_user_list                         /system/user
 system_user_view                         /system/user/{user_name}
 updates_refresh                          /system/updates/refresh

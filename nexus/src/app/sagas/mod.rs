@@ -25,6 +25,7 @@ pub mod instance_create;
 pub mod instance_migrate;
 pub mod service_balance;
 pub mod snapshot_create;
+pub mod volume_delete;
 
 #[derive(Debug)]
 pub struct NexusSagaType;
@@ -101,6 +102,9 @@ fn make_action_registry() -> ActionRegistry {
     <snapshot_create::SagaSnapshotCreate as NexusSaga>::register_actions(
         &mut registry,
     );
+    <volume_delete::SagaVolumeDelete as NexusSaga>::register_actions(
+        &mut registry,
+    );
     registry
 }
 
@@ -109,3 +113,7 @@ pub(super) async fn saga_generate_uuid<UserType: SagaType>(
 ) -> Result<Uuid, ActionError> {
     Ok(Uuid::new_v4())
 }
+
+// Arbitrary limit on concurrency, for operations issued on multiple regions
+// within a disk at the same time.
+const MAX_CONCURRENT_REGION_REQUESTS: usize = 3;

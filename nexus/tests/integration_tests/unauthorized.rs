@@ -185,15 +185,15 @@ lazy_static! {
     static ref SETUP_REQUESTS: Vec<SetupReq> = vec![
         // Create a separate Silo (not used for anything else)
         SetupReq::Post {
-            url: "/silos",
+            url: "/system/silos",
             body: serde_json::to_value(&*DEMO_SILO_CREATE).unwrap(),
-            id_routes: vec!["/by-id/silos/{id}"],
+            id_routes: vec!["/system/by-id/silos/{id}"],
         },
         // Create an IP pool
         SetupReq::Post {
             url: &*DEMO_IP_POOLS_URL,
             body: serde_json::to_value(&*DEMO_IP_POOL_CREATE).unwrap(),
-            id_routes: vec!["/by-id/ip-pools/{id}"],
+            id_routes: vec!["/system/by-id/ip-pools/{id}"],
         },
         // Create an IP Pool range
         SetupReq::Post {
@@ -262,9 +262,9 @@ lazy_static! {
         },
         // Create a GlobalImage
         SetupReq::Post {
-            url: "/images",
+            url: "/system/images",
             body: serde_json::to_value(&*DEMO_GLOBAL_IMAGE_CREATE).unwrap(),
-            id_routes: vec!["/by-id/global-images/{id}"],
+            id_routes: vec!["/system/by-id/images/{id}"],
         },
         // Create a SAML identity provider
         SetupReq::Post {

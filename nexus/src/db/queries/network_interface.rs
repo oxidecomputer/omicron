@@ -33,10 +33,13 @@ use uuid::Uuid;
 // These are sentinel values and other constants used to verify the state of the
 // system when operating on network interfaces
 lazy_static::lazy_static! {
-    // State an instance must be in to operate on its network interfaces, in
+    // States an instance must be in to operate on its network interfaces, in
     // most situations.
     static ref INSTANCE_STOPPED: db::model::InstanceState =
         db::model::InstanceState(external::InstanceState::Stopped);
+
+    static ref INSTANCE_FAILED: db::model::InstanceState =
+        db::model::InstanceState(external::InstanceState::Failed);
 
     // An instance can be in the creating state while we manipulate its
     // interfaces. The intention is for this only to be the case during sagas.
@@ -51,19 +54,19 @@ lazy_static::lazy_static! {
     static ref NO_INSTANCE_SENTINEL_STRING: String =
         String::from(NO_INSTANCE_SENTINEL);
 
-    static ref INSTANCE_NOT_STOPPED_SENTINEL_STRING: String =
-        String::from(INSTANCE_NOT_STOPPED_SENTINEL);
+    static ref INSTANCE_BAD_STATE_SENTINEL_STRING: String =
+        String::from(INSTANCE_BAD_STATE_SENTINEL);
 }
 
 // Uncastable sentinel used to detect when an instance exists, but is not
-// stopped
-const INSTANCE_NOT_STOPPED_SENTINEL: &'static str = "not-stopped";
+// in the right state to have its network interfaces altered
+const INSTANCE_BAD_STATE_SENTINEL: &'static str = "bad-state";
 
 // Error message generated when we're attempting to operate on an instance,
 // either inserting or deleting an interface, and that instance exists but is
-// not stopped.
-const INSTANCE_NOT_STOPPED_ERROR_MESSAGE: &'static str =
-    "could not parse \"not-stopped\" as type uuid: uuid: incorrect UUID length: not-stopped";
+// in a state we can't work on.
+const INSTANCE_BAD_STATE_ERROR_MESSAGE: &'static str =
+    "could not parse \"bad-state\" as type uuid: uuid: incorrect UUID length: bad-state";
 
 // Uncastable sentinel used to detect when an instance doesn't exist
 const NO_INSTANCE_SENTINEL: &'static str = "no-instance";
@@ -289,15 +292,15 @@ fn decode_database_error(
         }
 
         // This catches the UUID-cast failure intentionally introduced by
-        // `push_instance_stopped_verification_subquery`, which verifies that
+        // `push_instance_state_verification_subquery`, which verifies that
         // the instance is actually stopped when running this query.
         PoolError::Connection(ConnectionError::Query(
             Error::DatabaseError(DatabaseErrorKind::Unknown, ref info),
-        )) if info.message() == INSTANCE_NOT_STOPPED_ERROR_MESSAGE => {
+        )) if info.message() == INSTANCE_BAD_STATE_ERROR_MESSAGE => {
             InsertError::InstanceMustBeStopped(interface.instance_id)
         }
         // This catches the UUID-cast failure intentionally introduced by
-        // `push_instance_stopped_verification_subquery`, which verifies that
+        // `push_instance_state_verification_subquery`, which verifies that
         // the instance doesn't even exist when running this query.
         PoolError::Connection(ConnectionError::Query(
             Error::DatabaseError(DatabaseErrorKind::Unknown, ref info),
@@ -731,13 +734,14 @@ fn push_instance_validation_cte<'a>(
     out.push_sql(" AS ");
     out.push_identifier(dsl::subnet_id::NAME)?;
 
-    // Push the subquery to ensure the instance is actually stopped when trying
-    // to insert the new interface.
+    // Push the subquery to ensure the instance state when trying to insert the
+    // new interface.
     out.push_sql(", (");
-    push_instance_stopped_verification_subquery(
+    push_instance_state_verification_subquery(
         instance_id,
         instance_id_str,
         out.reborrow(),
+        false,
     )?;
 
     // Push the subquery used to select and validate the slot number for the
@@ -1116,8 +1120,8 @@ impl QueryFragment<Pg> for IsPrimaryNic {
 type InstanceFromClause = FromClause<db::schema::instance::table>;
 const INSTANCE_FROM_CLAUSE: InstanceFromClause = InstanceFromClause::new();
 
-// Subquery used to ensure an instance both exists and is stopped before
-// inserting or deleting a network interface.
+// Subquery used to ensure an instance both exists and is either stopped (or
+// optionally failed) before inserting or deleting a network interface.
 //
 // This pushes a subquery like:
 //
@@ -1138,26 +1142,34 @@ const INSTANCE_FROM_CLAUSE: InstanceFromClause = InstanceFromClause::new();
 //      )
 //      WHEN 'stopped' THEN '<instance_id_str>' -- Instance UUID as a string
 //      WHEN 'creating' THEN '<instance_id_str>' -- Instance UUID as a string
+//      WHEN 'failed' THEN '<instance_id_str>' -- Instance UUID as a string
 //      WHEN 'destroyed' THEN 'no-instance' -- Sentinel for an instance not existing
-//      ELSE 'not-stopped' -- Any other state is invalid for operating on instances
+//      ELSE 'bad-state' -- Any other state is invalid for operating on instances
 //      END
 // AS UUID)
 // ```
 //
 // This uses the familiar cast-fail trick to select the instance's UUID if the
-// instance is stopped, or a sentinel of `'running'` if not. It also ensures the
-// instance exists at all with the sentinel `'no-instance'`.
+// instance is in a state that can be altered, or a sentinel of `'running'` if
+// not. It also ensures the instance exists at all with the sentinel
+// `'no-instance'`.
 //
-// Note that both 'stopped' and 'creating' are considered valid states. The
-// former is used for most situations, especially client-facing, but the latter
-// is critical for the instance-creation saga. When we first provision the
-// instance, its in the 'creating' state until a sled agent responds telling us
-// that the instance has actually been launched. This additional case supports
-// adding interfaces during that provisioning process.
-fn push_instance_stopped_verification_subquery<'a>(
+// 'failed' is conditionally an accepted state: it would not be accepted as part
+// of InsertQuery, but it should be as part of DeleteQuery (for example if the
+// instance creation saga failed).
+//
+// Note that 'stopped', 'failed', and 'creating' are considered valid states.
+// 'stopped' is used for most situations, especially client-facing, but
+// 'creating' is critical for the instance-creation saga. When we first
+// provision the instance, its in the 'creating' state until a sled agent
+// responds telling us that the instance has actually been launched. This
+// additional case supports adding interfaces during that provisioning process.
+
+fn push_instance_state_verification_subquery<'a>(
     instance_id: &'a Uuid,
     instance_id_str: &'a String,
     mut out: AstPass<'_, 'a, Pg>,
+    failed_ok: bool,
 ) -> QueryResult<()> {
     out.push_sql("CAST(CASE COALESCE((SELECT ");
     out.push_identifier(db::schema::instance::dsl::state::NAME)?;
@@ -1179,6 +1191,13 @@ fn push_instance_stopped_verification_subquery<'a>(
     out.push_bind_param::<db::model::InstanceStateEnum, db::model::InstanceState>(&INSTANCE_CREATING)?;
     out.push_sql(" THEN ");
     out.push_bind_param::<sql_types::Text, String>(instance_id_str)?;
+    if failed_ok {
+        // FAILED is ok for DeleteQuery, but not for InsertQuery!
+        out.push_sql(" WHEN ");
+        out.push_bind_param::<db::model::InstanceStateEnum, db::model::InstanceState>(&INSTANCE_FAILED)?;
+        out.push_sql(" THEN ");
+        out.push_bind_param::<sql_types::Text, String>(instance_id_str)?;
+    }
     out.push_sql(" WHEN ");
     out.push_bind_param::<db::model::InstanceStateEnum, db::model::InstanceState>(&INSTANCE_DESTROYED)?;
     out.push_sql(" THEN ");
@@ -1187,7 +1206,7 @@ fn push_instance_stopped_verification_subquery<'a>(
     )?;
     out.push_sql(" ELSE ");
     out.push_bind_param::<sql_types::Text, String>(
-        &INSTANCE_NOT_STOPPED_SENTINEL_STRING,
+        &INSTANCE_BAD_STATE_SENTINEL_STRING,
     )?;
     out.push_sql(" END AS UUID)");
     Ok(())
@@ -1239,9 +1258,10 @@ fn push_instance_stopped_verification_subquery<'a>(
 ///                     time_deleted IS NULL
 ///             )), 'destroyed')
 ///             WHEN 'stopped' THEN '<instance_id>'
-///             WHEN 'creating' the '<instanced_id>'
+///             WHEN 'creating' THEN '<instanced_id>'
+///             WHEN 'failed' THEN '<instanced_id>'
 ///             WHEN 'destroyed' THEN 'no-instance'
-///             ELSE 'not-stopped'
+///             ELSE 'bad-state'
 ///         ) AS UUID)
 ///     )
 /// UPDATE
@@ -1287,10 +1307,11 @@ impl QueryFragment<Pg> for DeleteQuery {
         mut out: AstPass<'_, 'a, Pg>,
     ) -> diesel::QueryResult<()> {
         out.push_sql("WITH instance AS MATERIALIZED (SELECT ");
-        push_instance_stopped_verification_subquery(
+        push_instance_state_verification_subquery(
             &self.instance_id,
             &self.instance_id_str,
             out.reborrow(),
+            true,
         )?;
         out.push_sql(
             "), interface AS MATERIALIZED (SELECT CAST(IF((SELECT NOT ",
@@ -1341,8 +1362,8 @@ pub enum DeleteError {
     /// Attempting to delete the primary interface, while there still exist
     /// secondary interfaces.
     InstanceHasSecondaryInterfaces(Uuid),
-    /// Instance must be stopped prior to deleting interfaces from it
-    InstanceMustBeStopped(Uuid),
+    /// Instance must be stopped or failed prior to deleting interfaces from it
+    InstanceBadState(Uuid),
     /// The instance does not exist at all, or is in the destroyed state.
     InstanceNotFound(Uuid),
     /// Any other error
@@ -1393,9 +1414,9 @@ impl DeleteError {
                     are still attached",
                 )
             }
-            DeleteError::InstanceMustBeStopped(_) => {
+            DeleteError::InstanceBadState(_) => {
                 external::Error::invalid_request(
-                    "Instance must be stopped to detach a network interface",
+                    "Instance must be stopped or failed to detach a network interface",
                 )
             }
             DeleteError::InstanceNotFound(id) => {
@@ -1444,15 +1465,15 @@ fn decode_delete_network_interface_database_error(
         }
 
         // This catches the UUID-cast failure intentionally introduced by
-        // `push_instance_stopped_verification_subquery`, which verifies that
-        // the instance is actually stopped when running this query.
+        // `push_instance_state_verification_subquery`, which verifies that
+        // the instance can be worked on when running this query.
         PoolError::Connection(ConnectionError::Query(
             Error::DatabaseError(DatabaseErrorKind::Unknown, ref info),
-        )) if info.message() == INSTANCE_NOT_STOPPED_ERROR_MESSAGE => {
-            DeleteError::InstanceMustBeStopped(instance_id)
+        )) if info.message() == INSTANCE_BAD_STATE_ERROR_MESSAGE => {
+            DeleteError::InstanceBadState(instance_id)
         }
         // This catches the UUID-cast failure intentionally introduced by
-        // `push_instance_stopped_verification_subquery`, which verifies that
+        // `push_instance_state_verification_subquery`, which verifies that
         // the instance doesn't even exist when running this query.
         PoolError::Connection(ConnectionError::Query(
             Error::DatabaseError(DatabaseErrorKind::Unknown, ref info),

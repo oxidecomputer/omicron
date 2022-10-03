@@ -273,6 +273,7 @@ impl DataStore {
         let ok_to_detach_instance_states = vec![
             db::model::InstanceState(api::external::InstanceState::Creating),
             db::model::InstanceState(api::external::InstanceState::Stopped),
+            db::model::InstanceState(api::external::InstanceState::Failed),
         ];
 
         let detached_label = api::external::DiskState::Detached.label();

@@ -59,18 +59,3 @@ impl LazyNexusClient {
         ))
     }
 }
-
-// Provides a mock implementation of the [`LazyNexusClient`].
-//
-// This allows tests to use the structure without actually performing
-// any DNS lookups.
-#[cfg(test)]
-mockall::mock! {
-    pub LazyNexusClient {
-        pub fn new(log: Logger, addr: Ipv6Addr) -> Result<Self, ResolveError>;
-        pub async fn get(&self) -> Result<NexusClient, String>;
-    }
-    impl Clone for LazyNexusClient {
-        fn clone(&self) -> Self;
-    }
-}

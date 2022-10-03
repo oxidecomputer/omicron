@@ -11,8 +11,6 @@ use slog::Logger;
 use std::fs;
 use std::path::Path;
 
-pub use opte::api::Vni;
-
 mod port;
 mod port_manager;
 
@@ -127,7 +125,7 @@ pub fn initialize_xde_driver(log: &Logger) -> Result<(), Error> {
         // those are exactly what we're giving it now.
         Err(opte_ioctl::Error::CommandError(
             _,
-            opte::api::OpteError::System { errno: libc::EEXIST, .. },
+            opte_ioctl::OpteError::System { errno: libc::EEXIST, .. },
         )) => Ok(()),
         Err(e) => Err(e.into()),
     }

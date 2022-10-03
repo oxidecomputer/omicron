@@ -8,6 +8,7 @@ use derive_more::From;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use vsss_rs::Share;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::db;
 use crate::trust_quorum::SerializableShareDistribution;
@@ -16,8 +17,11 @@ use crate::trust_quorum::SerializableShareDistribution;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NodeRequest {
     pub version: u32,
-    /// A message correlation id to match requests to responses
-    pub id: u64,
+    // A monotonic counter maintained and incremented by Nexus
+    // The coordinator id for requests issued by RSS is always 0
+    //
+    // Requests issued for old coordinator ids are ignored
+    pub coordinator_id: u64,
     pub op: NodeOp,
 }
 
@@ -28,7 +32,7 @@ pub enum NodeOp {
     ///
     /// A [`Node`] will only respond if the epoch is still valid
     /// and the sending [`Node`] is a member of the trust quorum.
-    GetShare { epoch: i32 },
+    GetShare { rack_uuid: Uuid, epoch: i32 },
 
     /// A request sent by RSS with the trust quorum membership and key share
     /// for epoch 0.
@@ -76,20 +80,26 @@ pub enum NodeOp {
 #[derive(Debug, Clone, PartialEq, From, Serialize, Deserialize)]
 pub struct NodeResponse {
     pub version: u32,
-    /// A message correlation id to match requests to responses
-    pub id: u64,
+    // A monotonic counter maintained and incremented by Nexus
+    // The coordinator id for requests issued by RSS is always 0
+    //
+    // Requests issued for old coordinator ids are ignored
+    pub coordinator_id: u64,
     pub result: Result<NodeOpResult, NodeError>,
 }
 
-#[derive(Debug, Clone, PartialEq, From, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, Zeroize, ZeroizeOnDrop,
+)]
 // The result of an operation from a [`Node`]
 pub enum NodeOpResult {
     /// A key share for a given epoch as requested by [`PeerRequest::GetShare`]
     Share { epoch: i32, share: Share },
 
-    /// An ack for the most recent coordinator message, where there is no data
-    /// to return
-    CoordinatorAck,
+    #[zeroize(skip)]
+    PrepareOk { rack_uuid: Uuid, epoch: i32 },
+    #[zeroize(skip)]
+    CommitOk { rack_uuid: Uuid, epoch: i32 },
 }
 
 /// Errors returned inside a [`NodeOpResult`]

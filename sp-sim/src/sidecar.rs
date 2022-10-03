@@ -464,19 +464,18 @@ impl SpHandler for Handler {
         Err(ResponseError::RequestUnsupportedForSp)
     }
 
-    fn update_prepare_status(
+    fn update_status(
         &mut self,
         sender: SocketAddrV6,
         port: SpPort,
-        request: gateway_messages::UpdatePrepareStatusRequest,
-    ) -> Result<gateway_messages::UpdatePrepareStatusResponse, ResponseError>
-    {
+        component: SpComponent,
+    ) -> Result<gateway_messages::UpdateStatus, ResponseError> {
         warn!(
             &self.log,
-            "received update prepare status request; not supported by simulated sidecar";
+            "received update status request; not supported by simulated sidecar";
             "sender" => %sender,
             "port" => ?port,
-            "request" => ?request,
+            "component" => ?component,
         );
         Err(ResponseError::RequestUnsupportedForSp)
     }
@@ -504,6 +503,7 @@ impl SpHandler for Handler {
         sender: SocketAddrV6,
         port: SpPort,
         component: SpComponent,
+        id: gateway_messages::UpdateId,
     ) -> Result<(), ResponseError> {
         warn!(
             &self.log,
@@ -511,6 +511,37 @@ impl SpHandler for Handler {
             "sender" => %sender,
             "port" => ?port,
             "component" => ?component,
+            "id" => ?id,
+        );
+        Err(ResponseError::RequestUnsupportedForSp)
+    }
+
+    fn power_state(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+    ) -> Result<gateway_messages::PowerState, ResponseError> {
+        warn!(
+            &self.log,
+            "received power state; not supported by simulated sidecar";
+            "sender" => %sender,
+            "port" => ?port,
+        );
+        Err(ResponseError::RequestUnsupportedForSp)
+    }
+
+    fn set_power_state(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+        power_state: gateway_messages::PowerState,
+    ) -> Result<(), ResponseError> {
+        warn!(
+            &self.log,
+            "received set power state; not supported by simulated sidecar";
+            "sender" => %sender,
+            "port" => ?port,
+            "power_state" => ?power_state,
         );
         Err(ResponseError::RequestUnsupportedForSp)
     }

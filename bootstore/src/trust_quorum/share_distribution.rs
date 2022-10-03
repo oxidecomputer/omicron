@@ -5,8 +5,10 @@
 use serde::Deserialize;
 use serde::Serialize;
 use sprockets_host::Ed25519Certificate;
+use std::collections::BTreeSet;
 use std::fmt;
 use vsss_rs::Share;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use super::rack_secret::Verifier;
 
@@ -15,12 +17,14 @@ use super::rack_secret::Verifier;
 /// to correctly recreate a split secret.
 // We intentionally DO NOT derive `Debug` or `Serialize`; both provide avenues
 // by which we may accidentally log the contents of our `share`.
-#[derive(Clone, PartialEq, Deserialize)]
+#[derive(Clone, PartialEq, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct ShareDistribution {
     pub threshold: usize,
+    #[zeroize(skip)]
     pub verifier: Verifier,
     pub share: Share,
-    pub member_device_id_certs: Vec<Ed25519Certificate>,
+    #[zeroize(skip)]
+    pub member_device_id_certs: BTreeSet<Ed25519Certificate>,
 }
 
 impl ShareDistribution {
@@ -48,11 +52,13 @@ impl fmt::Debug for ShareDistribution {
 /// This type should only be used to build careful serialization routines that
 /// need to deal with trust quorum shares; e.g.,
 /// `RequestEnvelope::danger_serialize_as_json()`.
-#[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct SerializableShareDistribution {
     pub threshold: usize,
     pub share: Share,
-    pub member_device_id_certs: Vec<Ed25519Certificate>,
+    #[zeroize(skip)]
+    pub member_device_id_certs: BTreeSet<Ed25519Certificate>,
+    #[zeroize(skip)]
     pub verifier: Verifier,
 }
 
@@ -73,9 +79,9 @@ impl From<ShareDistribution> for SerializableShareDistribution {
     fn from(dist: ShareDistribution) -> Self {
         Self {
             threshold: dist.threshold,
-            verifier: dist.verifier,
-            share: dist.share,
-            member_device_id_certs: dist.member_device_id_certs,
+            verifier: dist.verifier.clone(),
+            share: dist.share.clone(),
+            member_device_id_certs: dist.member_device_id_certs.clone(),
         }
     }
 }
@@ -84,9 +90,9 @@ impl From<SerializableShareDistribution> for ShareDistribution {
     fn from(dist: SerializableShareDistribution) -> Self {
         Self {
             threshold: dist.threshold,
-            verifier: dist.verifier,
-            share: dist.share,
-            member_device_id_certs: dist.member_device_id_certs,
+            verifier: dist.verifier.clone(),
+            share: dist.share.clone(),
+            member_device_id_certs: dist.member_device_id_certs.clone(),
         }
     }
 }

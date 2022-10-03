@@ -55,6 +55,7 @@ mod oximeter;
 mod project;
 mod rack;
 mod region;
+mod region_snapshot;
 mod role;
 mod saga;
 mod service;
@@ -69,9 +70,11 @@ mod volume;
 mod vpc;
 mod zpool;
 
+pub use volume::CrucibleResources;
+
 // Number of unique datasets required to back a region.
 // TODO: This should likely turn into a configuration option.
-const REGION_REDUNDANCY_THRESHOLD: usize = 3;
+pub(crate) const REGION_REDUNDANCY_THRESHOLD: usize = 3;
 
 // Represents a query that is ready to be executed.
 //
@@ -359,12 +362,20 @@ mod test {
             .unwrap();
 
         // Associate silo with user
+        let authz_silo = authz::Silo::new(
+            authz::FLEET,
+            *SILO_ID,
+            LookupType::ById(*SILO_ID),
+        );
         datastore
-            .silo_user_create(SiloUser::new(
-                *SILO_ID,
-                silo_user_id,
-                "external_id".into(),
-            ))
+            .silo_user_create(
+                &authz_silo,
+                SiloUser::new(
+                    authz_silo.id(),
+                    silo_user_id,
+                    "external_id".into(),
+                ),
+            )
             .await
             .unwrap();
 
@@ -688,9 +699,12 @@ mod test {
             .region_allocate(&opctx, volume1_id, &params)
             .await
             .unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("Not enough datasets to allocate disks"));
+
+        let expected = "Not enough datasets to allocate disks";
+        assert!(
+            err.to_string().contains(expected),
+            "Saw error: \'{err}\', but expected \'{expected}\'"
+        );
 
         assert!(matches!(err, Error::ServiceUnavailable { .. }));
 
@@ -756,16 +770,6 @@ mod test {
         let datastore = DataStore::new(Arc::new(pool));
 
         let explanation = DataStore::get_allocated_regions_query(Uuid::nil())
-            .explain_async(datastore.pool())
-            .await
-            .unwrap();
-        assert!(
-            !explanation.contains("FULL SCAN"),
-            "Found an unexpected FULL SCAN: {}",
-            explanation
-        );
-
-        let explanation = DataStore::get_allocatable_datasets_query()
             .explain_async(datastore.pool())
             .await
             .unwrap();
@@ -877,13 +881,21 @@ mod test {
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
         // Create a new Silo user so that we can lookup their keys.
+        let authz_silo = authz::Silo::new(
+            authz::FLEET,
+            *SILO_ID,
+            LookupType::ById(*SILO_ID),
+        );
         let silo_user_id = Uuid::new_v4();
         datastore
-            .silo_user_create(SiloUser::new(
-                *SILO_ID,
-                silo_user_id,
-                "external@id".into(),
-            ))
+            .silo_user_create(
+                &authz_silo,
+                SiloUser::new(
+                    authz_silo.id(),
+                    silo_user_id,
+                    "external@id".into(),
+                ),
+            )
             .await
             .unwrap();
 

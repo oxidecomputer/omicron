@@ -7,10 +7,14 @@
 use crate::db::alias::ExpressionAlias;
 use crate::db::model::Service;
 use crate::db::model::ServiceKind;
+use crate::db::model::queries::service_provision::{
+    sled_allocation_pool, previously_allocated_services, old_service_count,
+    new_service_count, candidate_sleds, new_internal_ips, candidate_services,
+    inserted_services,
+};
 use crate::db::pool::DbConnection;
 use crate::db::schema;
 use crate::db::subquery::{AsQuerySource, Cte, CteBuilder, CteQuery};
-use crate::subquery;
 use chrono::DateTime;
 use chrono::Utc;
 use db_macros::Subquery;
@@ -50,12 +54,6 @@ impl SledAllocationPool {
     }
 }
 
-subquery! {
-    sled_allocation_pool {
-        id -> Uuid,
-    }
-}
-
 /// A subquery to find all services of a particular type which have already been
 /// allocated.
 #[derive(Subquery)]
@@ -83,18 +81,6 @@ impl PreviouslyAllocatedServices {
     }
 }
 
-subquery! {
-    previously_allocated_services {
-        id -> Uuid,
-        time_created -> Timestamptz,
-        time_modified -> Timestamptz,
-
-        sled_id -> Uuid,
-        ip -> Inet,
-        kind -> crate::db::model::ServiceKindEnum,
-    }
-}
-
 /// A subquery to find the number of old services.
 #[derive(Subquery)]
 #[subquery(name = old_service_count)]
@@ -112,12 +98,6 @@ impl OldServiceCount {
                     .select((diesel::dsl::count_star(),)),
             ),
         }
-    }
-}
-
-subquery! {
-    old_service_count (count) {
-        count -> Int8,
     }
 }
 
@@ -148,12 +128,6 @@ impl NewServiceCount {
                 ),)
             )),
         }
-    }
-}
-
-subquery! {
-    new_service_count (count) {
-        count -> Int8,
     }
 }
 
@@ -202,12 +176,6 @@ impl CandidateSleds {
     }
 }
 
-subquery! {
-    candidate_sleds {
-        id -> Uuid,
-    }
-}
-
 /// A subquery to provision internal IPs for all the new services.
 #[derive(Subquery)]
 #[subquery(name = new_internal_ips)]
@@ -240,18 +208,6 @@ impl NewInternalIps {
         }
     }
 }
-
-subquery! {
-    new_internal_ips {
-        id -> Uuid,
-        last_used_address -> Inet,
-    }
-}
-
-diesel::allow_tables_to_appear_in_same_query!(
-    candidate_sleds,
-    new_internal_ips,
-);
 
 /// A subquery to create the new services which should be inserted.
 #[derive(Subquery)]
@@ -295,18 +251,6 @@ impl CandidateServices {
     }
 }
 
-subquery! {
-    candidate_services {
-        id -> Uuid,
-        time_created -> Timestamptz,
-        time_modified -> Timestamptz,
-
-        sled_id -> Uuid,
-        ip -> Inet,
-        kind -> crate::db::model::ServiceKindEnum,
-    }
-}
-
 /// A subquery to insert the new services.
 #[derive(Subquery)]
 #[subquery(name = inserted_services)]
@@ -327,21 +271,6 @@ impl InsertServices {
                     .returning(service::all_columns),
             ),
         }
-    }
-}
-
-// TODO: It's worth looking at Diesel's aliasing facilities to see
-// what we can do for these cases where we're trying to generate
-// a table identical to an existing one, but with a new name.
-subquery! {
-    inserted_services {
-        id -> Uuid,
-        time_created -> Timestamptz,
-        time_modified -> Timestamptz,
-
-        sled_id -> Uuid,
-        ip -> Inet,
-        kind -> crate::db::model::ServiceKindEnum,
     }
 }
 

@@ -23,7 +23,6 @@ use std::convert::TryFrom;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use tokio::time::Instant;
 use tokio_stream::wrappers::ReceiverStream;
 
 /// Configuration of a single port of the management network switch.
@@ -86,15 +85,11 @@ pub(super) struct LocationMap {
 
 impl LocationMap {
     pub(super) async fn run_discovery(
-        config: LocationConfig,
+        config: ValidatedLocationConfig,
         ports: HashMap<SwitchPort, SwitchPortConfig>,
         sockets: Arc<HashMap<SwitchPort, SingleSp>>,
-        deadline: Instant,
         log: &Logger,
-    ) -> Result<Self, StartupError> {
-        // Validate that `config` is valid.
-        let config = ValidatedLocationConfig::try_from((&ports, config))?;
-
+    ) -> Result<Self, String> {
         // Spawn a task that will send discovery packets on every switch port
         // until it hears back from all SPs with exponential backoff to avoid
         // slamming the network; we expect some ports to never resolve (e.g., if
@@ -118,24 +113,12 @@ impl LocationMap {
         }
 
         // Collect responses and solve for a single location
-        let location = match tokio::time::timeout_at(
-            deadline,
-            resolve_location(
-                config.names,
-                ReceiverStream::new(refined_locations),
-                log,
-            ),
+        let location = resolve_location(
+            config.names,
+            ReceiverStream::new(refined_locations),
+            log,
         )
-        .await
-        {
-            Ok(Ok(location)) => location,
-            Ok(Err(err)) => return Err(err),
-            Err(_) => {
-                return Err(StartupError::DiscoveryFailed {
-                    reason: String::from("timeout"),
-                })
-            }
-        };
+        .await?;
 
         // based on the resolved location and the input configuration, build the
         // map of port <-> logical ID
@@ -183,7 +166,7 @@ impl LocationMap {
 //    consistent; e.g., there isn't a LocationDeterminationConfig that refers to
 //    a nonexistent switch port.
 #[derive(Debug, PartialEq)]
-struct ValidatedLocationConfig {
+pub(super) struct ValidatedLocationConfig {
     names: HashSet<String>,
     determination: Vec<ValidatedLocationDeterminationConfig>,
 }
@@ -417,7 +400,7 @@ async fn resolve_location<S>(
     mut locations: HashSet<String>,
     determinations: S,
     log: &Logger,
-) -> Result<String, StartupError>
+) -> Result<String, String>
 where
     S: Stream<Item = (SwitchPort, HashSet<String>)>,
 {
@@ -442,21 +425,18 @@ where
 
     match locations.len() {
         1 => Ok(locations.into_iter().next().unwrap()),
-        0 => Err(StartupError::DiscoveryFailed {
-            reason: String::from(concat!(
-                "could not determine unique location ",
-                "(all possible locations eliminated)",
-            )),
-        }),
+        0 => Err(String::from(concat!(
+            "could not determine unique location ",
+            "(all possible locations eliminated)",
+        ))),
+
         _ => {
             let mut remaining = locations.into_iter().collect::<Vec<_>>();
             remaining.sort_unstable();
-            Err(StartupError::DiscoveryFailed {
-                reason: format!(
-                    "could not determine unique location (remaining set `{:?}`)",
-                    remaining,
-                ),
-            })
+            Err(format!(
+                "could not determine unique location (remaining set `{:?}`)",
+                remaining,
+            ))
         }
     }
 }
@@ -614,7 +594,7 @@ mod tests {
             }
         }
 
-        async fn resolve(self, log: &Logger) -> Result<String, StartupError> {
+        async fn resolve(self, log: &Logger) -> Result<String, String> {
             resolve_location(self.names, self.determinations, log).await
         }
     }
@@ -638,34 +618,24 @@ mod tests {
         // failing to resolve to a single location should give us an error
         let harness =
             Harness::new(&["a", "b", "c"], &[&["a", "b"], &["b", "a"]]);
-        let err = harness.resolve(&log).await.unwrap_err();
-        match err {
-            StartupError::DiscoveryFailed { reason } => {
-                assert_eq!(
-                    reason,
-                    concat!(
-                        "could not determine unique location ",
-                        "(remaining set `[\"a\", \"b\"]`)",
-                    )
-                );
-            }
-            _ => panic!("unexpected error {}", err),
-        }
+        let reason = harness.resolve(&log).await.unwrap_err();
+        assert_eq!(
+            reason,
+            concat!(
+                "could not determine unique location ",
+                "(remaining set `[\"a\", \"b\"]`)",
+            )
+        );
 
         // determinations that have no name in common should give us an error
         let harness = Harness::new(&["a", "b", "c"], &[&["a", "b"], &["c"]]);
-        let err = harness.resolve(&log).await.unwrap_err();
-        match err {
-            StartupError::DiscoveryFailed { reason } => {
-                assert_eq!(
-                    reason,
-                    concat!(
-                        "could not determine unique location ",
-                        "(all possible locations eliminated)",
-                    )
-                );
-            }
-            _ => panic!("unexpected error {}", err),
-        }
+        let reason = harness.resolve(&log).await.unwrap_err();
+        assert_eq!(
+            reason,
+            concat!(
+                "could not determine unique location ",
+                "(all possible locations eliminated)",
+            )
+        );
     }
 }

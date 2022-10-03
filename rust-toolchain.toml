@@ -10,5 +10,5 @@
 [toolchain]
 # NOTE: This toolchain is also specified within .github/buildomat/jobs/{build-and-test,package}.sh.
 # If you update it here, update that file too.
-channel = "nightly-2022-04-27"
+channel = "nightly-2022-09-27"
 profile = "default"

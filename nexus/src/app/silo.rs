@@ -69,6 +69,18 @@ impl super::Nexus {
         Ok(db_silo)
     }
 
+    pub async fn silo_fetch_by_id(
+        &self,
+        opctx: &OpContext,
+        silo_id: &Uuid,
+    ) -> LookupResult<db::model::Silo> {
+        let (.., db_silo) = LookupPath::new(opctx, &self.db_datastore)
+            .silo_id(*silo_id)
+            .fetch()
+            .await?;
+        Ok(db_silo)
+    }
+
     pub async fn silo_delete(
         &self,
         opctx: &OpContext,
@@ -152,7 +164,7 @@ impl super::Nexus {
         opctx.authorize(authz::Action::CreateChild, authz_silo).await?;
         opctx.authorize(authz::Action::ListChildren, authz_silo).await?;
 
-        let existing_silo_user = self
+        let fetch_result = self
             .datastore()
             .silo_user_fetch_by_external_id(
                 opctx,
@@ -161,32 +173,35 @@ impl super::Nexus {
             )
             .await?;
 
-        let silo_user = if let Some(existing_silo_user) = existing_silo_user {
-            existing_silo_user
-        } else {
-            // In this branch, no user exists for the authenticated subject
-            // external id. The next action depends on the silo's user provision
-            // type.
-            match db_silo.user_provision_type {
-                // If the user provision type is fixed, do not a new user if one
-                // does not exist.
-                db::model::UserProvisionType::Fixed => {
-                    return Ok(None);
-                }
+        let (authz_silo_user, db_silo_user) =
+            if let Some(existing_silo_user) = fetch_result {
+                existing_silo_user
+            } else {
+                // In this branch, no user exists for the authenticated subject
+                // external id. The next action depends on the silo's user
+                // provision type.
+                match db_silo.user_provision_type {
+                    // If the user provision type is fixed, do not a new user if
+                    // one does not exist.
+                    db::model::UserProvisionType::Fixed => {
+                        return Ok(None);
+                    }
 
-                // If the user provision type is JIT, then create the user if
-                // one does not exist
-                db::model::UserProvisionType::Jit => {
-                    let silo_user = db::model::SiloUser::new(
-                        authz_silo.id(),
-                        Uuid::new_v4(),
-                        authenticated_subject.external_id.clone(),
-                    );
+                    // If the user provision type is JIT, then create the user if
+                    // one does not exist
+                    db::model::UserProvisionType::Jit => {
+                        let silo_user = db::model::SiloUser::new(
+                            authz_silo.id(),
+                            Uuid::new_v4(),
+                            authenticated_subject.external_id.clone(),
+                        );
 
-                    self.db_datastore.silo_user_create(silo_user).await?
+                        self.db_datastore
+                            .silo_user_create(&authz_silo, silo_user)
+                            .await?
+                    }
                 }
-            }
-        };
+            };
 
         // Gather a list of groups that the user is part of based on what the
         // IdP sent us. Also, if the silo user provision type is Jit, create
@@ -230,12 +245,12 @@ impl super::Nexus {
         self.db_datastore
             .silo_group_membership_replace_for_user(
                 opctx,
-                silo_user.id(),
+                &authz_silo_user,
                 silo_user_group_ids,
             )
             .await?;
 
-        Ok(Some(silo_user))
+        Ok(Some(db_silo_user))
     }
 
     // Silo groups

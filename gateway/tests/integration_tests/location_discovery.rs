@@ -22,8 +22,14 @@ async fn discovery_both_locations() {
 
     // the two instances should've discovered that they were switch0 and
     // switch1, respectively
-    assert_eq!(testctx0.server.apictx.sp_comms.location_name(), "switch0");
-    assert_eq!(testctx1.server.apictx.sp_comms.location_name(), "switch1");
+    assert_eq!(
+        testctx0.server.apictx.sp_comms.location_name().unwrap(),
+        "switch0"
+    );
+    assert_eq!(
+        testctx1.server.apictx.sp_comms.location_name().unwrap(),
+        "switch1"
+    );
 
     // both instances should report the same serial number for switch 0 and
     // switch 1, and it should match the expected values from the config

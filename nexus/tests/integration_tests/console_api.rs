@@ -68,7 +68,7 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
     // without other privileges.  However, they _do_ need the privilege to
     // create Organizations because we'll be testing that as a smoke test.
     // We'll remove that privilege afterwards.
-    let silo_url = format!("/silos/{}", DEFAULT_SILO.identity().name);
+    let silo_url = format!("/system/silos/{}", DEFAULT_SILO.identity().name);
     let policy_url = format!("{}/policy", silo_url);
     let initial_policy: shared::Policy<SiloRole> =
         NexusRequest::object_get(testctx, &policy_url)
@@ -163,6 +163,7 @@ async fn test_console_pages(cptestctx: &ControlPlaneTestContext) {
         "/",
         "/orgs/irrelevant-path",
         "/settings/irrelevant-path",
+        "/sys/irrelevant-path",
         "/device/success",
         "/device/verify",
     ];

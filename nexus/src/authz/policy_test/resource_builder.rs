@@ -106,10 +106,15 @@ impl<'a> ResourceBuilder<'a> {
             println!("creating user: {}", &username);
             self.users.push((username.clone(), user_id));
 
+            let authz_silo = authz::Silo::new(
+                authz::FLEET,
+                silo_id,
+                LookupType::ById(silo_id),
+            );
             let silo_user =
                 db::model::SiloUser::new(silo_id, user_id, username);
             datastore
-                .silo_user_create(silo_user)
+                .silo_user_create(&authz_silo, silo_user)
                 .await
                 .expect("failed to create silo user");
 

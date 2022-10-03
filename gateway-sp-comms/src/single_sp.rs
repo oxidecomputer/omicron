@@ -10,11 +10,13 @@ use crate::communicator::ResponseKindExt;
 use crate::error::BadResponseType;
 use crate::error::SpCommunicationError;
 use crate::error::UpdateError;
+use crate::hubris_archive::HubrisArchive;
 use gateway_messages::sp_impl;
 use gateway_messages::version;
 use gateway_messages::BulkIgnitionState;
 use gateway_messages::IgnitionCommand;
 use gateway_messages::IgnitionState;
+use gateway_messages::PowerState;
 use gateway_messages::Request;
 use gateway_messages::RequestKind;
 use gateway_messages::ResponseError;
@@ -25,11 +27,11 @@ use gateway_messages::SpMessageKind;
 use gateway_messages::SpPort;
 use gateway_messages::SpState;
 use gateway_messages::UpdateChunk;
+use gateway_messages::UpdateId;
 use gateway_messages::UpdatePrepare;
-use gateway_messages::UpdatePrepareStatusRequest;
+use gateway_messages::UpdateStatus;
 use omicron_common::backoff;
 use omicron_common::backoff::Backoff;
-use rand::Rng;
 use slog::debug;
 use slog::error;
 use slog::info;
@@ -51,6 +53,7 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tokio::time;
 use tokio::time::timeout;
+use uuid::Uuid;
 
 pub const DISCOVERY_MULTICAST_ADDR: Ipv6Addr =
     Ipv6Addr::new(0xff15, 0, 0, 0, 0, 0, 0x1de, 0);
@@ -165,64 +168,101 @@ impl SingleSp {
 
     /// Update a component of the SP (or the SP itself!).
     ///
-    /// This is a bulk operation that will make multiple RPC calls to the SP to
-    /// deliver all of `image`.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `image.is_empty()`.
-    pub async fn update(
+    /// This function will return before the update is compelte! Once the SP
+    /// acknowledges that we want to apply an update, we spawn a background task
+    /// to stream the update to the SP and then return. Poll the status of the
+    /// update via [`Self::update_status()`].
+    pub async fn start_update(
         &self,
         component: SpComponent,
+        update_id: Uuid,
         slot: u16,
         image: Vec<u8>,
     ) -> Result<(), UpdateError> {
-        assert!(!image.is_empty());
+        if image.is_empty() {
+            return Err(UpdateError::ImageEmpty);
+        }
+
+        // If we're updating the SP, we expect `image` to be a hubris archive;
+        // extract the SP image from it.
+        //
+        // TODO 1: We will need to pull other data out of the archive (aux flash
+        //         images).
+        // TODO 2: Are we sticking with hubris archives as the delivery format?
+        let image = if component == SpComponent::SP_ITSELF {
+            let mut archive = HubrisArchive::new(image)?;
+            archive.final_bin()?
+        } else {
+            image
+        };
+
         let total_size = image
             .len()
             .try_into()
             .map_err(|_err| UpdateError::ImageTooLarge)?;
 
-        let stream_id: u64 = rand::thread_rng().gen();
-
         info!(
             self.log, "starting update";
             "component" => component.as_str(),
-            "stream_id" => stream_id,
+            "id" => %update_id,
             "total_size" => total_size,
         );
-        self.update_prepare(component, stream_id, slot, total_size)
-            .await
-            .map_err(UpdateError::Start)?;
+        let id = update_id.into();
+        self.update_prepare(component, id, slot, total_size).await?;
 
-        // Wait until the SP finishes whatever prep work it needs to do.
-        self.poll_for_update_prepare_status_done(component, stream_id)
-            .await
-            .map_err(UpdateError::Start)?;
-        info!(
-            self.log, "SP update preparation complete";
-            "stream_id" => stream_id,
-        );
-
-        let mut image = Cursor::new(image);
-        let mut offset = 0;
-        while !CursorExt::is_empty(&image) {
-            let prior_pos = image.position();
-            debug!(
-                self.log, "sending update chunk";
-                "stream_id" => stream_id,
-                "offset" => offset,
-            );
-
-            image = self
-                .update_chunk(component, stream_id, offset, image)
+        let log = self.log.clone();
+        let inner = self.cmds_tx.clone();
+        tokio::spawn(async move {
+            // Wait until the SP has finished preparing for this update.
+            match poll_until_update_prep_complete(&inner, component, id, &log)
                 .await
-                .map_err(|err| UpdateError::Chunk { offset, err })?;
+            {
+                Ok(()) => {
+                    info!(
+                        log, "update preparation complete";
+                        "update_id" => %update_id,
+                    );
+                }
+                Err(message) => {
+                    error!(
+                        log, "update preparation failed";
+                        "err" => message,
+                        "update_id" => %update_id,
+                    );
+                    return;
+                }
+            }
 
-            // Update our offset according to how far our cursor advanced.
-            offset += (image.position() - prior_pos) as u32;
-        }
-        info!(self.log, "update complete");
+            // Deliver the update in chunks.
+            let mut image = Cursor::new(image);
+            let mut offset = 0;
+            while !CursorExt::is_empty(&image) {
+                let prior_pos = image.position();
+                debug!(
+                    log, "sending update chunk";
+                    "id" => %update_id,
+                    "offset" => offset,
+                );
+
+                image = match update_chunk(&inner, component, id, offset, image)
+                    .await
+                {
+                    Ok(image) => image,
+                    Err(err) => {
+                        error!(
+                            log, "update failed";
+                            "id" => %update_id,
+                            "err" => %err,
+                        );
+                        return;
+                    }
+                };
+
+                // Update our offset according to how far our cursor advanced.
+                offset += (image.position() - prior_pos) as u32;
+            }
+            info!(log, "update complete"; "id" => %update_id);
+        });
 
         Ok(())
     }
@@ -234,13 +274,13 @@ impl SingleSp {
     async fn update_prepare(
         &self,
         component: SpComponent,
-        stream_id: u64,
+        id: UpdateId,
         slot: u16,
         total_size: u32,
     ) -> Result<()> {
         self.rpc(RequestKind::UpdatePrepare(UpdatePrepare {
             component,
-            stream_id,
+            id,
             slot,
             total_size,
         }))
@@ -250,91 +290,41 @@ impl SingleSp {
         })
     }
 
-    /// Send a steady stream of "update prepare status" messages until the SP
-    /// indicates update prepartion is complete.
-    async fn poll_for_update_prepare_status_done(
+    /// Get the status of any update being applied to the given component.
+    pub async fn update_status(
         &self,
         component: SpComponent,
-        stream_id: u64,
-    ) -> Result<()> {
-        // We expect most update prepartion to be fast, but for some components
-        // (e.g., host boot flash), it can take up to several minutes to prepare
-        // the target flash slot. Send a few status requests with a short
-        // polling interval, then back off to polling every few seconds.
-        //
-        // These choses of durations/number of attempts are all relatively
-        // arbitrary and could be tuned over time or for specific components.
-        const INITIAL_POLL_INTERVAL: Duration = Duration::from_millis(200);
-        const INITIAL_POLL_ATTEMPTS: usize = 5;
-        const SLOW_POLL_INTERVAL: Duration = Duration::from_secs(3);
-
-        let request =
-            RequestKind::UpdatePrepareStatus(UpdatePrepareStatusRequest {
-                component,
-                stream_id,
-            });
-
-        for attempt in 1.. {
-            let status =
-                self.rpc(request).await.and_then(|(_peer, response)| {
-                    response.expect_update_prepare_status().map_err(Into::into)
-                })?;
-            if status.done {
-                return Ok(());
-            }
-            let sleep_time = if attempt <= INITIAL_POLL_ATTEMPTS {
-                INITIAL_POLL_INTERVAL
-            } else {
-                SLOW_POLL_INTERVAL
-            };
-            tokio::time::sleep(sleep_time).await;
-        }
-
-        // We can't break out of the for loop without retrying usize::MAX times,
-        // which isn't phsyically possible (but the compiler doesn't know that).
-        unreachable!();
-    }
-
-    /// Send a portion of an update to the SP.
-    ///
-    /// Must be preceded by a call to `update_start()` (and may be preceded by
-    /// earlier chunks of this update)`.
-    ///
-    /// The completion of an update is implicit, and is detected by the SP based
-    /// on size of the update (specified by the `total_size` given when the
-    /// update starts).
-    ///
-    /// Panics if `chunk.len() > UpdateChunk::MAX_CHUNK_SIZE`.
-    async fn update_chunk(
-        &self,
-        component: SpComponent,
-        stream_id: u64,
-        offset: u32,
-        data: Cursor<Vec<u8>>,
-    ) -> Result<Cursor<Vec<u8>>> {
-        let update_chunk = UpdateChunk { component, stream_id, offset };
-        let (result, data) = self
-            .rpc_with_trailing_data(
-                RequestKind::UpdateChunk(update_chunk),
-                data,
-            )
-            .await;
-
-        result.and_then(|(_peer, response)| {
-            response.expect_update_chunk_ack().map_err(Into::into)
-        })?;
-
-        Ok(data)
+    ) -> Result<UpdateStatus> {
+        update_status(&self.cmds_tx, component).await
     }
 
     /// Abort an in-progress update.
-    pub async fn update_abort(&self, component: SpComponent) -> Result<()> {
-        // RequestKind::UpdateAbort does not take a `stream_id` argument,
-        // because this command is designed to allow aborts to in-progress
-        // updates that may have been started by other MGS instances.
-        self.rpc(RequestKind::UpdateAbort(component)).await.and_then(
-            |(_peer, response)| {
+    pub async fn update_abort(
+        &self,
+        component: SpComponent,
+        update_id: Uuid,
+    ) -> Result<()> {
+        self.rpc(RequestKind::UpdateAbort { component, id: update_id.into() })
+            .await
+            .and_then(|(_peer, response)| {
                 response.expect_update_abort_ack().map_err(Into::into)
+            })
+    }
+
+    /// Get the current power state.
+    pub async fn power_state(&self) -> Result<PowerState> {
+        self.rpc(RequestKind::GetPowerState).await.and_then(
+            |(_peer, response)| {
+                response.expect_power_state().map_err(Into::into)
+            },
+        )
+    }
+
+    /// Set the current power state.
+    pub async fn set_power_state(&self, power_state: PowerState) -> Result<()> {
+        self.rpc(RequestKind::SetPowerState(power_state)).await.and_then(
+            |(_peer, response)| {
+                response.expect_set_power_state_ack().map_err(Into::into)
             },
         )
     }
@@ -350,7 +340,7 @@ impl SingleSp {
     /// needed the reset for has happened (e.g., checking the SP's version, in
     /// the case of updates).
     pub async fn reset_prepare(&self) -> Result<()> {
-        self.rpc(RequestKind::SysResetPrepare).await.and_then(
+        self.rpc(RequestKind::ResetPrepare).await.and_then(
             |(_peer, response)| {
                 response.expect_sys_reset_prepare_ack().map_err(Into::into)
             },
@@ -363,7 +353,7 @@ impl SingleSp {
     pub async fn reset_trigger(&self) -> Result<()> {
         // Reset trigger should retry until we get back an error indicating the
         // SP wasn't expecting a reset trigger (because it has reset!).
-        match self.rpc(RequestKind::SysResetTrigger).await {
+        match self.rpc(RequestKind::ResetTrigger).await {
             Ok((_peer, response)) => {
                 Err(SpCommunicationError::BadResponseType(BadResponseType {
                     expected: "system-reset",
@@ -371,7 +361,7 @@ impl SingleSp {
                 }))
             }
             Err(SpCommunicationError::SpError(
-                ResponseError::SysResetTriggerWithoutPrepare,
+                ResponseError::ResetTriggerWithoutPrepare,
             )) => Ok(()),
             Err(other) => Err(other),
         }
@@ -422,14 +412,106 @@ impl SingleSp {
     ) -> Result<(SocketAddrV6, ResponseKind)> {
         rpc(&self.cmds_tx, kind, None).await.result
     }
+}
 
-    async fn rpc_with_trailing_data(
-        &self,
-        kind: RequestKind,
-        trailing_data: Cursor<Vec<u8>>,
-    ) -> (Result<(SocketAddrV6, ResponseKind)>, Cursor<Vec<u8>>) {
-        rpc_with_trailing_data(&self.cmds_tx, kind, trailing_data).await
+/// Poll an SP until it indicates that preparation for update identified by `id`
+/// has completed.
+async fn poll_until_update_prep_complete(
+    inner_tx: &mpsc::Sender<InnerCommand>,
+    component: SpComponent,
+    id: UpdateId,
+    log: &Logger,
+) -> Result<(), String> {
+    // The choice of interval is relatively arbitrary; we expect update
+    // preparation to generally fall in one of two cases:
+    //
+    // 1. No prep is necessary, and the update can happen immediately
+    //    (we'll never sleep)
+    // 2. Prep is relatively slow (e.g., erasing a flash part)
+    //
+    // We choose a few seconds assuming this polling interval is
+    // primarily hit when the SP is doing something slow.
+    const POLL_UPDATE_STATUS_INTERVAL: Duration = Duration::from_secs(2);
+
+    // Poll SP until update preparation is complete.
+    loop {
+        // Get update status from the SP or give up.
+        let status = match update_status(inner_tx, component).await {
+            Ok(status) => status,
+            Err(err) => {
+                return Err(format!("could not get status from SP: {err}"));
+            }
+        };
+
+        // Either sleep and retry (if still preparing), break out of our
+        // loop (if prep complete), or fail (anything else).
+        match status {
+            UpdateStatus::Preparing(sub_status) => {
+                if sub_status.id == id {
+                    debug!(
+                        log,
+                        "SP still preparing; sleeping for {:?}",
+                        POLL_UPDATE_STATUS_INTERVAL
+                    );
+                    tokio::time::sleep(POLL_UPDATE_STATUS_INTERVAL).await;
+                    continue;
+                }
+            }
+            UpdateStatus::InProgress(sub_status) => {
+                if sub_status.id == id {
+                    return Ok(());
+                }
+            }
+            UpdateStatus::None
+            | UpdateStatus::Complete(_)
+            | UpdateStatus::Aborted(_) => (),
+        }
+
+        return Err(format!("update preparation failed; status = {status:?}"));
     }
+}
+
+/// Get the status of any update being applied to the given component.
+async fn update_status(
+    inner_tx: &mpsc::Sender<InnerCommand>,
+    component: SpComponent,
+) -> Result<UpdateStatus> {
+    rpc(inner_tx, RequestKind::UpdateStatus(component), None)
+        .await
+        .result
+        .and_then(|(_peer, response)| {
+            response.expect_update_status().map_err(Into::into)
+        })
+}
+
+/// Send a portion of an update to the SP.
+///
+/// Must be preceded by a call to `update_prepare()` (and may be preceded by
+/// earlier chunks of this update)`.
+///
+/// The completion of an update is implicit, and is detected by the SP based
+/// on size of the update (specified by the `total_size` given when the
+/// update starts).
+async fn update_chunk(
+    inner_tx: &mpsc::Sender<InnerCommand>,
+    component: SpComponent,
+    id: UpdateId,
+    offset: u32,
+    data: Cursor<Vec<u8>>,
+) -> Result<Cursor<Vec<u8>>> {
+    let update_chunk = UpdateChunk { component, id, offset };
+    let (result, data) = rpc_with_trailing_data(
+        inner_tx,
+        RequestKind::UpdateChunk(update_chunk),
+        data,
+    )
+    .await;
+
+    result.and_then(|(_peer, response)| {
+        response.expect_update_chunk_ack().map_err(Into::into)
+    })?;
+
+    Ok(data)
 }
 
 async fn rpc_with_trailing_data(

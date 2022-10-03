@@ -46,9 +46,9 @@ lazy_static! {
     // Silo used for testing
     pub static ref DEMO_SILO_NAME: Name = "demo-silo".parse().unwrap();
     pub static ref DEMO_SILO_URL: String =
-        format!("/silos/{}", *DEMO_SILO_NAME);
+        format!("/system/silos/{}", *DEMO_SILO_NAME);
     pub static ref DEMO_SILO_POLICY_URL: String =
-        format!("/silos/{}/policy", *DEMO_SILO_NAME);
+        format!("/system/silos/{}/policy", *DEMO_SILO_NAME);
     pub static ref DEMO_SILO_CREATE: params::SiloCreate =
         params::SiloCreate {
             identity: IdentityMetadataCreateParams {
@@ -280,7 +280,7 @@ lazy_static! {
     // Global Images
     pub static ref DEMO_GLOBAL_IMAGE_NAME: Name = "alpine-edge".parse().unwrap();
     pub static ref DEMO_GLOBAL_IMAGE_URL: String =
-        format!("/images/{}", *DEMO_GLOBAL_IMAGE_NAME);
+        format!("/system/images/{}", *DEMO_GLOBAL_IMAGE_NAME);
     pub static ref DEMO_GLOBAL_IMAGE_CREATE: params::GlobalImageCreate =
         params::GlobalImageCreate {
             identity: IdentityMetadataCreateParams {
@@ -296,7 +296,7 @@ lazy_static! {
         };
 
     // IP Pools
-    pub static ref DEMO_IP_POOLS_URL: &'static str = "/ip-pools";
+    pub static ref DEMO_IP_POOLS_URL: &'static str = "/system/ip-pools";
     pub static ref DEMO_IP_POOL_NAME: Name = "pool0".parse().unwrap();
     pub static ref DEMO_IP_POOL_CREATE: params::IpPoolCreate =
         params::IpPoolCreate {
@@ -306,7 +306,7 @@ lazy_static! {
             },
             project: None,
         };
-    pub static ref DEMO_IP_POOL_URL: String = format!("/ip-pools/{}", *DEMO_IP_POOL_NAME);
+    pub static ref DEMO_IP_POOL_URL: String = format!("/system/ip-pools/{}", *DEMO_IP_POOL_NAME);
     pub static ref DEMO_IP_POOL_UPDATE: params::IpPoolUpdate =
         params::IpPoolUpdate {
             identity: IdentityMetadataUpdateParams {
@@ -323,7 +323,7 @@ lazy_static! {
     pub static ref DEMO_IP_POOL_RANGES_DEL_URL: String = format!("{}/remove", *DEMO_IP_POOL_RANGES_URL);
 
     // IP Pools (Services)
-    pub static ref DEMO_IP_POOLS_SERVICE_URL: &'static str = "/ip-pools-service";
+    pub static ref DEMO_IP_POOLS_SERVICE_URL: &'static str = "/system/ip-pools-service";
     pub static ref DEMO_IP_POOL_SERVICE_URL: String = format!("{}/{}", *DEMO_IP_POOLS_SERVICE_URL, RACK_UUID);
     pub static ref DEMO_IP_POOL_SERVICE_RANGES_URL: String = format!("{}/ranges", *DEMO_IP_POOL_SERVICE_URL);
     pub static ref DEMO_IP_POOL_SERVICE_RANGES_ADD_URL: String = format!("{}/add", *DEMO_IP_POOL_SERVICE_RANGES_URL);
@@ -360,8 +360,8 @@ lazy_static! {
 
 lazy_static! {
     // Identity providers
-    pub static ref IDENTITY_PROVIDERS_URL: String = format!("/silos/default-silo/identity-providers");
-    pub static ref SAML_IDENTITY_PROVIDERS_URL: String = format!("/silos/default-silo/saml-identity-providers");
+    pub static ref IDENTITY_PROVIDERS_URL: String = format!("/system/silos/default-silo/identity-providers");
+    pub static ref SAML_IDENTITY_PROVIDERS_URL: String = format!("/system/silos/default-silo/saml-identity-providers");
 
     pub static ref DEMO_SAML_IDENTITY_PROVIDER_NAME: Name = "demo-saml-provider".parse().unwrap();
     pub static ref SPECIFIC_SAML_IDENTITY_PROVIDER_URL: String = format!("{}/{}", *SAML_IDENTITY_PROVIDERS_URL, *DEMO_SAML_IDENTITY_PROVIDER_NAME);
@@ -648,7 +648,7 @@ lazy_static! {
 
         /* Silos */
         VerifyEndpoint {
-            url: "/silos",
+            url: "/system/silos",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
@@ -656,6 +656,14 @@ lazy_static! {
                 AllowedMethod::Post(
                     serde_json::to_value(&*DEMO_SILO_CREATE).unwrap()
                 )
+            ],
+        },
+        VerifyEndpoint {
+            url: "/system/by-id/silos/{id}",
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get,
             ],
         },
         VerifyEndpoint {
@@ -1378,7 +1386,7 @@ lazy_static! {
         /* Global Images */
 
         VerifyEndpoint {
-            url: "/images",
+            url: "/system/images",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::ReadOnly,
             allowed_methods: vec![
@@ -1390,9 +1398,18 @@ lazy_static! {
         },
 
         VerifyEndpoint {
-            url: "/by-id/global-images/{id}",
+            url: "/system/by-id/images/{id}",
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::ReadOnly,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
+
+        VerifyEndpoint {
+            url: "/system/by-id/ip-pools/{id}",
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get,
             ],

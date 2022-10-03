@@ -129,7 +129,6 @@ impl SpHandle {
         let session = match role {
             SprocketsRole::Client => sprockets_host::Session::new_client(
                 stream,
-                self.manufacturing_public_key(),
                 self.rot_handle(),
                 self.rot_certs(),
                 ROT_TIMEOUT,
@@ -138,7 +137,6 @@ impl SpHandle {
             .map_err(|e| SpError::SprocketsSessionError(e.to_string()))?,
             SprocketsRole::Server => sprockets_host::Session::new_server(
                 stream,
-                self.manufacturing_public_key(),
                 self.rot_handle(),
                 self.rot_certs(),
                 ROT_TIMEOUT,

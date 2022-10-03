@@ -27,13 +27,13 @@ use dropshot::ResultsPage;
 use dropshot::TypedBody;
 use dropshot::WhichPage;
 use gateway_messages::IgnitionCommand;
-use gateway_messages::SpComponent;
 use gateway_sp_comms::error::Error as SpCommsError;
 use gateway_sp_comms::Timeout as SpTimeout;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
+use uuid::Uuid;
 
 #[derive(
     Debug,
@@ -117,6 +117,36 @@ pub enum SpIgnition {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "state", rename_all = "snake_case")]
+enum SpUpdateStatus {
+    /// The SP has no update status.
+    None,
+    /// The SP is preparing to receive an update.
+    ///
+    /// May or may not include progress, depending on the capabilities of the
+    /// component being updated.
+    Preparing { id: Uuid, progress: Option<UpdatePreparationProgress> },
+    /// The SP is currently receiving an update.
+    InProgress { id: Uuid, bytes_received: u32, total_bytes: u32 },
+    /// The SP has completed receiving an update.
+    Complete { id: Uuid },
+    /// The SP has aborted an in-progress update.
+    Aborted { id: Uuid },
+}
+
+/// Progress of an SP preparing to update.
+///
+/// The units of `current` and `total` are unspecified and defined by the SP;
+/// e.g., if preparing for an update requires erasing a flash device, this may
+/// indicate progress of that erasure without defining units (bytes, pages,
+/// sectors, etc.).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+struct UpdatePreparationProgress {
+    current: u32,
+    total: u32,
+}
+
 #[derive(Serialize, JsonSchema)]
 struct SpComponentInfo {}
 
@@ -173,6 +203,28 @@ pub struct SpIdentifier {
     pub typ: SpType,
     #[serde(deserialize_with = "deserializer_u32_from_string")]
     pub slot: u32,
+}
+
+/// See RFD 81.
+///
+/// This enum only lists power states the SP is able to control; higher power
+/// states are controlled by ignition.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+)]
+enum PowerState {
+    A0,
+    A1,
+    A2,
 }
 
 // We can't use the default `Deserialize` derivation for `SpIdentifier::slot`
@@ -314,22 +366,8 @@ async fn sp_list(
             let details = match result {
                 Ok(details) => details,
                 Err(err) => match &*err {
-                    // TODO Treating "communication failed" and "we don't know
-                    // the IP address" as "unresponsive" may not be right. Do we
-                    // need more refined errors?
-                    SpCommsError::Timeout { .. }
-                    | SpCommsError::SpCommunicationFailed(_)
-                    | SpCommsError::BadIgnitionTarget(_)
-                    | SpCommsError::LocalIgnitionControllerAddressUnknown
-                    | SpCommsError::SpAddressUnknown(_) => {
-                        SpState::Unresponsive
-                    }
-                    // These errors should not be possible for the request we
-                    // made.
-                    SpCommsError::SpDoesNotExist(_)
-                    | SpCommsError::UpdateFailed(_) => {
-                        unreachable!("impossible error {}", err)
-                    }
+                    SpCommsError::Timeout { .. } => SpState::Unresponsive,
+                    _ => return Err(err),
                 },
             };
             Ok(SpInfo {
@@ -486,36 +524,33 @@ async fn sp_component_serial_console_detach(
 // TODO: how can we make this generic enough to support any update mechanism?
 #[derive(Deserialize, JsonSchema)]
 pub struct UpdateBody {
+    /// An identifier for this update.
+    ///
+    /// This ID applies to this single instance of the API call; it is not an
+    /// ID of `image` itself. Multiple API calls with the same `image` should
+    /// use different IDs.
+    pub id: Uuid,
+    /// The binary blob containing the update image (component-specific).
     pub image: Vec<u8>,
+    /// The update slot to apply this image to. Supply 0 if the component only
+    /// has one update slot.
+    pub slot: u16,
 }
 
-/// Update an SP
-///
-/// Copies a new image to the alternate bank of the SP flash.
-#[endpoint {
-    method = POST,
-    path = "/sp/{type}/{slot}/update",
-}]
-async fn sp_update(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path: Path<PathSp>,
-    body: TypedBody<UpdateBody>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let comms = &rqctx.context().sp_comms;
-    let sp = path.into_inner().sp;
-    let image = body.into_inner().image;
-
-    comms
-        .update(sp.into(), SpComponent::SP_ITSELF, 0, image)
-        .await
-        .map_err(http_err_from_comms_err)?;
-
-    Ok(HttpResponseUpdatedNoContent {})
+#[derive(Deserialize, JsonSchema)]
+pub struct UpdateAbortBody {
+    /// The ID of the update to abort.
+    ///
+    /// If the SP is currently receiving an update with this ID, it will be
+    /// aborted.
+    ///
+    /// If the SP is currently receiving an update with a different ID, the
+    /// abort request will fail.
+    ///
+    /// If the SP is not currently receiving any update, the request to abort
+    /// should succeed but will not have actually done anything.
+    pub id: Uuid,
 }
-
-// TODO-completeness: Either add a new endpoint to allow for updating
-// components, or expand the above endpoint to cover that case in addition to
-// updating the SP itself.
 
 /// Reset an SP
 #[endpoint {
@@ -545,16 +580,80 @@ async fn sp_reset(
 /// Note that not all components may be updated; components without known
 /// update mechanisms will return an error without any inspection of the
 /// update bundle.
+///
+/// Updating the SP itself is done via the component name `sp`.
 #[endpoint {
     method = POST,
     path = "/sp/{type}/{slot}/component/{component}/update",
 }]
 async fn sp_component_update(
-    _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    _path: Path<PathSpComponent>,
-    _body: TypedBody<UpdateBody>,
-) -> Result<HttpResponseOk<ResultsPage<SpComponentInfo>>, HttpError> {
-    todo!()
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path: Path<PathSpComponent>,
+    body: TypedBody<UpdateBody>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let comms = Arc::clone(&rqctx.context().sp_comms);
+    let PathSpComponent { sp, component } = path.into_inner();
+    let component = component_from_str(&component)?;
+    let UpdateBody { id, image, slot } = body.into_inner();
+
+    comms
+        .start_update(sp.into(), component, id, slot, image)
+        .await
+        .map_err(http_err_from_comms_err)?;
+
+    Ok(HttpResponseUpdatedNoContent {})
+}
+
+/// Get the status of an update being applied to an SP component
+///
+/// Getting the status of an update to the SP itself is done via the component
+/// name `sp`.
+#[endpoint {
+    method = GET,
+    path = "/sp/{type}/{slot}/component/{component}/update-status",
+}]
+async fn sp_component_update_status(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path: Path<PathSpComponent>,
+) -> Result<HttpResponseOk<SpUpdateStatus>, HttpError> {
+    let comms = Arc::clone(&rqctx.context().sp_comms);
+    let PathSpComponent { sp, component } = path.into_inner();
+    let component = component_from_str(&component)?;
+
+    let status = comms
+        .update_status(sp.into(), component)
+        .await
+        .map_err(http_err_from_comms_err)?;
+
+    Ok(HttpResponseOk(status.into()))
+}
+
+/// Abort any in-progress update an SP component
+///
+/// Aborting an update to the SP itself is done via the component name `sp`.
+///
+/// On a successful return, the update corresponding to the given UUID will no
+/// longer be in progress (either aborted or applied).
+#[endpoint {
+    method = POST,
+    path = "/sp/{type}/{slot}/component/{component}/update-abort",
+}]
+async fn sp_component_update_abort(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path: Path<PathSpComponent>,
+    body: TypedBody<UpdateAbortBody>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let comms = &rqctx.context().sp_comms;
+    let PathSpComponent { sp, component } = path.into_inner();
+    let component = component_from_str(&component)?;
+    let UpdateAbortBody { id } = body.into_inner();
+
+    comms
+        .update_abort(sp.into(), component, id)
+        .await
+        .map_err(http_err_from_comms_err)?;
+
+    Ok(HttpResponseUpdatedNoContent {})
 }
 
 /// Power on an SP component
@@ -640,10 +739,12 @@ async fn ignition_get(
     Ok(HttpResponseOk(info))
 }
 
-/// Power on an SP via Ignition
+/// Power on a sled via a request to its SP.
+///
+/// This corresponds to moving the sled into A2.
 #[endpoint {
     method = POST,
-    path = "/sp/{type}/{slot}/power-on",
+    path = "/ignition/{type}/{slot}/power-on",
 }]
 async fn ignition_power_on(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -661,10 +762,12 @@ async fn ignition_power_on(
     Ok(HttpResponseUpdatedNoContent {})
 }
 
-/// Power off an SP via Ignition
+/// Power off a sled via Ignition
+///
+/// This corresponds to moving the sled into A3.
 #[endpoint {
     method = POST,
-    path = "/sp/{type}/{slot}/power-off",
+    path = "/ignition/{type}/{slot}/power-off",
 }]
 async fn ignition_power_off(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
@@ -676,6 +779,56 @@ async fn ignition_power_off(
     apictx
         .sp_comms
         .send_ignition_command(sp.into(), IgnitionCommand::PowerOff)
+        .await
+        .map_err(http_err_from_comms_err)?;
+
+    Ok(HttpResponseUpdatedNoContent {})
+}
+
+/// Get the current power state of a sled via its SP.
+///
+/// Note that if the sled is in A3, the SP is powered off and will not be able
+/// to respond; use the ignition control endpoints for those cases.
+#[endpoint {
+    method = GET,
+    path = "/sp/{type}/{slot}/power-state",
+}]
+async fn sp_power_state_get(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path: Path<PathSp>,
+) -> Result<HttpResponseOk<PowerState>, HttpError> {
+    let apictx = rqctx.context();
+    let sp = path.into_inner().sp;
+
+    let power_state = apictx
+        .sp_comms
+        .power_state(sp.into())
+        .await
+        .map_err(http_err_from_comms_err)?;
+
+    Ok(HttpResponseOk(power_state.into()))
+}
+
+/// Set the current power state of a sled via its SP.
+///
+/// Note that if the sled is in A3, the SP is powered off and will not be able
+/// to respond; use the ignition control endpoints for those cases.
+#[endpoint {
+    method = POST,
+    path = "/sp/{type}/{slot}/power-state",
+}]
+async fn sp_power_state_set(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path: Path<PathSp>,
+    body: TypedBody<PowerState>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let sp = path.into_inner().sp;
+    let power_state = body.into_inner();
+
+    apictx
+        .sp_comms
+        .set_power_state(sp.into(), power_state.into())
         .await
         .map_err(http_err_from_comms_err)?;
 
@@ -702,13 +855,16 @@ pub fn api() -> GatewayApiDescription {
     ) -> Result<(), String> {
         api.register(sp_list)?;
         api.register(sp_get)?;
-        api.register(sp_update)?;
         api.register(sp_reset)?;
+        api.register(sp_power_state_get)?;
+        api.register(sp_power_state_set)?;
         api.register(sp_component_list)?;
         api.register(sp_component_get)?;
         api.register(sp_component_serial_console_attach)?;
         api.register(sp_component_serial_console_detach)?;
         api.register(sp_component_update)?;
+        api.register(sp_component_update_status)?;
+        api.register(sp_component_update_abort)?;
         api.register(sp_component_power_on)?;
         api.register(sp_component_power_off)?;
         api.register(ignition_list)?;

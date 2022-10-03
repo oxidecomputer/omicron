@@ -41,6 +41,7 @@ mod silo;
 mod sled;
 pub mod test_interfaces;
 mod update;
+mod volume;
 mod vpc;
 mod vpc_router;
 mod vpc_subnet;
@@ -495,11 +496,11 @@ impl Nexus {
 /// For unimplemented endpoints, indicates whether the resource identified
 /// by this endpoint will always be publicly visible or not
 ///
-/// For example, the resource "/images" is well-known (it's part of the
+/// For example, the resource "/system/images" is well-known (it's part of the
 /// API).  Being unauthorized to list images will result in a "403
 /// Forbidden".  It's `UnimplResourceVisibility::Public'.
 ///
-/// By contrast, the resource "/images/some-image" is not publicly-known.
+/// By contrast, the resource "/system/images/some-image" is not publicly-known.
 /// If you're not authorized to view it, you'll get a "404 Not Found".  It's
 /// `Unimpl::ProtectedLookup(LookupType::ByName("some-image"))`.
 pub enum Unimpl {

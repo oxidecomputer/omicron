@@ -7,6 +7,7 @@
 use crate::authn;
 use async_trait::async_trait;
 use authn::Reason;
+use std::borrow::Borrow;
 use uuid::Uuid;
 
 pub mod cookies;
@@ -35,13 +36,16 @@ where
     // TODO-openapi: At some point, the authentication headers need to get into
     // the OpenAPI spec.  We probably don't want to have every endpoint function
     // accept them via an extractor, though.
-    pub async fn authn_request(
+    pub async fn authn_request<Q>(
         &self,
-        rqctx: &dropshot::RequestContext<T>,
-    ) -> Result<authn::Context, authn::Error> {
+        rqctx: &dropshot::RequestContext<Q>,
+    ) -> Result<authn::Context, authn::Error>
+    where
+        Q: Borrow<T> + Send + Sync + 'static,
+    {
         let log = &rqctx.log;
         let request = &rqctx.request.lock().await;
-        let ctx = rqctx.context();
+        let ctx = rqctx.context().borrow();
         let result = self.authn_request_generic(ctx, log, request).await;
         trace!(log, "authn result: {:?}", result);
         result

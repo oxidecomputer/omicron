@@ -13,10 +13,16 @@
 //! that information from the trust quorum database, parse it, and write
 //! it to CockroachDB when we start it up.
 
+mod coordinator;
 mod db;
-mod messages;
+
+// Only public for integration tests
+pub mod messages;
+
 mod node;
 mod trust_quorum;
 
+pub use coordinator::Coordinator;
+pub use coordinator::Error;
 pub use node::Config;
 pub use node::Node;

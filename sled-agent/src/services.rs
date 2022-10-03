@@ -103,6 +103,9 @@ pub fn default_services_config_path() -> PathBuf {
     Path::new(omicron_common::OMICRON_CONFIG_PATH).join(SERVICE_CONFIG_FILENAME)
 }
 
+// Converts a zone and service name into a full configuration directory path.
+type ConfigDirGetter = Box<dyn Fn(&str, &str) -> PathBuf + Send + Sync>;
+
 /// Configuration parameters which modify the [`ServiceManager`]'s behavior.
 pub struct Config {
     /// An optional internet gateway address for external services.
@@ -114,7 +117,7 @@ pub struct Config {
 
     /// A function which returns the path the directory holding the
     /// service's configuration file.
-    pub get_svc_config_dir: Box<dyn Fn(&str, &str) -> PathBuf + Send + Sync>,
+    pub get_svc_config_dir: ConfigDirGetter,
 }
 
 impl Default for Config {
