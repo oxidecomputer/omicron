@@ -18,9 +18,10 @@ use crate::ScreenEvent;
 use crate::State;
 use crossterm::event::Event as TermEvent;
 use crossterm::event::{
-    KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKind,
+    KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use slog::Logger;
+use std::collections::BTreeMap;
 use tui::layout::{Alignment, Rect};
 use tui::style::{Color, Style};
 use tui::widgets::{Block, Borders};
@@ -35,6 +36,8 @@ pub struct InventoryScreen {
     rack_state: RackState,
     tab_index: TabIndex,
     hovered: Option<ComponentId>,
+    tab_index_by_component_id: BTreeMap<ComponentId, TabIndex>,
+    component_id_by_tab_index: BTreeMap<TabIndex, ComponentId>,
     modal_active: bool,
 }
 
@@ -42,14 +45,18 @@ impl InventoryScreen {
     pub fn new(log: &Logger) -> InventoryScreen {
         let mut rack_state = RackState::new();
         rack_state.set_logger(log.clone());
-        InventoryScreen {
+        let mut screen = InventoryScreen {
             log: log.clone(),
             watermark: include_str!("../../banners/oxide.txt"),
             rack_state,
-            tab_index: TabIndex::new(MAX_TAB_INDEX),
+            tab_index: TabIndex::new_unset(MAX_TAB_INDEX),
             hovered: None,
+            tab_index_by_component_id: BTreeMap::new(),
+            component_id_by_tab_index: BTreeMap::new(),
             modal_active: false,
-        }
+        };
+        screen.init_tab_index();
+        screen
     }
 
     fn draw_background(&self, f: &mut Frame) {
@@ -117,7 +124,7 @@ impl InventoryScreen {
         f: &mut Frame,
         vertical_border: Height,
     ) {
-        if self.tab_index.get().is_none() {
+        if !self.tab_index.is_set() {
             return;
         }
 
@@ -133,10 +140,17 @@ impl InventoryScreen {
         rect.x = vertical_border.0;
         rect.width = rect.width - vertical_border.0 * 2;
 
-        // Unwraps are safe because we verified self.tab_index.get().is_some() above.
-        let current = self.component_id(self.tab_index.get().unwrap());
-        let next = self.component_id(self.tab_index.next().unwrap());
-        let prev = self.component_id(self.tab_index.prev().unwrap());
+        // Unwraps are safe because we verified self.tab_index.is_set() above.
+        let current =
+            *self.component_id_by_tab_index.get(&self.tab_index).unwrap();
+        let next = *self
+            .component_id_by_tab_index
+            .get(&self.tab_index.next())
+            .unwrap();
+        let prev = *self
+            .component_id_by_tab_index
+            .get(&self.tab_index.prev())
+            .unwrap();
 
         // TODO: Fill in with actual inventory
         let current_component = None;
@@ -179,7 +193,7 @@ impl InventoryScreen {
                 }
             }
             KeyCode::Enter => {
-                if !self.modal_active && self.tab_index.get().is_some() {
+                if !self.modal_active && self.tab_index.is_set() {
                     // Open the modal on the next draw
                     self.modal_active = true;
                 } else {
@@ -200,7 +214,33 @@ impl InventoryScreen {
             MouseEventKind::Moved => {
                 self.set_hover_state(event.column, event.row)
             }
+            MouseEventKind::Down(MouseButton::Left) => {
+                self.handle_mouse_click(state)
+            }
             _ => vec![],
+        }
+    }
+
+    fn handle_mouse_click(&mut self, state: &State) -> Vec<Action> {
+        // Set the tab index to the hovered component Id if there is one.
+        // Remove the old tab_index, and make it match the clicked one
+        if let Some(component_id) = self.hovered {
+            self.clear_tabbed();
+            self.tab_index = self
+                .tab_index_by_component_id
+                .get(&component_id)
+                .unwrap()
+                .clone();
+            self.set_tabbed();
+
+            // Now that we've set the TabIndex, just act as if `Enter` was
+            // pressed.
+            self.handle_key_event(
+                state,
+                KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+            )
+        } else {
+            vec![]
         }
     }
 
@@ -257,36 +297,36 @@ impl InventoryScreen {
     }
 
     fn update_tabbed(&mut self, val: bool) {
-        if let Some(i) = self.tab_index.get() {
-            let id = self.component_id(i);
+        if let Some(id) = self.component_id_by_tab_index.get(&self.tab_index) {
             self.rack_state.component_rects.get_mut(&id).unwrap().tabbed = val;
         }
     }
 
-    // Return the ComponentId for a given TabIndex value
-    //
-    // XXX: If the TabIndex for the rack components changes, this method must
-    // also.
-    fn component_id(&self, i: u16) -> ComponentId {
-        // Sleds
-        if i < 16 {
-            ComponentId::Sled(i.try_into().unwrap())
-        } else if i > 19 {
-            ComponentId::Sled((i - 4).try_into().unwrap())
-        } else
-        // Switches
-        if i == 16 {
-            ComponentId::Switch(0)
-        } else if i == 19 {
-            ComponentId::Switch(1)
-        } else
-        // Power Shelves
-        // We actually want to return the active component here, so
-        // we name it "psc X"
-        if i == 17 || i == 18 {
-            ComponentId::Psc((i - 17).try_into().unwrap())
-        } else {
-            unreachable!();
+    // Map Rack [`ComponentId`]s
+    fn init_tab_index(&mut self) {
+        for i in 0..=MAX_TAB_INDEX {
+            let tab_index = TabIndex::new(MAX_TAB_INDEX, i);
+            let component_id = if i < 16 {
+                ComponentId::Sled(i.try_into().unwrap())
+            } else if i > 19 {
+                ComponentId::Sled((i - 4).try_into().unwrap())
+            } else if i == 16 {
+                // Switches
+                ComponentId::Switch(0)
+            } else if i == 19 {
+                ComponentId::Switch(1)
+            } else if i == 17 || i == 18 {
+                // Power Shelves
+                // We actually want to return the active component here, so
+                // we name it "psc X"
+                ComponentId::Psc((i - 17).try_into().unwrap())
+            } else {
+                // If we add more items to tab through this will change
+                unreachable!();
+            };
+
+            self.component_id_by_tab_index.insert(tab_index, component_id);
+            self.tab_index_by_component_id.insert(component_id, tab_index);
         }
     }
 }
