@@ -89,7 +89,6 @@ use crate::app::sagas::NexusAction;
 use crate::context::OpContext;
 use crate::db::identity::{Asset, Resource};
 use crate::db::lookup::LookupPath;
-use crate::db::model::Generation;
 use crate::external_api::params;
 use crate::{authn, authz, db};
 use anyhow::anyhow;
@@ -127,10 +126,6 @@ pub struct Params {
 // snapshot create saga: actions
 
 lazy_static! {
-    static ref SAVE_DISK_GEN_TO_CONTEXT: NexusAction = new_action_noop_undo(
-        "snapshot-create.save-disk-gen-to-ctx",
-        ssc_save_disk_gen,
-    );
     static ref REGIONS_ALLOC: NexusAction = new_action_noop_undo(
         "snapshot-create.regions-alloc",
         ssc_alloc_regions,
@@ -178,7 +173,6 @@ impl NexusSaga for SagaSnapshotCreate {
     type Params = Params;
 
     fn register_actions(registry: &mut ActionRegistry) {
-        registry.register(Arc::clone(&*SAVE_DISK_GEN_TO_CONTEXT));
         registry.register(Arc::clone(&*REGIONS_ALLOC));
         registry.register(Arc::clone(&*REGIONS_ENSURE));
         registry.register(Arc::clone(&*CREATE_DESTINATION_VOLUME_RECORD));
@@ -210,14 +204,6 @@ impl NexusSaga for SagaSnapshotCreate {
             "destination_volume_id",
             "GenerateDestinationVolumeId",
             ACTION_GENERATE_ID.as_ref(),
-        ));
-
-        // At the beginning of this saga, save disk generation number. Compare
-        // later to see if the disk changed mid-saga.
-        builder.append(Node::action(
-            "disk_gen",
-            "SaveDiskGenToCtx",
-            SAVE_DISK_GEN_TO_CONTEXT.as_ref(),
         ));
 
         // Allocate region space for snapshot to store blocks post-scrub
@@ -280,23 +266,6 @@ impl NexusSaga for SagaSnapshotCreate {
 
 // snapshot create saga: action implementations
 
-async fn ssc_save_disk_gen(
-    sagactx: NexusActionContext,
-) -> Result<Generation, ActionError> {
-    let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params::<Params>()?;
-
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
-
-    let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
-        .disk_id(params.disk_id)
-        .fetch()
-        .await
-        .map_err(ActionError::action_failed)?;
-
-    Ok(disk.runtime_state.gen)
-}
-
 async fn ssc_alloc_regions(
     sagactx: NexusActionContext,
 ) -> Result<Vec<(db::model::Dataset, db::model::Region)>, ActionError> {
@@ -323,12 +292,6 @@ async fn ssc_alloc_regions(
         .fetch()
         .await
         .map_err(ActionError::action_failed)?;
-
-    if disk.runtime_state.gen != sagactx.lookup::<Generation>("disk_gen")? {
-        return Err(ActionError::action_failed(
-            "disk changed during snapshot create".to_string(),
-        ));
-    }
 
     let datasets_and_regions = osagactx
         .datastore()
@@ -484,12 +447,6 @@ async fn ssc_create_snapshot_record(
         .await
         .map_err(ActionError::action_failed)?;
 
-    if disk.runtime_state.gen != sagactx.lookup::<Generation>("disk_gen")? {
-        return Err(ActionError::action_failed(
-            "disk changed during snapshot create".to_string(),
-        ));
-    }
-
     info!(log, "creating snapshot {} from disk {}", snapshot_id, disk.id());
 
     let snapshot = db::model::Snapshot {
@@ -568,12 +525,6 @@ async fn ssc_send_snapshot_request(
         .fetch()
         .await
         .map_err(ActionError::action_failed)?;
-
-    if disk.runtime_state.gen != sagactx.lookup::<Generation>("disk_gen")? {
-        return Err(ActionError::action_failed(
-            "disk changed during snapshot create".to_string(),
-        ));
-    }
 
     match disk.runtime().attach_instance_id {
         Some(instance_id) => {
@@ -675,12 +626,6 @@ async fn ssc_start_running_snapshot(
         .await
         .map_err(ActionError::action_failed)?;
 
-    if disk.runtime_state.gen != sagactx.lookup::<Generation>("disk_gen")? {
-        return Err(ActionError::action_failed(
-            "disk changed during snapshot create".to_string(),
-        ));
-    }
-
     // For each dataset and region that makes up the disk, create a map from the
     // region information to the new running snapshot information.
     let datasets_and_regions = osagactx
@@ -779,12 +724,6 @@ async fn ssc_create_volume_record(
         .fetch()
         .await
         .map_err(ActionError::action_failed)?;
-
-    if disk.runtime_state.gen != sagactx.lookup::<Generation>("disk_gen")? {
-        return Err(ActionError::action_failed(
-            "disk changed during snapshot create".to_string(),
-        ));
-    }
 
     let disk_volume = osagactx
         .datastore()
