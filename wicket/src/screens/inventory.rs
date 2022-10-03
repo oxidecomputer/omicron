@@ -222,6 +222,11 @@ impl InventoryScreen {
     }
 
     fn handle_mouse_click(&mut self, state: &State) -> Vec<Action> {
+        // Do nothing if we're inside the modal
+        if self.modal_active {
+            return vec![];
+        }
+
         // Set the tab index to the hovered component Id if there is one.
         // Remove the old tab_index, and make it match the clicked one
         if let Some(component_id) = self.hovered {
