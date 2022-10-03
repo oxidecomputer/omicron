@@ -79,7 +79,7 @@ impl Screens {
 //
 // Each screen maintains a mapping of TabIndex to the appropriate screen
 // objects/widgets.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialOrd, PartialEq, Eq, Ord)]
 pub struct TabIndex {
     current: Option<u16>,
     max: u16,
@@ -87,9 +87,16 @@ pub struct TabIndex {
 
 impl TabIndex {
     // Create an unset TabIndex
-    pub fn new(max: u16) -> TabIndex {
+    pub fn new_unset(max: u16) -> TabIndex {
         assert!(max < u16::MAX);
         TabIndex { current: None, max }
+    }
+
+    // Create a TabIndex with a set value
+    pub fn new(max: u16, val: u16) -> TabIndex {
+        assert!(max < u16::MAX);
+        assert!(val <= max);
+        TabIndex { current: Some(val), max }
     }
 
     // Unset the current index
@@ -97,19 +104,37 @@ impl TabIndex {
         self.current = None;
     }
 
-    // Get the current tab index
-    pub fn get(&self) -> Option<u16> {
-        self.current
+    // Return true if current tab index is set, false otherwise
+    pub fn is_set(&self) -> bool {
+        self.current.is_some()
+    }
+
+    // Set the current tab index
+    pub fn set(&mut self, i: u16) {
+        assert!(i <= self.max);
+        self.current = Some(i);
     }
 
     // Get the next tab index
-    pub fn next(&self) -> Option<u16> {
-        self.current.as_ref().map(|&i| if i == self.max { 0 } else { i + 1 })
+    pub fn next(&self) -> TabIndex {
+        self.current.as_ref().map_or_else(
+            || self.clone(),
+            |&i| {
+                let current = if i == self.max { 0 } else { i + 1 };
+                TabIndex { current: Some(current), max: self.max }
+            },
+        )
     }
 
     // Get the previous tab index
-    pub fn prev(&self) -> Option<u16> {
-        self.current.as_ref().map(|&i| if i == 0 { self.max } else { i - 1 })
+    pub fn prev(&self) -> TabIndex {
+        self.current.as_ref().map_or_else(
+            || self.clone(),
+            |&i| {
+                let current = if i == 0 { self.max } else { i - 1 };
+                TabIndex { current: Some(current), max: self.max }
+            },
+        )
     }
 
     // Increment the current value
