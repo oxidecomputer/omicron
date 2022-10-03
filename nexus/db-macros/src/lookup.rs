@@ -42,6 +42,14 @@ pub struct Input {
     primary_key_columns: Vec<PrimaryKeyColumn>,
     /// This resources supports soft-deletes
     soft_deletes: bool,
+    /// This resource appears under the `Silo` hierarchy, but nevertheless
+    /// should be visible to users in other Silos
+    ///
+    /// This is "false" by default.  If you don't specify this,
+    /// `lookup_resource!` determines whether something should be visible based
+    /// on whether it's nested under a `Silo`.
+    #[serde(default)]
+    visible_outside_silo: bool,
 }
 
 #[derive(serde::Deserialize)]
@@ -67,8 +75,9 @@ pub struct Config {
     /// This resources supports soft-deletes
     soft_deletes: bool,
 
-    /// This resource is nested under the Silo hierarchy
-    siloed: bool,
+    /// This resource is inside a Silo and only visible to users in the same
+    /// Silo
+    silo_restricted: bool,
 
     // The path to the resource
     /// list of type names for this resource and its parents
@@ -115,13 +124,12 @@ impl Config {
 
         let child_resources = input.children;
         let parent = input.ancestors.last().map(|s| Resource::for_name(&s));
-        // XXX-dap
-        let siloed = resource.name != "SamlIdentityProvider"
+        let silo_restricted = !input.visible_outside_silo
             && input.ancestors.iter().any(|s| s == "Silo");
 
         Config {
             resource,
-            siloed,
+            silo_restricted,
             path_types,
             path_authz_names,
             parent,
@@ -291,7 +299,7 @@ fn generate_misc_helpers(config: &Config) -> TokenStream {
     };
 
     let resource_authz_name = &config.resource.authz_name;
-    let silo_check_fn = if config.siloed {
+    let silo_check_fn = if config.silo_restricted {
         quote! {
             /// For a "siloed" resource (i.e., one that's nested under "Silo" in
             /// the resource hierarchy), check whether a given resource's Silo
@@ -479,7 +487,7 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
     // If this resource is "Siloed", then tack on an extra check that the
     // resource's Silo matches the Silo of the actor doing the fetch/lookup.
     // See the generation of `silo_check()` for details.
-    let (silo_check_lookup, silo_check_fetch) = if config.siloed {
+    let (silo_check_lookup, silo_check_fetch) = if config.silo_restricted {
         (
             quote! {
                 .and_then(|input| {
