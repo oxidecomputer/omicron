@@ -398,7 +398,7 @@ fn get_header_value(resp: TestResponse, header_name: HeaderName) -> String {
 async fn log_in_and_extract_token(testctx: &ClientTestContext) -> String {
     let login = RequestBuilder::new(&testctx, Method::POST, "/login")
         .body(Some(&SpoofLoginBody { username: "unprivileged".to_string() }))
-        .expect_status(Some(StatusCode::OK))
+        .expect_status(Some(StatusCode::SEE_OTHER))
         .execute()
         .await
         .expect("failed to log in");

@@ -1162,8 +1162,8 @@ checksum = "1435fa1053d8b2fbbe9be7e97eca7f33d37b28409959813daefc1446a14247f1"
 
 [[package]]
 name = "dropshot"
-version = "0.7.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#c849d8684f39c5a785782e781fac88f88de49e4b"
+version = "0.8.1-dev"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#0ae4dd3601b56e5cf0d706889ba1d46470e27326"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -1202,8 +1202,8 @@ dependencies = [
 
 [[package]]
 name = "dropshot_endpoint"
-version = "0.7.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#c849d8684f39c5a785782e781fac88f88de49e4b"
+version = "0.8.1-dev"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#0ae4dd3601b56e5cf0d706889ba1d46470e27326"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3536,9 +3536,9 @@ dependencies = [
 
 [[package]]
 name = "paste"
-version = "1.0.8"
+version = "1.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9423e2b32f7a043629287a536f21951e8c6a82482d0acb1eeebfc90bc2225b22"
+checksum = "b1de2e551fb905ac83f73f7aedf2f0cb4a0da7e35efa24a202a936269f1f18e1"
 
 [[package]]
 name = "path-absolutize"
@@ -4876,9 +4876,9 @@ dependencies = [
 
 [[package]]
 name = "sha1"
-version = "0.10.1"
+version = "0.10.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c77f4e7f65455545c2153c1253d25056825e77ee2533f0e41deb65a93a34852f"
+checksum = "f04293dc80c3993519f2d7f6f511707ee7094fe0c6d3406feb330cdb3540eba3"
 dependencies = [
  "cfg-if 1.0.0",
  "cpufeatures",
