@@ -10,7 +10,7 @@ anyhow = "1.0"
 async-trait = "0.1.53"
 bytes = { version = "1.2.1", features = [ "serde" ] }
 chrono = { version = "0.4.19", features = [ "serde" ] }
-clap = { version = "3.2", features = ["derive"] }
+clap = { version = "4.0", features = ["derive"] }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
 oximeter = { path = "../oximeter" }
 regex = "1.6.0"
