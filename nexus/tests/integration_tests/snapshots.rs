@@ -104,7 +104,7 @@ async fn test_snapshot(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
 
     // Create a disk from this image
-    let disk_size = ByteCount::try_from(2u64 * 1024 * 1024 * 1024).unwrap();
+    let disk_size = ByteCount::from_gibibytes_u32(2);
     let base_disk_name: Name = "base-disk".parse().unwrap();
     let base_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
@@ -235,7 +235,7 @@ async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
 
     // Create a disk from this image
-    let disk_size = ByteCount::try_from(2u64 * 1024 * 1024 * 1024).unwrap();
+    let disk_size = ByteCount::from_gibibytes_u32(2);
     let base_disk_name: Name = "base-disk".parse().unwrap();
     let base_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
@@ -292,7 +292,7 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     let disks_url = get_disks_url();
 
     // Create a blank disk
-    let disk_size = ByteCount::try_from(2u64 * 1024 * 1024 * 1024).unwrap();
+    let disk_size = ByteCount::from_gibibytes_u32(2);
     let base_disk_name: Name = "base-disk".parse().unwrap();
     let base_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
@@ -340,7 +340,7 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(snapshot.size, base_disk.size);
 
     // Create a disk from this snapshot
-    let disk_size = ByteCount::try_from(2u64 * 1024 * 1024 * 1024).unwrap();
+    let disk_size = ByteCount::from_gibibytes_u32(2);
     let snap_disk_name: Name = "snap-disk".parse().unwrap();
     let snap_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {

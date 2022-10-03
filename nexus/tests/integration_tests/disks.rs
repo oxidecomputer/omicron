@@ -837,7 +837,7 @@ async fn test_disk_backed_by_multiple_region_sets(
     create_org_and_project(client).await;
 
     // Ask for a 20 gibibyte disk.
-    let disk_size = ByteCount::try_from(20u64 * 1024 * 1024 * 1024).unwrap();
+    let disk_size = ByteCount::from_gibibytes_u32(20);
     let disks_url = get_disks_url();
     let new_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
@@ -873,7 +873,7 @@ async fn test_disk_too_big(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
 
     // Ask for a 300 gibibyte disk (but only 10 is available)
-    let disk_size = ByteCount::try_from(300u64 * 1024 * 1024 * 1024).unwrap();
+    let disk_size = ByteCount::from_gibibytes_u32(300);
     let disks_url = get_disks_url();
     let new_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
@@ -926,7 +926,7 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
     }
 
     // Ask for a 7 gibibyte disk, this should succeed
-    let disk_size = ByteCount::try_from(7u64 * 1024 * 1024 * 1024).unwrap();
+    let disk_size = ByteCount::from_gibibytes_u32(7);
     let disks_url = get_disks_url();
 
     let disk_one = params::DiskCreate {
@@ -959,16 +959,14 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
                     .regions_total_occupied_size(dataset.id)
                     .await
                     .unwrap(),
-                ByteCount::try_from(7u64 * 1024 * 1024 * 1024)
-                    .unwrap()
-                    .to_bytes(),
+                ByteCount::from_gibibytes_u32(7).to_bytes(),
             );
         }
     }
 
     // Ask for a 4 gibibyte disk, this should fail because there isn't space
     // available.
-    let disk_size = ByteCount::try_from(4u64 * 1024 * 1024 * 1024).unwrap();
+    let disk_size = ByteCount::from_gibibytes_u32(4);
     let disk_two = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: "disk-two".parse().unwrap(),
@@ -998,9 +996,7 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
                     .regions_total_occupied_size(dataset.id)
                     .await
                     .unwrap(),
-                ByteCount::try_from(7u64 * 1024 * 1024 * 1024)
-                    .unwrap()
-                    .to_bytes(),
+                ByteCount::from_gibibytes_u32(7).to_bytes(),
             );
         }
     }
@@ -1030,7 +1026,7 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
     }
 
     // Ask for a 10 gibibyte disk.
-    let disk_size = ByteCount::try_from(10u64 * 1024 * 1024 * 1024).unwrap();
+    let disk_size = ByteCount::from_gibibytes_u32(10);
     let disk_three = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: "disk-three".parse().unwrap(),
@@ -1060,9 +1056,7 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
                     .regions_total_occupied_size(dataset.id)
                     .await
                     .unwrap(),
-                ByteCount::try_from(10u64 * 1024 * 1024 * 1024)
-                    .unwrap()
-                    .to_bytes(),
+                ByteCount::from_gibibytes_u32(10).to_bytes(),
             );
         }
     }
@@ -1088,7 +1082,7 @@ async fn test_multiple_disks_multiple_zpools(
     create_org_and_project(client).await;
 
     // Ask for a 10 gibibyte disk, this should succeed
-    let disk_size = ByteCount::try_from(10u64 * 1024 * 1024 * 1024).unwrap();
+    let disk_size = ByteCount::from_gibibytes_u32(10);
     let disks_url = get_disks_url();
 
     let disk_one = params::DiskCreate {
@@ -1113,7 +1107,7 @@ async fn test_multiple_disks_multiple_zpools(
     .unwrap();
 
     // Ask for another 10 gibibyte disk
-    let disk_size = ByteCount::try_from(10u64 * 1024 * 1024 * 1024).unwrap();
+    let disk_size = ByteCount::from_gibibytes_u32(10);
     let disk_two = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: "disk-two".parse().unwrap(),
