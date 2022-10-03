@@ -80,15 +80,6 @@ async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
                     .unwrap(),
                 id_routes,
             ),
-            SetupReq::Put { url, body, id_routes } => (
-                url,
-                NexusRequest::object_put(client, url, Some(body))
-                    .authn_as(AuthnMode::PrivilegedUser)
-                    .execute()
-                    .await
-                    .unwrap(),
-                id_routes,
-            ),
         };
 
         setup_results.insert(url, result.clone());
@@ -162,11 +153,6 @@ enum SetupReq {
         body: serde_json::Value,
         id_routes: Vec<&'static str>,
     },
-    Put {
-        url: &'static str,
-        body: serde_json::Value,
-        id_routes: Vec<&'static str>,
-    },
 }
 
 lazy_static! {
@@ -202,13 +188,6 @@ lazy_static! {
             url: "/system/silos",
             body: serde_json::to_value(&*DEMO_SILO_CREATE).unwrap(),
             id_routes: vec!["/system/by-id/silos/{id}"],
-        },
-        // Grant the privileged test user admin privileges on the demo Silo so
-        // that it can see the identity providers.
-        SetupReq::Put {
-            url: &*DEMO_SILO_POLICY_URL,
-            body: serde_json::to_value(&*DEMO_SILO_POLICY).unwrap(),
-            id_routes: vec![],
         },
         // Create an IP pool
         SetupReq::Post {

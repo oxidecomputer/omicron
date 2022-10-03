@@ -27,7 +27,6 @@ use omicron_common::api::external::RouterRouteUpdateParams;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_nexus::authn;
 use omicron_nexus::authz;
-use omicron_nexus::db::identity::Asset;
 use omicron_nexus::external_api::params;
 use omicron_nexus::external_api::shared;
 use omicron_nexus::external_api::shared::IpRange;
@@ -59,16 +58,6 @@ lazy_static! {
             discoverable: true,
             identity_mode: shared::SiloIdentityMode::SamlJit,
             admin_group_name: None,
-        };
-    pub static ref DEMO_SILO_POLICY: shared::Policy<authz::SiloRole> =
-        shared::Policy {
-            role_assignments: vec![
-                shared::RoleAssignment {
-                    identity_type: shared::IdentityType::SiloUser,
-                    identity_id: authn::USER_TEST_PRIVILEGED.id(),
-                    role_name: authz::SiloRole::Admin,
-                },
-            ]
         };
 
     // Organization used for testing
