@@ -400,11 +400,10 @@ impl super::Nexus {
         project_name: &Name,
         params: &params::SnapshotCreate,
     ) -> CreateResult<db::model::Snapshot> {
-        let (authz_silo, authz_org) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .organization_name(organization_name)
-                .lookup_for(authz::Action::ListChildren)
-                .await?;
+        let (authz_silo, _) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .lookup_for(authz::Action::ListChildren)
+            .await?;
 
         let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
             .organization_name(organization_name)
@@ -412,11 +411,18 @@ impl super::Nexus {
             .lookup_for(authz::Action::ListChildren)
             .await?;
 
+        let (.., authz_disk) = LookupPath::new(opctx, &self.db_datastore)
+            .organization_name(organization_name)
+            .project_name(project_name)
+            .disk_name(&db::model::Name(params.disk.clone()))
+            .lookup_for(authz::Action::Read)
+            .await?;
+
         let saga_params = sagas::snapshot_create::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             silo_id: authz_silo.id(),
-            organization_id: authz_org.id(),
             project_id: authz_project.id(),
+            disk_id: authz_disk.id(),
             create_params: params.clone(),
         };
 

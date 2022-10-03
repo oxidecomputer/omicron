@@ -119,8 +119,8 @@ use uuid::Uuid;
 pub struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub silo_id: Uuid,
-    pub organization_id: Uuid,
     pub project_id: Uuid,
+    pub disk_id: Uuid,
     pub create_params: params::SnapshotCreate,
 }
 
@@ -289,8 +289,7 @@ async fn ssc_save_disk_gen(
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
 
     let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
-        .project_id(params.project_id)
-        .disk_name(&params.create_params.disk.clone().into())
+        .disk_id(params.disk_id)
         .fetch()
         .await
         .map_err(ActionError::action_failed)?;
@@ -320,8 +319,7 @@ async fn ssc_alloc_regions(
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
 
     let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
-        .project_id(params.project_id)
-        .disk_name(&params.create_params.disk.clone().into())
+        .disk_id(params.disk_id)
         .fetch()
         .await
         .map_err(ActionError::action_failed)?;
@@ -481,8 +479,7 @@ async fn ssc_create_snapshot_record(
     info!(log, "grabbing disk by name {}", params.create_params.disk);
 
     let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
-        .project_id(params.project_id)
-        .disk_name(&params.create_params.disk.clone().into())
+        .disk_id(params.disk_id)
         .fetch()
         .await
         .map_err(ActionError::action_failed)?;
@@ -567,8 +564,7 @@ async fn ssc_send_snapshot_request(
 
     // Find if this disk is attached to an instance
     let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
-        .project_id(params.project_id)
-        .disk_name(&params.create_params.disk.clone().into())
+        .disk_id(params.disk_id)
         .fetch()
         .await
         .map_err(ActionError::action_failed)?;
@@ -674,8 +670,7 @@ async fn ssc_start_running_snapshot(
     let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
 
     let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
-        .project_id(params.project_id)
-        .disk_name(&params.create_params.disk.clone().into())
+        .disk_id(params.disk_id)
         .fetch()
         .await
         .map_err(ActionError::action_failed)?;
@@ -780,8 +775,7 @@ async fn ssc_create_volume_record(
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
 
     let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
-        .project_id(params.project_id)
-        .disk_name(&params.create_params.disk.clone().into())
+        .disk_id(params.disk_id)
         .fetch()
         .await
         .map_err(ActionError::action_failed)?;
