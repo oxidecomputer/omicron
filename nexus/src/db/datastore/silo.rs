@@ -16,6 +16,7 @@ use crate::db::error::TransactionError;
 use crate::db::fixed_data::silo::DEFAULT_SILO;
 use crate::db::identity::Resource;
 use crate::db::model::Name;
+use crate::db::model::ResourceUsage;
 use crate::db::model::Silo;
 use crate::db::pagination::paginated;
 use crate::external_api::params;
@@ -53,10 +54,17 @@ impl DataStore {
                 public_error_from_diesel_pool(e, ErrorHandler::Server)
             })?;
         info!(opctx.log, "created {} built-in silos", count);
+
+        self.resource_usage_create(
+            opctx,
+            ResourceUsage::new(DEFAULT_SILO.id()),
+        )
+        .await?;
+
         Ok(())
     }
 
-    pub async fn silo_create_query(
+    async fn silo_create_query(
         opctx: &OpContext,
         silo: Silo,
     ) -> Result<impl RunnableQuery<Silo>, Error> {
@@ -77,7 +85,7 @@ impl DataStore {
         let silo_id = Uuid::new_v4();
         let silo_group_id = Uuid::new_v4();
 
-        let silo_create_query = DataStore::silo_create_query(
+        let silo_create_query = Self::silo_create_query(
             opctx,
             db::model::Silo::new_with_id(silo_id, new_silo_params.clone()),
         )
@@ -134,6 +142,11 @@ impl DataStore {
             .await?
             .transaction_async(|conn| async move {
                 let silo = silo_create_query.get_result_async(&conn).await?;
+                use db::schema::resource_usage::dsl;
+                diesel::insert_into(dsl::resource_usage)
+                    .values(ResourceUsage::new(silo.id()))
+                    .execute_async(&conn)
+                    .await?;
 
                 if let Some(query) = silo_admin_group_ensure_query {
                     query.get_result_async(&conn).await?;

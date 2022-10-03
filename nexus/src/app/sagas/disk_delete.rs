@@ -6,6 +6,8 @@ use super::ActionRegistry;
 use super::NexusActionContext;
 use super::NexusSaga;
 use crate::app::sagas::NexusAction;
+use crate::authn;
+use crate::context::OpContext;
 use lazy_static::lazy_static;
 use serde::Deserialize;
 use serde::Serialize;
@@ -19,6 +21,8 @@ use uuid::Uuid;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Params {
+    pub serialized_authn: authn::saga::Serialized,
+    pub project_id: Uuid,
     pub disk_id: Uuid,
 }
 
@@ -89,10 +93,12 @@ async fn sdd_delete_volume(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
     let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
     osagactx
         .nexus()
-        .volume_delete(volume_id)
+        .volume_delete(&opctx, params.project_id, volume_id)
         .await
         .map_err(ActionError::action_failed)?;
     Ok(())

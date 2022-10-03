@@ -17,6 +17,7 @@ use crate::db::model::Name;
 use crate::db::model::Organization;
 use crate::db::model::Project;
 use crate::db::model::ProjectUpdate;
+use crate::db::model::ResourceUsage;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
@@ -45,7 +46,7 @@ impl DataStore {
 
         let name = project.name().as_str().to_string();
         let organization_id = project.organization_id;
-        Organization::insert_resource(
+        let project = Organization::insert_resource(
             organization_id,
             diesel::insert_into(dsl::project).values(project),
         )
@@ -62,7 +63,17 @@ impl DataStore {
                     ErrorHandler::Conflict(ResourceType::Project, &name),
                 )
             }
-        })
+        })?;
+
+        // Create resource usage for the project.
+        //
+        // NOTE: if you do this before the project is created, it'll exist as
+        // soon as the project does. However, that'll work better in a saga/CTE when
+        // unwinding is built-in more naturally.
+        self.resource_usage_create(opctx, ResourceUsage::new(project.id()))
+            .await?;
+
+        Ok(project)
     }
 
     /// Delete a project

@@ -35,6 +35,12 @@ impl super::Nexus {
             .lookup_for(authz::Action::CreateChild)
             .await?;
 
+        // TODO: We probably want to have "project creation", "resource usage
+        // creation", and "default VPC creation" co-located within a saga for
+        // atomicity.
+        //
+        // Until then, we just perform the operations sequentially.
+
         // Create a project.
         let db_project =
             db::model::Project::new(authz_org.id(), new_project.clone());
@@ -42,11 +48,6 @@ impl super::Nexus {
             .db_datastore
             .project_create(opctx, &authz_org, db_project)
             .await?;
-
-        // TODO: We probably want to have "project creation" and "default VPC
-        // creation" co-located within a saga for atomicity.
-        //
-        // Until then, we just perform the operations sequentially.
 
         // Create a default VPC associated with the project.
         // TODO-correctness We need to be using the project_id we just created.

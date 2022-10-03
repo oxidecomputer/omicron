@@ -17,6 +17,7 @@ use crate::db::identity::Resource;
 use crate::db::model::Name;
 use crate::db::model::Organization;
 use crate::db::model::OrganizationUpdate;
+use crate::db::model::ResourceUsage;
 use crate::db::model::Silo;
 use crate::db::pagination::paginated;
 use crate::external_api::params;
@@ -51,7 +52,7 @@ impl DataStore {
         let organization = Organization::new(organization.clone(), silo_id);
         let name = organization.name().as_str().to_string();
 
-        Silo::insert_resource(
+        let org = Silo::insert_resource(
             silo_id,
             diesel::insert_into(dsl::organization).values(organization),
         )
@@ -71,7 +72,16 @@ impl DataStore {
                     ErrorHandler::Conflict(ResourceType::Organization, &name),
                 )
             }
-        })
+        })?;
+
+        // Create resource usage for the org.
+        //
+        // NOTE: if you do this before the org is created, it'll exist as
+        // soon as the org does. However, that'll work better in a saga/CTE when
+        // unwinding is built-in more naturally.
+        self.resource_usage_create(opctx, ResourceUsage::new(org.id())).await?;
+
+        Ok(org)
     }
 
     /// Delete a organization

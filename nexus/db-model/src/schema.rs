@@ -395,6 +395,13 @@ table! {
 }
 
 table! {
+    resource_usage {
+        id -> Uuid,
+        disk_bytes_used -> Int8,
+    }
+}
+
+table! {
     zpool (id) {
         id -> Uuid,
         time_created -> Timestamptz,

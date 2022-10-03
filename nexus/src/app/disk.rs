@@ -377,15 +377,19 @@ impl super::Nexus {
         project_name: &Name,
         disk_name: &Name,
     ) -> DeleteResult {
-        let (.., authz_disk) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .disk_name(disk_name)
-            .lookup_for(authz::Action::Delete)
-            .await?;
+        let (.., project, authz_disk) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .organization_name(organization_name)
+                .project_name(project_name)
+                .disk_name(disk_name)
+                .lookup_for(authz::Action::Delete)
+                .await?;
 
-        let saga_params =
-            sagas::disk_delete::Params { disk_id: authz_disk.id() };
+        let saga_params = sagas::disk_delete::Params {
+            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+            project_id: project.id(),
+            disk_id: authz_disk.id(),
+        };
         self.execute_saga::<sagas::disk_delete::SagaDiskDelete>(saga_params)
             .await?;
         Ok(())
@@ -498,7 +502,7 @@ impl super::Nexus {
         // reference counting for volumes, and probably means this needs to
         // instead be a saga.
 
-        let (.., authz_snapshot, db_snapshot) =
+        let (.., project, authz_snapshot, db_snapshot) =
             LookupPath::new(opctx, &self.db_datastore)
                 .organization_name(organization_name)
                 .project_name(project_name)
@@ -511,7 +515,7 @@ impl super::Nexus {
             .await?;
 
         // Kick off volume deletion saga
-        self.volume_delete(db_snapshot.volume_id).await?;
+        self.volume_delete(opctx, project.id(), db_snapshot.volume_id).await?;
 
         Ok(())
     }

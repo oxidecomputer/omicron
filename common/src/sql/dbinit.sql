@@ -129,6 +129,21 @@ CREATE INDEX ON omicron.public.service (
 );
 
 /*
+ * A table describing resource usage which may be associated
+ * with a collection of objects, including:
+ * - Projects
+ * - Organizations
+ * - Silos
+ * - Fleet
+ */
+CREATE TABLE omicron.public.resource_usage (
+    /* Should match the UUID of the corresponding collection */
+    id UUID PRIMARY KEY,
+
+    disk_bytes_used INT8 NOT NULL
+);
+
+/*
  * ZPools of Storage, attached to Sleds.
  * Typically these are backed by a single physical disk.
  */

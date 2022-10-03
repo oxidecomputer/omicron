@@ -51,8 +51,16 @@ lazy_static! {
         sdc_create_disk_record,
         sdc_create_disk_record_undo
     );
-    static ref REGIONS_ALLOC: NexusAction =
-        new_action_noop_undo("disk-create.regions-alloc", sdc_alloc_regions,);
+    static ref REGIONS_ALLOC: NexusAction = ActionFunc::new_action(
+        "disk-create.allocate-regions",
+        sdc_alloc_regions,
+        sdc_alloc_regions_undo,
+    );
+    static ref REGIONS_ACCOUNT: NexusAction = ActionFunc::new_action(
+        "disk-create.account-regions",
+        sdc_account_regions,
+        sdc_account_regions_undo,
+    );
     static ref REGIONS_ENSURE: NexusAction =
         new_action_noop_undo("disk-create.regions-ensure", sdc_regions_ensure,);
     static ref CREATE_VOLUME_RECORD: NexusAction = ActionFunc::new_action(
@@ -244,6 +252,76 @@ async fn sdc_alloc_regions(
         .await
         .map_err(ActionError::action_failed)?;
     Ok(datasets_and_regions)
+}
+
+async fn sdc_alloc_regions_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+
+    let region_ids = sagactx
+        .lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
+            "datasets_and_regions",
+        )?
+        .into_iter()
+        .map(|(_, region)| region.id())
+        .collect::<Vec<Uuid>>();
+
+    osagactx.datastore().regions_hard_delete(region_ids).await?;
+    Ok(())
+}
+
+fn get_space_used_by_allocated_regions(
+    sagactx: &NexusActionContext,
+) -> Result<i64, ActionError> {
+    let space_used = sagactx
+        .lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
+            "datasets_and_regions",
+        )?
+        .into_iter()
+        .map(|(_, region)| region.size_used())
+        .fold(0, |acc, x| acc + x);
+    Ok(space_used)
+}
+
+// TODO: Not yet idempotent
+async fn sdc_account_regions(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    osagactx
+        .datastore()
+        .resource_usage_update_disk(
+            &opctx,
+            params.project_id,
+            get_space_used_by_allocated_regions(&sagactx)?,
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(())
+}
+
+// TODO: Not yet idempotent
+async fn sdc_account_regions_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    osagactx
+        .datastore()
+        .resource_usage_update_disk(
+            &opctx,
+            params.project_id,
+            -get_space_used_by_allocated_regions(&sagactx)?,
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(())
 }
 
 /// Call out to Crucible agent and perform region creation.
@@ -560,9 +638,14 @@ async fn sdc_create_volume_record_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
 
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
     let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
-    osagactx.nexus().volume_delete(volume_id).await?;
+    osagactx
+        .nexus()
+        .volume_delete(&opctx, params.project_id, volume_id)
+        .await?;
     Ok(())
 }
 
