@@ -245,18 +245,19 @@ pub fn external_api() -> NexusApiDescription {
         api.register(user_list)?;
 
         // Console API operations
-        api.register(console_api::spoof_login)?;
-        api.register(console_api::spoof_login_form)?;
-        api.register(console_api::login_redirect)?;
-        api.register(console_api::session_me)?;
+        api.register(console_api::login_begin)?;
+        api.register(console_api::login_spoof_begin)?;
+        api.register(console_api::login_spoof)?;
+        api.register(console_api::login_saml_begin)?;
+        api.register(console_api::login_saml)?;
         api.register(console_api::logout)?;
+
+        api.register(console_api::session_me)?;
         api.register(console_api::console_page)?;
         api.register(console_api::console_root)?;
         api.register(console_api::console_settings_page)?;
+        api.register(console_api::console_system_page)?;
         api.register(console_api::asset)?;
-
-        api.register(console_api::login)?;
-        api.register(console_api::consume_credentials)?;
 
         api.register(device_auth::device_auth_request)?;
         api.register(device_auth::device_auth_verify)?;

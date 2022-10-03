@@ -535,7 +535,7 @@
         "tags": [
           "hidden"
         ],
-        "operationId": "spoof_login",
+        "operationId": "login_spoof",
         "requestBody": {
           "content": {
             "application/json": {
@@ -547,13 +547,24 @@
           "required": true
         },
         "responses": {
-          "default": {
-            "description": "",
-            "content": {
-              "*/*": {
-                "schema": {}
+          "303": {
+            "description": "redirect (see other)",
+            "headers": {
+              "location": {
+                "description": "HTTP \"Location\" header",
+                "style": "simple",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -565,7 +576,7 @@
         ],
         "summary": "Prompt user login",
         "description": "Either display a page asking a user for their credentials, or redirect them to their identity provider.",
-        "operationId": "login",
+        "operationId": "login_saml_begin",
         "parameters": [
           {
             "in": "path",
@@ -587,13 +598,24 @@
           }
         ],
         "responses": {
-          "default": {
-            "description": "",
-            "content": {
-              "*/*": {
-                "schema": {}
+          "302": {
+            "description": "redirect (found)",
+            "headers": {
+              "location": {
+                "description": "HTTP \"Location\" header",
+                "style": "simple",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       },
@@ -603,7 +625,7 @@
         ],
         "summary": "Authenticate a user",
         "description": "Either receive a username and password, or some sort of identity provider data (like a SAMLResponse). Use these to set the user's session cookie.",
-        "operationId": "consume_credentials",
+        "operationId": "login_saml",
         "parameters": [
           {
             "in": "path",
@@ -636,13 +658,24 @@
           "required": true
         },
         "responses": {
-          "default": {
-            "description": "",
-            "content": {
-              "*/*": {
-                "schema": {}
+          "303": {
+            "description": "redirect (see other)",
+            "headers": {
+              "location": {
+                "description": "HTTP \"Location\" header",
+                "style": "simple",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -654,13 +687,14 @@
         ],
         "operationId": "logout",
         "responses": {
-          "default": {
-            "description": "",
-            "content": {
-              "*/*": {
-                "schema": {}
-              }
-            }
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
