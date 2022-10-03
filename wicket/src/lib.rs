@@ -110,7 +110,7 @@ impl Wizard {
         let (mgs, mgs_manager) = MgsManager::new(&log, events_tx.clone());
         Wizard {
             screens,
-            active_screen: ScreenId::Inventory,
+            active_screen: ScreenId::Splash,
             events_rx,
             events_tx,
             state,
@@ -228,6 +228,11 @@ impl Wizard {
                     let screen = self.screens.get_mut(self.active_screen);
                     screen.draw(&self.state, &mut self.terminal)?;
                 }
+                Action::SwitchScreen(id) => {
+                    self.active_screen = id;
+                    let screen = self.screens.get_mut(id);
+                    screen.draw(&self.state, &mut self.terminal)?;
+                }
             }
         }
         Ok(())
@@ -258,7 +263,7 @@ async fn run_event_listener(log: slog::Logger, events_tx: Sender<Event>) {
     info!(log, "Starting event listener");
     tokio::spawn(async move {
         let mut events = EventStream::new();
-        let mut ticker = interval(Duration::from_millis(50));
+        let mut ticker = interval(Duration::from_millis(30));
         loop {
             tokio::select! {
                 _ = ticker.tick() => {
@@ -336,6 +341,7 @@ pub enum Event {
 /// is meant for and what action should be taken in that case.
 pub enum Action {
     Redraw,
+    SwitchScreen(ScreenId),
 }
 
 /// Events sent to a screen

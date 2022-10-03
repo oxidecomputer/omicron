@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 pub mod inventory;
+mod splash;
 
 use crate::Action;
 use crate::ScreenEvent;
@@ -11,9 +12,13 @@ use crate::Term;
 use slog::Logger;
 use tui::layout::Rect;
 
+pub use inventory::InventoryScreen;
+use splash::SplashScreen;
+
 /// An identifier for a specific [`Screen`] in the [`Wizard`]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ScreenId {
+    Splash,
     Inventory,
     Update,
     RackInit,
@@ -47,16 +52,18 @@ pub trait Screen {
     fn on(&mut self, state: &State, event: ScreenEvent) -> Vec<Action>;
 }
 
-pub use inventory::InventoryScreen;
-
 /// All [`Screen`]s for wicket
 pub struct Screens {
+    splash: SplashScreen,
     inventory: InventoryScreen,
 }
 
 impl Screens {
     pub fn new(log: &Logger) -> Screens {
-        Screens { inventory: InventoryScreen::new(log) }
+        Screens {
+            splash: SplashScreen::new(),
+            inventory: InventoryScreen::new(log),
+        }
     }
 
     pub fn get(&self, id: ScreenId) -> &dyn Screen {
@@ -68,6 +75,7 @@ impl Screens {
 
     pub fn get_mut(&mut self, id: ScreenId) -> &mut dyn Screen {
         match id {
+            ScreenId::Splash => &mut self.splash,
             ScreenId::Inventory => &mut self.inventory,
             _ => unimplemented!(),
         }
