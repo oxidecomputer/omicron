@@ -102,9 +102,10 @@ impl ResourceUsageUpdate {
                             .query_source()
                             .select(parent_silo::id)
                             .single_value()
-                            .assume_not_null())), // TODO: Presumably, we could also update the fleet containing
-                                                  // the silo here. However, such an object does not exist in the
-                                                  // database at the time of writing this comment.
+                            .assume_not_null())),
+                    // TODO: Presumably, we could also update the fleet containing
+                    // the silo here. However, such an object does not exist in the
+                    // database at the time of writing this comment.
                 )
                 .returning(dsl::id),
         );
