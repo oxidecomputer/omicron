@@ -12,9 +12,9 @@ OPERATION ID                             URL PATH
 device_access_token                      /device/token
 device_auth_confirm                      /device/confirm
 device_auth_request                      /device/auth
+login_spoof                              /login
 logout                                   /logout
 session_me                               /session/me
-spoof_login                              /login
 
 API operations found with tag "images"
 OPERATION ID                             URL PATH
@@ -49,8 +49,8 @@ instance_view_by_id                      /by-id/instances/{id}
 
 API operations found with tag "login"
 OPERATION ID                             URL PATH
-consume_credentials                      /login/{silo_name}/saml/{provider_name}
-login                                    /login/{silo_name}/saml/{provider_name}
+login_saml                               /login/{silo_name}/saml/{provider_name}
+login_saml_begin                         /login/{silo_name}/saml/{provider_name}
 
 API operations found with tag "metrics"
 OPERATION ID                             URL PATH

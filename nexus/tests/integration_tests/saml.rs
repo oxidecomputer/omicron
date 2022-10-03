@@ -989,7 +989,7 @@ async fn test_post_saml_response(cptestctx: &ControlPlaneTestContext) {
             })
             .unwrap(),
         ))
-        .expect_status(Some(StatusCode::FOUND)),
+        .expect_status(Some(StatusCode::SEE_OTHER)),
     )
     .execute()
     .await
@@ -1092,7 +1092,7 @@ async fn test_post_saml_response_with_relay_state(
             })
             .unwrap(),
         ))
-        .expect_status(Some(StatusCode::FOUND)),
+        .expect_status(Some(StatusCode::SEE_OTHER)),
     )
     .execute()
     .await
