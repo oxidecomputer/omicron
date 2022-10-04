@@ -578,7 +578,7 @@ impl super::Nexus {
 
         let subnet_networks: NetMap = self
             .db_datastore
-            .resolve_subnets_to_ips(vpc, subnets)
+            .resolve_vpc_subnets_to_ip_networks(vpc, subnets)
             .await?
             .into_iter()
             .map(|(name, v)| (name.0, v))

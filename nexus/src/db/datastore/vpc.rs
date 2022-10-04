@@ -707,7 +707,7 @@ impl DataStore {
     }
 
     /// Identify all subnets in use by each VpcSubnet
-    pub async fn resolve_subnets_to_ips<T: IntoIterator<Item = Name>>(
+    pub async fn resolve_vpc_subnets_to_ip_networks<T: IntoIterator<Item = Name>>(
         &self,
         vpc: &Vpc,
         subnet_names: T,
