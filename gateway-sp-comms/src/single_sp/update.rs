@@ -319,8 +319,8 @@ async fn drive_component_update(
 /// Poll an SP until it indicates that preparation for update identified by `id`
 /// has completed.
 ///
-/// If `update_has_aux_image` is `true` (i.e., the update we're waiting on has
-/// is an SP update with an aux flash image), we poll until we see the
+/// If `update_has_aux_image` is `true` (i.e., the update we're waiting on is an
+/// SP update with an aux flash image), we poll until we see the
 /// `SpUpdateAuxFlashChckScan` status from the SP, and then return `true` or
 /// `false` indicating whether the SP found a matching CHCK (i.e., returning
 /// `Ok(true)` means the SP found a matching CHCK, and we don't need to send the
