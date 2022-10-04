@@ -11,10 +11,11 @@ use db_macros::Subquery;
 use diesel::pg::Pg;
 use diesel::query_builder::{AstPass, Query, QueryFragment, QueryId};
 use diesel::{
-    sql_types, BoolExpressionMethods, ExpressionMethods,
-    NullableExpressionMethods, QueryDsl, RunQueryDsl,
+    sql_types, CombineDsl, ExpressionMethods, IntoSql, QueryDsl, RunQueryDsl,
 };
-use nexus_db_model::queries::resource_usage_update::{parent_org, parent_silo};
+use nexus_db_model::queries::resource_usage_update::{
+    all_collections, parent_org, parent_silo,
+};
 
 #[derive(Subquery, QueryId)]
 #[subquery(name = parent_org)]
@@ -49,16 +50,48 @@ impl ParentSilo {
         Self {
             query: Box::new(
                 dsl::organization
-                    .filter(
-                        dsl::id.eq(parent_org
-                            .query_source()
-                            .select(parent_org::id)
-                            .single_value()
-                            .assume_not_null()),
-                    )
+                    .filter(dsl::id.eq_any(
+                        parent_org.query_source().select(parent_org::id),
+                    ))
                     .select((ExpressionAlias::new::<parent_silo::dsl::id>(
                         dsl::silo_id,
                     ),)),
+            ),
+        }
+    }
+}
+
+#[derive(Subquery, QueryId)]
+#[subquery(name = all_collections)]
+struct AllCollections {
+    query: Box<dyn CteQuery<SqlType = all_collections::SqlType>>,
+}
+
+impl AllCollections {
+    fn new(
+        project_id: uuid::Uuid,
+        parent_org: &ParentOrg,
+        parent_silo: &ParentSilo,
+    ) -> Self {
+        Self {
+            query: Box::new(
+                diesel::select((ExpressionAlias::new::<
+                    all_collections::dsl::id,
+                >(
+                    project_id.into_sql::<sql_types::Uuid>()
+                ),))
+                .union(parent_org.query_source().select((
+                    ExpressionAlias::new::<all_collections::dsl::id>(
+                        parent_org::id,
+                    ),
+                )))
+                .union(parent_silo.query_source().select((
+                    ExpressionAlias::new::<all_collections::dsl::id>(
+                        parent_silo::id,
+                    ),
+                ))), // TODO: Presumably, we could also update the fleet containing
+                     // the silo here. However, such an object does not exist in the
+                     // database at the time of writing this comment.
             ),
         }
     }
@@ -78,6 +111,8 @@ impl ResourceUsageUpdate {
     ) -> Self {
         let parent_org = ParentOrg::new(project_id);
         let parent_silo = ParentSilo::new(&parent_org);
+        let all_collections =
+            AllCollections::new(project_id, &parent_org, &parent_silo);
 
         use crate::db::schema::resource_usage::dsl;
 
@@ -87,32 +122,16 @@ impl ResourceUsageUpdate {
                     dsl::disk_bytes_used
                         .eq(dsl::disk_bytes_used + disk_bytes_diff),
                 )
-                .filter(
-                    // Update the project
-                    dsl::id
-                        .eq(project_id)
-                        // Update the organization containing the project
-                        .or(dsl::id.eq(parent_org
-                            .query_source()
-                            .select(parent_org::id)
-                            .single_value()
-                            .assume_not_null()))
-                        // Update the silo containing the organization
-                        .or(dsl::id.eq(parent_silo
-                            .query_source()
-                            .select(parent_silo::id)
-                            .single_value()
-                            .assume_not_null())),
-                    // TODO: Presumably, we could also update the fleet containing
-                    // the silo here. However, such an object does not exist in the
-                    // database at the time of writing this comment.
-                )
+                .filter(dsl::id.eq_any(
+                    all_collections.query_source().select(all_collections::id),
+                ))
                 .returning(dsl::id),
         );
 
         let cte = CteBuilder::new()
             .add_subquery(parent_org)
             .add_subquery(parent_silo)
+            .add_subquery(all_collections)
             .build(final_update);
 
         Self { cte }

@@ -19,10 +19,17 @@ table! {
     }
 }
 
+table! {
+    all_collections {
+        id -> Uuid,
+    }
+}
+
 diesel::allow_tables_to_appear_in_same_query!(organization, parent_org,);
 
 diesel::allow_tables_to_appear_in_same_query!(
     resource_usage,
     parent_org,
     parent_silo,
+    all_collections,
 );
