@@ -198,6 +198,7 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
 
         discoverable -> Bool,
+        authentication_mode -> crate::AuthenticationModeEnum,
         user_provision_type -> crate::UserProvisionTypeEnum,
 
         rcgen -> Int8,

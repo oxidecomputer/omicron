@@ -232,8 +232,8 @@ pub fn external_api() -> NexusApiDescription {
         api.register(silo_policy_view)?;
         api.register(silo_policy_update)?;
 
-        api.register(silo_identity_provider_create)?;
-        api.register(silo_identity_provider_view)?;
+        api.register(saml_identity_provider_create)?;
+        api.register(saml_identity_provider_view)?;
 
         api.register(system_image_list)?;
         api.register(system_image_create)?;
@@ -460,8 +460,8 @@ async fn silo_list(
             }
         }
         .into_iter()
-        .map(|p| p.into())
-        .collect();
+        .map(|p| p.try_into())
+        .collect::<Result<Vec<_>, Error>>()?;
         Ok(HttpResponseOk(ScanByNameOrId::results_page(
             &query,
             silos,
@@ -487,7 +487,7 @@ async fn silo_create(
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let silo =
             nexus.silo_create(&opctx, new_silo_params.into_inner()).await?;
-        Ok(HttpResponseCreated(silo.into()))
+        Ok(HttpResponseCreated(silo.try_into()?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -518,7 +518,7 @@ async fn silo_view(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let silo = nexus.silo_fetch(&opctx, &silo_name).await?;
-        Ok(HttpResponseOk(silo.into()))
+        Ok(HttpResponseOk(silo.try_into()?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -540,7 +540,7 @@ async fn silo_view_by_id(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let silo = nexus.silo_fetch_by_id(&opctx, id).await?;
-        Ok(HttpResponseOk(silo.into()))
+        Ok(HttpResponseOk(silo.try_into()?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -665,10 +665,10 @@ async fn silo_identity_provider_list(
 /// Create a SAML IDP
 #[endpoint {
     method = POST,
-    path = "/system/silos/{silo_name}/saml-identity-providers",
+    path = "/system/silos/{silo_name}/identity-providers/saml",
     tags = ["system"],
 }]
-async fn silo_identity_provider_create(
+async fn saml_identity_provider_create(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<SiloPathParam>,
     new_provider: TypedBody<params::SamlIdentityProviderCreate>,
@@ -702,10 +702,10 @@ struct SiloSamlPathParam {
 /// Fetch a SAML IDP
 #[endpoint {
     method = GET,
-    path = "/system/silos/{silo_name}/saml-identity-providers/{provider_name}",
+    path = "/system/silos/{silo_name}/identity-providers/saml/{provider_name}",
     tags = ["system"],
 }]
-async fn silo_identity_provider_view(
+async fn saml_identity_provider_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<SiloSamlPathParam>,
 ) -> Result<HttpResponseOk<views::SamlIdentityProvider>, HttpError> {

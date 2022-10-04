@@ -90,16 +90,62 @@ pub enum IdentityType {
     SiloGroup,
 }
 
+/// Describes how identities are managed and users are authenticated in this
+/// Silo
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SiloIdentityMode {
+    /// Users are authenticated with SAML using an external authentication
+    /// provider.  The system updates information about users and groups only
+    /// during successful authentication (i.e,. "JIT provisioning" of users and
+    /// groups).
+    SamlJit,
+
+    /// The system is the source of truth about users.  There is no linkage to
+    /// an external authentication provider or identity provider.
+    // NOTE: authentication for these users is not supported yet at all.  It
+    // will eventually be password-based.
+    LocalOnly,
+}
+
+impl SiloIdentityMode {
+    pub fn authentication_mode(&self) -> AuthenticationMode {
+        match self {
+            SiloIdentityMode::LocalOnly => AuthenticationMode::Local,
+            SiloIdentityMode::SamlJit => AuthenticationMode::Saml,
+        }
+    }
+
+    pub fn user_provision_type(&self) -> UserProvisionType {
+        match self {
+            SiloIdentityMode::LocalOnly => UserProvisionType::ApiOnly,
+            SiloIdentityMode::SamlJit => UserProvisionType::Jit,
+        }
+    }
+}
+
+/// How users are authenticated in this Silo
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthenticationMode {
+    /// Authentication is via SAML using an external authentication provider
+    Saml,
+
+    /// Authentication is local to the Oxide system
+    Local,
+}
+
 /// How users will be provisioned in a silo during authentication.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum UserProvisionType {
-    /// Do not automatically create users during authentication if they do not
-    /// exist in the database already.
-    Fixed,
+    /// Identities are managed directly by explicit calls to the external API.
+    /// They are not synchronized from any external identity provider nor
+    /// automatically created or updated when a user logs in.
+    ApiOnly,
 
-    /// Create users during authentication if they do not exist in the database
-    /// already, using information provided by the identity provider.
+    /// Users and groups are created or updated during authentication using
+    /// information provided by the authentication provider
     Jit,
 }
 

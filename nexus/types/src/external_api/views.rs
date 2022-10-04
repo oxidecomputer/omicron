@@ -58,8 +58,8 @@ pub struct Silo {
     /// will not be part of the "list all silos" output.
     pub discoverable: bool,
 
-    /// User provision type
-    pub user_provision_type: shared::UserProvisionType,
+    /// How users and groups are managed in this Silo
+    pub identity_mode: shared::SiloIdentityMode,
 }
 
 // IDENTITY PROVIDER
