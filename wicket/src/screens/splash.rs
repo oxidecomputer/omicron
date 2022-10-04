@@ -47,7 +47,7 @@ impl SplashScreen {
         rect.height = LOGO_HEIGHT;
         rect.width = LOGO_WIDTH;
 
-        let stale_style = Style::default().fg(OX_GRAY_DARK);
+        let stale_style = Style::default().fg(OX_GREEN_DARKEST);
         let style = Style::default().fg(OX_OFF_WHITE);
         let x_style = Style::default().fg(OX_GREEN_LIGHT);
         let logo = Logo::new(&self.state)
