@@ -280,6 +280,18 @@ async fn main() -> Result<()> {
                         );
                     }
                 }
+                UpdateStatus::SpUpdateAuxFlashChckScan {
+                    id,
+                    found_match,
+                    ..
+                } => {
+                    let id = Uuid::from(id);
+                    info!(
+                        log, "aux flash scan complete";
+                        "id" => %id,
+                        "found_match" => found_match,
+                    );
+                }
                 UpdateStatus::InProgress(sub_status) => {
                     let id = Uuid::from(sub_status.id);
                     info!(
@@ -296,6 +308,10 @@ async fn main() -> Result<()> {
                 UpdateStatus::Aborted(id) => {
                     let id = Uuid::from(id);
                     info!(log, "update aborted"; "id" => %id);
+                }
+                UpdateStatus::Failed { id, code } => {
+                    let id = Uuid::from(id);
+                    info!(log, "update failed"; "id" => %id, "code" => code);
                 }
                 UpdateStatus::None => {
                     info!(log, "no update status available");
@@ -372,6 +388,20 @@ async fn update(
                     info!(log, "update preparing (no progress available)");
                 }
             }
+            UpdateStatus::SpUpdateAuxFlashChckScan {
+                id,
+                found_match,
+                total_size,
+            } => {
+                if id != sp_update_id {
+                    bail!("different update in progress ({:?})", id);
+                }
+                info!(
+                    log, "aux flash scan complete";
+                    "found_match" => found_match,
+                    "total_size" => total_size,
+                );
+            }
             UpdateStatus::InProgress(sub_status) => {
                 if sub_status.id != sp_update_id {
                     bail!("different update in progress ({:?})", sub_status.id);
@@ -393,6 +423,12 @@ async fn update(
                     bail!("different update aborted ({id:?})");
                 }
                 bail!("update aborted");
+            }
+            UpdateStatus::Failed { id, code } => {
+                if id != sp_update_id {
+                    bail!("different update failed ({id:?}, code {code})");
+                }
+                bail!("update failed (code {code})");
             }
         }
         tokio::time::sleep(Duration::from_secs(1)).await;

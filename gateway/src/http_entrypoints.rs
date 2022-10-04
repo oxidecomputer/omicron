@@ -133,6 +133,8 @@ enum SpUpdateStatus {
     Complete { id: Uuid },
     /// The SP has aborted an in-progress update.
     Aborted { id: Uuid },
+    /// The update process failed.
+    Failed { id: Uuid, code: u32 },
 }
 
 /// Progress of an SP preparing to update.

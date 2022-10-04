@@ -14,6 +14,7 @@ use crate::hubris_archive::HubrisArchive;
 use gateway_messages::sp_impl;
 use gateway_messages::version;
 use gateway_messages::BulkIgnitionState;
+use gateway_messages::ComponentUpdatePrepare;
 use gateway_messages::IgnitionCommand;
 use gateway_messages::IgnitionState;
 use gateway_messages::PowerState;
@@ -28,7 +29,6 @@ use gateway_messages::SpPort;
 use gateway_messages::SpState;
 use gateway_messages::UpdateChunk;
 use gateway_messages::UpdateId;
-use gateway_messages::UpdatePrepare;
 use gateway_messages::UpdateStatus;
 use omicron_common::backoff;
 use omicron_common::backoff::Backoff;
@@ -278,7 +278,7 @@ impl SingleSp {
         slot: u16,
         total_size: u32,
     ) -> Result<()> {
-        self.rpc(RequestKind::UpdatePrepare(UpdatePrepare {
+        self.rpc(RequestKind::ComponentUpdatePrepare(ComponentUpdatePrepare {
             component,
             id,
             slot,
@@ -286,7 +286,7 @@ impl SingleSp {
         }))
         .await
         .and_then(|(_peer, response)| {
-            response.expect_update_prepare_ack().map_err(Into::into)
+            response.expect_component_update_prepare_ack().map_err(Into::into)
         })
     }
 
@@ -457,6 +457,10 @@ async fn poll_until_update_prep_complete(
                     continue;
                 }
             }
+            UpdateStatus::SpUpdateAuxFlashChckScan { .. } => {
+                return Err("SP returned unexpected status (aux flash scan?!)"
+                    .to_string());
+            }
             UpdateStatus::InProgress(sub_status) => {
                 if sub_status.id == id {
                     return Ok(());
@@ -465,6 +469,16 @@ async fn poll_until_update_prep_complete(
             UpdateStatus::None
             | UpdateStatus::Complete(_)
             | UpdateStatus::Aborted(_) => (),
+            UpdateStatus::Failed { id: failed_id, code } => {
+                if id == failed_id {
+                    return Err(format!("updated failed (SP code {code})"));
+                } else {
+                    let failed_id = Uuid::from(failed_id);
+                    return Err(format!(
+                        "different SP update failed ({failed_id})"
+                    ));
+                }
+            }
         }
 
         return Err(format!("update preparation failed; status = {status:?}"));

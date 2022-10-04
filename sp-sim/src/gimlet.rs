@@ -619,11 +619,27 @@ impl SpHandler for Handler {
         Ok(state)
     }
 
-    fn update_prepare(
+    fn sp_update_prepare(
         &mut self,
         sender: SocketAddrV6,
         port: SpPort,
-        update: gateway_messages::UpdatePrepare,
+        update: gateway_messages::SpUpdatePrepare,
+    ) -> Result<(), ResponseError> {
+        warn!(
+            &self.log,
+            "received update prepare request; not supported by simulated gimlet";
+            "sender" => %sender,
+            "port" => ?port,
+            "update" => ?update,
+        );
+        Err(ResponseError::RequestUnsupportedForSp)
+    }
+
+    fn component_update_prepare(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+        update: gateway_messages::ComponentUpdatePrepare,
     ) -> Result<(), ResponseError> {
         warn!(
             &self.log,

@@ -63,7 +63,8 @@ pub enum RequestKind {
         offset: u64,
     },
     SerialConsoleDetach,
-    UpdatePrepare(UpdatePrepare),
+    SpUpdatePrepare(SpUpdatePrepare),
+    ComponentUpdatePrepare(ComponentUpdatePrepare),
     /// `UpdateChunk` always includes trailing raw data.
     UpdateChunk(UpdateChunk),
     UpdateStatus(SpComponent),
@@ -102,6 +103,25 @@ pub enum UpdateStatus {
     /// Returned when the SP is still preparing to apply the update with the
     /// given ID (e.g., erasing a target flash slot).
     Preparing(UpdatePreparationStatus),
+    /// Special status only applicable to SP updates: the SP has finished
+    /// scanning its auxiliary flash slots, and we now know whether we need to
+    /// send the aux flash image.
+    ///
+    /// This state is only applicable to (a) the `SP_ITSELF` component when (b)
+    /// the update preparation message sent by MGS indicates an aux flash image
+    /// is present.
+    SpUpdateAuxFlashChckScan {
+        id: UpdateId,
+        /// If true, MGS will not send the aux flash image and will only send
+        /// the SP image.
+        found_match: bool,
+        /// Total size of the update to be applied.
+        ///
+        /// This is not directly relevant to this state, but is used by MGS to
+        /// convert this state (which only it knows about) into an `InProgress`
+        /// state to return to its callers.
+        total_size: u32,
+    },
     /// Returned when an update is currently in progress.
     InProgress(UpdateInProgressStatus),
     /// Returned when an update has completed.
@@ -118,6 +138,13 @@ pub enum UpdateStatus {
     /// update starts (or the status is reset some other way, such as an SP
     /// reboot).
     Aborted(UpdateId),
+    /// Returned when an update has failed on the SP.
+    ///
+    /// The SP has no concept of time, so we cannot indicate how recently this
+    /// abort happened. The SP will continue to return this status until a new
+    /// update starts (or the status is reset some other way, such as an SP
+    /// reboot).
+    Failed { id: UpdateId, code: u32 },
 }
 
 /// See RFD 81.
@@ -166,7 +193,8 @@ pub enum ResponseKind {
     BulkIgnitionState(BulkIgnitionState),
     IgnitionCommandAck,
     SpState(SpState),
-    UpdatePrepareAck,
+    SpUpdatePrepareAck,
+    ComponentUpdatePrepareAck,
     UpdateChunkAck,
     UpdateStatus(UpdateStatus),
     UpdateAbortAck,
@@ -217,6 +245,8 @@ pub enum ResponseError {
     /// Cannot attach to the serial console because another MGS instance is
     /// already attached.
     SerialConsoleAlreadyAttached,
+    /// An update cannot be started while another component is being updated.
+    OtherComponentUpdateInProgress(SpComponent),
     /// An update has not been prepared yet.
     UpdateNotPrepared,
     /// An update-related message arrived at the SP, but its update ID does not
@@ -264,6 +294,9 @@ impl fmt::Display for ResponseError {
             }
             ResponseError::SerialConsoleAlreadyAttached => {
                 write!(f, "serial console already attached")
+            }
+            ResponseError::OtherComponentUpdateInProgress(component) => {
+                write!(f, "another component is being updated {component:?}")
             }
             ResponseError::UpdateNotPrepared => {
                 write!(f, "SP has not received update prepare request")
@@ -354,7 +387,22 @@ impl From<UpdateId> for uuid::Uuid {
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, SerializedSize, Serialize, Deserialize,
 )]
-pub struct UpdatePrepare {
+pub struct SpUpdatePrepare {
+    pub id: UpdateId,
+    /// If this update includes an aux flash image, this size will be nonzero.
+    pub aux_flash_size: u32,
+    /// If this update includes an aux flash image, this check value is used by
+    /// the SP do determine whether it already has this aux flash image in one
+    /// of its slots.
+    pub aux_flash_chck: [u8; 32],
+    /// Size of the SP image in bytes.
+    pub sp_image_size: u32,
+}
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, SerializedSize, Serialize, Deserialize,
+)]
+pub struct ComponentUpdatePrepare {
     pub component: SpComponent,
     pub id: UpdateId,
     /// The number of available slots depends on `component`; passing an invalid
@@ -461,6 +509,9 @@ impl SpComponent {
 
     /// The SP itself.
     pub const SP_ITSELF: Self = Self { id: *b"sp\0\0\0\0\0\0\0\0\0\0\0\0\0\0" };
+
+    /// The SP's auxiliary flash.
+    pub const SP_AUX_FLASH: Self = Self { id: *b"sp-aux-flash\0\0\0\0" };
 
     /// The `sp3` host CPU.
     pub const SP3_HOST_CPU: Self = Self { id: *b"sp3-host-cpu\0\0\0\0" };
