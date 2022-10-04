@@ -36,6 +36,13 @@ impl From<UpdateStatus> for SpUpdateStatus {
                 id: status.id.into(),
                 progress: status.progress.map(Into::into),
             },
+            UpdateStatus::SpUpdateAuxFlashChckScan {
+                id, total_size, ..
+            } => Self::InProgress {
+                id: id.into(),
+                bytes_received: 0,
+                total_bytes: total_size,
+            },
             UpdateStatus::InProgress(status) => Self::InProgress {
                 id: status.id.into(),
                 bytes_received: status.bytes_received,
@@ -43,6 +50,9 @@ impl From<UpdateStatus> for SpUpdateStatus {
             },
             UpdateStatus::Complete(id) => Self::Complete { id: id.into() },
             UpdateStatus::Aborted(id) => Self::Aborted { id: id.into() },
+            UpdateStatus::Failed { id, code } => {
+                Self::Failed { id: id.into(), code }
+            }
         }
     }
 }

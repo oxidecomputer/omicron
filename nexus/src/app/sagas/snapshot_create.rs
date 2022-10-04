@@ -82,8 +82,8 @@
 //!
 
 use super::{
-    ActionRegistry, NexusActionContext, NexusSaga, SagaInitError,
-    ACTION_GENERATE_ID,
+    common_storage::ensure_all_datasets_and_regions, ActionRegistry,
+    NexusActionContext, NexusSaga, SagaInitError, ACTION_GENERATE_ID,
 };
 use crate::app::sagas::NexusAction;
 use crate::context::OpContext;
@@ -94,12 +94,14 @@ use crate::{authn, authz, db};
 use anyhow::anyhow;
 use crucible_agent_client::{types::RegionId, Client as CrucibleAgentClient};
 use lazy_static::lazy_static;
+use omicron_common::api::external;
 use omicron_common::api::external::Error;
+use rand::{rngs::StdRng, RngCore, SeedableRng};
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::types::{
-    DiskSnapshotRequestBody, InstanceIssueDiskSnapshotRequestBody,
-    VolumeConstructionRequest,
+    CrucibleOpts, DiskSnapshotRequestBody,
+    InstanceIssueDiskSnapshotRequestBody, VolumeConstructionRequest,
 };
 use slog::info;
 use std::collections::BTreeMap;
@@ -116,14 +118,34 @@ use uuid::Uuid;
 pub struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub silo_id: Uuid,
-    pub organization_id: Uuid,
     pub project_id: Uuid,
+    pub disk_id: Uuid,
     pub create_params: params::SnapshotCreate,
 }
 
 // snapshot create saga: actions
 
 lazy_static! {
+    static ref REGIONS_ALLOC: NexusAction = ActionFunc::new_action(
+        "snapshot-create.regions-alloc",
+        ssc_alloc_regions,
+        ssc_alloc_regions_undo,
+    );
+    static ref REGIONS_ACCOUNT: NexusAction = ActionFunc::new_action(
+        "snapshot-create.account-regions",
+        ssc_account_regions,
+        ssc_account_regions_undo,
+    );
+    static ref REGIONS_ENSURE: NexusAction = new_action_noop_undo(
+        "snapshot-create.regions-ensure",
+        ssc_regions_ensure,
+    );
+    static ref CREATE_DESTINATION_VOLUME_RECORD: NexusAction =
+        ActionFunc::new_action(
+            "snapshot-create.create-destination-volume-record",
+            ssc_create_destination_volume_record,
+            ssc_create_destination_volume_record_undo,
+        );
     static ref CREATE_SNAPSHOT_RECORD: NexusAction = ActionFunc::new_action(
         "snapshot-create.create-snapshot-record",
         ssc_create_snapshot_record,
@@ -157,6 +179,10 @@ impl NexusSaga for SagaSnapshotCreate {
     type Params = Params;
 
     fn register_actions(registry: &mut ActionRegistry) {
+        registry.register(Arc::clone(&*REGIONS_ALLOC));
+        registry.register(Arc::clone(&*REGIONS_ACCOUNT));
+        registry.register(Arc::clone(&*REGIONS_ENSURE));
+        registry.register(Arc::clone(&*CREATE_DESTINATION_VOLUME_RECORD));
         registry.register(Arc::clone(&*CREATE_SNAPSHOT_RECORD));
         registry.register(Arc::clone(&*SEND_SNAPSHOT_REQUEST));
         registry.register(Arc::clone(&*START_RUNNING_SNAPSHOT));
@@ -179,6 +205,35 @@ impl NexusSaga for SagaSnapshotCreate {
             "volume_id",
             "GenerateVolumeId",
             ACTION_GENERATE_ID.as_ref(),
+        ));
+
+        builder.append(Node::action(
+            "destination_volume_id",
+            "GenerateDestinationVolumeId",
+            ACTION_GENERATE_ID.as_ref(),
+        ));
+
+        // Allocate region space for snapshot to store blocks post-scrub
+        builder.append(Node::action(
+            "datasets_and_regions",
+            "RegionsAlloc",
+            REGIONS_ALLOC.as_ref(),
+        ));
+        builder.append(Node::action(
+            "no-result",
+            "RegionsAccount",
+            REGIONS_ACCOUNT.as_ref(),
+        ));
+        builder.append(Node::action(
+            "regions_ensure",
+            "RegionsEnsure",
+            REGIONS_ENSURE.as_ref(),
+        ));
+
+        builder.append(Node::action(
+            "created_destination_volume",
+            "CreateDestinationVolumeRecord",
+            CREATE_DESTINATION_VOLUME_RECORD.as_ref(),
         ));
 
         // Create the Snapshot DB object
@@ -222,6 +277,237 @@ impl NexusSaga for SagaSnapshotCreate {
 
 // snapshot create saga: action implementations
 
+async fn ssc_alloc_regions(
+    sagactx: NexusActionContext,
+) -> Result<Vec<(db::model::Dataset, db::model::Region)>, ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let destination_volume_id =
+        sagactx.lookup::<Uuid>("destination_volume_id")?;
+
+    // Ensure the destination volume is backed by appropriate regions.
+    //
+    // This allocates regions in the database, but the disk state is still
+    // "creating" - the respective Crucible Agents must be instructed to
+    // allocate the necessary regions before we can mark the disk as "ready to
+    // be used".
+    //
+    // TODO: Depending on the result of
+    // https://github.com/oxidecomputer/omicron/issues/613 , we
+    // should consider using a paginated API to access regions, rather than
+    // returning all of them at once.
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+
+    let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
+        .disk_id(params.disk_id)
+        .fetch()
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    let datasets_and_regions = osagactx
+        .datastore()
+        .region_allocate(
+            &opctx,
+            destination_volume_id,
+            &params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(
+                    disk.block_size.to_bytes(),
+                )
+                .map_err(|e| ActionError::action_failed(e.to_string()))?,
+            },
+            external::ByteCount::from(disk.size),
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    Ok(datasets_and_regions)
+}
+
+async fn ssc_alloc_regions_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+
+    let region_ids = sagactx
+        .lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
+            "datasets_and_regions",
+        )?
+        .into_iter()
+        .map(|(_, region)| region.id())
+        .collect::<Vec<Uuid>>();
+
+    osagactx.datastore().regions_hard_delete(region_ids).await?;
+    Ok(())
+}
+
+fn get_space_used_by_allocated_regions(
+    sagactx: &NexusActionContext,
+) -> Result<i64, ActionError> {
+    let space_used = sagactx
+        .lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
+            "datasets_and_regions",
+        )?
+        .into_iter()
+        .map(|(_, region)| region.size_used())
+        .fold(0, |acc, x| acc + x);
+    Ok(space_used)
+}
+
+// TODO: Not yet idempotent
+async fn ssc_account_regions(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    osagactx
+        .datastore()
+        .resource_usage_update_disk(
+            &opctx,
+            params.project_id,
+            get_space_used_by_allocated_regions(&sagactx)?,
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(())
+}
+
+// TODO: Not yet idempotent
+async fn ssc_account_regions_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    osagactx
+        .datastore()
+        .resource_usage_update_disk(
+            &opctx,
+            params.project_id,
+            -get_space_used_by_allocated_regions(&sagactx)?,
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(())
+}
+
+async fn ssc_regions_ensure(
+    sagactx: NexusActionContext,
+) -> Result<String, ActionError> {
+    let osagactx = sagactx.user_data();
+    let log = osagactx.log();
+    let destination_volume_id =
+        sagactx.lookup::<Uuid>("destination_volume_id")?;
+
+    let datasets_and_regions = ensure_all_datasets_and_regions(
+        &log,
+        sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
+            "datasets_and_regions",
+        )?,
+    )
+    .await?;
+
+    let block_size = datasets_and_regions[0].1.block_size;
+
+    // Create volume construction request
+    let mut rng = StdRng::from_entropy();
+    let volume_construction_request = VolumeConstructionRequest::Volume {
+        id: destination_volume_id,
+        block_size,
+        sub_volumes: vec![VolumeConstructionRequest::Region {
+            block_size,
+            // gen of 0 is here, these regions were just allocated.
+            gen: 0,
+            opts: CrucibleOpts {
+                id: destination_volume_id,
+                target: datasets_and_regions
+                    .iter()
+                    .map(|(dataset, region)| {
+                        dataset
+                            .address_with_port(region.port_number)
+                            .to_string()
+                    })
+                    .collect(),
+
+                lossy: false,
+                flush_timeout: None,
+
+                // all downstairs will expect encrypted blocks
+                key: Some(base64::encode({
+                    // TODO the current encryption key
+                    // requirement is 32 bytes, what if that
+                    // changes?
+                    let mut random_bytes: [u8; 32] = [0; 32];
+                    rng.fill_bytes(&mut random_bytes);
+                    random_bytes
+                })),
+
+                // TODO TLS, which requires sending X509 stuff during
+                // downstairs region allocation too.
+                cert_pem: None,
+                key_pem: None,
+                root_cert_pem: None,
+
+                control: None,
+
+                // TODO while the transfer of blocks is occurring to the
+                // destination volume, the opt here should be read-write. When
+                // the transfer has completed, update the volume to make it
+                // read-only.
+                read_only: false,
+            },
+        }],
+        read_only_parent: None,
+    };
+
+    let volume_data = serde_json::to_string(&volume_construction_request)
+        .map_err(|e| {
+            ActionError::action_failed(Error::internal_error(&e.to_string()))
+        })?;
+
+    Ok(volume_data)
+}
+
+async fn ssc_create_destination_volume_record(
+    sagactx: NexusActionContext,
+) -> Result<db::model::Volume, ActionError> {
+    let osagactx = sagactx.user_data();
+
+    let destination_volume_id =
+        sagactx.lookup::<Uuid>("destination_volume_id")?;
+    let destination_volume_data = sagactx.lookup::<String>("regions_ensure")?;
+
+    let volume =
+        db::model::Volume::new(destination_volume_id, destination_volume_data);
+
+    let volume_created = osagactx
+        .datastore()
+        .volume_create(volume)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    Ok(volume_created)
+}
+
+async fn ssc_create_destination_volume_record_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+
+    let destination_volume_id =
+        sagactx.lookup::<Uuid>("destination_volume_id")?;
+    osagactx
+        .nexus()
+        .volume_delete(&opctx, params.project_id, destination_volume_id)
+        .await?;
+
+    Ok(())
+}
+
 async fn ssc_create_snapshot_record(
     sagactx: NexusActionContext,
 ) -> Result<db::model::Snapshot, ActionError> {
@@ -232,16 +518,17 @@ async fn ssc_create_snapshot_record(
 
     let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
 
-    // We admittedly reference the volume before it has been allocated,
-    // but this should be acceptable because the snapshot remains in a "Creating"
-    // state until the saga has completed.
+    // We admittedly reference the volume(s) before they have been allocated,
+    // but this should be acceptable because the snapshot remains in a
+    // "Creating" state until the saga has completed.
     let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
+    let destination_volume_id =
+        sagactx.lookup::<Uuid>("destination_volume_id")?;
 
     info!(log, "grabbing disk by name {}", params.create_params.disk);
 
     let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
-        .project_id(params.project_id)
-        .disk_name(&params.create_params.disk.clone().into())
+        .disk_id(params.disk_id)
         .fetch()
         .await
         .map_err(ActionError::action_failed)?;
@@ -257,6 +544,7 @@ async fn ssc_create_snapshot_record(
         project_id: params.project_id,
         disk_id: disk.id(),
         volume_id,
+        destination_volume_id: Some(destination_volume_id),
 
         gen: db::model::Generation::new(),
         state: db::model::SnapshotState::Creating,
@@ -319,8 +607,7 @@ async fn ssc_send_snapshot_request(
 
     // Find if this disk is attached to an instance
     let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
-        .project_id(params.project_id)
-        .disk_name(&params.create_params.disk.clone().into())
+        .disk_id(params.disk_id)
         .fetch()
         .await
         .map_err(ActionError::action_failed)?;
@@ -420,8 +707,7 @@ async fn ssc_start_running_snapshot(
     let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
 
     let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
-        .project_id(params.project_id)
-        .disk_name(&params.create_params.disk.clone().into())
+        .disk_id(params.disk_id)
         .fetch()
         .await
         .map_err(ActionError::action_failed)?;
@@ -520,8 +806,7 @@ async fn ssc_create_volume_record(
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
 
     let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
-        .project_id(params.project_id)
-        .disk_name(&params.create_params.disk.clone().into())
+        .disk_id(params.disk_id)
         .fetch()
         .await
         .map_err(ActionError::action_failed)?;
@@ -632,6 +917,8 @@ async fn ssc_finalize_snapshot_record(
 
     Ok(snapshot)
 }
+
+// helper functions
 
 /// Create a Snapshot VolumeConstructionRequest by copying a disk's
 /// VolumeConstructionRequest and modifying it accordingly.

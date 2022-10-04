@@ -76,7 +76,7 @@ pub enum DeployCommand {
         #[clap(long = "out", default_value = "/opt/oxide", action)]
         install_dir: PathBuf,
     },
-    // Unpacks the package files on the target machine
+    /// Unpacks the package files on the target machine
     Unpack {
         /// The directory from which artifacts will be pulled.
         ///
@@ -90,7 +90,7 @@ pub enum DeployCommand {
         #[clap(long = "out", default_value = "/opt/oxide", action)]
         install_dir: PathBuf,
     },
-    // Installs the sled-agent illumos service and starts it
+    /// Installs the sled-agent illumos service and starts it
     Activate {
         /// The directory to which artifacts will be installed.
         ///

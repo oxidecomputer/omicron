@@ -3,8 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{
-    ActionRegistry, NexusActionContext, NexusSaga, SagaInitError,
-    ACTION_GENERATE_ID, MAX_CONCURRENT_REGION_REQUESTS,
+    common_storage::ensure_all_datasets_and_regions, ActionRegistry,
+    NexusActionContext, NexusSaga, SagaInitError, ACTION_GENERATE_ID,
 };
 use crate::app::sagas::NexusAction;
 use crate::context::OpContext;
@@ -12,22 +12,13 @@ use crate::db::identity::{Asset, Resource};
 use crate::db::lookup::LookupPath;
 use crate::external_api::params;
 use crate::{authn, authz, db};
-use anyhow::anyhow;
-use crucible_agent_client::{
-    types::{CreateRegion, RegionId, State as RegionState},
-    Client as CrucibleAgentClient,
-};
-use futures::StreamExt;
 use lazy_static::lazy_static;
 use omicron_common::api::external::Error;
-use omicron_common::backoff::{self, BackoffError};
 use rand::{rngs::StdRng, RngCore, SeedableRng};
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::types::{CrucibleOpts, VolumeConstructionRequest};
-use slog::warn;
-use slog::Logger;
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 use std::sync::Arc;
 use steno::ActionError;
 use steno::ActionFunc;
@@ -85,6 +76,7 @@ impl NexusSaga for SagaDiskCreate {
     fn register_actions(registry: &mut ActionRegistry) {
         registry.register(Arc::clone(&*CREATE_DISK_RECORD));
         registry.register(Arc::clone(&*REGIONS_ALLOC));
+        registry.register(Arc::clone(&*REGIONS_ACCOUNT));
         registry.register(Arc::clone(&*REGIONS_ENSURE));
         registry.register(Arc::clone(&*CREATE_VOLUME_RECORD));
         registry.register(Arc::clone(&*FINALIZE_DISK_RECORD));
@@ -116,6 +108,12 @@ impl NexusSaga for SagaDiskCreate {
             "datasets_and_regions",
             "RegionsAlloc",
             REGIONS_ALLOC.as_ref(),
+        ));
+
+        builder.append(Node::action(
+            "no-result",
+            "RegionsAccount",
+            REGIONS_ACCOUNT.as_ref(),
         ));
 
         builder.append(Node::action(
@@ -248,7 +246,12 @@ async fn sdc_alloc_regions(
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
     let datasets_and_regions = osagactx
         .datastore()
-        .region_allocate(&opctx, volume_id, &params.create_params)
+        .region_allocate(
+            &opctx,
+            volume_id,
+            &params.create_params.disk_source,
+            params.create_params.size,
+        )
         .await
         .map_err(ActionError::action_failed)?;
     Ok(datasets_and_regions)
@@ -325,118 +328,19 @@ async fn sdc_account_regions_undo(
 }
 
 /// Call out to Crucible agent and perform region creation.
-async fn ensure_region_in_dataset(
-    log: &Logger,
-    dataset: &db::model::Dataset,
-    region: &db::model::Region,
-) -> Result<crucible_agent_client::types::Region, Error> {
-    let url = format!("http://{}", dataset.address());
-    let client = CrucibleAgentClient::new(&url);
-
-    let region_request = CreateRegion {
-        block_size: region.block_size().to_bytes(),
-        extent_count: region.extent_count().try_into().unwrap(),
-        extent_size: region.blocks_per_extent().try_into().unwrap(),
-        // TODO: Can we avoid casting from UUID to string?
-        // NOTE: This'll require updating the crucible agent client.
-        id: RegionId(region.id().to_string()),
-        encrypted: region.encrypted(),
-        cert_pem: None,
-        key_pem: None,
-        root_pem: None,
-    };
-
-    let create_region = || async {
-        let region = client
-            .region_create(&region_request)
-            .await
-            .map_err(|e| BackoffError::Permanent(e.into()))?;
-        match region.state {
-            RegionState::Requested => Err(BackoffError::transient(anyhow!(
-                "Region creation in progress"
-            ))),
-            RegionState::Created => Ok(region),
-            _ => Err(BackoffError::Permanent(anyhow!(
-                "Failed to create region, unexpected state: {:?}",
-                region.state
-            ))),
-        }
-    };
-
-    let log_create_failure = |_, delay| {
-        warn!(
-            log,
-            "Region requested, not yet created. Retrying in {:?}", delay
-        );
-    };
-
-    let region = backoff::retry_notify(
-        backoff::internal_service_policy(),
-        create_region,
-        log_create_failure,
-    )
-    .await
-    .map_err(|e| Error::internal_error(&e.to_string()))?;
-
-    Ok(region.into_inner())
-}
-
-/// Call out to Crucible agent and perform region creation.
 async fn sdc_regions_ensure(
     sagactx: NexusActionContext,
 ) -> Result<String, ActionError> {
     let log = sagactx.user_data().log();
     let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
 
-    let datasets_and_regions = sagactx
-        .lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
+    let datasets_and_regions = ensure_all_datasets_and_regions(
+        &log,
+        sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
             "datasets_and_regions",
-        )?;
-
-    let request_count = datasets_and_regions.len();
-
-    // Allocate regions, and additionally return the dataset that the region was
-    // allocated in.
-    let datasets_and_regions: Vec<(
-        db::model::Dataset,
-        crucible_agent_client::types::Region,
-    )> = futures::stream::iter(datasets_and_regions)
-        .map(|(dataset, region)| async move {
-            match ensure_region_in_dataset(log, &dataset, &region).await {
-                Ok(result) => Ok((dataset, result)),
-                Err(e) => Err(e),
-            }
-        })
-        // Execute the allocation requests concurrently.
-        .buffer_unordered(std::cmp::min(
-            request_count,
-            MAX_CONCURRENT_REGION_REQUESTS,
-        ))
-        .collect::<Vec<
-            Result<
-                (db::model::Dataset, crucible_agent_client::types::Region),
-                Error,
-            >,
-        >>()
-        .await
-        .into_iter()
-        .collect::<Result<
-            Vec<(db::model::Dataset, crucible_agent_client::types::Region)>,
-            Error,
-        >>()
-        .map_err(ActionError::action_failed)?;
-
-    // Assert each region has the same block size, otherwise Volume creation
-    // will fail.
-    let all_region_have_same_block_size = datasets_and_regions
-        .windows(2)
-        .all(|w| w[0].1.block_size == w[1].1.block_size);
-
-    if !all_region_have_same_block_size {
-        return Err(ActionError::action_failed(Error::internal_error(
-            "volume creation will fail due to block size mismatch",
-        )));
-    }
+        )?,
+    )
+    .await?;
 
     let block_size = datasets_and_regions[0].1.block_size;
 
@@ -597,8 +501,6 @@ async fn sdc_regions_ensure(
                 key_pem: None,
                 root_cert_pem: None,
 
-                // TODO open a control socket for the whole volume, not
-                // in the sub volumes
                 control: None,
 
                 read_only: false,

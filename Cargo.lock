@@ -671,6 +671,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "crc"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "53757d12b596c16c78b83458d732a5d1a17ab3f53f2f7412f6fb57cc8a140ab3"
+dependencies = [
+ "crc-catalog",
+]
+
+[[package]]
+name = "crc-catalog"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2d0165d2900ae6778e36e80bbc4da3b5eefccee9ba939761f9c2882a5d9af3ff"
+
+[[package]]
 name = "crc32fast"
 version = "1.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -957,7 +972,7 @@ name = "ddm-admin-client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "omicron-zone-package",
+ "omicron-zone-package 0.3.2",
  "progenitor",
  "progenitor-client",
  "quote",
@@ -1162,8 +1177,8 @@ checksum = "1435fa1053d8b2fbbe9be7e97eca7f33d37b28409959813daefc1446a14247f1"
 
 [[package]]
 name = "dropshot"
-version = "0.7.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#c849d8684f39c5a785782e781fac88f88de49e4b"
+version = "0.8.1-dev"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#0ae4dd3601b56e5cf0d706889ba1d46470e27326"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -1202,8 +1217,8 @@ dependencies = [
 
 [[package]]
 name = "dropshot_endpoint"
-version = "0.7.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#c849d8684f39c5a785782e781fac88f88de49e4b"
+version = "0.8.1-dev"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#0ae4dd3601b56e5cf0d706889ba1d46470e27326"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1704,6 +1719,7 @@ dependencies = [
  "serde_with",
  "slog",
  "thiserror",
+ "tlvc",
  "tokio",
  "tokio-stream",
  "usdt",
@@ -3000,7 +3016,7 @@ dependencies = [
  "indicatif",
  "omicron-common",
  "omicron-sled-agent",
- "omicron-zone-package",
+ "omicron-zone-package 0.4.0",
  "rayon",
  "reqwest",
  "ring",
@@ -3118,6 +3134,27 @@ name = "omicron-zone-package"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b45da86a08794bc3e038552e9777724f204bdd55c8669f098e6b90df3f5bacd0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "filetime",
+ "flate2",
+ "reqwest",
+ "serde",
+ "serde_derive",
+ "tar",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "toml",
+ "walkdir",
+]
+
+[[package]]
+name = "omicron-zone-package"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "222c900d9a67df941c61590869a2a23de13d6cc613d9aaa5dd09c98b1e8dde45"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3536,9 +3573,9 @@ dependencies = [
 
 [[package]]
 name = "paste"
-version = "1.0.8"
+version = "1.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9423e2b32f7a043629287a536f21951e8c6a82482d0acb1eeebfc90bc2225b22"
+checksum = "b1de2e551fb905ac83f73f7aedf2f0cb4a0da7e35efa24a202a936269f1f18e1"
 
 [[package]]
 name = "path-absolutize"
@@ -4876,9 +4913,9 @@ dependencies = [
 
 [[package]]
 name = "sha1"
-version = "0.10.1"
+version = "0.10.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c77f4e7f65455545c2153c1253d25056825e77ee2533f0e41deb65a93a34852f"
+checksum = "f04293dc80c3993519f2d7f6f511707ee7094fe0c6d3406feb330cdb3540eba3"
 dependencies = [
  "cfg-if 1.0.0",
  "cpufeatures",
@@ -5672,6 +5709,16 @@ name = "tinyvec_macros"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cda74da7e1a664f795bb1f8a87ec406fb89a02522cf6e50620d016add6dbbf5c"
+
+[[package]]
+name = "tlvc"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/tlvc.git#2643765eb7775d1f5e8ec56910f1ab15e9c75170"
+dependencies = [
+ "byteorder",
+ "crc",
+ "zerocopy 0.6.1",
+]
 
 [[package]]
 name = "tokio"

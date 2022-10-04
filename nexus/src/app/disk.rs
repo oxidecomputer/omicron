@@ -404,23 +404,24 @@ impl super::Nexus {
         project_name: &Name,
         params: &params::SnapshotCreate,
     ) -> CreateResult<db::model::Snapshot> {
-        let (authz_silo, authz_org) =
+        let authz_silo: authz::Silo;
+        let _authz_org: authz::Organization;
+        let authz_project: authz::Project;
+        let authz_disk: authz::Disk;
+
+        (authz_silo, _authz_org, authz_project, authz_disk) =
             LookupPath::new(opctx, &self.db_datastore)
                 .organization_name(organization_name)
-                .lookup_for(authz::Action::ListChildren)
+                .project_name(project_name)
+                .disk_name(&db::model::Name(params.disk.clone()))
+                .lookup_for(authz::Action::Read)
                 .await?;
-
-        let (.., authz_project) = LookupPath::new(opctx, &self.db_datastore)
-            .organization_name(organization_name)
-            .project_name(project_name)
-            .lookup_for(authz::Action::ListChildren)
-            .await?;
 
         let saga_params = sagas::snapshot_create::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             silo_id: authz_silo.id(),
-            organization_id: authz_org.id(),
             project_id: authz_project.id(),
+            disk_id: authz_disk.id(),
             create_params: params.clone(),
         };
 
@@ -514,8 +515,11 @@ impl super::Nexus {
             .project_delete_snapshot(opctx, &authz_snapshot, &db_snapshot)
             .await?;
 
-        // Kick off volume deletion saga
+        // Kick off volume deletion saga(s)
         self.volume_delete(opctx, project.id(), db_snapshot.volume_id).await?;
+        if let Some(volume_id) = db_snapshot.destination_volume_id {
+            self.volume_delete(opctx, project.id(), volume_id).await?;
+        }
 
         Ok(())
     }

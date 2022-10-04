@@ -181,7 +181,8 @@ lazy_static! {
                 block_size: params::BlockSize::try_from(4096).unwrap(),
             },
             size: ByteCount::from_gibibytes_u32(
-                DiskTest::DEFAULT_ZPOOL_SIZE_GIB
+                // divide by two to leave space for snapshot blocks
+                DiskTest::DEFAULT_ZPOOL_SIZE_GIB / 2
             ),
         };
     pub static ref DEMO_DISK_METRICS_URL: String =

@@ -669,6 +669,8 @@ CREATE TABLE omicron.public.disk (
     /* Indicates that the object has been deleted */
     /* This is redundant for Disks, but we keep it here for consistency. */
     time_deleted TIMESTAMPTZ,
+
+    /* child resource generation number, per RFD 192 */
     rcgen INT NOT NULL,
 
     /* Every Disk is in exactly one Project at a time. */
@@ -786,6 +788,9 @@ CREATE TABLE omicron.public.snapshot (
 
     /* Every Snapshot consists of a root volume */
     volume_id UUID NOT NULL,
+
+    /* Where will the scrubbed blocks eventually land? */
+    destination_volume_id UUID,
 
     gen INT NOT NULL,
     state omicron.public.snapshot_state NOT NULL,

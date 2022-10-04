@@ -41,6 +41,10 @@ pub enum UpdateError {
     SpUpdateFileNotFound { path: String, err: zip::result::ZipError },
     #[error("failed to decompress `{path}` within SP update: {err}")]
     SpUpdateDecompressionFailed { path: String, err: io::Error },
+    #[error("error reading aux flash image: {0:?}")]
+    TlvcError(tlvc::TlvcReadError),
+    #[error("corrupt aux flash image: {0}")]
+    CorruptTlvc(String),
     #[error("failed to send update message to SP: {0}")]
     Communication(#[from] SpCommunicationError),
 }
