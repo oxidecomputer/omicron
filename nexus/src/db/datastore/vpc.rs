@@ -48,7 +48,7 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use uuid::Uuid;
 
 impl DataStore {
@@ -711,7 +711,7 @@ impl DataStore {
         &self,
         vpc: &Vpc,
         subnet_names: T,
-    ) -> Result<HashMap<Name, Vec<IpNetwork>>, Error> {
+    ) -> Result<BTreeMap<Name, Vec<IpNetwork>>, Error> {
         #[derive(diesel::Queryable)]
         struct SubnetIps {
             name: Name,
@@ -735,7 +735,7 @@ impl DataStore {
                 public_error_from_diesel_pool(e, ErrorHandler::Server)
             })?;
 
-        let mut result = HashMap::with_capacity(subnets.len());
+        let mut result = BTreeMap::new();
         for subnet in subnets {
             let entry = result.entry(subnet.name).or_insert_with(Vec::new);
             entry.push(IpNetwork::V4(subnet.ipv4_block.0 .0));
