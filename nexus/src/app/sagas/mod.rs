@@ -26,6 +26,8 @@ pub mod instance_migrate;
 pub mod snapshot_create;
 pub mod volume_delete;
 
+pub mod common_storage;
+
 #[derive(Debug)]
 pub struct NexusSagaType;
 impl steno::SagaType for NexusSagaType {
@@ -110,7 +112,3 @@ pub(super) async fn saga_generate_uuid<UserType: SagaType>(
 ) -> Result<Uuid, ActionError> {
     Ok(Uuid::new_v4())
 }
-
-// Arbitrary limit on concurrency, for operations issued on multiple regions
-// within a disk at the same time.
-const MAX_CONCURRENT_REGION_REQUESTS: usize = 3;

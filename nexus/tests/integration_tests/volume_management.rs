@@ -107,7 +107,7 @@ async fn test_snapshot_then_delete_disk(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
 
     // Create a disk from this image
-    let disk_size = ByteCount::try_from(2u64 * 1024 * 1024 * 1024).unwrap();
+    let disk_size = ByteCount::from_gibibytes_u32(2);
     let base_disk_name: Name = "base-disk".parse().unwrap();
     let base_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
@@ -239,7 +239,7 @@ async fn test_delete_snapshot_then_disk(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
 
     // Create a disk from this image
-    let disk_size = ByteCount::try_from(2u64 * 1024 * 1024 * 1024).unwrap();
+    let disk_size = ByteCount::from_gibibytes_u32(2);
     let base_disk_name: Name = "base-disk".parse().unwrap();
     let base_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
@@ -371,7 +371,7 @@ async fn test_multiple_snapshots(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
 
     // Create a disk from this image
-    let disk_size = ByteCount::try_from(2u64 * 1024 * 1024 * 1024).unwrap();
+    let disk_size = ByteCount::from_gibibytes_u32(1);
     let base_disk_name: Name = "base-disk".parse().unwrap();
     let base_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
@@ -504,7 +504,7 @@ async fn test_snapshot_prevents_other_disk(
     .unwrap();
 
     // Create a disk from this image
-    let disk_size = ByteCount::try_from(2u64 * 1024 * 1024 * 1024).unwrap();
+    let disk_size = ByteCount::from_gibibytes_u32(2);
     let base_disk_name: Name = "base-disk".parse().unwrap();
     let base_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
@@ -567,7 +567,7 @@ async fn test_snapshot_prevents_other_disk(
 
     // Attempt disk allocation, which will fail - the presense of the snapshot
     // means the region wasn't deleted.
-    let disk_size = ByteCount::try_from(10u64 * 1024 * 1024 * 1024).unwrap();
+    let disk_size = ByteCount::from_gibibytes_u32(10);
     let next_disk_name: Name = "next-disk".parse().unwrap();
     let next_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
@@ -638,7 +638,7 @@ async fn test_multiple_disks_multiple_snapshots_order_1(
     let disks_url = get_disks_url();
 
     // Create a blank disk
-    let disk_size = ByteCount::try_from(2u64 * 1024 * 1024 * 1024).unwrap();
+    let disk_size = ByteCount::from_gibibytes_u32(2);
     let first_disk_name: Name = "first-disk".parse().unwrap();
     let first_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
@@ -785,7 +785,7 @@ async fn test_multiple_disks_multiple_snapshots_order_2(
     let disks_url = get_disks_url();
 
     // Create a blank disk
-    let disk_size = ByteCount::try_from(2u64 * 1024 * 1024 * 1024).unwrap();
+    let disk_size = ByteCount::from_gibibytes_u32(2);
     let first_disk_name: Name = "first-disk".parse().unwrap();
     let first_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
@@ -926,7 +926,7 @@ async fn prepare_for_test_multiple_layers_of_snapshots(
     let disks_url = get_disks_url();
 
     // Create a blank disk
-    let disk_size = ByteCount::try_from(2u64 * 1024 * 1024 * 1024).unwrap();
+    let disk_size = ByteCount::from_gibibytes_u32(1);
     let layer_1_disk_name: Name = "layer-1-disk".parse().unwrap();
     let layer_1_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {

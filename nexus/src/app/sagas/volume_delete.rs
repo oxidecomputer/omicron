@@ -23,18 +23,15 @@
 //! resources, and when they are inserted or deleted the accounting needs to
 //! change. Saga nodes must be idempotent in order to work correctly.
 
+use super::common_storage::delete_crucible_regions;
+use super::common_storage::delete_crucible_snapshots;
 use super::ActionRegistry;
 use super::NexusActionContext;
 use super::NexusSaga;
-use super::MAX_CONCURRENT_REGION_REQUESTS;
 use crate::app::sagas::NexusAction;
-use crate::db;
 use crate::db::datastore::CrucibleResources;
-use crucible_agent_client::{types::RegionId, Client as CrucibleAgentClient};
-use futures::StreamExt;
 use lazy_static::lazy_static;
 use nexus_types::identity::Asset;
-use omicron_common::api::external::Error;
 use serde::Deserialize;
 use serde::Serialize;
 use std::sync::Arc;
@@ -327,135 +324,6 @@ async fn svd_hard_delete_volume_record(
         .volume_hard_delete(params.volume_id)
         .await
         .map_err(ActionError::action_failed)?;
-
-    Ok(())
-}
-
-// helper functions
-
-// Given a list of datasets and regions, send DELETE calls to the datasets
-// corresponding Crucible Agent for each region.
-pub(super) async fn delete_crucible_regions(
-    datasets_and_regions: Vec<(db::model::Dataset, db::model::Region)>,
-) -> Result<(), Error> {
-    let request_count = datasets_and_regions.len();
-    if request_count == 0 {
-        return Ok(());
-    }
-
-    futures::stream::iter(datasets_and_regions)
-        .map(|(dataset, region)| async move {
-            let url = format!("http://{}", dataset.address());
-            let client = CrucibleAgentClient::new(&url);
-            let id = RegionId(region.id().to_string());
-            client.region_delete(&id).await.map_err(|e| match e {
-                crucible_agent_client::Error::ErrorResponse(rv) => {
-                    match rv.status() {
-                        http::StatusCode::SERVICE_UNAVAILABLE => {
-                            Error::unavail(&rv.message)
-                        }
-                        status if status.is_client_error() => {
-                            Error::invalid_request(&rv.message)
-                        }
-                        _ => Error::internal_error(&rv.message),
-                    }
-                }
-                _ => Error::internal_error(
-                    "unexpected failure during `delete_crucible_regions`",
-                ),
-            })
-        })
-        // Execute the allocation requests concurrently.
-        .buffer_unordered(std::cmp::min(
-            request_count,
-            MAX_CONCURRENT_REGION_REQUESTS,
-        ))
-        .collect::<Vec<Result<_, _>>>()
-        .await
-        .into_iter()
-        .collect::<Result<Vec<_>, _>>()?;
-
-    Ok(())
-}
-
-// Given a list of datasets and region snapshots, send DELETE calls to the
-// datasets corresponding Crucible Agent for each running read-only downstairs
-// and snapshot.
-pub(super) async fn delete_crucible_snapshots(
-    datasets_and_snapshots: Vec<(
-        db::model::Dataset,
-        db::model::RegionSnapshot,
-    )>,
-) -> Result<(), Error> {
-    let request_count = datasets_and_snapshots.len();
-    if request_count == 0 {
-        return Ok(());
-    }
-
-    futures::stream::iter(datasets_and_snapshots)
-        .map(|(dataset, region_snapshot)| async move {
-            let url = format!("http://{}", dataset.address());
-            let client = CrucibleAgentClient::new(&url);
-
-            // delete running snapshot
-            client
-                .region_delete_running_snapshot(
-                    &RegionId(region_snapshot.region_id.to_string()),
-                    &region_snapshot.snapshot_id.to_string(),
-                )
-                .await
-                .map_err(|e| match e {
-                    crucible_agent_client::Error::ErrorResponse(rv) => {
-                        match rv.status() {
-                            http::StatusCode::SERVICE_UNAVAILABLE => {
-                                Error::unavail(&rv.message)
-                            }
-                            status if status.is_client_error() => {
-                                Error::invalid_request(&rv.message)
-                            }
-                            _ => Error::internal_error(&rv.message),
-                        }
-                    }
-                    _ => Error::internal_error(
-                        "unexpected failure during `region_delete_running_snapshot`",
-                    ),
-                })?;
-
-            // delete snapshot
-            client
-                .region_delete_snapshot(
-                    &RegionId(region_snapshot.region_id.to_string()),
-                    &region_snapshot.snapshot_id.to_string(),
-                )
-                .await
-                .map_err(|e| match e {
-                    crucible_agent_client::Error::ErrorResponse(rv) => {
-                        match rv.status() {
-                            http::StatusCode::SERVICE_UNAVAILABLE => {
-                                Error::unavail(&rv.message)
-                            }
-                            status if status.is_client_error() => {
-                                Error::invalid_request(&rv.message)
-                            }
-                            _ => Error::internal_error(&rv.message),
-                        }
-                    }
-                    _ => Error::internal_error(
-                        "unexpected failure during `region_delete_snapshot`",
-                    ),
-                })?;
-
-            Ok(())
-        })
-        // Execute the allocation requests concurrently.
-        .buffer_unordered(std::cmp::min(
-            request_count,
-            MAX_CONCURRENT_REGION_REQUESTS,
-        ))
-        .collect::<Vec<Result<(), Error>>>()
-        .await
-        .into_iter()
-        .collect::<Result<Vec<_>, _>>()?;
 
     Ok(())
 }
