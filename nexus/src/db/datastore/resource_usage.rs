@@ -37,6 +37,24 @@ impl DataStore {
         Ok(())
     }
 
+    pub async fn resource_usage_get(
+        &self,
+        opctx: &OpContext,
+        id: Uuid,
+    ) -> Result<ResourceUsage, Error> {
+        use db::schema::resource_usage::dsl;
+
+        let resource_usage = dsl::resource_usage
+            .find(id)
+            .select(ResourceUsage::as_select())
+            .get_result_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            })?;
+        Ok(resource_usage)
+    }
+
     /// Delete a resource_usage
     pub async fn resource_usage_delete(
         &self,

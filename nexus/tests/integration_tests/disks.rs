@@ -34,7 +34,7 @@ use omicron_common::api::external::Instance;
 use omicron_common::api::external::Name;
 use omicron_common::backoff;
 use omicron_nexus::TestInterfaces as _;
-use omicron_nexus::{external_api::params, Nexus};
+use omicron_nexus::{context::OpContext, external_api::params, Nexus};
 use oximeter::types::Datum;
 use oximeter::types::Measurement;
 use sled_agent_client::TestInterfaces as _;
@@ -43,6 +43,7 @@ use uuid::Uuid;
 
 const ORG_NAME: &str = "test-org";
 const PROJECT_NAME: &str = "springfield-squidport-disks";
+const PROJECT_NAME_2: &str = "bouncymeadow-octopusharbor-disks";
 const DISK_NAME: &str = "just-rainsticks";
 const INSTANCE_NAME: &str = "just-rainsticks";
 
@@ -895,6 +896,130 @@ async fn test_disk_too_big(cptestctx: &ControlPlaneTestContext) {
     .execute()
     .await
     .unwrap();
+}
+
+#[nexus_test]
+async fn test_disk_resource_usage(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.apictx.nexus;
+    let datastore = nexus.datastore();
+
+    let _test = DiskTest::new(&cptestctx).await;
+
+    create_ip_pool(&client, "p0", None, None).await;
+    let org_id = create_organization(&client, ORG_NAME).await.identity.id;
+    let project_id1 =
+        create_project(client, ORG_NAME, PROJECT_NAME).await.identity.id;
+    let project_id2 =
+        create_project(client, ORG_NAME, PROJECT_NAME_2).await.identity.id;
+
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    // The project and organization should start as empty.
+    let resource_usage =
+        datastore.resource_usage_get(&opctx, project_id1).await.unwrap();
+    assert_eq!(resource_usage.disk_bytes_used, 0);
+    let resource_usage =
+        datastore.resource_usage_get(&opctx, project_id2).await.unwrap();
+    assert_eq!(resource_usage.disk_bytes_used, 0);
+    let resource_usage =
+        datastore.resource_usage_get(&opctx, org_id).await.unwrap();
+    assert_eq!(resource_usage.disk_bytes_used, 0);
+
+    // Ask for a 1 gibibyte disk in the first project.
+    //
+    // This disk should appear in the accounting information for the project
+    // in which it was allocated
+    let disk_size = ByteCount::from_gibibytes_u32(1);
+    let disks_url =
+        format!("/organizations/{}/projects/{}/disks", ORG_NAME, PROJECT_NAME);
+    let disk_one = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "disk-one".parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
+        size: disk_size,
+    };
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&disk_one))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("unexpected failure creating 1 GiB disk");
+    let resource_usage =
+        datastore.resource_usage_get(&opctx, project_id1).await.unwrap();
+    assert_eq!(resource_usage.disk_bytes_used, 3 * disk_size.to_bytes() as i64);
+    let resource_usage =
+        datastore.resource_usage_get(&opctx, project_id2).await.unwrap();
+    assert_eq!(resource_usage.disk_bytes_used, 0);
+    let resource_usage =
+        datastore.resource_usage_get(&opctx, org_id).await.unwrap();
+    assert_eq!(resource_usage.disk_bytes_used, 3 * disk_size.to_bytes() as i64);
+
+    // Ask for a 1 gibibyte disk in the second project.
+    //
+    // Each project should be using "one disk" of real storage, but the org
+    // should be using both.
+    let disks_url = format!(
+        "/organizations/{}/projects/{}/disks",
+        ORG_NAME, PROJECT_NAME_2
+    );
+    let disk_one = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "disk-two".parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
+        size: disk_size,
+    };
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&disk_one))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("unexpected failure creating 1 GiB disk");
+    let resource_usage =
+        datastore.resource_usage_get(&opctx, project_id1).await.unwrap();
+    assert_eq!(resource_usage.disk_bytes_used, 3 * disk_size.to_bytes() as i64);
+    let resource_usage =
+        datastore.resource_usage_get(&opctx, project_id2).await.unwrap();
+    assert_eq!(resource_usage.disk_bytes_used, 3 * disk_size.to_bytes() as i64);
+    let resource_usage =
+        datastore.resource_usage_get(&opctx, org_id).await.unwrap();
+    assert_eq!(
+        resource_usage.disk_bytes_used,
+        2 * 3 * disk_size.to_bytes() as i64
+    );
+
+    // Delete the disk we just created, observe the utilization drop
+    // accordingly.
+    let disk_url = format!("{}/{}", disks_url, "disk-two");
+    NexusRequest::object_delete(client, &disk_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to delete disk");
+    let resource_usage =
+        datastore.resource_usage_get(&opctx, project_id1).await.unwrap();
+    assert_eq!(resource_usage.disk_bytes_used, 3 * disk_size.to_bytes() as i64);
+    let resource_usage =
+        datastore.resource_usage_get(&opctx, project_id2).await.unwrap();
+    assert_eq!(resource_usage.disk_bytes_used, 0);
+    let resource_usage =
+        datastore.resource_usage_get(&opctx, org_id).await.unwrap();
+    assert_eq!(resource_usage.disk_bytes_used, 3 * disk_size.to_bytes() as i64);
 }
 
 // Test disk size accounting
