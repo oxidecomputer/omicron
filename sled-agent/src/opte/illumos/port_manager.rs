@@ -314,17 +314,17 @@ impl PortManager {
         );
 
         // Initialize firewall rules for the new port.
-        {
-            let port_name = port_name.clone();
-            let rules = opte_firewall_rules(firewall_rules, &vni, &mac);
-            debug!(
-                self.inner.log,
-                "Setting firewall rules";
-                "port_name" => ?&port_name,
-                "rules" => ?&rules,
-            );
-            hdl.set_fw_rules(&SetFwRulesReq { port_name, rules })?;
-        }
+        let rules = opte_firewall_rules(firewall_rules, &vni, &mac);
+        debug!(
+            self.inner.log,
+            "Setting firewall rules";
+            "port_name" => &port_name,
+            "rules" => ?&rules,
+        );
+        hdl.set_fw_rules(&SetFwRulesReq {
+            port_name: port_name.clone(),
+            rules,
+        })?;
 
         // Create a VNIC on top of this device, to hook Viona into.
         //
