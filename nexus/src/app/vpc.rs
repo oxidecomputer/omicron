@@ -7,7 +7,8 @@
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
-use crate::db::identity::{Asset, Resource};
+use crate::db::identity::Asset;
+use crate::db::identity::Resource;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
 use crate::db::model::VpcRouterKind;
@@ -29,7 +30,8 @@ use omicron_common::api::external::RouterRouteCreateParams;
 use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
-use sled_agent_client::types::{IpNet, NetworkInterface};
+use sled_agent_client::types::IpNet;
+use sled_agent_client::types::NetworkInterface;
 
 use futures::future::join_all;
 use ipnetwork::IpNetwork;
