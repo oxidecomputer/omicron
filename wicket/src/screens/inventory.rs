@@ -345,9 +345,10 @@ impl Screen for InventoryScreen {
     ) -> anyhow::Result<()> {
         terminal.draw(|f| {
             self.draw_background(f);
-            self.draw_rack(f, MARGIN);
             if self.modal_active {
                 self.draw_modal(state, f, MARGIN);
+            } else {
+                self.draw_rack(f, MARGIN);
             }
             self.draw_watermark(f);
         })?;
