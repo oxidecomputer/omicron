@@ -1344,8 +1344,8 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
     let utilization_url = |id: Uuid| {
         format!(
             "/system/metrics/resource-utilization?start_time={:?}&end_time={:?}&id={:?}",
-            Utc::now() - chrono::Duration::seconds(2),
-            Utc::now() + chrono::Duration::seconds(2),
+            Utc::now() - chrono::Duration::seconds(20),
+            Utc::now() + chrono::Duration::seconds(20),
             id,
         )
     };
