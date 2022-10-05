@@ -11,21 +11,19 @@ use omicron_test_utils::dev::test_cmds::{
 use openapiv3::OpenAPI;
 use subprocess::Exec;
 
-// name of gateway executable
-const CMD_GATEWAY: &str = env!("CARGO_BIN_EXE_gateway");
+// name of mgs executable
+const CMD_MGS: &str = env!("CARGO_BIN_EXE_mgs");
 
-fn path_to_gateway() -> PathBuf {
-    path_to_executable(CMD_GATEWAY)
+fn path_to_mgs() -> PathBuf {
+    path_to_executable(CMD_MGS)
 }
 
 #[test]
-fn test_gateway_openapi_sled() {
-    let exec = Exec::cmd(path_to_gateway())
-        .arg("--openapi")
-        .arg("examples/config.toml");
+fn test_mgs_openapi_sled() {
+    let exec = Exec::cmd(path_to_mgs()).arg("openapi");
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
     assert_exit_code(exit_status, EXIT_SUCCESS, &stderr_text);
-    assert_contents("tests/output/cmd-gateway-openapi-stderr", &stderr_text);
+    assert_contents("tests/output/cmd-mgs-openapi-stderr", &stderr_text);
 
     let spec: OpenAPI = serde_json::from_str(&stdout_text)
         .expect("stdout was not valid OpenAPI");
