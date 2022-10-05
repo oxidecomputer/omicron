@@ -91,7 +91,7 @@ version = "0.1.0"
 path = "../oximeter/producer"
 
 [dependencies.schemars]
-version = "0.8.10"
+version = "0.8.11"
 features = [ "chrono", "uuid1" ]
 
 [dependencies.serde]

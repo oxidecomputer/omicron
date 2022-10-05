@@ -10,7 +10,7 @@ bytes = { version = "1.2.1", features = [ "serde" ] }
 chrono = { version = "0.4.19", features = [ "serde" ] }
 num-traits = "0.2.15"
 oximeter-macro-impl = { path = "../oximeter-macro-impl" }
-schemars = { version = "0.8.10", features = [ "uuid1", "bytes", "chrono" ] }
+schemars = { version = "0.8.11", features = [ "uuid1", "bytes", "chrono" ] }
 serde = { version = "1", features = [ "derive" ] }
 thiserror = "1.0.37"
 uuid = { version = "1.1.0", features = [ "v4", "serde" ] }
