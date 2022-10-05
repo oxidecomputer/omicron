@@ -307,6 +307,9 @@ async fn test_listing_identity_providers(cptestctx: &ControlPlaneTestContext) {
     create_silo(&client, "test-silo", true, shared::SiloIdentityMode::SamlJit)
         .await;
 
+    create_silo(&client, "test-silo", true, shared::UserProvisionType::Jit)
+        .await;
+
     // List providers - should be none
     let providers = objects_list_page_authz::<IdentityProvider>(
         client,
@@ -1515,6 +1518,91 @@ async fn test_jit_silo_constraints(cptestctx: &ControlPlaneTestContext) {
         .unwrap();
     assert_eq!(error.message, "cannot create users in this kind of Silo");
 
+    // They should also not be able to set or invalidate their own password.
+    let user_password_url = format!("/users/{}/set_password", new_silo_user_id);
+    let error: dropshot::HttpErrorResponseBody =
+        NexusRequest::expect_failure_with_body(
+            client,
+            StatusCode::BAD_REQUEST,
+            Method::POST,
+            &user_password_url,
+            &params::UserPassword::Password(password.clone()),
+        )
+        .authn_as(AuthnMode::SiloUser(new_silo_user_id))
+        .execute()
+        .await
+        .unwrap()
+        .parsed_body()
+        .unwrap();
+    assert_eq!(
+        error.message,
+        "cannot set password for users in this kind of Silo"
+    );
+
+    let error: dropshot::HttpErrorResponseBody =
+        NexusRequest::expect_failure_with_body(
+            client,
+            StatusCode::BAD_REQUEST,
+            Method::POST,
+            &user_password_url,
+            &params::UserPassword::InvalidPassword,
+        )
+        .authn_as(AuthnMode::SiloUser(new_silo_user_id))
+        .execute()
+        .await
+        .unwrap()
+        .parsed_body()
+        .unwrap();
+    assert_eq!(
+        error.message,
+        "cannot set password for users in this kind of Silo"
+    );
+
+    // They should also not be able to log into this kind of Silo with a
+    // username and password.
+    let error: dropshot::HttpErrorResponseBody =
+        NexusRequest::expect_failure_with_body(
+            client,
+            StatusCode::BAD_REQUEST,
+            Method::POST,
+            "/login/jit",
+            &params::UsernamePasswordCredentials {
+                username: params::UserId::from_str(&admin_user.external_id)
+                    .unwrap(),
+                password: password.clone(),
+            },
+        )
+        .execute()
+        .await
+        .unwrap()
+        .parsed_body()
+        .unwrap();
+    assert_eq!(
+        error.message,
+        "cannot login to this Silo with local credentials"
+    );
+
+    // They should get the same error for a user that does not exist.
+    let error: dropshot::HttpErrorResponseBody =
+        NexusRequest::expect_failure_with_body(
+            client,
+            StatusCode::BAD_REQUEST,
+            Method::POST,
+            "/login/jit",
+            &params::UsernamePasswordCredentials {
+                username: params::UserId::from_str("bogus").unwrap(),
+                password: password.clone(),
+            },
+        )
+        .execute()
+        .await
+        .unwrap()
+        .parsed_body()
+        .unwrap();
+    assert_eq!(
+        error.message,
+        "cannot login to this Silo with local credentials"
+    );
 }
 
 #[nexus_test]

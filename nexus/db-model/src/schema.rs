@@ -218,6 +218,14 @@ table! {
 }
 
 table! {
+    silo_user_password_hash (silo_user_id) {
+        silo_user_id -> Uuid,
+        hash -> Text,
+        time_created -> Timestamptz,
+    }
+}
+
+table! {
     silo_group (id) {
         id -> Uuid,
         time_created -> Timestamptz,

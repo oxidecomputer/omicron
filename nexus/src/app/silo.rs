@@ -166,7 +166,21 @@ impl super::Nexus {
             new_user_params.external_id.as_ref().to_owned(),
         );
 
+        // TODO These two steps should happen in a transaction.
         let db_silo_user = datastore.silo_user_create(silo_user).await?;
+        let authz_silo_user = authz::SiloUser::new(
+            authz_silo.clone(),
+            db_silo_user.id(),
+            LookupType::ById(db_silo_user.id()),
+        );
+        self.silo_user_password_set_internal(
+            opctx,
+            &db_silo,
+            &authz_silo_user,
+            &db_silo_user,
+            new_user_params.password,
+        )
+        .await?;
         Ok(db_silo_user)
     }
 
@@ -281,6 +295,165 @@ impl super::Nexus {
             .await?;
 
         Ok(Some(db_silo_user))
+    }
+
+    // Silo user passwords
+
+    /// Set or invalidate a Silo user's password
+    ///
+    /// If `password` is `Some(...)`, the password is set to the requested
+    /// value.  Otherwise, any existing password is invalidated so that it
+    /// cannot be used for authentication any more.
+    pub async fn silo_user_password_set(
+        &self,
+        opctx: &OpContext,
+        user_id: Uuid,
+        password_value: params::UserPassword,
+    ) -> UpdateResult<()> {
+        let datastore = self.datastore();
+        let authz_silo = opctx.authn.silo_required()?;
+        let (.., db_silo) = LookupPath::new(opctx, &datastore)
+            .silo_id(authz_silo.id())
+            .fetch()
+            .await?;
+
+        let (_, authz_silo_user, db_silo_user) =
+            LookupPath::new(opctx, &datastore)
+                .silo_user_id(user_id)
+                .fetch()
+                .await?;
+
+        self.silo_user_password_set_internal(
+            opctx,
+            &db_silo,
+            &authz_silo_user,
+            &db_silo_user,
+            password_value,
+        )
+        .await
+    }
+
+    async fn silo_user_password_set_internal(
+        &self,
+        opctx: &OpContext,
+        db_silo: &db::model::Silo,
+        authz_silo_user: &authz::SiloUser,
+        db_silo_user: &db::model::SiloUser,
+        password_value: params::UserPassword,
+    ) -> UpdateResult<()> {
+        let password_hash = match password_value {
+            params::UserPassword::InvalidPassword => None,
+            params::UserPassword::Password(password) => {
+                let mut hasher = nexus_passwords::Hasher::default();
+                let password_hash = hasher
+                    .create_password(password.as_ref())
+                    .map_err(|e| {
+                    Error::internal_error(&format!("setting password: {:#}", e))
+                })?;
+                Some(db::model::SiloUserPasswordHash::new(
+                    authz_silo_user.id(),
+                    nexus_db_model::PasswordHashString::from(password_hash),
+                ))
+            }
+        };
+
+        self.datastore()
+            .silo_user_password_hash_set(
+                opctx,
+                db_silo,
+                authz_silo_user,
+                db_silo_user,
+                password_hash,
+            )
+            .await
+    }
+
+    /// Verify a Silo user's password
+    pub async fn silo_user_password_verify(
+        &self,
+        opctx: &OpContext,
+        maybe_authz_silo_user: Option<&authz::SiloUser>,
+        password: &nexus_passwords::Password,
+    ) -> Result<bool, Error> {
+        let maybe_hash = match maybe_authz_silo_user {
+            None => None,
+            Some(authz_silo_user) => {
+                self.datastore()
+                    .silo_user_password_hash_fetch(opctx, authz_silo_user)
+                    .await?
+            }
+        };
+
+        let mut hasher = nexus_passwords::Hasher::default();
+        match maybe_hash {
+            None => {
+                // If the user or their password hash does not exist, create a
+                // dummy password hash anyway.  This avoids exposing a timing
+                // attack where an attacker can learn that a user exists by
+                // seeing how fast it took a login attempt to fail.
+                let _ = hasher.create_password(password);
+                Ok(false)
+            }
+            Some(silo_user_password_hash) => Ok(hasher
+                .verify_password(password, &silo_user_password_hash.hash)
+                .map_err(|e| {
+                    Error::internal_error(&format!(
+                        "verifying password: {:#}",
+                        e
+                    ))
+                })?),
+        }
+    }
+
+    /// Given a silo name and username/password credentials, verify the
+    /// credentials and return the corresponding SiloUser.
+    pub async fn login_local(
+        &self,
+        opctx: &OpContext,
+        silo_name: &Name,
+        credentials: params::UsernamePasswordCredentials,
+    ) -> Result<Option<db::model::SiloUser>, Error> {
+        let datastore = self.datastore();
+        let (authz_silo, db_silo) = LookupPath::new(opctx, datastore)
+            .silo_name(silo_name)
+            .fetch()
+            .await?;
+        if db_silo.user_provision_type != UserProvisionType::Fixed {
+            return Err(Error::invalid_request(&format!(
+                "cannot login to this Silo with local credentials"
+            )));
+        }
+
+        // NOTE: It's very important that we not bail out early if we fail to
+        // find a user with this external id.  See the note in
+        // silo_user_password_verify().
+        // TODO-security There may still be some vulnerability to timing attack
+        // here, in that we'll do one fewer database lookup if a user does not
+        // exist.
+        let fetch_user = datastore
+            .silo_user_fetch_by_external_id(
+                opctx,
+                &authz_silo,
+                credentials.username.as_ref(),
+            )
+            .await?;
+        let verified = self
+            .silo_user_password_verify(
+                opctx,
+                fetch_user.as_ref().map(|(authz_silo_user, _)| authz_silo_user),
+                credentials.password.as_ref(),
+            )
+            .await?;
+        if verified {
+            bail_unless!(
+                fetch_user.is_some(),
+                "passed password verification without a valid user"
+            );
+            let db_user = fetch_user.unwrap().1;
+            Ok(Some(db_user))
+        } else {
+            Ok(None)
+        }
     }
 
     // Silo groups

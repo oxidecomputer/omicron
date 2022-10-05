@@ -30,5 +30,6 @@ steno = "0.2"
 db-macros = { path = "../db-macros" }
 omicron-common = { path = "../../common" }
 nexus-defaults = { path = "../defaults" }
+nexus-passwords = { path = "../passwords" }
 nexus-types = { path = "../types" }
 sled-agent-client = { path = "../../sled-agent-client" }

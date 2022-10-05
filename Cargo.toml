@@ -17,6 +17,7 @@ members = [
     "nexus/db-macros",
     "nexus/db-model",
     "nexus/defaults",
+    "nexus/passwords",
     "nexus/test-utils",
     "nexus/test-utils-macros",
     "nexus/types",
@@ -54,6 +55,7 @@ default-members = [
     "nexus/db-macros",
     "nexus/db-model",
     "nexus/defaults",
+    "nexus/passwords",
     "nexus/types",
     "package",
     "rpaths",
@@ -86,6 +88,14 @@ opt-level = 3
 # the additional build time added to `lalrpop` itself.
 [profile.dev.package.lalrpop]
 opt-level = 3
+
+# Password hashing is expensive by construction.  Build the hashing libraries
+# with optimizations to significantly speed up tests.
+[profile.dev.package.argon2]
+opt-level = 3
+[profile.dev.package.rust-argon2]
+opt-level = 3
+
 
 [profile.release]
 panic = "abort"

@@ -245,9 +245,11 @@ pub fn external_api() -> NexusApiDescription {
 
         api.register(user_list)?;
         api.register(user_create)?;
+        api.register(user_set_password)?;
 
         // Console API operations
         api.register(console_api::login_begin)?;
+        api.register(console_api::login_local)?;
         api.register(console_api::login_spoof_begin)?;
         api.register(console_api::login_spoof)?;
         api.register(console_api::login_saml_begin)?;
@@ -4145,6 +4147,36 @@ async fn user_create(
 struct UserPathParam {
     /// The user's internal id
     user_id: Uuid,
+}
+
+/// Set or invalidate a user's password
+///
+/// Passwords can only be updated for users in Silos with `provision_type` ==
+/// `Fixed`.
+#[endpoint {
+    method = POST,
+    path = "/users/{user_id}/set_password",
+    tags = ["silos"],
+}]
+async fn user_set_password(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    user_path: Path<UserPathParam>,
+    update: TypedBody<params::UserPassword>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        nexus
+            .silo_user_password_set(
+                &opctx,
+                user_path.into_inner().user_id,
+                update.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 // Built-in (system) users
