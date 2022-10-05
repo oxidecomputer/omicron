@@ -854,3 +854,13 @@ pub struct ResourceMetrics {
     /// An exclusive end time of metrics.
     pub end_time: DateTime<Utc>,
 }
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ResourceUtilization {
+    #[serde(flatten)]
+    pub pagination:
+        dropshot::PaginationParams<ResourceMetrics, ResourceMetrics>,
+
+    /// The UUID of the container being queried
+    pub id: Uuid,
+}

@@ -241,6 +241,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(system_image_view_by_id)?;
         api.register(system_image_delete)?;
 
+        api.register(system_metrics_list)?;
         api.register(updates_refresh)?;
         api.register(user_list)?;
 
@@ -4019,6 +4020,42 @@ async fn updates_refresh(
         let opctx = OpContext::for_external_api(&rqctx).await?;
         nexus.updates_refresh_metadata(&opctx).await?;
         Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+// Metrics
+
+/// Access metrics data
+#[endpoint {
+     method = GET,
+     path = "/system/metrics/resource-utilization",
+     tags = ["system"],
+}]
+async fn system_metrics_list(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<params::ResourceUtilization>,
+) -> Result<HttpResponseOk<ResultsPage<oximeter_db::Measurement>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+
+    let query = query_params.into_inner();
+    let limit = rqctx.page_limit(&query.pagination)?;
+
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+        let result = nexus
+            .select_timeseries(
+                "collection_target:disk_usage_metric",
+                &[&format!("id=={}", query.id)],
+                query.pagination,
+                limit,
+            )
+            .await?;
+
+        Ok(HttpResponseOk(result))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

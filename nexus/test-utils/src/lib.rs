@@ -162,6 +162,7 @@ pub async fn test_setup_with_config(
     .await
     .unwrap();
     register_test_producer(&producer).unwrap();
+    server.register_as_producer().await;
 
     ControlPlaneTestContext {
         server,

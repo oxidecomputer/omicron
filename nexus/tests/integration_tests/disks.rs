@@ -1297,7 +1297,7 @@ async fn query_for_metrics_until_they_exist(
 async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
-    create_org_and_project(client).await;
+    let project_id = create_org_and_project(client).await;
     create_disk(&client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
 
     // Whenever we grab this URL, get the surrounding few seconds of metrics.
@@ -1335,6 +1335,43 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
             assert!(cumulative.start_time() <= item.timestamp());
         }
     }
+
+    // Check the utilization info for the whole project too.
+    let utilization_url = |id: Uuid| {
+        format!(
+            "/system/metrics/resource-utilization?start_time={:?}&end_time={:?}&id={:?}",
+            Utc::now() - chrono::Duration::seconds(2),
+            Utc::now() + chrono::Duration::seconds(2),
+            id,
+        )
+    };
+
+    let get_i64 = |measurement: &oximeter::types::Measurement| -> i64 {
+        match measurement.datum() {
+            oximeter::types::Datum::I64(value) => *value,
+            _ => panic!("Unexpected datum type: {:?}", measurement.datum()),
+        }
+    };
+
+    // We should see two measurements: One when the project was created, and
+    // another once the disk modified the size.
+    let measurements = query_for_metrics_until_they_exist(
+        client,
+        &utilization_url(project_id),
+    )
+    .await;
+    assert_eq!(
+        measurements.items.len(),
+        2,
+        "Unexpected items: {:#?}",
+        measurements.items
+    );
+    assert_eq!(get_i64(&measurements.items[0]), 0);
+    assert!(
+        get_i64(&measurements.items[1]) > 0,
+        "Unexpected items: {:#?}",
+        measurements.items
+    );
 }
 
 #[nexus_test]
