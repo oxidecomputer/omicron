@@ -21,7 +21,6 @@ use nexus_test_utils::http_testing::TestResponse;
 use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
-use omicron_common::api::external::IdentityMetadata;
 use omicron_nexus::authn::external::spoof;
 
 // This test hits a list Nexus API endpoints using both unauthenticated and
@@ -189,6 +188,14 @@ lazy_static! {
             body: serde_json::to_value(&*DEMO_SILO_CREATE).unwrap(),
             id_routes: vec!["/system/by-id/silos/{id}"],
         },
+        // Create a local User
+        SetupReq::Post {
+            url: &*DEMO_SILO_USERS_CREATE_URL,
+            body: serde_json::to_value(&*DEMO_USER_CREATE).unwrap(),
+            id_routes: vec![
+                &*DEMO_SILO_USER_ID_URL,
+            ],
+        },
         // Create an IP pool
         SetupReq::Post {
             url: &*DEMO_IP_POOLS_URL,
@@ -281,6 +288,15 @@ lazy_static! {
     ];
 }
 
+/// Contents returned from an endpoint that creates a resource that has an id
+///
+/// This is a subset of `IdentityMetadata`.  `IdentityMetadata` includes other
+/// fields (like "name") that are not present on all objects.
+#[derive(serde::Deserialize)]
+struct IdMetadata {
+    id: String,
+}
+
 /// Verifies a single API endpoint, described with `endpoint`
 ///
 /// (Technically, a single `VerifyEndpoint` struct describes an HTTP resource,
@@ -358,7 +374,7 @@ async fn verify_endpoint(
             Some(response) => endpoint.url.replace(
                 "{id}",
                 response
-                    .parsed_body::<IdentityMetadata>()
+                    .parsed_body::<IdMetadata>()
                     .unwrap()
                     .id
                     .to_string()

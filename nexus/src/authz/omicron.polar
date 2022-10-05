@@ -252,6 +252,9 @@ has_relation(silo: Silo, "parent_silo", user: SiloUser)
 has_permission(actor: AuthenticatedActor, _perm: String, silo_user: SiloUser)
     if actor.equals_silo_user(silo_user);
 
+has_permission(actor: AuthenticatedActor, "read", silo_user: SiloUser)
+    if silo_user.silo in actor.silo;
+
 resource SiloGroup {
 	permissions = [
 	    "list_children",

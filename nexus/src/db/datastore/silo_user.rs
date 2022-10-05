@@ -75,14 +75,42 @@ impl DataStore {
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Delete, authz_silo_user).await?;
 
+        // Delete the user and everything associated with them.
+        // TODO-scalability Many of these should be done in batches.
+        // TODO-robustness We might consider the RFD 192 "rcgen" pattern as well
+        // so that people can't, say, login while we do this.
         self.pool_authorized(opctx)
             .await?
             .transaction_async(|mut conn| async move {
-                // Users in API-managed Silos do not currently support groups.
+                // Delete console sessions.
+                {
+                    use db::schema::console_session::dsl;
+                    diesel::delete(dsl::console_session)
+                        .filter(dsl::silo_user_id.eq(authz_silo_user.id()))
+                        .execute_async(&mut conn)
+                        .await?;
+                }
+
+                // Delete device authentication tokens.
+                {
+                    use db::schema::device_access_token::dsl;
+                    diesel::delete(dsl::device_access_token)
+                        .filter(dsl::silo_user_id.eq(authz_silo_user.id()))
+                        .execute_async(&mut conn)
+                        .await?;
+                }
+
+                // Delete group memberships.
+                {
+                    use db::schema::silo_group_membership::dsl;
+                    diesel::delete(dsl::silo_group_membership)
+                        .filter(dsl::silo_user_id.eq(authz_silo_user.id()))
+                        .execute_async(&mut conn)
+                        .await?;
+                }
 
                 // Delete ssh keys.
                 {
-                    // TODO-scalability This should be done in batches.
                     use db::schema::ssh_key::dsl;
                     diesel::update(dsl::ssh_key)
                         .filter(dsl::silo_user_id.eq(authz_silo_user.id()))

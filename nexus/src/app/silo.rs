@@ -184,7 +184,7 @@ impl super::Nexus {
     ) -> DeleteResult {
         // Verify that this user is actually in this Silo.
         let datastore = self.datastore();
-        let (authz_silo, _) = LookupPath::new(opctx, datastore)
+        let (authz_silo, db_silo) = LookupPath::new(opctx, datastore)
             .silo_name(silo_name)
             .fetch()
             .await?;
@@ -195,6 +195,12 @@ impl super::Nexus {
                 .await?;
         if db_silo_user.silo_id != authz_silo.id() {
             return Err(authz_silo_user.not_found());
+        }
+
+        if db_silo.user_provision_type != UserProvisionType::ApiOnly {
+            return Err(Error::invalid_request(
+                "cannot delete users in this kind of Silo",
+            ));
         }
 
         self.db_datastore.silo_user_delete(opctx, &authz_silo_user).await

@@ -99,7 +99,6 @@ API operations found with tag "silos"
 OPERATION ID                             URL PATH
 policy_update                            /policy
 policy_view                              /policy
-user_create                              /users
 user_list                                /users
 
 API operations found with tag "snapshots"
@@ -125,6 +124,10 @@ ip_pool_service_view                     /system/ip-pools-service/{rack_id}
 ip_pool_update                           /system/ip-pools/{pool_name}
 ip_pool_view                             /system/ip-pools/{pool_name}
 ip_pool_view_by_id                       /system/by-id/ip-pools/{id}
+local_idp_user_create                    /system/silos/{silo_name}/identity-providers/local/users/create
+local_idp_user_delete                    /system/silos/{silo_name}/identity-providers/local/users/id/{user_id}
+local_idp_user_view                      /system/silos/{silo_name}/identity-providers/local/users/id/{user_id}
+local_idp_users_list                     /system/silos/{silo_name}/identity-providers/local/users/all
 rack_list                                /system/hardware/racks
 rack_view                                /system/hardware/racks/{rack_id}
 saga_list                                /system/sagas

@@ -27,6 +27,8 @@ use omicron_common::api::external::RouterRouteUpdateParams;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_nexus::authn;
 use omicron_nexus::authz;
+use omicron_nexus::db::fixed_data::silo::DEFAULT_SILO;
+use omicron_nexus::db::identity::Resource;
 use omicron_nexus::external_api::params;
 use omicron_nexus::external_api::shared;
 use omicron_nexus::external_api::shared::IpRange;
@@ -60,6 +62,22 @@ lazy_static! {
             identity_mode: shared::SiloIdentityMode::SamlJit,
             admin_group_name: None,
         };
+    // Use the default Silo for testing the local IdP
+    pub static ref DEMO_SILO_USERS_CREATE_URL: String =
+        format!(
+            "/system/silos/{}/identity-providers/local/users/create",
+            DEFAULT_SILO.identity().name,
+        );
+    pub static ref DEMO_SILO_USERS_LIST_URL: String =
+        format!(
+            "/system/silos/{}/identity-providers/local/users/all",
+            DEFAULT_SILO.identity().name,
+        );
+    pub static ref DEMO_SILO_USER_ID_URL: String = format!(
+        "/system/silos/{}/identity-providers/local/users/id/{{id}}",
+        DEFAULT_SILO.identity().name,
+    );
+
 
     // Organization used for testing
     pub static ref DEMO_ORG_NAME: Name = "demo-org".parse().unwrap();
@@ -720,11 +738,36 @@ lazy_static! {
             unprivileged_access: UnprivilegedAccess::ReadOnly,
             allowed_methods: vec![
                 AllowedMethod::Get,
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &*DEMO_SILO_USERS_LIST_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::ReadOnly,
+            allowed_methods: vec![ AllowedMethod::Get ],
+        },
+
+        VerifyEndpoint {
+            url: &*DEMO_SILO_USERS_CREATE_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::ReadOnly,
+            allowed_methods: vec![
                 AllowedMethod::Post(
                     serde_json::to_value(
                         &*DEMO_USER_CREATE
                     ).unwrap()
                 ),
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &*DEMO_SILO_USER_ID_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::ReadOnly,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Delete,
             ],
         },
 

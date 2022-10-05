@@ -1502,7 +1502,7 @@ async fn test_jit_silo_constraints(cptestctx: &ControlPlaneTestContext) {
             client,
             StatusCode::BAD_REQUEST,
             Method::POST,
-            "/users",
+            "/system/silos/jit/identity-providers/local/users/create",
             &params::UserCreate {
                 external_id: params::UserId::from_str("dummy").unwrap(),
             },
@@ -1517,7 +1517,7 @@ async fn test_jit_silo_constraints(cptestctx: &ControlPlaneTestContext) {
 }
 
 #[nexus_test]
-async fn test_fixed_silo_constraints(cptestctx: &ControlPlaneTestContext) {
+async fn test_local_silo_constraints(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     let nexus = &cptestctx.server.apictx.nexus;
 
@@ -1548,7 +1548,7 @@ async fn test_fixed_silo_constraints(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
-    // It's not allowed to create an identity provider in a fixed Silo.
+    // It's not allowed to create an identity provider in an ApiOnly Silo.
     let error: dropshot::HttpErrorResponseBody =
         NexusRequest::expect_failure_with_body(
             client,
@@ -1612,3 +1612,8 @@ async fn test_fixed_silo_constraints(cptestctx: &ControlPlaneTestContext) {
     .await
     .unwrap();
 }
+
+// XXX-dap TODO-coverage
+// - attempt to create, delete user using API in SamlJit Silo ("create" may be
+//   covered above)
+// - successful user create/fetch/list/delete
