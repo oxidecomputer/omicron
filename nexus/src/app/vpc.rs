@@ -431,6 +431,7 @@ impl super::Nexus {
         debug!(self.log, "sending firewall rules to sled agents");
         let results = join_all(sled_requests).await;
         // TODO-correctness: handle more than one failure in the sled-agent requests
+        //   https://github.com/oxidecomputer/omicron/issues/1791
         for (sled, result) in vpc_to_sleds.iter().zip(results) {
             if let Err(e) = result {
                 warn!(self.log, "failed to update firewall rules on sled agent";
