@@ -67,8 +67,9 @@ impl super::Nexus {
             .authn
             .silo_required()
             .internal_context("listing current silo's users")?;
+        let authz_silo_user_list = authz::SiloUserList::new(authz_silo.clone());
         self.db_datastore
-            .silo_users_list_by_id(opctx, &authz_silo, pagparams)
+            .silo_users_list_by_id(opctx, &authz_silo_user_list, pagparams)
             .await
     }
 

@@ -413,17 +413,44 @@ resource SiloIdentityProviderList {
 	"list_children" if "read" on "parent_silo";
 
 	# Fleet and Silo administrators can manage the Silo's identity provider
-	# configuration.  This is the only area of Silo configuration that Fleet
-	# Administrators have permissions on.  This is also the only case (so
-	# far) where we need to look two levels up the hierarchy to see if
-	# somebody has the right permission.  For most other things, permissions
-	# cascade down the hierarchy so we only need to look at the parent.
+	# configuration.  This is one of the only areas of Silo configuration
+	# that Fleet Administrators have permissions on.  This is also one of
+	# the only cases where we need to look two levels up the hierarchy to
+	# see if somebody has the right permission.  For most other things,
+	# permissions cascade down the hierarchy so we only need to look at the
+	# parent.
 	"create_child" if "admin" on "parent_silo";
 	"create_child" if "admin" on "parent_fleet";
 }
 has_relation(silo: Silo, "parent_silo", collection: SiloIdentityProviderList)
 	if collection.silo = silo;
 has_relation(fleet: Fleet, "parent_fleet", collection: SiloIdentityProviderList)
+	if collection.silo.fleet = fleet;
+
+# Describes the policy for creating and managing Silo users (mostly intended for
+# API-managed users)
+resource SiloUserList {
+	permissions = [ "list_children", "create_child" ];
+
+	relations = { parent_silo: Silo, parent_fleet: Fleet };
+
+	# Everyone who can read the Silo (which includes all the users in the
+	# Silo) can see the users in it.
+	"list_children" if "read" on "parent_silo";
+
+	# Fleet and Silo administrators can manage the Silo's users.  This is
+	# one of the only areas of Silo configuration that Fleet Administrators
+	# have permissions on.  This is also one of the few cases (so far) where
+	# we need to look two levels up the hierarchy to see if somebody has the
+	# right permission.  For most other things, permissions cascade down the
+	# hierarchy so we only need to look at the parent.
+	"create_child" if "admin" on "parent_silo";
+	"list_children" if "admin" on "parent_fleet";
+	"create_child" if "admin" on "parent_fleet";
+}
+has_relation(silo: Silo, "parent_silo", collection: SiloUserList)
+	if collection.silo = silo;
+has_relation(fleet: Fleet, "parent_fleet", collection: SiloUserList)
 	if collection.silo.fleet = fleet;
 
 # These rules grants the external authenticator role the permissions it needs to

@@ -164,6 +164,12 @@ impl super::Nexus {
             Uuid::new_v4(),
             new_user_params.external_id.as_ref().to_owned(),
         );
+        let authz_silo_user_list = authz::SiloUserList::new(authz_silo.clone());
+        //
+        // TODO-cleanup This authz check belongs in silo_user_create().
+        opctx
+            .authorize(authz::Action::CreateChild, &authz_silo_user_list)
+            .await?;
         let (_, db_silo_user) =
             datastore.silo_user_create(&authz_silo, silo_user).await?;
         Ok(db_silo_user)
