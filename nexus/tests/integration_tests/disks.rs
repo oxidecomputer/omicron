@@ -1295,6 +1295,10 @@ async fn query_for_metrics_until_they_exist(
 
 #[nexus_test]
 async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
+    // Normally, Nexus is not registered as a producer for tests.
+    // Turn this bit on so we can also test some metrics from Nexus itself.
+    cptestctx.server.register_as_producer().await;
+
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
     let project_id = create_org_and_project(client).await;

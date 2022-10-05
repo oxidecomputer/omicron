@@ -241,7 +241,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(system_image_view_by_id)?;
         api.register(system_image_delete)?;
 
-        api.register(system_metrics_list)?;
+        api.register(system_metrics_utilization_list)?;
         api.register(updates_refresh)?;
         api.register(user_list)?;
 
@@ -4032,7 +4032,7 @@ async fn updates_refresh(
      path = "/system/metrics/resource-utilization",
      tags = ["system"],
 }]
-async fn system_metrics_list(
+async fn system_metrics_utilization_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<params::ResourceUtilization>,
 ) -> Result<HttpResponseOk<ResultsPage<oximeter_db::Measurement>>, HttpError> {
