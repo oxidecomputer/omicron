@@ -8,6 +8,7 @@ use crate::illumos::dladm::Dladm;
 use crate::illumos::dladm::PhysicalLink;
 use crate::illumos::dladm::VnicSource;
 use crate::opte::default_boundary_services;
+use crate::opte::opte_firewall_rules;
 use crate::opte::Error;
 use crate::opte::Gateway;
 use crate::opte::Port;
@@ -17,27 +18,14 @@ use crate::params::SourceNatConfig;
 use crate::params::VpcFirewallRule;
 use ipnetwork::IpNetwork;
 use macaddr::MacAddr6;
-use omicron_common::api::external::IpNet;
-use omicron_common::api::external::VpcFirewallRuleAction;
-use omicron_common::api::external::VpcFirewallRuleDirection;
-use omicron_common::api::external::VpcFirewallRuleProtocol;
-use omicron_common::api::external::VpcFirewallRuleStatus;
 use opte_ioctl::OpteHdl;
-use oxide_vpc::api::Action;
 use oxide_vpc::api::AddRouterEntryReq;
-use oxide_vpc::api::Address;
-use oxide_vpc::api::Direction;
-use oxide_vpc::api::Filters;
-use oxide_vpc::api::FirewallRule;
 use oxide_vpc::api::IpCfg;
 use oxide_vpc::api::IpCidr;
 use oxide_vpc::api::Ipv4Cfg;
 use oxide_vpc::api::Ipv4Cidr;
 use oxide_vpc::api::Ipv4PrefixLen;
 use oxide_vpc::api::MacAddr;
-use oxide_vpc::api::Ports;
-use oxide_vpc::api::ProtoFilter;
-use oxide_vpc::api::Protocol;
 use oxide_vpc::api::RouterTarget;
 use oxide_vpc::api::SNat4Cfg;
 use oxide_vpc::api::SetFwRulesReq;
@@ -495,112 +483,6 @@ impl PortManager {
         }
         Ok(())
     }
-}
-
-/// Translate from a slice of VPC firewall rules to a vector of OPTE rules
-/// that match the given port's MAC address. OPTE rules can only encode a
-/// single host address and protocol, so we must unroll rules with multiple
-/// hosts/protocols.
-fn opte_firewall_rules(
-    rules: &[VpcFirewallRule],
-    vni: &Vni,
-    mac: &MacAddr6,
-) -> Vec<FirewallRule> {
-    rules
-        .iter()
-        .filter(|rule| match rule.status {
-            VpcFirewallRuleStatus::Disabled => false,
-            VpcFirewallRuleStatus::Enabled => true,
-        })
-        .filter(|rule| {
-            rule.targets.is_empty() // no targets means apply everywhere
-                || rule.targets.iter().any(|nic| {
-                    // (VNI, MAC) is a unique identifier for the NIC.
-                    u32::from(nic.vni) == u32::from(*vni) && nic.mac.0 == *mac
-                })
-        })
-        .map(|rule| {
-            let priority = rule.priority.0;
-            let action = match rule.action {
-                VpcFirewallRuleAction::Allow => Action::Allow,
-                VpcFirewallRuleAction::Deny => Action::Deny,
-            };
-            let direction = match rule.direction {
-                VpcFirewallRuleDirection::Inbound => Direction::In,
-                VpcFirewallRuleDirection::Outbound => Direction::Out,
-            };
-            let ports = match rule.filter_ports {
-                Some(ref ports) if ports.len() > 0 => Ports::PortList(
-                    ports
-                        .iter()
-                        .flat_map(|range| {
-                            (range.first.0.get()..=range.last.0.get())
-                                .collect::<Vec<u16>>()
-                        })
-                        .collect::<Vec<u16>>(),
-                ),
-                _ => Ports::Any,
-            };
-            let proto_filters = rule.filter_protocols.as_ref().map_or_else(
-                || vec![ProtoFilter::Any],
-                |protos| {
-                    protos
-                        .iter()
-                        .map(|proto| {
-                            ProtoFilter::Proto(match proto {
-                                VpcFirewallRuleProtocol::Tcp => Protocol::TCP,
-                                VpcFirewallRuleProtocol::Udp => Protocol::UDP,
-                                VpcFirewallRuleProtocol::Icmp => Protocol::ICMP,
-                            })
-                        })
-                        .collect::<Vec<ProtoFilter>>()
-                },
-            );
-            let host_filters = rule.filter_hosts.as_ref().map_or_else(
-                || vec![Address::Any],
-                |hosts| {
-                    hosts
-                        .iter()
-                        .map(|host| match host {
-                            IpNet::V4(net) if net.prefix() == 32 => {
-                                Address::Ip(net.ip().into())
-                            }
-                            IpNet::V4(net) => Address::Subnet(Ipv4Cidr::new(
-                                net.ip().into(),
-                                Ipv4PrefixLen::new(net.prefix()).unwrap(),
-                            )),
-                            IpNet::V6(_net) => {
-                                todo!("IPv6 host filters")
-                            }
-                        })
-                        .collect::<Vec<Address>>()
-                },
-            );
-            proto_filters
-                .iter()
-                .map(|proto| {
-                    host_filters
-                        .iter()
-                        .map(|hosts| FirewallRule {
-                            priority,
-                            action,
-                            direction,
-                            filters: {
-                                let mut filters = Filters::new();
-                                filters
-                                    .set_hosts(hosts.clone())
-                                    .set_protocol(proto.clone())
-                                    .set_ports(ports.clone());
-                                filters
-                            },
-                        })
-                        .collect::<Vec<FirewallRule>>()
-                })
-                .collect::<Vec<Vec<FirewallRule>>>()
-        })
-        .flatten()
-        .flatten()
-        .collect::<Vec<FirewallRule>>()
 }
 
 pub struct PortTicket {
