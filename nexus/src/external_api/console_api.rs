@@ -35,7 +35,6 @@ use hyper::Body;
 use lazy_static::lazy_static;
 use mime_guess;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::InternalContext;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_urlencoded;
@@ -600,12 +599,7 @@ pub async fn session_me(
         // as _somebody_. We could restrict this to session auth only, but it's
         // not clear what the advantage would be.
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let &actor = opctx
-            .authn
-            .actor_required()
-            .internal_context("loading current user")?;
-        let user =
-            nexus.silo_user_fetch_by_id(&opctx, &actor.actor_id()).await?;
+        let user = nexus.silo_user_fetch_self(&opctx).await?;
         Ok(HttpResponseOk(user.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

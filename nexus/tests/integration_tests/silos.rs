@@ -207,8 +207,9 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
         .expect("failed to make request");
 
     // Verify silo user was also deleted
-    nexus
-        .silo_user_fetch(authn_opctx, new_silo_user_id)
+    LookupPath::new(&authn_opctx, nexus.datastore())
+        .silo_user_id(new_silo_user_id)
+        .fetch()
         .await
         .expect_err("unexpected success");
 }

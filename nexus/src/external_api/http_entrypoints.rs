@@ -235,6 +235,11 @@ pub fn external_api() -> NexusApiDescription {
         api.register(saml_identity_provider_create)?;
         api.register(saml_identity_provider_view)?;
 
+        api.register(local_idp_users_list)?;
+        api.register(local_idp_user_create)?;
+        api.register(local_idp_user_view)?;
+        api.register(local_idp_user_delete)?;
+
         api.register(system_image_list)?;
         api.register(system_image_create)?;
         api.register(system_image_view)?;
@@ -244,7 +249,6 @@ pub fn external_api() -> NexusApiDescription {
         api.register(updates_refresh)?;
 
         api.register(user_list)?;
-        api.register(user_create)?;
 
         // Console API operations
         api.register(console_api::login_begin)?;
@@ -732,6 +736,134 @@ async fn saml_identity_provider_view(
 }
 
 // TODO: no DELETE for identity providers?
+
+// "Local" Identity Provider
+
+/// List users in the given local identity provider
+#[endpoint {
+    method = GET,
+    path = "/system/silos/{silo_name}/identity-providers/local/users/all",
+    tags = ["system"],
+}]
+async fn local_idp_users_list(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<SiloPathParam>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<User>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let silo_name = path_params.into_inner().silo_name;
+    let query = query_params.into_inner();
+    let pagparams = data_page_params_for(&rqctx, &query)?;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let users = nexus
+            .silo_users_list(&opctx, &silo_name, &pagparams)
+            .await?
+            .into_iter()
+            .map(|i| i.into())
+            .collect();
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            users,
+            &|_, user: &User| user.id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Create a user
+///
+/// Users can only be created in Silos with `provision_type` == `Fixed`.
+/// Otherwise, Silo users are just-in-time (JIT) provisioned when a user first
+/// logs in using an external Identity Provider.
+#[endpoint {
+    method = POST,
+    path = "/system/silos/{silo_name}/identity-providers/local/users/create",
+    tags = ["system"],
+}]
+async fn local_idp_user_create(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<SiloPathParam>,
+    new_user_params: TypedBody<params::UserCreate>,
+) -> Result<HttpResponseCreated<User>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let silo_name = path_params.into_inner().silo_name;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let user = nexus
+            .silo_api_user_create(
+                &opctx,
+                &silo_name,
+                new_user_params.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseCreated(user.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Path parameters for Silo User requests
+#[derive(Deserialize, JsonSchema)]
+struct UserPathParam {
+    /// The silo's unique name.
+    silo_name: Name,
+    /// The user's internal id
+    user_id: Uuid,
+}
+
+#[endpoint {
+    method = GET,
+    path = "/system/silos/{silo_name}/identity-providers/local/users/id/{user_id}",
+    tags = ["system"],
+}]
+async fn local_idp_user_view(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<UserPathParam>,
+) -> Result<HttpResponseOk<User>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path_params = path_params.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let user = nexus
+            .silo_user_fetch(
+                &opctx,
+                &path_params.silo_name,
+                path_params.user_id,
+            )
+            .await?;
+        Ok(HttpResponseOk(user.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+#[endpoint {
+    method = DELETE,
+    path = "/system/silos/{silo_name}/identity-providers/local/users/id/{user_id}",
+    tags = ["system"],
+}]
+async fn local_idp_user_delete(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<UserPathParam>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path_params = path_params.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        nexus
+            .silo_api_user_delete(
+                &opctx,
+                &path_params.silo_name,
+                path_params.user_id,
+            )
+            .await?;
+        Ok(HttpResponseDeleted())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
 
 /// List organizations
 #[endpoint {
@@ -4100,7 +4232,7 @@ async fn user_list(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let users = nexus
-            .silo_users_list(&opctx, &pagparams)
+            .silo_users_list_current(&opctx, &pagparams)
             .await?
             .into_iter()
             .map(|i| i.into())
@@ -4110,32 +4242,6 @@ async fn user_list(
             users,
             &|_, user: &User| user.id,
         )?))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Create a user
-///
-/// Users can only be created in Silos with `provision_type` == `Fixed`.
-/// Otherwise, Silo users are just-in-time (JIT) provisioned when a user first
-/// logs in using an external Identity Provider.
-#[endpoint {
-    method = POST,
-    path = "/users",
-    tags = ["silos"],
-}]
-async fn user_create(
-    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    new_user_params: TypedBody<params::UserCreate>,
-) -> Result<HttpResponseCreated<User>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let handler = async {
-        let opctx = OpContext::for_external_api(&rqctx).await?;
-        let user = nexus
-            .silo_fixed_user_create(&opctx, new_user_params.into_inner())
-            .await?;
-        Ok(HttpResponseCreated(user.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

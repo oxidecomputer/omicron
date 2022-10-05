@@ -58,7 +58,8 @@ impl super::Nexus {
 
     // Silo users
 
-    pub async fn silo_users_list(
+    /// List users in the current Silo
+    pub async fn silo_users_list_current(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
@@ -73,16 +74,36 @@ impl super::Nexus {
             .await
     }
 
-    pub async fn silo_user_fetch_by_id(
+    /// Fetch the currently-authenticated Silo user
+    pub async fn silo_user_fetch_self(
         &self,
         opctx: &OpContext,
-        silo_user_id: &Uuid,
     ) -> LookupResult<db::model::SiloUser> {
+        let &actor = opctx
+            .authn
+            .actor_required()
+            .internal_context("loading current user")?;
         let (.., db_silo_user) = LookupPath::new(opctx, &self.db_datastore)
-            .silo_user_id(*silo_user_id)
+            .silo_user_id(actor.actor_id())
             .fetch()
             .await?;
         Ok(db_silo_user)
+    }
+
+    pub async fn silo_users_list(
+        &self,
+        opctx: &OpContext,
+        silo_name: &Name,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<db::model::SiloUser> {
+        let (authz_silo, ..) = LookupPath::new(opctx, &self.db_datastore)
+            .silo_name(silo_name)
+            .fetch()
+            .await?;
+        let authz_silo_user_list = authz::SiloUserList::new(authz_silo);
+        self.db_datastore
+            .silo_users_list_by_id(opctx, &authz_silo_user_list, pagparams)
+            .await
     }
 
     // Built-in users

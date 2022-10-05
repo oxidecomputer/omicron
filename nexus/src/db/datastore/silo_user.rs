@@ -18,11 +18,14 @@ use crate::db::model::SiloUser;
 use crate::db::model::UserBuiltin;
 use crate::db::pagination::paginated;
 use crate::external_api::params;
+use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use chrono::Utc;
 use diesel::prelude::*;
 use nexus_types::identity::Asset;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
+use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::ResourceType;
@@ -62,6 +65,48 @@ impl DataStore {
                 );
                 (authz_silo_user, db_silo_user)
             })
+    }
+
+    /// Delete a Silo User
+    pub async fn silo_user_delete(
+        &self,
+        opctx: &OpContext,
+        authz_silo_user: &authz::SiloUser,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Delete, authz_silo_user).await?;
+
+        self.pool_authorized(opctx)
+            .await?
+            .transaction_async(|mut conn| async move {
+                // Users in API-managed Silos do not currently support groups.
+
+                // Delete ssh keys.
+                {
+                    // TODO-scalability This should be done in batches.
+                    use db::schema::ssh_key::dsl;
+                    diesel::update(dsl::ssh_key)
+                        .filter(dsl::silo_user_id.eq(authz_silo_user.id()))
+                        .filter(dsl::time_deleted.is_null())
+                        .set(dsl::time_deleted.eq(Utc::now()))
+                        .execute_async(&mut conn)
+                        .await?;
+                }
+
+                // Delete the user record.
+                // XXX-dap should use check_if_exists/execute_and_check
+                use db::schema::silo_user::dsl;
+                diesel::update(dsl::silo_user)
+                    .filter(dsl::id.eq(authz_silo_user.id()))
+                    .filter(dsl::time_deleted.is_null())
+                    .set(dsl::time_deleted.eq(Utc::now()))
+                    .execute_async(&mut conn)
+                    //.check_if_exists::<SiloUser>(authz_silo_user.id())
+                    //.execute_and_check(&mut conn)
+                    .await?;
+                Ok(())
+            })
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     /// Given an external ID, return

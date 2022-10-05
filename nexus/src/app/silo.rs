@@ -4,6 +4,7 @@
 
 //! Silos, Users, and SSH Keys.
 
+use crate::authz::ApiResource;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::{Asset, Resource};
@@ -141,15 +142,15 @@ impl super::Nexus {
 
     // Users
 
-    pub async fn silo_fixed_user_create(
+    pub async fn silo_api_user_create(
         &self,
         opctx: &OpContext,
+        silo_name: &Name,
         new_user_params: params::UserCreate,
     ) -> CreateResult<db::model::SiloUser> {
         let datastore = self.datastore();
-        let authz_silo = opctx.authn.silo_required()?;
-        let (.., db_silo) = LookupPath::new(opctx, &datastore)
-            .silo_id(authz_silo.id())
+        let (authz_silo, db_silo) = LookupPath::new(opctx, &datastore)
+            .silo_name(silo_name)
             .fetch()
             .await?;
 
@@ -165,7 +166,7 @@ impl super::Nexus {
             new_user_params.external_id.as_ref().to_owned(),
         );
         let authz_silo_user_list = authz::SiloUserList::new(authz_silo.clone());
-        //
+
         // TODO-cleanup This authz check belongs in silo_user_create().
         opctx
             .authorize(authz::Action::CreateChild, &authz_silo_user_list)
@@ -175,16 +176,51 @@ impl super::Nexus {
         Ok(db_silo_user)
     }
 
+    pub async fn silo_api_user_delete(
+        &self,
+        opctx: &OpContext,
+        silo_name: &Name,
+        silo_user_id: Uuid,
+    ) -> DeleteResult {
+        // Verify that this user is actually in this Silo.
+        let datastore = self.datastore();
+        let (authz_silo, _) = LookupPath::new(opctx, datastore)
+            .silo_name(silo_name)
+            .fetch()
+            .await?;
+        let (_, authz_silo_user, db_silo_user) =
+            LookupPath::new(opctx, datastore)
+                .silo_user_id(silo_user_id)
+                .fetch_for(authz::Action::Delete)
+                .await?;
+        if db_silo_user.silo_id != authz_silo.id() {
+            return Err(authz_silo_user.not_found());
+        }
+
+        self.db_datastore.silo_user_delete(opctx, &authz_silo_user).await
+    }
+
     pub async fn silo_user_fetch(
         &self,
         opctx: &OpContext,
+        silo_name: &Name,
         silo_user_id: Uuid,
     ) -> LookupResult<db::model::SiloUser> {
-        let (.., db_silo_user) = LookupPath::new(opctx, &self.datastore())
-            .silo_user_id(silo_user_id)
+        let datastore = self.datastore();
+        let (authz_silo_requested, _) = LookupPath::new(opctx, datastore)
+            .silo_name(silo_name)
             .fetch()
             .await?;
-        Ok(db_silo_user)
+        let (_, authz_silo_user, db_silo_user) =
+            LookupPath::new(opctx, datastore)
+                .silo_user_id(silo_user_id)
+                .fetch()
+                .await?;
+        if db_silo_user.silo_id != authz_silo_requested.id() {
+            Err(authz_silo_user.not_found())
+        } else {
+            Ok(db_silo_user)
+        }
     }
 
     /// Based on an authenticated subject, fetch or create a silo user
