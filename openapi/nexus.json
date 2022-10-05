@@ -547,18 +547,8 @@
           "required": true
         },
         "responses": {
-          "303": {
-            "description": "redirect (see other)",
-            "headers": {
-              "location": {
-                "description": "HTTP \"Location\" header",
-                "style": "simple",
-                "required": true,
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"

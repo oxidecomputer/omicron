@@ -47,9 +47,6 @@ pub struct SpoofLoginBody {
     pub username: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct SpoofLoginResponse {}
-
 // This is just for demo purposes. we will probably end up with a real
 // username/password login endpoint, but I think it will only be for use while
 // setting up the rack
@@ -63,8 +60,7 @@ pub struct SpoofLoginResponse {}
 pub async fn login_spoof(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     params: TypedBody<SpoofLoginBody>,
-) -> Result<HttpResponseHeaders<HttpResponseOk<SpoofLoginResponse>>, HttpError>
-{
+) -> Result<HttpResponseHeaders<HttpResponseUpdatedNoContent>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
@@ -89,9 +85,8 @@ pub async fn login_spoof(
         let authn_opctx = nexus.opctx_external_authn();
         let session = nexus.session_create(&authn_opctx, user_id).await?;
 
-        let mut response = HttpResponseHeaders::new_unnamed(HttpResponseOk(
-            SpoofLoginResponse {},
-        ));
+        let mut response =
+            HttpResponseHeaders::new_unnamed(HttpResponseUpdatedNoContent());
         {
             let headers = response.headers_mut();
             headers.append(
