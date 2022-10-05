@@ -4,6 +4,7 @@
 
 //! A Modal for displaying rack inventory
 
+use super::clear_buf;
 use crate::inventory::{Component, ComponentId, Inventory};
 use slog::Logger;
 use std::marker::PhantomData;
@@ -167,14 +168,5 @@ impl<'a> StatefulWidget for ComponentModal<'a> {
         self.draw_background(area, buf);
         self.draw_status_bar(area, buf, state);
         self.draw_inventory(area, buf, state);
-    }
-}
-
-// Set the buf area to the bg color
-fn clear_buf(area: Rect, buf: &mut Buffer, style: Style) {
-    for x in area.left()..area.right() {
-        for y in area.top()..area.bottom() {
-            buf.get_mut(x, y).set_style(style).set_symbol(" ");
-        }
     }
 }

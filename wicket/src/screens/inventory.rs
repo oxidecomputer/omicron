@@ -82,13 +82,19 @@ impl InventoryScreen {
         let style = Style::default().fg(OX_GREEN_DARK).bg(OX_GRAY);
         let selected_style = Style::default().fg(OX_YELLOW).bg(OX_GRAY);
         let hovered_style = Style::default().fg(OX_PINK).bg(OX_GRAY);
-        let bar = MenuBar::new(
-            &self.hamburger_state,
-            "Oxide Rack",
+        let help_menu_style =
+            Style::default().fg(OX_OFF_WHITE).bg(Color::Black);
+        let help_menu_command_style =
+            Style::default().fg(OX_GREEN_LIGHT).bg(Color::Black);
+        let bar = MenuBar {
+            hamburger_state: &self.hamburger_state,
+            title: "Oxide Rack",
             style,
             selected_style,
             hovered_style,
-        );
+            help_menu_style,
+            help_menu_command_style,
+        };
         f.render_widget(bar, f.size());
     }
 
@@ -162,17 +168,11 @@ impl InventoryScreen {
         rect.x = vertical_border.0;
         rect.width = rect.width - vertical_border.0 * 2;
 
-        // Unwraps are safe because we verified self.tab_index.is_set() above.
+        // Unwrap is safe because we verified self.tab_index.is_set() above.
         let current =
             *self.component_id_by_tab_index.get(&self.tab_index).unwrap();
-        let next = *self
-            .component_id_by_tab_index
-            .get(&self.tab_index.next())
-            .unwrap();
-        let prev = *self
-            .component_id_by_tab_index
-            .get(&self.tab_index.prev())
-            .unwrap();
+        let next = self.get_next_component_id();
+        let prev = self.get_prev_component_id();
 
         // TODO: Fill in with actual inventory
         let current_component = None;
@@ -198,11 +198,23 @@ impl InventoryScreen {
             KeyCode::Tab => {
                 self.clear_tabbed();
                 self.tab_index.inc();
+                if self.modal_active
+                    && self.tab_index == self.hamburger_state.tab_index
+                {
+                    // We need to skip over the hamburger
+                    self.tab_index.inc();
+                }
                 self.set_tabbed();
             }
             KeyCode::BackTab => {
                 self.clear_tabbed();
                 self.tab_index.dec();
+                if self.modal_active
+                    && self.tab_index == self.hamburger_state.tab_index
+                {
+                    // We need to skip over the hamburger
+                    self.tab_index.dec();
+                }
                 self.set_tabbed();
             }
             KeyCode::Esc => {
@@ -430,6 +442,25 @@ impl InventoryScreen {
             self.tab_index_by_component_id.insert(component_id, tab_index);
         }
     }
+
+    fn get_next_component_id(&self) -> ComponentId {
+        // We skip over the hamburger
+        let mut next = self.tab_index.next();
+        if next == self.hamburger_state.tab_index {
+            next.inc();
+        }
+        *self.component_id_by_tab_index.get(&next).unwrap()
+    }
+
+    // We skip over the hamburger
+    fn get_prev_component_id(&self) -> ComponentId {
+        // We skip over the hamburger
+        let mut prev = self.tab_index.prev();
+        if prev == self.hamburger_state.tab_index {
+            prev.dec();
+        }
+        *self.component_id_by_tab_index.get(&prev).unwrap()
+    }
 }
 
 const MARGIN: Height = Height(5);
@@ -441,13 +472,13 @@ impl Screen for InventoryScreen {
     ) -> anyhow::Result<()> {
         terminal.draw(|f| {
             self.draw_background(f);
-            self.draw_menubar(f);
             if self.modal_active {
                 self.draw_modal(state, f, MARGIN);
             } else {
                 self.draw_rack(f, MARGIN);
                 self.draw_watermark(f);
             }
+            self.draw_menubar(f);
         })?;
         Ok(())
     }
