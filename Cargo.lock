@@ -1178,7 +1178,7 @@ checksum = "1435fa1053d8b2fbbe9be7e97eca7f33d37b28409959813daefc1446a14247f1"
 [[package]]
 name = "dropshot"
 version = "0.8.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#0ae4dd3601b56e5cf0d706889ba1d46470e27326"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#21e86a2de595ff83e21328385fa7444ac1401236"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -1218,7 +1218,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.8.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#0ae4dd3601b56e5cf0d706889ba1d46470e27326"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#21e86a2de595ff83e21328385fa7444ac1401236"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4612,9 +4612,9 @@ dependencies = [
 
 [[package]]
 name = "schemars"
-version = "0.8.10"
+version = "0.8.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1847b767a3d62d95cbf3d8a9f0e421cf57a0d8aa4f411d4b16525afb0284d4ed"
+checksum = "2a5fb6c61f29e723026dc8e923d94c694313212abbecbbe5f55a7748eec5b307"
 dependencies = [
  "bytes",
  "chrono",
@@ -4627,9 +4627,9 @@ dependencies = [
 
 [[package]]
 name = "schemars_derive"
-version = "0.8.10"
+version = "0.8.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af4d7e1b012cb3d9129567661a63755ea4b8a7386d339dc945ae187e403c6743"
+checksum = "f188d036977451159430f3b8dc82ec76364a42b7e289c2b18a9a18f4470058e9"
 dependencies = [
  "proc-macro2",
  "quote",
