@@ -7,9 +7,11 @@
 mod animated_logo;
 mod banner;
 mod component;
+mod menubar;
 mod rack;
 
 pub use animated_logo::{Logo, LogoState, LOGO_HEIGHT, LOGO_WIDTH};
 pub use banner::Banner;
 pub use component::{ComponentModal, ComponentModalState};
+pub use menubar::{HamburgerState, MenuBar};
 pub use rack::{Rack, RackState};
