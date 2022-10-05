@@ -6,7 +6,7 @@ license = "MPL-2.0"
 
 [dependencies]
 anyhow = "1.0"
-clap = { version = "3.2", features = ["derive"] }
+clap = { version = "4.0", features = ["derive"] }
 slog = { version = "2.7", features = ["max_level_trace", "release_max_level_debug"] }
 slog-async = "2.6"
 slog-term = "2.9"

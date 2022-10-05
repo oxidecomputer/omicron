@@ -13,7 +13,7 @@ async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", 
 async-trait = "0.1.56"
 base64 = "0.13.0"
 bb8 = "0.8.0"
-clap = { version = "3.2", features = ["derive"] }
+clap = { version = "4.0", features = ["derive"] }
 cookie = "0.16"
 crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "bacffd142fc38a01fe255407b0c8d5d0aacfe778" }
 diesel = { version = "2.0.0", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }

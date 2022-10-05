@@ -7,7 +7,7 @@ license = "MPL-2.0"
 
 [dependencies]
 anyhow = "1.0"
-clap = { version = "3.2", features = ["derive"] }
+clap = { version = "4.0", features = ["derive"] }
 crossbeam = "0.8"
 omicron-sled-agent = { path = "../sled-agent" }
 omicron-package = { path = "../package" }
