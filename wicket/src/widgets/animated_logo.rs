@@ -61,10 +61,12 @@ impl<'a> Logo<'a> {
 
 impl<'a> Widget for Logo<'a> {
     fn render(self, area: Rect, buf: &mut Buffer) {
+        // Delay painting for 8 frames
+        let paint_point =
+            if self.state.frame < 8 { 0 } else { self.state.frame - 8 };
         for (y, line) in self.state.text.lines().enumerate() {
             for (x, c) in line.chars().enumerate() {
                 if c == '#' {
-                    let paint_point = self.state.frame / 3 * 2;
                     let cell = buf
                         .get_mut(x as u16 + area.left(), y as u16 + area.top())
                         .set_symbol(" ");
