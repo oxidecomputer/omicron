@@ -4026,6 +4026,18 @@ async fn updates_refresh(
 
 // Metrics
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ResourceUtilization {
+    #[serde(flatten)]
+    pub pagination: dropshot::PaginationParams<
+        params::ResourceMetrics,
+        params::ResourceMetrics,
+    >,
+
+    /// The UUID of the container being queried
+    pub id: Uuid,
+}
+
 /// Access metrics data
 #[endpoint {
      method = GET,
@@ -4034,7 +4046,7 @@ async fn updates_refresh(
 }]
 async fn system_metrics_utilization_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    query_params: Query<params::ResourceUtilization>,
+    query_params: Query<ResourceUtilization>,
 ) -> Result<HttpResponseOk<ResultsPage<oximeter_db::Measurement>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;

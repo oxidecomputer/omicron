@@ -2710,7 +2710,6 @@ dependencies = [
  "api_identity",
  "base64",
  "chrono",
- "dropshot",
  "omicron-common",
  "openssl",
  "openssl-probe",
