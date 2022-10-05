@@ -5,6 +5,7 @@
 //! Implementation of queries for updating resource usage info.
 
 use crate::db::alias::ExpressionAlias;
+use crate::db::model::ResourceUsage;
 use crate::db::pool::DbConnection;
 use crate::db::subquery::{AsQuerySource, Cte, CteBuilder, CteQuery};
 use db_macros::Subquery;
@@ -12,6 +13,7 @@ use diesel::pg::Pg;
 use diesel::query_builder::{AstPass, Query, QueryFragment, QueryId};
 use diesel::{
     sql_types, CombineDsl, ExpressionMethods, IntoSql, QueryDsl, RunQueryDsl,
+    SelectableHelper,
 };
 use nexus_db_model::queries::resource_usage_update::{
     all_collections, parent_org, parent_silo,
@@ -125,7 +127,7 @@ impl ResourceUsageUpdate {
                 .filter(dsl::id.eq_any(
                     all_collections.query_source().select(all_collections::id),
                 ))
-                .returning(dsl::id),
+                .returning(ResourceUsage::as_returning()),
         );
 
         let cte = CteBuilder::new()
@@ -150,8 +152,12 @@ impl QueryFragment<Pg> for ResourceUsageUpdate {
     }
 }
 
+type SelectableSql<T> = <
+    <T as diesel::Selectable<Pg>>::SelectExpression as diesel::Expression
+>::SqlType;
+
 impl Query for ResourceUsageUpdate {
-    type SqlType = sql_types::Uuid;
+    type SqlType = SelectableSql<ResourceUsage>;
 }
 
 impl RunQueryDsl<DbConnection> for ResourceUsageUpdate {}
