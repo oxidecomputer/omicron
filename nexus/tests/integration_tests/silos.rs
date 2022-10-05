@@ -13,6 +13,7 @@ use omicron_nexus::external_api::views::{
 use omicron_nexus::external_api::{params, shared};
 use omicron_nexus::TestInterfaces as _;
 use std::collections::HashSet;
+use std::str::FromStr;
 
 use http::method::Method;
 use http::StatusCode;
@@ -1461,4 +1462,150 @@ async fn test_ensure_same_silo_group(cptestctx: &ControlPlaneTestContext) {
         .unwrap();
 
     // TODO-coverage were we intending to verify something here?
+}
+
+#[nexus_test]
+async fn test_jit_silo_constraints(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.apictx.nexus;
+    let silo =
+        create_silo(&client, "jit", true, shared::UserProvisionType::Jit).await;
+
+    // We need one initial user that would in principle have privileges to
+    // create other users.
+    let new_silo_user_id =
+        "6922f0b2-9a92-659b-da6b-93ad4955a3a3".parse().unwrap();
+    let admin_user = nexus
+        .silo_user_create(
+            silo.identity.id,
+            new_silo_user_id,
+            "admin-user".into(),
+        )
+        .await
+        .unwrap();
+
+    // Grant this user "admin" privileges on that Silo.
+    grant_iam(
+        client,
+        "/silos/jit",
+        SiloRole::Admin,
+        new_silo_user_id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    // They should not be able to create a local-only user in this JIT Silo.
+    let password = params::Password::from_str("dummy").unwrap();
+    let error: dropshot::HttpErrorResponseBody =
+        NexusRequest::expect_failure_with_body(
+            client,
+            StatusCode::BAD_REQUEST,
+            Method::POST,
+            "/users",
+            &params::UserCreate {
+                external_id: params::UserId::from_str("dummy").unwrap(),
+                password: params::UserPassword::Password(password.clone()),
+            },
+        )
+        .authn_as(AuthnMode::SiloUser(new_silo_user_id))
+        .execute()
+        .await
+        .unwrap()
+        .parsed_body()
+        .unwrap();
+    assert_eq!(error.message, "cannot create users in this kind of Silo");
+
+}
+
+#[nexus_test]
+async fn test_fixed_silo_constraints(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.apictx.nexus;
+
+    // Now, let's try a "fixed" Silo with its own admin user.
+    let silo =
+        create_silo(&client, "fixed", true, shared::UserProvisionType::Fixed)
+            .await;
+    let new_silo_user_id =
+        "5b3564b6-8770-4a30-b538-8ef6ae3efa3b".parse().unwrap();
+    let _ = nexus
+        .silo_user_create(
+            silo.identity.id,
+            new_silo_user_id,
+            "admin-user".into(),
+        )
+        .await
+        .unwrap();
+    grant_iam(
+        client,
+        "/silos/fixed",
+        SiloRole::Admin,
+        new_silo_user_id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    // It's not allowed to create an identity provider in a fixed Silo.
+    let error: dropshot::HttpErrorResponseBody =
+        NexusRequest::expect_failure_with_body(
+            client,
+            StatusCode::BAD_REQUEST,
+            Method::POST,
+            "/silos/fixed/saml-identity-providers",
+            &params::SamlIdentityProviderCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "some-totally-real-saml-provider"
+                        .to_string()
+                        .parse()
+                        .unwrap(),
+                    description: "a demo provider".to_string(),
+                },
+
+                idp_metadata_source:
+                    params::IdpMetadataSource::Base64EncodedXml {
+                        data: base64::encode(SAML_IDP_DESCRIPTOR.to_string()),
+                    },
+
+                idp_entity_id: "entity_id".to_string(),
+                sp_client_id: "client_id".to_string(),
+                acs_url: "http://acs".to_string(),
+                slo_url: "http://slo".to_string(),
+                technical_contact_email: "technical@fake".to_string(),
+
+                signing_keypair: None,
+
+                group_attribute_name: None,
+            },
+        )
+        .authn_as(AuthnMode::SiloUser(new_silo_user_id))
+        .execute()
+        .await
+        .unwrap()
+        .parsed_body()
+        .unwrap();
+
+    assert_eq!(
+        error.message,
+        "cannot create identity providers in this kind of Silo"
+    );
+
+    // The SAML login endpoints should not work, either.
+    NexusRequest::expect_failure(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::GET,
+        "/login/fixed/foo",
+    )
+    .execute()
+    .await
+    .unwrap();
+    NexusRequest::expect_failure(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::POST,
+        "/login/fixed/foo",
+    )
+    .execute()
+    .await
+    .unwrap();
 }

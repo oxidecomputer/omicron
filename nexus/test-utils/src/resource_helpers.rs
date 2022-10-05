@@ -18,11 +18,13 @@ use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_nexus::crucible_agent_client::types::State as RegionState;
 use omicron_nexus::external_api::params;
+use omicron_nexus::external_api::params::UserId;
 use omicron_nexus::external_api::shared;
 use omicron_nexus::external_api::shared::IdentityType;
 use omicron_nexus::external_api::shared::IpRange;
 use omicron_nexus::external_api::views::IpPool;
 use omicron_nexus::external_api::views::IpPoolRange;
+use omicron_nexus::external_api::views::User;
 use omicron_nexus::external_api::views::{
     Organization, Project, Silo, Vpc, VpcRouter,
 };
@@ -122,6 +124,19 @@ pub async fn create_silo(
             identity_mode,
             admin_group_name: None,
         },
+    )
+    .await
+}
+
+pub async fn create_local_user(
+    client: &ClientTestContext,
+    username: &UserId,
+    password: params::UserPassword,
+) -> User {
+    object_create(
+        client,
+        "/users",
+        &params::UserCreate { external_id: username.to_owned(), password },
     )
     .await
 }

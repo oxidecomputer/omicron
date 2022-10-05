@@ -242,7 +242,9 @@ pub fn external_api() -> NexusApiDescription {
         api.register(system_image_delete)?;
 
         api.register(updates_refresh)?;
+
         api.register(user_list)?;
+        api.register(user_create)?;
 
         // Console API operations
         api.register(console_api::login_begin)?;
@@ -4112,6 +4114,39 @@ async fn user_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Create a user
+///
+/// Users can only be created in Silos with `provision_type` == `Fixed`.
+/// Otherwise, Silo users are just-in-time (JIT) provisioned when a user first
+/// logs in using an external Identity Provider.
+#[endpoint {
+    method = POST,
+    path = "/users",
+    tags = ["silos"],
+}]
+async fn user_create(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    new_user_params: TypedBody<params::UserCreate>,
+) -> Result<HttpResponseCreated<User>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let user = nexus
+            .silo_fixed_user_create(&opctx, new_user_params.into_inner())
+            .await?;
+        Ok(HttpResponseCreated(user.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Path parameters for Silo User requests
+#[derive(Deserialize, JsonSchema)]
+struct UserPathParam {
+    /// The user's internal id
+    user_id: Uuid,
+}
+
 // Built-in (system) users
 
 /// List built-in users
@@ -4148,7 +4183,7 @@ async fn system_user_list(
 
 /// Path parameters for global (system) user requests
 #[derive(Deserialize, JsonSchema)]
-struct UserPathParam {
+struct BuiltinUserPathParam {
     /// The built-in user's unique name.
     user_name: Name,
 }
@@ -4161,7 +4196,7 @@ struct UserPathParam {
 }]
 async fn system_user_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<UserPathParam>,
+    path_params: Path<BuiltinUserPathParam>,
 ) -> Result<HttpResponseOk<UserBuiltin>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
