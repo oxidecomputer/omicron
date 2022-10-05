@@ -305,8 +305,13 @@ CREATE INDEX on omicron.public.volume (
  * Silos
  */
 
+CREATE TYPE omicron.public.authentication_mode AS ENUM (
+  'local',
+  'saml'
+);
+
 CREATE TYPE omicron.public.user_provision_type AS ENUM (
-  'fixed',
+  'api_only',
   'jit'
 );
 
@@ -320,6 +325,7 @@ CREATE TABLE omicron.public.silo (
     time_deleted TIMESTAMPTZ,
 
     discoverable BOOL NOT NULL,
+    authentication_mode omicron.public.authentication_mode NOT NULL,
     user_provision_type omicron.public.user_provision_type NOT NULL,
 
     /* child resource generation number, per RFD 192 */
@@ -654,6 +660,8 @@ CREATE TABLE omicron.public.disk (
     /* Indicates that the object has been deleted */
     /* This is redundant for Disks, but we keep it here for consistency. */
     time_deleted TIMESTAMPTZ,
+
+    /* child resource generation number, per RFD 192 */
     rcgen INT NOT NULL,
 
     /* Every Disk is in exactly one Project at a time. */
@@ -771,6 +779,9 @@ CREATE TABLE omicron.public.snapshot (
 
     /* Every Snapshot consists of a root volume */
     volume_id UUID NOT NULL,
+
+    /* Where will the scrubbed blocks eventually land? */
+    destination_volume_id UUID,
 
     gen INT NOT NULL,
     state omicron.public.snapshot_state NOT NULL,

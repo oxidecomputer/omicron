@@ -77,6 +77,8 @@ table! {
         disk_id -> Uuid,
         volume_id -> Uuid,
 
+        destination_volume_id -> Nullable<Uuid>,
+
         gen -> Int8,
         state -> crate::SnapshotStateEnum,
         block_size -> crate::BlockSizeEnum,
@@ -196,6 +198,7 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
 
         discoverable -> Bool,
+        authentication_mode -> crate::AuthenticationModeEnum,
         user_provision_type -> crate::UserProvisionTypeEnum,
 
         rcgen -> Int8,

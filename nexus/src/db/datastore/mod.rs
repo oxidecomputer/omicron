@@ -235,6 +235,7 @@ mod test {
     use crate::db::identity::Asset;
     use crate::db::identity::Resource;
     use crate::db::lookup::LookupPath;
+    use crate::db::model::BlockSize;
     use crate::db::model::Dataset;
     use crate::db::model::ExternalIp;
     use crate::db::model::Rack;
@@ -522,10 +523,16 @@ mod test {
             ByteCount::from_mebibytes_u32(500),
         );
         let volume1_id = Uuid::new_v4();
+
         // Currently, we only allocate one Region Set per volume.
         let expected_region_count = REGION_REDUNDANCY_THRESHOLD;
         let dataset_and_regions = datastore
-            .region_allocate(&opctx, volume1_id, &params)
+            .region_allocate(
+                &opctx,
+                volume1_id,
+                &params.disk_source,
+                params.size,
+            )
             .await
             .unwrap();
 
@@ -536,8 +543,11 @@ mod test {
             assert!(disk1_datasets.insert(dataset.id()));
             assert_eq!(volume1_id, region.volume_id());
             assert_eq!(ByteCount::from(4096), region.block_size());
-            assert_eq!(params.extent_size() / 4096, region.blocks_per_extent());
-            assert_eq!(params.extent_count(), region.extent_count());
+            let (_, extent_count) = DataStore::get_crucible_allocation(
+                &BlockSize::AdvancedFormat,
+                params.size,
+            );
+            assert_eq!(extent_count, region.extent_count());
         }
 
         // Allocate regions for a second disk. Observe that we allocate from
@@ -548,17 +558,26 @@ mod test {
         );
         let volume2_id = Uuid::new_v4();
         let dataset_and_regions = datastore
-            .region_allocate(&opctx, volume2_id, &params)
+            .region_allocate(
+                &opctx,
+                volume2_id,
+                &params.disk_source,
+                params.size,
+            )
             .await
             .unwrap();
+
         assert_eq!(expected_region_count, dataset_and_regions.len());
         let mut disk2_datasets = HashSet::new();
         for (dataset, region) in dataset_and_regions {
             assert!(disk2_datasets.insert(dataset.id()));
             assert_eq!(volume2_id, region.volume_id());
             assert_eq!(ByteCount::from(4096), region.block_size());
-            assert_eq!(params.extent_size() / 4096, region.blocks_per_extent());
-            assert_eq!(params.extent_count(), region.extent_count());
+            let (_, extent_count) = DataStore::get_crucible_allocation(
+                &BlockSize::AdvancedFormat,
+                params.size,
+            );
+            assert_eq!(extent_count, region.extent_count());
         }
 
         // Double-check that the datasets used for the first disk weren't
@@ -605,11 +624,21 @@ mod test {
         );
         let volume_id = Uuid::new_v4();
         let mut dataset_and_regions1 = datastore
-            .region_allocate(&opctx, volume_id, &params)
+            .region_allocate(
+                &opctx,
+                volume_id,
+                &params.disk_source,
+                params.size,
+            )
             .await
             .unwrap();
         let mut dataset_and_regions2 = datastore
-            .region_allocate(&opctx, volume_id, &params)
+            .region_allocate(
+                &opctx,
+                volume_id,
+                &params.disk_source,
+                params.size,
+            )
             .await
             .unwrap();
 
@@ -672,7 +701,12 @@ mod test {
         );
         let volume1_id = Uuid::new_v4();
         let err = datastore
-            .region_allocate(&opctx, volume1_id, &params)
+            .region_allocate(
+                &opctx,
+                volume1_id,
+                &params.disk_source,
+                params.size,
+            )
             .await
             .unwrap_err();
 
@@ -726,7 +760,12 @@ mod test {
         let volume1_id = Uuid::new_v4();
 
         assert!(datastore
-            .region_allocate(&opctx, volume1_id, &params)
+            .region_allocate(
+                &opctx,
+                volume1_id,
+                &params.disk_source,
+                params.size
+            )
             .await
             .is_err());
 

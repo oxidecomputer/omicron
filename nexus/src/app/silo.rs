@@ -181,9 +181,9 @@ impl super::Nexus {
                 // external id. The next action depends on the silo's user
                 // provision type.
                 match db_silo.user_provision_type {
-                    // If the user provision type is fixed, do not a new user if
-                    // one does not exist.
-                    db::model::UserProvisionType::Fixed => {
+                    // If the user provision type is ApiOnly, do not create a
+                    // new user if one does not exist.
+                    db::model::UserProvisionType::ApiOnly => {
                         return Ok(None);
                     }
 
@@ -212,7 +212,7 @@ impl super::Nexus {
 
         for group in &authenticated_subject.groups {
             let silo_group = match db_silo.user_provision_type {
-                db::model::UserProvisionType::Fixed => {
+                db::model::UserProvisionType::ApiOnly => {
                     self.db_datastore
                         .silo_group_optional_lookup(
                             opctx,
@@ -383,6 +383,19 @@ impl super::Nexus {
         // But we check now to protect the code that fetches the descriptor from
         // an external source.
         opctx.authorize(authz::Action::CreateChild, &authz_idp_list).await?;
+
+        // The authentication mode is immutable so it's safe to check this here
+        // and bail out.
+        if db_silo.authentication_mode
+            != nexus_db_model::AuthenticationMode::Saml
+        {
+            return Err(Error::invalid_request(&format!(
+                "cannot create SAML identity provider for this Silo type \
+                (expected authentication mode {:?}, found {:?})",
+                nexus_db_model::AuthenticationMode::Saml,
+                &db_silo.authentication_mode,
+            )));
+        }
 
         let idp_metadata_document_string = match &params.idp_metadata_source {
             params::IdpMetadataSource::Url { url } => {

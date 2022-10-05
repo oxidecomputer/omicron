@@ -28,9 +28,13 @@ async fn test_cannot_read_others_ssh_keys(cptestctx: &ControlPlaneTestContext) {
     let nexus = &cptestctx.server.apictx.nexus;
 
     // Create a silo with a two unprivileged users
-    let silo =
-        create_silo(&client, "authz", true, shared::UserProvisionType::Fixed)
-            .await;
+    let silo = create_silo(
+        &client,
+        "authz",
+        true,
+        shared::SiloIdentityMode::LocalOnly,
+    )
+    .await;
 
     let user1 = Uuid::new_v4();
     nexus
@@ -130,9 +134,13 @@ async fn test_global_image_read_for_unpriv(
     let nexus = &cptestctx.server.apictx.nexus;
 
     // Create a silo with an unprivileged user
-    let silo =
-        create_silo(&client, "authz", true, shared::UserProvisionType::Fixed)
-            .await;
+    let silo = create_silo(
+        &client,
+        "authz",
+        true,
+        shared::SiloIdentityMode::LocalOnly,
+    )
+    .await;
 
     let new_silo_user_id = Uuid::new_v4();
     nexus
@@ -206,9 +214,13 @@ async fn test_list_silo_users_for_unpriv(cptestctx: &ControlPlaneTestContext) {
     let nexus = &cptestctx.server.apictx.nexus;
 
     // Create a silo with an unprivileged user
-    let silo =
-        create_silo(&client, "authz", true, shared::UserProvisionType::Fixed)
-            .await;
+    let silo = create_silo(
+        &client,
+        "authz",
+        true,
+        shared::SiloIdentityMode::LocalOnly,
+    )
+    .await;
 
     let new_silo_user_id = Uuid::new_v4();
     nexus
@@ -217,9 +229,13 @@ async fn test_list_silo_users_for_unpriv(cptestctx: &ControlPlaneTestContext) {
         .unwrap();
 
     // Create another silo with another unprivileged user
-    let silo =
-        create_silo(&client, "other", true, shared::UserProvisionType::Fixed)
-            .await;
+    let silo = create_silo(
+        &client,
+        "other",
+        true,
+        shared::SiloIdentityMode::LocalOnly,
+    )
+    .await;
 
     nexus
         .silo_user_create(silo.identity.id, Uuid::new_v4(), "otheruser".into())
@@ -249,9 +265,13 @@ async fn test_list_silo_idps_for_unpriv(cptestctx: &ControlPlaneTestContext) {
     let nexus = &cptestctx.server.apictx.nexus;
 
     // Create a silo with an unprivileged user
-    let silo =
-        create_silo(&client, "authz", true, shared::UserProvisionType::Fixed)
-            .await;
+    let silo = create_silo(
+        &client,
+        "authz",
+        true,
+        shared::SiloIdentityMode::LocalOnly,
+    )
+    .await;
 
     let new_silo_user_id = Uuid::new_v4();
     nexus
@@ -279,9 +299,13 @@ async fn test_session_me_for_unpriv(cptestctx: &ControlPlaneTestContext) {
     let nexus = &cptestctx.server.apictx.nexus;
 
     // Create a silo with an unprivileged user
-    let silo =
-        create_silo(&client, "authz", true, shared::UserProvisionType::Fixed)
-            .await;
+    let silo = create_silo(
+        &client,
+        "authz",
+        true,
+        shared::SiloIdentityMode::LocalOnly,
+    )
+    .await;
 
     let new_silo_user_id = Uuid::new_v4();
     nexus
@@ -306,9 +330,13 @@ async fn test_silo_read_for_unpriv(cptestctx: &ControlPlaneTestContext) {
     let nexus = &cptestctx.server.apictx.nexus;
 
     // Create a silo with an unprivileged user
-    let silo =
-        create_silo(&client, "authz", true, shared::UserProvisionType::Fixed)
-            .await;
+    let silo = create_silo(
+        &client,
+        "authz",
+        true,
+        shared::SiloIdentityMode::LocalOnly,
+    )
+    .await;
 
     let new_silo_user_id = Uuid::new_v4();
     nexus
@@ -317,9 +345,13 @@ async fn test_silo_read_for_unpriv(cptestctx: &ControlPlaneTestContext) {
         .unwrap();
 
     // Create another silo
-    let _silo =
-        create_silo(&client, "other", true, shared::UserProvisionType::Fixed)
-            .await;
+    let _silo = create_silo(
+        &client,
+        "other",
+        true,
+        shared::SiloIdentityMode::LocalOnly,
+    )
+    .await;
 
     // That user can access their own silo
     let _silo: views::Silo =
