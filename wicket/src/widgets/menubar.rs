@@ -4,6 +4,7 @@
 
 //! The menu bar at the top of each screen
 
+use super::HelpMenu;
 use crate::screens::TabIndex;
 use tui::buffer::Buffer;
 use tui::layout::Alignment;
@@ -13,7 +14,6 @@ use tui::text::Text;
 use tui::widgets::Block;
 use tui::widgets::Paragraph;
 use tui::widgets::Widget;
-use tui::widgets::{BorderType, Borders};
 
 #[derive(Debug)]
 pub struct HamburgerState {
@@ -38,24 +38,16 @@ impl HamburgerState {
 
 #[derive(Debug)]
 pub struct MenuBar<'a> {
-    hamburger_state: &'a HamburgerState,
-    title: &'a str,
-    style: Style,
-    selected_style: Style,
-    hovered_style: Style,
+    pub hamburger_state: &'a HamburgerState,
+    pub title: &'a str,
+    pub style: Style,
+    pub selected_style: Style,
+    pub hovered_style: Style,
+    pub help_menu_style: Style,
+    pub help_menu_command_style: Style,
 }
 
 impl<'a> MenuBar<'a> {
-    pub fn new(
-        hamburger_state: &'a HamburgerState,
-        title: &'a str,
-        style: Style,
-        selected_style: Style,
-        hovered_style: Style,
-    ) -> MenuBar<'a> {
-        MenuBar { hamburger_state, title, style, selected_style, hovered_style }
-    }
-
     fn draw_title(&self, mut rect: Rect, buf: &mut Buffer) {
         rect.height = 1;
         rect.y = 1;
@@ -67,6 +59,9 @@ impl<'a> MenuBar<'a> {
     }
 
     fn draw_hamburger(&self, mut rect: Rect, buf: &mut Buffer) {
+        if self.hamburger_state.selected {
+            return;
+        }
         rect.height = 3;
         rect.width = 4;
         rect.x = 1;
@@ -83,11 +78,22 @@ impl<'a> MenuBar<'a> {
         let hamburger = Paragraph::new(text);
         hamburger.render(rect, buf);
     }
+
+    fn draw_help_menu(&self, rect: Rect, buf: &mut Buffer) {
+        let menu = HelpMenu {
+            style: self.help_menu_style,
+            command_style: self.help_menu_command_style,
+        };
+        menu.render(rect, buf);
+    }
 }
 
 impl<'a> Widget for MenuBar<'a> {
     fn render(self, rect: Rect, buf: &mut Buffer) {
         self.draw_title(rect, buf);
         self.draw_hamburger(rect, buf);
+        if self.hamburger_state.selected {
+            self.draw_help_menu(rect, buf);
+        }
     }
 }
