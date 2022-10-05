@@ -9,8 +9,9 @@ use super::Screen;
 use super::TabIndex;
 use super::{Height, Width};
 use crate::inventory::ComponentId;
+use crate::widgets::HamburgerState;
 use crate::widgets::{
-    Banner, ComponentModal, ComponentModalState, Rack, RackState,
+    Banner, ComponentModal, ComponentModalState, MenuBar, Rack, RackState,
 };
 use crate::Action;
 use crate::Frame;
@@ -22,12 +23,19 @@ use crossterm::event::{
 };
 use slog::Logger;
 use std::collections::BTreeMap;
-use tui::layout::{Alignment, Rect};
+use tui::layout::Rect;
 use tui::style::{Color, Style};
 use tui::widgets::{Block, Borders};
 
 // Currently we only allow tabbing through the rack
-const MAX_TAB_INDEX: u16 = 35;
+const MAX_TAB_INDEX: u16 = 36;
+
+// Is the mouse hovering over the hamburger or rack?
+#[derive(Debug, Clone, Copy)]
+pub enum HoverState {
+    Rack(ComponentId),
+    Hamburger,
+}
 
 /// Show the rack inventory as learned from MGS
 pub struct InventoryScreen {
@@ -35,7 +43,8 @@ pub struct InventoryScreen {
     watermark: &'static str,
     rack_state: RackState,
     tab_index: TabIndex,
-    hovered: Option<ComponentId>,
+    hovered: Option<HoverState>,
+    hamburger_state: HamburgerState,
     tab_index_by_component_id: BTreeMap<ComponentId, TabIndex>,
     component_id_by_tab_index: BTreeMap<TabIndex, ComponentId>,
     modal_active: bool,
@@ -51,6 +60,10 @@ impl InventoryScreen {
             rack_state,
             tab_index: TabIndex::new_unset(MAX_TAB_INDEX),
             hovered: None,
+            hamburger_state: HamburgerState::new(TabIndex::new(
+                MAX_TAB_INDEX,
+                MAX_TAB_INDEX,
+            )),
             tab_index_by_component_id: BTreeMap::new(),
             component_id_by_tab_index: BTreeMap::new(),
             modal_active: false,
@@ -61,13 +74,22 @@ impl InventoryScreen {
 
     fn draw_background(&self, f: &mut Frame) {
         let style = Style::default().fg(OX_GREEN_DARK).bg(OX_GRAY);
-        let block = Block::default()
-            .style(style)
-            .borders(Borders::NONE)
-            .title("Inventory: Fuck yeah!")
-            .title_alignment(Alignment::Center);
-
+        let block = Block::default().style(style).borders(Borders::NONE);
         f.render_widget(block, f.size());
+    }
+
+    fn draw_menubar(&self, f: &mut Frame) {
+        let style = Style::default().fg(OX_GREEN_DARK).bg(OX_GRAY);
+        let selected_style = Style::default().fg(OX_YELLOW).bg(OX_GRAY);
+        let hovered_style = Style::default().fg(OX_PINK).bg(OX_GRAY);
+        let bar = MenuBar::new(
+            &self.hamburger_state,
+            "Oxide Rack",
+            style,
+            selected_style,
+            hovered_style,
+        );
+        f.render_widget(bar, f.size());
     }
 
     fn draw_watermark(&self, f: &mut Frame) -> (Height, Width) {
@@ -184,20 +206,30 @@ impl InventoryScreen {
                 self.set_tabbed();
             }
             KeyCode::Esc => {
-                if !self.modal_active {
-                    self.clear_tabbed();
-                    self.tab_index.clear();
-                } else {
+                if self.hamburger_state.selected {
+                    // Close the hamburger menu on the next draw
+                    self.hamburger_state.selected = false;
+                } else if self.modal_active {
                     // Close the modal on the next draw
                     self.modal_active = false;
+                } else {
+                    self.clear_tabbed();
+                    self.tab_index.clear();
                 }
             }
             KeyCode::Enter => {
-                if !self.modal_active && self.tab_index.is_set() {
+                // We allow the hamburger menu on top of the modal
+                if self.tab_index == self.hamburger_state.tab_index {
+                    if self.hamburger_state.selected {
+                        // The menu is already open
+                        // TODO: Select the currently tabbed item?
+                        // Do we even need to allow that selection here ala command palette?
+                    } else {
+                        self.hamburger_state.selected = true;
+                    }
+                } else if !self.modal_active && self.tab_index.is_set() {
                     // Open the modal on the next draw
                     self.modal_active = true;
-                } else {
-                    // TODO: Send the command through to the modal
                 }
             }
             _ => (),
@@ -229,14 +261,23 @@ impl InventoryScreen {
 
         // Set the tab index to the hovered component Id if there is one.
         // Remove the old tab_index, and make it match the clicked one
-        if let Some(component_id) = self.hovered {
-            self.clear_tabbed();
-            self.tab_index = self
-                .tab_index_by_component_id
-                .get(&component_id)
-                .unwrap()
-                .clone();
-            self.set_tabbed();
+        if let Some(hover_state) = self.hovered {
+            match hover_state {
+                HoverState::Hamburger => {
+                    self.clear_tabbed();
+                    self.tab_index = self.hamburger_state.tab_index;
+                    self.set_tabbed();
+                }
+                HoverState::Rack(component_id) => {
+                    self.clear_tabbed();
+                    self.tab_index = self
+                        .tab_index_by_component_id
+                        .get(&component_id)
+                        .unwrap()
+                        .clone();
+                    self.set_tabbed();
+                }
+            }
 
             // Now that we've set the TabIndex, just act as if `Enter` was
             // pressed.
@@ -252,29 +293,81 @@ impl InventoryScreen {
     // Discover which rect the mouse is hovering over, remove any previous
     // hover state, and set any new state.
     fn set_hover_state(&mut self, x: u16, y: u16) -> Vec<Action> {
-        let id = self.find_rect_intersection(x, y);
-        if id == self.hovered {
-            // No change
-            vec![]
-        } else {
-            if let Some(id) = self.hovered {
-                // Clear the old hover state
-                self.rack_state.component_rects.get_mut(&id).unwrap().hovered =
-                    false;
+        // Are we currently hovering over the hamburger?
+        let mouse_pointer = Rect { x, y, width: 1, height: 1 };
+        if self.hamburger_state.rect.intersects(mouse_pointer) {
+            let actions = match self.hovered {
+                Some(HoverState::Hamburger) => {
+                    // No change
+                    vec![]
+                }
+                Some(HoverState::Rack(id)) => {
+                    // Clear the old hover state
+                    self.rack_state
+                        .component_rects
+                        .get_mut(&id)
+                        .unwrap()
+                        .hovered = false;
+                    vec![Action::Redraw]
+                }
+                None => {
+                    vec![Action::Redraw]
+                }
+            };
+
+            self.hamburger_state.hovered = true;
+            self.hovered = Some(HoverState::Hamburger);
+            return actions;
+        }
+
+        // Were we previously hovering over anything?
+        let current_id = self.find_rack_rect_intersection(x, y);
+        let actions = match self.hovered {
+            Some(HoverState::Hamburger) => {
+                self.hamburger_state.hovered = false;
+                vec![Action::Redraw]
             }
-            self.hovered = id;
-            if let Some(id) = id {
+            Some(HoverState::Rack(id)) => {
+                if current_id == Some(id) {
+                    // No change
+                    vec![]
+                } else {
+                    // Clear the old hover state
+                    self.rack_state
+                        .component_rects
+                        .get_mut(&id)
+                        .unwrap()
+                        .hovered = false;
+                    vec![Action::Redraw]
+                }
+            }
+            None => {
+                vec![Action::Redraw]
+            }
+        };
+
+        // Are we actually hovering over the rack
+        match current_id {
+            Some(id) => {
+                self.hovered = Some(HoverState::Rack(id));
                 // Set the new state
                 self.rack_state.component_rects.get_mut(&id).unwrap().hovered =
                     true;
             }
-            vec![Action::Redraw]
-        }
+            None => {
+                self.hovered = None;
+            }
+        };
+        actions
     }
 
     // See if the mouse is hovering over any part of the rack and return
     // the component if it is.
-    fn find_rect_intersection(&self, x: u16, y: u16) -> Option<ComponentId> {
+    fn find_rack_rect_intersection(
+        &self,
+        x: u16,
+        y: u16,
+    ) -> Option<ComponentId> {
         let mouse_pointer = Rect { x, y, width: 1, height: 1 };
         if !self.rack_state.rect.intersects(mouse_pointer) {
             return None;
@@ -304,12 +397,15 @@ impl InventoryScreen {
     fn update_tabbed(&mut self, val: bool) {
         if let Some(id) = self.component_id_by_tab_index.get(&self.tab_index) {
             self.rack_state.component_rects.get_mut(&id).unwrap().tabbed = val;
+        } else if self.tab_index == self.hamburger_state.tab_index {
+            self.hamburger_state.tabbed = val;
         }
     }
 
     // Map Rack [`ComponentId`]s
     fn init_tab_index(&mut self) {
-        for i in 0..=MAX_TAB_INDEX {
+        // Exclude the last tab index, which is the hamburger menu
+        for i in 0..MAX_TAB_INDEX {
             let tab_index = TabIndex::new(MAX_TAB_INDEX, i);
             let component_id = if i < 16 {
                 ComponentId::Sled(i.try_into().unwrap())
@@ -345,12 +441,13 @@ impl Screen for InventoryScreen {
     ) -> anyhow::Result<()> {
         terminal.draw(|f| {
             self.draw_background(f);
+            self.draw_menubar(f);
             if self.modal_active {
                 self.draw_modal(state, f, MARGIN);
             } else {
                 self.draw_rack(f, MARGIN);
+                self.draw_watermark(f);
             }
-            self.draw_watermark(f);
         })?;
         Ok(())
     }
@@ -366,7 +463,7 @@ impl Screen for InventoryScreen {
             ScreenEvent::Tick => {
                 vec![]
             }
-            _ => unimplemented!(),
+            _ => vec![],
         }
     }
 }

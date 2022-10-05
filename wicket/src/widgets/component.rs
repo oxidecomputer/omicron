@@ -5,7 +5,7 @@
 //! A Modal for displaying rack inventory
 
 use crate::inventory::{Component, ComponentId, Inventory};
-use slog::{debug, Logger};
+use slog::Logger;
 use std::marker::PhantomData;
 use tui::buffer::Buffer;
 use tui::layout::Alignment;
@@ -140,7 +140,6 @@ impl<'a> ComponentModal<'a> {
         header.render(rect, buf);
 
         // Draw the contents
-
         let text = match state.inventory.get_inventory(&state.current) {
             Some(inventory) => {
                 Text::styled(format!("{:#?}", inventory), self.inventory_style)

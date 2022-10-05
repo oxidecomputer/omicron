@@ -12,6 +12,7 @@ use crate::widgets::{Logo, LogoState, LOGO_HEIGHT, LOGO_WIDTH};
 use crate::Action;
 use crate::Frame;
 use crate::ScreenEvent;
+use crate::TermEvent;
 use tui::style::{Color, Style};
 use tui::widgets::Block;
 
@@ -73,11 +74,20 @@ impl Screen for SplashScreen {
     }
 
     fn on(&mut self, state: &crate::State, event: ScreenEvent) -> Vec<Action> {
-        self.state.frame += 1;
-        if self.state.frame < TOTAL_FRAMES {
-            vec![Action::Redraw]
-        } else {
-            vec![Action::SwitchScreen(ScreenId::Inventory)]
+        match event {
+            ScreenEvent::Tick => {
+                self.state.frame += 1;
+                if self.state.frame < TOTAL_FRAMES {
+                    vec![Action::Redraw]
+                } else {
+                    vec![Action::SwitchScreen(ScreenId::Inventory)]
+                }
+            }
+            ScreenEvent::Term(TermEvent::Key(_)) => {
+                // Allow the user to skip the splash screen with any key press
+                vec![Action::SwitchScreen(ScreenId::Inventory)]
+            }
+            _ => vec![],
         }
     }
 }
