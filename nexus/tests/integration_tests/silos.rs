@@ -1469,13 +1469,14 @@ async fn test_jit_silo_constraints(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     let nexus = &cptestctx.server.apictx.nexus;
     let silo =
-        create_silo(&client, "jit", true, shared::UserProvisionType::Jit).await;
+        create_silo(&client, "jit", true, shared::SiloIdentityMode::SamlJit)
+            .await;
 
     // We need one initial user that would in principle have privileges to
     // create other users.
     let new_silo_user_id =
         "6922f0b2-9a92-659b-da6b-93ad4955a3a3".parse().unwrap();
-    let admin_user = nexus
+    let _ = nexus
         .silo_user_create(
             silo.identity.id,
             new_silo_user_id,
@@ -1487,7 +1488,7 @@ async fn test_jit_silo_constraints(cptestctx: &ControlPlaneTestContext) {
     // Grant this user "admin" privileges on that Silo.
     grant_iam(
         client,
-        "/silos/jit",
+        "/system/silos/jit",
         SiloRole::Admin,
         new_silo_user_id,
         AuthnMode::PrivilegedUser,
@@ -1495,7 +1496,6 @@ async fn test_jit_silo_constraints(cptestctx: &ControlPlaneTestContext) {
     .await;
 
     // They should not be able to create a local-only user in this JIT Silo.
-    let password = params::Password::from_str("dummy").unwrap();
     let error: dropshot::HttpErrorResponseBody =
         NexusRequest::expect_failure_with_body(
             client,
@@ -1504,7 +1504,6 @@ async fn test_jit_silo_constraints(cptestctx: &ControlPlaneTestContext) {
             "/users",
             &params::UserCreate {
                 external_id: params::UserId::from_str("dummy").unwrap(),
-                password: params::UserPassword::Password(password.clone()),
             },
         )
         .authn_as(AuthnMode::SiloUser(new_silo_user_id))
@@ -1514,7 +1513,6 @@ async fn test_jit_silo_constraints(cptestctx: &ControlPlaneTestContext) {
         .parsed_body()
         .unwrap();
     assert_eq!(error.message, "cannot create users in this kind of Silo");
-
 }
 
 #[nexus_test]
@@ -1522,10 +1520,14 @@ async fn test_fixed_silo_constraints(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     let nexus = &cptestctx.server.apictx.nexus;
 
-    // Now, let's try a "fixed" Silo with its own admin user.
-    let silo =
-        create_silo(&client, "fixed", true, shared::UserProvisionType::Fixed)
-            .await;
+    // Now, let's try a "LocalOnly" Silo with its own admin user.
+    let silo = create_silo(
+        &client,
+        "fixed",
+        true,
+        shared::SiloIdentityMode::LocalOnly,
+    )
+    .await;
     let new_silo_user_id =
         "5b3564b6-8770-4a30-b538-8ef6ae3efa3b".parse().unwrap();
     let _ = nexus
@@ -1538,7 +1540,7 @@ async fn test_fixed_silo_constraints(cptestctx: &ControlPlaneTestContext) {
         .unwrap();
     grant_iam(
         client,
-        "/silos/fixed",
+        "/system/silos/fixed",
         SiloRole::Admin,
         new_silo_user_id,
         AuthnMode::PrivilegedUser,
@@ -1551,7 +1553,7 @@ async fn test_fixed_silo_constraints(cptestctx: &ControlPlaneTestContext) {
             client,
             StatusCode::BAD_REQUEST,
             Method::POST,
-            "/silos/fixed/saml-identity-providers",
+            "/system/silos/fixed/identity-providers/saml",
             &params::SamlIdentityProviderCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "some-totally-real-saml-provider"
@@ -1594,7 +1596,7 @@ async fn test_fixed_silo_constraints(cptestctx: &ControlPlaneTestContext) {
         client,
         StatusCode::NOT_FOUND,
         Method::GET,
-        "/login/fixed/foo",
+        "/login/fixed/saml/foo",
     )
     .execute()
     .await
@@ -1603,7 +1605,7 @@ async fn test_fixed_silo_constraints(cptestctx: &ControlPlaneTestContext) {
         client,
         StatusCode::NOT_FOUND,
         Method::POST,
-        "/login/fixed/foo",
+        "/login/fixed/saml/foo",
     )
     .execute()
     .await

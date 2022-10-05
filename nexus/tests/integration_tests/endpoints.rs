@@ -33,6 +33,7 @@ use omicron_nexus::external_api::shared::IpRange;
 use omicron_nexus::external_api::shared::Ipv4Range;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
+use std::str::FromStr;
 
 lazy_static! {
     pub static ref HARDWARE_RACK_URL: String =
@@ -262,7 +263,8 @@ lazy_static! {
     };
 }
 
-// Separate lazy_static! blocks to avoid hitting some recursion limit when compiling
+// Separate lazy_static! blocks to avoid hitting some recursion limit when
+// compiling
 lazy_static! {
     // Project Images
     pub static ref DEMO_IMAGE_NAME: Name = "demo-image".parse().unwrap();
@@ -386,6 +388,11 @@ lazy_static! {
 
             group_attribute_name: None,
         };
+
+    // Users
+    pub static ref DEMO_USER_CREATE: params::UserCreate = params::UserCreate {
+        external_id: params::UserId::from_str("dummy-user").unwrap(),
+    };
 }
 
 /// Describes an API endpoint to be verified by the "unauthorized" test
@@ -713,6 +720,11 @@ lazy_static! {
             unprivileged_access: UnprivilegedAccess::ReadOnly,
             allowed_methods: vec![
                 AllowedMethod::Get,
+                AllowedMethod::Post(
+                    serde_json::to_value(
+                        &*DEMO_USER_CREATE
+                    ).unwrap()
+                ),
             ],
         },
 

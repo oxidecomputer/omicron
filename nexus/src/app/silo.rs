@@ -15,14 +15,13 @@ use crate::external_api::shared;
 use crate::{authn, authz};
 use anyhow::Context;
 use nexus_db_model::UserProvisionType;
+use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::UpdateResult;
-use omicron_common::api::external::{CreateResult, LookupType};
-use omicron_common::bail_unless;
 use uuid::Uuid;
 
 impl super::Nexus {
@@ -154,10 +153,10 @@ impl super::Nexus {
             .fetch()
             .await?;
 
-        if db_silo.user_provision_type != UserProvisionType::Fixed {
-            return Err(Error::invalid_request(&format!(
-                "cannot create users in this kind of Silo"
-            )));
+        if db_silo.user_provision_type != UserProvisionType::ApiOnly {
+            return Err(Error::invalid_request(
+                "cannot create users in this kind of Silo",
+            ));
         }
 
         let silo_user = db::model::SiloUser::new(
@@ -165,8 +164,8 @@ impl super::Nexus {
             Uuid::new_v4(),
             new_user_params.external_id.as_ref().to_owned(),
         );
-
-        let db_silo_user = datastore.silo_user_create(silo_user).await?;
+        let (_, db_silo_user) =
+            datastore.silo_user_create(&authz_silo, silo_user).await?;
         Ok(db_silo_user)
     }
 
@@ -409,9 +408,9 @@ impl super::Nexus {
         let authz_idp_list = authz::SiloIdentityProviderList::new(authz_silo);
 
         if db_silo.user_provision_type != UserProvisionType::Jit {
-            return Err(Error::invalid_request(&format!(
-                "cannot create identity providers in this kind of Silo"
-            )));
+            return Err(Error::invalid_request(
+                "cannot create identity providers in this kind of Silo",
+            ));
         }
 
         // This check is not strictly necessary yet.  We'll check this

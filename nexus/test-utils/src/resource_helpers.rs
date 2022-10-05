@@ -131,12 +131,11 @@ pub async fn create_silo(
 pub async fn create_local_user(
     client: &ClientTestContext,
     username: &UserId,
-    password: params::UserPassword,
 ) -> User {
     object_create(
         client,
         "/users",
-        &params::UserCreate { external_id: username.to_owned(), password },
+        &params::UserCreate { external_id: username.to_owned() },
     )
     .await
 }

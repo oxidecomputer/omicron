@@ -4140,13 +4140,6 @@ async fn user_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Path parameters for Silo User requests
-#[derive(Deserialize, JsonSchema)]
-struct UserPathParam {
-    /// The user's internal id
-    user_id: Uuid,
-}
-
 // Built-in (system) users
 
 /// List built-in users

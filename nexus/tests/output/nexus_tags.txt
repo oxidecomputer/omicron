@@ -99,6 +99,7 @@ API operations found with tag "silos"
 OPERATION ID                             URL PATH
 policy_update                            /policy
 policy_view                              /policy
+user_create                              /users
 user_list                                /users
 
 API operations found with tag "snapshots"
