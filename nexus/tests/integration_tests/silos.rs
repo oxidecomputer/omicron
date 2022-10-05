@@ -1617,3 +1617,5 @@ async fn test_local_silo_constraints(cptestctx: &ControlPlaneTestContext) {
 // - attempt to create, delete user using API in SamlJit Silo ("create" may be
 //   covered above)
 // - successful user create/fetch/list/delete
+// - deleting a user that doesn't exist
+// - fetch/delete a user that exists in a different Silo

@@ -79,14 +79,34 @@ impl DataStore {
         // TODO-scalability Many of these should be done in batches.
         // TODO-robustness We might consider the RFD 192 "rcgen" pattern as well
         // so that people can't, say, login while we do this.
+        let authz_silo_user_id = authz_silo_user.id();
         self.pool_authorized(opctx)
             .await?
             .transaction_async(|mut conn| async move {
+                // Check if the user exists first so that we can bail with an
+                // appropriate error if not.  It would be better to use
+                // `check_if_exists()`/`execute_and_check()` here, but that
+                // mechanism does not yet support running in a transaction.
+                // This approach remains correct at least with CockroachDB
+                // because it guarantees serializability of transactions.  With
+                // other databases, we might need an explicit "SELECT FOR
+                // UPDATE" here.  Either way, we're essentially locking this row
+                // for the duration of the transaction, which is not great.
+                {
+                    use db::schema::silo_user::dsl;
+                    let _ = dsl::silo_user
+                        .filter(dsl::id.eq(authz_silo_user_id))
+                        .filter(dsl::time_deleted.is_null())
+                        .select(SiloUser::as_select())
+                        .get_result_async(&mut conn)
+                        .await?;
+                }
+
                 // Delete console sessions.
                 {
                     use db::schema::console_session::dsl;
                     diesel::delete(dsl::console_session)
-                        .filter(dsl::silo_user_id.eq(authz_silo_user.id()))
+                        .filter(dsl::silo_user_id.eq(authz_silo_user_id))
                         .execute_async(&mut conn)
                         .await?;
                 }
@@ -95,7 +115,7 @@ impl DataStore {
                 {
                     use db::schema::device_access_token::dsl;
                     diesel::delete(dsl::device_access_token)
-                        .filter(dsl::silo_user_id.eq(authz_silo_user.id()))
+                        .filter(dsl::silo_user_id.eq(authz_silo_user_id))
                         .execute_async(&mut conn)
                         .await?;
                 }
@@ -104,7 +124,7 @@ impl DataStore {
                 {
                     use db::schema::silo_group_membership::dsl;
                     diesel::delete(dsl::silo_group_membership)
-                        .filter(dsl::silo_user_id.eq(authz_silo_user.id()))
+                        .filter(dsl::silo_user_id.eq(authz_silo_user_id))
                         .execute_async(&mut conn)
                         .await?;
                 }
@@ -113,7 +133,7 @@ impl DataStore {
                 {
                     use db::schema::ssh_key::dsl;
                     diesel::update(dsl::ssh_key)
-                        .filter(dsl::silo_user_id.eq(authz_silo_user.id()))
+                        .filter(dsl::silo_user_id.eq(authz_silo_user_id))
                         .filter(dsl::time_deleted.is_null())
                         .set(dsl::time_deleted.eq(Utc::now()))
                         .execute_async(&mut conn)
@@ -121,20 +141,24 @@ impl DataStore {
                 }
 
                 // Delete the user record.
-                // XXX-dap should use check_if_exists/execute_and_check
-                use db::schema::silo_user::dsl;
-                diesel::update(dsl::silo_user)
-                    .filter(dsl::id.eq(authz_silo_user.id()))
-                    .filter(dsl::time_deleted.is_null())
-                    .set(dsl::time_deleted.eq(Utc::now()))
-                    .execute_async(&mut conn)
-                    //.check_if_exists::<SiloUser>(authz_silo_user.id())
-                    //.execute_and_check(&mut conn)
-                    .await?;
+                {
+                    use db::schema::silo_user::dsl;
+                    diesel::update(dsl::silo_user)
+                        .filter(dsl::id.eq(authz_silo_user_id))
+                        .filter(dsl::time_deleted.is_null())
+                        .set(dsl::time_deleted.eq(Utc::now()))
+                        .execute_async(&mut conn)
+                        .await?;
+                }
                 Ok(())
             })
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_silo_user),
+                )
+            })
     }
 
     /// Given an external ID, return
