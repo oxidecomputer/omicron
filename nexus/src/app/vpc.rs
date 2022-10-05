@@ -72,7 +72,7 @@ impl super::Nexus {
         )?;
         let (authz_vpc, db_vpc) = self
             .db_datastore
-            .project_create_vpc(opctx, &authz_project, vpc.clone())
+            .project_create_vpc(opctx, &authz_project, vpc)
             .await?;
 
         // TODO: Ultimately when the VPC is created a system router w/ an
