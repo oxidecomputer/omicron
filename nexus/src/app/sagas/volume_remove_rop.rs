@@ -5,6 +5,7 @@
 use super::{ActionRegistry, NexusActionContext, NexusSaga, SagaInitError};
 use crate::app::sagas;
 use crate::app::sagas::NexusAction;
+use crate::db;
 use lazy_static::lazy_static;
 use serde::Deserialize;
 use serde::Serialize;
@@ -29,11 +30,23 @@ lazy_static! {
     // to the temporary volume.
     // - Delete the temporary volume.
 
+    // Create the empty data for the temp volume.
+    static ref CREATE_TEMP_DATA: NexusAction = new_action_noop_undo(
+        "volume-remove-rop.create-temp-data",
+        svr_create_temp_data
+    );
+    static ref CREATE_TEMP_VOLUME: NexusAction = new_action_noop_undo(
+        "volume-remove-rop.create-temp-volume",
+        svr_create_temp_volume
+    );
+
     // remove the read_only_parent,  attach it to the temp volume.
     static ref REMOVE_READ_ONLY_PARENT: NexusAction = new_action_noop_undo(
         "volume-remove-rop.remove-read-only-parent",
         svr_remove_read_only_parent
     );
+
+    // Remove temp volume
 }
 
 // volume remove read only parent saga: definition
@@ -45,6 +58,8 @@ impl NexusSaga for SagaVolumeRemoveROP {
     type Params = Params;
 
     fn register_actions(registry: &mut ActionRegistry) {
+        registry.register(Arc::clone(&*CREATE_TEMP_DATA));
+        registry.register(Arc::clone(&*CREATE_TEMP_VOLUME));
         registry.register(Arc::clone(&*REMOVE_READ_ONLY_PARENT));
     }
 
@@ -52,20 +67,22 @@ impl NexusSaga for SagaVolumeRemoveROP {
         _params: &Self::Params,
         mut builder: steno::DagBuilder,
     ) -> Result<steno::Dag, SagaInitError> {
+        // Generate the temp volume ID this saga will use.
         let temp_volume_id = Uuid::new_v4();
+        // Generate the params for the subsaga called at the end.
         let subsaga_params =
             sagas::volume_delete::Params { volume_id: temp_volume_id };
         let subsaga_dag = {
-            let subsaga_builder =
-                steno::DagBuilder::new(steno::SagaName::new(
-                    sagas::volume_delete::SagaVolumeDelete::NAME,
-                ));
+            let subsaga_builder = steno::DagBuilder::new(steno::SagaName::new(
+                sagas::volume_delete::SagaVolumeDelete::NAME,
+            ));
             sagas::volume_delete::SagaVolumeDelete::make_saga_dag(
                 &subsaga_params,
                 subsaga_builder,
             )?
         };
 
+        // Add the temp_volume_id to the saga.
         builder.append(Node::constant(
             "temp_volume_id",
             serde_json::to_value(&temp_volume_id).map_err(|e| {
@@ -73,7 +90,19 @@ impl NexusSaga for SagaVolumeRemoveROP {
             })?,
         ));
 
-        // XXX add a node that creates the volume with the given volume id
+        // Create the temporary volume data
+        builder.append(Node::action(
+            "temp_volume_data",
+            "CreateTempData",
+            CREATE_TEMP_DATA.as_ref(),
+        ));
+
+        // Create the temporary volume
+        builder.append(Node::action(
+            "temp_volume",
+            "CreateTempVolume",
+            CREATE_TEMP_VOLUME.as_ref(),
+        ));
 
         builder.append(Node::action(
             "no_result_1",
@@ -102,6 +131,41 @@ impl NexusSaga for SagaVolumeRemoveROP {
 }
 
 // volume remove read only parent saga: action implementations
+
+async fn svr_create_temp_data(
+    sagactx: NexusActionContext,
+) -> Result<String, ActionError> {
+    let osagactx = sagactx.user_data();
+
+    let temp_volume_id = sagactx.lookup::<Uuid>("temp_volume_id")?;
+
+    let volume_created = osagactx
+        .datastore()
+        .volume_create_empty_data(temp_volume_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    Ok(volume_created)
+}
+
+async fn svr_create_temp_volume(
+    sagactx: NexusActionContext,
+) -> Result<db::model::Volume, ActionError> {
+    let osagactx = sagactx.user_data();
+
+    let temp_volume_id = sagactx.lookup::<Uuid>("temp_volume_id")?;
+    let temp_volume_data = sagactx.lookup::<String>("temp_volume_data")?;
+
+    let volume = db::model::Volume::new(temp_volume_id, temp_volume_data);
+    let volume_created = osagactx
+        .datastore()
+        .volume_create(volume)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    Ok(volume_created)
+}
+
 async fn svr_remove_read_only_parent(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {

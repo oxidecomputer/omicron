@@ -50,10 +50,7 @@ async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
     project.identity.id
 }
 
-async fn create_global_image(
-	client: &ClientTestContext,
-) -> views::GlobalImage {
-
+async fn create_global_image(client: &ClientTestContext) -> views::GlobalImage {
     create_ip_pool(&client, "p0", None, None).await;
     create_org_and_project(client).await;
 
@@ -87,27 +84,21 @@ async fn create_global_image(
         block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
-    NexusRequest::objects_post(
-        client,
-        "/system/images",
-        &image_create_params,
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap()
-    .parsed_body()
-    .unwrap()
+    NexusRequest::objects_post(client, "/system/images", &image_create_params)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap()
+        .parsed_body()
+        .unwrap()
 }
 
 async fn create_base_disk(
-	client: &ClientTestContext,
-	global_image: &views::GlobalImage,
+    client: &ClientTestContext,
+    global_image: &views::GlobalImage,
     disks_url: &String,
     base_disk_name: &Name,
 ) -> Disk {
-
-    // let disk_size = ByteCount::try_from(2u64 * 1024 * 1024 * 1024).unwrap();
     let disk_size = ByteCount::from_gibibytes_u32(2);
     let base_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
@@ -148,14 +139,11 @@ async fn test_snapshot_then_delete_disk(cptestctx: &ControlPlaneTestContext) {
     let disks_url = get_disks_url();
     let base_disk_name: Name = "base-disk".parse().unwrap();
 
-	let global_image = create_global_image(&client).await;
+    let global_image = create_global_image(&client).await;
     // Create a disk from this image
-    let base_disk = create_base_disk(
-		&client,
-	    &global_image,
-        &disks_url,
-        &base_disk_name
-	).await;
+    let base_disk =
+        create_base_disk(&client, &global_image, &disks_url, &base_disk_name)
+            .await;
 
     // Issue snapshot request
     let snapshots_url = format!(
@@ -221,14 +209,11 @@ async fn test_delete_snapshot_then_disk(cptestctx: &ControlPlaneTestContext) {
     let base_disk_name: Name = "base-disk".parse().unwrap();
 
     // Define a global image
-	let global_image = create_global_image(&client).await;
+    let global_image = create_global_image(&client).await;
     // Create a disk from this image
-    let base_disk = create_base_disk(
-		&client,
-	    &global_image,
-        &disks_url,
-        &base_disk_name
-	).await;
+    let base_disk =
+        create_base_disk(&client, &global_image, &disks_url, &base_disk_name)
+            .await;
 
     // Issue snapshot request
     let snapshots_url = format!(
@@ -293,15 +278,12 @@ async fn test_multiple_snapshots(cptestctx: &ControlPlaneTestContext) {
     let disks_url = get_disks_url();
     let base_disk_name: Name = "base-disk".parse().unwrap();
 
-	let global_image = create_global_image(&client).await;
+    let global_image = create_global_image(&client).await;
     // Create a disk from this image
     let disk_size = ByteCount::from_gibibytes_u32(1); // ZZZ
-    let base_disk = create_base_disk(
-		&client,
-	    &global_image,
-        &disks_url,
-        &base_disk_name
-	).await;
+    let base_disk =
+        create_base_disk(&client, &global_image, &disks_url, &base_disk_name)
+            .await;
 
     // Issue snapshot requests
     let snapshots_url = format!(
@@ -368,14 +350,11 @@ async fn test_snapshot_prevents_other_disk(
     let disks_url = get_disks_url();
     let base_disk_name: Name = "base-disk".parse().unwrap();
 
-	let global_image = create_global_image(&client).await;
+    let global_image = create_global_image(&client).await;
     // Create a disk from this image
-    let base_disk = create_base_disk(
-		&client,
-	    &global_image,
-        &disks_url,
-        &base_disk_name
-	).await;
+    let base_disk =
+        create_base_disk(&client, &global_image, &disks_url, &base_disk_name)
+            .await;
 
     // Issue snapshot request
     let snapshots_url = format!(
@@ -1058,23 +1037,23 @@ async fn test_multiple_layers_of_snapshots_random_delete_order(
 
 async fn create_volume(
     datastore: &Arc<DataStore>,
-	volume_id: Uuid,
-    rop_option: Option<VolumeConstructionRequest>
+    volume_id: Uuid,
+    rop_option: Option<VolumeConstructionRequest>,
 ) {
-	let block_size = 512;
+    let block_size = 512;
 
     // Make the SubVolume
     let sub_volume = VolumeConstructionRequest::File {
-		id: volume_id,
-		block_size,
-		path: "/lol".to_string(),
-	};
-	let sub_volumes = vec![sub_volume];
+        id: volume_id,
+        block_size,
+        path: "/lol".to_string(),
+    };
+    let sub_volumes = vec![sub_volume];
 
-	let rop = match rop_option {
-		Some(x) => Some(Box::new(x)),
-		None => None,
-	};
+    let rop = match rop_option {
+        Some(x) => Some(Box::new(x)),
+        None => None,
+    };
 
     // Create the volume from the parts above and insert into the database.
     datastore
@@ -1084,7 +1063,7 @@ async fn create_volume(
                 id: volume_id,
                 block_size,
                 sub_volumes,
-				read_only_parent: rop,
+                read_only_parent: rop,
             })
             .unwrap(),
         ))
@@ -1103,19 +1082,19 @@ async fn test_volume_remove_read_only_parent_base(
 
     let volume_id = Uuid::new_v4();
     let t_vid = Uuid::new_v4();
-	let block_size = 512;
+    let block_size = 512;
 
     // Make our read_only_parent
     let rop = VolumeConstructionRequest::Url {
-		id: Uuid::new_v4(),
-		block_size,
-		url: "http://oxide.computer/rop".to_string(),
-	};
+        id: Uuid::new_v4(),
+        block_size,
+        url: "http://oxide.computer/rop".to_string(),
+    };
 
     // Create the Volume with a read_only_parent, and the temp volume that
     // the saga would create for us.
-	create_volume(&datastore, volume_id, Some(rop)).await;
-	create_volume(&datastore, t_vid, None).await;
+    create_volume(&datastore, volume_id, Some(rop)).await;
+    create_volume(&datastore, t_vid, None).await;
 
     // We should get Ok(true) back after removal of the ROP.
     let res = datastore.volume_remove_rop(volume_id, t_vid).await.unwrap();
@@ -1123,42 +1102,42 @@ async fn test_volume_remove_read_only_parent_base(
 
     // Go and get the volume from the database, verify it no longer
     // has a read only parent.
-	let new_vol = datastore.volume_get(volume_id).await.unwrap();
-	let vcr: VolumeConstructionRequest =
-		serde_json::from_str(new_vol.data()).unwrap();
+    let new_vol = datastore.volume_get(volume_id).await.unwrap();
+    let vcr: VolumeConstructionRequest =
+        serde_json::from_str(new_vol.data()).unwrap();
 
-	match vcr {
-		VolumeConstructionRequest::Volume {
-			id: _,
-			block_size: _,
-			sub_volumes: _,
-			read_only_parent,
-		} => {
+    match vcr {
+        VolumeConstructionRequest::Volume {
+            id: _,
+            block_size: _,
+            sub_volumes: _,
+            read_only_parent,
+        } => {
             assert!(read_only_parent.is_none());
-        },
-		x => {
-			panic!("Unexpected volume type returned: {:?}", x);
-		}
-	}
+        }
+        x => {
+            panic!("Unexpected volume type returned: {:?}", x);
+        }
+    }
 
     // Verify the t_vid now has a ROP.
-	let new_vol = datastore.volume_get(t_vid).await.unwrap();
-	let vcr: VolumeConstructionRequest =
-		serde_json::from_str(new_vol.data()).unwrap();
+    let new_vol = datastore.volume_get(t_vid).await.unwrap();
+    let vcr: VolumeConstructionRequest =
+        serde_json::from_str(new_vol.data()).unwrap();
 
-	match vcr {
-		VolumeConstructionRequest::Volume {
-			id: _,
-			block_size: _,
-			sub_volumes: _,
-			read_only_parent,
-		} => {
+    match vcr {
+        VolumeConstructionRequest::Volume {
+            id: _,
+            block_size: _,
+            sub_volumes: _,
+            read_only_parent,
+        } => {
             assert!(read_only_parent.is_some());
-        },
-		x => {
-			panic!("Unexpected volume type returned: {:?}", x);
-		}
-	}
+        }
+        x => {
+            panic!("Unexpected volume type returned: {:?}", x);
+        }
+    }
 
     // Try to remove the read only parent a 2nd time, it should
     // return Ok(false) as there is now no volume to remove.
@@ -1169,23 +1148,23 @@ async fn test_volume_remove_read_only_parent_base(
     // We want to verify we can call volume_remove_rop twice and the second
     // time through it won't change what it did the first time. This is
     // critical to supporting replay of the saga, should it be needed.
-	let new_vol = datastore.volume_get(t_vid).await.unwrap();
-	let vcr: VolumeConstructionRequest =
-		serde_json::from_str(new_vol.data()).unwrap();
+    let new_vol = datastore.volume_get(t_vid).await.unwrap();
+    let vcr: VolumeConstructionRequest =
+        serde_json::from_str(new_vol.data()).unwrap();
 
-	match vcr {
-		VolumeConstructionRequest::Volume {
-			id: _,
-			block_size: _,
-			sub_volumes: _,
-			read_only_parent,
-		} => {
+    match vcr {
+        VolumeConstructionRequest::Volume {
+            id: _,
+            block_size: _,
+            sub_volumes: _,
+            read_only_parent,
+        } => {
             assert!(read_only_parent.is_some());
-        },
-		x => {
-			panic!("Unexpected volume type returned: {:?}", x);
-		}
-	}
+        }
+        x => {
+            panic!("Unexpected volume type returned: {:?}", x);
+        }
+    }
 }
 
 #[nexus_test]
@@ -1199,7 +1178,7 @@ async fn test_volume_remove_read_only_parent_no_parent(
 
     let volume_id = Uuid::new_v4();
     let t_vid = Uuid::new_v4();
-	create_volume(&datastore, volume_id, None).await;
+    create_volume(&datastore, volume_id, None).await;
 
     // We will get Ok(false) back from this operation.
     let res = datastore.volume_remove_rop(volume_id, t_vid).await.unwrap();
@@ -1260,22 +1239,20 @@ async fn test_volume_remove_read_only_parent_volume_deleted(
     let nexus = &cptestctx.server.apictx.nexus;
     let datastore = nexus.datastore();
     let volume_id = Uuid::new_v4();
-	let block_size = 512;
+    let block_size = 512;
 
     // Make our read_only_parent
     let rop = VolumeConstructionRequest::Url {
-		id: Uuid::new_v4(),
-		block_size,
-		url: "http://oxide.computer/rop".to_string(),
-	};
+        id: Uuid::new_v4(),
+        block_size,
+        url: "http://oxide.computer/rop".to_string(),
+    };
     // Make the volume
-	create_volume(&datastore, volume_id, Some(rop)).await;
+    create_volume(&datastore, volume_id, Some(rop)).await;
 
     // Soft delete the volume
     let _cr = datastore
-        .decrease_crucible_resource_count_and_soft_delete_volume(
-            volume_id
-        )
+        .decrease_crucible_resource_count_and_soft_delete_volume(volume_id)
         .await
         .unwrap();
 
@@ -1287,26 +1264,25 @@ async fn test_volume_remove_read_only_parent_volume_deleted(
 
 #[nexus_test]
 async fn test_volume_remove_rop_saga(cptestctx: &ControlPlaneTestContext) {
-
     // Test the saga for removal of a volume with a read only parent.
     // We create a volume with a read only parent, then call the saga on it.
     let nexus = &cptestctx.server.apictx.nexus;
     let datastore = nexus.datastore();
 
     let volume_id = Uuid::new_v4();
-	let block_size = 512;
+    let block_size = 512;
 
     // Make our read_only_parent
     let rop = VolumeConstructionRequest::Url {
-		id: Uuid::new_v4(),
-		block_size,
-		url: "http://oxide.computer/rop".to_string(),
-	};
+        id: Uuid::new_v4(),
+        block_size,
+        url: "http://oxide.computer/rop".to_string(),
+    };
 
-	create_volume(&datastore, volume_id, Some(rop)).await;
+    create_volume(&datastore, volume_id, Some(rop)).await;
 
-	println!("Created this volume: {:?}", volume_id);
-	// disk to volume id, to then remove ROP?
+    println!("Created this volume: {:?}", volume_id);
+    // disk to volume id, to then remove ROP?
     let int_client = &cptestctx.internal_client;
     let rop_url = format!("/volume/remove-read-only-parent/{}", volume_id);
 
@@ -1321,23 +1297,23 @@ async fn test_volume_remove_rop_saga(cptestctx: &ControlPlaneTestContext) {
         .await
         .unwrap();
 
-	let new_vol = datastore.volume_get(volume_id).await.unwrap();
-	let vcr: VolumeConstructionRequest =
-		serde_json::from_str(new_vol.data()).unwrap();
+    let new_vol = datastore.volume_get(volume_id).await.unwrap();
+    let vcr: VolumeConstructionRequest =
+        serde_json::from_str(new_vol.data()).unwrap();
 
-	match vcr {
-		VolumeConstructionRequest::Volume {
-			id: _,
-			block_size: _,
-			sub_volumes: _,
-			read_only_parent,
-		} => {
+    match vcr {
+        VolumeConstructionRequest::Volume {
+            id: _,
+            block_size: _,
+            sub_volumes: _,
+            read_only_parent,
+        } => {
             assert!(read_only_parent.is_none());
-        },
-		x => {
-			panic!("Unexpected volume type returned: {:?}", x);
-		}
-	}
+        }
+        x => {
+            panic!("Unexpected volume type returned: {:?}", x);
+        }
+    }
 }
 
 // volume_delete saga node idempotency tests

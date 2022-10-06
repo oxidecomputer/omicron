@@ -29,9 +29,29 @@ use omicron_common::api::external::ResourceType;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::types::VolumeConstructionRequest;
+use steno::ActionError;
 use uuid::Uuid;
 
 impl DataStore {
+    // Create an empty VolumeConstructionRequest and convert it to a string.
+    pub async fn volume_create_empty_data(
+        &self,
+        volume_id: Uuid,
+    ) -> Result<String, ActionError> {
+        // Manufacture an empty volume construction request.
+        let volume_construction_request = VolumeConstructionRequest::Volume {
+            id: volume_id,
+            block_size: 512,
+            sub_volumes: vec![],
+            read_only_parent: None,
+        };
+        let volume_data = serde_json::to_string(&volume_construction_request)
+            .map_err(|e| {
+            ActionError::action_failed(Error::internal_error(&e.to_string()))
+        })?;
+        Ok(volume_data)
+    }
+
     pub async fn volume_create(&self, volume: Volume) -> CreateResult<Volume> {
         use db::schema::volume::dsl;
 
@@ -459,7 +479,6 @@ impl DataStore {
         volume_id: Uuid,
         temp_volume_id: Uuid,
     ) -> Result<bool, Error> {
-
         // In this single transaction:
         // - Get the given volume from the volume_id from the database
         // - Extract the volume.data into a VolumeConstructionRequest (VCR)
@@ -477,7 +496,7 @@ impl DataStore {
         self.pool()
             .transaction(move |conn| {
                 // Grab the volume in question. If the volume record was already
-                // delete the we can just return.
+                // deleted then we can just return.
                 let volume = {
                     use db::schema::volume::dsl;
 
@@ -510,6 +529,7 @@ impl DataStore {
                 let vcr: VolumeConstructionRequest =
                     serde_json::from_str(volume.data()).unwrap();
 
+                println!("Updating volume: {} {}", volume_id, temp_volume_id);
                 match vcr {
                     VolumeConstructionRequest::Volume {
                         id,
@@ -554,13 +574,16 @@ impl DataStore {
                                 serde_json::to_string(&rop_vcr).unwrap();
                             // Update the temp_volume_id with the volume
                             // data that contains the read_only_parent.
-                            let num_updated = diesel::update(volume_dsl::volume)
-                                .filter(volume_dsl::id.eq(temp_volume_id))
-                                .filter(volume_dsl::time_deleted.is_null())
-                                .set(volume_dsl::data.eq(rop_volume_data))
-                                .execute(conn)?;
-                            println!("*** num_updated = {}", num_updated);
-                           Ok(true)
+                            let num_updated =
+                                diesel::update(volume_dsl::volume)
+                                    .filter(volume_dsl::id.eq(temp_volume_id))
+                                    .filter(volume_dsl::time_deleted.is_null())
+                                    .set(volume_dsl::data.eq(rop_volume_data))
+                                    .execute(conn)?;
+                            if num_updated != 1 {
+                                println!("RETURN ERROR");
+                            }
+                            Ok(true)
                         }
                     }
                     _ => {
@@ -570,10 +593,7 @@ impl DataStore {
                 }
             })
             .await
-            .map_err(|e| public_error_from_diesel_pool(
-                e,
-                ErrorHandler::Server
-            ))
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 }
 

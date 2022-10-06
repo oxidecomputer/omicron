@@ -50,7 +50,7 @@ impl super::Nexus {
 
         let saga_outputs = self
             .execute_saga::<sagas::volume_remove_rop::SagaVolumeRemoveROP>(
-                saga_params
+                saga_params,
             )
             .await?;
 
