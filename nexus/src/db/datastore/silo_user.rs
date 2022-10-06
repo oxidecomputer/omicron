@@ -84,22 +84,15 @@ impl DataStore {
         self.pool_authorized(opctx)
             .await?
             .transaction_async(|mut conn| async move {
-                // Check if the user exists first so that we can bail with an
-                // appropriate error if not.  It would be better to use
-                // `check_if_exists()`/`execute_and_check()` here, but that
-                // mechanism does not yet support running in a transaction.
-                // This approach remains correct at least with CockroachDB
-                // because it guarantees serializability of transactions.  With
-                // other databases, we might need an explicit "SELECT FOR
-                // UPDATE" here.  Either way, we're essentially locking this row
-                // for the duration of the transaction, which is not great.
+                // Delete the user record.
                 {
                     use db::schema::silo_user::dsl;
-                    let _ = dsl::silo_user
+                    diesel::update(dsl::silo_user)
                         .filter(dsl::id.eq(authz_silo_user_id))
                         .filter(dsl::time_deleted.is_null())
-                        .select(SiloUser::as_select())
-                        .get_result_async(&mut conn)
+                        .set(dsl::time_deleted.eq(Utc::now()))
+                        .check_if_exists::<SiloUser>(authz_silo_user_id)
+                        .execute_and_check(&mut conn)
                         .await?;
                 }
 
@@ -141,17 +134,6 @@ impl DataStore {
                         .await?;
                 }
 
-                // Delete the user record.
-                {
-                    use db::schema::silo_user::dsl;
-                    diesel::update(dsl::silo_user)
-                        .filter(dsl::id.eq(authz_silo_user_id))
-                        .filter(dsl::time_deleted.is_null())
-                        .set(dsl::time_deleted.eq(Utc::now()))
-                        .check_if_exists::<SiloUser>(authz_silo_user_id)
-                        .execute_and_check(&mut conn)
-                        .await?;
-                }
                 Ok(())
             })
             .await
