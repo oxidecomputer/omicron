@@ -60,7 +60,7 @@ pub struct SpoofLoginBody {
 pub async fn login_spoof(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     params: TypedBody<SpoofLoginBody>,
-) -> Result<HttpResponseSeeOther, HttpError> {
+) -> Result<HttpResponseHeaders<HttpResponseUpdatedNoContent>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
@@ -85,7 +85,8 @@ pub async fn login_spoof(
         let authn_opctx = nexus.opctx_external_authn();
         let session = nexus.session_create(&authn_opctx, user_id).await?;
 
-        let mut response = http_response_see_other(String::from("/"))?;
+        let mut response =
+            HttpResponseHeaders::new_unnamed(HttpResponseUpdatedNoContent());
         {
             let headers = response.headers_mut();
             headers.append(
@@ -246,7 +247,7 @@ impl RelayState {
 /// to their identity provider.
 #[endpoint {
    method = GET,
-   path = "/login/{silo_name}/{provider_name}",
+   path = "/login/{silo_name}/saml/{provider_name}",
    tags = ["login"],
 }]
 pub async fn login_saml_begin(
@@ -326,7 +327,7 @@ pub async fn login_saml_begin(
 /// data (like a SAMLResponse). Use these to set the user's session cookie.
 #[endpoint {
    method = POST,
-   path = "/login/{silo_name}/{provider_name}",
+   path = "/login/{silo_name}/saml/{provider_name}",
    tags = ["login"],
 }]
 pub async fn login_saml(

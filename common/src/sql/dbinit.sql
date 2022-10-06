@@ -320,8 +320,13 @@ CREATE INDEX on omicron.public.volume (
  * Silos
  */
 
+CREATE TYPE omicron.public.authentication_mode AS ENUM (
+  'local',
+  'saml'
+);
+
 CREATE TYPE omicron.public.user_provision_type AS ENUM (
-  'fixed',
+  'api_only',
   'jit'
 );
 
@@ -335,6 +340,7 @@ CREATE TABLE omicron.public.silo (
     time_deleted TIMESTAMPTZ,
 
     discoverable BOOL NOT NULL,
+    authentication_mode omicron.public.authentication_mode NOT NULL,
     user_provision_type omicron.public.user_provision_type NOT NULL,
 
     /* child resource generation number, per RFD 192 */

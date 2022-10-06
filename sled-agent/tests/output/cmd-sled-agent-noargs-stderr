@@ -1,14 +1,12 @@
-sled_agent 0.1.0
 See README.adoc for more information
 
-USAGE:
-    sled-agent <SUBCOMMAND>
+Usage: sled-agent <COMMAND>
 
-OPTIONS:
-    -h, --help       Print help information
-    -V, --version    Print version information
+Commands:
+  openapi  Generates the OpenAPI specification
+  run      Runs the Sled Agent server
+  help     Print this message or the help of the given subcommand(s)
 
-SUBCOMMANDS:
-    help       Print this message or the help of the given subcommand(s)
-    openapi    Generates the OpenAPI specification
-    run        Runs the Sled Agent server
+Options:
+  -h, --help     Print help information
+  -V, --version  Print version information

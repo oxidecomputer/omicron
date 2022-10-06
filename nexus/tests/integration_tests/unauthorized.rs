@@ -137,11 +137,11 @@ G GET  PUT  POST DEL  TRCE G  URL
 /// Describes a request made during the setup phase to create a resource that
 /// we'll use later in the verification phase
 ///
-/// The setup phase takes a list of `SetupReq` enums and issues a `GET` or `POST`
-/// request to each one's `url`. `id_results` is a list of URLs that are associated
-/// to the results of the setup request with any `{id}` params in the URL replaced with
-/// the result's URL. This is used to later verify ID endpoints without first having to
-/// know the ID.
+/// The setup phase takes a list of `SetupReq` enums and issues a `GET` or
+/// `POST` request to each one's `url`. `id_results` is a list of URLs that are
+/// associated to the results of the setup request with any `{id}` params in the
+/// URL replaced with the result's URL. This is used to later verify ID
+/// endpoints without first having to know the ID.
 
 enum SetupReq {
     Get {
@@ -183,7 +183,7 @@ lazy_static! {
 
     /// List of requests to execute at setup time
     static ref SETUP_REQUESTS: Vec<SetupReq> = vec![
-        // Create a separate Silo (not used for anything else)
+        // Create a separate Silo
         SetupReq::Post {
             url: "/system/silos",
             body: serde_json::to_value(&*DEMO_SILO_CREATE).unwrap(),

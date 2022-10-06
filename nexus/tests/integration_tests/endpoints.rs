@@ -56,7 +56,7 @@ lazy_static! {
                 description: String::from(""),
             },
             discoverable: true,
-            user_provision_type: shared::UserProvisionType::Fixed,
+            identity_mode: shared::SiloIdentityMode::SamlJit,
             admin_group_name: None,
         };
 
@@ -361,8 +361,8 @@ lazy_static! {
 
 lazy_static! {
     // Identity providers
-    pub static ref IDENTITY_PROVIDERS_URL: String = format!("/system/silos/default-silo/identity-providers");
-    pub static ref SAML_IDENTITY_PROVIDERS_URL: String = format!("/system/silos/default-silo/saml-identity-providers");
+    pub static ref IDENTITY_PROVIDERS_URL: String = format!("/system/silos/demo-silo/identity-providers");
+    pub static ref SAML_IDENTITY_PROVIDERS_URL: String = format!("/system/silos/demo-silo/identity-providers/saml");
 
     pub static ref DEMO_SAML_IDENTITY_PROVIDER_NAME: Name = "demo-saml-provider".parse().unwrap();
     pub static ref SPECIFIC_SAML_IDENTITY_PROVIDER_URL: String = format!("{}/{}", *SAML_IDENTITY_PROVIDERS_URL, *DEMO_SAML_IDENTITY_PROVIDER_NAME);
@@ -1458,7 +1458,14 @@ lazy_static! {
 
         VerifyEndpoint {
             url: &*SAML_IDENTITY_PROVIDERS_URL,
-            visibility: Visibility::Public,
+            // The visibility here deserves some explanation.  In order to
+            // create a real SAML identity provider for doing tests, we have to
+            // do it in a non-default Silo (because the default one does not
+            // support creating a SAML identity provider).  But unprivileged
+            // users won't be able to see that Silo.  So from their perspective,
+            // it's like an object in a container they can't see (which is what
+            // Visibility::Protected means).
+            visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Post(
                 serde_json::to_value(&*SAML_IDENTITY_PROVIDER).unwrap(),

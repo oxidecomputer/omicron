@@ -547,18 +547,8 @@
           "required": true
         },
         "responses": {
-          "303": {
-            "description": "redirect (see other)",
-            "headers": {
-              "location": {
-                "description": "HTTP \"Location\" header",
-                "style": "simple",
-                "required": true,
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -569,7 +559,7 @@
         }
       }
     },
-    "/login/{silo_name}/{provider_name}": {
+    "/login/{silo_name}/saml/{provider_name}": {
       "get": {
         "tags": [
           "login"
@@ -6848,6 +6838,104 @@
         "x-dropshot-pagination": true
       }
     },
+    "/system/silos/{silo_name}/identity-providers/saml": {
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Create a SAML IDP",
+        "operationId": "saml_identity_provider_create",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "silo_name",
+            "description": "The silo's unique name.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SamlIdentityProviderCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SamlIdentityProvider"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/system/silos/{silo_name}/identity-providers/saml/{provider_name}": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Fetch a SAML IDP",
+        "operationId": "saml_identity_provider_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_name",
+            "description": "The SAML identity provider's name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "silo_name",
+            "description": "The silo's unique name.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SamlIdentityProvider"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/system/silos/{silo_name}/policy": {
       "get": {
         "tags": [
@@ -6921,104 +7009,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SiloRolePolicy"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/system/silos/{silo_name}/saml-identity-providers": {
-      "post": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Create a SAML IDP",
-        "operationId": "silo_identity_provider_create",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "silo_name",
-            "description": "The silo's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SamlIdentityProviderCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SamlIdentityProvider"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/system/silos/{silo_name}/saml-identity-providers/{provider_name}": {
-      "get": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Fetch a SAML IDP",
-        "operationId": "silo_identity_provider_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "provider_name",
-            "description": "The SAML identity provider's name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
-          },
-          {
-            "in": "path",
-            "name": "silo_name",
-            "description": "The silo's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            },
-            "style": "simple"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SamlIdentityProvider"
                 }
               }
             }
@@ -8599,9 +8589,14 @@
         ]
       },
       "IdentityProviderType": {
-        "type": "string",
-        "enum": [
-          "saml"
+        "oneOf": [
+          {
+            "description": "SAML identity provider",
+            "type": "string",
+            "enum": [
+              "saml"
+            ]
+          }
         ]
       },
       "IdentityType": {
@@ -9185,18 +9180,77 @@
       },
       "InstanceState": {
         "description": "Running state of an Instance (primarily: booted or stopped)\n\nThis typically reflects whether it's starting, running, stopping, or stopped, but also includes states related to the Instance's lifecycle",
-        "type": "string",
-        "enum": [
-          "creating",
-          "starting",
-          "running",
-          "stopping",
-          "stopped",
-          "rebooting",
-          "migrating",
-          "repairing",
-          "failed",
-          "destroyed"
+        "oneOf": [
+          {
+            "description": "The instance is being created.",
+            "type": "string",
+            "enum": [
+              "creating"
+            ]
+          },
+          {
+            "description": "The instance is currently starting up.",
+            "type": "string",
+            "enum": [
+              "starting"
+            ]
+          },
+          {
+            "description": "The instance is currently running.",
+            "type": "string",
+            "enum": [
+              "running"
+            ]
+          },
+          {
+            "description": "The instance has been requested to stop and a transition to \"Stopped\" is imminent.",
+            "type": "string",
+            "enum": [
+              "stopping"
+            ]
+          },
+          {
+            "description": "The instance is currently stopped.",
+            "type": "string",
+            "enum": [
+              "stopped"
+            ]
+          },
+          {
+            "description": "The instance is in the process of rebooting - it will remain in the \"rebooting\" state until the VM is starting once more.",
+            "type": "string",
+            "enum": [
+              "rebooting"
+            ]
+          },
+          {
+            "description": "The instance is in the process of migrating - it will remain in the \"migrating\" state until the migration process is complete and the destination propolis is ready to continue execution.",
+            "type": "string",
+            "enum": [
+              "migrating"
+            ]
+          },
+          {
+            "description": "The instance is attempting to recover from a failure.",
+            "type": "string",
+            "enum": [
+              "repairing"
+            ]
+          },
+          {
+            "description": "The instance has encountered a failure.",
+            "type": "string",
+            "enum": [
+              "failed"
+            ]
+          },
+          {
+            "description": "The instance has been deleted.",
+            "type": "string",
+            "enum": [
+              "destroyed"
+            ]
+          }
         ]
       },
       "IpKind": {
@@ -10322,12 +10376,35 @@
       },
       "RouterRouteKind": {
         "description": "The classification of a [`RouterRoute`] as defined by the system. The kind determines certain attributes such as if the route is modifiable and describes how or where the route was created.\n\nSee [RFD-21](https://rfd.shared.oxide.computer/rfd/0021#concept-router) for more context",
-        "type": "string",
-        "enum": [
-          "default",
-          "vpc_subnet",
-          "vpc_peering",
-          "custom"
+        "oneOf": [
+          {
+            "description": "Determines the default destination of traffic, such as whether it goes to the internet or not.\n\n`Destination: An Internet Gateway` `Modifiable: true`",
+            "type": "string",
+            "enum": [
+              "default"
+            ]
+          },
+          {
+            "description": "Automatically added for each VPC Subnet in the VPC\n\n`Destination: A VPC Subnet` `Modifiable: false`",
+            "type": "string",
+            "enum": [
+              "vpc_subnet"
+            ]
+          },
+          {
+            "description": "Automatically added when VPC peering is established\n\n`Destination: A different VPC` `Modifiable: false`",
+            "type": "string",
+            "enum": [
+              "vpc_peering"
+            ]
+          },
+          {
+            "description": "Created by a user See [`RouteTarget`]\n\n`Destination: User defined` `Modifiable: true`",
+            "type": "string",
+            "enum": [
+              "custom"
+            ]
+          }
         ]
       },
       "RouterRouteResultsPage": {
@@ -10709,6 +10786,14 @@
             "type": "string",
             "format": "uuid"
           },
+          "identity_mode": {
+            "description": "How users and groups are managed in this Silo",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SiloIdentityMode"
+              }
+            ]
+          },
           "name": {
             "description": "unique, mutable, user-controlled identifier for each resource",
             "allOf": [
@@ -10726,24 +10811,16 @@
             "description": "timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
-          },
-          "user_provision_type": {
-            "description": "User provision type",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/UserProvisionType"
-              }
-            ]
           }
         },
         "required": [
           "description",
           "discoverable",
           "id",
+          "identity_mode",
           "name",
           "time_created",
-          "time_modified",
-          "user_provision_type"
+          "time_modified"
         ]
       },
       "SiloCreate": {
@@ -10761,18 +10838,37 @@
           "discoverable": {
             "type": "boolean"
           },
+          "identity_mode": {
+            "$ref": "#/components/schemas/SiloIdentityMode"
+          },
           "name": {
             "$ref": "#/components/schemas/Name"
-          },
-          "user_provision_type": {
-            "$ref": "#/components/schemas/UserProvisionType"
           }
         },
         "required": [
           "description",
           "discoverable",
-          "name",
-          "user_provision_type"
+          "identity_mode",
+          "name"
+        ]
+      },
+      "SiloIdentityMode": {
+        "description": "Describes how identities are managed and users are authenticated in this Silo",
+        "oneOf": [
+          {
+            "description": "Users are authenticated with SAML using an external authentication provider.  The system updates information about users and groups only during successful authentication (i.e,. \"JIT provisioning\" of users and groups).",
+            "type": "string",
+            "enum": [
+              "saml_jit"
+            ]
+          },
+          {
+            "description": "The system is the source of truth about users.  There is no linkage to an external authentication provider or identity provider.",
+            "type": "string",
+            "enum": [
+              "local_only"
+            ]
+          }
         ]
       },
       "SiloResultsPage": {
@@ -11241,14 +11337,6 @@
         },
         "required": [
           "items"
-        ]
-      },
-      "UserProvisionType": {
-        "description": "How users will be provisioned in a silo during authentication.",
-        "type": "string",
-        "enum": [
-          "fixed",
-          "jit"
         ]
       },
       "UserResultsPage": {
@@ -12131,18 +12219,40 @@
       },
       "NameOrIdSortMode": {
         "description": "Supported set of sort modes for scanning by name or id",
-        "type": "string",
-        "enum": [
-          "name_ascending",
-          "name_descending",
-          "id_ascending"
+        "oneOf": [
+          {
+            "description": "sort in increasing order of \"name\"",
+            "type": "string",
+            "enum": [
+              "name_ascending"
+            ]
+          },
+          {
+            "description": "sort in decreasing order of \"name\"",
+            "type": "string",
+            "enum": [
+              "name_descending"
+            ]
+          },
+          {
+            "description": "sort in increasing order of \"id\"",
+            "type": "string",
+            "enum": [
+              "id_ascending"
+            ]
+          }
         ]
       },
       "NameSortMode": {
         "description": "Supported set of sort modes for scanning by name only\n\nCurrently, we only support scanning in ascending order.",
-        "type": "string",
-        "enum": [
-          "name_ascending"
+        "oneOf": [
+          {
+            "description": "sort in increasing order of \"name\"",
+            "type": "string",
+            "enum": [
+              "name_ascending"
+            ]
+          }
         ]
       },
       "DiskMetricName": {
@@ -12158,9 +12268,14 @@
       },
       "IdSortMode": {
         "description": "Supported set of sort modes for scanning by id only.\n\nCurrently, we only support scanning in ascending order.",
-        "type": "string",
-        "enum": [
-          "id_ascending"
+        "oneOf": [
+          {
+            "description": "sort in increasing order of \"id\"",
+            "type": "string",
+            "enum": [
+              "id_ascending"
+            ]
+          }
         ]
       }
     }

@@ -495,7 +495,8 @@ lookup_resource! {
     soft_deletes = true,
     primary_key_columns = [
         { column_name = "id", rust_type = Uuid },
-    ]
+    ],
+    visible_outside_silo = true
 }
 
 lookup_resource! {
