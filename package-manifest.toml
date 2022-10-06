@@ -98,7 +98,8 @@ zone = true
 # 1. Build the zone image manually
 # 2. Copy the output zone image from crucible/out to omicron/out
 # 3. Use type = "manual" instead of the "prebuilt"
-type = "prebuilt"
+#type = "prebuilt"
+type = "manual"
 repo = "crucible"
 commit = "1d67a53042f19ff7ca30dd20a04da94b7715ed7c"
 # The SHA256 digest is automatically posted to:
@@ -112,7 +113,7 @@ sha256 = "d43fcfabc3f6402cfdbe3a0d31d49ae903f76b5ddec955dcee63236e4a60fdb0"
 service_name = "propolis-server"
 zone = true
 [external_package.propolis-server.source]
-type = "prebuilt"
+type = "manual"
 repo = "propolis"
 commit = "c59b1ac246b19130bd489cdce217e40a4e51c094"
 # The SHA256 digest is automatically posted to:

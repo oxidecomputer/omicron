@@ -16,7 +16,7 @@ rack_secret_threshold = 1
 # IP address of Internet gateway
 #
 # NOTE: In the lab, use "172.20.15.225"
-# address = "192.168.1.1"
+address = "172.20.11.1"
 
 # MAC address of the internet gateway in the local network, i.e., of the above
 # IP address.
@@ -72,8 +72,8 @@ gz_addresses = []
 [request.service.service_type]
 type = "nexus"
 internal_ip = "fd00:1122:3344:0101::3"
-# NOTE: In the lab, use "172.20.15.226"
-external_ip = "192.168.1.20"
+# NOTE: In the lab, use "172.20.11.2"
+external_ip = "172.20.11.2"
 
 # TODO(https://github.com/oxidecomputer/omicron/issues/732): Nexus
 # should allocate Oximeter services.

@@ -447,6 +447,134 @@ impl DataStore {
                 }
             })
     }
+
+    // Here we remove the read only parent from volume_id, and attach it
+    // to temp_volume_id.
+    //
+    // As this is part of a saga, it will be able to handle being replayed
+    // If we call this twice, any work done the first time through should
+    // not happen again, or be undone.
+    pub async fn volume_remove_rop(
+        &self,
+        volume_id: Uuid,
+        temp_volume_id: Uuid,
+    ) -> Result<bool, Error> {
+
+        // In this single transaction:
+        // - Get the given volume from the volume_id from the database
+        // - Extract the volume.data into a VolumeConstructionRequest (VCR)
+        // - Create a new VCR, copying over anything from the original VCR,
+        //   but, replacing the read_only_parent with None.
+        // - Put the new VCR into volume.data, then update the volume in the
+        //   database.
+        // - Get the given volume from temp_volume_id from the database
+        // - Extract the temp volume.data into a VCR
+        // - Create a new VCR, copying over anything from the original VCR,
+        //   but, replacing the read_only_parent with the read_only_parent
+        //   data from volume_id.
+        // - Put the new temp VCR into the temp volume.data, update the
+        //   temp_volume in the database.
+        self.pool()
+            .transaction(move |conn| {
+                // Grab the volume in question. If the volume record was already
+                // delete the we can just return.
+                let volume = {
+                    use db::schema::volume::dsl;
+
+                    let volume = dsl::volume
+                        .filter(dsl::id.eq(volume_id))
+                        .select(Volume::as_select())
+                        .get_result(conn)
+                        .optional()?;
+
+                    let volume = if let Some(v) = volume {
+                        v
+                    } else {
+                        // the volume does not exist, nothing to do.
+                        return Ok(false);
+                    };
+
+                    if volume.time_deleted.is_some() {
+                        // this volume is deleted, so let whatever is deleting
+                        // it clean it up.
+                        return Ok(false);
+                    } else {
+                        // A volume record exists, and was not deleted, we
+                        // can attempt to remove its read_only_parent.
+                        volume
+                    }
+                };
+
+                // If a read_only_parent exists, remove it from volume_id, and
+                // attach it to temp_volume_id.
+                let vcr: VolumeConstructionRequest =
+                    serde_json::from_str(volume.data()).unwrap();
+
+                match vcr {
+                    VolumeConstructionRequest::Volume {
+                        id,
+                        block_size,
+                        sub_volumes,
+                        read_only_parent,
+                    } => {
+                        if read_only_parent.is_none() {
+                            // This volume has no read_only_parent
+                            Ok(false)
+                        } else {
+                            // Create a new VCR and fill in the contents
+                            // from what the original volume had.
+                            let new_vcr = VolumeConstructionRequest::Volume {
+                                id,
+                                block_size,
+                                sub_volumes,
+                                read_only_parent: None,
+                            };
+
+                            let new_volume_data =
+                                serde_json::to_string(&new_vcr).unwrap();
+
+                            // Update the original volume_id with the new
+                            // volume.data.
+                            use db::schema::volume::dsl as volume_dsl;
+                            diesel::update(volume_dsl::volume)
+                                .filter(volume_dsl::id.eq(volume_id))
+                                .set(volume_dsl::data.eq(new_volume_data))
+                                .execute(conn)?;
+
+                            // Make a new VCR, with the information from
+                            // our temp_volume_id, but the read_only_parent
+                            // from the original volume.
+                            let rop_vcr = VolumeConstructionRequest::Volume {
+                                id: temp_volume_id,
+                                block_size,
+                                sub_volumes: vec![],
+                                read_only_parent,
+                            };
+                            let rop_volume_data =
+                                serde_json::to_string(&rop_vcr).unwrap();
+                            // Update the temp_volume_id with the volume
+                            // data that contains the read_only_parent.
+                            diesel::update(volume_dsl::volume)
+                                .filter(volume_dsl::id.eq(temp_volume_id))
+                                .filter(volume_dsl::time_deleted.is_null())
+                                .set(volume_dsl::data.eq(rop_volume_data))
+                                .execute(conn)?;
+
+                           Ok(true)
+                        }
+                    }
+                    _ => {
+                        // Volume has a format that does not contain ROPs
+                        Ok(false)
+                    }
+                }
+            })
+            .await
+            .map_err(|e| public_error_from_diesel_pool(
+                e,
+                ErrorHandler::Server
+            ))
+    }
 }
 
 #[derive(Default)]

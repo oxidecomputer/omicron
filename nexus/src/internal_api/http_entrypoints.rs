@@ -42,6 +42,7 @@ pub fn internal_api() -> NexusApiDescription {
         api.register(dataset_put)?;
         api.register(cpapi_instances_put)?;
         api.register(cpapi_disks_put)?;
+        api.register(cpapi_volume_remove_read_only_parent)?;
         api.register(cpapi_producers_post)?;
         api.register(cpapi_collectors_post)?;
         api.register(cpapi_metrics_collect)?;
@@ -219,6 +220,32 @@ async fn cpapi_disks_put(
     let handler = async {
         let opctx = OpContext::for_internal_api(&rqctx).await;
         nexus.notify_disk_updated(&opctx, path.disk_id, &new_state).await?;
+        Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Path parameters for Volume requests (internal API)
+#[derive(Deserialize, JsonSchema)]
+struct VolumePathParam {
+    volume_id: Uuid,
+}
+
+/// Request removal of a read_only_parent from a volume
+#[endpoint {
+     method = POST,
+     path = "/volume/remove-read-only-parent/{volume_id}",
+ }]
+async fn cpapi_volume_remove_read_only_parent(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<VolumePathParam>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+
+    let handler = async {
+        nexus.volume_remove_read_only_parent(path.volume_id).await?;
         Ok(HttpResponseUpdatedNoContent())
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
