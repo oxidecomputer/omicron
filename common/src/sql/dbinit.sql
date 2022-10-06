@@ -140,7 +140,12 @@ CREATE TABLE omicron.public.resource_usage (
     /* Should match the UUID of the corresponding collection */
     id UUID PRIMARY KEY,
 
-    disk_bytes_used INT8 NOT NULL
+    -- The amount of physical disk space which has been provisioned
+    -- on behalf of the collection.
+    physical_disk_bytes_provisioned INT8 NOT NULL,
+
+    -- The number of CPUs provisioned by VMs.
+    cpus_provisioned INT8 NOT NULL
 );
 
 /*

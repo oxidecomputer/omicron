@@ -400,7 +400,8 @@ table! {
 table! {
     resource_usage {
         id -> Uuid,
-        disk_bytes_used -> Int8,
+        physical_disk_bytes_provisioned -> Int8,
+        cpus_provisioned -> Int8,
     }
 }
 

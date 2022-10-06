@@ -322,7 +322,10 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
     let usage = datastore.resource_usage_get(&opctx, project_id).await.unwrap();
-    assert_eq!(usage.disk_bytes_used, 3 * disk_size.to_bytes() as i64);
+    assert_eq!(
+        usage.physical_disk_bytes_provisioned,
+        3 * disk_size.to_bytes() as i64
+    );
 
     // Issue snapshot request
     let snapshots_url = format!(
@@ -346,7 +349,10 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(snapshot.disk_id, base_disk.identity.id);
     assert_eq!(snapshot.size, base_disk.size);
     let usage = datastore.resource_usage_get(&opctx, project_id).await.unwrap();
-    assert_eq!(usage.disk_bytes_used, 2 * 3 * disk_size.to_bytes() as i64);
+    assert_eq!(
+        usage.physical_disk_bytes_provisioned,
+        2 * 3 * disk_size.to_bytes() as i64
+    );
 
     // Create a disk from this snapshot
     let disk_size = ByteCount::from_gibibytes_u32(2);
@@ -375,7 +381,10 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
 
     let usage = datastore.resource_usage_get(&opctx, project_id).await.unwrap();
-    assert_eq!(usage.disk_bytes_used, 3 * 3 * disk_size.to_bytes() as i64);
+    assert_eq!(
+        usage.physical_disk_bytes_provisioned,
+        3 * 3 * disk_size.to_bytes() as i64
+    );
 
     // Delete snapshot
     let snapshot_url = format!(
@@ -393,7 +402,10 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
 
     let usage = datastore.resource_usage_get(&opctx, project_id).await.unwrap();
-    assert_eq!(usage.disk_bytes_used, 2 * 3 * disk_size.to_bytes() as i64);
+    assert_eq!(
+        usage.physical_disk_bytes_provisioned,
+        2 * 3 * disk_size.to_bytes() as i64
+    );
 
     // Delete the disk using the snapshot
     let disk_url = format!("{}/{}", disks_url, snap_disk_name);
@@ -403,7 +415,10 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
         .await
         .expect("failed to delete disk");
     let usage = datastore.resource_usage_get(&opctx, project_id).await.unwrap();
-    assert_eq!(usage.disk_bytes_used, 3 * disk_size.to_bytes() as i64);
+    assert_eq!(
+        usage.physical_disk_bytes_provisioned,
+        3 * disk_size.to_bytes() as i64
+    );
 
     // Delete the original base disk
     let disk_url = format!("{}/{}", disks_url, base_disk_name);
@@ -413,7 +428,7 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
         .await
         .expect("failed to delete disk");
     let usage = datastore.resource_usage_get(&opctx, project_id).await.unwrap();
-    assert_eq!(usage.disk_bytes_used, 0);
+    assert_eq!(usage.physical_disk_bytes_provisioned, 0);
 }
 
 // Test the various ways Nexus can reject a disk created from a snapshot

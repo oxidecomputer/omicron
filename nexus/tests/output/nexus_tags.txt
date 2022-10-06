@@ -145,7 +145,7 @@ system_image_delete                      /system/images/{image_name}
 system_image_list                        /system/images
 system_image_view                        /system/images/{image_name}
 system_image_view_by_id                  /system/by-id/images/{id}
-system_metrics_utilization_list          /system/metrics/resource-utilization
+system_metrics_list                      /system/metrics/{resource_name}
 system_user_list                         /system/user
 system_user_view                         /system/user/{user_name}
 updates_refresh                          /system/updates/refresh

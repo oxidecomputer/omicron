@@ -6357,14 +6357,23 @@
         }
       }
     },
-    "/system/metrics/resource-utilization": {
+    "/system/metrics/{resource_name}": {
       "get": {
         "tags": [
           "system"
         ],
         "summary": "Access metrics data",
-        "operationId": "system_metrics_utilization_list",
+        "operationId": "system_metrics_list",
         "parameters": [
+          {
+            "in": "path",
+            "name": "resource_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ResourceName"
+            },
+            "style": "simple"
+          },
           {
             "in": "query",
             "name": "end_time",
@@ -12276,6 +12285,17 @@
               "id_ascending"
             ]
           }
+        ]
+      },
+      "ResourceName": {
+        "type": "string",
+        "enum": [
+          "physical_disk_space_provisioned",
+          "physical_disk_space_capacity",
+          "cpus_provisioned",
+          "cpu_capacity",
+          "ram_provisioned",
+          "ram_capacity"
         ]
       }
     }

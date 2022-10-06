@@ -241,7 +241,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(system_image_view_by_id)?;
         api.register(system_image_delete)?;
 
-        api.register(system_metrics_utilization_list)?;
+        api.register(system_metrics_list)?;
         api.register(updates_refresh)?;
         api.register(user_list)?;
 
@@ -4035,37 +4035,76 @@ pub struct ResourceUtilization {
     >,
 
     /// The UUID of the container being queried
+    // TODO: I might want to force the caller to specify type here?
     pub id: Uuid,
+}
+
+#[derive(Display, Deserialize, JsonSchema)]
+#[display(style = "snake_case")]
+#[serde(rename_all = "snake_case")]
+pub enum ResourceName {
+    PhysicalDiskSpaceProvisioned,
+    PhysicalDiskSpaceCapacity,
+    CpusProvisioned,
+    CpuCapacity,
+    RamProvisioned,
+    RamCapacity,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct SystemMetricsPathParam {
+    resource_name: ResourceName,
 }
 
 /// Access metrics data
 #[endpoint {
      method = GET,
-     path = "/system/metrics/resource-utilization",
+     path = "/system/metrics/{resource_name}",
      tags = ["system"],
 }]
-async fn system_metrics_utilization_list(
+async fn system_metrics_list(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<SystemMetricsPathParam>,
     query_params: Query<ResourceUtilization>,
 ) -> Result<HttpResponseOk<ResultsPage<oximeter_db::Measurement>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
+    let resource_name = path_params.into_inner().resource_name;
 
     let query = query_params.into_inner();
     let limit = rqctx.page_limit(&query.pagination)?;
 
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
 
-        let result = nexus
-            .select_timeseries(
-                "collection_target:disk_usage_metric",
-                &[&format!("id=={}", query.id)],
-                query.pagination,
-                limit,
-            )
-            .await?;
+        let result = match resource_name {
+            ResourceName::PhysicalDiskSpaceProvisioned => {
+                opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+                nexus
+                    .select_timeseries(
+                        "collection_target:physical_disk_space_provisioned",
+                        &[&format!("id=={}", query.id)],
+                        query.pagination,
+                        limit,
+                    )
+                    .await?
+            }
+            ResourceName::PhysicalDiskSpaceCapacity => todo!(),
+            ResourceName::CpusProvisioned => {
+                opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+                nexus
+                    .select_timeseries(
+                        "collection_target:cpus_provisioned",
+                        &[&format!("id=={}", query.id)],
+                        query.pagination,
+                        limit,
+                    )
+                    .await?
+            }
+            ResourceName::CpuCapacity => todo!(),
+            ResourceName::RamProvisioned => todo!(),
+            ResourceName::RamCapacity => todo!(),
+        };
 
         Ok(HttpResponseOk(result))
     };

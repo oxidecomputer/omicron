@@ -7,6 +7,7 @@
 use crate::db::alias::ExpressionAlias;
 use crate::db::model::ResourceUsage;
 use crate::db::pool::DbConnection;
+use crate::db::schema::resource_usage;
 use crate::db::subquery::{AsQuerySource, Cte, CteBuilder, CteQuery};
 use db_macros::Subquery;
 use diesel::pg::Pg;
@@ -107,23 +108,29 @@ pub struct ResourceUsageUpdate {
 }
 
 impl ResourceUsageUpdate {
-    pub fn new_update_disk(
-        project_id: uuid::Uuid,
-        disk_bytes_diff: i64,
-    ) -> Self {
+    // Generic utility for updating all collections including this resource,
+    // even transitively.
+    //
+    // Includes:
+    // - Project
+    // - Organization
+    // - Silo
+    fn apply_update<V>(project_id: uuid::Uuid, values: V) -> Self
+    where
+        V: diesel::AsChangeset<Target = resource_usage::table>,
+        <V as diesel::AsChangeset>::Changeset:
+            QueryFragment<Pg> + Send + 'static,
+    {
         let parent_org = ParentOrg::new(project_id);
         let parent_silo = ParentSilo::new(&parent_org);
         let all_collections =
             AllCollections::new(project_id, &parent_org, &parent_silo);
 
-        use crate::db::schema::resource_usage::dsl;
+        use resource_usage::dsl;
 
         let final_update = Box::new(
             diesel::update(dsl::resource_usage)
-                .set(
-                    dsl::disk_bytes_used
-                        .eq(dsl::disk_bytes_used + disk_bytes_diff),
-                )
+                .set(values)
                 .filter(dsl::id.eq_any(
                     all_collections.query_source().select(all_collections::id),
                 ))
@@ -137,6 +144,26 @@ impl ResourceUsageUpdate {
             .build(final_update);
 
         Self { cte }
+    }
+
+    pub fn new_update_disk(
+        project_id: uuid::Uuid,
+        disk_bytes_diff: i64,
+    ) -> Self {
+        use resource_usage::dsl;
+        Self::apply_update(
+            project_id,
+            dsl::physical_disk_bytes_provisioned
+                .eq(dsl::physical_disk_bytes_provisioned + disk_bytes_diff),
+        )
+    }
+
+    pub fn new_update_cpus(project_id: uuid::Uuid, cpus_diff: i64) -> Self {
+        use resource_usage::dsl;
+        Self::apply_update(
+            project_id,
+            dsl::cpus_provisioned.eq(dsl::cpus_provisioned + cpus_diff),
+        )
     }
 }
 

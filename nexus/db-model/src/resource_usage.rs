@@ -11,11 +11,12 @@ use uuid::Uuid;
 pub struct ResourceUsage {
     pub id: Uuid,
 
-    pub disk_bytes_used: i64,
+    pub physical_disk_bytes_provisioned: i64,
+    pub cpus_provisioned: i64,
 }
 
 impl ResourceUsage {
     pub fn new(id: Uuid) -> Self {
-        Self { id, disk_bytes_used: 0 }
+        Self { id, physical_disk_bytes_provisioned: 0, cpus_provisioned: 0 }
     }
 }

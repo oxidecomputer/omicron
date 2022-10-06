@@ -27,33 +27,60 @@ struct CollectionTarget {
 }
 
 #[derive(Debug, Clone, Metric)]
-struct DiskUsageMetric {
+struct PhysicalDiskSpaceProvisioned {
     #[datum]
     bytes_used: i64,
 }
 
+#[derive(Debug, Clone, Metric)]
+struct CpusProvisioned {
+    #[datum]
+    cpus: i64,
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct Producer {
-    updates: Arc<Mutex<Vec<(CollectionTarget, DiskUsageMetric)>>>,
+    samples: Arc<Mutex<Vec<Sample>>>,
 }
 
 impl Producer {
     pub fn new() -> Self {
-        Self { updates: Arc::new(Mutex::new(vec![])) }
+        Self { samples: Arc::new(Mutex::new(vec![])) }
     }
 
-    fn append(&self, usages: &Vec<ResourceUsage>) {
-        let mut new_updates = usages
+    fn append_disk_metrics(&self, usages: &Vec<ResourceUsage>) {
+        let new_samples = usages
             .iter()
             .map(|usage| {
-                (
-                    CollectionTarget { id: usage.id },
-                    DiskUsageMetric { bytes_used: usage.disk_bytes_used },
+                Sample::new(
+                    &CollectionTarget { id: usage.id },
+                    &PhysicalDiskSpaceProvisioned {
+                        bytes_used: usage.physical_disk_bytes_provisioned,
+                    },
                 )
             })
             .collect::<Vec<_>>();
-        let mut pending_updates = self.updates.lock().unwrap();
-        pending_updates.append(&mut new_updates);
+
+        self.append(new_samples);
+    }
+
+    fn append_cpu_metrics(&self, usages: &Vec<ResourceUsage>) {
+        let new_samples = usages
+            .iter()
+            .map(|usage| {
+                Sample::new(
+                    &CollectionTarget { id: usage.id },
+                    &CpusProvisioned { cpus: usage.cpus_provisioned },
+                )
+            })
+            .collect::<Vec<_>>();
+
+        self.append(new_samples);
+    }
+
+    fn append(&self, mut new_samples: Vec<Sample>) {
+        let mut pending_samples = self.samples.lock().unwrap();
+        pending_samples.append(&mut new_samples);
     }
 }
 
@@ -61,12 +88,9 @@ impl oximeter::Producer for Producer {
     fn produce(
         &mut self,
     ) -> Result<Box<dyn Iterator<Item = Sample> + 'static>, MetricsError> {
-        let updates =
-            std::mem::replace(&mut *self.updates.lock().unwrap(), vec![]);
-        let samples = updates
-            .into_iter()
-            .map(|(target, metric)| Sample::new(&target, &metric));
-        Ok(Box::new(samples))
+        let samples =
+            std::mem::replace(&mut *self.samples.lock().unwrap(), vec![]);
+        Ok(Box::new(samples.into_iter()))
     }
 }
 
@@ -88,7 +112,8 @@ impl DataStore {
                 .map_err(|e| {
                     public_error_from_diesel_pool(e, ErrorHandler::Server)
                 })?;
-        self.resource_usage_producer.append(&usages);
+        self.resource_usage_producer.append_disk_metrics(&usages);
+        self.resource_usage_producer.append_cpu_metrics(&usages);
         Ok(usages)
     }
 
@@ -141,7 +166,24 @@ impl DataStore {
                 .map_err(|e| {
                     public_error_from_diesel_pool(e, ErrorHandler::Server)
                 })?;
-        self.resource_usage_producer.append(&usages);
+        self.resource_usage_producer.append_disk_metrics(&usages);
+        Ok(usages)
+    }
+
+    pub async fn resource_usage_update_cpus(
+        &self,
+        opctx: &OpContext,
+        project_id: Uuid,
+        cpus_diff: i64,
+    ) -> Result<Vec<ResourceUsage>, Error> {
+        let usages =
+            ResourceUsageUpdate::new_update_cpus(project_id, cpus_diff)
+                .get_results_async(self.pool_authorized(opctx).await?)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                })?;
+        self.resource_usage_producer.append_cpu_metrics(&usages);
         Ok(usages)
     }
 }
