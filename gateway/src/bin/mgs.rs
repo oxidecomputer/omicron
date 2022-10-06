@@ -15,7 +15,6 @@ use uuid::Uuid;
 #[clap(name = "gateway", about = "See README.adoc for more information")]
 enum Args {
     /// Print the external OpenAPI Spec document and exit
-    #[clap(help = "Print the external OpenAPI Spec document and exit", action)]
     Openapi,
 
     /// Start an MGS server
