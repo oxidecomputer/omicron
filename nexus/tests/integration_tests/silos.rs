@@ -1500,7 +1500,7 @@ async fn test_jit_silo_constraints(cptestctx: &ControlPlaneTestContext) {
     let error: dropshot::HttpErrorResponseBody =
         NexusRequest::expect_failure_with_body(
             client,
-            StatusCode::BAD_REQUEST,
+            StatusCode::NOT_FOUND,
             Method::POST,
             "/system/silos/jit/identity-providers/local/users/create",
             &params::UserCreate {
@@ -1513,7 +1513,60 @@ async fn test_jit_silo_constraints(cptestctx: &ControlPlaneTestContext) {
         .unwrap()
         .parsed_body()
         .unwrap();
-    assert_eq!(error.message, "cannot create users in this kind of Silo");
+    assert_eq!(
+        error.message,
+        "not found: identity-provider with name \"local\""
+    );
+
+    // Suppose we do create a user (as via JIT).  They should not be able to
+    // view or delete them via the local identity provider.
+    let other_user_id = "57372ebb-ee76-4a2d-fa3e-e1875a8d11c0".parse().unwrap();
+    let _ = nexus
+        .silo_user_create(silo.identity.id, other_user_id, "other-user".into())
+        .await
+        .unwrap();
+    let other_user_url = format!(
+        "/system/silos/jit/identity-providers/local/users/id/{}",
+        other_user_id
+    );
+
+    for method in [Method::GET, Method::DELETE] {
+        let error: dropshot::HttpErrorResponseBody =
+            NexusRequest::expect_failure(
+                client,
+                StatusCode::NOT_FOUND,
+                method,
+                &other_user_url,
+            )
+            .authn_as(AuthnMode::SiloUser(new_silo_user_id))
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
+        assert_eq!(
+            error.message,
+            "not found: identity-provider with name \"local\""
+        );
+    }
+
+    // They should also not be able to list users via the "local" IdP endpoint.
+    let error: dropshot::HttpErrorResponseBody = NexusRequest::expect_failure(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::GET,
+        "/system/silos/jit/identity-providers/local/users/all",
+    )
+    .authn_as(AuthnMode::SiloUser(new_silo_user_id))
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+    assert_eq!(
+        error.message,
+        "not found: identity-provider with name \"local\""
+    );
 }
 
 #[nexus_test]
@@ -1521,7 +1574,7 @@ async fn test_local_silo_constraints(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     let nexus = &cptestctx.server.apictx.nexus;
 
-    // Now, let's try a "LocalOnly" Silo with its own admin user.
+    // Create a "LocalOnly" Silo with its own admin user.
     let silo = create_silo(
         &client,
         "fixed",
@@ -1614,8 +1667,6 @@ async fn test_local_silo_constraints(cptestctx: &ControlPlaneTestContext) {
 }
 
 // XXX-dap TODO-coverage
-// - attempt to create, delete user using API in SamlJit Silo ("create" may be
-//   covered above)
 // - successful user create/fetch/list/delete
 // - deleting a user that doesn't exist
 // - fetch/delete a user that exists in a different Silo

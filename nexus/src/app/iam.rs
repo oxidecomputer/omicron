@@ -90,22 +90,6 @@ impl super::Nexus {
         Ok(db_silo_user)
     }
 
-    pub async fn silo_users_list(
-        &self,
-        opctx: &OpContext,
-        silo_name: &Name,
-        pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<db::model::SiloUser> {
-        let (authz_silo, ..) = LookupPath::new(opctx, &self.db_datastore)
-            .silo_name(silo_name)
-            .fetch()
-            .await?;
-        let authz_silo_user_list = authz::SiloUserList::new(authz_silo);
-        self.db_datastore
-            .silo_users_list_by_id(opctx, &authz_silo_user_list, pagparams)
-            .await
-    }
-
     // Built-in users
 
     pub async fn users_builtin_list(
