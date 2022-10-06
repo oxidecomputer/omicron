@@ -17,6 +17,7 @@ use crate::db::model::Name;
 use crate::db::model::SiloUser;
 use crate::db::model::UserBuiltin;
 use crate::db::pagination::paginated;
+use crate::db::update_and_check::UpdateAndCheck;
 use crate::external_api::params;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -147,7 +148,8 @@ impl DataStore {
                         .filter(dsl::id.eq(authz_silo_user_id))
                         .filter(dsl::time_deleted.is_null())
                         .set(dsl::time_deleted.eq(Utc::now()))
-                        .execute_async(&mut conn)
+                        .check_if_exists::<SiloUser>(authz_silo_user_id)
+                        .execute_and_check(&mut conn)
                         .await?;
                 }
                 Ok(())
