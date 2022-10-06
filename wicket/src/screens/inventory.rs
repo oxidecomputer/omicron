@@ -9,6 +9,7 @@ use super::Screen;
 use super::TabIndex;
 use super::{Height, Width};
 use crate::inventory::ComponentId;
+use crate::widgets::AnimationState;
 use crate::widgets::HamburgerState;
 use crate::widgets::{
     Banner, ComponentModal, ComponentModalState, MenuBar, Rack, RackState,
@@ -83,9 +84,9 @@ impl InventoryScreen {
         let selected_style = Style::default().fg(OX_YELLOW).bg(OX_GRAY);
         let hovered_style = Style::default().fg(OX_PINK).bg(OX_GRAY);
         let help_menu_style =
-            Style::default().fg(OX_OFF_WHITE).bg(Color::Black);
+            Style::default().fg(OX_OFF_WHITE).bg(OX_GREEN_DARK);
         let help_menu_command_style =
-            Style::default().fg(OX_GREEN_LIGHT).bg(Color::Black);
+            Style::default().fg(OX_GREEN_LIGHT).bg(OX_GREEN_DARK);
         let bar = MenuBar {
             hamburger_state: &self.hamburger_state,
             title: "Oxide Rack",
@@ -218,9 +219,8 @@ impl InventoryScreen {
                 self.set_tabbed();
             }
             KeyCode::Esc => {
-                if self.hamburger_state.selected {
-                    // Close the hamburger menu on the next draw
-                    self.hamburger_state.selected = false;
+                if self.hamburger_state.help_menu.is_some() {
+                    self.close_help_menu();
                 } else if self.modal_active {
                     // Close the modal on the next draw
                     self.modal_active = false;
@@ -232,13 +232,7 @@ impl InventoryScreen {
             KeyCode::Enter => {
                 // We allow the hamburger menu on top of the modal
                 if self.tab_index == self.hamburger_state.tab_index {
-                    if self.hamburger_state.selected {
-                        // The menu is already open
-                        // TODO: Select the currently tabbed item?
-                        // Do we even need to allow that selection here ala command palette?
-                    } else {
-                        self.hamburger_state.selected = true;
-                    }
+                    self.open_help_menu()
                 } else if !self.modal_active && self.tab_index.is_set() {
                     // Open the modal on the next draw
                     self.modal_active = true;
@@ -247,6 +241,31 @@ impl InventoryScreen {
             _ => (),
         }
         vec![Action::Redraw]
+    }
+
+    fn open_help_menu(&mut self) {
+        self.hamburger_state
+            .help_menu
+            .get_or_insert(AnimationState::Opening { frame: 0, frame_max: 3 });
+    }
+
+    fn close_help_menu(&mut self) {
+        let state = self.hamburger_state.help_menu.take();
+        match state {
+            None => {
+                // Already closed
+                ()
+            }
+            Some(AnimationState::Opening { frame, frame_max }) => {
+                // Transition to closing at the same position in the animation
+                self.hamburger_state.help_menu =
+                    Some(AnimationState::Closing { frame, frame_max });
+            }
+            Some(s) => {
+                // Already closing. Maintain same state
+                self.hamburger_state.help_menu = Some(s);
+            }
+        }
     }
 
     fn handle_mouse_event(
@@ -492,7 +511,23 @@ impl Screen for InventoryScreen {
                 self.handle_mouse_event(state, mouse_event)
             }
             ScreenEvent::Tick => {
-                vec![]
+                if self.hamburger_state.help_menu.is_some() {
+                    let done =
+                        self.hamburger_state.help_menu.as_mut().unwrap().step();
+                    if done
+                        && self
+                            .hamburger_state
+                            .help_menu
+                            .as_ref()
+                            .unwrap()
+                            .is_closing()
+                    {
+                        self.hamburger_state.help_menu = None;
+                    }
+                    vec![Action::Redraw]
+                } else {
+                    vec![]
+                }
             }
             _ => vec![],
         }

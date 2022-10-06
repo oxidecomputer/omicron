@@ -4,6 +4,7 @@
 
 //! The menu bar at the top of each screen
 
+use super::AnimationState;
 use super::HelpMenu;
 use crate::screens::TabIndex;
 use tui::buffer::Buffer;
@@ -21,7 +22,7 @@ pub struct HamburgerState {
     pub rect: Rect,
     pub tabbed: bool,
     pub hovered: bool,
-    pub selected: bool,
+    pub help_menu: Option<AnimationState>,
 }
 
 impl HamburgerState {
@@ -31,7 +32,7 @@ impl HamburgerState {
             rect: Rect { height: 3, width: 4, x: 1, y: 0 },
             tabbed: false,
             hovered: false,
-            selected: false,
+            help_menu: None,
         }
     }
 }
@@ -59,7 +60,7 @@ impl<'a> MenuBar<'a> {
     }
 
     fn draw_hamburger(&self, mut rect: Rect, buf: &mut Buffer) {
-        if self.hamburger_state.selected {
+        if self.hamburger_state.help_menu.is_some() {
             return;
         }
         rect.height = 3;
@@ -80,9 +81,13 @@ impl<'a> MenuBar<'a> {
     }
 
     fn draw_help_menu(&self, rect: Rect, buf: &mut Buffer) {
+        if self.hamburger_state.help_menu.is_none() {
+            return;
+        }
         let menu = HelpMenu {
             style: self.help_menu_style,
             command_style: self.help_menu_command_style,
+            state: self.hamburger_state.help_menu.unwrap(),
         };
         menu.render(rect, buf);
     }
@@ -92,8 +97,6 @@ impl<'a> Widget for MenuBar<'a> {
     fn render(self, rect: Rect, buf: &mut Buffer) {
         self.draw_title(rect, buf);
         self.draw_hamburger(rect, buf);
-        if self.hamburger_state.selected {
-            self.draw_help_menu(rect, buf);
-        }
+        self.draw_help_menu(rect, buf);
     }
 }
