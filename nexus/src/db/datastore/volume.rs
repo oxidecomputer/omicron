@@ -554,12 +554,12 @@ impl DataStore {
                                 serde_json::to_string(&rop_vcr).unwrap();
                             // Update the temp_volume_id with the volume
                             // data that contains the read_only_parent.
-                            diesel::update(volume_dsl::volume)
+                            let num_updated = diesel::update(volume_dsl::volume)
                                 .filter(volume_dsl::id.eq(temp_volume_id))
                                 .filter(volume_dsl::time_deleted.is_null())
                                 .set(volume_dsl::data.eq(rop_volume_data))
                                 .execute(conn)?;
-
+                            println!("*** num_updated = {}", num_updated);
                            Ok(true)
                         }
                     }
