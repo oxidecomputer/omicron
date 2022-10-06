@@ -30,3 +30,86 @@ pub fn clear_buf(area: Rect, buf: &mut Buffer, style: Style) {
         }
     }
 }
+
+/// Animate expansion of a rec diagonally from top-left to bottom-right and
+/// drawing the bg color.
+///
+/// Return the Rect that was drawn
+pub fn animate_clear_buf(
+    mut rect: Rect,
+    buf: &mut Buffer,
+    style: Style,
+    state: AnimationState,
+) -> Rect {
+    rect.width = rect.width * state.frame() / state.frame_max();
+    rect.height = rect.height * state.frame() / state.frame_max();
+    clear_buf(rect, buf, style);
+    rect
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum AnimationState {
+    // Count up from frame = 0 until frame = frame_max
+    Opening { frame: u16, frame_max: u16 },
+    // Count down from frame = frame_max until frame = 0
+    Closing { frame: u16, frame_max: u16 },
+}
+
+impl AnimationState {
+    pub fn is_done(&self) -> bool {
+        match self {
+            AnimationState::Opening { frame, frame_max } => frame == frame_max,
+            AnimationState::Closing { frame, .. } => *frame == 0,
+        }
+    }
+
+    // Animate one frame
+    //
+    /// Return true if animation is complete
+    pub fn step(&mut self) -> bool {
+        match self {
+            AnimationState::Opening { frame, frame_max } => {
+                if frame != frame_max {
+                    *frame += 1;
+                    false
+                } else {
+                    true
+                }
+            }
+            AnimationState::Closing { frame, .. } => {
+                if *frame != 0 {
+                    *frame -= 1;
+                    false
+                } else {
+                    true
+                }
+            }
+        }
+    }
+
+    pub fn is_opening(&self) -> bool {
+        if let AnimationState::Opening { .. } = self {
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn is_closing(&self) -> bool {
+        !self.is_opening()
+    }
+
+    pub fn frame(&self) -> u16 {
+        match self {
+            AnimationState::Closing { frame, .. } => *frame,
+            AnimationState::Opening { frame, .. } => *frame,
+        }
+    }
+
+    pub fn frame_max(&self) -> u16 {
+        match self {
+            AnimationState::Closing { frame_max, .. } => *frame_max,
+            AnimationState::Opening { frame_max, .. } => *frame_max,
+        }
+    }
+}
