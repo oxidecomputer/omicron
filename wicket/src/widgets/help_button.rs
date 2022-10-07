@@ -25,7 +25,7 @@ pub struct HelpButtonState {
 impl HelpButtonState {
     pub fn new(x: u16, y: u16) -> HelpButtonState {
         HelpButtonState {
-            rect: Rect { height: 5, width: 11, x, y },
+            rect: Rect { height: 5, width: 12, x, y },
             hovered: false,
             selected: false,
         }
@@ -59,7 +59,7 @@ impl<'a> HelpButton<'a> {
 
 impl<'a> Widget for HelpButton<'a> {
     fn render(self, _: Rect, buf: &mut Buffer) {
-        let text = Text::from("  Help  \n ━━━━━━━\n  cmd-h ");
+        let text = Text::from("  Help  \n ━━━━━━━\n  ctrl-h ");
         let block_style = if self.state.hovered {
             self.hovered_style
         } else if self.state.selected {

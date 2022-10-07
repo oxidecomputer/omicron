@@ -187,6 +187,11 @@ impl RackScreen {
             KeyCode::Enter => {
                 // TODO: Transition to the component screen
             }
+            KeyCode::Char('h') => {
+                if event.modifiers.contains(KeyModifiers::CONTROL) {
+                    self.open_help_menu();
+                }
+            }
             _ => (),
         }
         vec![Action::Redraw]
