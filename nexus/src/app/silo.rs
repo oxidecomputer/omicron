@@ -16,15 +16,15 @@ use crate::external_api::shared;
 use crate::{authn, authz};
 use anyhow::Context;
 use nexus_db_model::UserProvisionType;
-use omicron_common::api::external::{CreateResult, ResourceType};
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::UpdateResult;
-use uuid::Uuid;
+use omicron_common::api::external::{CreateResult, ResourceType};
 use std::str::FromStr;
+use uuid::Uuid;
 
 impl super::Nexus {
     // Silos
@@ -160,7 +160,8 @@ impl super::Nexus {
         if db_silo.user_provision_type != UserProvisionType::ApiOnly {
             return Err(Error::not_found_by_name(
                 ResourceType::IdentityProvider,
-                &omicron_common::api::external::Name::from_str("local").unwrap(),
+                &omicron_common::api::external::Name::from_str("local")
+                    .unwrap(),
             ));
         }
         Ok((authz_silo, db_silo))
@@ -232,13 +233,14 @@ impl super::Nexus {
         silo_user_id: Uuid,
     ) -> DeleteResult {
         let (authz_silo, _) = self.silo_api_fetch(opctx, silo_name).await?;
-        let (authz_silo_user, _) = self.silo_api_user_lookup_by_id(
-            opctx,
-            &authz_silo,
-            silo_user_id,
-            authz::Action::Delete,
-        )
-        .await?;
+        let (authz_silo_user, _) = self
+            .silo_api_user_lookup_by_id(
+                opctx,
+                &authz_silo,
+                silo_user_id,
+                authz::Action::Delete,
+            )
+            .await?;
         self.db_datastore.silo_user_delete(opctx, &authz_silo_user).await
     }
 
@@ -249,13 +251,14 @@ impl super::Nexus {
         silo_user_id: Uuid,
     ) -> LookupResult<db::model::SiloUser> {
         let (authz_silo, _) = self.silo_api_fetch(opctx, silo_name).await?;
-        let (_, db_silo_user) = self.silo_api_user_lookup_by_id(
-            opctx,
-            &authz_silo,
-            silo_user_id,
-            authz::Action::Delete,
-        )
-        .await?;
+        let (_, db_silo_user) = self
+            .silo_api_user_lookup_by_id(
+                opctx,
+                &authz_silo,
+                silo_user_id,
+                authz::Action::Read,
+            )
+            .await?;
         Ok(db_silo_user)
     }
 

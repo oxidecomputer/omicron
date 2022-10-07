@@ -1666,7 +1666,165 @@ async fn test_local_silo_constraints(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
 }
 
+#[nexus_test]
+async fn test_local_silo_users(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.apictx.nexus;
+
+    // Create a "LocalOnly" Silo.
+    let silo = create_silo(
+        &client,
+        "local-only",
+        true,
+        shared::SiloIdentityMode::LocalOnly,
+    )
+    .await;
+
+    // We'll run through a battery of tests as each of two different users: the
+    // usual "test-privileged" user (which should have full access because
+    // they're a Fleet Administrator) as well as a newly-created Silo Admin
+    // user.
+    run_user_tests(client, &silo, &AuthnMode::PrivilegedUser, &[]).await;
+
+    let new_silo_user_id =
+        "5b3564b6-8770-4a30-b538-8ef6ae3efa3b".parse().unwrap();
+    let _ = nexus
+        .silo_user_create(
+            silo.identity.id,
+            new_silo_user_id,
+            "admin-user".into(),
+        )
+        .await
+        .unwrap();
+    grant_iam(
+        client,
+        "/system/silos/local-only",
+        SiloRole::Admin,
+        new_silo_user_id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+    run_user_tests(
+        client,
+        &silo,
+        &AuthnMode::SiloUser(new_silo_user_id),
+        &[views::User {
+            id: new_silo_user_id,
+            display_name: String::from("admin-user"),
+        }],
+    )
+    .await;
+}
+
+/// Runs a sequence of tests for create, read, and delete of API-managed users
+async fn run_user_tests(
+    client: &dropshot::test_util::ClientTestContext,
+    silo: &views::Silo,
+    authn_mode: &AuthnMode,
+    existing_users: &[views::User],
+) {
+    let url_local_idp_users = format!(
+        "/system/silos/{}/identity-providers/local/users",
+        silo.identity.name
+    );
+    let url_all_users = format!("{}/all", url_local_idp_users);
+    let url_user_create = format!("{}/create", url_local_idp_users);
+
+    // Fetch users and verify it matches what the caller expects.
+    println!("run_user_tests: as {:?}: fetch all users", authn_mode);
+    let users = NexusRequest::object_get(client, &url_all_users)
+        .authn_as(authn_mode.clone())
+        .execute()
+        .await
+        .expect("failed to list users")
+        .parsed_body::<dropshot::ResultsPage<views::User>>()
+        .unwrap()
+        .items;
+    println!("users: {:?}", users);
+    assert_eq!(users, existing_users);
+
+    // Create a user.
+    let user_created = NexusRequest::objects_post(
+        client,
+        &url_user_create,
+        &params::UserCreate {
+            external_id: params::UserId::from_str("a-test-user").unwrap(),
+        },
+    )
+    .authn_as(authn_mode.clone())
+    .execute()
+    .await
+    .expect("failed to create user")
+    .parsed_body::<views::User>()
+    .unwrap();
+    assert_eq!(user_created.display_name, "a-test-user");
+    println!("created user: {:?}", user_created);
+
+    // Fetch the user we just created.
+    let user_url = format!("{}/id/{}", url_local_idp_users, user_created.id);
+    let user_found = NexusRequest::object_get(client, &user_url)
+        .authn_as(authn_mode.clone())
+        .execute()
+        .await
+        .expect("failed to fetch user we just created")
+        .parsed_body::<views::User>()
+        .unwrap();
+    assert_eq!(user_created, user_found);
+
+    // List users.  We should find whatever was there before, plus our new one.
+    let new_users = NexusRequest::object_get(client, &url_all_users)
+        .authn_as(authn_mode.clone())
+        .execute()
+        .await
+        .expect("failed to list users")
+        .parsed_body::<dropshot::ResultsPage<views::User>>()
+        .unwrap()
+        .items;
+    println!("new_users: {:?}", new_users);
+    let new_users = new_users
+        .iter()
+        .filter(|new_user| !users.iter().any(|old_user| *new_user == old_user))
+        .collect::<Vec<_>>();
+    assert_eq!(new_users, &[&user_created]);
+
+    // Delete the user that we created.
+    NexusRequest::object_delete(client, &user_url)
+        .authn_as(authn_mode.clone())
+        .execute()
+        .await
+        .expect("failed to delete the user we just created");
+
+    // We should not be able to fetch or delete the user again.
+    for method in [Method::GET, Method::DELETE] {
+        let error = NexusRequest::expect_failure(
+            client,
+            StatusCode::NOT_FOUND,
+            method,
+            &user_url,
+        )
+        .authn_as(authn_mode.clone())
+        .execute()
+        .await
+        .expect("unexpectedly succeeded in fetching deleted user")
+        .parsed_body::<dropshot::HttpErrorResponseBody>()
+        .unwrap();
+        let not_found_message =
+            format!("not found: silo-user with id \"{}\"", user_created.id);
+        assert_eq!(error.message, not_found_message);
+    }
+
+    // List users again.  We should just find whatever we started with.
+    let last_users = NexusRequest::object_get(client, &url_all_users)
+        .authn_as(authn_mode.clone())
+        .execute()
+        .await
+        .expect("failed to list users")
+        .parsed_body::<dropshot::ResultsPage<views::User>>()
+        .unwrap()
+        .items;
+    println!("last_users: {:?}", last_users);
+    assert_eq!(last_users, existing_users);
+}
+
 // XXX-dap TODO-coverage
-// - successful user create/fetch/list/delete
-// - deleting a user that doesn't exist
 // - fetch/delete a user that exists in a different Silo

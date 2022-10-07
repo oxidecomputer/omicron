@@ -142,6 +142,7 @@ impl DataStore {
                     e,
                     ErrorHandler::NotFoundByResource(authz_silo_user),
                 )
+                .internal_context("deleting silo user")
             })
     }
 

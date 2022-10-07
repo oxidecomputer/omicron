@@ -448,7 +448,7 @@ impl TestResponse {
 
 /// Specifies what user (if any) the caller wants to use for authenticating to
 /// the server
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum AuthnMode {
     UnprivilegedUser,
     PrivilegedUser,

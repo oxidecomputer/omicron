@@ -1417,6 +1417,9 @@ CREATE TABLE omicron.public.console_session (
 CREATE INDEX ON omicron.public.console_session (
     time_created
 );
+CREATE INDEX ON omicron.public.console_session (
+    silo_user_id
+);
 
 /*******************************************************************/
 
@@ -1530,6 +1533,10 @@ CREATE TABLE omicron.public.device_access_token (
 -- one token is ever created for a given device authorization flow.
 CREATE UNIQUE INDEX ON omicron.public.device_access_token (
     client_id, device_code
+);
+
+CREATE INDEX ON omicron.public.device_access_token (
+    silo_user_id
 );
 
 /*
