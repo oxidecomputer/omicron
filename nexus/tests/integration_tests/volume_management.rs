@@ -22,6 +22,7 @@ use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Name;
+use omicron_nexus::context::OpContext;
 use omicron_nexus::db::DataStore;
 use omicron_nexus::external_api::params;
 use omicron_nexus::external_api::views;
@@ -1035,6 +1036,7 @@ async fn test_multiple_layers_of_snapshots_random_delete_order(
     assert!(disk_test.crucible_resources_deleted().await);
 }
 
+// A test function to create a volume with the provided read only parent.
 async fn create_volume(
     datastore: &Arc<DataStore>,
     volume_id: Uuid,

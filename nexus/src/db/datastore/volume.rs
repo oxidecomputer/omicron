@@ -479,6 +479,19 @@ impl DataStore {
         volume_id: Uuid,
         temp_volume_id: Uuid,
     ) -> Result<bool, Error> {
+        #[derive(Debug, thiserror::Error)]
+        enum RemoveReadOnlyParentError {
+            #[error("Error removing read only parent: {0}")]
+            DieselError(#[from] diesel::result::Error),
+
+            #[error("Serde error removing read only parent: {0}")]
+            SerdeError(#[from] serde_json::Error),
+
+            #[error("Database in unexpected state")]
+            UnexpectedDatabaseState,
+        }
+        type TxnError = TransactionError<RemoveReadOnlyParentError>;
+
         // In this single transaction:
         // - Get the given volume from the volume_id from the database
         // - Extract the volume.data into a VolumeConstructionRequest (VCR)
@@ -527,9 +540,17 @@ impl DataStore {
                 // If a read_only_parent exists, remove it from volume_id, and
                 // attach it to temp_volume_id.
                 let vcr: VolumeConstructionRequest =
-                    serde_json::from_str(volume.data()).unwrap();
+                    serde_json::from_str(
+                        volume.data()
+                    )
+                    .map_err(|e| {
+                        TxnError::CustomError(
+                            RemoveReadOnlyParentError::SerdeError(
+                                e,
+                            ),
+                        )
+                    })?;
 
-                println!("Updating volume: {} {}", volume_id, temp_volume_id);
                 match vcr {
                     VolumeConstructionRequest::Volume {
                         id,
@@ -551,15 +572,33 @@ impl DataStore {
                             };
 
                             let new_volume_data =
-                                serde_json::to_string(&new_vcr).unwrap();
+                                serde_json::to_string(
+                                    &new_vcr
+                                )
+                                .map_err(|e| {
+                                    TxnError::CustomError(
+                                        RemoveReadOnlyParentError::SerdeError(
+                                            e,
+                                        ),
+                                    )
+                                })?;
 
                             // Update the original volume_id with the new
                             // volume.data.
                             use db::schema::volume::dsl as volume_dsl;
-                            diesel::update(volume_dsl::volume)
+                            let num_updated = diesel::update(volume_dsl::volume)
                                 .filter(volume_dsl::id.eq(volume_id))
                                 .set(volume_dsl::data.eq(new_volume_data))
                                 .execute(conn)?;
+
+                            // This should update just one row.  If it does
+                            // not, then something is terribly wrong in the
+                            // database.
+                            if num_updated != 1 {
+                                return Err(TxnError::CustomError(
+                                    RemoveReadOnlyParentError::UnexpectedDatabaseState,
+                                ));
+                            }
 
                             // Make a new VCR, with the information from
                             // our temp_volume_id, but the read_only_parent
@@ -571,7 +610,16 @@ impl DataStore {
                                 read_only_parent,
                             };
                             let rop_volume_data =
-                                serde_json::to_string(&rop_vcr).unwrap();
+                                serde_json::to_string(
+                                    &rop_vcr
+                                )
+                                .map_err(|e| {
+                                    TxnError::CustomError(
+                                        RemoveReadOnlyParentError::SerdeError(
+                                            e,
+                                        ),
+                                    )
+                                })?;
                             // Update the temp_volume_id with the volume
                             // data that contains the read_only_parent.
                             let num_updated =
@@ -581,7 +629,9 @@ impl DataStore {
                                     .set(volume_dsl::data.eq(rop_volume_data))
                                     .execute(conn)?;
                             if num_updated != 1 {
-                                println!("RETURN ERROR");
+                                return Err(TxnError::CustomError(
+                                    RemoveReadOnlyParentError::UnexpectedDatabaseState,
+                                ));
                             }
                             Ok(true)
                         }
@@ -593,7 +643,18 @@ impl DataStore {
                 }
             })
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| match e {
+                TxnError::CustomError(
+                    RemoveReadOnlyParentError::DieselError(e),
+                ) => public_error_from_diesel_pool(
+                    e.into(),
+                    ErrorHandler::Server,
+                ),
+
+                _ => {
+                    Error::internal_error(&format!("Transaction error: {}", e))
+                }
+            })
     }
 }
 
