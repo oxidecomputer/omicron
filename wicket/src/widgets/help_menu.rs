@@ -15,21 +15,15 @@ use tui::widgets::Widget;
 use tui::widgets::{Block, Borders};
 
 #[derive(Debug)]
-pub struct HelpMenu {
+pub struct HelpMenu<'a> {
+    pub help: &'a [(&'a str, &'a str)],
     pub style: Style,
     pub command_style: Style,
     pub state: AnimationState,
 }
 
-impl Widget for HelpMenu {
+impl<'a> Widget for HelpMenu<'a> {
     fn render(self, mut rect: Rect, buf: &mut Buffer) {
-        let help = [
-            ("<TAB> | mouse over", "Highlight object"),
-            ("<Enter> | left mouse click", "Select highlighted objects"),
-            ("<ESC>", "Exit the current context"),
-            ("<CTRL-C>", "Exit the program"),
-        ];
-
         let mut text = Text::styled(
             "HELP\n\n",
             self.style
@@ -37,8 +31,8 @@ impl Widget for HelpMenu {
                 .add_modifier(Modifier::UNDERLINED),
         );
 
-        for (cmd, desc) in help {
-            text.extend(Text::styled(cmd, self.command_style));
+        for (cmd, desc) in self.help {
+            text.extend(Text::styled(*cmd, self.command_style));
             text.extend(Text::styled(format!("    {desc}"), self.style));
             text.extend(Text::styled("\n", self.style));
         }

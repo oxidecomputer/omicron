@@ -43,6 +43,7 @@ pub struct RackScreen {
     watermark: &'static str,
     tab_index: TabIndex,
     hovered: Option<HoverState>,
+    help_data: Vec<(&'static str, &'static str)>,
     help_button_state: HelpButtonState,
     help_menu_state: Option<AnimationState>,
     tab_index_by_component_id: BTreeMap<ComponentId, TabIndex>,
@@ -51,11 +52,18 @@ pub struct RackScreen {
 
 impl RackScreen {
     pub fn new(log: &Logger) -> RackScreen {
+        let help_data = vec![
+            ("<TAB> | mouse over", "Highlight object"),
+            ("<Enter> | left mouse click", "Select highlighted objects"),
+            ("<ESC>", "Exit the current context"),
+            ("<CTRL-C>", "Exit the program"),
+        ];
         let mut screen = RackScreen {
             log: log.clone(),
             watermark: include_str!("../../banners/oxide.txt"),
             tab_index: TabIndex::new_unset(MAX_TAB_INDEX),
             hovered: None,
+            help_data,
             help_button_state: HelpButtonState::new(1, 0),
             help_menu_state: None,
             tab_index_by_component_id: BTreeMap::new(),
@@ -95,6 +103,7 @@ impl RackScreen {
         // Draw the help button if not selected, otherwise draw the help menu
         if self.help_button_state.selected {
             let menu = HelpMenu {
+                help: &self.help_data,
                 style: help_menu_style,
                 command_style: help_menu_command_style,
                 state: *self.help_menu_state.as_ref().unwrap(),
