@@ -160,7 +160,7 @@ impl<'a> Widget for Rack<'a> {
 }
 
 // Currently we only allow tabbing through the rack
-const MAX_TAB_INDEX: u16 = 35;
+const MAX_TAB_INDEX: u16 = 34;
 
 // The visual state of the rack
 #[derive(Debug)]
@@ -226,12 +226,12 @@ impl RackState {
     }
 
     pub fn get_next_component_id(&self) -> ComponentId {
-        let mut next = self.tab_index.next();
+        let next = self.tab_index.next();
         *self.component_id_by_tab_index.get(&next).unwrap()
     }
 
     pub fn get_prev_component_id(&self) -> ComponentId {
-        let mut prev = self.tab_index.prev();
+        let prev = self.tab_index.prev();
         *self.component_id_by_tab_index.get(&prev).unwrap()
     }
 
@@ -381,7 +381,7 @@ impl RackState {
     }
 
     fn init_tab_index(&mut self) {
-        for i in 0..MAX_TAB_INDEX {
+        for i in 0..=MAX_TAB_INDEX {
             let tab_index = TabIndex::new(MAX_TAB_INDEX, i);
             let component_id = if i < 16 {
                 ComponentId::Sled(i.try_into().unwrap())

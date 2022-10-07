@@ -104,7 +104,6 @@ impl RackScreen {
                 &self.help_button_state,
                 button_style,
                 hovered_style,
-                selected_style,
             );
 
             f.render_widget(button, f.size());
@@ -185,7 +184,9 @@ impl RackScreen {
                 }
             }
             KeyCode::Enter => {
-                return vec![Action::SwitchScreen(ScreenId::Component)];
+                if state.rack_state.tab_index.is_set() {
+                    return vec![Action::SwitchScreen(ScreenId::Component)];
+                }
             }
             KeyCode::Char('h') => {
                 if event.modifiers.contains(KeyModifiers::CONTROL) {

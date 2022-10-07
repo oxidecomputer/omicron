@@ -43,7 +43,6 @@ pub struct HelpButton<'a> {
     pub state: &'a HelpButtonState,
     pub style: Style,
     pub hovered_style: Style,
-    pub selected_style: Style,
 }
 
 impl<'a> HelpButton<'a> {
@@ -51,22 +50,16 @@ impl<'a> HelpButton<'a> {
         state: &'a HelpButtonState,
         style: Style,
         hovered_style: Style,
-        selected_style: Style,
     ) -> HelpButton<'a> {
-        HelpButton { state, style, hovered_style, selected_style }
+        HelpButton { state, style, hovered_style }
     }
 }
 
 impl<'a> Widget for HelpButton<'a> {
     fn render(self, _: Rect, buf: &mut Buffer) {
         let text = Text::from("  Help  \n ━━━━━━━\n  ctrl-h ");
-        let block_style = if self.state.hovered {
-            self.hovered_style
-        } else if self.state.selected {
-            self.selected_style
-        } else {
-            self.style
-        };
+        let block_style =
+            if self.state.hovered { self.hovered_style } else { self.style };
         let button = Paragraph::new(text).style(self.style).block(
             Block::default()
                 .style(block_style)
