@@ -10,14 +10,12 @@ use tui::style::Style;
 
 mod animated_logo;
 mod banner;
-mod component;
 mod help_button;
 mod help_menu;
 mod rack;
 
 pub use animated_logo::{Logo, LogoState, LOGO_HEIGHT, LOGO_WIDTH};
 pub use banner::Banner;
-pub use component::{ComponentModal, ComponentModalState};
 pub use help_button::{HelpButton, HelpButtonState};
 pub use help_menu::HelpMenu;
 pub use rack::{Rack, RackState};
