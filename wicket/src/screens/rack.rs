@@ -412,7 +412,15 @@ impl Screen for RackScreen {
                 self.handle_mouse_event(state, mouse_event)
             }
             ScreenEvent::Tick => {
-                state.rack_state.knight_rider_mode.as_mut().map(|k| k.inc());
+                let width = state.rack_state.rect.width / 2 - 2;
+                let left = state.rack_state.rect.x + 1;
+                let right = left + width;
+
+                state
+                    .rack_state
+                    .knight_rider_mode
+                    .as_mut()
+                    .map(|k| k.inc(left, right));
                 if self.help_button_state.selected {
                     let done = self.help_menu_state.as_mut().unwrap().step();
                     if done

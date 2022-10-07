@@ -62,12 +62,18 @@ impl<'a> Rack<'a> {
             for y in inner.top()..inner.bottom() {
                 let cell = buf.get_mut(x, y).set_symbol("▕");
                 if sled.tabbed {
-                    if let Some(KnightRiderMode { count }) =
+                    if let Some(KnightRiderMode { count, move_left }) =
                         self.state.knight_rider_mode
                     {
                         let pos = count % inner_width as usize;
-                        if pos == (x - inner.left()) as usize {
-                            cell.set_bg(Color::Red);
+                        if move_left {
+                            if pos == (inner.right() - x) as usize {
+                                cell.set_bg(Color::Red);
+                            }
+                        } else {
+                            if pos == (x - inner.left()) as usize {
+                                cell.set_bg(Color::Red);
+                            }
                         }
                     }
                     if let Some(color) = self.sled_selected_style.fg {
@@ -177,11 +183,18 @@ const MAX_TAB_INDEX: u16 = 34;
 #[derive(Debug, Default)]
 pub struct KnightRiderMode {
     count: usize,
+    move_left: bool,
 }
 
 impl KnightRiderMode {
-    pub fn inc(&mut self) {
+    pub fn inc(&mut self, left: u16, right: u16) {
         self.count += 1;
+        if self.count % left as usize == 0 {
+            self.move_left = false;
+        }
+        if self.count % right as usize == 0 {
+            self.move_left = true;
+        }
     }
 }
 
