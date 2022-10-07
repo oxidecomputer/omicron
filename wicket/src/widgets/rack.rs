@@ -221,6 +221,20 @@ impl RackState {
         self.log = Some(log);
     }
 
+    pub fn get_current_component_id(&self) -> ComponentId {
+        *self.component_id_by_tab_index.get(&self.tab_index).unwrap()
+    }
+
+    pub fn get_next_component_id(&self) -> ComponentId {
+        let mut next = self.tab_index.next();
+        *self.component_id_by_tab_index.get(&next).unwrap()
+    }
+
+    pub fn get_prev_component_id(&self) -> ComponentId {
+        let mut prev = self.tab_index.prev();
+        *self.component_id_by_tab_index.get(&prev).unwrap()
+    }
+
     // We need to size the rack for large and small terminals
     // Width is not the issue, but height is.
     // We have the following constraints:
@@ -391,17 +405,5 @@ impl RackState {
             self.component_id_by_tab_index.insert(tab_index, component_id);
             self.tab_index_by_component_id.insert(component_id, tab_index);
         }
-    }
-
-    // TODO: This gets used in the component screen
-    fn get_next_component_id(&self) -> ComponentId {
-        let mut next = self.tab_index.next();
-        *self.component_id_by_tab_index.get(&next).unwrap()
-    }
-
-    // TODO: This gets used in the component screen
-    fn get_prev_component_id(&self) -> ComponentId {
-        let mut prev = self.tab_index.prev();
-        *self.component_id_by_tab_index.get(&prev).unwrap()
     }
 }

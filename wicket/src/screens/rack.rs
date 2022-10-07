@@ -6,7 +6,7 @@
 
 use super::colors::*;
 use super::Screen;
-use super::TabIndex;
+use super::ScreenId;
 use super::{Height, Width};
 use crate::inventory::ComponentId;
 use crate::widgets::AnimationState;
@@ -21,7 +21,6 @@ use crossterm::event::{
     KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use slog::Logger;
-use std::collections::BTreeMap;
 use tui::layout::Alignment;
 use tui::layout::Rect;
 use tui::style::{Color, Style};
@@ -47,8 +46,9 @@ pub struct RackScreen {
 impl RackScreen {
     pub fn new(log: &Logger) -> RackScreen {
         let help_data = vec![
-            ("<TAB> | mouse over", "Highlight object"),
-            ("<Enter> | left mouse click", "Select highlighted objects"),
+            ("<TAB>", "Cycle forward through components"),
+            ("<SHIFT>-<TAB>", "Cycle backwards through components"),
+            ("<Enter> | left mouse click", "Select hovered object"),
             ("<ESC>", "Exit the current context"),
             ("<CTRL-C>", "Exit the program"),
         ];
@@ -185,7 +185,7 @@ impl RackScreen {
                 }
             }
             KeyCode::Enter => {
-                // TODO: Transition to the component screen
+                return vec![Action::SwitchScreen(ScreenId::Component)];
             }
             KeyCode::Char('h') => {
                 if event.modifiers.contains(KeyModifiers::CONTROL) {
@@ -249,8 +249,7 @@ impl RackScreen {
                 }
                 HoverState::Rack(component_id) => {
                     state.rack_state.set_tab(component_id);
-                    // TODO: Transition to component screen
-                    vec![Action::Redraw]
+                    vec![Action::SwitchScreen(ScreenId::Component)]
                 }
             }
         } else {

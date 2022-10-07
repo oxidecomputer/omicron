@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+mod component;
 mod rack;
 mod splash;
 
@@ -12,6 +13,7 @@ use crate::Term;
 use slog::Logger;
 use tui::layout::Rect;
 
+use component::ComponentScreen;
 use rack::RackScreen;
 use splash::SplashScreen;
 
@@ -56,16 +58,22 @@ pub trait Screen {
 pub struct Screens {
     splash: SplashScreen,
     rack: RackScreen,
+    component: ComponentScreen,
 }
 
 impl Screens {
     pub fn new(log: &Logger) -> Screens {
-        Screens { splash: SplashScreen::new(), rack: RackScreen::new(log) }
+        Screens {
+            splash: SplashScreen::new(),
+            rack: RackScreen::new(log),
+            component: ComponentScreen::new(),
+        }
     }
 
     pub fn get(&self, id: ScreenId) -> &dyn Screen {
         match id {
             ScreenId::Rack => &self.rack,
+            ScreenId::Component => &self.component,
             _ => unimplemented!(),
         }
     }
@@ -74,6 +82,7 @@ impl Screens {
         match id {
             ScreenId::Splash => &mut self.splash,
             ScreenId::Rack => &mut self.rack,
+            ScreenId::Component => &mut self.component,
             _ => unimplemented!(),
         }
     }
