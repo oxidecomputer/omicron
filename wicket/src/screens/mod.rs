@@ -26,6 +26,22 @@ pub enum ScreenId {
     Update,
 }
 
+impl ScreenId {
+    pub fn name(&self) -> &'static str {
+        match self {
+            ScreenId::Splash => "splash",
+            ScreenId::Rack => "rack",
+            ScreenId::Component => "component",
+            ScreenId::Update => "update",
+        }
+    }
+
+    /// Width of the maximum string length of the name
+    pub fn width() -> u16 {
+        9
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Height(pub u16);
 

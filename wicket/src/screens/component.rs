@@ -13,9 +13,11 @@ use crate::widgets::clear_buf;
 use crate::widgets::AnimationState;
 use crate::widgets::Control;
 use crate::widgets::{Banner, HelpButton, HelpButtonState, HelpMenu, Rack};
+use crate::widgets::{ScreenButton, ScreenButtonState};
 use crate::Action;
 use crate::Frame;
 use crate::ScreenEvent;
+use crate::ScreenId;
 use crate::State;
 use crossterm::event::Event as TermEvent;
 use crossterm::event::{
@@ -34,6 +36,7 @@ use tui::widgets::{Block, Borders};
 #[derive(Debug, Clone, Copy)]
 pub enum HoverState {
     HelpButton,
+    RackScreenButton,
 }
 
 pub struct ComponentScreen {
@@ -41,6 +44,7 @@ pub struct ComponentScreen {
     help_data: Vec<(&'static str, &'static str)>,
     help_button_state: HelpButtonState,
     help_menu_state: Option<AnimationState>,
+    rack_screen_button_state: ScreenButtonState,
 }
 
 impl ComponentScreen {
@@ -56,6 +60,12 @@ impl ComponentScreen {
             help_data,
             help_button_state: HelpButtonState::new(1, 0),
             help_menu_state: None,
+            rack_screen_button_state: ScreenButtonState::new(
+                ScreenId::Rack,
+                // This get's reset on every draw
+                u16::MAX,
+                0,
+            ),
         }
     }
 
@@ -146,6 +156,14 @@ impl ComponentScreen {
 
             f.render_widget(button, f.size());
         }
+
+        // Draw the RackSreenButton
+        let button = ScreenButton::new(
+            &self.rack_screen_button_state,
+            button_style,
+            hovered_style,
+        );
+        f.render_widget(button, f.size());
     }
 
     fn draw_inventory(&self, f: &mut Frame, state: &State) {
@@ -246,6 +264,9 @@ impl ComponentScreen {
                     self.open_help_menu();
                     vec![]
                 }
+                HoverState::RackScreenButton => {
+                    vec![Action::SwitchScreen(ScreenId::Rack)]
+                }
             }
         } else {
             vec![]
@@ -265,11 +286,24 @@ impl ComponentScreen {
                     // No change
                     vec![]
                 }
-                None => vec![Action::Redraw],
+                _ => vec![Action::Redraw],
             };
 
             self.help_button_state.hovered = true;
+            self.rack_screen_button_state.hovered = false;
             self.hovered = Some(HoverState::HelpButton);
+            actions
+        } else if self.rack_screen_button_state.intersects_point(x, y) {
+            let actions = match self.hovered {
+                Some(HoverState::RackScreenButton) => {
+                    // No change
+                    vec![]
+                }
+                _ => vec![Action::Redraw],
+            };
+            self.rack_screen_button_state.hovered = true;
+            self.help_button_state.hovered = false;
+            self.hovered = Some(HoverState::RackScreenButton);
             actions
         } else {
             if self.hovered.is_none() {
@@ -277,6 +311,7 @@ impl ComponentScreen {
             } else {
                 self.hovered = None;
                 self.help_button_state.hovered = false;
+                self.rack_screen_button_state.hovered = false;
                 vec![Action::Redraw]
             }
         }
@@ -329,6 +364,8 @@ impl Screen for ComponentScreen {
         terminal: &mut crate::Term,
     ) -> anyhow::Result<()> {
         terminal.draw(|f| {
+            self.rack_screen_button_state.rect.x =
+                f.size().width - ScreenButtonState::width();
             self.draw_background(f);
             self.draw_status_bar(f, state);
             self.draw_inventory(f, state);

@@ -72,7 +72,6 @@ impl RackScreen {
     fn draw_menubar(&self, f: &mut Frame) {
         let style = Style::default().fg(OX_GREEN_DARK).bg(OX_GRAY);
         let button_style = Style::default().fg(OX_OFF_WHITE).bg(OX_GRAY_DARK);
-        let selected_style = Style::default().fg(OX_YELLOW).bg(OX_GRAY_DARK);
         let hovered_style = Style::default().fg(OX_PINK).bg(OX_GRAY_DARK);
         let help_menu_style =
             Style::default().fg(OX_OFF_WHITE).bg(OX_GREEN_DARK);
