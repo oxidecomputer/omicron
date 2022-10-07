@@ -13,6 +13,7 @@ use crossterm::event::Event as TermEvent;
 use crossterm::event::EventStream;
 use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{MouseEvent, MouseEventKind};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen,
@@ -194,6 +195,8 @@ impl Wizard {
                     screen.draw(&self.state, &mut self.terminal)?;
                 }
                 Event::Term(TermEvent::Mouse(mouse_event)) => {
+                    self.state.mouse =
+                        Point { x: mouse_event.column, y: mouse_event.row };
                     let actions = screen.on(
                         &mut self.state,
                         ScreenEvent::Term(TermEvent::Mouse(mouse_event)),
@@ -242,6 +245,20 @@ impl Wizard {
                 Action::SwitchScreen(id) => {
                     self.active_screen = id;
                     let screen = self.screens.get_mut(id);
+                    // Simulate a mouse movement for the current position
+                    // because the mouse may be in a different position when transitioning
+                    // between screens.
+                    let mouse_event = MouseEvent {
+                        kind: MouseEventKind::Moved,
+                        column: self.state.mouse.x,
+                        row: self.state.mouse.y,
+                        modifiers: KeyModifiers::NONE,
+                    };
+                    let event =
+                        ScreenEvent::Term(TermEvent::Mouse(mouse_event));
+                    // We ignore actions, as they can only be draw actions, and
+                    // we are about to draw.
+                    let _ = screen.on(&mut self.state, event);
                     screen.draw(&self.state, &mut self.terminal)?;
                 }
             }
@@ -309,6 +326,12 @@ async fn run_event_listener(log: slog::Logger, events_tx: Sender<Event>) {
     });
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Point {
+    pub x: u16,
+    pub y: u16,
+}
+
 /// The data state of the Wizard
 ///
 /// Data is not tied to any specific screen and is updated upon event receipt.
@@ -316,11 +339,16 @@ async fn run_event_listener(log: slog::Logger, events_tx: Sender<Event>) {
 pub struct State {
     pub inventory: Inventory,
     pub rack_state: RackState,
+    pub mouse: Point,
 }
 
 impl State {
     pub fn new() -> State {
-        State { inventory: Inventory::default(), rack_state: RackState::new() }
+        State {
+            inventory: Inventory::default(),
+            rack_state: RackState::new(),
+            mouse: Point::default(),
+        }
     }
 }
 
