@@ -73,6 +73,10 @@ impl InventoryScreen {
         screen
     }
 
+    fn help_menu_open(&self) -> bool {
+        self.hamburger_state.help_menu.is_some()
+    }
+
     fn draw_background(&self, f: &mut Frame) {
         let style = Style::default().fg(OX_GREEN_DARK).bg(OX_GRAY);
         let block = Block::default().style(style).borders(Borders::NONE);
@@ -197,29 +201,36 @@ impl InventoryScreen {
     ) -> Vec<Action> {
         match event.code {
             KeyCode::Tab => {
-                self.clear_tabbed();
-                self.tab_index.inc();
-                if self.modal_active
-                    && self.tab_index == self.hamburger_state.tab_index
-                {
-                    // We need to skip over the hamburger
+                // Don't process tab requests if the help menu is open
+                if !self.help_menu_open() {
+                    self.clear_tabbed();
                     self.tab_index.inc();
+                    if self.modal_active
+                        && self.tab_index == self.hamburger_state.tab_index
+                    {
+                        // We need to skip over the hamburger
+                        self.tab_index.inc();
+                    }
+                    self.set_tabbed();
                 }
-                self.set_tabbed();
             }
             KeyCode::BackTab => {
-                self.clear_tabbed();
-                self.tab_index.dec();
-                if self.modal_active
-                    && self.tab_index == self.hamburger_state.tab_index
-                {
-                    // We need to skip over the hamburger
+                // Don't process tab requests if the help menu is open
+                if !self.help_menu_open() {
+                    self.clear_tabbed();
                     self.tab_index.dec();
+                    if self.modal_active
+                        && self.tab_index == self.hamburger_state.tab_index
+                    {
+                        // We need to skip over the hamburger
+                        self.tab_index.dec();
+                    }
+                    self.set_tabbed();
                 }
-                self.set_tabbed();
             }
             KeyCode::Esc => {
-                if self.hamburger_state.help_menu.is_some() {
+                // Clear the top object
+                if self.help_menu_open() {
                     self.close_help_menu();
                 } else if self.modal_active {
                     // Close the modal on the next draw
@@ -234,8 +245,10 @@ impl InventoryScreen {
                 if self.tab_index == self.hamburger_state.tab_index {
                     self.open_help_menu()
                 } else if !self.modal_active && self.tab_index.is_set() {
-                    // Open the modal on the next draw
-                    self.modal_active = true;
+                    // Open the modal on the next draw, but only if the help menu is not open already
+                    if !self.help_menu_open() {
+                        self.modal_active = true;
+                    }
                 }
             }
             _ => (),
@@ -246,7 +259,7 @@ impl InventoryScreen {
     fn open_help_menu(&mut self) {
         self.hamburger_state
             .help_menu
-            .get_or_insert(AnimationState::Opening { frame: 0, frame_max: 3 });
+            .get_or_insert(AnimationState::Opening { frame: 0, frame_max: 8 });
     }
 
     fn close_help_menu(&mut self) {
@@ -286,6 +299,26 @@ impl InventoryScreen {
 
     fn handle_mouse_click(&mut self, state: &State) -> Vec<Action> {
         // Do nothing if we're inside the modal
+        //
+        // TODO: Unfortunately this means the user can't click the help
+        // button. Fix this.
+        //
+        // The problem is that we conflate being tabbed as also allowing
+        // entry to the object, in this case the hamburger. But when in the modal
+        // we also limit tabs to not go to the hamburger ever, because we
+        // want to allow only cycling through the sleds.
+        //
+        // One option to fix this would be to just go ahead and remove the
+        // hamburger from the tab index, and allow access with <CMD-h> or
+        // a mouse click only. This is probably the easiest, but not being
+        // able to tab access to a control seems wrong. However, with the modal
+        // we really only allow conditional tabbing.
+        //
+        // Another option is to separate the notion of being tab selected from
+        // being clicked and make clicking not change the tab index.
+        //
+        // A final option is just to add more special case code. This really
+        // seems terrible.
         if self.modal_active {
             return vec![];
         }
@@ -524,7 +557,11 @@ impl Screen for InventoryScreen {
                     {
                         self.hamburger_state.help_menu = None;
                     }
-                    vec![Action::Redraw]
+                    if !done {
+                        vec![Action::Redraw]
+                    } else {
+                        vec![]
+                    }
                 } else {
                     vec![]
                 }
