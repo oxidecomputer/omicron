@@ -342,7 +342,8 @@ async fn test_session_me(cptestctx: &ControlPlaneTestContext) {
         priv_user,
         views::User {
             id: USER_TEST_PRIVILEGED.id(),
-            display_name: USER_TEST_PRIVILEGED.external_id.clone()
+            display_name: USER_TEST_PRIVILEGED.external_id.clone(),
+            silo_id: DEFAULT_SILO.id(),
         }
     );
 
@@ -359,7 +360,8 @@ async fn test_session_me(cptestctx: &ControlPlaneTestContext) {
         unpriv_user,
         views::User {
             id: USER_TEST_UNPRIVILEGED.id(),
-            display_name: USER_TEST_UNPRIVILEGED.external_id.clone()
+            display_name: USER_TEST_UNPRIVILEGED.external_id.clone(),
+            silo_id: DEFAULT_SILO.id(),
         }
     );
 }
