@@ -389,7 +389,7 @@ lazy_static! {
 
     pub static ref DEMO_SYSTEM_METRICS_URL: String =
         format!(
-            "/system/metrics/physical_disk_space_provisioned?start_time={:?}&end_time={:?}&id={}",
+            "/system/metrics/virtual_disk_space_provisioned?start_time={:?}&end_time={:?}&id={}",
             Utc::now(),
             Utc::now(),
             "3aaf22ae-5691-4f6d-b62c-aa532512fa78",
