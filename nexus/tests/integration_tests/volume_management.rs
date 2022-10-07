@@ -281,7 +281,6 @@ async fn test_multiple_snapshots(cptestctx: &ControlPlaneTestContext) {
 
     let global_image = create_global_image(&client).await;
     // Create a disk from this image
-    let disk_size = ByteCount::from_gibibytes_u32(1); // ZZZ
     let base_disk =
         create_base_disk(&client, &global_image, &disks_url, &base_disk_name)
             .await;
