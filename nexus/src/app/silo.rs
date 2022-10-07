@@ -169,10 +169,9 @@ impl super::Nexus {
 
     /// Helper function for looking up a user in a Silo
     ///
-    /// The normal Lookup API lets you look up users directly, regardless of
-    /// what Silo they're in.  This helper validates that they're in the
-    /// expected Silo.
-    async fn silo_api_user_lookup_by_id(
+    /// `LookupPath` lets you look up users directly, regardless of what Silo
+    /// they're in.  This helper validates that they're in the expected Silo.
+    async fn silo_user_lookup_by_id(
         &self,
         opctx: &OpContext,
         authz_silo: &authz::Silo,
@@ -237,7 +236,7 @@ impl super::Nexus {
     ) -> DeleteResult {
         let (authz_silo, _) = self.silo_api_fetch(opctx, silo_name).await?;
         let (authz_silo_user, _) = self
-            .silo_api_user_lookup_by_id(
+            .silo_user_lookup_by_id(
                 opctx,
                 &authz_silo,
                 silo_user_id,
@@ -256,7 +255,7 @@ impl super::Nexus {
     ) -> LookupResult<db::model::SiloUser> {
         let (authz_silo, _) = self.silo_api_fetch(opctx, silo_name).await?;
         let (_, db_silo_user) = self
-            .silo_api_user_lookup_by_id(
+            .silo_user_lookup_by_id(
                 opctx,
                 &authz_silo,
                 silo_user_id,
