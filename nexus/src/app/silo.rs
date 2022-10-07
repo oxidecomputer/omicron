@@ -143,30 +143,6 @@ impl super::Nexus {
 
     // Users
 
-    /// Helper function for looking up a LocalOnly Silo by name
-    ///
-    /// This is called from contexts that are trying to access the "local"
-    /// identity provider.  On failure, it returns a 404 for that identity
-    /// provider.
-    async fn silo_api_fetch(
-        &self,
-        opctx: &OpContext,
-        silo_name: &Name,
-    ) -> LookupResult<(authz::Silo, db::model::Silo)> {
-        let (authz_silo, db_silo) = LookupPath::new(opctx, &self.db_datastore)
-            .silo_name(silo_name)
-            .fetch()
-            .await?;
-        if db_silo.user_provision_type != UserProvisionType::ApiOnly {
-            return Err(Error::not_found_by_name(
-                ResourceType::IdentityProvider,
-                &omicron_common::api::external::Name::from_str("local")
-                    .unwrap(),
-            ));
-        }
-        Ok((authz_silo, db_silo))
-    }
-
     /// Helper function for looking up a user in a Silo
     ///
     /// `LookupPath` lets you look up users directly, regardless of what Silo
@@ -190,28 +166,56 @@ impl super::Nexus {
         Ok((authz_silo_user, db_silo_user))
     }
 
-    /// List the users in a specific Silo
-    pub async fn silo_api_users_list(
+    // The "local" identity provider (available only in `LocalOnly` Silos)
+
+    /// Helper function for looking up a LocalOnly Silo by name
+    ///
+    /// This is called from contexts that are trying to access the "local"
+    /// identity provider.  On failure, it returns a 404 for that identity
+    /// provider.
+    async fn local_idp_fetch_silo(
+        &self,
+        opctx: &OpContext,
+        silo_name: &Name,
+    ) -> LookupResult<(authz::Silo, db::model::Silo)> {
+        let (authz_silo, db_silo) = LookupPath::new(opctx, &self.db_datastore)
+            .silo_name(silo_name)
+            .fetch()
+            .await?;
+        if db_silo.user_provision_type != UserProvisionType::ApiOnly {
+            return Err(Error::not_found_by_name(
+                ResourceType::IdentityProvider,
+                &omicron_common::api::external::Name::from_str("local")
+                    .unwrap(),
+            ));
+        }
+        Ok((authz_silo, db_silo))
+    }
+
+    /// List the users in a Silo's local identity provider
+    pub async fn local_idp_list_users(
         &self,
         opctx: &OpContext,
         silo_name: &Name,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::SiloUser> {
-        let (authz_silo, _) = self.silo_api_fetch(opctx, silo_name).await?;
+        let (authz_silo, _) =
+            self.local_idp_fetch_silo(opctx, silo_name).await?;
         let authz_silo_user_list = authz::SiloUserList::new(authz_silo);
         self.db_datastore
             .silo_users_list_by_id(opctx, &authz_silo_user_list, pagparams)
             .await
     }
 
-    /// Create a user in a specific Silo
-    pub async fn silo_api_user_create(
+    /// Create a user in a Silo's local identity provider
+    pub async fn local_idp_create_user(
         &self,
         opctx: &OpContext,
         silo_name: &Name,
         new_user_params: params::UserCreate,
     ) -> CreateResult<db::model::SiloUser> {
-        let (authz_silo, _) = self.silo_api_fetch(opctx, silo_name).await?;
+        let (authz_silo, _) =
+            self.local_idp_fetch_silo(opctx, silo_name).await?;
         let authz_silo_user_list = authz::SiloUserList::new(authz_silo.clone());
         // TODO-cleanup This authz check belongs in silo_user_create().
         opctx
@@ -227,14 +231,15 @@ impl super::Nexus {
         Ok(db_silo_user)
     }
 
-    /// Delete a specific user in a specific Silo
-    pub async fn silo_api_user_delete(
+    /// Delete a user in a Silo's local identity provider
+    pub async fn local_idp_delete_user(
         &self,
         opctx: &OpContext,
         silo_name: &Name,
         silo_user_id: Uuid,
     ) -> DeleteResult {
-        let (authz_silo, _) = self.silo_api_fetch(opctx, silo_name).await?;
+        let (authz_silo, _) =
+            self.local_idp_fetch_silo(opctx, silo_name).await?;
         let (authz_silo_user, _) = self
             .silo_user_lookup_by_id(
                 opctx,
@@ -246,14 +251,15 @@ impl super::Nexus {
         self.db_datastore.silo_user_delete(opctx, &authz_silo_user).await
     }
 
-    /// Fetch a specific user in a specific Silo
-    pub async fn silo_api_user_fetch(
+    /// Fetch a user in a Silo's local identity provider
+    pub async fn local_idp_fetch_user(
         &self,
         opctx: &OpContext,
         silo_name: &Name,
         silo_user_id: Uuid,
     ) -> LookupResult<db::model::SiloUser> {
-        let (authz_silo, _) = self.silo_api_fetch(opctx, silo_name).await?;
+        let (authz_silo, _) =
+            self.local_idp_fetch_silo(opctx, silo_name).await?;
         let (_, db_silo_user) = self
             .silo_user_lookup_by_id(
                 opctx,

@@ -758,7 +758,7 @@ async fn local_idp_users_list(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let users = nexus
-            .silo_api_users_list(&opctx, &silo_name, &pagparams)
+            .local_idp_list_users(&opctx, &silo_name, &pagparams)
             .await?
             .into_iter()
             .map(|i| i.into())
@@ -793,7 +793,7 @@ async fn local_idp_user_create(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let user = nexus
-            .silo_api_user_create(
+            .local_idp_create_user(
                 &opctx,
                 &silo_name,
                 new_user_params.into_inner(),
@@ -828,7 +828,7 @@ async fn local_idp_user_view(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let user = nexus
-            .silo_api_user_fetch(
+            .local_idp_fetch_user(
                 &opctx,
                 &path_params.silo_name,
                 path_params.user_id,
@@ -854,7 +854,7 @@ async fn local_idp_user_delete(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         nexus
-            .silo_api_user_delete(
+            .local_idp_delete_user(
                 &opctx,
                 &path_params.silo_name,
                 path_params.user_id,
