@@ -8,6 +8,7 @@ use crate::inventory::ComponentId;
 use crate::screens::make_even;
 use crate::screens::Height;
 use crate::screens::RectState;
+use crate::screens::TabIndex;
 use slog::Logger;
 use std::collections::BTreeMap;
 use tui::buffer::Buffer;
@@ -15,7 +16,6 @@ use tui::layout::Rect;
 use tui::style::Style;
 use tui::widgets::Block;
 use tui::widgets::Borders;
-use tui::widgets::StatefulWidget;
 use tui::widgets::Widget;
 
 #[derive(Debug, Clone)]
@@ -159,17 +159,31 @@ impl<'a> Widget for Rack<'a> {
     }
 }
 
+// Currently we only allow tabbing through the rack
+const MAX_TAB_INDEX: u16 = 35;
+
 // The visual state of the rack
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct RackState {
     pub log: Option<Logger>,
     pub rect: Rect,
     pub component_rects: BTreeMap<ComponentId, RectState>,
+    pub tab_index: TabIndex,
+    pub tab_index_by_component_id: BTreeMap<ComponentId, TabIndex>,
+    pub component_id_by_tab_index: BTreeMap<TabIndex, ComponentId>,
 }
 
 impl RackState {
     pub fn new() -> RackState {
-        let mut state = RackState::default();
+        let mut state = RackState {
+            log: None,
+            rect: Rect::default(),
+            component_rects: BTreeMap::new(),
+            tab_index: TabIndex::new_unset(MAX_TAB_INDEX),
+            tab_index_by_component_id: BTreeMap::new(),
+            component_id_by_tab_index: BTreeMap::new(),
+        };
+
         for i in 0..32 {
             state
                 .component_rects
@@ -184,8 +198,25 @@ impl RackState {
                 .component_rects
                 .insert(ComponentId::Psc(i), RectState::default());
         }
+
+        state.init_tab_index();
         state
     }
+
+    pub fn update_tabbed(&mut self, val: bool) {
+        if let Some(id) = self.component_id_by_tab_index.get(&self.tab_index) {
+            self.component_rects.get_mut(&id).unwrap().tabbed = val;
+        }
+    }
+
+    pub fn set_tab(&mut self, id: ComponentId) {
+        self.update_tabbed(false);
+        if let Some(tab_index) = self.tab_index_by_component_id.get(&id) {
+            self.tab_index = *tab_index;
+            self.update_tabbed(true);
+        }
+    }
+
     pub fn set_logger(&mut self, log: Logger) {
         self.log = Some(log);
     }
@@ -333,5 +364,44 @@ impl RackState {
             sled.rect.height = sled_height;
         }
         sled.rect.width = sled_width;
+    }
+
+    fn init_tab_index(&mut self) {
+        for i in 0..MAX_TAB_INDEX {
+            let tab_index = TabIndex::new(MAX_TAB_INDEX, i);
+            let component_id = if i < 16 {
+                ComponentId::Sled(i.try_into().unwrap())
+            } else if i > 19 {
+                ComponentId::Sled((i - 4).try_into().unwrap())
+            } else if i == 16 {
+                // Switches
+                ComponentId::Switch(0)
+            } else if i == 19 {
+                ComponentId::Switch(1)
+            } else if i == 17 || i == 18 {
+                // Power Shelves
+                // We actually want to return the active component here, so
+                // we name it "psc X"
+                ComponentId::Psc((i - 17).try_into().unwrap())
+            } else {
+                // If we add more items to tab through this will change
+                unreachable!();
+            };
+
+            self.component_id_by_tab_index.insert(tab_index, component_id);
+            self.tab_index_by_component_id.insert(component_id, tab_index);
+        }
+    }
+
+    // TODO: This gets used in the component screen
+    fn get_next_component_id(&self) -> ComponentId {
+        let mut next = self.tab_index.next();
+        *self.component_id_by_tab_index.get(&next).unwrap()
+    }
+
+    // TODO: This gets used in the component screen
+    fn get_prev_component_id(&self) -> ComponentId {
+        let mut prev = self.tab_index.prev();
+        *self.component_id_by_tab_index.get(&prev).unwrap()
     }
 }

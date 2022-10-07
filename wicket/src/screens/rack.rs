@@ -27,9 +27,6 @@ use tui::layout::Rect;
 use tui::style::{Color, Style};
 use tui::widgets::{Block, Borders};
 
-// Currently we only allow tabbing through the rack
-const MAX_TAB_INDEX: u16 = 35;
-
 // Is the mouse hovering over the HelpButton or rack?
 #[derive(Debug, Clone, Copy)]
 pub enum HoverState {
@@ -41,13 +38,10 @@ pub enum HoverState {
 pub struct RackScreen {
     log: Logger,
     watermark: &'static str,
-    tab_index: TabIndex,
     hovered: Option<HoverState>,
     help_data: Vec<(&'static str, &'static str)>,
     help_button_state: HelpButtonState,
     help_menu_state: Option<AnimationState>,
-    tab_index_by_component_id: BTreeMap<ComponentId, TabIndex>,
-    component_id_by_tab_index: BTreeMap<TabIndex, ComponentId>,
 }
 
 impl RackScreen {
@@ -58,19 +52,15 @@ impl RackScreen {
             ("<ESC>", "Exit the current context"),
             ("<CTRL-C>", "Exit the program"),
         ];
-        let mut screen = RackScreen {
+
+        RackScreen {
             log: log.clone(),
             watermark: include_str!("../../banners/oxide.txt"),
-            tab_index: TabIndex::new_unset(MAX_TAB_INDEX),
             hovered: None,
             help_data,
             help_button_state: HelpButtonState::new(1, 0),
             help_menu_state: None,
-            tab_index_by_component_id: BTreeMap::new(),
-            component_id_by_tab_index: BTreeMap::new(),
-        };
-        screen.init_tab_index();
-        screen
+        }
     }
 
     fn draw_background(&self, f: &mut Frame) {
@@ -178,12 +168,12 @@ impl RackScreen {
         match event.code {
             KeyCode::Tab => {
                 self.clear_tabbed(state);
-                self.tab_index.inc();
+                state.rack_state.tab_index.inc();
                 self.set_tabbed(state);
             }
             KeyCode::BackTab => {
                 self.clear_tabbed(state);
-                self.tab_index.dec();
+                state.rack_state.tab_index.dec();
                 self.set_tabbed(state);
             }
             KeyCode::Esc => {
@@ -191,7 +181,7 @@ impl RackScreen {
                     self.close_help_menu();
                 } else {
                     self.clear_tabbed(state);
-                    self.tab_index.clear();
+                    state.rack_state.tab_index.clear();
                 }
             }
             KeyCode::Enter => {
@@ -253,14 +243,7 @@ impl RackScreen {
                     vec![]
                 }
                 HoverState::Rack(component_id) => {
-                    self.clear_tabbed(state);
-                    self.tab_index = self
-                        .tab_index_by_component_id
-                        .get(&component_id)
-                        .unwrap()
-                        .clone();
-                    self.set_tabbed(state);
-
+                    state.rack_state.set_tab(component_id);
                     // TODO: Transition to component screen
                     vec![Action::Redraw]
                 }
@@ -377,59 +360,12 @@ impl RackScreen {
 
     // Set the tabbed boolean to `true` for the current tab indexed rect
     fn set_tabbed(&mut self, state: &mut State) {
-        self.update_tabbed(state, true);
+        state.rack_state.update_tabbed(true);
     }
 
     // Set the tabbed boolean to `false` for the current tab indexed rect
     fn clear_tabbed(&mut self, state: &mut State) {
-        self.update_tabbed(state, false);
-    }
-
-    fn update_tabbed(&mut self, state: &mut State, val: bool) {
-        if let Some(id) = self.component_id_by_tab_index.get(&self.tab_index) {
-            state.rack_state.component_rects.get_mut(&id).unwrap().tabbed = val;
-        }
-    }
-
-    // Map Rack [`ComponentId`]s
-    fn init_tab_index(&mut self) {
-        // Exclude the last tab index, which is the hamburger menu
-        for i in 0..MAX_TAB_INDEX {
-            let tab_index = TabIndex::new(MAX_TAB_INDEX, i);
-            let component_id = if i < 16 {
-                ComponentId::Sled(i.try_into().unwrap())
-            } else if i > 19 {
-                ComponentId::Sled((i - 4).try_into().unwrap())
-            } else if i == 16 {
-                // Switches
-                ComponentId::Switch(0)
-            } else if i == 19 {
-                ComponentId::Switch(1)
-            } else if i == 17 || i == 18 {
-                // Power Shelves
-                // We actually want to return the active component here, so
-                // we name it "psc X"
-                ComponentId::Psc((i - 17).try_into().unwrap())
-            } else {
-                // If we add more items to tab through this will change
-                unreachable!();
-            };
-
-            self.component_id_by_tab_index.insert(tab_index, component_id);
-            self.tab_index_by_component_id.insert(component_id, tab_index);
-        }
-    }
-
-    // TODO: This gets used in the component screen
-    fn get_next_component_id(&self) -> ComponentId {
-        let mut next = self.tab_index.next();
-        *self.component_id_by_tab_index.get(&next).unwrap()
-    }
-
-    // TODO: This gets used in the component screen
-    fn get_prev_component_id(&self) -> ComponentId {
-        let mut prev = self.tab_index.prev();
-        *self.component_id_by_tab_index.get(&prev).unwrap()
+        state.rack_state.update_tabbed(false);
     }
 }
 
