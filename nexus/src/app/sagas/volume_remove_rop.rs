@@ -24,10 +24,10 @@ pub struct Params {
 // Volume remove_read_only_parent saga: actions
 
 lazy_static! {
-    // We remove a read_only parent by
+    // We remove a read_only parent by:
     // - Creating a temporary volume.
     // - Remove the read_only_parent from our source volume and attach it
-    // to the temporary volume.
+    //   to the temporary volume.
     // - Delete the temporary volume.
 
     // Create the empty data for the temp volume.
@@ -45,8 +45,6 @@ lazy_static! {
         "volume-remove-rop.remove-read-only-parent",
         svr_remove_read_only_parent
     );
-
-    // Remove temp volume
 }
 
 // volume remove read only parent saga: definition
@@ -104,12 +102,14 @@ impl NexusSaga for SagaVolumeRemoveROP {
             CREATE_TEMP_VOLUME.as_ref(),
         ));
 
+        // Remove the read only parent, attach to temp volume
         builder.append(Node::action(
             "no_result_1",
             "RemoveReadOnlyParent",
             REMOVE_READ_ONLY_PARENT.as_ref(),
         ));
 
+        // Build the params for the subsaga to delete the temp volume
         builder.append(Node::constant(
             "params_for_delete_subsaga",
             serde_json::to_value(&subsaga_params).map_err(|e| {
@@ -120,6 +120,7 @@ impl NexusSaga for SagaVolumeRemoveROP {
             })?,
         ));
 
+        // Call the subsaga to delete the temp volume
         builder.append(Node::subsaga(
             "final_no_result",
             subsaga_dag,
@@ -132,6 +133,8 @@ impl NexusSaga for SagaVolumeRemoveROP {
 
 // volume remove read only parent saga: action implementations
 
+// To create a volume, we need a crucible volume construction request.
+// We create that data here.
 async fn svr_create_temp_data(
     sagactx: NexusActionContext,
 ) -> Result<String, ActionError> {
@@ -174,7 +177,6 @@ async fn svr_remove_read_only_parent(
 
     let temp_volume_id = sagactx.lookup::<uuid::Uuid>("temp_volume_id")?;
 
-    println!("svr_remove_read_only_parent nv:{}", temp_volume_id);
     osagactx
         .datastore()
         .volume_remove_rop(params.volume_id, temp_volume_id)

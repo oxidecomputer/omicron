@@ -503,7 +503,7 @@ impl DataStore {
         // - Extract the temp volume.data into a VCR
         // - Create a new VCR, copying over anything from the original VCR,
         //   but, replacing the read_only_parent with the read_only_parent
-        //   data from volume_id.
+        //   data from original volume_id.
         // - Put the new temp VCR into the temp volume.data, update the
         //   temp_volume in the database.
         self.pool()

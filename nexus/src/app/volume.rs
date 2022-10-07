@@ -41,7 +41,7 @@ impl super::Nexus {
         Ok(volume_deleted)
     }
 
-    /// Kick off a saga to remove a read only parent from a volume.
+    /// Start a saga to remove a read only parent from a volume.
     pub async fn volume_remove_read_only_parent(
         self: &Arc<Self>,
         volume_id: Uuid,
