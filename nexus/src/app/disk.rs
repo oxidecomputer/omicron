@@ -511,6 +511,15 @@ impl super::Nexus {
                 .fetch()
                 .await?;
 
+        // TODO: This should exist within a saga
+        self.db_datastore
+            .resource_usage_update_disk(
+                &opctx,
+                project.id(),
+                -i64::try_from(db_snapshot.size.to_bytes()).unwrap(),
+            )
+            .await?;
+
         self.db_datastore
             .project_delete_snapshot(opctx, &authz_snapshot, &db_snapshot)
             .await?;

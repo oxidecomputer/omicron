@@ -187,8 +187,8 @@ impl ResourceUsageUpdate {
         use resource_usage::dsl;
         Self::apply_update(
             project_id,
-            dsl::physical_disk_bytes_provisioned
-                .eq(dsl::physical_disk_bytes_provisioned + disk_bytes_diff),
+            dsl::virtual_disk_bytes_provisioned
+                .eq(dsl::virtual_disk_bytes_provisioned + disk_bytes_diff),
         )
     }
 

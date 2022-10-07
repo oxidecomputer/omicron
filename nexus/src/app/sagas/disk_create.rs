@@ -47,10 +47,10 @@ lazy_static! {
         sdc_alloc_regions,
         sdc_alloc_regions_undo,
     );
-    static ref REGIONS_ACCOUNT: NexusAction = ActionFunc::new_action(
-        "disk-create.account-regions",
-        sdc_account_regions,
-        sdc_account_regions_undo,
+    static ref SPACE_ACCOUNT: NexusAction = ActionFunc::new_action(
+        "disk-create.account-space",
+        sdc_account_space,
+        sdc_account_space_undo,
     );
     static ref REGIONS_ENSURE: NexusAction =
         new_action_noop_undo("disk-create.regions-ensure", sdc_regions_ensure,);
@@ -76,7 +76,7 @@ impl NexusSaga for SagaDiskCreate {
     fn register_actions(registry: &mut ActionRegistry) {
         registry.register(Arc::clone(&*CREATE_DISK_RECORD));
         registry.register(Arc::clone(&*REGIONS_ALLOC));
-        registry.register(Arc::clone(&*REGIONS_ACCOUNT));
+        registry.register(Arc::clone(&*SPACE_ACCOUNT));
         registry.register(Arc::clone(&*REGIONS_ENSURE));
         registry.register(Arc::clone(&*CREATE_VOLUME_RECORD));
         registry.register(Arc::clone(&*FINALIZE_DISK_RECORD));
@@ -112,8 +112,8 @@ impl NexusSaga for SagaDiskCreate {
 
         builder.append(Node::action(
             "no-result",
-            "RegionsAccount",
-            REGIONS_ACCOUNT.as_ref(),
+            "SpaceAccount",
+            SPACE_ACCOUNT.as_ref(),
         ));
 
         builder.append(Node::action(
@@ -274,33 +274,21 @@ async fn sdc_alloc_regions_undo(
     Ok(())
 }
 
-fn get_space_used_by_allocated_regions(
-    sagactx: &NexusActionContext,
-) -> Result<i64, ActionError> {
-    let space_used = sagactx
-        .lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
-            "datasets_and_regions",
-        )?
-        .into_iter()
-        .map(|(_, region)| region.size_used())
-        .fold(0, |acc, x| acc + x);
-    Ok(space_used)
-}
-
 // TODO: Not yet idempotent
-async fn sdc_account_regions(
+async fn sdc_account_space(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
 
+    let disk_created = sagactx.lookup::<db::model::Disk>("created_disk")?;
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
     osagactx
         .datastore()
         .resource_usage_update_disk(
             &opctx,
             params.project_id,
-            get_space_used_by_allocated_regions(&sagactx)?,
+            i64::try_from(disk_created.size.to_bytes()).unwrap(),
         )
         .await
         .map_err(ActionError::action_failed)?;
@@ -308,19 +296,20 @@ async fn sdc_account_regions(
 }
 
 // TODO: Not yet idempotent
-async fn sdc_account_regions_undo(
+async fn sdc_account_space_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
 
+    let disk_created = sagactx.lookup::<db::model::Disk>("created_disk")?;
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
     osagactx
         .datastore()
         .resource_usage_update_disk(
             &opctx,
             params.project_id,
-            -get_space_used_by_allocated_regions(&sagactx)?,
+            -i64::try_from(disk_created.size.to_bytes()).unwrap(),
         )
         .await
         .map_err(ActionError::action_failed)?;

@@ -153,7 +153,7 @@ CREATE TABLE omicron.public.resource_usage (
 
     -- The amount of physical disk space which has been provisioned
     -- on behalf of the collection.
-    physical_disk_bytes_provisioned INT8 NOT NULL,
+    virtual_disk_bytes_provisioned INT8 NOT NULL,
 
     -- The number of CPUs provisioned by VMs.
     cpus_provisioned INT8 NOT NULL,

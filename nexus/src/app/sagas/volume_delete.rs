@@ -30,7 +30,6 @@ use super::NexusActionContext;
 use super::NexusSaga;
 use crate::app::sagas::NexusAction;
 use crate::authn;
-use crate::context::OpContext;
 use crate::db::datastore::CrucibleResources;
 use lazy_static::lazy_static;
 use nexus_types::identity::Asset;
@@ -171,7 +170,6 @@ async fn svd_delete_crucible_regions(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params::<Params>()?;
 
     let crucible_resources_to_delete =
         sagactx.lookup::<CrucibleResources>("crucible_resources_to_delete")?;
@@ -191,23 +189,6 @@ async fn svd_delete_crucible_regions(
                 .iter()
                 .map(|(_, r)| r.id())
                 .collect();
-
-            // TODO: This accounting is not yet idempotent
-            let space_used = crucible_resources_to_delete
-                .datasets_and_regions
-                .iter()
-                .fold(0, |acc, (_, r)| acc + r.size_used());
-            let opctx =
-                OpContext::for_saga_action(&sagactx, &params.serialized_authn);
-            osagactx
-                .datastore()
-                .resource_usage_update_disk(
-                    &opctx,
-                    params.project_id,
-                    -space_used,
-                )
-                .await
-                .map_err(ActionError::action_failed)?;
 
             osagactx
                 .datastore()

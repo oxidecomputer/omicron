@@ -4043,7 +4043,7 @@ pub struct ResourceUtilization {
 #[display(style = "snake_case")]
 #[serde(rename_all = "snake_case")]
 pub enum ResourceName {
-    PhysicalDiskSpaceProvisioned,
+    VirtualDiskSpaceProvisioned,
     CpusProvisioned,
     RamProvisioned,
 }
@@ -4075,11 +4075,11 @@ async fn system_metrics_list(
         let opctx = OpContext::for_external_api(&rqctx).await?;
 
         let result = match resource_name {
-            ResourceName::PhysicalDiskSpaceProvisioned => {
+            ResourceName::VirtualDiskSpaceProvisioned => {
                 opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
                 nexus
                     .select_timeseries(
-                        "collection_target:physical_disk_space_provisioned",
+                        "collection_target:virtual_disk_space_provisioned",
                         &[&format!("id=={}", query.id)],
                         query.pagination,
                         limit,

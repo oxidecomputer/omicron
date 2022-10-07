@@ -11,7 +11,7 @@ use uuid::Uuid;
 pub struct ResourceUsage {
     pub id: Uuid,
 
-    pub physical_disk_bytes_provisioned: i64,
+    pub virtual_disk_bytes_provisioned: i64,
     pub cpus_provisioned: i64,
     pub ram_provisioned: i64,
 }
@@ -20,7 +20,7 @@ impl ResourceUsage {
     pub fn new(id: Uuid) -> Self {
         Self {
             id,
-            physical_disk_bytes_provisioned: 0,
+            virtual_disk_bytes_provisioned: 0,
             cpus_provisioned: 0,
             ram_provisioned: 0,
         }

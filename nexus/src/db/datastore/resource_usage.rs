@@ -28,7 +28,7 @@ struct CollectionTarget {
 }
 
 #[derive(Debug, Clone, Metric)]
-struct PhysicalDiskSpaceProvisioned {
+struct VirtualDiskSpaceProvisioned {
     #[datum]
     bytes_used: i64,
 }
@@ -61,8 +61,8 @@ impl Producer {
             .map(|usage| {
                 Sample::new(
                     &CollectionTarget { id: usage.id },
-                    &PhysicalDiskSpaceProvisioned {
-                        bytes_used: usage.physical_disk_bytes_provisioned,
+                    &VirtualDiskSpaceProvisioned {
+                        bytes_used: usage.virtual_disk_bytes_provisioned,
                     },
                 )
             })

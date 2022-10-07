@@ -920,19 +920,19 @@ async fn test_disk_resource_usage(cptestctx: &ControlPlaneTestContext) {
     // The project and organization should start as empty.
     let resource_usage =
         datastore.resource_usage_get(&opctx, project_id1).await.unwrap();
-    assert_eq!(resource_usage.physical_disk_bytes_provisioned, 0);
+    assert_eq!(resource_usage.virtual_disk_bytes_provisioned, 0);
     let resource_usage =
         datastore.resource_usage_get(&opctx, project_id2).await.unwrap();
-    assert_eq!(resource_usage.physical_disk_bytes_provisioned, 0);
+    assert_eq!(resource_usage.virtual_disk_bytes_provisioned, 0);
     let resource_usage =
         datastore.resource_usage_get(&opctx, org_id).await.unwrap();
-    assert_eq!(resource_usage.physical_disk_bytes_provisioned, 0);
+    assert_eq!(resource_usage.virtual_disk_bytes_provisioned, 0);
     let resource_usage =
         datastore.resource_usage_get(&opctx, *SILO_ID).await.unwrap();
-    assert_eq!(resource_usage.physical_disk_bytes_provisioned, 0);
+    assert_eq!(resource_usage.virtual_disk_bytes_provisioned, 0);
     let resource_usage =
         datastore.resource_usage_get(&opctx, *FLEET_ID).await.unwrap();
-    assert_eq!(resource_usage.physical_disk_bytes_provisioned, 0);
+    assert_eq!(resource_usage.virtual_disk_bytes_provisioned, 0);
 
     // Ask for a 1 gibibyte disk in the first project.
     //
@@ -963,29 +963,29 @@ async fn test_disk_resource_usage(cptestctx: &ControlPlaneTestContext) {
     let resource_usage =
         datastore.resource_usage_get(&opctx, project_id1).await.unwrap();
     assert_eq!(
-        resource_usage.physical_disk_bytes_provisioned,
-        3 * disk_size.to_bytes() as i64
+        resource_usage.virtual_disk_bytes_provisioned,
+        disk_size.to_bytes() as i64
     );
     let resource_usage =
         datastore.resource_usage_get(&opctx, project_id2).await.unwrap();
-    assert_eq!(resource_usage.physical_disk_bytes_provisioned, 0);
+    assert_eq!(resource_usage.virtual_disk_bytes_provisioned, 0);
     let resource_usage =
         datastore.resource_usage_get(&opctx, org_id).await.unwrap();
     assert_eq!(
-        resource_usage.physical_disk_bytes_provisioned,
-        3 * disk_size.to_bytes() as i64
+        resource_usage.virtual_disk_bytes_provisioned,
+        disk_size.to_bytes() as i64
     );
     let resource_usage =
         datastore.resource_usage_get(&opctx, *SILO_ID).await.unwrap();
     assert_eq!(
-        resource_usage.physical_disk_bytes_provisioned,
-        3 * disk_size.to_bytes() as i64
+        resource_usage.virtual_disk_bytes_provisioned,
+        disk_size.to_bytes() as i64
     );
     let resource_usage =
         datastore.resource_usage_get(&opctx, *FLEET_ID).await.unwrap();
     assert_eq!(
-        resource_usage.physical_disk_bytes_provisioned,
-        3 * disk_size.to_bytes() as i64
+        resource_usage.virtual_disk_bytes_provisioned,
+        disk_size.to_bytes() as i64
     );
 
     // Ask for a 1 gibibyte disk in the second project.
@@ -1018,20 +1018,20 @@ async fn test_disk_resource_usage(cptestctx: &ControlPlaneTestContext) {
     let resource_usage =
         datastore.resource_usage_get(&opctx, project_id1).await.unwrap();
     assert_eq!(
-        resource_usage.physical_disk_bytes_provisioned,
-        3 * disk_size.to_bytes() as i64
+        resource_usage.virtual_disk_bytes_provisioned,
+        disk_size.to_bytes() as i64
     );
     let resource_usage =
         datastore.resource_usage_get(&opctx, project_id2).await.unwrap();
     assert_eq!(
-        resource_usage.physical_disk_bytes_provisioned,
-        3 * disk_size.to_bytes() as i64
+        resource_usage.virtual_disk_bytes_provisioned,
+        disk_size.to_bytes() as i64
     );
     let resource_usage =
         datastore.resource_usage_get(&opctx, org_id).await.unwrap();
     assert_eq!(
-        resource_usage.physical_disk_bytes_provisioned,
-        2 * 3 * disk_size.to_bytes() as i64
+        resource_usage.virtual_disk_bytes_provisioned,
+        2 * disk_size.to_bytes() as i64
     );
 
     // Delete the disk we just created, observe the utilization drop
@@ -1045,17 +1045,17 @@ async fn test_disk_resource_usage(cptestctx: &ControlPlaneTestContext) {
     let resource_usage =
         datastore.resource_usage_get(&opctx, project_id1).await.unwrap();
     assert_eq!(
-        resource_usage.physical_disk_bytes_provisioned,
-        3 * disk_size.to_bytes() as i64
+        resource_usage.virtual_disk_bytes_provisioned,
+        disk_size.to_bytes() as i64
     );
     let resource_usage =
         datastore.resource_usage_get(&opctx, project_id2).await.unwrap();
-    assert_eq!(resource_usage.physical_disk_bytes_provisioned, 0);
+    assert_eq!(resource_usage.virtual_disk_bytes_provisioned, 0);
     let resource_usage =
         datastore.resource_usage_get(&opctx, org_id).await.unwrap();
     assert_eq!(
-        resource_usage.physical_disk_bytes_provisioned,
-        3 * disk_size.to_bytes() as i64
+        resource_usage.virtual_disk_bytes_provisioned,
+        disk_size.to_bytes() as i64
     );
 }
 
@@ -1380,7 +1380,7 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
     // Check the utilization info for the whole project too.
     let utilization_url = |id: Uuid| {
         format!(
-            "/system/metrics/physical_disk_space_provisioned?start_time={:?}&end_time={:?}&id={:?}",
+            "/system/metrics/virtual_disk_space_provisioned?start_time={:?}&end_time={:?}&id={:?}",
             Utc::now() - chrono::Duration::seconds(20),
             Utc::now() + chrono::Duration::seconds(20),
             id,

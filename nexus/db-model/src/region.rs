@@ -75,9 +75,4 @@ impl Region {
         // external, customer-supplied keys is a non-requirement.
         true
     }
-    pub fn size_used(&self) -> i64 {
-        self.extent_count()
-            * self.blocks_per_extent()
-            * self.block_size().to_bytes() as i64
-    }
 }

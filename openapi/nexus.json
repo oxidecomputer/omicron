@@ -12290,7 +12290,7 @@
       "ResourceName": {
         "type": "string",
         "enum": [
-          "physical_disk_space_provisioned",
+          "virtual_disk_space_provisioned",
           "cpus_provisioned",
           "ram_provisioned"
         ]
