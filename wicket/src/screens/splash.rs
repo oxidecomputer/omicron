@@ -73,7 +73,11 @@ impl Screen for SplashScreen {
         Ok(())
     }
 
-    fn on(&mut self, _state: &crate::State, event: ScreenEvent) -> Vec<Action> {
+    fn on(
+        &mut self,
+        _state: &mut crate::State,
+        event: ScreenEvent,
+    ) -> Vec<Action> {
         match event {
             ScreenEvent::Tick => {
                 self.state.frame += 1;

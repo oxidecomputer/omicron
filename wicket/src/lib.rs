@@ -24,6 +24,7 @@ use std::io::{stdout, Stdout};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use tokio::time::{interval, Duration};
 use tui::backend::CrosstermBackend;
+use tui::layout::Rect;
 use tui::Terminal;
 
 pub(crate) mod inventory;
@@ -33,7 +34,10 @@ mod widgets;
 
 use inventory::{Component, ComponentId, Inventory, PowerState};
 use mgs::{MgsHandle, MgsManager};
-use screens::{ScreenId, Screens};
+use screens::{Height, ScreenId, Screens};
+use widgets::RackState;
+
+pub const MARGIN: Height = Height(5);
 
 // We can avoid a bunch of unnecessary type parameters by picking them ahead of time.
 pub type Term = Terminal<CrosstermBackend<Stdout>>;
@@ -99,7 +103,7 @@ impl Wizard {
         let log = Self::setup_log("/tmp/wicket.log").unwrap();
         let screens = Screens::new(&log);
         let (events_tx, events_rx) = channel();
-        let state = State::default();
+        let state = State::new();
         let backend = CrosstermBackend::new(stdout());
         let terminal = Terminal::new(backend).unwrap();
         let log = Self::setup_log("/tmp/wicket.log").unwrap();
@@ -155,6 +159,11 @@ impl Wizard {
     }
 
     fn mainloop(&mut self) -> anyhow::Result<()> {
+        // Size the rack for the initial draw
+        self.state
+            .rack_state
+            .resize(&self.terminal.get_frame().size(), &MARGIN);
+
         // Draw the initial screen
         let screen = self.screens.get_mut(self.active_screen);
         screen.draw(&self.state, &mut self.terminal)?;
@@ -165,7 +174,7 @@ impl Wizard {
             let event = self.events_rx.recv().unwrap();
             match event {
                 Event::Tick => {
-                    let actions = screen.on(&self.state, ScreenEvent::Tick);
+                    let actions = screen.on(&mut self.state, ScreenEvent::Tick);
                     self.handle_actions(actions)?;
                 }
                 Event::Term(TermEvent::Key(key_event)) => {
@@ -174,17 +183,19 @@ impl Wizard {
                         break;
                     }
                     let actions = screen.on(
-                        &self.state,
+                        &mut self.state,
                         ScreenEvent::Term(TermEvent::Key(key_event)),
                     );
                     self.handle_actions(actions)?;
                 }
-                Event::Term(TermEvent::Resize(_, _)) => {
+                Event::Term(TermEvent::Resize(width, height)) => {
+                    let rect = Rect { x: 0, y: 0, width, height };
+                    self.state.rack_state.resize(&rect, &MARGIN);
                     screen.draw(&self.state, &mut self.terminal)?;
                 }
                 Event::Term(TermEvent::Mouse(mouse_event)) => {
                     let actions = screen.on(
-                        &self.state,
+                        &mut self.state,
                         ScreenEvent::Term(TermEvent::Mouse(mouse_event)),
                     );
                     self.handle_actions(actions)?;
@@ -301,9 +312,16 @@ async fn run_event_listener(log: slog::Logger, events_tx: Sender<Event>) {
 /// The data state of the Wizard
 ///
 /// Data is not tied to any specific screen and is updated upon event receipt.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct State {
-    inventory: Inventory,
+    pub inventory: Inventory,
+    pub rack_state: RackState,
+}
+
+impl State {
+    pub fn new() -> State {
+        State { inventory: Inventory::default(), rack_state: RackState::new() }
+    }
 }
 
 /// Send requests to RSS

@@ -18,58 +18,21 @@ use tui::widgets::Borders;
 use tui::widgets::StatefulWidget;
 use tui::widgets::Widget;
 
-#[derive(Debug, Clone, Default)]
-pub struct Rack {
-    sled_style: Style,
-    sled_selected_style: Style,
-    switch_style: Style,
-    switch_selected_style: Style,
-    power_shelf_style: Style,
-    power_shelf_selected_style: Style,
-    border_style: Style,
-    border_selected_style: Style,
-    border_hover_style: Style,
+#[derive(Debug, Clone)]
+pub struct Rack<'a> {
+    pub state: &'a RackState,
+    pub sled_style: Style,
+    pub sled_selected_style: Style,
+    pub switch_style: Style,
+    pub switch_selected_style: Style,
+    pub power_shelf_style: Style,
+    pub power_shelf_selected_style: Style,
+    pub border_style: Style,
+    pub border_selected_style: Style,
+    pub border_hover_style: Style,
 }
 
-impl Rack {
-    pub fn sled_style(mut self, style: Style) -> Self {
-        self.sled_style = style;
-        self
-    }
-    pub fn sled_selected_style(mut self, style: Style) -> Self {
-        self.sled_selected_style = style;
-        self
-    }
-    pub fn switch_style(mut self, style: Style) -> Self {
-        self.switch_style = style;
-        self
-    }
-    pub fn switch_selected_style(mut self, style: Style) -> Self {
-        self.switch_selected_style = style;
-        self
-    }
-    pub fn power_shelf_style(mut self, style: Style) -> Self {
-        self.power_shelf_style = style;
-        self
-    }
-    pub fn power_shelf_selected_style(mut self, style: Style) -> Self {
-        self.power_shelf_selected_style = style;
-        self
-    }
-    pub fn border_style(mut self, style: Style) -> Self {
-        self.border_style = style;
-        self
-    }
-    pub fn border_selected_style(mut self, style: Style) -> Self {
-        self.border_selected_style = style;
-        self
-    }
-
-    pub fn border_hover_style(mut self, style: Style) -> Self {
-        self.border_hover_style = style;
-        self
-    }
-
+impl<'a> Rack<'a> {
     fn draw_sled(&self, buf: &mut Buffer, sled: &RectState, i: u8) {
         let mut block = Block::default()
             .title(format!("sled {}", i))
@@ -139,7 +102,6 @@ impl Rack {
         buf: &mut Buffer,
         power_shelf: &RectState,
         i: u8,
-        _log: &Logger,
     ) {
         let mut block = Block::default()
             .title(format!("power {}", i))
@@ -185,20 +147,13 @@ fn borders(height: u16) -> Borders {
     }
 }
 
-impl StatefulWidget for Rack {
-    type State = RackState;
-
-    fn render(self, _area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        for (id, rect) in state.component_rects.iter() {
+impl<'a> Widget for Rack<'a> {
+    fn render(self, _area: Rect, buf: &mut Buffer) {
+        for (id, rect) in self.state.component_rects.iter() {
             match id {
                 ComponentId::Sled(i) => self.draw_sled(buf, rect, *i),
                 ComponentId::Switch(i) => self.draw_switch(buf, rect, *i),
-                ComponentId::Psc(i) => self.draw_power_shelf(
-                    buf,
-                    rect,
-                    *i,
-                    state.log.as_ref().unwrap(),
-                ),
+                ComponentId::Psc(i) => self.draw_power_shelf(buf, rect, *i),
             }
         }
     }
@@ -208,8 +163,6 @@ impl StatefulWidget for Rack {
 #[derive(Debug, Default)]
 pub struct RackState {
     pub log: Option<Logger>,
-    // The starting TabIndex for the Rack.
-    pub tab_start: u16,
     pub rect: Rect,
     pub component_rects: BTreeMap<ComponentId, RectState>,
 }
@@ -290,9 +243,6 @@ impl RackState {
 
         let mut rect = rect.clone();
         rect.height = rack_height;
-
-        slog::debug!(self.log.as_ref().unwrap(), "rack_height = {rack_height}, sled_height = {sled_height}, other_height = {other_height}, 
-            max_height = {max_height}");
 
         // Center the rack vertically as much as possible
         let extra_margin = (max_height - rack_height) / 2;

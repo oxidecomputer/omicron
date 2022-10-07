@@ -2,7 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-pub mod inventory;
 mod rack;
 mod splash;
 
@@ -50,7 +49,7 @@ pub trait Screen {
 
     /// Handle a [`ScreenEvent`] to update internal display state and output
     /// any necessary actions for the system to take.
-    fn on(&mut self, state: &State, event: ScreenEvent) -> Vec<Action>;
+    fn on(&mut self, state: &mut State, event: ScreenEvent) -> Vec<Action>;
 }
 
 /// All [`Screen`]s for wicket

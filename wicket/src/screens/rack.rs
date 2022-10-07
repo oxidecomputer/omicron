@@ -11,10 +11,7 @@ use super::{Height, Width};
 use crate::inventory::ComponentId;
 use crate::widgets::AnimationState;
 use crate::widgets::Control;
-use crate::widgets::{
-    Banner, ComponentModal, ComponentModalState, HelpButton, HelpButtonState,
-    HelpMenu, Rack, RackState,
-};
+use crate::widgets::{Banner, HelpButton, HelpButtonState, HelpMenu, Rack};
 use crate::Action;
 use crate::Frame;
 use crate::ScreenEvent;
@@ -44,7 +41,6 @@ pub enum HoverState {
 pub struct RackScreen {
     log: Logger,
     watermark: &'static str,
-    rack_state: RackState,
     tab_index: TabIndex,
     hovered: Option<HoverState>,
     help_button_state: HelpButtonState,
@@ -55,12 +51,9 @@ pub struct RackScreen {
 
 impl RackScreen {
     pub fn new(log: &Logger) -> RackScreen {
-        let mut rack_state = RackState::new();
-        rack_state.set_logger(log.clone());
         let mut screen = RackScreen {
             log: log.clone(),
             watermark: include_str!("../../banners/oxide.txt"),
-            rack_state,
             tab_index: TabIndex::new_unset(MAX_TAB_INDEX),
             hovered: None,
             help_button_state: HelpButtonState::new(1, 0),
@@ -119,7 +112,7 @@ impl RackScreen {
         }
     }
 
-    fn draw_watermark(&self, f: &mut Frame) -> (Height, Width) {
+    fn draw_watermark(&self, state: &State, f: &mut Frame) -> (Height, Width) {
         let style = Style::default().fg(OX_GRAY_DARK).bg(OX_GRAY);
         let banner = Banner::new(self.watermark).style(style);
         let height = banner.height();
@@ -128,7 +121,7 @@ impl RackScreen {
 
         // Only draw the banner if there is enough horizontal whitespace to
         // make it look good.
-        if self.rack_state.rect.width * 3 + width > rect.width {
+        if state.rack_state.rect.width * 3 + width > rect.width {
             return (Height(0), Width(0));
         }
 
@@ -144,49 +137,51 @@ impl RackScreen {
 
     /// Draw the rack in the center of the screen.
     /// Scale it to look nice.
-    fn draw_rack(&mut self, f: &mut Frame, vertical_border: Height) {
-        self.rack_state.resize(&f.size(), &vertical_border);
+    fn draw_rack(&mut self, state: &State, f: &mut Frame) {
+        let rack = Rack {
+            state: &state.rack_state,
+            switch_style: Style::default().bg(OX_GRAY_DARK).fg(OX_WHITE),
+            power_shelf_style: Style::default().bg(OX_GRAY).fg(OX_OFF_WHITE),
+            sled_style: Style::default().bg(OX_GREEN_LIGHT).fg(Color::Black),
+            sled_selected_style: Style::default()
+                .fg(Color::Black)
+                .bg(OX_GRAY_DARK),
 
-        let rack = Rack::default()
-            .switch_style(Style::default().bg(OX_GRAY_DARK).fg(OX_WHITE))
-            .power_shelf_style(Style::default().bg(OX_GRAY).fg(OX_OFF_WHITE))
-            .sled_style(Style::default().bg(OX_GREEN_LIGHT).fg(Color::Black))
-            .sled_selected_style(
-                Style::default().fg(Color::Black).bg(OX_GRAY_DARK),
-            )
-            .border_style(Style::default().fg(OX_GRAY).bg(Color::Black))
-            .border_selected_style(
-                Style::default().fg(OX_YELLOW).bg(OX_GRAY_DARK),
-            )
-            .border_hover_style(Style::default().fg(OX_PINK).bg(OX_GRAY_DARK))
-            .switch_selected_style(Style::default().bg(OX_GRAY_DARK))
-            .power_shelf_selected_style(Style::default().bg(OX_GRAY));
+            border_style: Style::default().fg(OX_GRAY).bg(Color::Black),
+            border_selected_style: Style::default()
+                .fg(OX_YELLOW)
+                .bg(OX_GRAY_DARK),
 
-        let area = self.rack_state.rect.clone();
-        f.render_stateful_widget(rack, area, &mut self.rack_state);
+            border_hover_style: Style::default().fg(OX_PINK).bg(OX_GRAY_DARK),
+            switch_selected_style: Style::default().bg(OX_GRAY_DARK),
+            power_shelf_selected_style: Style::default().bg(OX_GRAY),
+        };
+
+        let area = state.rack_state.rect.clone();
+        f.render_widget(rack, area);
     }
 
     fn handle_key_event(
         &mut self,
-        state: &State,
+        state: &mut State,
         event: KeyEvent,
     ) -> Vec<Action> {
         match event.code {
             KeyCode::Tab => {
-                self.clear_tabbed();
+                self.clear_tabbed(state);
                 self.tab_index.inc();
-                self.set_tabbed();
+                self.set_tabbed(state);
             }
             KeyCode::BackTab => {
-                self.clear_tabbed();
+                self.clear_tabbed(state);
                 self.tab_index.dec();
-                self.set_tabbed();
+                self.set_tabbed(state);
             }
             KeyCode::Esc => {
                 if self.help_button_state.selected {
                     self.close_help_menu();
                 } else {
-                    self.clear_tabbed();
+                    self.clear_tabbed(state);
                     self.tab_index.clear();
                 }
             }
@@ -225,12 +220,12 @@ impl RackScreen {
 
     fn handle_mouse_event(
         &mut self,
-        state: &State,
+        state: &mut State,
         event: MouseEvent,
     ) -> Vec<Action> {
         match event.kind {
             MouseEventKind::Moved => {
-                self.set_hover_state(event.column, event.row)
+                self.set_hover_state(state, event.column, event.row)
             }
             MouseEventKind::Down(MouseButton::Left) => {
                 self.handle_mouse_click(state)
@@ -239,7 +234,7 @@ impl RackScreen {
         }
     }
 
-    fn handle_mouse_click(&mut self, _state: &State) -> Vec<Action> {
+    fn handle_mouse_click(&mut self, state: &mut State) -> Vec<Action> {
         // Set the tab index to the hovered component Id if there is one.
         // Remove the old tab_index, and make it match the clicked one
         if let Some(hover_state) = self.hovered {
@@ -249,13 +244,13 @@ impl RackScreen {
                     vec![]
                 }
                 HoverState::Rack(component_id) => {
-                    self.clear_tabbed();
+                    self.clear_tabbed(state);
                     self.tab_index = self
                         .tab_index_by_component_id
                         .get(&component_id)
                         .unwrap()
                         .clone();
-                    self.set_tabbed();
+                    self.set_tabbed(state);
 
                     // TODO: Transition to component screen
                     vec![Action::Redraw]
@@ -268,7 +263,12 @@ impl RackScreen {
 
     // Discover which rect the mouse is hovering over, remove any previous
     // hover state, and set any new state.
-    fn set_hover_state(&mut self, x: u16, y: u16) -> Vec<Action> {
+    fn set_hover_state(
+        &mut self,
+        state: &mut State,
+        x: u16,
+        y: u16,
+    ) -> Vec<Action> {
         // Are we currently hovering over the Help Button?
         if self.help_button_state.intersects_point(x, y) {
             let actions = match self.hovered {
@@ -278,7 +278,8 @@ impl RackScreen {
                 }
                 Some(HoverState::Rack(id)) => {
                     // Clear the old hover state
-                    self.rack_state
+                    state
+                        .rack_state
                         .component_rects
                         .get_mut(&id)
                         .unwrap()
@@ -296,7 +297,7 @@ impl RackScreen {
         }
 
         // Were we previously hovering over anything?
-        let current_id = self.find_rack_rect_intersection(x, y);
+        let current_id = self.find_rack_rect_intersection(state, x, y);
         let actions = match self.hovered {
             Some(HoverState::HelpButton) => {
                 self.help_button_state.hovered = false;
@@ -308,7 +309,8 @@ impl RackScreen {
                     vec![]
                 } else {
                     // Clear the old hover state
-                    self.rack_state
+                    state
+                        .rack_state
                         .component_rects
                         .get_mut(&id)
                         .unwrap()
@@ -326,8 +328,12 @@ impl RackScreen {
             Some(id) => {
                 self.hovered = Some(HoverState::Rack(id));
                 // Set the new state
-                self.rack_state.component_rects.get_mut(&id).unwrap().hovered =
-                    true;
+                state
+                    .rack_state
+                    .component_rects
+                    .get_mut(&id)
+                    .unwrap()
+                    .hovered = true;
             }
             None => {
                 self.hovered = None;
@@ -340,18 +346,19 @@ impl RackScreen {
     // the component if it is.
     fn find_rack_rect_intersection(
         &self,
+        state: &State,
         x: u16,
         y: u16,
     ) -> Option<ComponentId> {
         let mouse_pointer = Rect { x, y, width: 1, height: 1 };
-        if !self.rack_state.rect.intersects(mouse_pointer) {
+        if !state.rack_state.rect.intersects(mouse_pointer) {
             return None;
         }
 
         // Find the interesecting component.
         // I'm sure there's a faster way to do this with percentages, etc..,
         // but this works for now.
-        for (id, rect_state) in self.rack_state.component_rects.iter() {
+        for (id, rect_state) in state.rack_state.component_rects.iter() {
             if rect_state.rect.intersects(mouse_pointer) {
                 return Some(*id);
             }
@@ -360,18 +367,18 @@ impl RackScreen {
     }
 
     // Set the tabbed boolean to `true` for the current tab indexed rect
-    fn set_tabbed(&mut self) {
-        self.update_tabbed(true);
+    fn set_tabbed(&mut self, state: &mut State) {
+        self.update_tabbed(state, true);
     }
 
     // Set the tabbed boolean to `false` for the current tab indexed rect
-    fn clear_tabbed(&mut self) {
-        self.update_tabbed(false);
+    fn clear_tabbed(&mut self, state: &mut State) {
+        self.update_tabbed(state, false);
     }
 
-    fn update_tabbed(&mut self, val: bool) {
+    fn update_tabbed(&mut self, state: &mut State, val: bool) {
         if let Some(id) = self.component_id_by_tab_index.get(&self.tab_index) {
-            self.rack_state.component_rects.get_mut(&id).unwrap().tabbed = val;
+            state.rack_state.component_rects.get_mut(&id).unwrap().tabbed = val;
         }
     }
 
@@ -417,23 +424,22 @@ impl RackScreen {
     }
 }
 
-const MARGIN: Height = Height(5);
 impl Screen for RackScreen {
     fn draw(
         &mut self,
-        _state: &State,
+        state: &State,
         terminal: &mut crate::Term,
     ) -> anyhow::Result<()> {
         terminal.draw(|f| {
             self.draw_background(f);
-            self.draw_rack(f, MARGIN);
-            self.draw_watermark(f);
+            self.draw_rack(state, f);
+            self.draw_watermark(state, f);
             self.draw_menubar(f);
         })?;
         Ok(())
     }
 
-    fn on(&mut self, state: &State, event: ScreenEvent) -> Vec<Action> {
+    fn on(&mut self, state: &mut State, event: ScreenEvent) -> Vec<Action> {
         match event {
             ScreenEvent::Term(TermEvent::Key(key_event)) => {
                 self.handle_key_event(state, key_event)
