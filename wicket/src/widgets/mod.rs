@@ -11,6 +11,7 @@ use tui::style::Style;
 mod animated_logo;
 mod banner;
 mod component;
+mod help_button;
 mod help_menu;
 mod menubar;
 mod rack;
@@ -18,9 +19,29 @@ mod rack;
 pub use animated_logo::{Logo, LogoState, LOGO_HEIGHT, LOGO_WIDTH};
 pub use banner::Banner;
 pub use component::{ComponentModal, ComponentModalState};
+pub use help_button::{HelpButton, HelpButtonState};
 pub use help_menu::HelpMenu;
 pub use menubar::{HamburgerState, MenuBar};
 pub use rack::{Rack, RackState};
+
+/// A control is an interactive object on a [`Screen`].
+///
+/// Control's are often the internal state of [`tui::Widget`]s and are used to
+/// manage how the Widgets are drawn.
+pub trait Control {
+    /// Return the rectangle of the control to be intersected.
+    fn rect(&self) -> Rect;
+
+    /// Return true if the rect of the control intersects the rect passed in.
+    fn intersects(&self, rect: Rect) -> bool {
+        self.rect().intersects(rect)
+    }
+
+    /// Return true if the control intersects with the given point
+    fn intersects_point(&self, x: u16, y: u16) -> bool {
+        self.rect().intersects(Rect { x, y, width: 1, height: 1 })
+    }
+}
 
 // Set the buf area to the bg color
 pub fn clear_buf(area: Rect, buf: &mut Buffer, style: Style) {

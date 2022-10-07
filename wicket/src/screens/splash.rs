@@ -63,7 +63,7 @@ impl SplashScreen {
 impl Screen for SplashScreen {
     fn draw(
         &mut self,
-        state: &crate::State,
+        _state: &crate::State,
         terminal: &mut crate::Term,
     ) -> anyhow::Result<()> {
         terminal.draw(|f| {
@@ -73,19 +73,19 @@ impl Screen for SplashScreen {
         Ok(())
     }
 
-    fn on(&mut self, state: &crate::State, event: ScreenEvent) -> Vec<Action> {
+    fn on(&mut self, _state: &crate::State, event: ScreenEvent) -> Vec<Action> {
         match event {
             ScreenEvent::Tick => {
                 self.state.frame += 1;
                 if self.state.frame < TOTAL_FRAMES {
                     vec![Action::Redraw]
                 } else {
-                    vec![Action::SwitchScreen(ScreenId::Inventory)]
+                    vec![Action::SwitchScreen(ScreenId::Rack)]
                 }
             }
             ScreenEvent::Term(TermEvent::Key(_)) => {
                 // Allow the user to skip the splash screen with any key press
-                vec![Action::SwitchScreen(ScreenId::Inventory)]
+                vec![Action::SwitchScreen(ScreenId::Rack)]
             }
             _ => vec![],
         }

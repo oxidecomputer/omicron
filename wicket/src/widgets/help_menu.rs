@@ -6,13 +6,10 @@
 
 use super::animate_clear_buf;
 use super::AnimationState;
-use crate::screens::TabIndex;
 use tui::buffer::Buffer;
-use tui::layout::Alignment;
 use tui::layout::Rect;
 use tui::style::{Modifier, Style};
 use tui::text::Text;
-use tui::text::{Span, Spans};
 use tui::widgets::Paragraph;
 use tui::widgets::Widget;
 use tui::widgets::{Block, Borders};

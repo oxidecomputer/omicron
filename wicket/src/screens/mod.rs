@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 pub mod inventory;
+mod rack;
 mod splash;
 
 use crate::Action;
@@ -12,16 +13,16 @@ use crate::Term;
 use slog::Logger;
 use tui::layout::Rect;
 
-pub use inventory::InventoryScreen;
+use rack::RackScreen;
 use splash::SplashScreen;
 
 /// An identifier for a specific [`Screen`] in the [`Wizard`]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ScreenId {
     Splash,
-    Inventory,
+    Rack,
+    Component,
     Update,
-    RackInit,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -55,20 +56,17 @@ pub trait Screen {
 /// All [`Screen`]s for wicket
 pub struct Screens {
     splash: SplashScreen,
-    inventory: InventoryScreen,
+    rack: RackScreen,
 }
 
 impl Screens {
     pub fn new(log: &Logger) -> Screens {
-        Screens {
-            splash: SplashScreen::new(),
-            inventory: InventoryScreen::new(log),
-        }
+        Screens { splash: SplashScreen::new(), rack: RackScreen::new(log) }
     }
 
     pub fn get(&self, id: ScreenId) -> &dyn Screen {
         match id {
-            ScreenId::Inventory => &self.inventory,
+            ScreenId::Rack => &self.rack,
             _ => unimplemented!(),
         }
     }
@@ -76,7 +74,7 @@ impl Screens {
     pub fn get_mut(&mut self, id: ScreenId) -> &mut dyn Screen {
         match id {
             ScreenId::Splash => &mut self.splash,
-            ScreenId::Inventory => &mut self.inventory,
+            ScreenId::Rack => &mut self.rack,
             _ => unimplemented!(),
         }
     }
