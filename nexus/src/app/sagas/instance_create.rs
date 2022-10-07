@@ -134,6 +134,7 @@ impl NexusSaga for SagaInstanceCreate {
 
     fn register_actions(registry: &mut super::ActionRegistry) {
         registry.register(Arc::clone(&*ALLOC_SERVER));
+        registry.register(Arc::clone(&*RESOURCES_ACCOUNT));
         registry.register(Arc::clone(&*ALLOC_PROPOLIS_IP));
         registry.register(Arc::clone(&*CREATE_INSTANCE_RECORD));
         registry.register(Arc::clone(&*CREATE_NETWORK_INTERFACE));
@@ -167,6 +168,12 @@ impl NexusSaga for SagaInstanceCreate {
             "server_id",
             "AllocServer",
             ALLOC_SERVER.as_ref(),
+        ));
+
+        builder.append(Node::action(
+            "no-result",
+            "ResourcesAccount",
+            RESOURCES_ACCOUNT.as_ref(),
         ));
 
         builder.append(Node::action(
