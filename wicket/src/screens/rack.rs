@@ -11,6 +11,7 @@ use super::{Height, Width};
 use crate::inventory::ComponentId;
 use crate::widgets::AnimationState;
 use crate::widgets::Control;
+use crate::widgets::KnightRiderMode;
 use crate::widgets::{Banner, HelpButton, HelpButtonState, HelpMenu, Rack};
 use crate::Action;
 use crate::Frame;
@@ -192,9 +193,23 @@ impl RackScreen {
                     self.open_help_menu();
                 }
             }
+            KeyCode::Char('k') => {
+                if event.modifiers.contains(KeyModifiers::CONTROL) {
+                    self.toggle_knight_rider_mode(state);
+                }
+            }
             _ => (),
         }
         vec![Action::Redraw]
+    }
+
+    fn toggle_knight_rider_mode(&self, state: &mut State) {
+        if state.rack_state.knight_rider_mode.is_some() {
+            state.rack_state.knight_rider_mode = None;
+        } else {
+            state.rack_state.knight_rider_mode =
+                Some(KnightRiderMode::default());
+        }
     }
 
     fn open_help_menu(&mut self) {
@@ -397,6 +412,7 @@ impl Screen for RackScreen {
                 self.handle_mouse_event(state, mouse_event)
             }
             ScreenEvent::Tick => {
+                state.rack_state.knight_rider_mode.as_mut().map(|k| k.inc());
                 if self.help_button_state.selected {
                     let done = self.help_menu_state.as_mut().unwrap().step();
                     if done
@@ -405,12 +421,13 @@ impl Screen for RackScreen {
                     {
                         self.help_menu_state = None;
                         self.help_button_state.selected = false;
-                        vec![Action::Redraw]
+                        return vec![Action::Redraw];
                     } else if !done {
-                        vec![Action::Redraw]
-                    } else {
-                        vec![]
+                        return vec![Action::Redraw];
                     }
+                }
+                if state.rack_state.knight_rider_mode.is_some() {
+                    vec![Action::Redraw]
                 } else {
                     vec![]
                 }

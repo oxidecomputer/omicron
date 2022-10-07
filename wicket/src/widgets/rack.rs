@@ -5,6 +5,7 @@
 //! A rendering of the Oxide rack
 
 use crate::inventory::ComponentId;
+use crate::screens::colors::*;
 use crate::screens::make_even;
 use crate::screens::Height;
 use crate::screens::RectState;
@@ -13,6 +14,7 @@ use slog::Logger;
 use std::collections::BTreeMap;
 use tui::buffer::Buffer;
 use tui::layout::Rect;
+use tui::style::Color;
 use tui::style::Style;
 use tui::widgets::Block;
 use tui::widgets::Borders;
@@ -55,10 +57,19 @@ impl<'a> Rack<'a> {
 
         // Draw some U.2 bays
         // TODO: Draw 10 only? - That may not scale down as well
+        let inner_width = inner.right() - inner.left();
         for x in inner.left()..inner.right() {
             for y in inner.top()..inner.bottom() {
                 let cell = buf.get_mut(x, y).set_symbol("▕");
                 if sled.tabbed {
+                    if let Some(KnightRiderMode { count }) =
+                        self.state.knight_rider_mode
+                    {
+                        let pos = count % inner_width as usize;
+                        if pos == (x - inner.left()) as usize {
+                            cell.set_bg(Color::Red);
+                        }
+                    }
                     if let Some(color) = self.sled_selected_style.fg {
                         cell.set_fg(color);
                     }
@@ -162,6 +173,18 @@ impl<'a> Widget for Rack<'a> {
 // Currently we only allow tabbing through the rack
 const MAX_TAB_INDEX: u16 = 34;
 
+// Easter egg alert: Support for Knight Rider mode
+#[derive(Debug, Default)]
+pub struct KnightRiderMode {
+    count: usize,
+}
+
+impl KnightRiderMode {
+    pub fn inc(&mut self) {
+        self.count += 1;
+    }
+}
+
 // The visual state of the rack
 #[derive(Debug)]
 pub struct RackState {
@@ -171,6 +194,7 @@ pub struct RackState {
     pub tab_index: TabIndex,
     pub tab_index_by_component_id: BTreeMap<ComponentId, TabIndex>,
     pub component_id_by_tab_index: BTreeMap<TabIndex, ComponentId>,
+    pub knight_rider_mode: Option<KnightRiderMode>,
 }
 
 impl RackState {
@@ -182,6 +206,7 @@ impl RackState {
             tab_index: TabIndex::new_unset(MAX_TAB_INDEX),
             tab_index_by_component_id: BTreeMap::new(),
             component_id_by_tab_index: BTreeMap::new(),
+            knight_rider_mode: None,
         };
 
         for i in 0..32 {
