@@ -79,7 +79,11 @@ impl DataStore {
         // NOTE: if you do this before the org is created, it'll exist as
         // soon as the org does. However, that'll work better in a saga/CTE when
         // unwinding is built-in more naturally.
-        self.resource_usage_create(opctx, ResourceUsage::new(org.id())).await?;
+        self.resource_usage_create(
+            self.pool_authorized(opctx).await?,
+            ResourceUsage::new(org.id()),
+        )
+        .await?;
 
         Ok(org)
     }

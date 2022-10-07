@@ -46,6 +46,7 @@ mod dataset;
 mod device_auth;
 mod disk;
 mod external_ip;
+mod fleet;
 mod global_image;
 mod identity_provider;
 mod instance;
@@ -1018,7 +1019,7 @@ mod test {
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
         // Create a Rack, insert it into the DB.
-        let rack = Rack::new(Uuid::new_v4());
+        let rack = Rack::new(Uuid::new_v4(), *db::fixed_data::FLEET_ID);
         let result = datastore.rack_insert(&opctx, &rack).await.unwrap();
         assert_eq!(result.id(), rack.id());
         assert_eq!(result.initialized, false);

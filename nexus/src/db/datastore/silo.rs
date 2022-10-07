@@ -56,7 +56,7 @@ impl DataStore {
         info!(opctx.log, "created {} built-in silos", count);
 
         self.resource_usage_create(
-            opctx,
+            self.pool_authorized(opctx).await?,
             ResourceUsage::new(DEFAULT_SILO.id()),
         )
         .await?;
@@ -147,6 +147,12 @@ impl DataStore {
                     .values(ResourceUsage::new(silo.id()))
                     .execute_async(&conn)
                     .await?;
+
+                self.resource_usage_create(
+                    &conn,
+                    ResourceUsage::new(DEFAULT_SILO.id()),
+                )
+                .await?;
 
                 if let Some(query) = silo_admin_group_ensure_query {
                     query.get_result_async(&conn).await?;

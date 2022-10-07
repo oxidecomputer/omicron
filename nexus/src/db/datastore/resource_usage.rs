@@ -10,8 +10,9 @@ use crate::db;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::model::ResourceUsage;
+use crate::db::pool::DbConnection;
 use crate::db::queries::resource_usage_update::ResourceUsageUpdate;
-use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::{AsyncRunQueryDsl, PoolError};
 use diesel::prelude::*;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -96,21 +97,29 @@ impl oximeter::Producer for Producer {
 
 impl DataStore {
     /// Create a resource_usage
-    pub async fn resource_usage_create(
+    pub async fn resource_usage_create<ConnErr>(
         &self,
-        opctx: &OpContext,
+        conn: &(impl async_bb8_diesel::AsyncConnection<DbConnection, ConnErr>
+              + Sync),
         resource_usage: ResourceUsage,
-    ) -> Result<Vec<ResourceUsage>, Error> {
+    ) -> Result<Vec<ResourceUsage>, Error>
+    where
+        ConnErr: From<diesel::result::Error> + Send + 'static,
+        PoolError: From<ConnErr>,
+    {
         use db::schema::resource_usage::dsl;
 
         let usages: Vec<ResourceUsage> =
             diesel::insert_into(dsl::resource_usage)
                 .values(resource_usage)
                 .on_conflict_do_nothing()
-                .get_results_async(self.pool_authorized(opctx).await?)
+                .get_results_async(conn)
                 .await
                 .map_err(|e| {
-                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                    public_error_from_diesel_pool(
+                        PoolError::from(e),
+                        ErrorHandler::Server,
+                    )
                 })?;
         self.resource_usage_producer.append_disk_metrics(&usages);
         self.resource_usage_producer.append_cpu_metrics(&usages);

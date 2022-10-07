@@ -351,10 +351,19 @@ table! {
 }
 
 table! {
+    fleet (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+    }
+}
+
+table! {
     rack (id) {
         id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
+        fleet_id -> Uuid,
         initialized -> Bool,
         tuf_base_url -> Nullable<Text>,
     }

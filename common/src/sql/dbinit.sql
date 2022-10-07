@@ -39,6 +39,14 @@ CREATE DATABASE omicron;
 CREATE USER omicron;
 ALTER DEFAULT PRIVILEGES GRANT INSERT, SELECT, UPDATE, DELETE ON TABLES to omicron;
 
+-- Fleet: Represents a collection of racks
+CREATE TABLE omicron.public.fleet (
+    /* Identity metadata (asset) */
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL
+);
+
 /*
  * Racks
  */
@@ -47,6 +55,9 @@ CREATE TABLE omicron.public.rack (
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
+
+    -- The fleet to which this rack belongs
+    fleet_id UUID NOT NULL,
 
     /*
      * Identifies if rack management has been transferred from RSS -> Nexus.
