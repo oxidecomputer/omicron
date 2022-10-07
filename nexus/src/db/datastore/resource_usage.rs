@@ -183,6 +183,7 @@ impl DataStore {
         Ok(())
     }
 
+    /// Transitively updates all provisioned disk usage from project -> fleet.
     pub async fn resource_usage_update_disk(
         &self,
         opctx: &OpContext,
@@ -200,6 +201,7 @@ impl DataStore {
         Ok(usages)
     }
 
+    /// Transitively updates all CPU/RAM usage from project -> fleet.
     pub async fn resource_usage_update_cpus_and_ram(
         &self,
         opctx: &OpContext,

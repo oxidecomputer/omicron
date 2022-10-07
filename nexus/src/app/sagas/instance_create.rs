@@ -80,7 +80,7 @@ lazy_static! {
         sic_alloc_server
     );
     static ref RESOURCES_ACCOUNT: NexusAction = ActionFunc::new_action(
-        "instance.account-resources",
+        "instance-create.account-resources",
         sic_account_resources,
         sic_account_resources_undo,
     );
