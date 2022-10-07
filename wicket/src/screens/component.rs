@@ -24,8 +24,10 @@ use crossterm::event::{
 use tui::buffer::Buffer;
 use tui::layout::Alignment;
 use tui::layout::Rect;
+use tui::style::Modifier;
 use tui::style::{Color, Style};
 use tui::text::{Span, Spans, Text};
+use tui::widgets::Paragraph;
 use tui::widgets::Widget;
 use tui::widgets::{Block, Borders};
 
@@ -58,7 +60,7 @@ impl ComponentScreen {
     }
 
     fn draw_background(&self, f: &mut Frame) {
-        let style = Style::default().fg(OX_GREEN_DARK).bg(OX_GRAY);
+        let style = Style::default().fg(OX_GREEN_DARK).bg(Color::Black);
         let block = Block::default().style(style);
         f.render_widget(block, f.size());
     }
@@ -144,6 +146,48 @@ impl ComponentScreen {
 
             f.render_widget(button, f.size());
         }
+    }
+
+    fn draw_inventory(&self, f: &mut Frame, state: &State) {
+        // Draw the header
+        let selected_style = Style::default().fg(OX_GREEN_LIGHT);
+        let inventory_style = Style::default().fg(OX_YELLOW_DIM);
+
+        let mut header_style = selected_style;
+        header_style =
+            header_style.add_modifier(Modifier::UNDERLINED | Modifier::BOLD);
+
+        let text = Text::styled("INVENTORY\n\n", header_style);
+        let mut rect = f.size();
+        rect.y = 6;
+        rect.height = rect.height - 6;
+        let center = (rect.width - text.width() as u16) / 2;
+        rect.x = rect.x + center;
+        rect.width = rect.width - center;
+        let header = Paragraph::new(text);
+        f.render_widget(header, rect);
+
+        // Draw the contents
+        let text = match state
+            .inventory
+            .get_inventory(&state.rack_state.get_current_component_id())
+        {
+            Some(inventory) => {
+                Text::styled(format!("{:#?}", inventory), inventory_style)
+            }
+            None => Text::styled("UNKNOWN", inventory_style),
+        };
+
+        let mut rect = f.size();
+        rect.y = 9;
+        rect.height = rect.height - 9;
+
+        let center = (rect.width - text.width() as u16) / 2;
+        rect.x = rect.x + center;
+        rect.width = rect.width - center;
+
+        let inventory = Paragraph::new(text);
+        f.render_widget(inventory, rect);
     }
 
     fn handle_key_event(
@@ -287,6 +331,7 @@ impl Screen for ComponentScreen {
         terminal.draw(|f| {
             self.draw_background(f);
             self.draw_status_bar(f, state);
+            self.draw_inventory(f, state);
         })?;
         Ok(())
     }
