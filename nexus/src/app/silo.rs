@@ -191,6 +191,7 @@ impl super::Nexus {
         Ok((authz_silo_user, db_silo_user))
     }
 
+    /// List the users in a specific Silo
     pub async fn silo_api_users_list(
         &self,
         opctx: &OpContext,
@@ -204,6 +205,7 @@ impl super::Nexus {
             .await
     }
 
+    /// Create a user in a specific Silo
     pub async fn silo_api_user_create(
         &self,
         opctx: &OpContext,
@@ -226,6 +228,7 @@ impl super::Nexus {
         Ok(db_silo_user)
     }
 
+    /// Delete a specific user in a specific Silo
     pub async fn silo_api_user_delete(
         &self,
         opctx: &OpContext,
@@ -244,6 +247,7 @@ impl super::Nexus {
         self.db_datastore.silo_user_delete(opctx, &authz_silo_user).await
     }
 
+    /// Fetch a specific user in a specific Silo
     pub async fn silo_api_user_fetch(
         &self,
         opctx: &OpContext,
