@@ -192,11 +192,18 @@ impl ResourceUsageUpdate {
         )
     }
 
-    pub fn new_update_cpus(project_id: uuid::Uuid, cpus_diff: i64) -> Self {
+    pub fn new_update_cpus_and_ram(
+        project_id: uuid::Uuid,
+        cpus_diff: i64,
+        ram_diff: i64,
+    ) -> Self {
         use resource_usage::dsl;
         Self::apply_update(
             project_id,
-            dsl::cpus_provisioned.eq(dsl::cpus_provisioned + cpus_diff),
+            (
+                dsl::cpus_provisioned.eq(dsl::cpus_provisioned + cpus_diff),
+                dsl::ram_provisioned.eq(dsl::ram_provisioned + ram_diff),
+            ),
         )
     }
 }

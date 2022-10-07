@@ -156,7 +156,10 @@ CREATE TABLE omicron.public.resource_usage (
     physical_disk_bytes_provisioned INT8 NOT NULL,
 
     -- The number of CPUs provisioned by VMs.
-    cpus_provisioned INT8 NOT NULL
+    cpus_provisioned INT8 NOT NULL,
+
+    -- The amount of RAM provisioned by VMs.
+    ram_provisioned INT8 NOT NULL
 );
 
 /*

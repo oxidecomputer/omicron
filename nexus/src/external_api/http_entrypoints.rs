@@ -4044,11 +4044,8 @@ pub struct ResourceUtilization {
 #[serde(rename_all = "snake_case")]
 pub enum ResourceName {
     PhysicalDiskSpaceProvisioned,
-    PhysicalDiskSpaceCapacity,
     CpusProvisioned,
-    CpuCapacity,
     RamProvisioned,
-    RamCapacity,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -4089,7 +4086,6 @@ async fn system_metrics_list(
                     )
                     .await?
             }
-            ResourceName::PhysicalDiskSpaceCapacity => todo!(),
             ResourceName::CpusProvisioned => {
                 opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
                 nexus
@@ -4101,9 +4097,17 @@ async fn system_metrics_list(
                     )
                     .await?
             }
-            ResourceName::CpuCapacity => todo!(),
-            ResourceName::RamProvisioned => todo!(),
-            ResourceName::RamCapacity => todo!(),
+            ResourceName::RamProvisioned => {
+                opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+                nexus
+                    .select_timeseries(
+                        "collection_target:ram_provisioned",
+                        &[&format!("id=={}", query.id)],
+                        query.pagination,
+                        limit,
+                    )
+                    .await?
+            }
         };
 
         Ok(HttpResponseOk(result))

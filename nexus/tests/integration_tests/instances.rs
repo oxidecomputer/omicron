@@ -472,6 +472,7 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     let resource_usage =
         datastore.resource_usage_get(&opctx, project_id).await.unwrap();
     assert_eq!(resource_usage.cpus_provisioned, 0);
+    assert_eq!(resource_usage.ram_provisioned, 0);
 
     // Create an instance.
     let instance_url = format!("{}/just-rainsticks", url_instances);
@@ -480,6 +481,10 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     let resource_usage =
         datastore.resource_usage_get(&opctx, project_id).await.unwrap();
     assert_eq!(resource_usage.cpus_provisioned, 4);
+    assert_eq!(
+        resource_usage.ram_provisioned,
+        i64::try_from(ByteCount::from_gibibytes_u32(1).to_bytes()).unwrap(),
+    );
 
     // Stop the instance
     let instance =
@@ -489,7 +494,7 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(instance.runtime.run_state, InstanceState::Stopped);
     // NOTE: I think it's arguably "more correct" to identify that the
     // number of CPUs being used by guests at this point is actually "0",
-    // not "4", because the instance is stopped.
+    // not "4", because the instance is stopped (same re: RAM usage).
     //
     // However, for implementation reasons, this is complicated (we have a
     // tendency to update the runtime without checking the prior state, which
@@ -497,6 +502,10 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     let resource_usage =
         datastore.resource_usage_get(&opctx, project_id).await.unwrap();
     assert_eq!(resource_usage.cpus_provisioned, 4);
+    assert_eq!(
+        resource_usage.ram_provisioned,
+        i64::try_from(ByteCount::from_gibibytes_u32(1).to_bytes()).unwrap(),
+    );
 
     // Stop the instance
     NexusRequest::object_delete(client, &instance_url)
@@ -508,6 +517,7 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     let resource_usage =
         datastore.resource_usage_get(&opctx, project_id).await.unwrap();
     assert_eq!(resource_usage.cpus_provisioned, 0);
+    assert_eq!(resource_usage.ram_provisioned, 0);
 }
 
 #[nexus_test]

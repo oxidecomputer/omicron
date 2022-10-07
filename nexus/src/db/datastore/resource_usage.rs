@@ -39,6 +39,12 @@ struct CpusProvisioned {
     cpus: i64,
 }
 
+#[derive(Debug, Clone, Metric)]
+struct RamProvisioned {
+    #[datum]
+    bytes: i64,
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct Producer {
     samples: Arc<Mutex<Vec<Sample>>>,
@@ -74,6 +80,12 @@ impl Producer {
                     &CpusProvisioned { cpus: usage.cpus_provisioned },
                 )
             })
+            .chain(usages.iter().map(|usage| {
+                Sample::new(
+                    &CollectionTarget { id: usage.id },
+                    &RamProvisioned { bytes: usage.ram_provisioned },
+                )
+            }))
             .collect::<Vec<_>>();
 
         self.append(new_samples);
@@ -188,19 +200,19 @@ impl DataStore {
         Ok(usages)
     }
 
-    pub async fn resource_usage_update_cpus(
+    pub async fn resource_usage_update_cpus_and_ram(
         &self,
         opctx: &OpContext,
         project_id: Uuid,
         cpus_diff: i64,
+        ram_diff: i64,
     ) -> Result<Vec<ResourceUsage>, Error> {
-        let usages =
-            ResourceUsageUpdate::new_update_cpus(project_id, cpus_diff)
-                .get_results_async(self.pool_authorized(opctx).await?)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel_pool(e, ErrorHandler::Server)
-                })?;
+        let usages = ResourceUsageUpdate::new_update_cpus_and_ram(
+            project_id, cpus_diff, ram_diff,
+        )
+        .get_results_async(self.pool_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
         self.resource_usage_producer.append_cpu_metrics(&usages);
         Ok(usages)
     }
