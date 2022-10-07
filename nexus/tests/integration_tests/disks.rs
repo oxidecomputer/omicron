@@ -33,6 +33,7 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::Name;
 use omicron_common::backoff;
+use omicron_nexus::db::fixed_data::{silo::SILO_ID, FLEET_ID};
 use omicron_nexus::TestInterfaces as _;
 use omicron_nexus::{context::OpContext, external_api::params, Nexus};
 use oximeter::types::Datum;
@@ -926,6 +927,12 @@ async fn test_disk_resource_usage(cptestctx: &ControlPlaneTestContext) {
     let resource_usage =
         datastore.resource_usage_get(&opctx, org_id).await.unwrap();
     assert_eq!(resource_usage.physical_disk_bytes_provisioned, 0);
+    let resource_usage =
+        datastore.resource_usage_get(&opctx, *SILO_ID).await.unwrap();
+    assert_eq!(resource_usage.physical_disk_bytes_provisioned, 0);
+    let resource_usage =
+        datastore.resource_usage_get(&opctx, *FLEET_ID).await.unwrap();
+    assert_eq!(resource_usage.physical_disk_bytes_provisioned, 0);
 
     // Ask for a 1 gibibyte disk in the first project.
     //
@@ -964,6 +971,18 @@ async fn test_disk_resource_usage(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(resource_usage.physical_disk_bytes_provisioned, 0);
     let resource_usage =
         datastore.resource_usage_get(&opctx, org_id).await.unwrap();
+    assert_eq!(
+        resource_usage.physical_disk_bytes_provisioned,
+        3 * disk_size.to_bytes() as i64
+    );
+    let resource_usage =
+        datastore.resource_usage_get(&opctx, *SILO_ID).await.unwrap();
+    assert_eq!(
+        resource_usage.physical_disk_bytes_provisioned,
+        3 * disk_size.to_bytes() as i64
+    );
+    let resource_usage =
+        datastore.resource_usage_get(&opctx, *FLEET_ID).await.unwrap();
     assert_eq!(
         resource_usage.physical_disk_bytes_provisioned,
         3 * disk_size.to_bytes() as i64

@@ -56,7 +56,7 @@ impl DataStore {
         info!(opctx.log, "created {} built-in silos", count);
 
         self.resource_usage_create(
-            self.pool_authorized(opctx).await?,
+            opctx,
             ResourceUsage::new(DEFAULT_SILO.id()),
         )
         .await?;
@@ -152,7 +152,7 @@ impl DataStore {
                     .execute_async(&conn)
                     .await?;
 
-                self.resource_usage_create(
+                self.resource_usage_create_on_connection(
                     &conn,
                     ResourceUsage::new(DEFAULT_SILO.id()),
                 )

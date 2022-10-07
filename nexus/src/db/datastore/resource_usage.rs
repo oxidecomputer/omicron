@@ -97,7 +97,16 @@ impl oximeter::Producer for Producer {
 
 impl DataStore {
     /// Create a resource_usage
-    pub async fn resource_usage_create<ConnErr>(
+    pub async fn resource_usage_create(
+        &self,
+        opctx: &OpContext,
+        resource_usage: ResourceUsage,
+    ) -> Result<Vec<ResourceUsage>, Error> {
+        let pool = self.pool_authorized(opctx).await?;
+        self.resource_usage_create_on_connection(pool, resource_usage).await
+    }
+
+    pub(crate) async fn resource_usage_create_on_connection<ConnErr>(
         &self,
         conn: &(impl async_bb8_diesel::AsyncConnection<DbConnection, ConnErr>
               + Sync),

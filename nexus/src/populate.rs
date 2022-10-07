@@ -279,12 +279,12 @@ impl Populator for PopulateFleet {
         'a: 'b,
     {
         async {
+            let id = *db::fixed_data::FLEET_ID;
+            datastore.fleet_insert(opctx, &db::model::Fleet::new(id)).await?;
             datastore
-                .fleet_insert(
-                    opctx,
-                    &db::model::Fleet::new(*db::fixed_data::FLEET_ID),
-                )
+                .resource_usage_create(opctx, db::model::ResourceUsage::new(id))
                 .await?;
+
             Ok(())
         }
         .boxed()
