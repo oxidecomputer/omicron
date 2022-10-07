@@ -197,6 +197,7 @@ table! {
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
 
+        fleet_id -> Uuid,
         discoverable -> Bool,
         authentication_mode -> crate::AuthenticationModeEnum,
         user_provision_type -> crate::UserProvisionTypeEnum,

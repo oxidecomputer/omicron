@@ -355,6 +355,7 @@ CREATE TABLE omicron.public.silo (
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
 
+    fleet_id UUID NOT NULL,
     discoverable BOOL NOT NULL,
     authentication_mode omicron.public.authentication_mode NOT NULL,
     user_provision_type omicron.public.user_provision_type NOT NULL,

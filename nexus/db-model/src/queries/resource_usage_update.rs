@@ -6,6 +6,7 @@
 
 use crate::schema::organization;
 use crate::schema::resource_usage;
+use crate::schema::silo;
 
 table! {
     parent_org {
@@ -20,16 +21,24 @@ table! {
 }
 
 table! {
+    parent_fleet {
+        id -> Uuid,
+    }
+}
+
+table! {
     all_collections {
         id -> Uuid,
     }
 }
 
 diesel::allow_tables_to_appear_in_same_query!(organization, parent_org,);
+diesel::allow_tables_to_appear_in_same_query!(silo, parent_silo,);
 
 diesel::allow_tables_to_appear_in_same_query!(
     resource_usage,
     parent_org,
     parent_silo,
+    parent_fleet,
     all_collections,
 );

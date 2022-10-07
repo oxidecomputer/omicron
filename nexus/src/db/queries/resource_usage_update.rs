@@ -17,7 +17,7 @@ use diesel::{
     SelectableHelper,
 };
 use nexus_db_model::queries::resource_usage_update::{
-    all_collections, parent_org, parent_silo,
+    all_collections, parent_fleet, parent_org, parent_silo,
 };
 
 #[derive(Subquery, QueryId)]
@@ -65,6 +65,29 @@ impl ParentSilo {
 }
 
 #[derive(Subquery, QueryId)]
+#[subquery(name = parent_fleet)]
+struct ParentFleet {
+    query: Box<dyn CteQuery<SqlType = parent_fleet::SqlType>>,
+}
+
+impl ParentFleet {
+    fn new(parent_silo: &ParentSilo) -> Self {
+        use crate::db::schema::silo::dsl;
+        Self {
+            query: Box::new(
+                dsl::silo
+                    .filter(dsl::id.eq_any(
+                        parent_silo.query_source().select(parent_silo::id),
+                    ))
+                    .select((ExpressionAlias::new::<parent_fleet::dsl::id>(
+                        dsl::fleet_id,
+                    ),)),
+            ),
+        }
+    }
+}
+
+#[derive(Subquery, QueryId)]
 #[subquery(name = all_collections)]
 struct AllCollections {
     query: Box<dyn CteQuery<SqlType = all_collections::SqlType>>,
@@ -75,6 +98,7 @@ impl AllCollections {
         project_id: uuid::Uuid,
         parent_org: &ParentOrg,
         parent_silo: &ParentSilo,
+        parent_fleet: &ParentFleet,
     ) -> Self {
         Self {
             query: Box::new(
@@ -92,9 +116,12 @@ impl AllCollections {
                     ExpressionAlias::new::<all_collections::dsl::id>(
                         parent_silo::id,
                     ),
-                ))), // TODO: Presumably, we could also update the fleet containing
-                     // the silo here. However, such an object does not exist in the
-                     // database at the time of writing this comment.
+                )))
+                .union(parent_fleet.query_source().select((
+                    ExpressionAlias::new::<all_collections::dsl::id>(
+                        parent_fleet::id,
+                    ),
+                ))),
             ),
         }
     }
@@ -115,6 +142,7 @@ impl ResourceUsageUpdate {
     // - Project
     // - Organization
     // - Silo
+    // - Fleet
     fn apply_update<V>(project_id: uuid::Uuid, values: V) -> Self
     where
         V: diesel::AsChangeset<Target = resource_usage::table>,
@@ -123,8 +151,13 @@ impl ResourceUsageUpdate {
     {
         let parent_org = ParentOrg::new(project_id);
         let parent_silo = ParentSilo::new(&parent_org);
-        let all_collections =
-            AllCollections::new(project_id, &parent_org, &parent_silo);
+        let parent_fleet = ParentFleet::new(&parent_silo);
+        let all_collections = AllCollections::new(
+            project_id,
+            &parent_org,
+            &parent_silo,
+            &parent_fleet,
+        );
 
         use resource_usage::dsl;
 
@@ -140,6 +173,7 @@ impl ResourceUsageUpdate {
         let cte = CteBuilder::new()
             .add_subquery(parent_org)
             .add_subquery(parent_silo)
+            .add_subquery(parent_fleet)
             .add_subquery(all_collections)
             .build(final_update);
 
