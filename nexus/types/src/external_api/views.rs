@@ -317,6 +317,9 @@ pub struct User {
     pub id: Uuid,
     /** Human-readable name that can identify the user */
     pub display_name: String,
+
+    /** Uuid of the silo to which this user belongs */
+    pub silo_id: Uuid,
 }
 
 // BUILT-IN USERS
