@@ -11188,11 +11188,17 @@
           "id": {
             "type": "string",
             "format": "uuid"
+          },
+          "silo_id": {
+            "description": "Uuid of the silo to which this user belongs",
+            "type": "string",
+            "format": "uuid"
           }
         },
         "required": [
           "display_name",
-          "id"
+          "id",
+          "silo_id"
         ]
       },
       "UserBuiltin": {
