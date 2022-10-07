@@ -547,18 +547,8 @@
           "required": true
         },
         "responses": {
-          "303": {
-            "description": "redirect (see other)",
-            "headers": {
-              "location": {
-                "description": "HTTP \"Location\" header",
-                "style": "simple",
-                "required": true,
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -8725,9 +8715,14 @@
         ]
       },
       "IdentityProviderType": {
-        "type": "string",
-        "enum": [
-          "saml"
+        "oneOf": [
+          {
+            "description": "SAML identity provider",
+            "type": "string",
+            "enum": [
+              "saml"
+            ]
+          }
         ]
       },
       "IdentityType": {
@@ -9311,18 +9306,77 @@
       },
       "InstanceState": {
         "description": "Running state of an Instance (primarily: booted or stopped)\n\nThis typically reflects whether it's starting, running, stopping, or stopped, but also includes states related to the Instance's lifecycle",
-        "type": "string",
-        "enum": [
-          "creating",
-          "starting",
-          "running",
-          "stopping",
-          "stopped",
-          "rebooting",
-          "migrating",
-          "repairing",
-          "failed",
-          "destroyed"
+        "oneOf": [
+          {
+            "description": "The instance is being created.",
+            "type": "string",
+            "enum": [
+              "creating"
+            ]
+          },
+          {
+            "description": "The instance is currently starting up.",
+            "type": "string",
+            "enum": [
+              "starting"
+            ]
+          },
+          {
+            "description": "The instance is currently running.",
+            "type": "string",
+            "enum": [
+              "running"
+            ]
+          },
+          {
+            "description": "The instance has been requested to stop and a transition to \"Stopped\" is imminent.",
+            "type": "string",
+            "enum": [
+              "stopping"
+            ]
+          },
+          {
+            "description": "The instance is currently stopped.",
+            "type": "string",
+            "enum": [
+              "stopped"
+            ]
+          },
+          {
+            "description": "The instance is in the process of rebooting - it will remain in the \"rebooting\" state until the VM is starting once more.",
+            "type": "string",
+            "enum": [
+              "rebooting"
+            ]
+          },
+          {
+            "description": "The instance is in the process of migrating - it will remain in the \"migrating\" state until the migration process is complete and the destination propolis is ready to continue execution.",
+            "type": "string",
+            "enum": [
+              "migrating"
+            ]
+          },
+          {
+            "description": "The instance is attempting to recover from a failure.",
+            "type": "string",
+            "enum": [
+              "repairing"
+            ]
+          },
+          {
+            "description": "The instance has encountered a failure.",
+            "type": "string",
+            "enum": [
+              "failed"
+            ]
+          },
+          {
+            "description": "The instance has been deleted.",
+            "type": "string",
+            "enum": [
+              "destroyed"
+            ]
+          }
         ]
       },
       "IpKind": {
@@ -10448,12 +10502,35 @@
       },
       "RouterRouteKind": {
         "description": "The classification of a [`RouterRoute`] as defined by the system. The kind determines certain attributes such as if the route is modifiable and describes how or where the route was created.\n\nSee [RFD-21](https://rfd.shared.oxide.computer/rfd/0021#concept-router) for more context",
-        "type": "string",
-        "enum": [
-          "default",
-          "vpc_subnet",
-          "vpc_peering",
-          "custom"
+        "oneOf": [
+          {
+            "description": "Determines the default destination of traffic, such as whether it goes to the internet or not.\n\n`Destination: An Internet Gateway` `Modifiable: true`",
+            "type": "string",
+            "enum": [
+              "default"
+            ]
+          },
+          {
+            "description": "Automatically added for each VPC Subnet in the VPC\n\n`Destination: A VPC Subnet` `Modifiable: false`",
+            "type": "string",
+            "enum": [
+              "vpc_subnet"
+            ]
+          },
+          {
+            "description": "Automatically added when VPC peering is established\n\n`Destination: A different VPC` `Modifiable: false`",
+            "type": "string",
+            "enum": [
+              "vpc_peering"
+            ]
+          },
+          {
+            "description": "Created by a user See [`RouteTarget`]\n\n`Destination: User defined` `Modifiable: true`",
+            "type": "string",
+            "enum": [
+              "custom"
+            ]
+          }
         ]
       },
       "RouterRouteResultsPage": {
@@ -10903,10 +10980,21 @@
       },
       "SiloIdentityMode": {
         "description": "Describes how identities are managed and users are authenticated in this Silo",
-        "type": "string",
-        "enum": [
-          "saml_jit",
-          "local_only"
+        "oneOf": [
+          {
+            "description": "Users are authenticated with SAML using an external authentication provider.  The system updates information about users and groups only during successful authentication (i.e,. \"JIT provisioning\" of users and groups).",
+            "type": "string",
+            "enum": [
+              "saml_jit"
+            ]
+          },
+          {
+            "description": "The system is the source of truth about users.  There is no linkage to an external authentication provider or identity provider.",
+            "type": "string",
+            "enum": [
+              "local_only"
+            ]
+          }
         ]
       },
       "SiloResultsPage": {
@@ -11309,11 +11397,17 @@
           "id": {
             "type": "string",
             "format": "uuid"
+          },
+          "silo_id": {
+            "description": "Uuid of the silo to which this user belongs",
+            "type": "string",
+            "format": "uuid"
           }
         },
         "required": [
           "display_name",
-          "id"
+          "id",
+          "silo_id"
         ]
       },
       "UserBuiltin": {
@@ -12281,18 +12375,40 @@
       },
       "NameOrIdSortMode": {
         "description": "Supported set of sort modes for scanning by name or id",
-        "type": "string",
-        "enum": [
-          "name_ascending",
-          "name_descending",
-          "id_ascending"
+        "oneOf": [
+          {
+            "description": "sort in increasing order of \"name\"",
+            "type": "string",
+            "enum": [
+              "name_ascending"
+            ]
+          },
+          {
+            "description": "sort in decreasing order of \"name\"",
+            "type": "string",
+            "enum": [
+              "name_descending"
+            ]
+          },
+          {
+            "description": "sort in increasing order of \"id\"",
+            "type": "string",
+            "enum": [
+              "id_ascending"
+            ]
+          }
         ]
       },
       "NameSortMode": {
         "description": "Supported set of sort modes for scanning by name only\n\nCurrently, we only support scanning in ascending order.",
-        "type": "string",
-        "enum": [
-          "name_ascending"
+        "oneOf": [
+          {
+            "description": "sort in increasing order of \"name\"",
+            "type": "string",
+            "enum": [
+              "name_ascending"
+            ]
+          }
         ]
       },
       "DiskMetricName": {
@@ -12308,9 +12424,14 @@
       },
       "IdSortMode": {
         "description": "Supported set of sort modes for scanning by id only.\n\nCurrently, we only support scanning in ascending order.",
-        "type": "string",
-        "enum": [
-          "id_ascending"
+        "oneOf": [
+          {
+            "description": "sort in increasing order of \"id\"",
+            "type": "string",
+            "enum": [
+              "id_ascending"
+            ]
+          }
         ]
       }
     }

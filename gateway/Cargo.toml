@@ -5,7 +5,7 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
-clap = { version = "3.2", features = ["derive"] }
+clap = { version = "4.0", features = ["derive"] }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
 futures = "0.3.24"
 hex = "0.4"
@@ -14,7 +14,7 @@ hyper = "0.14.20"
 schemars = "0.8"
 serde = { version = "1.0", features = ["derive"] }
 slog-dtrace = "0.2"
-thiserror = "1.0.36"
+thiserror = "1.0.37"
 tokio-tungstenite = "0.17"
 toml = "0.5.9"
 uuid = "1.1.0"

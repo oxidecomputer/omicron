@@ -1,6 +1,5 @@
-error: Found argument 'bogus-command' which wasn't expected, or isn't valid in this context
+error: The subcommand 'bogus-command' wasn't recognized
 
-USAGE:
-    omicron-dev <SUBCOMMAND>
+Usage: omicron-dev <COMMAND>
 
-For more information try --help
+For more information try '--help'

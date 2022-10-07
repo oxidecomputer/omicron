@@ -39,6 +39,7 @@ impl From<SiloUser> for views::User {
             id: user.id(),
             // TODO the use of external_id as display_name is temporary
             display_name: user.external_id,
+            silo_id: user.silo_id,
         }
     }
 }

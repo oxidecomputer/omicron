@@ -17,9 +17,14 @@ schema for pagination parameters: scan parameters, scan by name only
   "definitions": {
     "NameSortMode": {
       "description": "Supported set of sort modes for scanning by name only\n\nCurrently, we only support scanning in ascending order.",
-      "type": "string",
-      "enum": [
-        "name_ascending"
+      "oneOf": [
+        {
+          "description": "sort in increasing order of \"name\"",
+          "type": "string",
+          "enum": [
+            "name_ascending"
+          ]
+        }
       ]
     }
   }
@@ -43,9 +48,14 @@ schema for pagination parameters: scan parameters, scan by id only
   "definitions": {
     "IdSortMode": {
       "description": "Supported set of sort modes for scanning by id only.\n\nCurrently, we only support scanning in ascending order.",
-      "type": "string",
-      "enum": [
-        "id_ascending"
+      "oneOf": [
+        {
+          "description": "sort in increasing order of \"id\"",
+          "type": "string",
+          "enum": [
+            "id_ascending"
+          ]
+        }
       ]
     }
   }
@@ -69,11 +79,28 @@ schema for pagination parameters: scan parameters, scan by name or id
   "definitions": {
     "NameOrIdSortMode": {
       "description": "Supported set of sort modes for scanning by name or id",
-      "type": "string",
-      "enum": [
-        "name_ascending",
-        "name_descending",
-        "id_ascending"
+      "oneOf": [
+        {
+          "description": "sort in increasing order of \"name\"",
+          "type": "string",
+          "enum": [
+            "name_ascending"
+          ]
+        },
+        {
+          "description": "sort in decreasing order of \"name\"",
+          "type": "string",
+          "enum": [
+            "name_descending"
+          ]
+        },
+        {
+          "description": "sort in increasing order of \"id\"",
+          "type": "string",
+          "enum": [
+            "id_ascending"
+          ]
+        }
       ]
     }
   }
@@ -115,9 +142,14 @@ schema for pagination parameters: page selector, scan by name only
     },
     "NameSortMode": {
       "description": "Supported set of sort modes for scanning by name only\n\nCurrently, we only support scanning in ascending order.",
-      "type": "string",
-      "enum": [
-        "name_ascending"
+      "oneOf": [
+        {
+          "description": "sort in increasing order of \"name\"",
+          "type": "string",
+          "enum": [
+            "name_ascending"
+          ]
+        }
       ]
     }
   }
@@ -149,9 +181,14 @@ schema for pagination parameters: page selector, scan by id only
   "definitions": {
     "IdSortMode": {
       "description": "Supported set of sort modes for scanning by id only.\n\nCurrently, we only support scanning in ascending order.",
-      "type": "string",
-      "enum": [
-        "id_ascending"
+      "oneOf": [
+        {
+          "description": "sort in increasing order of \"id\"",
+          "type": "string",
+          "enum": [
+            "id_ascending"
+          ]
+        }
       ]
     }
   }
@@ -222,11 +259,28 @@ schema for pagination parameters: page selector, scan by name or id
     },
     "NameOrIdSortMode": {
       "description": "Supported set of sort modes for scanning by name or id",
-      "type": "string",
-      "enum": [
-        "name_ascending",
-        "name_descending",
-        "id_ascending"
+      "oneOf": [
+        {
+          "description": "sort in increasing order of \"name\"",
+          "type": "string",
+          "enum": [
+            "name_ascending"
+          ]
+        },
+        {
+          "description": "sort in decreasing order of \"name\"",
+          "type": "string",
+          "enum": [
+            "name_descending"
+          ]
+        },
+        {
+          "description": "sort in increasing order of \"id\"",
+          "type": "string",
+          "enum": [
+            "id_ascending"
+          ]
+        }
       ]
     }
   }
