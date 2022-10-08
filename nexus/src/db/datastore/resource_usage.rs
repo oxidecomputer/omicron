@@ -47,8 +47,14 @@ struct RamProvisioned {
     bytes: i64,
 }
 
+/// An oximeter producer for reporting [`ResourceUsage`] information to Clickhouse.
+///
+/// This producer collects samples whenever the database record for a collection
+/// is created or updated. This implies that the CockroachDB record is always
+/// kept up-to-date, and the Clickhouse historical records are batched and
+/// transmitted once they are collected (as is the norm for Clickhouse metrics).
 #[derive(Debug, Default, Clone)]
-pub struct Producer {
+pub(crate) struct Producer {
     samples: Arc<Mutex<Vec<Sample>>>,
 }
 
@@ -110,7 +116,7 @@ impl oximeter::Producer for Producer {
 }
 
 impl DataStore {
-    /// Create a resource_usage
+    /// Create a [`ResourceUsage`] object.
     pub async fn resource_usage_create(
         &self,
         opctx: &OpContext,
@@ -173,7 +179,7 @@ impl DataStore {
         Ok(resource_usage)
     }
 
-    /// Delete a resource_usage
+    /// Delete a [`ResourceUsage`] object.
     pub async fn resource_usage_delete(
         &self,
         opctx: &OpContext,
