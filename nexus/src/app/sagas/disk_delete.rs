@@ -167,7 +167,7 @@ async fn sdd_delete_volume(
         sagactx.lookup::<db::model::Disk>("deleted_disk")?.volume_id;
     osagactx
         .nexus()
-        .volume_delete(&opctx, params.project_id, volume_id)
+        .volume_delete(&opctx, volume_id)
         .await
         .map_err(ActionError::action_failed)?;
     Ok(())

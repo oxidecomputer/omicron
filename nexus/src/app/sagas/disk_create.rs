@@ -541,10 +541,7 @@ async fn sdc_create_volume_record_undo(
 
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
     let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
-    osagactx
-        .nexus()
-        .volume_delete(&opctx, params.project_id, volume_id)
-        .await?;
+    osagactx.nexus().volume_delete(&opctx, volume_id).await?;
     Ok(())
 }
 

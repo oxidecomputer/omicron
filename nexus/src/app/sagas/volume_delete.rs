@@ -46,7 +46,6 @@ use uuid::Uuid;
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Params {
     pub serialized_authn: authn::saga::Serialized,
-    pub project_id: Uuid,
     pub volume_id: Uuid,
 }
 // volume delete saga: actions

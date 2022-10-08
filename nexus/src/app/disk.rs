@@ -529,9 +529,9 @@ impl super::Nexus {
             .await?;
 
         // Kick off volume deletion saga(s)
-        self.volume_delete(opctx, project.id(), db_snapshot.volume_id).await?;
+        self.volume_delete(opctx, db_snapshot.volume_id).await?;
         if let Some(volume_id) = db_snapshot.destination_volume_id {
-            self.volume_delete(opctx, project.id(), volume_id).await?;
+            self.volume_delete(opctx, volume_id).await?;
         }
 
         Ok(())
