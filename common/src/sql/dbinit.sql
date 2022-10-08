@@ -139,17 +139,16 @@ CREATE INDEX ON omicron.public.service (
     sled_id
 );
 
-/*
- * A table describing resource usage which may be associated
- * with a collection of objects, including:
- * - Projects
- * - Organizations
- * - Silos
- * - Fleet
- */
+-- A table describing resource usage which may be associated
+-- with a collection of objects, including:
+-- - Projects
+-- - Organizations
+-- - Silos
+-- - Fleet
 CREATE TABLE omicron.public.resource_usage (
-    /* Should match the UUID of the corresponding collection */
+    -- Should match the UUID of the corresponding collection
     id UUID PRIMARY KEY,
+    resource_type STRING(63) NOT NULL,
 
     -- The amount of physical disk space which has been provisioned
     -- on behalf of the collection.

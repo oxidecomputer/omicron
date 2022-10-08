@@ -13,6 +13,7 @@ use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Resource;
+use crate::db::model::CollectionType;
 use crate::db::model::Name;
 use crate::db::model::Organization;
 use crate::db::model::Project;
@@ -70,8 +71,11 @@ impl DataStore {
         // NOTE: if you do this before the project is created, it'll exist as
         // soon as the project does. However, that'll work better in a saga/CTE when
         // unwinding is built-in more naturally.
-        self.resource_usage_create(opctx, ResourceUsage::new(project.id()))
-            .await?;
+        self.resource_usage_create(
+            opctx,
+            ResourceUsage::new(project.id(), CollectionType::Project),
+        )
+        .await?;
 
         Ok(project)
     }

@@ -15,6 +15,7 @@ use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
 use crate::db::fixed_data::silo::DEFAULT_SILO;
 use crate::db::identity::Resource;
+use crate::db::model::CollectionType;
 use crate::db::model::Name;
 use crate::db::model::ResourceUsage;
 use crate::db::model::Silo;
@@ -57,7 +58,7 @@ impl DataStore {
 
         self.resource_usage_create(
             opctx,
-            ResourceUsage::new(DEFAULT_SILO.id()),
+            ResourceUsage::new(DEFAULT_SILO.id(), CollectionType::Silo),
         )
         .await?;
 
@@ -148,13 +149,13 @@ impl DataStore {
                 let silo = silo_create_query.get_result_async(&conn).await?;
                 use db::schema::resource_usage::dsl;
                 diesel::insert_into(dsl::resource_usage)
-                    .values(ResourceUsage::new(silo.id()))
+                    .values(ResourceUsage::new(silo.id(), CollectionType::Silo))
                     .execute_async(&conn)
                     .await?;
 
                 self.resource_usage_create_on_connection(
                     &conn,
-                    ResourceUsage::new(DEFAULT_SILO.id()),
+                    ResourceUsage::new(DEFAULT_SILO.id(), CollectionType::Silo),
                 )
                 .await?;
 
