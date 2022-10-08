@@ -10,7 +10,7 @@ use crate::bootstrap::ddm_admin_client::{DdmAdminClient, DdmError};
 use crate::bootstrap::params::SledAgentRequest;
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
 use crate::bootstrap::trust_quorum::{RackSecret, ShareDistribution};
-use crate::params::{ServiceRequest, ServiceType};
+use crate::params::{ServiceType, ServiceZoneRequest};
 use internal_dns_client::multiclient::{DnsError, Updater as DnsUpdater};
 use omicron_common::address::{
     get_sled_address, ReservedRackSubnet, DNS_PORT, DNS_SERVER_PORT,
@@ -72,11 +72,11 @@ struct SledAllocation {
 }
 
 /// The interface to the Rack Setup Service.
-pub struct Service {
+pub struct RackSetupService {
     handle: tokio::task::JoinHandle<Result<(), SetupServiceError>>,
 }
 
-impl Service {
+impl RackSetupService {
     /// Creates a new rack setup service, which runs in a background task.
     ///
     /// Arguments:
@@ -114,7 +114,7 @@ impl Service {
             }
         });
 
-        Service { handle }
+        RackSetupService { handle }
     }
 
     /// Awaits the completion of the RSS service.
@@ -213,7 +213,7 @@ impl ServiceInner {
     async fn initialize_services(
         &self,
         sled_address: SocketAddr,
-        services: &Vec<ServiceRequest>,
+        services: &Vec<ServiceZoneRequest>,
     ) -> Result<(), SetupServiceError> {
         let dur = std::time::Duration::from_secs(60);
         let client = reqwest::ClientBuilder::new()
@@ -314,12 +314,12 @@ impl ServiceInner {
                 if idx < dns_subnets.len() {
                     let dns_subnet = &dns_subnets[idx];
                     let dns_addr = dns_subnet.dns_address().ip();
-                    request.dns_services.push(ServiceRequest {
+                    request.dns_services.push(ServiceZoneRequest {
                         id: Uuid::new_v4(),
-                        name: "internal-dns".to_string(),
+                        zone_name: "internal-dns".to_string(),
                         addresses: vec![dns_addr],
                         gz_addresses: vec![dns_subnet.gz_address().ip()],
-                        service_type: ServiceType::InternalDns {
+                        services: vec![ServiceType::InternalDns {
                             server_address: SocketAddrV6::new(
                                 dns_addr,
                                 DNS_SERVER_PORT,
@@ -329,7 +329,7 @@ impl ServiceInner {
                             dns_address: SocketAddrV6::new(
                                 dns_addr, DNS_PORT, 0, 0,
                             ),
-                        },
+                        }],
                     });
                 }
 
@@ -650,22 +650,26 @@ impl ServiceInner {
                 allocation.initialization_request.subnet,
             ));
 
-            let all_services = allocation
+            let all_zones = allocation
                 .services_request
-                .services
+                .service_zones
                 .iter()
                 .chain(allocation.services_request.dns_services.iter())
                 .map(|s| s.clone())
                 .collect::<Vec<_>>();
 
-            self.initialize_services(sled_address, &all_services).await?;
+            self.initialize_services(sled_address, &all_zones).await?;
 
             let mut records = HashMap::new();
-            for service in &all_services {
-                records
-                    .entry(service.srv())
-                    .or_insert_with(Vec::new)
-                    .push((service.aaaa(), service.address()));
+            for zone in &all_zones {
+                for service in &zone.services {
+                    if let Some(addr) = zone.address(service) {
+                        records
+                            .entry(zone.srv(service))
+                            .or_insert_with(Vec::new)
+                            .push((zone.aaaa(), addr))
+                    }
+                }
             }
             self.dns_servers
                 .get()

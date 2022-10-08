@@ -64,12 +64,12 @@ zpool_id = "d462a7f7-b628-40fe-80ff-4e4189e2d62b"
 address = "[fd00:1122:3344:0101::5]:8123"
 dataset_kind.type = "clickhouse"
 
-[[request.service]]
+[[request.service_zone]]
 id = "e6bff1ff-24fb-49dc-a54e-c6a350cd4d6c"
-name = "nexus"
+zone_name = "nexus"
 addresses = [ "fd00:1122:3344:0101::3" ]
 gz_addresses = []
-[request.service.service_type]
+[[request.service_zone.services]]
 type = "nexus"
 internal_ip = "fd00:1122:3344:0101::3"
 # NOTE: In the lab, use "172.20.15.226"
@@ -77,19 +77,25 @@ external_ip = "192.168.1.20"
 
 # TODO(https://github.com/oxidecomputer/omicron/issues/732): Nexus
 # should allocate Oximeter services.
-[[request.service]]
+[[request.service_zone]]
 id = "1da65e5b-210c-4859-a7d7-200c1e659972"
-name = "oximeter"
+zone_name = "oximeter"
 addresses = [ "fd00:1122:3344:0101::4" ]
 gz_addresses = []
-[request.service.service_type]
+[[request.service_zone.services]]
 type = "oximeter"
 
-[[request.service]]
+[[request.service_zone]]
 id = "a0fe5ebc-9261-6f77-acc1-972481755789"
-name = "dendrite"
+zone_name = "switch"
 addresses = [ "fd00:1122:3344:0101::9" ]
 gz_addresses = []
-[request.service.service_type]
+[[request.service_zone.services]]
 type = "dendrite"
 asic = "tofino_stub"
+#[[request.service_zone.services]]
+# The tfport service will not work with the tofino_stub asic,
+# as there is no network traffic to multiplex or network device
+# to layer over.
+#type = "tfport"
+#pkt_source = "tfpkt0"

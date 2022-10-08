@@ -352,6 +352,19 @@ pub enum ServiceType {
     InternalDns { server_address: SocketAddrV6, dns_address: SocketAddrV6 },
     Oximeter,
     Dendrite { asic: DendriteAsic },
+    Tfport { pkt_source: String },
+}
+
+impl std::fmt::Display for ServiceType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
+        match self {
+            ServiceType::Nexus { .. } => write!(f, "nexus"),
+            ServiceType::InternalDns { .. } => write!(f, "internal-dns"),
+            ServiceType::Oximeter => write!(f, "oximeter"),
+            ServiceType::Dendrite { .. } => write!(f, "dendrite"),
+            ServiceType::Tfport { .. } => write!(f, "tfport"),
+        }
+    }
 }
 
 impl From<ServiceType> for sled_agent_client::types::ServiceType {
@@ -371,21 +384,20 @@ impl From<ServiceType> for sled_agent_client::types::ServiceType {
             }
             St::Oximeter => AutoSt::Oximeter,
             St::Dendrite { asic } => AutoSt::Dendrite { asic: asic.into() },
+            St::Tfport { pkt_source } => AutoSt::Tfport { pkt_source },
         }
     }
 }
 
-/// Describes a request to create a service. This information
-/// should be sufficient for a Sled Agent to start a zone
-/// containing the requested service.
+/// Describes a request to create a zone running one or more services.
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]
-pub struct ServiceRequest {
-    // The UUID of the service to be initialized.
+pub struct ServiceZoneRequest {
+    // The UUID of the zone to be initialized.
     pub id: Uuid,
-    // The name of the service to be created.
-    pub name: String,
+    // The name of the zone to be created.
+    pub zone_name: String,
     // The addresses on which the service should listen for requests.
     pub addresses: Vec<Ipv6Addr>,
     // The addresses in the global zone which should be created, if necessary
@@ -397,50 +409,60 @@ pub struct ServiceRequest {
     // is necessary to allow inter-zone traffic routing.
     #[serde(default)]
     pub gz_addresses: Vec<Ipv6Addr>,
-    // Any other service-specific parameters.
-    pub service_type: ServiceType,
+    // Services that should be run in the zone
+    pub services: Vec<ServiceType>,
 }
 
-impl ServiceRequest {
+impl ServiceZoneRequest {
     pub fn aaaa(&self) -> AAAA {
         AAAA::Zone(self.id)
     }
 
-    pub fn srv(&self) -> SRV {
-        match self.service_type {
+    // XXX: any reason this can't just be service.to_string()?
+    pub fn srv(&self, service: &ServiceType) -> SRV {
+        match service {
             ServiceType::InternalDns { .. } => {
                 SRV::Service(ServiceName::InternalDNS)
             }
             ServiceType::Nexus { .. } => SRV::Service(ServiceName::Nexus),
             ServiceType::Oximeter => SRV::Service(ServiceName::Oximeter),
             ServiceType::Dendrite { .. } => SRV::Service(ServiceName::Dendrite),
+            ServiceType::Tfport { .. } => SRV::Service(ServiceName::Tfport),
         }
     }
 
-    pub fn address(&self) -> SocketAddrV6 {
-        match self.service_type {
-            ServiceType::InternalDns { server_address, .. } => server_address,
+    pub fn address(&self, service: &ServiceType) -> Option<SocketAddrV6> {
+        match service {
+            ServiceType::InternalDns { server_address, .. } => {
+                Some(*server_address)
+            }
             ServiceType::Nexus { internal_ip, .. } => {
-                SocketAddrV6::new(internal_ip, NEXUS_INTERNAL_PORT, 0, 0)
+                Some(SocketAddrV6::new(*internal_ip, NEXUS_INTERNAL_PORT, 0, 0))
             }
             ServiceType::Oximeter => {
-                SocketAddrV6::new(self.addresses[0], OXIMETER_PORT, 0, 0)
+                Some(SocketAddrV6::new(self.addresses[0], OXIMETER_PORT, 0, 0))
             }
             ServiceType::Dendrite { .. } => {
-                SocketAddrV6::new(self.addresses[0], DENDRITE_PORT, 0, 0)
+                Some(SocketAddrV6::new(self.addresses[0], DENDRITE_PORT, 0, 0))
             }
+            ServiceType::Tfport { .. } => None,
         }
     }
 }
 
-impl From<ServiceRequest> for sled_agent_client::types::ServiceRequest {
-    fn from(s: ServiceRequest) -> Self {
+impl From<ServiceZoneRequest> for sled_agent_client::types::ServiceZoneRequest {
+    fn from(s: ServiceZoneRequest) -> Self {
+        let mut services = Vec::new();
+        for service in s.services {
+            services.push(service.into())
+        }
+
         Self {
             id: s.id,
-            name: s.name,
+            zone_name: s.zone_name.to_string(),
             addresses: s.addresses,
             gz_addresses: s.gz_addresses,
-            service_type: s.service_type.into(),
+            services,
         }
     }
 }
@@ -452,5 +474,5 @@ impl From<ServiceRequest> for sled_agent_client::types::ServiceRequest {
 /// as Nexus.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct ServiceEnsureBody {
-    pub services: Vec<ServiceRequest>,
+    pub services: Vec<ServiceZoneRequest>,
 }

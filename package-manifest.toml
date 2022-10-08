@@ -135,7 +135,7 @@ commit = "21fd8236c23dc38fea5d1e4c8196be685c251da2"
 sha256 = "039c9b3e97b0d61012850c1476574742c0cb9274ffa86cfeb15d619854ebacfa"
 
 [external_package.dendrite-stub]
-service_name = "dendrite"
+service_name = "switch"
 zone = true
 [external_package.dendrite-stub.only_for_targets]
 switch_variant = "stub"
@@ -144,30 +144,24 @@ switch_variant = "stub"
 #
 # 1. Build the zone image manually
 #   1a. cd <dendrite tree>
-#   1b. cargo build --features=<tofino_stub|tofino_asic|softnpu>
+#   1b. cargo build --features=tofino_stub
 #   1c. cargo xtask dist -o
-# 2. Copy the output zone image from dendrite/out to omicron/out
+# 2. Copy dendrite.tar.gz from dendrite/out to omicron/out
 # 3. Use type = "manual" instead of the "prebuilt"
 type = "prebuilt"
 repo = "dendrite"
 commit = "e5ae7508778d02e079d9a10942ac14ec2064ccb7"
-sha256 = "db426f820cdb0de97c3ba3e80d50bad66e4b68e8882088a8cf64e1beb52b0e98"
+sha256 = "968c2a9f9951196b905d5e1a9dc4a615f1b247640f2c13dc42cae9ab2f13595a"
 
 [external_package.dendrite-asic]
-service_name = "dendrite"
+service_name = "switch"
 zone = true
 [external_package.dendrite-asic.only_for_targets]
 switch_variant = "asic"
 [external_package.dendrite-asic.source]
-# To manually override the package source:
-#
-# 1. Build the zone image manually
-#   1a. cd <dendrite tree>
-#   1b. cargo build --features=<tofino_stub|tofino_asic|softnpu>
-#   1c. cargo xtask dist -o
-# 2. Copy the output zone image from dendrite/out to omicron/out
-# 3. Use type = "manual" instead of the "prebuilt"
+# Manually overriding the package source is identical to dendrite-stub,
+# but built with "--features=tofino_asic"
 type = "prebuilt"
 repo = "dendrite"
 commit = "e5ae7508778d02e079d9a10942ac14ec2064ccb7"
-sha256 = "f5fdde40e15d63387e3c35105209a6e4f9dcf4a001d0a3ee36ad857937a65c62"
+sha256 = "e2a39a9721d206c617fc377d16b5ee348d141068b8fd13078d17331a1be10913"
