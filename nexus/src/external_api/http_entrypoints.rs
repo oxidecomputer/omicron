@@ -241,7 +241,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(system_image_view_by_id)?;
         api.register(system_image_delete)?;
 
-        api.register(system_metrics_list)?;
+        api.register(system_metric)?;
         api.register(updates_refresh)?;
         api.register(user_list)?;
 
@@ -4027,7 +4027,7 @@ async fn updates_refresh(
 // Metrics
 
 #[derive(Debug, Deserialize, JsonSchema)]
-pub struct ResourceUtilization {
+pub struct SystemMetricParams {
     #[serde(flatten)]
     pub pagination: dropshot::PaginationParams<
         params::ResourceMetrics,
@@ -4059,10 +4059,10 @@ struct SystemMetricsPathParam {
      path = "/system/metrics/{resource_name}",
      tags = ["system"],
 }]
-async fn system_metrics_list(
+async fn system_metric(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<SystemMetricsPathParam>,
-    query_params: Query<ResourceUtilization>,
+    query_params: Query<SystemMetricParams>,
 ) -> Result<HttpResponseOk<ResultsPage<oximeter_db::Measurement>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
