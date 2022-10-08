@@ -146,8 +146,9 @@ CREATE INDEX ON omicron.public.service (
 -- - Silos
 -- - Fleet
 CREATE TABLE omicron.public.resource_usage (
-    -- Should match the UUID of the corresponding collection
+    -- Should match the UUID of the corresponding collection.
     id UUID PRIMARY KEY,
+    -- Identifies the type of the collection.
     resource_type STRING(63) NOT NULL,
 
     -- The amount of physical disk space which has been provisioned
