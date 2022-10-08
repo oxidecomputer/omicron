@@ -212,7 +212,7 @@ impl super::Nexus {
 
         let saga_params = sagas::disk_create::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
-            project: authz_project,
+            project_id: authz_project.id(),
             create_params: params.clone(),
         };
         let saga_outputs = self
@@ -387,7 +387,7 @@ impl super::Nexus {
 
         let saga_params = sagas::disk_delete::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
-            project,
+            project_id: project.id(),
             disk_id: authz_disk.id(),
         };
         self.execute_saga::<sagas::disk_delete::SagaDiskDelete>(saga_params)
@@ -420,7 +420,7 @@ impl super::Nexus {
         let saga_params = sagas::snapshot_create::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             silo_id: authz_silo.id(),
-            project: authz_project,
+            project_id: authz_project.id(),
             disk_id: authz_disk.id(),
             create_params: params.clone(),
         };
@@ -503,7 +503,7 @@ impl super::Nexus {
         // reference counting for volumes, and probably means this needs to
         // instead be a saga.
 
-        let (.., authz_project, authz_snapshot, db_snapshot) =
+        let (.., project, authz_snapshot, db_snapshot) =
             LookupPath::new(opctx, &self.db_datastore)
                 .organization_name(organization_name)
                 .project_name(project_name)
@@ -515,7 +515,7 @@ impl super::Nexus {
         self.db_datastore
             .resource_usage_update_disk(
                 &opctx,
-                authz_project.id(),
+                project.id(),
                 -i64::try_from(db_snapshot.size.to_bytes()).map_err(|e| {
                     Error::internal_error(&format!(
                         "updating resource usage: {e}"
@@ -529,10 +529,9 @@ impl super::Nexus {
             .await?;
 
         // Kick off volume deletion saga(s)
-        self.volume_delete(opctx, &authz_project, db_snapshot.volume_id)
-            .await?;
+        self.volume_delete(opctx, project.id(), db_snapshot.volume_id).await?;
         if let Some(volume_id) = db_snapshot.destination_volume_id {
-            self.volume_delete(opctx, &authz_project, volume_id).await?;
+            self.volume_delete(opctx, project.id(), volume_id).await?;
         }
 
         Ok(())

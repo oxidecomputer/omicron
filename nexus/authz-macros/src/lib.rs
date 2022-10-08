@@ -278,7 +278,7 @@ fn do_authz_resource(
 
     Ok(quote! {
         #[doc = #doc_struct]
-        #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+        #[derive(Clone, Debug)]
         pub struct #resource_name {
             parent: #parent_resource_name,
             key: #primary_key_type,

@@ -150,7 +150,7 @@ impl<T: ApiResource + oso::PolarClass + Clone> AuthorizedResource for T {
 /// This object is used for authorization checks on a Fleet by passing it as the
 /// `resource` argument to [`crate::context::OpContext::authorize()`].  You
 /// don't construct a `Fleet` yourself -- use the global [`FLEET`].
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug)]
 pub struct Fleet;
 /// Singleton representing the [`Fleet`] itself for authz purposes
 pub const FLEET: Fleet = Fleet;

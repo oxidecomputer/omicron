@@ -6,7 +6,6 @@
 
 use crate::app::sagas;
 use crate::authn;
-use crate::authz;
 use crate::context::OpContext;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -28,12 +27,12 @@ impl super::Nexus {
     pub async fn volume_delete(
         self: &Arc<Self>,
         opctx: &OpContext,
-        project: &authz::Project,
+        project_id: Uuid,
         volume_id: Uuid,
     ) -> DeleteResult {
         let saga_params = sagas::volume_delete::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
-            project_id: project.id(),
+            project_id,
             volume_id,
         };
 
