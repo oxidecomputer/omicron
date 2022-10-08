@@ -4042,7 +4042,7 @@ pub struct SystemMetricParams {
 #[derive(Display, Deserialize, JsonSchema)]
 #[display(style = "snake_case")]
 #[serde(rename_all = "snake_case")]
-pub enum ResourceName {
+pub enum SystemMetricName {
     VirtualDiskSpaceProvisioned,
     CpusProvisioned,
     RamProvisioned,
@@ -4050,13 +4050,13 @@ pub enum ResourceName {
 
 #[derive(Deserialize, JsonSchema)]
 struct SystemMetricsPathParam {
-    resource_name: ResourceName,
+    metric_name: SystemMetricName,
 }
 
 /// Access metrics data
 #[endpoint {
      method = GET,
-     path = "/system/metrics/{resource_name}",
+     path = "/system/metrics/{metric_name}",
      tags = ["system"],
 }]
 async fn system_metric(
@@ -4066,7 +4066,7 @@ async fn system_metric(
 ) -> Result<HttpResponseOk<ResultsPage<oximeter_db::Measurement>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
-    let resource_name = path_params.into_inner().resource_name;
+    let metric_name = path_params.into_inner().metric_name;
 
     let query = query_params.into_inner();
     let limit = rqctx.page_limit(&query.pagination)?;
@@ -4074,8 +4074,8 @@ async fn system_metric(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
 
-        let result = match resource_name {
-            ResourceName::VirtualDiskSpaceProvisioned => {
+        let result = match metric_name {
+            SystemMetricName::VirtualDiskSpaceProvisioned => {
                 opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
                 nexus
                     .select_timeseries(
@@ -4086,7 +4086,7 @@ async fn system_metric(
                     )
                     .await?
             }
-            ResourceName::CpusProvisioned => {
+            SystemMetricName::CpusProvisioned => {
                 opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
                 nexus
                     .select_timeseries(
@@ -4097,7 +4097,7 @@ async fn system_metric(
                     )
                     .await?
             }
-            ResourceName::RamProvisioned => {
+            SystemMetricName::RamProvisioned => {
                 opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
                 nexus
                     .select_timeseries(

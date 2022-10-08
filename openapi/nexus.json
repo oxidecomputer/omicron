@@ -6357,20 +6357,20 @@
         }
       }
     },
-    "/system/metrics/{resource_name}": {
+    "/system/metrics/{metric_name}": {
       "get": {
         "tags": [
           "system"
         ],
         "summary": "Access metrics data",
-        "operationId": "system_metrics_list",
+        "operationId": "system_metric",
         "parameters": [
           {
             "in": "path",
-            "name": "resource_name",
+            "name": "metric_name",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/ResourceName"
+              "$ref": "#/components/schemas/SystemMetricName"
             },
             "style": "simple"
           },
@@ -12287,7 +12287,7 @@
           }
         ]
       },
-      "ResourceName": {
+      "SystemMetricName": {
         "type": "string",
         "enum": [
           "virtual_disk_space_provisioned",
