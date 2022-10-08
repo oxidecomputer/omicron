@@ -20,8 +20,9 @@ use oximeter::{types::Sample, Metric, MetricsError, Target};
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
-/// A collection which holds resources (such as a project, organization, or
-/// silo).
+/// Describes a collection that holds other resources.
+///
+/// Example targets might include projects, organizations, silos or fleets.
 #[derive(Debug, Clone, Target)]
 struct CollectionTarget {
     id: Uuid,
