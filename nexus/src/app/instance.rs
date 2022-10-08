@@ -256,7 +256,11 @@ impl super::Nexus {
                 project.id(),
                 -i64::from(instance.runtime_state.ncpus.0 .0),
                 -i64::try_from(instance.runtime_state.memory.to_bytes())
-                    .unwrap(),
+                    .map_err(|e| {
+                        Error::internal_error(&format!(
+                            "updating resource usage: {e}"
+                        ))
+                    })?,
             )
             .await?;
         self.db_datastore

@@ -10,6 +10,7 @@ use crate::authn;
 use crate::context::OpContext;
 use crate::db;
 use lazy_static::lazy_static;
+use omicron_common::api::external::Error;
 use serde::Deserialize;
 use serde::Serialize;
 use std::sync::Arc;
@@ -116,7 +117,13 @@ async fn sdd_account_space(
         .resource_usage_update_disk(
             &opctx,
             params.project_id,
-            -i64::try_from(deleted_disk.size.to_bytes()).unwrap(),
+            -i64::try_from(deleted_disk.size.to_bytes())
+                .map_err(|e| {
+                    Error::internal_error(&format!(
+                        "updating resource usage: {e}"
+                    ))
+                })
+                .map_err(ActionError::action_failed)?,
         )
         .await
         .map_err(ActionError::action_failed)?;
@@ -137,7 +144,13 @@ async fn sdd_account_space_undo(
         .resource_usage_update_disk(
             &opctx,
             params.project_id,
-            i64::try_from(deleted_disk.size.to_bytes()).unwrap(),
+            i64::try_from(deleted_disk.size.to_bytes())
+                .map_err(|e| {
+                    Error::internal_error(&format!(
+                        "updating resource usage: {e}"
+                    ))
+                })
+                .map_err(ActionError::action_failed)?,
         )
         .await
         .map_err(ActionError::action_failed)?;

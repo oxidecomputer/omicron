@@ -516,7 +516,11 @@ impl super::Nexus {
             .resource_usage_update_disk(
                 &opctx,
                 project.id(),
-                -i64::try_from(db_snapshot.size.to_bytes()).unwrap(),
+                -i64::try_from(db_snapshot.size.to_bytes()).map_err(|e| {
+                    Error::internal_error(&format!(
+                        "updating resource usage: {e}"
+                    ))
+                })?,
             )
             .await?;
 

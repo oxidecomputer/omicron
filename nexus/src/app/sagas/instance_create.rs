@@ -866,7 +866,13 @@ async fn sic_account_resources(
             &opctx,
             params.project_id,
             i64::from(params.create_params.ncpus.0),
-            i64::try_from(params.create_params.memory.to_bytes()).unwrap(),
+            i64::try_from(params.create_params.memory.to_bytes())
+                .map_err(|e| {
+                    Error::internal_error(&format!(
+                        "updating resource usage: {e}"
+                    ))
+                })
+                .map_err(ActionError::action_failed)?,
         )
         .await
         .map_err(ActionError::action_failed)?;
@@ -887,7 +893,13 @@ async fn sic_account_resources_undo(
             &opctx,
             params.project_id,
             -i64::from(params.create_params.ncpus.0),
-            -i64::try_from(params.create_params.memory.to_bytes()).unwrap(),
+            -i64::try_from(params.create_params.memory.to_bytes())
+                .map_err(|e| {
+                    Error::internal_error(&format!(
+                        "updating resource usage: {e}"
+                    ))
+                })
+                .map_err(ActionError::action_failed)?,
         )
         .await
         .map_err(ActionError::action_failed)?;

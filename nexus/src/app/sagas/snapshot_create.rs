@@ -558,7 +558,13 @@ async fn ssc_account_space(
         .resource_usage_update_disk(
             &opctx,
             params.project_id,
-            i64::try_from(snapshot_created.size.to_bytes()).unwrap(),
+            i64::try_from(snapshot_created.size.to_bytes())
+                .map_err(|e| {
+                    Error::internal_error(&format!(
+                        "updating resource usage: {e}"
+                    ))
+                })
+                .map_err(ActionError::action_failed)?,
         )
         .await
         .map_err(ActionError::action_failed)?;
@@ -580,7 +586,13 @@ async fn ssc_account_space_undo(
         .resource_usage_update_disk(
             &opctx,
             params.project_id,
-            -i64::try_from(snapshot_created.size.to_bytes()).unwrap(),
+            -i64::try_from(snapshot_created.size.to_bytes())
+                .map_err(|e| {
+                    Error::internal_error(&format!(
+                        "updating resource usage: {e}"
+                    ))
+                })
+                .map_err(ActionError::action_failed)?,
         )
         .await
         .map_err(ActionError::action_failed)?;
