@@ -7,6 +7,7 @@ use super::NexusActionContext;
 use super::NexusSaga;
 use crate::app::sagas::NexusAction;
 use crate::authn;
+use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use lazy_static::lazy_static;
@@ -25,7 +26,7 @@ use uuid::Uuid;
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Params {
     pub serialized_authn: authn::saga::Serialized,
-    pub project_id: Uuid,
+    pub project: authz::Project,
     pub disk_id: Uuid,
 }
 
@@ -116,7 +117,7 @@ async fn sdd_account_space(
         .datastore()
         .resource_usage_update_disk(
             &opctx,
-            params.project_id,
+            params.project.id(),
             -i64::try_from(deleted_disk.size.to_bytes())
                 .map_err(|e| {
                     Error::internal_error(&format!(
@@ -143,7 +144,7 @@ async fn sdd_account_space_undo(
         .datastore()
         .resource_usage_update_disk(
             &opctx,
-            params.project_id,
+            params.project.id(),
             i64::try_from(deleted_disk.size.to_bytes())
                 .map_err(|e| {
                     Error::internal_error(&format!(
@@ -167,7 +168,7 @@ async fn sdd_delete_volume(
         sagactx.lookup::<db::model::Disk>("deleted_disk")?.volume_id;
     osagactx
         .nexus()
-        .volume_delete(&opctx, params.project_id, volume_id)
+        .volume_delete(&opctx, &params.project, volume_id)
         .await
         .map_err(ActionError::action_failed)?;
     Ok(())

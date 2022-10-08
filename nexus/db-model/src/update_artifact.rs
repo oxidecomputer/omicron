@@ -7,6 +7,7 @@ use crate::schema::update_available_artifact;
 use chrono::{DateTime, Utc};
 use omicron_common::api::internal;
 use parse_display::Display;
+use serde::{Deserialize, Serialize};
 use std::io::Write;
 
 impl_enum_wrapper!(
@@ -14,7 +15,7 @@ impl_enum_wrapper!(
     #[diesel(postgres_type(name = "update_artifact_kind"))]
     pub struct UpdateArtifactKindEnum;
 
-    #[derive(Clone, Copy, Debug, Display, AsExpression, FromSqlRow, PartialEq, Eq)]
+    #[derive(Clone, Copy, Debug, Display, AsExpression, FromSqlRow, PartialEq, Eq, Serialize, Deserialize)]
     #[display("{0}")]
     #[diesel(sql_type = UpdateArtifactKindEnum)]
     pub struct UpdateArtifactKind(pub internal::nexus::UpdateArtifactKind);
@@ -24,7 +25,15 @@ impl_enum_wrapper!(
 );
 
 #[derive(
-    Queryable, Insertable, Clone, Debug, Display, Selectable, AsChangeset,
+    Queryable,
+    Insertable,
+    Clone,
+    Debug,
+    Display,
+    Selectable,
+    AsChangeset,
+    Serialize,
+    Deserialize,
 )]
 #[diesel(table_name = update_available_artifact)]
 #[display("{kind} \"{name}\" v{version}")]

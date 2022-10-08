@@ -118,7 +118,7 @@ use uuid::Uuid;
 pub struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub silo_id: Uuid,
-    pub project_id: Uuid,
+    pub project: authz::Project,
     pub disk_id: Uuid,
     pub create_params: params::SnapshotCreate,
 }
@@ -450,7 +450,7 @@ async fn ssc_create_destination_volume_record_undo(
         sagactx.lookup::<Uuid>("destination_volume_id")?;
     osagactx
         .nexus()
-        .volume_delete(&opctx, params.project_id, destination_volume_id)
+        .volume_delete(&opctx, &params.project, destination_volume_id)
         .await?;
 
     Ok(())
@@ -489,7 +489,7 @@ async fn ssc_create_snapshot_record(
             params.create_params.identity.clone(),
         ),
 
-        project_id: params.project_id,
+        project_id: params.project.id(),
         disk_id: disk.id(),
         volume_id,
         destination_volume_id: Some(destination_volume_id),
@@ -557,7 +557,7 @@ async fn ssc_account_space(
         .datastore()
         .resource_usage_update_disk(
             &opctx,
-            params.project_id,
+            params.project.id(),
             i64::try_from(snapshot_created.size.to_bytes())
                 .map_err(|e| {
                     Error::internal_error(&format!(
@@ -585,7 +585,7 @@ async fn ssc_account_space_undo(
         .datastore()
         .resource_usage_update_disk(
             &opctx,
-            params.project_id,
+            params.project.id(),
             -i64::try_from(snapshot_created.size.to_bytes())
                 .map_err(|e| {
                     Error::internal_error(&format!(
@@ -878,10 +878,7 @@ async fn ssc_create_volume_record_undo(
     let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
 
     info!(log, "deleting volume {}", volume_id);
-    osagactx
-        .nexus()
-        .volume_delete(&opctx, params.project_id, volume_id)
-        .await?;
+    osagactx.nexus().volume_delete(&opctx, &params.project, volume_id).await?;
 
     Ok(())
 }

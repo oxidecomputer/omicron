@@ -30,7 +30,7 @@ use uuid::Uuid;
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Params {
     pub serialized_authn: authn::saga::Serialized,
-    pub project_id: Uuid,
+    pub project: authz::Project,
     pub create_params: params::DiskCreate,
 }
 
@@ -196,7 +196,7 @@ async fn sdc_create_disk_record(
 
     let disk = db::model::Disk::new(
         disk_id,
-        params.project_id,
+        params.project.id(),
         volume_id,
         params.create_params.clone(),
         block_size,
@@ -287,7 +287,7 @@ async fn sdc_account_space(
         .datastore()
         .resource_usage_update_disk(
             &opctx,
-            params.project_id,
+            params.project.id(),
             i64::try_from(disk_created.size.to_bytes())
                 .map_err(|e| {
                     Error::internal_error(&format!(
@@ -314,7 +314,7 @@ async fn sdc_account_space_undo(
         .datastore()
         .resource_usage_update_disk(
             &opctx,
-            params.project_id,
+            params.project.id(),
             -i64::try_from(disk_created.size.to_bytes()).map_err(|e| {
                 Error::internal_error(&format!("updating resource usage: {e}"))
             })?,
@@ -541,10 +541,7 @@ async fn sdc_create_volume_record_undo(
 
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
     let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
-    osagactx
-        .nexus()
-        .volume_delete(&opctx, params.project_id, volume_id)
-        .await?;
+    osagactx.nexus().volume_delete(&opctx, &params.project, volume_id).await?;
     Ok(())
 }
 
