@@ -321,7 +321,10 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
 
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
-    let usage = datastore.resource_usage_get(&opctx, project_id).await.unwrap();
+    let usage = datastore
+        .virtual_resource_provisioning_get(&opctx, project_id)
+        .await
+        .unwrap();
     assert_eq!(
         usage.virtual_disk_bytes_provisioned,
         disk_size.to_bytes() as i64
@@ -348,7 +351,10 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
 
     assert_eq!(snapshot.disk_id, base_disk.identity.id);
     assert_eq!(snapshot.size, base_disk.size);
-    let usage = datastore.resource_usage_get(&opctx, project_id).await.unwrap();
+    let usage = datastore
+        .virtual_resource_provisioning_get(&opctx, project_id)
+        .await
+        .unwrap();
     assert_eq!(
         usage.virtual_disk_bytes_provisioned,
         2 * disk_size.to_bytes() as i64
@@ -380,7 +386,10 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     .parsed_body()
     .unwrap();
 
-    let usage = datastore.resource_usage_get(&opctx, project_id).await.unwrap();
+    let usage = datastore
+        .virtual_resource_provisioning_get(&opctx, project_id)
+        .await
+        .unwrap();
     assert_eq!(
         usage.virtual_disk_bytes_provisioned,
         3 * disk_size.to_bytes() as i64
@@ -401,7 +410,10 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     .await
     .unwrap();
 
-    let usage = datastore.resource_usage_get(&opctx, project_id).await.unwrap();
+    let usage = datastore
+        .virtual_resource_provisioning_get(&opctx, project_id)
+        .await
+        .unwrap();
     assert_eq!(
         usage.virtual_disk_bytes_provisioned,
         2 * disk_size.to_bytes() as i64
@@ -414,7 +426,10 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
         .execute()
         .await
         .expect("failed to delete disk");
-    let usage = datastore.resource_usage_get(&opctx, project_id).await.unwrap();
+    let usage = datastore
+        .virtual_resource_provisioning_get(&opctx, project_id)
+        .await
+        .unwrap();
     assert_eq!(
         usage.virtual_disk_bytes_provisioned,
         disk_size.to_bytes() as i64
@@ -427,7 +442,10 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
         .execute()
         .await
         .expect("failed to delete disk");
-    let usage = datastore.resource_usage_get(&opctx, project_id).await.unwrap();
+    let usage = datastore
+        .virtual_resource_provisioning_get(&opctx, project_id)
+        .await
+        .unwrap();
     assert_eq!(usage.virtual_disk_bytes_provisioned, 0);
 }
 

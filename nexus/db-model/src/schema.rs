@@ -408,9 +408,9 @@ table! {
 }
 
 table! {
-    resource_usage {
+    virtual_resource_provisioning {
         id -> Uuid,
-        resource_type -> Text,
+        collection_type -> Text,
         virtual_disk_bytes_provisioned -> Int8,
         cpus_provisioned -> Int8,
         ram_provisioned -> Int8,

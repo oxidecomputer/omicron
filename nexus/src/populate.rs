@@ -282,9 +282,9 @@ impl Populator for PopulateFleet {
             let id = *db::fixed_data::FLEET_ID;
             datastore.fleet_insert(opctx, &db::model::Fleet::new(id)).await?;
             datastore
-                .resource_usage_create(
+                .virtual_resource_provisioning_create(
                     opctx,
-                    db::model::ResourceUsage::new(
+                    db::model::VirtualResourceProvisioning::new(
                         id,
                         db::model::CollectionType::Fleet,
                     ),

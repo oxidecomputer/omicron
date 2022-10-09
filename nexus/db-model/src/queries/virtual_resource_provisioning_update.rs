@@ -5,8 +5,8 @@
 //! Describes the resource usage update CTE
 
 use crate::schema::organization;
-use crate::schema::resource_usage;
 use crate::schema::silo;
+use crate::schema::virtual_resource_provisioning;
 
 table! {
     parent_org {
@@ -36,7 +36,7 @@ diesel::allow_tables_to_appear_in_same_query!(organization, parent_org,);
 diesel::allow_tables_to_appear_in_same_query!(silo, parent_silo,);
 
 diesel::allow_tables_to_appear_in_same_query!(
-    resource_usage,
+    virtual_resource_provisioning,
     parent_org,
     parent_silo,
     parent_fleet,

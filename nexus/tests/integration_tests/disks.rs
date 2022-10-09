@@ -900,7 +900,9 @@ async fn test_disk_too_big(cptestctx: &ControlPlaneTestContext) {
 }
 
 #[nexus_test]
-async fn test_disk_resource_usage(cptestctx: &ControlPlaneTestContext) {
+async fn test_disk_virtual_resource_provisioning(
+    cptestctx: &ControlPlaneTestContext,
+) {
     let client = &cptestctx.external_client;
     let nexus = &cptestctx.server.apictx.nexus;
     let datastore = nexus.datastore();
@@ -918,21 +920,31 @@ async fn test_disk_resource_usage(cptestctx: &ControlPlaneTestContext) {
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
     // The project and organization should start as empty.
-    let resource_usage =
-        datastore.resource_usage_get(&opctx, project_id1).await.unwrap();
-    assert_eq!(resource_usage.virtual_disk_bytes_provisioned, 0);
-    let resource_usage =
-        datastore.resource_usage_get(&opctx, project_id2).await.unwrap();
-    assert_eq!(resource_usage.virtual_disk_bytes_provisioned, 0);
-    let resource_usage =
-        datastore.resource_usage_get(&opctx, org_id).await.unwrap();
-    assert_eq!(resource_usage.virtual_disk_bytes_provisioned, 0);
-    let resource_usage =
-        datastore.resource_usage_get(&opctx, *SILO_ID).await.unwrap();
-    assert_eq!(resource_usage.virtual_disk_bytes_provisioned, 0);
-    let resource_usage =
-        datastore.resource_usage_get(&opctx, *FLEET_ID).await.unwrap();
-    assert_eq!(resource_usage.virtual_disk_bytes_provisioned, 0);
+    let virtual_resource_provisioning = datastore
+        .virtual_resource_provisioning_get(&opctx, project_id1)
+        .await
+        .unwrap();
+    assert_eq!(virtual_resource_provisioning.virtual_disk_bytes_provisioned, 0);
+    let virtual_resource_provisioning = datastore
+        .virtual_resource_provisioning_get(&opctx, project_id2)
+        .await
+        .unwrap();
+    assert_eq!(virtual_resource_provisioning.virtual_disk_bytes_provisioned, 0);
+    let virtual_resource_provisioning = datastore
+        .virtual_resource_provisioning_get(&opctx, org_id)
+        .await
+        .unwrap();
+    assert_eq!(virtual_resource_provisioning.virtual_disk_bytes_provisioned, 0);
+    let virtual_resource_provisioning = datastore
+        .virtual_resource_provisioning_get(&opctx, *SILO_ID)
+        .await
+        .unwrap();
+    assert_eq!(virtual_resource_provisioning.virtual_disk_bytes_provisioned, 0);
+    let virtual_resource_provisioning = datastore
+        .virtual_resource_provisioning_get(&opctx, *FLEET_ID)
+        .await
+        .unwrap();
+    assert_eq!(virtual_resource_provisioning.virtual_disk_bytes_provisioned, 0);
 
     // Ask for a 1 gibibyte disk in the first project.
     //
@@ -960,31 +972,41 @@ async fn test_disk_resource_usage(cptestctx: &ControlPlaneTestContext) {
     .execute()
     .await
     .expect("unexpected failure creating 1 GiB disk");
-    let resource_usage =
-        datastore.resource_usage_get(&opctx, project_id1).await.unwrap();
+    let virtual_resource_provisioning = datastore
+        .virtual_resource_provisioning_get(&opctx, project_id1)
+        .await
+        .unwrap();
     assert_eq!(
-        resource_usage.virtual_disk_bytes_provisioned,
+        virtual_resource_provisioning.virtual_disk_bytes_provisioned,
         disk_size.to_bytes() as i64
     );
-    let resource_usage =
-        datastore.resource_usage_get(&opctx, project_id2).await.unwrap();
-    assert_eq!(resource_usage.virtual_disk_bytes_provisioned, 0);
-    let resource_usage =
-        datastore.resource_usage_get(&opctx, org_id).await.unwrap();
+    let virtual_resource_provisioning = datastore
+        .virtual_resource_provisioning_get(&opctx, project_id2)
+        .await
+        .unwrap();
+    assert_eq!(virtual_resource_provisioning.virtual_disk_bytes_provisioned, 0);
+    let virtual_resource_provisioning = datastore
+        .virtual_resource_provisioning_get(&opctx, org_id)
+        .await
+        .unwrap();
     assert_eq!(
-        resource_usage.virtual_disk_bytes_provisioned,
+        virtual_resource_provisioning.virtual_disk_bytes_provisioned,
         disk_size.to_bytes() as i64
     );
-    let resource_usage =
-        datastore.resource_usage_get(&opctx, *SILO_ID).await.unwrap();
+    let virtual_resource_provisioning = datastore
+        .virtual_resource_provisioning_get(&opctx, *SILO_ID)
+        .await
+        .unwrap();
     assert_eq!(
-        resource_usage.virtual_disk_bytes_provisioned,
+        virtual_resource_provisioning.virtual_disk_bytes_provisioned,
         disk_size.to_bytes() as i64
     );
-    let resource_usage =
-        datastore.resource_usage_get(&opctx, *FLEET_ID).await.unwrap();
+    let virtual_resource_provisioning = datastore
+        .virtual_resource_provisioning_get(&opctx, *FLEET_ID)
+        .await
+        .unwrap();
     assert_eq!(
-        resource_usage.virtual_disk_bytes_provisioned,
+        virtual_resource_provisioning.virtual_disk_bytes_provisioned,
         disk_size.to_bytes() as i64
     );
 
@@ -1015,22 +1037,28 @@ async fn test_disk_resource_usage(cptestctx: &ControlPlaneTestContext) {
     .execute()
     .await
     .expect("unexpected failure creating 1 GiB disk");
-    let resource_usage =
-        datastore.resource_usage_get(&opctx, project_id1).await.unwrap();
+    let virtual_resource_provisioning = datastore
+        .virtual_resource_provisioning_get(&opctx, project_id1)
+        .await
+        .unwrap();
     assert_eq!(
-        resource_usage.virtual_disk_bytes_provisioned,
+        virtual_resource_provisioning.virtual_disk_bytes_provisioned,
         disk_size.to_bytes() as i64
     );
-    let resource_usage =
-        datastore.resource_usage_get(&opctx, project_id2).await.unwrap();
+    let virtual_resource_provisioning = datastore
+        .virtual_resource_provisioning_get(&opctx, project_id2)
+        .await
+        .unwrap();
     assert_eq!(
-        resource_usage.virtual_disk_bytes_provisioned,
+        virtual_resource_provisioning.virtual_disk_bytes_provisioned,
         disk_size.to_bytes() as i64
     );
-    let resource_usage =
-        datastore.resource_usage_get(&opctx, org_id).await.unwrap();
+    let virtual_resource_provisioning = datastore
+        .virtual_resource_provisioning_get(&opctx, org_id)
+        .await
+        .unwrap();
     assert_eq!(
-        resource_usage.virtual_disk_bytes_provisioned,
+        virtual_resource_provisioning.virtual_disk_bytes_provisioned,
         2 * disk_size.to_bytes() as i64
     );
 
@@ -1042,19 +1070,25 @@ async fn test_disk_resource_usage(cptestctx: &ControlPlaneTestContext) {
         .execute()
         .await
         .expect("failed to delete disk");
-    let resource_usage =
-        datastore.resource_usage_get(&opctx, project_id1).await.unwrap();
+    let virtual_resource_provisioning = datastore
+        .virtual_resource_provisioning_get(&opctx, project_id1)
+        .await
+        .unwrap();
     assert_eq!(
-        resource_usage.virtual_disk_bytes_provisioned,
+        virtual_resource_provisioning.virtual_disk_bytes_provisioned,
         disk_size.to_bytes() as i64
     );
-    let resource_usage =
-        datastore.resource_usage_get(&opctx, project_id2).await.unwrap();
-    assert_eq!(resource_usage.virtual_disk_bytes_provisioned, 0);
-    let resource_usage =
-        datastore.resource_usage_get(&opctx, org_id).await.unwrap();
+    let virtual_resource_provisioning = datastore
+        .virtual_resource_provisioning_get(&opctx, project_id2)
+        .await
+        .unwrap();
+    assert_eq!(virtual_resource_provisioning.virtual_disk_bytes_provisioned, 0);
+    let virtual_resource_provisioning = datastore
+        .virtual_resource_provisioning_get(&opctx, org_id)
+        .await
+        .unwrap();
     assert_eq!(
-        resource_usage.virtual_disk_bytes_provisioned,
+        virtual_resource_provisioning.virtual_disk_bytes_provisioned,
         disk_size.to_bytes() as i64
     );
 }

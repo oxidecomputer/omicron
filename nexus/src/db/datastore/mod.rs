@@ -58,7 +58,6 @@ mod project;
 mod rack;
 mod region;
 mod region_snapshot;
-mod resource_usage;
 mod role;
 mod saga;
 mod service;
@@ -69,6 +68,7 @@ mod sled;
 mod snapshot;
 mod ssh_key;
 mod update;
+mod virtual_resource_provisioning;
 mod volume;
 mod vpc;
 mod zpool;
@@ -106,7 +106,8 @@ impl<U, T> RunnableQuery<U> for T where
 
 pub struct DataStore {
     pool: Arc<Pool>,
-    resource_usage_producer: resource_usage::Producer,
+    virtual_resource_provisioning_producer:
+        virtual_resource_provisioning::Producer,
 }
 
 // The majority of `DataStore`'s methods live in our submodules as a concession
@@ -116,13 +117,16 @@ impl DataStore {
     pub fn new(pool: Arc<Pool>) -> Self {
         DataStore {
             pool,
-            resource_usage_producer: resource_usage::Producer::new(),
+            virtual_resource_provisioning_producer:
+                virtual_resource_provisioning::Producer::new(),
         }
     }
 
     pub fn register_producers(&self, registry: &ProducerRegistry) {
         registry
-            .register_producer(self.resource_usage_producer.clone())
+            .register_producer(
+                self.virtual_resource_provisioning_producer.clone(),
+            )
             .unwrap();
     }
 

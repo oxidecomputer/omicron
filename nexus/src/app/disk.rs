@@ -513,7 +513,7 @@ impl super::Nexus {
 
         // TODO: This should exist within a saga
         self.db_datastore
-            .resource_usage_update_disk(
+            .virtual_resource_provisioning_update_disk(
                 &opctx,
                 project.id(),
                 -i64::try_from(db_snapshot.size.to_bytes()).map_err(|e| {

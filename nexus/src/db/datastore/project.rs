@@ -19,7 +19,7 @@ use crate::db::model::Name;
 use crate::db::model::Organization;
 use crate::db::model::Project;
 use crate::db::model::ProjectUpdate;
-use crate::db::model::ResourceUsage;
+use crate::db::model::VirtualResourceProvisioning;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl};
 use chrono::Utc;
@@ -77,9 +77,12 @@ impl DataStore {
                 })?;
 
                 // Create resource usage for the project.
-                self.resource_usage_create_on_connection(
+                self.virtual_resource_provisioning_create_on_connection(
                     &conn,
-                    ResourceUsage::new(project.id(), CollectionType::Project),
+                    VirtualResourceProvisioning::new(
+                        project.id(),
+                        CollectionType::Project,
+                    ),
                 )
                 .await?;
                 Ok(project)

@@ -5,9 +5,9 @@
 //! Implementation of queries for updating resource usage info.
 
 use crate::db::alias::ExpressionAlias;
-use crate::db::model::ResourceUsage;
+use crate::db::model::VirtualResourceProvisioning;
 use crate::db::pool::DbConnection;
-use crate::db::schema::resource_usage;
+use crate::db::schema::virtual_resource_provisioning;
 use crate::db::subquery::{AsQuerySource, Cte, CteBuilder, CteQuery};
 use db_macros::Subquery;
 use diesel::pg::Pg;
@@ -16,7 +16,7 @@ use diesel::{
     sql_types, CombineDsl, ExpressionMethods, IntoSql, QueryDsl, RunQueryDsl,
     SelectableHelper,
 };
-use nexus_db_model::queries::resource_usage_update::{
+use nexus_db_model::queries::virtual_resource_provisioning_update::{
     all_collections, parent_fleet, parent_org, parent_silo,
 };
 
@@ -130,11 +130,11 @@ impl AllCollections {
 /// Constructs a CTE for updating resource usage information in all
 /// collections for a particular object.
 #[derive(QueryId)]
-pub struct ResourceUsageUpdate {
+pub struct VirtualResourceProvisioningUpdate {
     cte: Cte,
 }
 
-impl ResourceUsageUpdate {
+impl VirtualResourceProvisioningUpdate {
     // Generic utility for updating all collections including this resource,
     // even transitively.
     //
@@ -145,7 +145,7 @@ impl ResourceUsageUpdate {
     // - Fleet
     fn apply_update<V>(project_id: uuid::Uuid, values: V) -> Self
     where
-        V: diesel::AsChangeset<Target = resource_usage::table>,
+        V: diesel::AsChangeset<Target = virtual_resource_provisioning::table>,
         <V as diesel::AsChangeset>::Changeset:
             QueryFragment<Pg> + Send + 'static,
     {
@@ -159,15 +159,15 @@ impl ResourceUsageUpdate {
             &parent_fleet,
         );
 
-        use resource_usage::dsl;
+        use virtual_resource_provisioning::dsl;
 
         let final_update = Box::new(
-            diesel::update(dsl::resource_usage)
+            diesel::update(dsl::virtual_resource_provisioning)
                 .set(values)
                 .filter(dsl::id.eq_any(
                     all_collections.query_source().select(all_collections::id),
                 ))
-                .returning(ResourceUsage::as_returning()),
+                .returning(VirtualResourceProvisioning::as_returning()),
         );
 
         let cte = CteBuilder::new()
@@ -184,7 +184,7 @@ impl ResourceUsageUpdate {
         project_id: uuid::Uuid,
         disk_bytes_diff: i64,
     ) -> Self {
-        use resource_usage::dsl;
+        use virtual_resource_provisioning::dsl;
         Self::apply_update(
             project_id,
             dsl::virtual_disk_bytes_provisioned
@@ -197,7 +197,7 @@ impl ResourceUsageUpdate {
         cpus_diff: i64,
         ram_diff: i64,
     ) -> Self {
-        use resource_usage::dsl;
+        use virtual_resource_provisioning::dsl;
         Self::apply_update(
             project_id,
             (
@@ -208,7 +208,7 @@ impl ResourceUsageUpdate {
     }
 }
 
-impl QueryFragment<Pg> for ResourceUsageUpdate {
+impl QueryFragment<Pg> for VirtualResourceProvisioningUpdate {
     fn walk_ast<'a>(
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
@@ -224,8 +224,8 @@ type SelectableSql<T> = <
     <T as diesel::Selectable<Pg>>::SelectExpression as diesel::Expression
 >::SqlType;
 
-impl Query for ResourceUsageUpdate {
-    type SqlType = SelectableSql<ResourceUsage>;
+impl Query for VirtualResourceProvisioningUpdate {
+    type SqlType = SelectableSql<VirtualResourceProvisioning>;
 }
 
-impl RunQueryDsl<DbConnection> for ResourceUsageUpdate {}
+impl RunQueryDsl<DbConnection> for VirtualResourceProvisioningUpdate {}

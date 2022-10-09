@@ -862,7 +862,7 @@ async fn sic_account_resources(
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
     osagactx
         .datastore()
-        .resource_usage_update_cpus_and_ram(
+        .virtual_resource_provisioning_update_cpus_and_ram(
             &opctx,
             params.project_id,
             i64::from(params.create_params.ncpus.0),
@@ -889,7 +889,7 @@ async fn sic_account_resources_undo(
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
     osagactx
         .datastore()
-        .resource_usage_update_cpus_and_ram(
+        .virtual_resource_provisioning_update_cpus_and_ram(
             &opctx,
             params.project_id,
             -i64::from(params.create_params.ncpus.0),

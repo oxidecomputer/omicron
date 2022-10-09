@@ -469,20 +469,24 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
 
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
-    let resource_usage =
-        datastore.resource_usage_get(&opctx, project_id).await.unwrap();
-    assert_eq!(resource_usage.cpus_provisioned, 0);
-    assert_eq!(resource_usage.ram_provisioned, 0);
+    let virtual_resource_provisioning = datastore
+        .virtual_resource_provisioning_get(&opctx, project_id)
+        .await
+        .unwrap();
+    assert_eq!(virtual_resource_provisioning.cpus_provisioned, 0);
+    assert_eq!(virtual_resource_provisioning.ram_provisioned, 0);
 
     // Create an instance.
     let instance_url = format!("{}/just-rainsticks", url_instances);
     create_instance(client, ORGANIZATION_NAME, PROJECT_NAME, "just-rainsticks")
         .await;
-    let resource_usage =
-        datastore.resource_usage_get(&opctx, project_id).await.unwrap();
-    assert_eq!(resource_usage.cpus_provisioned, 4);
+    let virtual_resource_provisioning = datastore
+        .virtual_resource_provisioning_get(&opctx, project_id)
+        .await
+        .unwrap();
+    assert_eq!(virtual_resource_provisioning.cpus_provisioned, 4);
     assert_eq!(
-        resource_usage.ram_provisioned,
+        virtual_resource_provisioning.ram_provisioned,
         i64::try_from(ByteCount::from_gibibytes_u32(1).to_bytes()).unwrap(),
     );
 
@@ -499,11 +503,13 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     // However, for implementation reasons, this is complicated (we have a
     // tendency to update the runtime without checking the prior state, which
     // makes edge-triggered behavior trickier to notice).
-    let resource_usage =
-        datastore.resource_usage_get(&opctx, project_id).await.unwrap();
-    assert_eq!(resource_usage.cpus_provisioned, 4);
+    let virtual_resource_provisioning = datastore
+        .virtual_resource_provisioning_get(&opctx, project_id)
+        .await
+        .unwrap();
+    assert_eq!(virtual_resource_provisioning.cpus_provisioned, 4);
     assert_eq!(
-        resource_usage.ram_provisioned,
+        virtual_resource_provisioning.ram_provisioned,
         i64::try_from(ByteCount::from_gibibytes_u32(1).to_bytes()).unwrap(),
     );
 
@@ -514,10 +520,12 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
         .await
         .unwrap();
 
-    let resource_usage =
-        datastore.resource_usage_get(&opctx, project_id).await.unwrap();
-    assert_eq!(resource_usage.cpus_provisioned, 0);
-    assert_eq!(resource_usage.ram_provisioned, 0);
+    let virtual_resource_provisioning = datastore
+        .virtual_resource_provisioning_get(&opctx, project_id)
+        .await
+        .unwrap();
+    assert_eq!(virtual_resource_provisioning.cpus_provisioned, 0);
+    assert_eq!(virtual_resource_provisioning.ram_provisioned, 0);
 }
 
 #[nexus_test]
