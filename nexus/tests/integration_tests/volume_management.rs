@@ -22,7 +22,6 @@ use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Name;
-use omicron_nexus::context::OpContext;
 use omicron_nexus::db::DataStore;
 use omicron_nexus::external_api::params;
 use omicron_nexus::external_api::views;
