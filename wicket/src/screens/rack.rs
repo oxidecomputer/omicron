@@ -43,7 +43,8 @@ impl RackScreen {
             ("<TAB>", "Cycle forward through components"),
             ("<SHIFT>-<TAB>", "Cycle backwards through components"),
             ("<Enter> | left mouse click", "Select hovered object"),
-            ("<ESC>", "Exit the current context"),
+            ("<ESC>", "Reset the TabIndex of the Rack"),
+            ("<CTRL-H", "Toggle this help menu"),
             ("<CTRL-C>", "Exit the program"),
         ];
 
@@ -171,11 +172,7 @@ impl RackScreen {
                 state.rack_state.dec_tab_index();
             }
             KeyCode::Esc => {
-                if self.help_button_state.selected {
-                    self.close_help_menu();
-                } else {
-                    state.rack_state.clear_tab_index();
-                }
+                state.rack_state.clear_tab_index();
             }
             KeyCode::Enter => {
                 if state.rack_state.tab_index.is_set() {
@@ -184,7 +181,7 @@ impl RackScreen {
             }
             KeyCode::Char('h') => {
                 if event.modifiers.contains(KeyModifiers::CONTROL) {
-                    self.open_help_menu();
+                    self.toggle_help_menu()
                 }
             }
             KeyCode::Char('k') => {
@@ -203,6 +200,14 @@ impl RackScreen {
         } else {
             state.rack_state.knight_rider_mode =
                 Some(KnightRiderMode::default());
+        }
+    }
+
+    fn toggle_help_menu(&mut self) {
+        if self.help_button_state.selected {
+            self.close_help_menu();
+        } else {
+            self.open_help_menu();
         }
     }
 

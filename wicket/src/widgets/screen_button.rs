@@ -71,13 +71,13 @@ impl<'a> ScreenButton<'a> {
 impl<'a> Widget for ScreenButton<'a> {
     fn render(self, _: Rect, buf: &mut Buffer) {
         let name = self.state.screen_id.name();
-        //        let margin = (ScreenButtonState::width() - 2 - name.len()) / 2;
         // Subtract borders
         let width = ScreenButtonState::width() as usize - 2;
         let text = Text::from(format!(
-            "   Screen  \n ━━━━━━━━━━\n{:^width$}",
+            "{:^width$}\n ━━━━━━━━━━\n{:^width$}",
             name,
-            width = width
+            "ctrl-r",
+            width = width,
         ));
         let button = Paragraph::new(text).style(self.style).block(
             Block::default()

@@ -40,8 +40,10 @@ impl ComponentScreen {
         let help_data = vec![
             ("<TAB>", "Cycle forward through components"),
             ("<SHIFT>-<TAB>", "Cycle backwards through components"),
-            ("<ESC>", "Exit the current context"),
-            ("<CTRL-C>", "Exit the program"),
+            ("<ESC>", "Go back to the rack screen"),
+            ("<CTRL-r", "Bo back to the rack screen"),
+            ("<CTRL-h", "Toggle this help menu"),
+            ("<CTRL-c>", "Exit the program"),
         ];
         ComponentScreen {
             hovered: None,
@@ -220,14 +222,14 @@ impl ComponentScreen {
             KeyCode::BackTab => {
                 state.rack_state.dec_tab_index();
             }
-            KeyCode::Esc => {
-                if self.help_button_state.selected {
-                    self.close_help_menu();
+            KeyCode::Char('r') => {
+                if event.modifiers.contains(KeyModifiers::CONTROL) {
+                    return vec![Action::SwitchScreen(ScreenId::Rack)];
                 }
             }
             KeyCode::Char('h') => {
                 if event.modifiers.contains(KeyModifiers::CONTROL) {
-                    self.open_help_menu();
+                    self.toggle_help_menu()
                 }
             }
             _ => (),
@@ -291,6 +293,15 @@ impl ComponentScreen {
             Some(self.rack_screen_button_state.id())
         } else {
             None
+        }
+    }
+
+    // TODO: DEDUPE
+    fn toggle_help_menu(&mut self) {
+        if self.help_button_state.selected {
+            self.close_help_menu();
+        } else {
+            self.open_help_menu();
         }
     }
 
