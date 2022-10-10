@@ -425,7 +425,7 @@ impl ServiceManager {
                 )
                 .map_err(|err| Error::GzAddress {
                     message: format!(
-                        "adding address on behalf of service '{}'",
+                        "adding address on behalf of service zone '{}'",
                         req.zone_name
                     ),
                     err,
