@@ -86,7 +86,7 @@ impl super::Nexus {
             "saga_id" => saga_id.to_string()
         ));
         let saga_context = Arc::new(Arc::new(SagaContext::new(
-            Arc::clone(self),
+            self.clone(),
             saga_logger,
             Arc::clone(&self.authz),
         )));

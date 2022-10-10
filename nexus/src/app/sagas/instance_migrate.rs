@@ -247,28 +247,20 @@ async fn sim_instance_migrate(
         ))
     })?;
 
-    let dst_sa = osagactx
-        .sled_client(&dst_sled_id)
+    let body = InstanceEnsureBody {
+        initial: instance_hardware,
+        target,
+        migrate: Some(InstanceMigrateParams {
+            src_propolis_addr: src_propolis_addr.to_string(),
+            src_propolis_id,
+        }),
+    };
+
+    let new_runtime_state = osagactx
+        .nexus()
+        .instance_sled_agent_set_runtime(dst_sled_id, &body, instance_id)
         .await
         .map_err(ActionError::action_failed)?;
-
-    let new_runtime_state: InstanceRuntimeState = dst_sa
-        .instance_put(
-            &instance_id,
-            &InstanceEnsureBody {
-                initial: instance_hardware,
-                target,
-                migrate: Some(InstanceMigrateParams {
-                    src_propolis_addr: src_propolis_addr.to_string(),
-                    src_propolis_id,
-                }),
-            },
-        )
-        .await
-        .map_err(omicron_common::api::external::Error::from)
-        .map_err(ActionError::action_failed)?
-        .into_inner()
-        .into();
 
     osagactx
         .datastore()

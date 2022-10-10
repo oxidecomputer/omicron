@@ -31,6 +31,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::internal::nexus;
+use sled_agent_client::types::InstanceEnsureBody;
 use sled_agent_client::types::InstanceRuntimeStateMigrateParams;
 use sled_agent_client::types::InstanceRuntimeStateRequested;
 use sled_agent_client::types::InstanceStateRequested;
@@ -682,6 +683,26 @@ impl super::Nexus {
                 }
             }
         }
+    }
+
+    /// Instructs a single sled to update its runtime.
+    ///
+    /// Does not modify the database.
+    pub(crate) async fn instance_sled_agent_set_runtime(
+        &self,
+        sled_id: Uuid,
+        body: &InstanceEnsureBody,
+        instance_id: Uuid,
+    ) -> Result<nexus::InstanceRuntimeState, Error> {
+        let dst_sa = self.sled_client(&sled_id).await?;
+
+        let new_runtime_state: nexus::InstanceRuntimeState = dst_sa
+            .instance_put(&instance_id, &body)
+            .await
+            .map_err(omicron_common::api::external::Error::from)?
+            .into_inner()
+            .into();
+        Ok(new_runtime_state)
     }
 
     /// Lists disks attached to the instance.

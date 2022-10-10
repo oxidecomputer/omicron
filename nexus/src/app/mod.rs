@@ -210,7 +210,7 @@ impl Nexus {
             opctx,
             my_sec_id,
             Arc::new(Arc::new(SagaContext::new(
-                Arc::clone(&nexus),
+                nexus.clone(),
                 saga_logger,
                 Arc::clone(&authz),
             ))),

@@ -457,7 +457,7 @@ async fn sdc_create_volume_record_undo(
     let osagactx = sagactx.user_data();
 
     let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
-    osagactx.nexus().volume_delete(volume_id).await?;
+    osagactx.nexus().clone().volume_delete(volume_id).await?;
     Ok(())
 }
 
@@ -555,5 +555,230 @@ fn randomize_volume_construction_request_ids(
                 path: path.clone(),
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::db::datastore::datastore_test;
+    use crate::saga_interface::SagaContext;
+    use nexus_test_utils::db::test_setup_database;
+    use omicron_common::api::external::ByteCount;
+    use omicron_common::api::external::DeleteResult;
+    use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_common::api::external::UpdateResult;
+    use omicron_common::api::internal::nexus;
+    use omicron_test_utils::dev;
+    use steno::DagBuilder;
+    use steno::InMemorySecStore;
+    use steno::SagaDag;
+    use steno::SagaName;
+    use steno::SecClient;
+
+    fn new_sec(log: &slog::Logger) -> SecClient {
+        steno::sec(log.new(slog::o!()), Arc::new(InMemorySecStore::new()))
+    }
+
+    fn create_saga_dag<N: NexusSaga>(params: N::Params) -> SagaDag {
+        let builder = DagBuilder::new(SagaName::new(N::NAME));
+        let dag = N::make_saga_dag(&params, builder)
+            .expect("Failed to build saga DAG");
+        let params = serde_json::to_value(&params)
+            .expect("Failed to serialize parameters");
+        SagaDag::new(dag, params)
+    }
+
+    async fn create_org_and_project(
+        opctx: &OpContext,
+        datastore: &db::DataStore,
+    ) -> crate::authz::Project {
+        let organization = params::OrganizationCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "org".parse().unwrap(),
+                description: "desc".to_string(),
+            },
+        };
+
+        let organization = datastore
+            .organization_create(&opctx, &organization)
+            .await
+            .expect("Failed to create org");
+
+        let project = db::model::Project::new(
+            organization.id(),
+            params::ProjectCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "project"
+                        .parse()
+                        .expect("Failed to parse project name"),
+                    description: "desc".to_string(),
+                },
+            },
+        );
+        let project_id = project.id();
+        let (.., authz_org) = LookupPath::new(&opctx, &datastore)
+            .organization_id(organization.id())
+            .lookup_for(authz::Action::CreateChild)
+            .await
+            .expect("Cannot lookup org to create a child project");
+        datastore
+            .project_create(&opctx, &authz_org, project)
+            .await
+            .expect("Failed to create project");
+        let (.., authz_project, _project) = LookupPath::new(&opctx, &datastore)
+            .project_id(project_id)
+            .fetch()
+            .await
+            .expect("Cannot lookup project we just created");
+        authz_project
+    }
+
+    // TODO: This - and frankly a lot of this test - could probably be shared
+    // between sagas.
+    struct StubNexus {
+        datastore: Arc<db::DataStore>,
+    }
+    #[async_trait::async_trait]
+    impl crate::saga_interface::NexusForSagas for StubNexus {
+        fn datastore(&self) -> &Arc<db::DataStore> {
+            &self.datastore
+        }
+
+        async fn random_sled_id(&self) -> Result<Option<Uuid>, Error> {
+            todo!();
+        }
+
+        async fn volume_delete(
+            self: Arc<Self>,
+            volume_id: Uuid,
+        ) -> DeleteResult {
+            // TODO!
+            todo!();
+        }
+
+        async fn instance_sled_agent_set_runtime(
+            &self,
+            sled_id: Uuid,
+            body: &sled_agent_client::types::InstanceEnsureBody,
+            instance_id: Uuid,
+        ) -> Result<nexus::InstanceRuntimeState, Error> {
+            todo!();
+        }
+
+        async fn disk_snapshot_sled_agent(
+            &self,
+            instance: &db::model::Instance,
+            disk_id: Uuid,
+            body: &sled_agent_client::types::InstanceIssueDiskSnapshotRequestBody,
+        ) -> Result<(), Error> {
+            todo!();
+        }
+
+        async fn disk_snapshot_random_sled_agent(
+            &self,
+            disk_id: Uuid,
+            body: &sled_agent_client::types::DiskSnapshotRequestBody,
+        ) -> Result<(), Error> {
+            todo!();
+        }
+
+        // TODO: This one could be implemented purely in the DB?
+        async fn instance_attach_disk(
+            &self,
+            opctx: &OpContext,
+            organization_name: &db::model::Name,
+            project_name: &db::model::Name,
+            instance_name: &db::model::Name,
+            disk_name: &db::model::Name,
+        ) -> UpdateResult<db::model::Disk> {
+            todo!();
+        }
+
+        // TODO: This one could be implemented purely in the DB?
+        async fn instance_detach_disk(
+            &self,
+            opctx: &OpContext,
+            organization_name: &db::model::Name,
+            project_name: &db::model::Name,
+            instance_name: &db::model::Name,
+            disk_name: &db::model::Name,
+        ) -> UpdateResult<db::model::Disk> {
+            todo!();
+        }
+
+        // TODO: This is half in the DB, half to the sled agent.
+        async fn instance_set_runtime(
+            &self,
+            opctx: &OpContext,
+            authz_instance: &authz::Instance,
+            db_instance: &db::model::Instance,
+            requested: sled_agent_client::types::InstanceRuntimeStateRequested,
+        ) -> Result<(), Error> {
+            todo!();
+        }
+
+        // TODO: This calls instance_set_runtime, so, all the problems
+        // that one has too
+        async fn instance_start_migrate(
+            &self,
+            opctx: &OpContext,
+            instance_id: Uuid,
+            migration_id: Uuid,
+            dst_propolis_id: Uuid,
+        ) -> UpdateResult<db::model::Instance> {
+            todo!();
+        }
+    }
+
+    #[tokio::test]
+    async fn test_todotodotodo() {
+        let logctx = dev::test_setup_log("test_TODOTODTODO");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        let authz_project = create_org_and_project(&opctx, &datastore).await;
+
+        // Build the saga DAG with the provided test parameters
+        let params = Params {
+            serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
+            project_id: authz_project.id(),
+            create_params: params::DiskCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "my-disk".parse().expect("Invalid disk name"),
+                    description: "My disk".to_string(),
+                },
+                disk_source: params::DiskSource::Blank {
+                    block_size: params::BlockSize(512),
+                },
+                size: ByteCount::from_gibibytes_u32(1),
+            },
+        };
+        let dag = create_saga_dag::<SagaDiskCreate>(params);
+
+        // Create a Saga Executor which can run the saga
+        let sec = new_sec(&logctx.log);
+        let saga_id = steno::SagaId(Uuid::new_v4());
+
+        let nexus = StubNexus { datastore: datastore.clone() };
+        let saga_context = Arc::new(Arc::new(SagaContext::new(
+            Arc::new(nexus),
+            logctx.log.clone(),
+            Arc::new(authz::Authz::new(&logctx.log)),
+        )));
+        let fut = sec
+            .saga_create(
+                saga_id,
+                Arc::clone(&saga_context),
+                Arc::new(dag),
+                crate::app::sagas::ACTION_REGISTRY.clone(),
+            )
+            .await
+            .expect("failed to create saga");
+        sec.saga_start(saga_id).await.expect("failed to start saga");
+        fut.await;
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
     }
 }
