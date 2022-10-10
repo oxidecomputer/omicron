@@ -8,12 +8,6 @@ use tui::layout::Rect;
 use tui::style::Style;
 use tui::widgets::Widget;
 
-/// The area in characters
-pub struct Area {
-    width: u16,
-    height: u16,
-}
-
 /// A banner draws the text output from `banner` as stored in string.
 ///
 /// This assumes the source string is ASCII and not Unicode. This should be

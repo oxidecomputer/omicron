@@ -28,6 +28,7 @@ use tui::widgets::{Block, Borders};
 
 /// Show the rack view
 pub struct RackScreen {
+    #[allow(unused)]
     log: Logger,
     watermark: &'static str,
     hovered: Option<ControlId>,

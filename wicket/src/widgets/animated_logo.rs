@@ -4,7 +4,6 @@
 
 //! Animated Oxide logo used for the splash screen
 
-use std::str::Lines;
 use tui::buffer::Buffer;
 use tui::layout::Rect;
 use tui::style::Style;

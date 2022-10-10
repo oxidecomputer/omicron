@@ -85,14 +85,6 @@ impl Screens {
         }
     }
 
-    pub fn get(&self, id: ScreenId) -> &dyn Screen {
-        match id {
-            ScreenId::Rack => &self.rack,
-            ScreenId::Component => &self.component,
-            _ => unimplemented!(),
-        }
-    }
-
     pub fn get_mut(&mut self, id: ScreenId) -> &mut dyn Screen {
         match id {
             ScreenId::Splash => &mut self.splash,
@@ -189,6 +181,7 @@ impl TabIndex {
 
 /// Oxide specific colors from the website
 /// Thanks for the idea JMC!
+#[allow(unused)]
 pub mod colors {
     use tui::style::Color;
     pub const OX_YELLOW: Color = Color::Rgb(0xF5, 0xCF, 0x65);

@@ -19,6 +19,7 @@ const CHANNEL_CAPACITY: usize = 1000;
 
 pub enum MgsRequest {}
 
+#[allow(unused)]
 pub struct MgsHandle {
     tx: tokio::sync::mpsc::Sender<MgsRequest>,
 }
@@ -26,6 +27,7 @@ pub struct MgsHandle {
 /// Send requests to MGS
 ///
 /// Forward replies to the [`Wizard`] as [`Event`]s
+#[allow(unused)]
 pub struct MgsManager {
     log: Logger,
     rx: tokio::sync::mpsc::Receiver<MgsRequest>,
@@ -54,7 +56,7 @@ impl MgsManager {
     /// * that can be utilized by the UI.
     ///
     /// TODO: Uh, um, make this not completely fake
-    pub async fn run(mut self) {
+    pub async fn run(self) {
         self.announce_fake_power_states();
         self.announce_fake_inventory();
     }

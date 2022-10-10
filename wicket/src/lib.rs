@@ -83,6 +83,7 @@ pub struct Wizard {
     state: State,
 
     // A mechanism for interacting with MGS
+    #[allow(unused)]
     mgs: MgsHandle,
 
     // When the Wizard is run, this will be extracted and moved
