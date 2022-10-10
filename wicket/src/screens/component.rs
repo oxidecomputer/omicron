@@ -6,13 +6,10 @@
 
 use super::colors::*;
 use super::Screen;
-use super::TabIndex;
-use super::{Height, Width};
-use crate::inventory::ComponentId;
-use crate::widgets::clear_buf;
 use crate::widgets::AnimationState;
 use crate::widgets::Control;
-use crate::widgets::{Banner, HelpButton, HelpButtonState, HelpMenu, Rack};
+use crate::widgets::ControlId;
+use crate::widgets::{HelpButton, HelpButtonState, HelpMenu};
 use crate::widgets::{ScreenButton, ScreenButtonState};
 use crate::Action;
 use crate::Frame;
@@ -23,24 +20,15 @@ use crossterm::event::Event as TermEvent;
 use crossterm::event::{
     KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
-use tui::buffer::Buffer;
 use tui::layout::Alignment;
-use tui::layout::Rect;
 use tui::style::Modifier;
 use tui::style::{Color, Style};
 use tui::text::{Span, Spans, Text};
+use tui::widgets::Block;
 use tui::widgets::Paragraph;
-use tui::widgets::Widget;
-use tui::widgets::{Block, Borders};
-
-#[derive(Debug, Clone, Copy)]
-pub enum HoverState {
-    HelpButton,
-    RackScreenButton,
-}
 
 pub struct ComponentScreen {
-    hovered: Option<HoverState>,
+    hovered: Option<ControlId>,
     help_data: Vec<(&'static str, &'static str)>,
     help_button_state: HelpButtonState,
     help_menu_state: Option<AnimationState>,
@@ -148,20 +136,32 @@ impl ComponentScreen {
             };
             f.render_widget(menu, f.size());
         } else {
+            let border_style =
+                if self.hovered == Some(self.help_button_state.id()) {
+                    hovered_style
+                } else {
+                    button_style
+                };
             let button = HelpButton::new(
                 &self.help_button_state,
                 button_style,
-                hovered_style,
+                border_style,
             );
 
             f.render_widget(button, f.size());
         }
 
         // Draw the RackSreenButton
+        let border_style =
+            if self.hovered == Some(self.rack_screen_button_state.id()) {
+                hovered_style
+            } else {
+                button_style
+            };
         let button = ScreenButton::new(
             &self.rack_screen_button_state,
             button_style,
-            hovered_style,
+            border_style,
         );
         f.render_widget(button, f.size());
     }
@@ -215,14 +215,10 @@ impl ComponentScreen {
     ) -> Vec<Action> {
         match event.code {
             KeyCode::Tab => {
-                self.clear_tabbed(state);
-                state.rack_state.tab_index.inc();
-                self.set_tabbed(state);
+                state.rack_state.inc_tab_index();
             }
             KeyCode::BackTab => {
-                self.clear_tabbed(state);
-                state.rack_state.tab_index.dec();
-                self.set_tabbed(state);
+                state.rack_state.dec_tab_index();
             }
             KeyCode::Esc => {
                 if self.help_button_state.selected {
@@ -255,21 +251,18 @@ impl ComponentScreen {
         }
     }
 
-    fn handle_mouse_click(&mut self, state: &mut State) -> Vec<Action> {
-        // Set the tab index to the hovered component Id if there is one.
-        // Remove the old tab_index, and make it match the clicked one
-        if let Some(hover_state) = self.hovered {
-            match hover_state {
-                HoverState::HelpButton => {
-                    self.open_help_menu();
-                    vec![]
-                }
-                HoverState::RackScreenButton => {
-                    vec![Action::SwitchScreen(ScreenId::Rack)]
-                }
+    fn handle_mouse_click(&mut self, _: &mut State) -> Vec<Action> {
+        match self.hovered {
+            Some(control_id) if control_id == self.help_button_state.id() => {
+                self.open_help_menu();
+                vec![]
             }
-        } else {
-            vec![]
+            Some(control_id)
+                if control_id == self.rack_screen_button_state.id() =>
+            {
+                vec![Action::SwitchScreen(ScreenId::Rack)]
+            }
+            _ => vec![],
         }
     }
 
@@ -279,41 +272,25 @@ impl ComponentScreen {
         x: u16,
         y: u16,
     ) -> Vec<Action> {
-        // Are we currently hovering over the Help Button?
-        if self.help_button_state.intersects_point(x, y) {
-            let actions = match self.hovered {
-                Some(HoverState::HelpButton) => {
-                    // No change
-                    vec![]
-                }
-                _ => vec![Action::Redraw],
-            };
-
-            self.help_button_state.hovered = true;
-            self.rack_screen_button_state.hovered = false;
-            self.hovered = Some(HoverState::HelpButton);
-            actions
-        } else if self.rack_screen_button_state.intersects_point(x, y) {
-            let actions = match self.hovered {
-                Some(HoverState::RackScreenButton) => {
-                    // No change
-                    vec![]
-                }
-                _ => vec![Action::Redraw],
-            };
-            self.rack_screen_button_state.hovered = true;
-            self.help_button_state.hovered = false;
-            self.hovered = Some(HoverState::RackScreenButton);
-            actions
+        let current_id = self.find_intersection(x, y);
+        if current_id == self.hovered {
+            // No change
+            vec![]
         } else {
-            if self.hovered.is_none() {
-                vec![]
-            } else {
-                self.hovered = None;
-                self.help_button_state.hovered = false;
-                self.rack_screen_button_state.hovered = false;
-                vec![Action::Redraw]
-            }
+            self.hovered = current_id;
+            vec![Action::Redraw]
+        }
+    }
+
+    // Return if the coordinates interesct a given control.
+    // This assumes disjoint control rectangles.
+    fn find_intersection(&self, x: u16, y: u16) -> Option<ControlId> {
+        if self.help_button_state.intersects_point(x, y) {
+            Some(self.help_button_state.id())
+        } else if self.rack_screen_button_state.intersects_point(x, y) {
+            Some(self.rack_screen_button_state.id())
+        } else {
+            None
         }
     }
 
@@ -342,18 +319,6 @@ impl ComponentScreen {
                 self.help_menu_state = Some(s);
             }
         }
-    }
-
-    // Set the tabbed boolean to `true` for the current tab indexed rect
-    // TODO: DEDUPE
-    fn set_tabbed(&mut self, state: &mut State) {
-        state.rack_state.update_tabbed(true);
-    }
-
-    // Set the tabbed boolean to `false` for the current tab indexed rect
-    // TODO: DEDUPE
-    fn clear_tabbed(&mut self, state: &mut State) {
-        state.rack_state.update_tabbed(false);
     }
 }
 

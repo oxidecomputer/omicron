@@ -11,7 +11,6 @@ use crate::ScreenEvent;
 use crate::State;
 use crate::Term;
 use slog::Logger;
-use tui::layout::Rect;
 
 use component::ComponentScreen;
 use rack::RackScreen;
@@ -186,25 +185,6 @@ impl TabIndex {
             *cur -= 1;
         }
     }
-}
-
-/// How a specific Rect should be displayed.
-#[derive(Debug, Default, Clone)]
-pub struct RectState {
-    pub rect: Rect,
-
-    // Whether the user has tabbed to the given Rect
-    pub tabbed: bool,
-
-    // Whether the mouse is hovering over the Rect
-    pub hovered: bool,
-
-    // Whether the user has clicked or hit enter on a tabbed Rect
-    pub selected: bool,
-
-    // If the Rect is currently accessible. It can become inactive if, for
-    // example, a sled has not reported inventory yet.
-    pub active: bool,
 }
 
 /// Oxide specific colors from the website

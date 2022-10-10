@@ -4,7 +4,9 @@
 
 //! A help button that brings up a help menu when selected
 
+use super::get_control_id;
 use super::Control;
+use super::ControlId;
 use crate::ScreenId;
 use tui::buffer::Buffer;
 use tui::layout::Rect;
@@ -18,6 +20,7 @@ use tui::widgets::Widget;
 
 #[derive(Debug)]
 pub struct ScreenButtonState {
+    control_id: ControlId,
     pub rect: Rect,
     pub hovered: bool,
     pub screen_id: ScreenId,
@@ -26,6 +29,7 @@ pub struct ScreenButtonState {
 impl ScreenButtonState {
     pub fn new(screen_id: ScreenId, x: u16, y: u16) -> ScreenButtonState {
         ScreenButtonState {
+            control_id: get_control_id(),
             rect: Rect { height: 5, width: Self::width(), x, y },
             hovered: false,
             screen_id,
@@ -38,6 +42,10 @@ impl ScreenButtonState {
 }
 
 impl Control for ScreenButtonState {
+    fn id(&self) -> ControlId {
+        self.control_id
+    }
+
     fn rect(&self) -> Rect {
         self.rect
     }
@@ -47,16 +55,16 @@ impl Control for ScreenButtonState {
 pub struct ScreenButton<'a> {
     pub state: &'a ScreenButtonState,
     pub style: Style,
-    pub hovered_style: Style,
+    pub border_style: Style,
 }
 
 impl<'a> ScreenButton<'a> {
     pub fn new(
         state: &'a ScreenButtonState,
         style: Style,
-        hovered_style: Style,
+        border_style: Style,
     ) -> ScreenButton<'a> {
-        ScreenButton { state, style, hovered_style }
+        ScreenButton { state, style, border_style }
     }
 }
 
@@ -71,11 +79,9 @@ impl<'a> Widget for ScreenButton<'a> {
             name,
             width = width
         ));
-        let block_style =
-            if self.state.hovered { self.hovered_style } else { self.style };
         let button = Paragraph::new(text).style(self.style).block(
             Block::default()
-                .style(block_style)
+                .style(self.border_style)
                 .borders(Borders::ALL)
                 .border_type(BorderType::Double),
         );

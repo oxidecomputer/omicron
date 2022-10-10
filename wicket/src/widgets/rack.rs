@@ -4,11 +4,12 @@
 
 //! A rendering of the Oxide rack
 
+use super::get_control_id;
+use super::Control;
+use super::ControlId;
 use crate::inventory::ComponentId;
-use crate::screens::colors::*;
 use crate::screens::make_even;
 use crate::screens::Height;
-use crate::screens::RectState;
 use crate::screens::TabIndex;
 use slog::Logger;
 use std::collections::BTreeMap;
@@ -35,11 +36,12 @@ pub struct Rack<'a> {
 }
 
 impl<'a> Rack<'a> {
-    fn draw_sled(&self, buf: &mut Buffer, sled: &RectState, i: u8) {
+    fn draw_sled(&self, buf: &mut Buffer, sled: &Rect, i: u8) {
+        let component_id = Some(ComponentId::Sled(i));
         let mut block = Block::default()
             .title(format!("sled {}", i))
-            .borders(borders(sled.rect.height));
-        if sled.tabbed {
+            .borders(borders(sled.height));
+        if self.state.tabbed == component_id {
             block = block
                 .style(self.sled_selected_style)
                 .border_style(self.border_selected_style);
@@ -47,13 +49,13 @@ impl<'a> Rack<'a> {
             block =
                 block.style(self.sled_style).border_style(self.border_style);
 
-            if sled.hovered {
+            if self.state.hovered == component_id {
                 block = block.border_style(self.border_hover_style)
             }
         }
 
-        let inner = block.inner(sled.rect);
-        block.render(sled.rect, buf);
+        let inner = block.inner(*sled);
+        block.render(*sled, buf);
 
         // Draw some U.2 bays
         // TODO: Draw 10 only? - That may not scale down as well
@@ -61,7 +63,7 @@ impl<'a> Rack<'a> {
         for x in inner.left()..inner.right() {
             for y in inner.top()..inner.bottom() {
                 let cell = buf.get_mut(x, y).set_symbol("▕");
-                if sled.tabbed {
+                if self.state.tabbed == component_id {
                     if let Some(KnightRiderMode { count, move_left }) =
                         self.state.knight_rider_mode
                     {
@@ -88,24 +90,25 @@ impl<'a> Rack<'a> {
         }
     }
 
-    fn draw_switch(&self, buf: &mut Buffer, switch: &RectState, i: u8) {
+    fn draw_switch(&self, buf: &mut Buffer, switch: &Rect, i: u8) {
+        let component_id = Some(ComponentId::Switch(i));
         let mut block = Block::default()
             .title(format!("switch {}", i))
-            .borders(borders(switch.rect.height));
-        if switch.tabbed {
+            .borders(borders(switch.height));
+        if self.state.tabbed == component_id {
             block = block
                 .style(self.switch_selected_style)
                 .border_style(self.border_selected_style);
         } else {
             block =
                 block.style(self.switch_style).border_style(self.border_style);
-            if switch.hovered {
+            if self.state.hovered == component_id {
                 block = block.border_style(self.border_hover_style)
             }
         }
 
-        let inner = block.inner(switch.rect);
-        block.render(switch.rect, buf);
+        let inner = block.inner(*switch);
+        block.render(*switch, buf);
 
         for x in inner.left()..inner.right() {
             for y in inner.top()..inner.bottom() {
@@ -114,16 +117,12 @@ impl<'a> Rack<'a> {
         }
     }
 
-    fn draw_power_shelf(
-        &self,
-        buf: &mut Buffer,
-        power_shelf: &RectState,
-        i: u8,
-    ) {
+    fn draw_power_shelf(&self, buf: &mut Buffer, power_shelf: &Rect, i: u8) {
+        let component_id = Some(ComponentId::Psc(i));
         let mut block = Block::default()
             .title(format!("power {}", i))
-            .borders(borders(power_shelf.rect.height));
-        if power_shelf.tabbed {
+            .borders(borders(power_shelf.height));
+        if self.state.tabbed == component_id {
             block = block
                 .style(self.power_shelf_selected_style)
                 .border_style(self.border_selected_style);
@@ -131,13 +130,13 @@ impl<'a> Rack<'a> {
             block = block
                 .style(self.power_shelf_style)
                 .border_style(self.border_style);
-            if power_shelf.hovered {
+            if self.state.hovered == component_id {
                 block = block.border_style(self.border_hover_style)
             }
         }
 
-        let inner = block.inner(power_shelf.rect);
-        block.render(power_shelf.rect, buf);
+        let inner = block.inner(*power_shelf);
+        block.render(*power_shelf, buf);
 
         let width = inner.right() - inner.left();
         let step = width / 6;
@@ -201,9 +200,12 @@ impl KnightRiderMode {
 // The visual state of the rack
 #[derive(Debug)]
 pub struct RackState {
+    control_id: ControlId,
     pub log: Option<Logger>,
     pub rect: Rect,
-    pub component_rects: BTreeMap<ComponentId, RectState>,
+    pub hovered: Option<ComponentId>,
+    pub tabbed: Option<ComponentId>,
+    pub component_rects: BTreeMap<ComponentId, Rect>,
     pub tab_index: TabIndex,
     pub tab_index_by_component_id: BTreeMap<ComponentId, TabIndex>,
     pub component_id_by_tab_index: BTreeMap<TabIndex, ComponentId>,
@@ -213,8 +215,11 @@ pub struct RackState {
 impl RackState {
     pub fn new() -> RackState {
         let mut state = RackState {
+            control_id: get_control_id(),
             log: None,
             rect: Rect::default(),
+            hovered: None,
+            tabbed: None,
             component_rects: BTreeMap::new(),
             tab_index: TabIndex::new_unset(MAX_TAB_INDEX),
             tab_index_by_component_id: BTreeMap::new(),
@@ -223,35 +228,78 @@ impl RackState {
         };
 
         for i in 0..32 {
-            state
-                .component_rects
-                .insert(ComponentId::Sled(i), RectState::default());
+            state.component_rects.insert(ComponentId::Sled(i), Rect::default());
         }
 
         for i in 0..2 {
             state
                 .component_rects
-                .insert(ComponentId::Switch(i), RectState::default());
-            state
-                .component_rects
-                .insert(ComponentId::Psc(i), RectState::default());
+                .insert(ComponentId::Switch(i), Rect::default());
+            state.component_rects.insert(ComponentId::Psc(i), Rect::default());
         }
 
         state.init_tab_index();
         state
     }
 
-    pub fn update_tabbed(&mut self, val: bool) {
-        if let Some(id) = self.component_id_by_tab_index.get(&self.tab_index) {
-            self.component_rects.get_mut(&id).unwrap().tabbed = val;
+    /// We call this when the mouse cursor intersects the rack. This figures out which
+    /// component intersects and sets `self.hovered`.
+    ///
+    /// Return true if the component being hovered over changed, false otherwise. This
+    /// allows us to limit the number of re-draws necessary.
+    pub fn set_hover_state(&mut self, x: u16, y: u16) -> bool {
+        // Find the interesecting component.
+        // I'm sure there's a faster way to do this with percentages, etc..,
+        // but this works for now.
+        for (id, rect) in self.component_rects.iter() {
+            let mouse_pointer = Rect { x, y, width: 1, height: 1 };
+            if rect.intersects(mouse_pointer) {
+                if self.hovered == Some(*id) {
+                    // No chnage
+                    return false;
+                } else {
+                    self.hovered = Some(*id);
+                    return true;
+                }
+            }
+        }
+        if self.hovered == None {
+            // No change
+            false
+        } else {
+            self.hovered = None;
+            true
+        }
+    }
+
+    pub fn inc_tab_index(&mut self) {
+        self.tab_index.inc();
+        let id = self.get_current_component_id();
+        self.tabbed = Some(id);
+    }
+
+    pub fn dec_tab_index(&mut self) {
+        self.tab_index.dec();
+        let id = self.get_current_component_id();
+        self.tabbed = Some(id);
+    }
+
+    pub fn clear_tab_index(&mut self) {
+        self.tab_index.clear();
+        self.tabbed = None;
+    }
+
+    pub fn set_tab_from_hovered(&mut self) {
+        self.tabbed = self.hovered;
+        if let Some(id) = self.tabbed {
+            self.set_tab(id);
         }
     }
 
     pub fn set_tab(&mut self, id: ComponentId) {
-        self.update_tabbed(false);
+        self.tabbed = Some(id);
         if let Some(tab_index) = self.tab_index_by_component_id.get(&id) {
             self.tab_index = *tab_index;
-            self.update_tabbed(true);
         }
     }
 
@@ -349,10 +397,10 @@ impl RackState {
         // Top Switch
         let switch =
             self.component_rects.get_mut(&ComponentId::Switch(0)).unwrap();
-        switch.rect.y = rect.y + sled_height * 8;
-        switch.rect.x = rect.x;
-        switch.rect.height = other_height;
-        switch.rect.width = sled_width * 2;
+        switch.y = rect.y + sled_height * 8;
+        switch.x = rect.x;
+        switch.height = other_height;
+        switch.width = sled_width * 2;
 
         // Power Shelves
         for i in [17, 18] {
@@ -360,20 +408,19 @@ impl RackState {
                 .component_rects
                 .get_mut(&ComponentId::Psc(i - 17))
                 .unwrap();
-            shelf.rect.y =
-                rect.y + sled_height * 8 + other_height * (i as u16 - 16);
-            shelf.rect.x = rect.x;
-            shelf.rect.height = other_height;
-            shelf.rect.width = sled_width * 2;
+            shelf.y = rect.y + sled_height * 8 + other_height * (i as u16 - 16);
+            shelf.x = rect.x;
+            shelf.height = other_height;
+            shelf.width = sled_width * 2;
         }
 
         // Bottom Switch
         let switch =
             self.component_rects.get_mut(&ComponentId::Switch(1)).unwrap();
-        switch.rect.y = rect.y + sled_height * 8 + 3 * other_height;
-        switch.rect.x = rect.x;
-        switch.rect.height = other_height;
-        switch.rect.width = sled_width * 2;
+        switch.y = rect.y + sled_height * 8 + 3 * other_height;
+        switch.x = rect.x;
+        switch.height = other_height;
+        switch.width = sled_width * 2;
 
         // Bottom Sleds
         // We treat each non-sled as 2 sleds for layout purposes
@@ -396,26 +443,26 @@ impl RackState {
             self.component_rects.get_mut(&ComponentId::Sled(index)).unwrap();
 
         if index < 16 {
-            sled.rect.y = rack.y + sled_height * (index as u16 / 2);
+            sled.y = rack.y + sled_height * (index as u16 / 2);
         } else {
-            sled.rect.y =
+            sled.y =
                 rack.y + sled_height * (index as u16 / 2) + other_height * 4;
         }
 
         if index % 2 == 0 {
             // left sled
-            sled.rect.x = rack.x
+            sled.x = rack.x
         } else {
             // right sled
-            sled.rect.x = rack.x + sled_width;
+            sled.x = rack.x + sled_width;
         }
         if (index == 30 || index == 31) && sled_height == 2 {
             // We saved space for a bottom border
-            sled.rect.height = 3;
+            sled.height = 3;
         } else {
-            sled.rect.height = sled_height;
+            sled.height = sled_height;
         }
-        sled.rect.width = sled_width;
+        sled.width = sled_width;
     }
 
     fn init_tab_index(&mut self) {
@@ -443,5 +490,15 @@ impl RackState {
             self.component_id_by_tab_index.insert(tab_index, component_id);
             self.tab_index_by_component_id.insert(component_id, tab_index);
         }
+    }
+}
+
+impl Control for RackState {
+    fn id(&self) -> ControlId {
+        self.control_id
+    }
+
+    fn rect(&self) -> Rect {
+        self.rect
     }
 }

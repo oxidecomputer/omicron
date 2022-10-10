@@ -4,6 +4,8 @@
 
 //! Custom tui widgets
 
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 use tui::buffer::Buffer;
 use tui::layout::Rect;
 use tui::style::Style;
@@ -22,11 +24,23 @@ pub use help_menu::HelpMenu;
 pub use rack::{KnightRiderMode, Rack, RackState};
 pub use screen_button::{ScreenButton, ScreenButtonState};
 
+/// A unique id for a [`Control`]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ControlId(pub usize);
+
+/// Return a unique id for a [`Control`]
+pub fn get_control_id() -> ControlId {
+    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+    ControlId(COUNTER.fetch_add(1, Ordering::Relaxed))
+}
+
 /// A control is an interactive object on a [`Screen`].
 ///
 /// Control's are often the internal state of [`tui::Widget`]s and are used to
 /// manage how the Widgets are drawn.
 pub trait Control {
+    fn id(&self) -> ControlId;
+
     /// Return the rectangle of the control to be intersected.
     fn rect(&self) -> Rect;
 

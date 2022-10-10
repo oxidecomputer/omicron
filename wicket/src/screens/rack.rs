@@ -8,9 +8,9 @@ use super::colors::*;
 use super::Screen;
 use super::ScreenId;
 use super::{Height, Width};
-use crate::inventory::ComponentId;
 use crate::widgets::AnimationState;
 use crate::widgets::Control;
+use crate::widgets::ControlId;
 use crate::widgets::KnightRiderMode;
 use crate::widgets::{Banner, HelpButton, HelpButtonState, HelpMenu, Rack};
 use crate::Action;
@@ -23,22 +23,14 @@ use crossterm::event::{
 };
 use slog::Logger;
 use tui::layout::Alignment;
-use tui::layout::Rect;
 use tui::style::{Color, Style};
 use tui::widgets::{Block, Borders};
-
-// Is the mouse hovering over the HelpButton or rack?
-#[derive(Debug, Clone, Copy)]
-pub enum HoverState {
-    Rack(ComponentId),
-    HelpButton,
-}
 
 /// Show the rack view
 pub struct RackScreen {
     log: Logger,
     watermark: &'static str,
-    hovered: Option<HoverState>,
+    hovered: Option<ControlId>,
     help_data: Vec<(&'static str, &'static str)>,
     help_button_state: HelpButtonState,
     help_menu_state: Option<AnimationState>,
@@ -100,10 +92,16 @@ impl RackScreen {
             };
             f.render_widget(menu, f.size());
         } else {
+            let border_style =
+                if self.hovered == Some(self.help_button_state.id()) {
+                    hovered_style
+                } else {
+                    button_style
+                };
             let button = HelpButton::new(
                 &self.help_button_state,
                 button_style,
-                hovered_style,
+                border_style,
             );
 
             f.render_widget(button, f.size());
@@ -166,21 +164,16 @@ impl RackScreen {
     ) -> Vec<Action> {
         match event.code {
             KeyCode::Tab => {
-                self.clear_tabbed(state);
-                state.rack_state.tab_index.inc();
-                self.set_tabbed(state);
+                state.rack_state.inc_tab_index();
             }
             KeyCode::BackTab => {
-                self.clear_tabbed(state);
-                state.rack_state.tab_index.dec();
-                self.set_tabbed(state);
+                state.rack_state.dec_tab_index();
             }
             KeyCode::Esc => {
                 if self.help_button_state.selected {
                     self.close_help_menu();
                 } else {
-                    self.clear_tabbed(state);
-                    state.rack_state.tab_index.clear();
+                    state.rack_state.clear_tab_index();
                 }
             }
             KeyCode::Enter => {
@@ -256,19 +249,16 @@ impl RackScreen {
     fn handle_mouse_click(&mut self, state: &mut State) -> Vec<Action> {
         // Set the tab index to the hovered component Id if there is one.
         // Remove the old tab_index, and make it match the clicked one
-        if let Some(hover_state) = self.hovered {
-            match hover_state {
-                HoverState::HelpButton => {
-                    self.open_help_menu();
-                    vec![]
-                }
-                HoverState::Rack(component_id) => {
-                    state.rack_state.set_tab(component_id);
-                    vec![Action::SwitchScreen(ScreenId::Component)]
-                }
+        match self.hovered {
+            Some(control_id) if control_id == self.help_button_state.id() => {
+                self.open_help_menu();
+                vec![]
             }
-        } else {
-            vec![]
+            Some(control_id) if control_id == state.rack_state.id() => {
+                state.rack_state.set_tab_from_hovered();
+                vec![Action::SwitchScreen(ScreenId::Component)]
+            }
+            _ => vec![],
         }
     }
 
@@ -280,111 +270,44 @@ impl RackScreen {
         x: u16,
         y: u16,
     ) -> Vec<Action> {
-        // Are we currently hovering over the Help Button?
-        if self.help_button_state.intersects_point(x, y) {
-            let actions = match self.hovered {
-                Some(HoverState::HelpButton) => {
-                    // No change
-                    vec![]
-                }
-                Some(HoverState::Rack(id)) => {
-                    // Clear the old hover state
-                    state
-                        .rack_state
-                        .component_rects
-                        .get_mut(&id)
-                        .unwrap()
-                        .hovered = false;
-                    vec![Action::Redraw]
-                }
-                None => {
-                    vec![Action::Redraw]
-                }
-            };
-
-            self.help_button_state.hovered = true;
-            self.hovered = Some(HoverState::HelpButton);
-            return actions;
-        }
-
-        // Were we previously hovering over anything?
-        let current_id = self.find_rack_rect_intersection(state, x, y);
-        let actions = match self.hovered {
-            Some(HoverState::HelpButton) => {
-                self.help_button_state.hovered = false;
-                vec![Action::Redraw]
-            }
-            Some(HoverState::Rack(id)) => {
-                if current_id == Some(id) {
-                    // No change
+        let current_id = self.find_intersection(state, x, y);
+        if current_id == self.hovered
+            && self.hovered != Some(state.rack_state.id())
+        {
+            // No change
+            vec![]
+        } else {
+            self.hovered = current_id;
+            if self.hovered == Some(state.rack_state.id()) {
+                // Update the specific component being hovered over
+                if !state.rack_state.set_hover_state(x, y) {
+                    // No need to redraw, as the component is the same as before
                     vec![]
                 } else {
-                    // Clear the old hover state
-                    state
-                        .rack_state
-                        .component_rects
-                        .get_mut(&id)
-                        .unwrap()
-                        .hovered = false;
                     vec![Action::Redraw]
                 }
-            }
-            None => {
+            } else {
+                state.rack_state.hovered = None;
                 vec![Action::Redraw]
             }
-        };
-
-        // Are we actually hovering over the rack
-        match current_id {
-            Some(id) => {
-                self.hovered = Some(HoverState::Rack(id));
-                // Set the new state
-                state
-                    .rack_state
-                    .component_rects
-                    .get_mut(&id)
-                    .unwrap()
-                    .hovered = true;
-            }
-            None => {
-                self.hovered = None;
-            }
-        };
-        actions
+        }
     }
 
-    // See if the mouse is hovering over any part of the rack and return
-    // the component if it is.
-    fn find_rack_rect_intersection(
+    // Return if the coordinates interesct a given control.
+    // This assumes disjoint control rectangles.
+    fn find_intersection(
         &self,
         state: &State,
         x: u16,
         y: u16,
-    ) -> Option<ComponentId> {
-        let mouse_pointer = Rect { x, y, width: 1, height: 1 };
-        if !state.rack_state.rect.intersects(mouse_pointer) {
-            return None;
+    ) -> Option<ControlId> {
+        if self.help_button_state.intersects_point(x, y) {
+            Some(self.help_button_state.id())
+        } else if state.rack_state.intersects_point(x, y) {
+            Some(state.rack_state.id())
+        } else {
+            None
         }
-
-        // Find the interesecting component.
-        // I'm sure there's a faster way to do this with percentages, etc..,
-        // but this works for now.
-        for (id, rect_state) in state.rack_state.component_rects.iter() {
-            if rect_state.rect.intersects(mouse_pointer) {
-                return Some(*id);
-            }
-        }
-        None
-    }
-
-    // Set the tabbed boolean to `true` for the current tab indexed rect
-    fn set_tabbed(&mut self, state: &mut State) {
-        state.rack_state.update_tabbed(true);
-    }
-
-    // Set the tabbed boolean to `false` for the current tab indexed rect
-    fn clear_tabbed(&mut self, state: &mut State) {
-        state.rack_state.update_tabbed(false);
     }
 }
 
