@@ -1807,7 +1807,8 @@
           "internal_d_n_s",
           "nexus",
           "oximeter",
-          "dendrite"
+          "dendrite",
+          "tfport"
         ]
       },
       "ServicePutRequest": {
