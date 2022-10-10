@@ -1286,7 +1286,7 @@ async fn test_volume_remove_rop_saga(cptestctx: &ControlPlaneTestContext) {
     let int_client = &cptestctx.internal_client;
     let rop_url = format!("/volume/remove-read-only-parent/{}", volume_id);
 
-    // Call the internal API endpoint
+    // Call the internal API endpoint for removal of the read only parent
     int_client
         .make_request(
             Method::POST,
@@ -1309,6 +1309,200 @@ async fn test_volume_remove_rop_saga(cptestctx: &ControlPlaneTestContext) {
             read_only_parent,
         } => {
             assert!(read_only_parent.is_none());
+        }
+        x => {
+            panic!("Unexpected volume type returned: {:?}", x);
+        }
+    }
+}
+
+#[nexus_test]
+async fn test_volume_remove_rop_saga_twice(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    // Test calling the saga for removal of a volume with a read only parent
+    // two times, the first will remove the read_only_parent, the second will
+    // do nothing.
+    let nexus = &cptestctx.server.apictx.nexus;
+    let datastore = nexus.datastore();
+
+    let volume_id = Uuid::new_v4();
+    let block_size = 512;
+
+    // Make our read_only_parent
+    let rop = VolumeConstructionRequest::Url {
+        id: Uuid::new_v4(),
+        block_size,
+        url: "http://oxide.computer/rop".to_string(),
+    };
+
+    create_volume(&datastore, volume_id, Some(rop)).await;
+
+    println!("Created this volume: {:?}", volume_id);
+    // disk to volume id, to then remove ROP?
+    let int_client = &cptestctx.internal_client;
+    let rop_url = format!("/volume/remove-read-only-parent/{}", volume_id);
+
+    // Call the internal API endpoint for removal of the read only parent
+    let res = int_client
+        .make_request(
+            Method::POST,
+            &rop_url,
+            None as Option<&serde_json::Value>,
+            StatusCode::NO_CONTENT,
+        )
+        .await
+        .unwrap();
+
+    println!("first returns {:?}", res);
+    let new_vol = datastore.volume_get(volume_id).await.unwrap();
+    let vcr: VolumeConstructionRequest =
+        serde_json::from_str(new_vol.data()).unwrap();
+
+    match vcr {
+        VolumeConstructionRequest::Volume {
+            id: _,
+            block_size: _,
+            sub_volumes: _,
+            read_only_parent,
+        } => {
+            assert!(read_only_parent.is_none());
+        }
+        x => {
+            panic!("Unexpected volume type returned: {:?}", x);
+        }
+    }
+
+    // Call the internal API endpoint a second time. Should be okay.
+    let res = int_client
+        .make_request(
+            Method::POST,
+            &rop_url,
+            None as Option<&serde_json::Value>,
+            StatusCode::NO_CONTENT,
+        )
+        .await
+        .unwrap();
+
+    println!("twice returns {:?}", res);
+}
+
+#[nexus_test]
+async fn test_volume_remove_rop_saga_no_volume(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    // Test calling the saga on a volume that does not exist.
+    let nexus = &cptestctx.server.apictx.nexus;
+    let volume_id = Uuid::new_v4();
+
+    println!("Non-existant volume: {:?}", volume_id);
+    let int_client = &cptestctx.internal_client;
+    let rop_url = format!("/volume/remove-read-only-parent/{}", volume_id);
+
+    // Call the internal API endpoint for removal of the read only parent
+    let res = int_client
+        .make_request(
+            Method::POST,
+            &rop_url,
+            None as Option<&serde_json::Value>,
+            StatusCode::NO_CONTENT,
+        )
+        .await
+        .unwrap();
+}
+
+#[nexus_test]
+async fn test_volume_remove_rop_saga_volume_not_volume(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    // Test saga removal of a read only volume for a volume that is not
+    // of a type to have a read only parent.
+    let nexus = &cptestctx.server.apictx.nexus;
+    let volume_id = Uuid::new_v4();
+    let datastore = nexus.datastore();
+
+    datastore
+        .volume_create(nexus_db_model::Volume::new(
+            volume_id,
+            serde_json::to_string(&VolumeConstructionRequest::File {
+                id: volume_id,
+                block_size: 512,
+                path: "/lol".to_string(),
+            })
+            .unwrap(),
+        ))
+        .await
+        .unwrap();
+
+    let int_client = &cptestctx.internal_client;
+    // Call the saga on this volume
+    let rop_url = format!("/volume/remove-read-only-parent/{}", volume_id);
+
+    // Call the internal API endpoint for removal of the read only parent
+    let res = int_client
+        .make_request(
+            Method::POST,
+            &rop_url,
+            None as Option<&serde_json::Value>,
+            StatusCode::NO_CONTENT,
+        )
+        .await
+        .unwrap();
+}
+
+#[nexus_test]
+async fn test_volume_remove_rop_saga_deleted_volume(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    // Test that a saga removal of a read_only_parent from a deleted volume
+    // takes no action on that deleted volume.
+    let nexus = &cptestctx.server.apictx.nexus;
+    let datastore = nexus.datastore();
+    let volume_id = Uuid::new_v4();
+    let block_size = 512;
+
+    // Make our read_only_parent
+    let rop = VolumeConstructionRequest::Url {
+        id: Uuid::new_v4(),
+        block_size,
+        url: "http://oxide.computer/rop".to_string(),
+    };
+    // Make the volume
+    create_volume(&datastore, volume_id, Some(rop)).await;
+
+    // Soft delete the volume
+    let _cr = datastore
+        .decrease_crucible_resource_count_and_soft_delete_volume(volume_id)
+        .await
+        .unwrap();
+
+    let int_client = &cptestctx.internal_client;
+    let rop_url = format!("/volume/remove-read-only-parent/{}", volume_id);
+
+    // Call the internal API endpoint for removal of the read only parent
+    let res = int_client
+        .make_request(
+            Method::POST,
+            &rop_url,
+            None as Option<&serde_json::Value>,
+            StatusCode::NO_CONTENT,
+        )
+        .await
+        .unwrap();
+
+    let new_vol = datastore.volume_get(volume_id).await.unwrap();
+    let vcr: VolumeConstructionRequest =
+        serde_json::from_str(new_vol.data()).unwrap();
+
+    // Volume should still have read only parent
+    match vcr {
+        VolumeConstructionRequest::Volume {
+            id: _,
+            block_size: _,
+            sub_volumes: _,
+            read_only_parent,
+        } => {
+            assert!(read_only_parent.is_some());
         }
         x => {
             panic!("Unexpected volume type returned: {:?}", x);
