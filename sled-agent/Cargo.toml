@@ -55,7 +55,7 @@ tokio = { version = "1.21", features = [ "full" ] }
 tokio-tungstenite = "0.17.2"
 tokio-util = { version = "0.7", features = ["codec"] }
 toml = "0.5.9"
-uuid = { version = "1.1.0", features = [ "serde", "v4" ] }
+uuid = { version = "1.2.1", features = [ "serde", "v4" ] }
 vsss-rs = { version = "2.0.0", default-features = false, features = ["std"] }
 zone = "0.1"
 
