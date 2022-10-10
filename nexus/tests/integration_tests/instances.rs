@@ -25,6 +25,7 @@ use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NetworkInterface;
+use omicron_nexus::context::OpContext;
 use omicron_nexus::external_api::shared::IpKind;
 use omicron_nexus::external_api::shared::IpRange;
 use omicron_nexus::external_api::shared::Ipv4Range;
@@ -445,6 +446,86 @@ async fn test_instances_create_reboot_halt(
     .execute()
     .await
     .unwrap();
+}
+
+#[nexus_test]
+async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let apictx = &cptestctx.server.apictx;
+    let nexus = &apictx.nexus;
+    let datastore = nexus.datastore();
+
+    // Create an IP pool and  project that we'll use for testing.
+    create_ip_pool(&client, POOL_NAME, None, None).await;
+    create_organization(&client, ORGANIZATION_NAME).await;
+    let url_instances = format!(
+        "/organizations/{}/projects/{}/instances",
+        ORGANIZATION_NAME, PROJECT_NAME
+    );
+    let project_id = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME)
+        .await
+        .identity
+        .id;
+
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+    let virtual_resource_provisioning = datastore
+        .virtual_resource_provisioning_get(&opctx, project_id)
+        .await
+        .unwrap();
+    assert_eq!(virtual_resource_provisioning.cpus_provisioned, 0);
+    assert_eq!(virtual_resource_provisioning.ram_provisioned, 0);
+
+    // Create an instance.
+    let instance_url = format!("{}/just-rainsticks", url_instances);
+    create_instance(client, ORGANIZATION_NAME, PROJECT_NAME, "just-rainsticks")
+        .await;
+    let virtual_resource_provisioning = datastore
+        .virtual_resource_provisioning_get(&opctx, project_id)
+        .await
+        .unwrap();
+    assert_eq!(virtual_resource_provisioning.cpus_provisioned, 4);
+    assert_eq!(
+        virtual_resource_provisioning.ram_provisioned,
+        i64::try_from(ByteCount::from_gibibytes_u32(1).to_bytes()).unwrap(),
+    );
+
+    // Stop the instance
+    let instance =
+        instance_post(&client, &instance_url, InstanceOp::Stop).await;
+    instance_simulate(nexus, &instance.identity.id).await;
+    let instance = instance_get(&client, &instance_url).await;
+    assert_eq!(instance.runtime.run_state, InstanceState::Stopped);
+    // NOTE: I think it's arguably "more correct" to identify that the
+    // number of CPUs being used by guests at this point is actually "0",
+    // not "4", because the instance is stopped (same re: RAM usage).
+    //
+    // However, for implementation reasons, this is complicated (we have a
+    // tendency to update the runtime without checking the prior state, which
+    // makes edge-triggered behavior trickier to notice).
+    let virtual_resource_provisioning = datastore
+        .virtual_resource_provisioning_get(&opctx, project_id)
+        .await
+        .unwrap();
+    assert_eq!(virtual_resource_provisioning.cpus_provisioned, 4);
+    assert_eq!(
+        virtual_resource_provisioning.ram_provisioned,
+        i64::try_from(ByteCount::from_gibibytes_u32(1).to_bytes()).unwrap(),
+    );
+
+    // Stop the instance
+    NexusRequest::object_delete(client, &instance_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+
+    let virtual_resource_provisioning = datastore
+        .virtual_resource_provisioning_get(&opctx, project_id)
+        .await
+        .unwrap();
+    assert_eq!(virtual_resource_provisioning.cpus_provisioned, 0);
+    assert_eq!(virtual_resource_provisioning.ram_provisioned, 0);
 }
 
 #[nexus_test]

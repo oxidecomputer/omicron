@@ -33,8 +33,9 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::Name;
 use omicron_common::backoff;
+use omicron_nexus::db::fixed_data::{silo::SILO_ID, FLEET_ID};
 use omicron_nexus::TestInterfaces as _;
-use omicron_nexus::{external_api::params, Nexus};
+use omicron_nexus::{context::OpContext, external_api::params, Nexus};
 use oximeter::types::Datum;
 use oximeter::types::Measurement;
 use sled_agent_client::TestInterfaces as _;
@@ -43,6 +44,7 @@ use uuid::Uuid;
 
 const ORG_NAME: &str = "test-org";
 const PROJECT_NAME: &str = "springfield-squidport-disks";
+const PROJECT_NAME_2: &str = "bouncymeadow-octopusharbor-disks";
 const DISK_NAME: &str = "just-rainsticks";
 const INSTANCE_NAME: &str = "just-rainsticks";
 
@@ -897,6 +899,200 @@ async fn test_disk_too_big(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
 }
 
+#[nexus_test]
+async fn test_disk_virtual_resource_provisioning(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.apictx.nexus;
+    let datastore = nexus.datastore();
+
+    let _test = DiskTest::new(&cptestctx).await;
+
+    create_ip_pool(&client, "p0", None, None).await;
+    let org_id = create_organization(&client, ORG_NAME).await.identity.id;
+    let project_id1 =
+        create_project(client, ORG_NAME, PROJECT_NAME).await.identity.id;
+    let project_id2 =
+        create_project(client, ORG_NAME, PROJECT_NAME_2).await.identity.id;
+
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    // The project and organization should start as empty.
+    let virtual_resource_provisioning = datastore
+        .virtual_resource_provisioning_get(&opctx, project_id1)
+        .await
+        .unwrap();
+    assert_eq!(virtual_resource_provisioning.virtual_disk_bytes_provisioned, 0);
+    let virtual_resource_provisioning = datastore
+        .virtual_resource_provisioning_get(&opctx, project_id2)
+        .await
+        .unwrap();
+    assert_eq!(virtual_resource_provisioning.virtual_disk_bytes_provisioned, 0);
+    let virtual_resource_provisioning = datastore
+        .virtual_resource_provisioning_get(&opctx, org_id)
+        .await
+        .unwrap();
+    assert_eq!(virtual_resource_provisioning.virtual_disk_bytes_provisioned, 0);
+    let virtual_resource_provisioning = datastore
+        .virtual_resource_provisioning_get(&opctx, *SILO_ID)
+        .await
+        .unwrap();
+    assert_eq!(virtual_resource_provisioning.virtual_disk_bytes_provisioned, 0);
+    let virtual_resource_provisioning = datastore
+        .virtual_resource_provisioning_get(&opctx, *FLEET_ID)
+        .await
+        .unwrap();
+    assert_eq!(virtual_resource_provisioning.virtual_disk_bytes_provisioned, 0);
+
+    // Ask for a 1 gibibyte disk in the first project.
+    //
+    // This disk should appear in the accounting information for the project
+    // in which it was allocated
+    let disk_size = ByteCount::from_gibibytes_u32(1);
+    let disks_url =
+        format!("/organizations/{}/projects/{}/disks", ORG_NAME, PROJECT_NAME);
+    let disk_one = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "disk-one".parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
+        size: disk_size,
+    };
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&disk_one))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("unexpected failure creating 1 GiB disk");
+    let virtual_resource_provisioning = datastore
+        .virtual_resource_provisioning_get(&opctx, project_id1)
+        .await
+        .unwrap();
+    assert_eq!(
+        virtual_resource_provisioning.virtual_disk_bytes_provisioned,
+        disk_size.to_bytes() as i64
+    );
+    let virtual_resource_provisioning = datastore
+        .virtual_resource_provisioning_get(&opctx, project_id2)
+        .await
+        .unwrap();
+    assert_eq!(virtual_resource_provisioning.virtual_disk_bytes_provisioned, 0);
+    let virtual_resource_provisioning = datastore
+        .virtual_resource_provisioning_get(&opctx, org_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        virtual_resource_provisioning.virtual_disk_bytes_provisioned,
+        disk_size.to_bytes() as i64
+    );
+    let virtual_resource_provisioning = datastore
+        .virtual_resource_provisioning_get(&opctx, *SILO_ID)
+        .await
+        .unwrap();
+    assert_eq!(
+        virtual_resource_provisioning.virtual_disk_bytes_provisioned,
+        disk_size.to_bytes() as i64
+    );
+    let virtual_resource_provisioning = datastore
+        .virtual_resource_provisioning_get(&opctx, *FLEET_ID)
+        .await
+        .unwrap();
+    assert_eq!(
+        virtual_resource_provisioning.virtual_disk_bytes_provisioned,
+        disk_size.to_bytes() as i64
+    );
+
+    // Ask for a 1 gibibyte disk in the second project.
+    //
+    // Each project should be using "one disk" of real storage, but the org
+    // should be using both.
+    let disks_url = format!(
+        "/organizations/{}/projects/{}/disks",
+        ORG_NAME, PROJECT_NAME_2
+    );
+    let disk_one = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "disk-two".parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
+        size: disk_size,
+    };
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&disk_one))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("unexpected failure creating 1 GiB disk");
+    let virtual_resource_provisioning = datastore
+        .virtual_resource_provisioning_get(&opctx, project_id1)
+        .await
+        .unwrap();
+    assert_eq!(
+        virtual_resource_provisioning.virtual_disk_bytes_provisioned,
+        disk_size.to_bytes() as i64
+    );
+    let virtual_resource_provisioning = datastore
+        .virtual_resource_provisioning_get(&opctx, project_id2)
+        .await
+        .unwrap();
+    assert_eq!(
+        virtual_resource_provisioning.virtual_disk_bytes_provisioned,
+        disk_size.to_bytes() as i64
+    );
+    let virtual_resource_provisioning = datastore
+        .virtual_resource_provisioning_get(&opctx, org_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        virtual_resource_provisioning.virtual_disk_bytes_provisioned,
+        2 * disk_size.to_bytes() as i64
+    );
+
+    // Delete the disk we just created, observe the utilization drop
+    // accordingly.
+    let disk_url = format!("{}/{}", disks_url, "disk-two");
+    NexusRequest::object_delete(client, &disk_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to delete disk");
+    let virtual_resource_provisioning = datastore
+        .virtual_resource_provisioning_get(&opctx, project_id1)
+        .await
+        .unwrap();
+    assert_eq!(
+        virtual_resource_provisioning.virtual_disk_bytes_provisioned,
+        disk_size.to_bytes() as i64
+    );
+    let virtual_resource_provisioning = datastore
+        .virtual_resource_provisioning_get(&opctx, project_id2)
+        .await
+        .unwrap();
+    assert_eq!(virtual_resource_provisioning.virtual_disk_bytes_provisioned, 0);
+    let virtual_resource_provisioning = datastore
+        .virtual_resource_provisioning_get(&opctx, org_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        virtual_resource_provisioning.virtual_disk_bytes_provisioned,
+        disk_size.to_bytes() as i64
+    );
+}
+
 // Test disk size accounting
 #[nexus_test]
 async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
@@ -1170,9 +1366,13 @@ async fn query_for_metrics_until_they_exist(
 
 #[nexus_test]
 async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
+    // Normally, Nexus is not registered as a producer for tests.
+    // Turn this bit on so we can also test some metrics from Nexus itself.
+    cptestctx.server.register_as_producer().await;
+
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
-    create_org_and_project(client).await;
+    let project_id = create_org_and_project(client).await;
     create_disk(&client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
 
     // Whenever we grab this URL, get the surrounding few seconds of metrics.
@@ -1210,6 +1410,29 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
             assert!(cumulative.start_time() <= item.timestamp());
         }
     }
+
+    // Check the utilization info for the whole project too.
+    let utilization_url = |id: Uuid| {
+        format!(
+            "/system/metrics/virtual_disk_space_provisioned?start_time={:?}&end_time={:?}&id={:?}",
+            Utc::now() - chrono::Duration::seconds(20),
+            Utc::now() + chrono::Duration::seconds(20),
+            id,
+        )
+    };
+
+    // We should create measurements when the disk is created, and again when
+    // it's modified. However, due to our inability to control the sampling
+    // rate, we just keep polling until we see *something*.
+    //
+    // Normally we'll see two measurements, but it's possible to only see one
+    // if the producer interface is queried in between the two samples.
+    let measurements = query_for_metrics_until_they_exist(
+        client,
+        &utilization_url(project_id),
+    )
+    .await;
+    assert!(!measurements.items.is_empty());
 }
 
 #[nexus_test]

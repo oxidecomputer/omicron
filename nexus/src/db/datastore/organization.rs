@@ -13,14 +13,17 @@ use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::diesel_pool_result_optional;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
+use crate::db::error::TransactionError;
 use crate::db::identity::Resource;
+use crate::db::model::CollectionType;
 use crate::db::model::Name;
 use crate::db::model::Organization;
 use crate::db::model::OrganizationUpdate;
 use crate::db::model::Silo;
+use crate::db::model::VirtualResourceProvisioning;
 use crate::db::pagination::paginated;
 use crate::external_api::params;
-use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl};
 use chrono::Utc;
 use diesel::prelude::*;
 use omicron_common::api::external::CreateResult;
@@ -51,27 +54,54 @@ impl DataStore {
         let organization = Organization::new(organization.clone(), silo_id);
         let name = organization.name().as_str().to_string();
 
-        Silo::insert_resource(
-            silo_id,
-            diesel::insert_into(dsl::organization).values(organization),
-        )
-        .insert_and_get_result_async(self.pool_authorized(opctx).await?)
-        .await
-        .map_err(|e| match e {
-            AsyncInsertError::CollectionNotFound => Error::InternalError {
-                internal_message: format!(
-                    "attempting to create an \
-                    organization under non-existent silo {}",
-                    silo_id
-                ),
-            },
-            AsyncInsertError::DatabaseError(e) => {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::Conflict(ResourceType::Organization, &name),
+        self.pool_authorized(opctx)
+            .await?
+            .transaction_async(|conn| async move {
+                let org = Silo::insert_resource(
+                    silo_id,
+                    diesel::insert_into(dsl::organization).values(organization),
                 )
-            }
-        })
+                .insert_and_get_result_async(&conn)
+                .await
+                .map_err(|e| match e {
+                    AsyncInsertError::CollectionNotFound => {
+                        Error::InternalError {
+                            internal_message: format!(
+                                "attempting to create an \
+                            organization under non-existent silo {}",
+                                silo_id
+                            ),
+                        }
+                    }
+                    AsyncInsertError::DatabaseError(e) => {
+                        public_error_from_diesel_pool(
+                            e,
+                            ErrorHandler::Conflict(
+                                ResourceType::Organization,
+                                &name,
+                            ),
+                        )
+                    }
+                })?;
+
+                self.virtual_resource_provisioning_create_on_connection(
+                    &conn,
+                    VirtualResourceProvisioning::new(
+                        org.id(),
+                        CollectionType::Organization,
+                    ),
+                )
+                .await?;
+
+                Ok(org)
+            })
+            .await
+            .map_err(|e| match e {
+                TransactionError::CustomError(e) => e,
+                TransactionError::Pool(e) => {
+                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                }
+            })
     }
 
     /// Delete a organization

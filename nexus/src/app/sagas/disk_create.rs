@@ -42,8 +42,16 @@ lazy_static! {
         sdc_create_disk_record,
         sdc_create_disk_record_undo
     );
-    static ref REGIONS_ALLOC: NexusAction =
-        new_action_noop_undo("disk-create.regions-alloc", sdc_alloc_regions,);
+    static ref REGIONS_ALLOC: NexusAction = ActionFunc::new_action(
+        "disk-create.allocate-regions",
+        sdc_alloc_regions,
+        sdc_alloc_regions_undo,
+    );
+    static ref SPACE_ACCOUNT: NexusAction = ActionFunc::new_action(
+        "disk-create.account-space",
+        sdc_account_space,
+        sdc_account_space_undo,
+    );
     static ref REGIONS_ENSURE: NexusAction =
         new_action_noop_undo("disk-create.regions-ensure", sdc_regions_ensure,);
     static ref CREATE_VOLUME_RECORD: NexusAction = ActionFunc::new_action(
@@ -68,6 +76,7 @@ impl NexusSaga for SagaDiskCreate {
     fn register_actions(registry: &mut ActionRegistry) {
         registry.register(Arc::clone(&*CREATE_DISK_RECORD));
         registry.register(Arc::clone(&*REGIONS_ALLOC));
+        registry.register(Arc::clone(&*SPACE_ACCOUNT));
         registry.register(Arc::clone(&*REGIONS_ENSURE));
         registry.register(Arc::clone(&*CREATE_VOLUME_RECORD));
         registry.register(Arc::clone(&*FINALIZE_DISK_RECORD));
@@ -99,6 +108,12 @@ impl NexusSaga for SagaDiskCreate {
             "datasets_and_regions",
             "RegionsAlloc",
             REGIONS_ALLOC.as_ref(),
+        ));
+
+        builder.append(Node::action(
+            "no-result",
+            "SpaceAccount",
+            SPACE_ACCOUNT.as_ref(),
         ));
 
         builder.append(Node::action(
@@ -240,6 +255,73 @@ async fn sdc_alloc_regions(
         .await
         .map_err(ActionError::action_failed)?;
     Ok(datasets_and_regions)
+}
+
+async fn sdc_alloc_regions_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+
+    let region_ids = sagactx
+        .lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
+            "datasets_and_regions",
+        )?
+        .into_iter()
+        .map(|(_, region)| region.id())
+        .collect::<Vec<Uuid>>();
+
+    osagactx.datastore().regions_hard_delete(region_ids).await?;
+    Ok(())
+}
+
+// TODO: Not yet idempotent
+async fn sdc_account_space(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+
+    let disk_created = sagactx.lookup::<db::model::Disk>("created_disk")?;
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    osagactx
+        .datastore()
+        .virtual_resource_provisioning_update_disk(
+            &opctx,
+            params.project_id,
+            i64::try_from(disk_created.size.to_bytes())
+                .map_err(|e| {
+                    Error::internal_error(&format!(
+                        "updating resource usage: {e}"
+                    ))
+                })
+                .map_err(ActionError::action_failed)?,
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(())
+}
+
+// TODO: Not yet idempotent
+async fn sdc_account_space_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+
+    let disk_created = sagactx.lookup::<db::model::Disk>("created_disk")?;
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    osagactx
+        .datastore()
+        .virtual_resource_provisioning_update_disk(
+            &opctx,
+            params.project_id,
+            -i64::try_from(disk_created.size.to_bytes()).map_err(|e| {
+                Error::internal_error(&format!("updating resource usage: {e}"))
+            })?,
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(())
 }
 
 /// Call out to Crucible agent and perform region creation.
@@ -455,9 +537,11 @@ async fn sdc_create_volume_record_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
 
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
     let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
-    osagactx.nexus().volume_delete(volume_id).await?;
+    osagactx.nexus().volume_delete(&opctx, volume_id).await?;
     Ok(())
 }
 

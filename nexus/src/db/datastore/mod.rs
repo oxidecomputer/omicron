@@ -26,6 +26,7 @@ use crate::db::{
     self,
     error::{public_error_from_diesel_pool, ErrorHandler},
 };
+use ::oximeter::types::ProducerRegistry;
 use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager};
 use diesel::pg::Pg;
 use diesel::prelude::*;
@@ -45,6 +46,7 @@ mod dataset;
 mod device_auth;
 mod disk;
 mod external_ip;
+mod fleet;
 mod global_image;
 mod identity_provider;
 mod instance;
@@ -66,6 +68,7 @@ mod sled;
 mod snapshot;
 mod ssh_key;
 mod update;
+mod virtual_resource_provisioning;
 mod volume;
 mod vpc;
 mod zpool;
@@ -103,6 +106,8 @@ impl<U, T> RunnableQuery<U> for T where
 
 pub struct DataStore {
     pool: Arc<Pool>,
+    virtual_resource_provisioning_producer:
+        virtual_resource_provisioning::Producer,
 }
 
 // The majority of `DataStore`'s methods live in our submodules as a concession
@@ -110,7 +115,19 @@ pub struct DataStore {
 // recompilation of that query's module instead of all queries on `DataStore`.
 impl DataStore {
     pub fn new(pool: Arc<Pool>) -> Self {
-        DataStore { pool }
+        DataStore {
+            pool,
+            virtual_resource_provisioning_producer:
+                virtual_resource_provisioning::Producer::new(),
+        }
+    }
+
+    pub fn register_producers(&self, registry: &ProducerRegistry) {
+        registry
+            .register_producer(
+                self.virtual_resource_provisioning_producer.clone(),
+            )
+            .unwrap();
     }
 
     // TODO-security This should be deprecated in favor of pool_authorized(),
@@ -238,6 +255,7 @@ mod test {
     use crate::db::model::BlockSize;
     use crate::db::model::Dataset;
     use crate::db::model::ExternalIp;
+    use crate::db::model::Fleet;
     use crate::db::model::Rack;
     use crate::db::model::Region;
     use crate::db::model::Service;
@@ -1006,7 +1024,7 @@ mod test {
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
         // Create a Rack, insert it into the DB.
-        let rack = Rack::new(Uuid::new_v4());
+        let rack = Rack::new(Uuid::new_v4(), *db::fixed_data::FLEET_ID);
         let result = datastore.rack_insert(&opctx, &rack).await.unwrap();
         assert_eq!(result.id(), rack.id());
         assert_eq!(result.initialized, false);
@@ -1029,6 +1047,26 @@ mod test {
             .await
             .unwrap();
         assert!(result.initialized);
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_fleet_initialize_is_idempotent() {
+        let logctx = dev::test_setup_log("test_fleet_initialize_is_idempotent");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        // Create a Fleet, insert it into the DB.
+        let fleet = Fleet::new(Uuid::new_v4());
+        let result = datastore.fleet_insert(&opctx, &fleet).await.unwrap();
+        assert_eq!(result.id(), fleet.id());
+
+        // Re-insert the Fleet (check for idempotency).
+        let result2 = datastore.fleet_insert(&opctx, &fleet).await.unwrap();
+        assert_eq!(result2.id(), fleet.id());
+        assert_eq!(result2.time_modified(), result.time_modified());
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();

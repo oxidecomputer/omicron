@@ -29,6 +29,7 @@ use super::ActionRegistry;
 use super::NexusActionContext;
 use super::NexusSaga;
 use crate::app::sagas::NexusAction;
+use crate::authn;
 use crate::db::datastore::CrucibleResources;
 use lazy_static::lazy_static;
 use nexus_types::identity::Asset;
@@ -44,9 +45,9 @@ use uuid::Uuid;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Params {
+    pub serialized_authn: authn::saga::Serialized,
     pub volume_id: Uuid,
 }
-
 // volume delete saga: actions
 
 lazy_static! {

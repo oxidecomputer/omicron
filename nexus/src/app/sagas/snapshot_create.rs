@@ -126,9 +126,10 @@ pub struct Params {
 // snapshot create saga: actions
 
 lazy_static! {
-    static ref REGIONS_ALLOC: NexusAction = new_action_noop_undo(
+    static ref REGIONS_ALLOC: NexusAction = ActionFunc::new_action(
         "snapshot-create.regions-alloc",
         ssc_alloc_regions,
+        ssc_alloc_regions_undo,
     );
     static ref REGIONS_ENSURE: NexusAction = new_action_noop_undo(
         "snapshot-create.regions-ensure",
@@ -144,6 +145,11 @@ lazy_static! {
         "snapshot-create.create-snapshot-record",
         ssc_create_snapshot_record,
         ssc_create_snapshot_record_undo,
+    );
+    static ref SPACE_ACCOUNT: NexusAction = ActionFunc::new_action(
+        "snapshot-create.account-space",
+        ssc_account_space,
+        ssc_account_space_undo,
     );
     static ref SEND_SNAPSHOT_REQUEST: NexusAction = new_action_noop_undo(
         "snapshot-create.send-snapshot-request",
@@ -177,6 +183,7 @@ impl NexusSaga for SagaSnapshotCreate {
         registry.register(Arc::clone(&*REGIONS_ENSURE));
         registry.register(Arc::clone(&*CREATE_DESTINATION_VOLUME_RECORD));
         registry.register(Arc::clone(&*CREATE_SNAPSHOT_RECORD));
+        registry.register(Arc::clone(&*SPACE_ACCOUNT));
         registry.register(Arc::clone(&*SEND_SNAPSHOT_REQUEST));
         registry.register(Arc::clone(&*START_RUNNING_SNAPSHOT));
         registry.register(Arc::clone(&*CREATE_VOLUME_RECORD));
@@ -212,7 +219,6 @@ impl NexusSaga for SagaSnapshotCreate {
             "RegionsAlloc",
             REGIONS_ALLOC.as_ref(),
         ));
-
         builder.append(Node::action(
             "regions_ensure",
             "RegionsEnsure",
@@ -230,6 +236,12 @@ impl NexusSaga for SagaSnapshotCreate {
             "created_snapshot",
             "CreateSnapshotRecord",
             CREATE_SNAPSHOT_RECORD.as_ref(),
+        ));
+
+        builder.append(Node::action(
+            "no-result",
+            "RegionsAccount",
+            SPACE_ACCOUNT.as_ref(),
         ));
 
         // Send a snapshot request to a sled-agent
@@ -310,6 +322,23 @@ async fn ssc_alloc_regions(
         .map_err(ActionError::action_failed)?;
 
     Ok(datasets_and_regions)
+}
+
+async fn ssc_alloc_regions_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+
+    let region_ids = sagactx
+        .lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
+            "datasets_and_regions",
+        )?
+        .into_iter()
+        .map(|(_, region)| region.id())
+        .collect::<Vec<Uuid>>();
+
+    osagactx.datastore().regions_hard_delete(region_ids).await?;
+    Ok(())
 }
 
 async fn ssc_regions_ensure(
@@ -414,10 +443,12 @@ async fn ssc_create_destination_volume_record_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
 
     let destination_volume_id =
         sagactx.lookup::<Uuid>("destination_volume_id")?;
-    osagactx.nexus().volume_delete(destination_volume_id).await?;
+    osagactx.nexus().volume_delete(&opctx, destination_volume_id).await?;
 
     Ok(())
 }
@@ -506,6 +537,62 @@ async fn ssc_create_snapshot_record_undo(
         .project_delete_snapshot(&opctx, &authz_snapshot, &db_snapshot)
         .await?;
 
+    Ok(())
+}
+
+// TODO: Not yet idempotent
+async fn ssc_account_space(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+
+    let snapshot_created =
+        sagactx.lookup::<db::model::Snapshot>("created_snapshot")?;
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    osagactx
+        .datastore()
+        .virtual_resource_provisioning_update_disk(
+            &opctx,
+            params.project_id,
+            i64::try_from(snapshot_created.size.to_bytes())
+                .map_err(|e| {
+                    Error::internal_error(&format!(
+                        "updating resource usage: {e}"
+                    ))
+                })
+                .map_err(ActionError::action_failed)?,
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(())
+}
+
+// TODO: Not yet idempotent
+async fn ssc_account_space_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+
+    let snapshot_created =
+        sagactx.lookup::<db::model::Snapshot>("created_snapshot")?;
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    osagactx
+        .datastore()
+        .virtual_resource_provisioning_update_disk(
+            &opctx,
+            params.project_id,
+            -i64::try_from(snapshot_created.size.to_bytes())
+                .map_err(|e| {
+                    Error::internal_error(&format!(
+                        "updating resource usage: {e}"
+                    ))
+                })
+                .map_err(ActionError::action_failed)?,
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
     Ok(())
 }
 
@@ -783,10 +870,12 @@ async fn ssc_create_volume_record_undo(
 ) -> Result<(), anyhow::Error> {
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
     let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
 
     info!(log, "deleting volume {}", volume_id);
-    osagactx.nexus().volume_delete(volume_id).await?;
+    osagactx.nexus().volume_delete(&opctx, volume_id).await?;
 
     Ok(())
 }

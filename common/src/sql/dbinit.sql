@@ -39,6 +39,14 @@ CREATE DATABASE omicron;
 CREATE USER omicron;
 ALTER DEFAULT PRIVILEGES GRANT INSERT, SELECT, UPDATE, DELETE ON TABLES to omicron;
 
+-- Fleet: Represents a collection of racks
+CREATE TABLE omicron.public.fleet (
+    /* Identity metadata (asset) */
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL
+);
+
 /*
  * Racks
  */
@@ -47,6 +55,9 @@ CREATE TABLE omicron.public.rack (
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
+
+    -- The fleet to which this rack belongs
+    fleet_id UUID NOT NULL,
 
     /*
      * Identifies if rack management has been transferred from RSS -> Nexus.
@@ -126,6 +137,29 @@ CREATE TABLE omicron.public.service (
 /* Add an index which lets us look up the services on a sled */
 CREATE INDEX ON omicron.public.service (
     sled_id
+);
+
+-- A table describing virtual resource provisioning which may be associated
+-- with a collection of objects, including:
+-- - Projects
+-- - Organizations
+-- - Silos
+-- - Fleet
+CREATE TABLE omicron.public.virtual_resource_provisioning (
+    -- Should match the UUID of the corresponding collection.
+    id UUID PRIMARY KEY,
+    -- Identifies the type of the collection.
+    collection_type STRING(63) NOT NULL,
+
+    -- The amount of physical disk space which has been provisioned
+    -- on behalf of the collection.
+    virtual_disk_bytes_provisioned INT8 NOT NULL,
+
+    -- The number of CPUs provisioned by VMs.
+    cpus_provisioned INT8 NOT NULL,
+
+    -- The amount of RAM provisioned by VMs.
+    ram_provisioned INT8 NOT NULL
 );
 
 /*
@@ -324,6 +358,7 @@ CREATE TABLE omicron.public.silo (
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
 
+    fleet_id UUID NOT NULL,
     discoverable BOOL NOT NULL,
     authentication_mode omicron.public.authentication_mode NOT NULL,
     user_provision_type omicron.public.user_provision_type NOT NULL,

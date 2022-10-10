@@ -43,9 +43,10 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         rack_id: Uuid,
+        fleet_id: Uuid,
     ) -> Result<(), Error> {
         self.datastore()
-            .rack_insert(opctx, &db::model::Rack::new(rack_id))
+            .rack_insert(opctx, &db::model::Rack::new(rack_id, fleet_id))
             .await?;
         Ok(())
     }

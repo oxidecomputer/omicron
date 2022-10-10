@@ -79,6 +79,11 @@ lazy_static! {
         "instance-create.alloc-server",
         sic_alloc_server
     );
+    static ref RESOURCES_ACCOUNT: NexusAction = ActionFunc::new_action(
+        "instance-create.account-resources",
+        sic_account_resources,
+        sic_account_resources_undo,
+    );
     static ref ALLOC_PROPOLIS_IP: NexusAction = new_action_noop_undo(
         "instance-create.allocate-propolis-ip",
         sic_allocate_propolis_ip,
@@ -129,6 +134,7 @@ impl NexusSaga for SagaInstanceCreate {
 
     fn register_actions(registry: &mut super::ActionRegistry) {
         registry.register(Arc::clone(&*ALLOC_SERVER));
+        registry.register(Arc::clone(&*RESOURCES_ACCOUNT));
         registry.register(Arc::clone(&*ALLOC_PROPOLIS_IP));
         registry.register(Arc::clone(&*CREATE_INSTANCE_RECORD));
         registry.register(Arc::clone(&*CREATE_NETWORK_INTERFACE));
@@ -162,6 +168,12 @@ impl NexusSaga for SagaInstanceCreate {
             "server_id",
             "AllocServer",
             ALLOC_SERVER.as_ref(),
+        ));
+
+        builder.append(Node::action(
+            "no-result",
+            "ResourcesAccount",
+            RESOURCES_ACCOUNT.as_ref(),
         ));
 
         builder.append(Node::action(
@@ -838,6 +850,60 @@ pub(super) async fn allocate_sled_ipv6(
         .next_ipv6_address(opctx, sled_uuid)
         .await
         .map_err(ActionError::action_failed)
+}
+
+// TODO: Not yet idempotent
+async fn sic_account_resources(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    osagactx
+        .datastore()
+        .virtual_resource_provisioning_update_cpus_and_ram(
+            &opctx,
+            params.project_id,
+            i64::from(params.create_params.ncpus.0),
+            i64::try_from(params.create_params.memory.to_bytes())
+                .map_err(|e| {
+                    Error::internal_error(&format!(
+                        "updating resource usage: {e}"
+                    ))
+                })
+                .map_err(ActionError::action_failed)?,
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(())
+}
+
+// TODO: Not yet idempotent
+async fn sic_account_resources_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    osagactx
+        .datastore()
+        .virtual_resource_provisioning_update_cpus_and_ram(
+            &opctx,
+            params.project_id,
+            -i64::from(params.create_params.ncpus.0),
+            -i64::try_from(params.create_params.memory.to_bytes())
+                .map_err(|e| {
+                    Error::internal_error(&format!(
+                        "updating resource usage: {e}"
+                    ))
+                })
+                .map_err(ActionError::action_failed)?,
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(())
 }
 
 // Allocate an IP address on the destination sled for the Propolis server

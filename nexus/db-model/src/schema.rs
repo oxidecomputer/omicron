@@ -197,6 +197,7 @@ table! {
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
 
+        fleet_id -> Uuid,
         discoverable -> Bool,
         authentication_mode -> crate::AuthenticationModeEnum,
         user_provision_type -> crate::UserProvisionTypeEnum,
@@ -351,10 +352,19 @@ table! {
 }
 
 table! {
+    fleet (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+    }
+}
+
+table! {
     rack (id) {
         id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
+        fleet_id -> Uuid,
         initialized -> Bool,
         tuf_base_url -> Nullable<Text>,
     }
@@ -394,6 +404,16 @@ table! {
         sled_id -> Uuid,
         ip -> Inet,
         kind -> crate::ServiceKindEnum,
+    }
+}
+
+table! {
+    virtual_resource_provisioning {
+        id -> Uuid,
+        collection_type -> Text,
+        virtual_disk_bytes_provisioned -> Int8,
+        cpus_provisioned -> Int8,
+        ram_provisioned -> Int8,
     }
 }
 

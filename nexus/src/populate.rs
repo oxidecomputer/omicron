@@ -267,6 +267,37 @@ impl Populator for PopulateSiloUserRoleAssignments {
 }
 
 #[derive(Debug)]
+struct PopulateFleet;
+impl Populator for PopulateFleet {
+    fn populate<'a, 'b>(
+        &self,
+        opctx: &'a OpContext,
+        datastore: &'a DataStore,
+        _args: &'a PopulateArgs,
+    ) -> BoxFuture<'b, Result<(), Error>>
+    where
+        'a: 'b,
+    {
+        async {
+            let id = *db::fixed_data::FLEET_ID;
+            datastore.fleet_insert(opctx, &db::model::Fleet::new(id)).await?;
+            datastore
+                .virtual_resource_provisioning_create(
+                    opctx,
+                    db::model::VirtualResourceProvisioning::new(
+                        id,
+                        db::model::CollectionType::Fleet,
+                    ),
+                )
+                .await?;
+
+            Ok(())
+        }
+        .boxed()
+    }
+}
+
+#[derive(Debug)]
 struct PopulateRack;
 impl Populator for PopulateRack {
     fn populate<'a, 'b>(
@@ -280,7 +311,13 @@ impl Populator for PopulateRack {
     {
         async {
             datastore
-                .rack_insert(opctx, &db::model::Rack::new(args.rack_id))
+                .rack_insert(
+                    opctx,
+                    &db::model::Rack::new(
+                        args.rack_id,
+                        *db::fixed_data::FLEET_ID,
+                    ),
+                )
                 .await?;
 
             let params = params::IpPoolCreate {
@@ -305,13 +342,14 @@ impl Populator for PopulateRack {
 }
 
 lazy_static! {
-    static ref ALL_POPULATORS: [&'static dyn Populator; 7] = [
+    static ref ALL_POPULATORS: [&'static dyn Populator; 8] = [
         &PopulateBuiltinUsers,
         &PopulateBuiltinRoles,
         &PopulateBuiltinRoleAssignments,
         &PopulateBuiltinSilos,
         &PopulateSiloUsers,
         &PopulateSiloUserRoleAssignments,
+        &PopulateFleet,
         &PopulateRack,
     ];
 }

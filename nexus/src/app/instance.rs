@@ -239,7 +239,7 @@ impl super::Nexus {
         // TODO-robustness We need to figure out what to do with Destroyed
         // instances?  Presumably we need to clean them up at some point, but
         // not right away so that callers can see that they've been destroyed.
-        let (.., authz_instance, _) =
+        let (.., project, authz_instance, instance) =
             LookupPath::new(opctx, &self.db_datastore)
                 .organization_name(organization_name)
                 .project_name(project_name)
@@ -249,6 +249,19 @@ impl super::Nexus {
 
         self.db_datastore
             .project_delete_instance(opctx, &authz_instance)
+            .await?;
+        self.db_datastore
+            .virtual_resource_provisioning_update_cpus_and_ram(
+                &opctx,
+                project.id(),
+                -i64::from(instance.runtime_state.ncpus.0 .0),
+                -i64::try_from(instance.runtime_state.memory.to_bytes())
+                    .map_err(|e| {
+                        Error::internal_error(&format!(
+                            "updating resource usage: {e}"
+                        ))
+                    })?,
+            )
             .await?;
         self.db_datastore
             .instance_delete_all_network_interfaces(opctx, &authz_instance)
