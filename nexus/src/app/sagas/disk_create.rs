@@ -666,7 +666,7 @@ mod test {
             todo!();
         }
 
-        async fn disk_snapshot_sled_agent(
+        async fn disk_snapshot_instance_sled_agent(
             &self,
             instance: &db::model::Instance,
             disk_id: Uuid,

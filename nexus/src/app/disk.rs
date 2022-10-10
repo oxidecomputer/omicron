@@ -521,7 +521,7 @@ impl super::Nexus {
         Ok(())
     }
 
-    pub(crate) async fn disk_snapshot_sled_agent(
+    pub(crate) async fn disk_snapshot_instance_sled_agent(
         &self,
         instance: &db::model::Instance,
         disk_id: Uuid,

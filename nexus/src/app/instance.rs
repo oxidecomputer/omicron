@@ -726,6 +726,7 @@ impl super::Nexus {
     }
 
     /// Attach a disk to an instance.
+    // TODO: Delete?
     pub async fn instance_attach_disk(
         &self,
         opctx: &OpContext,

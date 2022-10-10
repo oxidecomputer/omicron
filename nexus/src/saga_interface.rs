@@ -51,7 +51,7 @@ pub trait NexusForSagas: Send + Sync {
         instance_id: Uuid,
     ) -> Result<nexus::InstanceRuntimeState, Error>;
 
-    async fn disk_snapshot_sled_agent(
+    async fn disk_snapshot_instance_sled_agent(
         &self,
         instance: &db::model::Instance,
         disk_id: Uuid,
@@ -67,14 +67,14 @@ pub trait NexusForSagas: Send + Sync {
     ) -> Result<(), Error>;
 
     // TODO: This one could be implemented purely in the DB?
-    async fn instance_attach_disk(
-        &self,
-        opctx: &OpContext,
-        organization_name: &db::model::Name,
-        project_name: &db::model::Name,
-        instance_name: &db::model::Name,
-        disk_name: &db::model::Name,
-    ) -> UpdateResult<db::model::Disk>;
+//    async fn instance_attach_disk(
+//        &self,
+//        opctx: &OpContext,
+//        organization_name: &db::model::Name,
+//        project_name: &db::model::Name,
+//        instance_name: &db::model::Name,
+//        disk_name: &db::model::Name,
+//    ) -> UpdateResult<db::model::Disk>;
 
     // TODO: This one could be implemented purely in the DB?
     async fn instance_detach_disk(
@@ -135,13 +135,13 @@ impl NexusForSagas for Nexus {
         self.instance_sled_agent_set_runtime(sled_id, body, instance_id).await
     }
 
-    async fn disk_snapshot_sled_agent(
+    async fn disk_snapshot_instance_sled_agent(
         &self,
         instance: &db::model::Instance,
         disk_id: Uuid,
         body: &sled_agent_client::types::InstanceIssueDiskSnapshotRequestBody,
     ) -> Result<(), Error> {
-        self.disk_snapshot_sled_agent(instance, disk_id, body).await
+        self.disk_snapshot_instance_sled_agent(instance, disk_id, body).await
     }
 
     async fn disk_snapshot_random_sled_agent(
@@ -152,23 +152,23 @@ impl NexusForSagas for Nexus {
         self.disk_snapshot_random_sled_agent(disk_id, body).await
     }
 
-    async fn instance_attach_disk(
-        &self,
-        opctx: &OpContext,
-        organization_name: &db::model::Name,
-        project_name: &db::model::Name,
-        instance_name: &db::model::Name,
-        disk_name: &db::model::Name,
-    ) -> UpdateResult<db::model::Disk> {
-        self.instance_attach_disk(
-            opctx,
-            organization_name,
-            project_name,
-            instance_name,
-            disk_name,
-        )
-        .await
-    }
+//    async fn instance_attach_disk(
+//        &self,
+//        opctx: &OpContext,
+//        organization_name: &db::model::Name,
+//        project_name: &db::model::Name,
+//        instance_name: &db::model::Name,
+//        disk_name: &db::model::Name,
+//    ) -> UpdateResult<db::model::Disk> {
+//        self.instance_attach_disk(
+//            opctx,
+//            organization_name,
+//            project_name,
+//            instance_name,
+//            disk_name,
+//        )
+//        .await
+//    }
 
     async fn instance_detach_disk(
         &self,

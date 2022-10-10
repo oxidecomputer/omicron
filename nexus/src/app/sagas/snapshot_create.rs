@@ -540,7 +540,7 @@ async fn ssc_send_snapshot_request(
             let body = InstanceIssueDiskSnapshotRequestBody { snapshot_id };
             osagactx
                 .nexus()
-                .disk_snapshot_sled_agent(&instance, disk.id(), &body)
+                .disk_snapshot_instance_sled_agent(&instance, disk.id(), &body)
                 .await
                 .map_err(ActionError::action_failed)?;
         }
