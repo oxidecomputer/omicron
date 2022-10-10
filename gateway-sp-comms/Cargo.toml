@@ -13,7 +13,7 @@ thiserror = "1.0.37"
 tlvc = {git = "https://github.com/oxidecomputer/tlvc.git"}
 tokio-stream = "0.1.10"
 usdt = "0.3.1"
-uuid = "1.1.0"
+uuid = "1.2.1"
 zip = { version = "0.6.2", default-features = false, features = ["deflate","bzip2"] }
 
 gateway-messages = { path = "../gateway-messages", features = ["std"] }
