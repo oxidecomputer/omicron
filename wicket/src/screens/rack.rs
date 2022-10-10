@@ -154,7 +154,7 @@ impl RackScreen {
             power_shelf_selected_style: Style::default().bg(OX_GRAY),
         };
 
-        let area = state.rack_state.rect.clone();
+        let area = state.rack_state.rect;
         f.render_widget(rack, area);
     }
 
@@ -215,10 +215,7 @@ impl RackScreen {
     fn close_help_menu(&mut self) {
         let state = self.help_menu_state.take();
         match state {
-            None => {
-                // Already closed
-                ()
-            }
+            None => (), // Already closed
             Some(AnimationState::Opening { frame, frame_max }) => {
                 // Transition to closing at the same position in the animation
                 self.help_menu_state =
@@ -340,11 +337,10 @@ impl Screen for RackScreen {
                 let left = state.rack_state.rect.x + 1;
                 let right = left + width;
 
-                state
-                    .rack_state
-                    .knight_rider_mode
-                    .as_mut()
-                    .map(|k| k.inc(left, right));
+                if let Some(k) = state.rack_state.knight_rider_mode.as_mut() {
+                    k.inc(left, right)
+                }
+
                 if self.help_button_state.selected {
                     let done = self.help_menu_state.as_mut().unwrap().step();
                     if done

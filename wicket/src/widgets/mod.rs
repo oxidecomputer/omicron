@@ -121,11 +121,7 @@ impl AnimationState {
     }
 
     pub fn is_opening(&self) -> bool {
-        if let AnimationState::Opening { .. } = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, AnimationState::Opening { .. })
     }
 
     pub fn is_closing(&self) -> bool {

@@ -63,10 +63,8 @@ impl<'a> Widget for Banner<'a> {
                     if let Some(fg) = self.style.fg {
                         cell.set_bg(fg);
                     }
-                } else {
-                    if let Some(bg) = self.style.bg {
-                        cell.set_bg(bg);
-                    }
+                } else if let Some(bg) = self.style.bg {
+                    cell.set_bg(bg);
                 }
                 len = x as u16;
             }

@@ -139,7 +139,7 @@ impl TabIndex {
     // Get the next tab index
     pub fn next(&self) -> TabIndex {
         self.current.as_ref().map_or_else(
-            || self.clone(),
+            || *self,
             |&i| {
                 let current = if i == self.max { 0 } else { i + 1 };
                 TabIndex { current: Some(current), max: self.max }
@@ -150,7 +150,7 @@ impl TabIndex {
     // Get the previous tab index
     pub fn prev(&self) -> TabIndex {
         self.current.as_ref().map_or_else(
-            || self.clone(),
+            || *self,
             |&i| {
                 let current = if i == 0 { self.max } else { i - 1 };
                 TabIndex { current: Some(current), max: self.max }

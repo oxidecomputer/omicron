@@ -72,19 +72,15 @@ impl<'a> Rack<'a> {
                             if pos == (inner.right() - x) as usize {
                                 cell.set_bg(Color::Red);
                             }
-                        } else {
-                            if pos == (x - inner.left()) as usize {
-                                cell.set_bg(Color::Red);
-                            }
+                        } else if pos == (x - inner.left()) as usize {
+                            cell.set_bg(Color::Red);
                         }
                     }
                     if let Some(color) = self.sled_selected_style.fg {
                         cell.set_fg(color);
                     }
-                } else {
-                    if let Some(color) = self.sled_style.fg {
-                        cell.set_fg(color);
-                    }
+                } else if let Some(color) = self.sled_style.fg {
+                    cell.set_fg(color);
                 }
             }
         }
@@ -212,6 +208,7 @@ pub struct RackState {
     pub knight_rider_mode: Option<KnightRiderMode>,
 }
 
+#[allow(clippy::new_without_default)]
 impl RackState {
     pub fn new() -> RackState {
         let mut state = RackState {
@@ -372,7 +369,7 @@ impl RackState {
                 (component_height * 20, component_height, component_height)
             };
 
-        let mut rect = rect.clone();
+        let mut rect = *rect;
         rect.height = rack_height;
 
         // Center the rack vertically as much as possible
@@ -387,7 +384,7 @@ impl RackState {
         let sled_width = rect.width / 2;
 
         // Save our rack rect for later
-        self.rect = rect.clone();
+        self.rect = rect;
 
         // Top Sleds
         for i in 0..16u8 {

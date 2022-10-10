@@ -71,7 +71,7 @@ impl<'a> Widget for Logo<'a> {
                         .set_symbol(" ");
                     if x < paint_point {
                         // The cell is highlighted
-                        if x < 11 || x > 17 {
+                        if !(11..=17).contains(&x) {
                             cell.set_bg(self.style.fg.unwrap());
                         } else {
                             // We're painting the Oxide `x`

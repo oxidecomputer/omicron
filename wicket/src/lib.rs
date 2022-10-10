@@ -100,6 +100,7 @@ pub struct Wizard {
     tokio_rt: tokio::runtime::Runtime,
 }
 
+#[allow(clippy::new_without_default)]
 impl Wizard {
     pub fn new() -> Wizard {
         let log = Self::setup_log("/tmp/wicket.log").unwrap();
@@ -296,7 +297,7 @@ async fn run_event_listener(log: slog::Logger, events_tx: Sender<Event>) {
         loop {
             tokio::select! {
                 _ = ticker.tick() => {
-                        if let Err(_) = events_tx.send(Event::Tick) {
+                        if events_tx.send(Event::Tick).is_err() {
                             info!(log, "Event listener completed");
                             // The receiver was dropped. Program is ending.
                             return;
@@ -315,7 +316,7 @@ async fn run_event_listener(log: slog::Logger, events_tx: Sender<Event>) {
                               return;
                             }
                         };
-                        if let Err(_) = events_tx.send(Event::Term(event)) {
+                        if events_tx.send(Event::Term(event)).is_err() {
                             info!(log, "Event listener completed");
                             // The receiver was dropped. Program is ending.
                             return;
@@ -341,6 +342,12 @@ pub struct State {
     pub inventory: Inventory,
     pub rack_state: RackState,
     pub mouse: Point,
+}
+
+impl Default for State {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl State {

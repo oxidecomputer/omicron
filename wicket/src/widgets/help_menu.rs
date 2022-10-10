@@ -44,7 +44,7 @@ impl<'a> Widget for HelpMenu<'a> {
         let yshift = 1;
 
         // Draw the background and some borders
-        let mut bg = rect.clone();
+        let mut bg = rect;
         bg.width = text_width + xshift * 2;
         bg.height = text_height + yshift * 3 / 2 + 2;
         let drawn_bg = animate_clear_buf(bg, buf, self.style, self.state);

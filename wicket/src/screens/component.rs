@@ -178,10 +178,10 @@ impl ComponentScreen {
         let text = Text::styled("INVENTORY\n\n", header_style);
         let mut rect = f.size();
         rect.y = 6;
-        rect.height = rect.height - 6;
+        rect.height -= 6;
         let center = (rect.width - text.width() as u16) / 2;
-        rect.x = rect.x + center;
-        rect.width = rect.width - center;
+        rect.x += center;
+        rect.width -= center;
         let header = Paragraph::new(text);
         f.render_widget(header, rect);
 
@@ -198,11 +198,11 @@ impl ComponentScreen {
 
         let mut rect = f.size();
         rect.y = 9;
-        rect.height = rect.height - 9;
+        rect.height -= 9;
 
         let center = (rect.width - text.width() as u16) / 2;
-        rect.x = rect.x + center;
-        rect.width = rect.width - center;
+        rect.x += center;
+        rect.width -= center;
 
         let inventory = Paragraph::new(text);
         f.render_widget(inventory, rect);
@@ -305,10 +305,7 @@ impl ComponentScreen {
     fn close_help_menu(&mut self) {
         let state = self.help_menu_state.take();
         match state {
-            None => {
-                // Already closed
-                ()
-            }
+            None => (), // Already closed
             Some(AnimationState::Opening { frame, frame_max }) => {
                 // Transition to closing at the same position in the animation
                 self.help_menu_state =
