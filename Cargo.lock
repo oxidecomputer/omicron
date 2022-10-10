@@ -1448,23 +1448,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "faux-mgs"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap 4.0.11",
- "gateway-messages",
- "gateway-sp-comms",
- "slog",
- "slog-async",
- "slog-term",
- "termios",
- "thiserror",
- "tokio",
- "uuid",
-]
-
-[[package]]
 name = "ff"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1731,6 +1714,7 @@ dependencies = [
 [[package]]
 name = "gateway-messages"
 version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?branch=main#90a4a944d35b7250b4ab468b31ae88deaf34ff78"
 dependencies = [
  "bitflags",
  "hubpack",
@@ -1745,11 +1729,11 @@ dependencies = [
 [[package]]
 name = "gateway-sp-comms"
 version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?branch=main#90a4a944d35b7250b4ab468b31ae88deaf34ff78"
 dependencies = [
+ "backoff",
  "futures",
  "gateway-messages",
- "omicron-common",
- "omicron-test-utils",
  "once_cell",
  "serde",
  "serde_with",
@@ -5629,15 +5613,6 @@ checksum = "633c1a546cee861a1a6d0dc69ebeca693bf4296661ba7852b9d21d159e0506df"
 dependencies = [
  "libc",
  "winapi",
-]
-
-[[package]]
-name = "termios"
-version = "0.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "411c5bf740737c7918b8b1fe232dca4dc9f8e754b8ad5e20966814001ed0ac6b"
-dependencies = [
- "libc",
 ]
 
 [[package]]
