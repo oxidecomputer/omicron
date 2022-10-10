@@ -14,11 +14,13 @@ use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
 use crate::db::model::SiloGroup;
 use crate::db::model::SiloGroupMembership;
+use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use async_bb8_diesel::{AsyncConnection, OptionalExtension};
 use chrono::Utc;
 use diesel::prelude::*;
 use omicron_common::api::external::CreateResult;
+use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
@@ -218,5 +220,23 @@ impl DataStore {
                     ErrorHandler::Server,
                 ),
             })
+    }
+
+    pub async fn silo_groups_list_by_id(
+        &self,
+        opctx: &OpContext,
+        authz_silo: &authz::Silo,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<SiloGroup> {
+        use db::schema::silo_group::dsl;
+
+        opctx.authorize(authz::Action::Read, authz_silo).await?;
+        paginated(dsl::silo_group, dsl::id, pagparams)
+            .filter(dsl::silo_id.eq(authz_silo.id()))
+            .filter(dsl::time_deleted.is_null())
+            .select(SiloGroup::as_select())
+            .load_async::<SiloGroup>(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 }
