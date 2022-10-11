@@ -8,7 +8,6 @@ use super::colors::*;
 use super::Screen;
 use super::ScreenId;
 use super::{Height, Width};
-use crate::widgets::AnimationState;
 use crate::widgets::Control;
 use crate::widgets::ControlId;
 use crate::widgets::HelpMenuState;
