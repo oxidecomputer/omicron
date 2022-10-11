@@ -11,7 +11,6 @@ use super::{Height, Width};
 use crate::widgets::Control;
 use crate::widgets::ControlId;
 use crate::widgets::HelpMenuState;
-use crate::widgets::KnightRiderMode;
 use crate::widgets::{Banner, HelpButton, HelpButtonState, HelpMenu, Rack};
 use crate::Action;
 use crate::Frame;
@@ -187,21 +186,12 @@ impl RackScreen {
             }
             KeyCode::Char('k') => {
                 if event.modifiers.contains(KeyModifiers::CONTROL) {
-                    self.toggle_knight_rider_mode(state);
+                    state.rack_state.toggle_knight_rider_mode();
                 }
             }
             _ => (),
         }
         vec![Action::Redraw]
-    }
-
-    fn toggle_knight_rider_mode(&self, state: &mut State) {
-        if state.rack_state.knight_rider_mode.is_some() {
-            state.rack_state.knight_rider_mode = None;
-        } else {
-            state.rack_state.knight_rider_mode =
-                Some(KnightRiderMode::default());
-        }
     }
 
     fn handle_mouse_event(
@@ -309,12 +299,8 @@ impl Screen for RackScreen {
                 self.handle_mouse_event(state, mouse_event)
             }
             ScreenEvent::Tick => {
-                let width = state.rack_state.rect.width / 2 - 2;
-                let left = state.rack_state.rect.x + 1;
-                let right = left + width;
-
                 if let Some(k) = state.rack_state.knight_rider_mode.as_mut() {
-                    k.inc(left, right)
+                    k.step();
                 }
 
                 if !self.help_menu_state.is_closed() {

@@ -59,20 +59,14 @@ impl<'a> Rack<'a> {
 
         // Draw some U.2 bays
         // TODO: Draw 10 only? - That may not scale down as well
-        let inner_width = inner.right() - inner.left();
         for x in inner.left()..inner.right() {
             for y in inner.top()..inner.bottom() {
                 let cell = buf.get_mut(x, y).set_symbol("▕");
                 if self.state.tabbed == component_id {
-                    if let Some(KnightRiderMode { count, move_left }) =
+                    if let Some(KnightRiderMode { pos, .. }) =
                         self.state.knight_rider_mode
                     {
-                        let pos = count % inner_width as usize;
-                        if move_left {
-                            if pos == (inner.right() - x) as usize {
-                                cell.set_bg(Color::Red);
-                            }
-                        } else if pos == (x - inner.left()) as usize {
+                        if x == (inner.left() + pos) {
                             cell.set_bg(Color::Red);
                         }
                     }
@@ -177,18 +171,23 @@ const MAX_TAB_INDEX: u16 = 34;
 // Easter egg alert: Support for Knight Rider mode
 #[derive(Debug, Default)]
 pub struct KnightRiderMode {
-    count: usize,
+    width: u16,
+    pos: u16,
     move_left: bool,
 }
 
 impl KnightRiderMode {
-    pub fn inc(&mut self, left: u16, right: u16) {
-        self.count += 1;
-        if self.count % left as usize == 0 {
+    pub fn step(&mut self) {
+        if self.pos == 0 && self.move_left {
+            self.pos = 1;
             self.move_left = false;
-        }
-        if self.count % right as usize == 0 {
+        } else if (self.pos == self.width) && !self.move_left {
             self.move_left = true;
+            self.pos = self.width - 1;
+        } else if self.move_left {
+            self.pos -= 1;
+        } else {
+            self.pos += 1;
         }
     }
 }
@@ -237,6 +236,16 @@ impl RackState {
 
         state.init_tab_index();
         state
+    }
+
+    pub fn toggle_knight_rider_mode(&mut self) {
+        if self.knight_rider_mode.is_none() {
+            let mut kr = KnightRiderMode::default();
+            kr.width = self.rect.width / 2 - 2;
+            self.knight_rider_mode = Some(kr);
+        } else {
+            self.knight_rider_mode = None;
+        }
     }
 
     /// We call this when the mouse cursor intersects the rack. This figures out which
@@ -385,6 +394,13 @@ impl RackState {
 
         // Save our rack rect for later
         self.rect = rect;
+
+        // Is KnightRiderModeEnabled. Need to reset the width.
+        if let Some(kr) = &mut self.knight_rider_mode {
+            kr.pos = 0;
+            kr.move_left = false;
+            kr.width = rect.width / 2 - 2;
+        }
 
         // Top Sleds
         for i in 0..16u8 {
