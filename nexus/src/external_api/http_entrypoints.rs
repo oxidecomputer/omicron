@@ -9,9 +9,9 @@ use super::views::IpPoolRange;
 use super::{
     console_api, device_auth, params, views,
     views::{
-        GlobalImage, IdentityProvider, Image, Organization, Project, Rack,
-        Role, Silo, Sled, Snapshot, SshKey, User, UserBuiltin, Vpc, VpcRouter,
-        VpcSubnet,
+        GlobalImage, Group, IdentityProvider, Image, Organization, Project,
+        Rack, Role, Silo, Sled, Snapshot, SshKey, User, UserBuiltin, Vpc,
+        VpcRouter, VpcSubnet,
     },
 };
 use crate::authz;
@@ -243,6 +243,7 @@ pub fn external_api() -> NexusApiDescription {
 
         api.register(updates_refresh)?;
         api.register(user_list)?;
+        api.register(group_list)?;
 
         // Console API operations
         api.register(console_api::login_begin)?;
@@ -4107,6 +4108,39 @@ async fn user_list(
             &query,
             users,
             &|_, user: &User| user.id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+// Silo groups
+
+/// List groups
+#[endpoint {
+    method = GET,
+    path = "/groups",
+    tags = ["silos"],
+}]
+async fn group_list(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<Group>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let pagparams = data_page_params_for(&rqctx, &query)?;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let groups = nexus
+            .silo_groups_list(&opctx, &pagparams)
+            .await?
+            .into_iter()
+            .map(|i| i.into())
+            .collect();
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            groups,
+            &|_, group: &Group| group.id,
         )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
