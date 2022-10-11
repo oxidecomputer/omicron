@@ -28,3 +28,58 @@ Most widgets contain a reference to state which is mutated by input events, and
 defined in the same file as the widget. The state often implements a `Control`
 that allows it to be manipulated  by the rest of the system in a unified
 manner.
+
+# Design
+
+The main type of the wicket crate is the `Wizard`. The wizard is run by the `wicket` binary and is in charge of:
+ * Handling user input (mouse, keyboard, resize) events
+ * Sending requests to downstream services (MGS + RSS)
+ * Handling events from downstream services
+ * Managing the active screen and triggering terminal rendering
+
+There is a main thread that runs an infinite loop in the `Wizard::mainloop`
+method. The loops job is to receive `Event`s from a single MPSC channel
+and update internal state, either directly or by forwarding events to the
+currently active screen, by calling its `on` method. The active screen
+processes events, updates its internal state (possibly including global state
+passed in via the `on` method), and returns a list of `Action`s that instructs
+the wizard what to do next. Currently there are only two types of `Action`s:
+
+ * `Action::Redraw` - which instructs the Wizard to call the active screen's `draw` method
+ * `Action::SwitchScreen(ScreenId)` - which instructs the wizard to transition between screens
+
+It's important to notice that the internal state of the system is only updated
+upon event receipt, and that a screen never processes an event that can
+mutate state and render in the same method. This makes it very easy to test
+the internal state mutations and behavoir of a screen. It also means that all
+drawing code is effectively stateless and fully immediate. While rendering
+`Widget`s relies on the current state of the system, the system does not
+change at all during rendering, and so an immutable borrow can be utilized for
+this state. This fits well with the `tui-rs` immediate drawing paradigm where
+Widgets are created right before rendering and passed by value to the renderb
+function, which consumes them.
+
+Besides the main thread, which runs `mainloop`, there is a separate tokio
+runtime which is used to drive communications with MGS and RSS, and to manage
+inputs and timers. While requests are driven by MGS and RSS clients, all
+replies are handled by the tokio runtime. Any important information in these
+replies is forwarded as an `Event` over a channel to be received in `mainloop`.
+All `Event`s, whether respones from downstream services, user input, or
+timer ticks are sent over the same channel in an `Event` enum. This keeps the
+`mainloop` simple and provides a total ordering of all events, which can allow
+for easier debugging.
+
+As mentioned above, a timer tick is sent as an `Event::Tick` message over
+a channel to the mainloop. Timers currently fire every 25ms, and help drive
+any animations. We don't redraw on every timer tick, since it's relatively
+expensive to calculate widget positions, and since the screens themselves
+return actions when they need to be redrawn. However, the widget also doesn't
+know when a screen animation is ongoing, and so it forwards all ticks to the
+currently active screen which returns an `Action::Redraw` if the screen needs
+to be redrawn.
+
+
+# Screens, Widgets, and Controls
+
+
+# What's left?
