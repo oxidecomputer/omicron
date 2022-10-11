@@ -78,8 +78,47 @@ know when a screen animation is ongoing, and so it forwards all ticks to the
 currently active screen which returns an `Action::Redraw` if the screen needs
 to be redrawn.
 
-
 # Screens, Widgets, and Controls
+
+A [`Screen`] represents the current visual state of the `Wizard` to the user,
+and what inputs are available to the user. Each `Screen` maintains its own
+internal state which can be mutated in response to events delivered to it via
+its `on` method, which also provides mutable access to a globl `State` which is
+relevant across sceens. As mentioned above, a `Screen::draw` method is called
+to render the current screen.
+
+Screens abstract the terminal display or tty, which itself can be modeled
+as a buffer of characters or a rectangle with a width and height, and x
+and y coordinates for the upper left hand corner. This rectangle can be
+further divided into rectangles that can be independently styled and drawn.
+These rectangles can be manipulated directly, but in the common case this
+manipulation is abstracted into a drawable `Widget`. We have implemented
+several of our own Widgets includng the rack view. Each screen has manual
+placement code for these widgets which allows full flexibility and responsive
+design.
+
+Widgets get consumed when drawn to the screen. And the placement code
+determines where the Widget rectangles are drawn. However, how do we change the
+styling of the Widgets, such that we know when a mouse hover is occurring or
+a button was clicked? For this take the minimal state required to render the
+widgets and implement a `Control`. Control's provide two key things: access to
+the rectangle, or `Rect`, that we need in order to draw the widget on the next render,
+and a unique ID, that allows Screens to keep track of which control is
+currently `active` or being hovered over. When a mouse movement event comes in,
+we can use rectangle intersection to see if the mouse is currently over a given
+Control, and mark it as `hovered'.
 
 
 # What's left?
+
+There are currently 3 screens implemented:
+ * Splash screen
+ * Rack view screen
+ * Component (Sled, Switch, PSC) view
+
+Navigation and UI for these screens works well, but there is no functionality
+implemented. All the inventory and power data shown in the `Component` screen
+is fake. We also aren't currently really talking to the MGS and RSS. Lastly,
+we don't have a way to take rack updates and install them, or initialize the
+rack (including trust quorum). This is a lot of functionality that will be
+implemented incrementally. 
