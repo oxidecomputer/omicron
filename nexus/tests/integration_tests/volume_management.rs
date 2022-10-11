@@ -1392,7 +1392,6 @@ async fn test_volume_remove_rop_saga_no_volume(
     cptestctx: &ControlPlaneTestContext,
 ) {
     // Test calling the saga on a volume that does not exist.
-    let nexus = &cptestctx.server.apictx.nexus;
     let volume_id = Uuid::new_v4();
 
     println!("Non-existant volume: {:?}", volume_id);
@@ -1400,7 +1399,7 @@ async fn test_volume_remove_rop_saga_no_volume(
     let rop_url = format!("/volume/remove-read-only-parent/{}", volume_id);
 
     // Call the internal API endpoint for removal of the read only parent
-    let res = int_client
+    int_client
         .make_request(
             Method::POST,
             &rop_url,
@@ -1439,7 +1438,7 @@ async fn test_volume_remove_rop_saga_volume_not_volume(
     let rop_url = format!("/volume/remove-read-only-parent/{}", volume_id);
 
     // Call the internal API endpoint for removal of the read only parent
-    let res = int_client
+    int_client
         .make_request(
             Method::POST,
             &rop_url,
