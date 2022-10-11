@@ -21,6 +21,7 @@ pub use animated_logo::{Logo, LogoState, LOGO_HEIGHT, LOGO_WIDTH};
 pub use banner::Banner;
 pub use help_button::{HelpButton, HelpButtonState};
 pub use help_menu::HelpMenu;
+pub use help_menu::HelpMenuState;
 pub use rack::{KnightRiderMode, Rack, RackState};
 pub use screen_button::{ScreenButton, ScreenButtonState};
 

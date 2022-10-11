@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! A help button that brings up a help menu when selected
+//! A help button that brings up a [`HelpMenu`] when selected
 
 use super::get_control_id;
 use super::Control;
@@ -21,7 +21,6 @@ use tui::widgets::Widget;
 pub struct HelpButtonState {
     control_id: ControlId,
     pub rect: Rect,
-    pub selected: bool,
 }
 
 impl HelpButtonState {
@@ -29,7 +28,6 @@ impl HelpButtonState {
         HelpButtonState {
             control_id: get_control_id(),
             rect: Rect { height: 5, width: 12, x, y },
-            selected: false,
         }
     }
 }

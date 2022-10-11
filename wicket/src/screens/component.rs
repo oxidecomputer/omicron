@@ -6,9 +6,9 @@
 
 use super::colors::*;
 use super::Screen;
-use crate::widgets::AnimationState;
 use crate::widgets::Control;
 use crate::widgets::ControlId;
+use crate::widgets::HelpMenuState;
 use crate::widgets::{HelpButton, HelpButtonState, HelpMenu};
 use crate::widgets::{ScreenButton, ScreenButtonState};
 use crate::Action;
@@ -31,7 +31,7 @@ pub struct ComponentScreen {
     hovered: Option<ControlId>,
     help_data: Vec<(&'static str, &'static str)>,
     help_button_state: HelpButtonState,
-    help_menu_state: Option<AnimationState>,
+    help_menu_state: HelpMenuState,
     rack_screen_button_state: ScreenButtonState,
 }
 
@@ -41,7 +41,7 @@ impl ComponentScreen {
             ("<TAB>", "Cycle forward through components"),
             ("<SHIFT>-<TAB>", "Cycle backwards through components"),
             ("<ESC>", "Go back to the rack screen"),
-            ("<CTRL-r", "Bo back to the rack screen"),
+            ("<CTRL-r", "Go back to the rack screen"),
             ("<CTRL-h", "Toggle this help menu"),
             ("<CTRL-c>", "Exit the program"),
         ];
@@ -49,7 +49,7 @@ impl ComponentScreen {
             hovered: None,
             help_data,
             help_button_state: HelpButtonState::new(1, 0),
-            help_menu_state: None,
+            help_menu_state: HelpMenuState::default(),
             rack_screen_button_state: ScreenButtonState::new(
                 ScreenId::Rack,
                 // This get's reset on every draw
@@ -128,13 +128,16 @@ impl ComponentScreen {
             .title_alignment(Alignment::Center);
         f.render_widget(power_state_block, rect);
 
-        // Draw the help button if not selected, otherwise draw the help menu
-        if self.help_button_state.selected {
+        // Draw the help button if the help menu is closed, otherwise draw the
+        // help menu
+        if !self.help_menu_state.is_closed() {
             let menu = HelpMenu {
                 help: &self.help_data,
                 style: help_menu_style,
                 command_style: help_menu_command_style,
-                state: *self.help_menu_state.as_ref().unwrap(),
+                // Unwrap is safe because we check that the menu is open (and
+                // thus has an AnimationState).
+                state: self.help_menu_state.get_animation_state().unwrap(),
             };
             f.render_widget(menu, f.size());
         } else {
@@ -229,7 +232,7 @@ impl ComponentScreen {
             }
             KeyCode::Char('h') => {
                 if event.modifiers.contains(KeyModifiers::CONTROL) {
-                    self.toggle_help_menu()
+                    self.help_menu_state.toggle();
                 }
             }
             _ => (),
@@ -256,7 +259,7 @@ impl ComponentScreen {
     fn handle_mouse_click(&mut self, _: &mut State) -> Vec<Action> {
         match self.hovered {
             Some(control_id) if control_id == self.help_button_state.id() => {
-                self.open_help_menu();
+                self.help_menu_state.open();
                 vec![]
             }
             Some(control_id)
@@ -295,39 +298,6 @@ impl ComponentScreen {
             None
         }
     }
-
-    // TODO: DEDUPE
-    fn toggle_help_menu(&mut self) {
-        if self.help_button_state.selected {
-            self.close_help_menu();
-        } else {
-            self.open_help_menu();
-        }
-    }
-
-    // TODO: DEDUPE
-    fn open_help_menu(&mut self) {
-        self.help_button_state.selected = true;
-        self.help_menu_state
-            .get_or_insert(AnimationState::Opening { frame: 0, frame_max: 8 });
-    }
-
-    // TODO: DEDUPE
-    fn close_help_menu(&mut self) {
-        let state = self.help_menu_state.take();
-        match state {
-            None => (), // Already closed
-            Some(AnimationState::Opening { frame, frame_max }) => {
-                // Transition to closing at the same position in the animation
-                self.help_menu_state =
-                    Some(AnimationState::Closing { frame, frame_max });
-            }
-            Some(s) => {
-                // Already closing. Maintain same state
-                self.help_menu_state = Some(s);
-            }
-        }
-    }
 }
 
 impl Screen for ComponentScreen {
@@ -355,21 +325,9 @@ impl Screen for ComponentScreen {
                 self.handle_mouse_event(state, mouse_event)
             }
             ScreenEvent::Tick => {
-                // TODO: DEDUPE w/ RackScreen
-                if self.help_button_state.selected {
-                    let done = self.help_menu_state.as_mut().unwrap().step();
-                    if done
-                        && self.help_menu_state.as_ref().unwrap().is_closing()
-                        && self.help_button_state.selected
-                    {
-                        self.help_menu_state = None;
-                        self.help_button_state.selected = false;
-                        vec![Action::Redraw]
-                    } else if !done {
-                        vec![Action::Redraw]
-                    } else {
-                        vec![]
-                    }
+                if !self.help_menu_state.is_closed() {
+                    self.help_menu_state.step();
+                    vec![Action::Redraw]
                 } else {
                     vec![]
                 }

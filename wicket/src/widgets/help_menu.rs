@@ -14,6 +14,59 @@ use tui::widgets::Paragraph;
 use tui::widgets::Widget;
 use tui::widgets::{Block, Borders};
 
+#[derive(Default)]
+pub struct HelpMenuState(Option<AnimationState>);
+
+impl HelpMenuState {
+    pub fn get_animation_state(&self) -> Option<AnimationState> {
+        self.0
+    }
+
+    // Return true if there is no [`AnimationState`]
+    pub fn is_closed(&self) -> bool {
+        self.0.is_none()
+    }
+
+    // Toggle the display of the help menu
+    pub fn toggle(&mut self) {
+        if self.is_closed() {
+            self.open()
+        } else {
+            self.close();
+        }
+    }
+
+    // Perform an animation step
+    pub fn step(&mut self) {
+        let state = self.0.as_mut().unwrap();
+        let done = state.step();
+        let is_closed = state.is_closing() && done;
+        if is_closed {
+            self.0 = None;
+        }
+    }
+
+    pub fn open(&mut self) {
+        self.0
+            .get_or_insert(AnimationState::Opening { frame: 0, frame_max: 8 });
+    }
+
+    pub fn close(&mut self) {
+        let state = self.0.take();
+        match state {
+            None => (), // Already closed
+            Some(AnimationState::Opening { frame, frame_max }) => {
+                // Transition to closing at the same position in the animation
+                self.0 = Some(AnimationState::Closing { frame, frame_max });
+            }
+            Some(s) => {
+                // Already closing. Maintain same state
+                self.0 = Some(s);
+            }
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct HelpMenu<'a> {
     pub help: &'a [(&'a str, &'a str)],
