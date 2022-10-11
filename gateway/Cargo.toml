@@ -19,9 +19,17 @@ tokio-tungstenite = "0.17"
 toml = "0.5.9"
 uuid = "1.2.1"
 
-gateway-messages = { path = "../gateway-messages", features = ["std"] }
-gateway-sp-comms = { path = "../gateway-sp-comms" }
 omicron-common = { path = "../common" }
+
+[dependencies.gateway-messages]
+git = "https://github.com/oxidecomputer/management-gateway-service"
+rev = "90a4a944d35b7250b4ab468b31ae88deaf34ff78"
+default-features = false
+features = ["std"]
+
+[dependencies.gateway-sp-comms]
+git = "https://github.com/oxidecomputer/management-gateway-service"
+rev = "90a4a944d35b7250b4ab468b31ae88deaf34ff78"
 
 [dependencies.slog]
 version = "2.7"
