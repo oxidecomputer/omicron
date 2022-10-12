@@ -38,9 +38,9 @@ The main type of the wicket crate is the `Wizard`. The wizard is run by the `wic
  * Managing the active screen and triggering terminal rendering
 
 There is a main thread that runs an infinite loop in the `Wizard::mainloop`
-method. The loops job is to receive `Event`s from a single MPSC channel
+method. The loop's job is to receive `Event`s from a single MPSC channel
 and update internal state, either directly or by forwarding events to the
-currently active screen, by calling its `on` method. The active screen
+currently active screen by calling its `on` method. The active screen
 processes events, updates its internal state (possibly including global state
 passed in via the `on` method), and returns a list of `Action`s that instructs
 the wizard what to do next. Currently there are only two types of `Action`s:
@@ -51,62 +51,62 @@ the wizard what to do next. Currently there are only two types of `Action`s:
 It's important to notice that the internal state of the system is only updated
 upon event receipt, and that a screen never processes an event that can
 mutate state and render in the same method. This makes it very easy to test
-the internal state mutations and behavoir of a screen. It also means that all
+the internal state mutations and behavior of a screen. It also means that all
 drawing code is effectively stateless and fully immediate. While rendering
-`Widget`s relies on the current state of the system, the system does not
-change at all during rendering, and so an immutable borrow can be utilized for
-this state. This fits well with the `tui-rs` immediate drawing paradigm where
-Widgets are created right before rendering and passed by value to the renderb
-function, which consumes them.
+`Widget`s relies on the current state of the system, the state of the  system
+does not change at all during rendering, and so an immutable borrow can be
+utilized for this state. This fits well with the `tui-rs` immediate drawing
+paradigm where widgets are created right before rendering and passed by value
+to the render function, which consumes them.
 
 Besides the main thread, which runs `mainloop`, there is a separate tokio
 runtime which is used to drive communications with MGS and RSS, and to manage
-inputs and timers. While requests are driven by MGS and RSS clients, all
-replies are handled by the tokio runtime. Any important information in these
-replies is forwarded as an `Event` over a channel to be received in `mainloop`.
-All `Event`s, whether respones from downstream services, user input, or
-timer ticks are sent over the same channel in an `Event` enum. This keeps the
-`mainloop` simple and provides a total ordering of all events, which can allow
-for easier debugging.
+inputs and timers. Requests are driven by MGS and RSS clients and all replies
+are handled by these clients in the tokio runtime. Any important information
+in these replies is forwarded as an `Event` over a channel to be received
+in `mainloop`. All `Event`s, whether respones from downstream services, user
+input, or timer ticks, are sent over the same channel in an `Event` enum. This
+keeps the `mainloop` simple and provides a total ordering of all events, which
+can allow for easier debugging.
 
 As mentioned above, a timer tick is sent as an `Event::Tick` message over
 a channel to the mainloop. Timers currently fire every 25ms, and help drive
 any animations. We don't redraw on every timer tick, since it's relatively
 expensive to calculate widget positions, and since the screens themselves
-return actions when they need to be redrawn. However, the widget also doesn't
+return actions when they need to be redrawn. However, the wizard also doesn't
 know when a screen animation is ongoing, and so it forwards all ticks to the
 currently active screen which returns an `Action::Redraw` if the screen needs
 to be redrawn.
 
 # Screens, Widgets, and Controls
 
-A [`Screen`] represents the current visual state of the `Wizard` to the user,
-and what inputs are available to the user. Each `Screen` maintains its own
-internal state which can be mutated in response to events delivered to it via
-its `on` method, which also provides mutable access to a globl `State` which is
-relevant across sceens. As mentioned above, a `Screen::draw` method is called
-to render the current screen.
+A `Screen` represents the current visual state of the `Wizard` to the user, and
+what inputs are available to the user. Each `Screen` maintains its own internal
+state which can be mutated in response to events delivered to it via its `on`
+method. The `on` method also provides mutable access to a globl `State` which
+is relevant across sceens. As mentioned above, a `Screen::draw` method is
+called to render the current screen.
 
-Screens abstract the terminal display or tty, which itself can be modeled
+Screens abstract the terminal display, or tty, which itself can be modeled
 as a buffer of characters or a rectangle with a width and height, and x
 and y coordinates for the upper left hand corner. This rectangle can be
 further divided into rectangles that can be independently styled and drawn.
 These rectangles can be manipulated directly, but in the common case this
 manipulation is abstracted into a drawable `Widget`. We have implemented
-several of our own Widgets includng the rack view. Each screen has manual
+several of our own widgets includng the rack view. Each screen has manual
 placement code for these widgets which allows full flexibility and responsive
 design.
 
 Widgets get consumed when drawn to the screen. And the placement code
-determines where the Widget rectangles are drawn. However, how do we change the
-styling of the Widgets, such that we know when a mouse hover is occurring or
-a button was clicked? For this take the minimal state required to render the
-widgets and implement a `Control`. Control's provide two key things: access to
-the rectangle, or `Rect`, that we need in order to draw the widget on the next render,
-and a unique ID, that allows Screens to keep track of which control is
-currently `active` or being hovered over. When a mouse movement event comes in,
-we can use rectangle intersection to see if the mouse is currently over a given
-Control, and mark it as `hovered'.
+determines where the widget rectangles are drawn. However, how do we change the
+styling of the Widgets, such that we know when a mouse hover is occurring or a
+button was clicked? For this purpose, we must track the minimal state required
+to render the widgets and implement a `Control`. Controls provide two key
+things: access to the rectangle, or `Rect`, that we need in order to draw the
+widget on the next render, and a unique ID, that allows screens to keep track
+of which control is currently `active` or being hovered over. For example, when
+a mouse movement event comes in, we can use rectangle intersection to see if
+the mouse is currently over a given Control, and mark it as `hovered'.
 
 
 # What's left?
@@ -116,9 +116,9 @@ There are currently 3 screens implemented:
  * Rack view screen
  * Component (Sled, Switch, PSC) view
 
-Navigation and UI for these screens works well, but there is no functionality
-implemented. All the inventory and power data shown in the `Component` screen
-is fake. We also aren't currently really talking to the MGS and RSS. Lastly,
-we don't have a way to take rack updates and install them, or initialize the
-rack (including trust quorum). This is a lot of functionality that will be
-implemented incrementally. 
+Navigation and UI for these screens works well, but there is no backend
+functionality implemented. All the inventory and power data shown in the
+`Component` screen is fake. We also aren't currently really talking to the MGS
+and RSS. Lastly, we don't have a way to take rack updates and install them, or
+initialize the rack (including trust quorum). This is a lot of functionality
+that will be implemented incrementally.
