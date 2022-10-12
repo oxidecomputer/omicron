@@ -17,7 +17,7 @@ clap = { version = "4.0", features = ["derive"] }
 crucible-client-types = { git = "https://github.com/oxidecomputer/crucible", rev = "bacffd142fc38a01fe255407b0c8d5d0aacfe778" }
 crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "bacffd142fc38a01fe255407b0c8d5d0aacfe778" }
 ddm-admin-client = { path = "../ddm-admin-client" }
-diesel = { version = "2.0.0-rc.1", features = ["sqlite", "chrono", "serde_json", "network-address", "uuid"] }
+diesel = { version = "2.0.2", features = ["sqlite", "chrono", "serde_json", "network-address", "uuid"] }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
 futures = "0.3.24"
 internal-dns-client = { path = "../internal-dns-client" }
@@ -55,7 +55,7 @@ tokio = { version = "1.21", features = [ "full" ] }
 tokio-tungstenite = "0.17.2"
 tokio-util = { version = "0.7", features = ["codec"] }
 toml = "0.5.9"
-uuid = { version = "1.1.0", features = [ "serde", "v4" ] }
+uuid = { version = "1.2.1", features = [ "serde", "v4" ] }
 vsss-rs = { version = "2.0.0", default-features = false, features = ["std"] }
 zone = "0.1"
 

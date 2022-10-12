@@ -317,6 +317,23 @@ pub struct User {
     pub id: Uuid,
     /** Human-readable name that can identify the user */
     pub display_name: String,
+
+    /** Uuid of the silo to which this user belongs */
+    pub silo_id: Uuid,
+}
+
+// SILO GROUPS
+
+/// Client view of a [`Group`]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+pub struct Group {
+    pub id: Uuid,
+
+    /** Human-readable name that can identify the group */
+    pub display_name: String,
+
+    /** Uuid of the silo to which this group belongs */
+    pub silo_id: Uuid,
 }
 
 // BUILT-IN USERS
