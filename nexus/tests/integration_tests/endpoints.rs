@@ -771,6 +771,15 @@ lazy_static! {
             ],
         },
 
+        VerifyEndpoint {
+            url: "/groups",
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::ReadOnly,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
+
         /* Organizations */
 
         VerifyEndpoint {

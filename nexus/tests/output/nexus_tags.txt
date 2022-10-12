@@ -97,6 +97,7 @@ session_sshkey_view                      /session/me/sshkeys/{ssh_key_name}
 
 API operations found with tag "silos"
 OPERATION ID                             URL PATH
+group_list                               /groups
 policy_update                            /policy
 policy_view                              /policy
 user_list                                /users
