@@ -62,8 +62,10 @@ pub enum DeployCommand {
         #[clap(long = "out", default_value = "/opt/oxide", action)]
         install_dir: PathBuf,
     },
-    /// Removes the packages from the target machine.
-    Uninstall {
+    /// Uninstalls the packages from the target machine.
+    Uninstall,
+    /// Uninstalls and removes the packages from the target machine.
+    Clean {
         /// The directory from which artifacts were be pulled.
         ///
         /// Should match the format from the Package subcommand.
@@ -76,6 +78,7 @@ pub enum DeployCommand {
         #[clap(long = "out", default_value = "/opt/oxide", action)]
         install_dir: PathBuf,
     },
+
     /// Unpacks the package files on the target machine
     Unpack {
         /// The directory from which artifacts will be pulled.
