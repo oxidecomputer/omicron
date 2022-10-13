@@ -343,6 +343,7 @@ impl DataStore {
             .filter(network_interface::time_deleted.is_null())
             .filter(instance::time_deleted.is_null())
             .select(Sled::as_select())
+            .distinct()
             .get_results_async(self.pool())
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
