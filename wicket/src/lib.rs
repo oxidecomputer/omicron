@@ -162,6 +162,7 @@ impl Wizard {
     }
 
     fn mainloop(&mut self) -> anyhow::Result<()> {
+        let rect = self.terminal.get_frame().size();
         // Size the rack for the initial draw
         self.state
             .rack_state
@@ -169,12 +170,20 @@ impl Wizard {
 
         // Draw the initial screen
         let screen = self.screens.get_mut(self.active_screen);
+        // Simulate a resize event, so the active screen knows it's current size
+        // and can calculate object positions
+        screen.on(
+            &mut self.state,
+            ScreenEvent::Term(TermEvent::Resize(rect.width, rect.height)),
+        );
+
         screen.draw(&self.state, &mut self.terminal)?;
 
         loop {
             let screen = self.screens.get_mut(self.active_screen);
             // unwrap is safe because we always hold onto a Sender
             let event = self.events_rx.recv().unwrap();
+            info!(self.log, "{:?}", event);
             match event {
                 Event::Tick => {
                     let actions = screen.on(&mut self.state, ScreenEvent::Tick);
@@ -194,6 +203,12 @@ impl Wizard {
                 Event::Term(TermEvent::Resize(width, height)) => {
                     let rect = Rect { x: 0, y: 0, width, height };
                     self.state.rack_state.resize(&rect, &MARGIN);
+                    // Simulate a resize event, so the active screen knows it's current size
+                    // and can calculate object positions
+                    screen.on(
+                        &mut self.state,
+                        ScreenEvent::Term(TermEvent::Resize(width, height)),
+                    );
                     screen.draw(&self.state, &mut self.terminal)?;
                 }
                 Event::Term(TermEvent::Mouse(mouse_event)) => {
@@ -247,6 +262,18 @@ impl Wizard {
                 Action::SwitchScreen(id) => {
                     self.active_screen = id;
                     let screen = self.screens.get_mut(id);
+                    let rect = self.terminal.get_frame().size();
+
+                    // Simulate a resize event, so the active screen knows it's current size
+                    // and can calculate object positions
+                    screen.on(
+                        &mut self.state,
+                        ScreenEvent::Term(TermEvent::Resize(
+                            rect.width,
+                            rect.height,
+                        )),
+                    );
+
                     // Simulate a mouse movement for the current position
                     // because the mouse may be in a different position when transitioning
                     // between screens.

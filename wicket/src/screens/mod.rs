@@ -5,6 +5,7 @@
 mod component;
 mod rack;
 mod splash;
+mod update;
 
 use crate::Action;
 use crate::ScreenEvent;
@@ -15,6 +16,7 @@ use slog::Logger;
 use component::ComponentScreen;
 use rack::RackScreen;
 use splash::SplashScreen;
+use update::UpdateScreen;
 
 /// An identifier for a specific [`Screen`] in the [`Wizard`]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -58,11 +60,7 @@ pub fn make_even(val: u16) -> u16 {
 
 pub trait Screen {
     /// Draw the [`Screen`]
-    fn draw(
-        &mut self,
-        state: &State,
-        terminal: &mut Term,
-    ) -> anyhow::Result<()>;
+    fn draw(&self, state: &State, terminal: &mut Term) -> anyhow::Result<()>;
 
     /// Handle a [`ScreenEvent`] to update internal display state and output
     /// any necessary actions for the system to take.
@@ -74,6 +72,7 @@ pub struct Screens {
     splash: SplashScreen,
     rack: RackScreen,
     component: ComponentScreen,
+    update: UpdateScreen,
 }
 
 impl Screens {
@@ -82,6 +81,7 @@ impl Screens {
             splash: SplashScreen::new(),
             rack: RackScreen::new(log),
             component: ComponentScreen::new(),
+            update: UpdateScreen::new(),
         }
     }
 
@@ -90,7 +90,7 @@ impl Screens {
             ScreenId::Splash => &mut self.splash,
             ScreenId::Rack => &mut self.rack,
             ScreenId::Component => &mut self.component,
-            _ => unimplemented!(),
+            ScreenId::Update => &mut self.update,
         }
     }
 }

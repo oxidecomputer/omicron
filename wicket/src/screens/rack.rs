@@ -135,7 +135,7 @@ impl RackScreen {
 
     /// Draw the rack in the center of the screen.
     /// Scale it to look nice.
-    fn draw_rack(&mut self, state: &State, f: &mut Frame) {
+    fn draw_rack(&self, state: &State, f: &mut Frame) {
         let rack = Rack {
             state: &state.rack_state,
             switch_style: Style::default().bg(OX_GRAY_DARK).fg(OX_WHITE),
@@ -277,7 +277,7 @@ impl RackScreen {
 
 impl Screen for RackScreen {
     fn draw(
-        &mut self,
+        &self,
         state: &State,
         terminal: &mut crate::Term,
     ) -> anyhow::Result<()> {

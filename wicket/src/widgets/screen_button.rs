@@ -22,16 +22,15 @@ use tui::widgets::Widget;
 pub struct ScreenButtonState {
     control_id: ControlId,
     pub rect: Rect,
-    pub hovered: bool,
     pub screen_id: ScreenId,
 }
 
 impl ScreenButtonState {
-    pub fn new(screen_id: ScreenId, x: u16, y: u16) -> ScreenButtonState {
+    pub fn new(screen_id: ScreenId) -> ScreenButtonState {
+        // Location will get set via [`Screen::resize`]
         ScreenButtonState {
             control_id: get_control_id(),
-            rect: Rect { height: 5, width: Self::width(), x, y },
-            hovered: false,
+            rect: Rect { height: 5, width: Self::width(), x: 0, y: 0 },
             screen_id,
         }
     }
