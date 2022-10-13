@@ -389,6 +389,27 @@ impl From<ServiceType> for sled_agent_client::types::ServiceType {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ServiceVariant {
+    Nexus,
+    InternalDns,
+    Oximeter,
+    Dendrite,
+    Tfport,
+}
+
+impl From<&ServiceType> for ServiceVariant {
+    fn from(s: &ServiceType) -> Self {
+        match s {
+            ServiceType::Nexus { .. } => ServiceVariant::Nexus,
+            ServiceType::InternalDns { .. } => ServiceVariant::InternalDns,
+            ServiceType::Oximeter => ServiceVariant::Oximeter,
+            ServiceType::Dendrite { .. } => ServiceVariant::Dendrite,
+            ServiceType::Tfport { .. } => ServiceVariant::Tfport,
+        }
+    }
+}
+
 /// Describes a request to create a zone running one or more services.
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
@@ -447,6 +468,12 @@ impl ServiceZoneRequest {
             }
             ServiceType::Tfport { .. } => None,
         }
+    }
+
+    pub fn get_service(&self, query: ServiceVariant) -> Option<&ServiceType> {
+        self.services
+            .iter()
+            .find(|&service| ServiceVariant::from(service) == query)
     }
 }
 

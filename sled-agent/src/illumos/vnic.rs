@@ -86,6 +86,7 @@ impl<DL: VnicSource + Clone> VnicAllocator<DL> {
 /// communicating with Oxide services.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum VnicKind {
+    Physical,
     OxideControl,
     Guest,
 }
@@ -136,9 +137,18 @@ impl Vnic {
         }
     }
 
+    /// Wraps a physical nic in a Vnic structure
+    pub fn wrap_physical<S: AsRef<str>>(name: S) -> Self {
+        Vnic {
+            name: name.as_ref().to_owned(),
+            deleted: false,
+            kind: VnicKind::Physical,
+        }
+    }
+
     /// Deletes a NIC (if it has not already been deleted).
     pub fn delete(&mut self) -> Result<(), DeleteVnicError> {
-        if self.deleted {
+        if self.deleted || self.kind == VnicKind::Physical {
             Ok(())
         } else {
             self.deleted = true;

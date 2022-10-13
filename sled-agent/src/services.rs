@@ -6,12 +6,15 @@
 
 use crate::bootstrap::ddm_admin_client::{DdmAdminClient, DdmError};
 use crate::common::underlay;
-use crate::illumos::dladm::{Etherstub, EtherstubVnic, PhysicalLink};
+use crate::illumos::dladm::{Dladm, Etherstub, EtherstubVnic, PhysicalLink};
 use crate::illumos::running_zone::{InstalledZone, RunningZone};
-use crate::illumos::vnic::VnicAllocator;
+use crate::illumos::vnic::{Vnic, VnicAllocator};
 use crate::illumos::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use crate::illumos::zone::AddressRequest;
-use crate::params::{ServiceEnsureBody, ServiceType, ServiceZoneRequest};
+use crate::params::{
+    DendriteAsic, ServiceEnsureBody, ServiceType, ServiceVariant,
+    ServiceZoneRequest,
+};
 use crate::zone::Zones;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::DENDRITE_PORT;
@@ -52,6 +55,9 @@ pub enum Error {
 
     #[error("I/O Error accessing {path}: {err}")]
     Io { path: PathBuf, err: std::io::Error },
+
+    #[error("Failed to find device {device}")]
+    MissingDevice { device: String },
 
     #[error("Failed to do '{intent}' by running command in zone: {err}")]
     ZoneCommand {
@@ -327,6 +333,152 @@ impl ServiceManager {
         }
     }
 
+    // Creates, installs, and boots a service zone.
+    async fn launch_service_zone(
+        &self,
+        zone_name: &str,
+        physical_nic: Option<Vnic>,
+        device_names: &[String],
+        addresses: &[Ipv6Addr],
+        gz_addresses: &[Ipv6Addr],
+    ) -> Result<RunningZone, Error> {
+        let devices: Vec<zone::Device> = device_names
+            .iter()
+            .map(|d| zone::Device { name: d.to_string() })
+            .collect();
+
+        let installed_zone = InstalledZone::install(
+            &self.log,
+            &self.vnic_allocator,
+            &zone_name,
+            // unique_name=
+            None,
+            // dataset=
+            &[],
+            &devices,
+            // opte_ports=
+            vec![],
+            // physical_nic=
+            physical_nic,
+        )
+        .await?;
+
+        let running_zone = RunningZone::boot(installed_zone).await?;
+
+        for addr in addresses {
+            info!(self.log, "Ensuring address {} exists", addr.to_string());
+            let addr_request =
+                AddressRequest::new_static(IpAddr::V6(*addr), None);
+            running_zone.ensure_address(addr_request).await?;
+            info!(
+                self.log,
+                "Ensuring address {} exists - OK",
+                addr.to_string()
+            );
+        }
+
+        info!(self.log, "GZ addresses: {:#?}", gz_addresses);
+        for &addr in gz_addresses {
+            info!(self.log, "Ensuring GZ address {} exists", addr.to_string());
+
+            let addr_name = zone_name.replace(&['-', '_'][..], "");
+            Zones::ensure_has_global_zone_v6_address(
+                self.underlay_vnic.clone(),
+                addr,
+                &addr_name,
+            )
+            .map_err(|err| Error::GzAddress {
+                message: format!(
+                    "adding address on behalf of service zone '{}'",
+                    zone_name
+                ),
+                err,
+            })?;
+
+            // If this address is in a new ipv6 prefix, notify maghemite so
+            // it can advertise it to other sleds.
+            self.advertise_prefix_of_address(addr).await;
+        }
+
+        let gateway = if !gz_addresses.is_empty() {
+            // If this service supplies its own GZ address, add a route.
+            //
+            // This is currently being used for the DNS service.
+            //
+            // TODO: consider limiting the number of GZ addresses which
+            // can be supplied - now that we're actively using it, we
+            // aren't really handling the "many GZ addresses" case, and it
+            // doesn't seem necessary now.
+            gz_addresses[0]
+        } else {
+            self.underlay_address
+        };
+
+        running_zone.add_default_route(gateway).await.map_err(|err| {
+            Error::ZoneCommand { intent: "Adding Route".to_string(), err }
+        })?;
+
+        Ok(running_zone)
+    }
+
+    // Check the services intended to run in the zone to determine whether any
+    // physical devices need to be mapped into the zone when it is created.
+    fn devices_needed(
+        &self,
+        req: &ServiceZoneRequest,
+    ) -> Result<Vec<String>, Error> {
+        // When running on a real sidecar, we need the /dev/tofino device
+        // to talk to the tofino ASIC.
+        // TODO: this really needs to be checked periodically rather
+        // than once at startup.  Since the sidecar is in a difference
+        // chassis, it can be powered on and off independently of this
+        // sled.
+        let needed = match req.get_service(ServiceVariant::Dendrite) {
+            Some(ServiceType::Dendrite { asic })
+                if *asic == DendriteAsic::TofinoAsic =>
+            {
+                vec!["/dev/tofino".to_string()]
+            }
+            _ => Vec::new(),
+        };
+
+        for dev in &needed {
+            if !Path::new(dev).exists() {
+                return Err(Error::MissingDevice { device: dev.to_string() });
+            }
+        }
+        Ok(needed)
+    }
+
+    // Check the services intended to run in the zone to determine whether any
+    // links or vnics need to be mapped into the zone when it is created.
+    fn nic_needed(
+        &self,
+        req: &ServiceZoneRequest,
+    ) -> Result<Option<Vnic>, Error> {
+        if let Some(ServiceType::Tfport { pkt_source }) =
+            req.get_service(ServiceVariant::Tfport)
+        {
+            // The tfport service requires a MAC device to/from which sidecar
+            // packets may be multiplexed.  If the link isn't present, don't
+            // bother trying to start the zone.
+            match Dladm::verify_link(pkt_source) {
+                Ok(_) => Ok(Some(Vnic::wrap_physical(pkt_source.to_string()))),
+                Err(_) => {
+                    Err(Error::MissingDevice { device: pkt_source.to_string() })
+                }
+            }
+        } else if req.get_service(ServiceVariant::Nexus).is_some() {
+            // TODO: Remove once Nexus traffic is transmitted over OPTE.
+            match self.physical_link_vnic_allocator.new_control(None) {
+                Ok(n) => Ok(Some(n)),
+                Err(e) => Err(Error::NexusVnicCreation(e)),
+            }
+        } else {
+            Ok(None)
+        }
+    }
+
     // Populates `existing_zones` according to the requests in `services`.
     //
     // At the point this function is invoked, IP addresses have already been
@@ -362,97 +514,31 @@ impl ServiceManager {
                 );
             }
 
-            // TODO: Remove once Nexus traffic is transmitted over OPTE.
-            let physical_nic = match req
-                .services
-                .iter()
-                .any(|service| matches!(service, ServiceType::Nexus { .. }))
-            {
-                true => {
-                    let vnic = self
-                        .physical_link_vnic_allocator
-                        .new_control(None)
-                        .map_err(|e| Error::NexusVnicCreation(e))?;
-                    Some(vnic)
+            let nic_needed = match self.nic_needed(req) {
+                Ok(n) => n,
+                Err(e) => {
+                    info!(self.log, "skipping zone {}: {:?}", req.zone_name, e);
+                    continue;
                 }
-                false => None,
             };
 
-            let installed_zone = InstalledZone::install(
-                &self.log,
-                &self.vnic_allocator,
-                &req.zone_name,
-                // unique_name=
-                None,
-                // dataset=
-                &[],
-                // devices=
-                &[],
-                // opte_ports=
-                vec![],
-                // physical_nic=
-                physical_nic,
-            )
-            .await?;
+            let devices = match self.devices_needed(req) {
+                Ok(d) => d,
+                Err(e) => {
+                    info!(self.log, "skipping zone {}: {:?}", req.zone_name, e);
+                    continue;
+                }
+            };
 
-            let running_zone = RunningZone::boot(installed_zone).await?;
-
-            for addr in &req.addresses {
-                info!(self.log, "Ensuring address {} exists", addr.to_string());
-                let addr_request =
-                    AddressRequest::new_static(IpAddr::V6(*addr), None);
-                running_zone.ensure_address(addr_request).await?;
-                info!(
-                    self.log,
-                    "Ensuring address {} exists - OK",
-                    addr.to_string()
-                );
-            }
-
-            info!(self.log, "GZ addresses: {:#?}", req.gz_addresses);
-            for &addr in &req.gz_addresses {
-                info!(
-                    self.log,
-                    "Ensuring GZ address {} exists",
-                    addr.to_string()
-                );
-
-                let addr_name = req.zone_name.replace(&['-', '_'][..], "");
-                Zones::ensure_has_global_zone_v6_address(
-                    self.underlay_vnic.clone(),
-                    addr,
-                    &addr_name,
+            let running_zone = self
+                .launch_service_zone(
+                    &req.zone_name,
+                    nic_needed,
+                    &devices,
+                    &req.addresses,
+                    &req.gz_addresses,
                 )
-                .map_err(|err| Error::GzAddress {
-                    message: format!(
-                        "adding address on behalf of service zone '{}'",
-                        req.zone_name
-                    ),
-                    err,
-                })?;
-
-                // If this address is in a new ipv6 prefix, notify maghemite so
-                // it can advertise it to other sleds.
-                self.advertise_prefix_of_address(addr).await;
-            }
-
-            let gateway = if !req.gz_addresses.is_empty() {
-                // If this service supplies its own GZ address, add a route.
-                //
-                // This is currently being used for the DNS service.
-                //
-                // TODO: consider limiting the number of GZ addresses which
-                // can be supplied - now that we're actively using it, we
-                // aren't really handling the "many GZ addresses" case, and it
-                // doesn't seem necessary now.
-                req.gz_addresses[0]
-            } else {
-                self.underlay_address
-            };
-
-            running_zone.add_default_route(gateway).await.map_err(|err| {
-                Error::ZoneCommand { intent: "Adding Route".to_string(), err }
-            })?;
+                .await?;
 
             for service in &req.services {
                 // TODO: Related to
@@ -617,7 +703,7 @@ impl ServiceManager {
                         info!(self.log, "Setting up dendrite service");
 
                         let address = req.addresses[0];
-                        smfh.setprop("config/asic", asic)?;
+                        smfh.setprop("config/asic", asic.to_string())?;
                         smfh.setprop(
                             "config/address",
                             &format!("[{}]:{}", address, DENDRITE_PORT,),

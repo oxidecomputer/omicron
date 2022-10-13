@@ -221,6 +221,21 @@ impl Dladm {
         Ok(())
     }
 
+    /// Verify that the given link exists
+    pub fn verify_link(link: &str) -> Result<(), FindPhysicalLinkError> {
+        let mut command = std::process::Command::new(PFEXEC);
+        let cmd = command.args(&[DLADM, "show-link", "-p", "-o", "LINK", link]);
+        let output = execute(cmd)?;
+        match String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .next()
+            .map(|s| s.trim())
+        {
+            Some(x) if x == link => Ok(()),
+            _ => Err(FindPhysicalLinkError::NoPhysicalLinkFound),
+        }
+    }
+
     /// Returns the name of the first observed physical data link.
     pub fn find_physical() -> Result<PhysicalLink, FindPhysicalLinkError> {
         let mut command = std::process::Command::new(PFEXEC);
