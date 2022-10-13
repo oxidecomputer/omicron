@@ -130,15 +130,15 @@ impl ComponentId {
 
 #[derive(Debug)]
 pub enum PowerState {
-    // Working
+    /// Working
     A0,
-    // Sojourning
+    /// Sojourning
     A1,
-    // Quiescent
+    /// Quiescent
     A2,
-    // Commanded Off
+    /// Commanded Off
     A3,
-    // Mechanical Off
+    /// Mechanical Off
     A4,
 }
 
