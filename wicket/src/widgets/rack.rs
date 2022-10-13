@@ -166,7 +166,8 @@ impl<'a> Widget for Rack<'a> {
 }
 
 // Currently we only allow tabbing through the rack
-const MAX_TAB_INDEX: u16 = 34;
+// There are 36 entries (0 - 35)
+const MAX_TAB_INDEX: u16 = 35;
 
 // Easter egg alert: Support for Knight Rider mode
 #[derive(Debug, Default)]
@@ -409,7 +410,7 @@ impl RackState {
 
         // Top Switch
         let switch =
-            self.component_rects.get_mut(&ComponentId::Switch(0)).unwrap();
+            self.component_rects.get_mut(&ComponentId::Switch(1)).unwrap();
         switch.y = rect.y + sled_height * 8;
         switch.x = rect.x;
         switch.height = other_height;
@@ -419,7 +420,7 @@ impl RackState {
         for i in [17, 18] {
             let shelf = self
                 .component_rects
-                .get_mut(&ComponentId::Psc(i - 17))
+                .get_mut(&ComponentId::Psc(18 - i))
                 .unwrap();
             shelf.y = rect.y + sled_height * 8 + other_height * (i as u16 - 16);
             shelf.x = rect.x;
@@ -429,7 +430,7 @@ impl RackState {
 
         // Bottom Switch
         let switch =
-            self.component_rects.get_mut(&ComponentId::Switch(1)).unwrap();
+            self.component_rects.get_mut(&ComponentId::Switch(0)).unwrap();
         switch.y = rect.y + sled_height * 8 + 3 * other_height;
         switch.x = rect.x;
         switch.height = other_height;
@@ -442,6 +443,8 @@ impl RackState {
         }
     }
 
+    // Sleds are numbered bottom-to-top and left-to-rigth
+    // See https://rfd.shared.oxide.computer/rfd/0200#_number_ordering
     fn size_sled(
         &mut self,
         i: u8,
@@ -452,8 +455,15 @@ impl RackState {
     ) {
         // The power shelves and switches are in between in the layout
         let index = if i < 16 { i } else { i - 8 };
+        let mut sled = 31 - index;
+        // Swap left and right
+        if sled & 1 == 1 {
+            sled -= 1;
+        } else {
+            sled += 1;
+        }
         let sled =
-            self.component_rects.get_mut(&ComponentId::Sled(index)).unwrap();
+            self.component_rects.get_mut(&ComponentId::Sled(sled)).unwrap();
 
         if index < 16 {
             sled.y = rack.y + sled_height * (index as u16 / 2);
@@ -478,13 +488,14 @@ impl RackState {
         sled.width = sled_width;
     }
 
+    // We tab from top to bottom, but number from bottom to top
     fn init_tab_index(&mut self) {
-        for i in 0..=MAX_TAB_INDEX {
-            let tab_index = TabIndex::new(MAX_TAB_INDEX, i);
+        for i in 0..=MAX_TAB_INDEX as u8 {
+            let tab_index = TabIndex::new(MAX_TAB_INDEX, i as u16);
             let component_id = if i < 16 {
-                ComponentId::Sled(i.try_into().unwrap())
+                ComponentId::Sled(i)
             } else if i > 19 {
-                ComponentId::Sled((i - 4).try_into().unwrap())
+                ComponentId::Sled(i - 4)
             } else if i == 16 {
                 // Switches
                 ComponentId::Switch(0)
@@ -494,7 +505,7 @@ impl RackState {
                 // Power Shelves
                 // We actually want to return the active component here, so
                 // we name it "psc X"
-                ComponentId::Psc((i - 17).try_into().unwrap())
+                ComponentId::Psc(i - 17)
             } else {
                 // If we add more items to tab through this will change
                 unreachable!();
