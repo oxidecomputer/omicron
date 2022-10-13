@@ -193,7 +193,8 @@ lazy_static! {
             url: &*DEMO_SILO_USERS_CREATE_URL,
             body: serde_json::to_value(&*DEMO_USER_CREATE).unwrap(),
             id_routes: vec![
-                &*DEMO_SILO_USER_ID_URL,
+                &*DEMO_SILO_USER_ID_GET_URL,
+                &*DEMO_SILO_USER_ID_DELETE_URL,
             ],
         },
         // Create an IP pool

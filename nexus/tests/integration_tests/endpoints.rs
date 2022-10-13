@@ -63,21 +63,22 @@ lazy_static! {
             admin_group_name: None,
         };
     // Use the default Silo for testing the local IdP
-    pub static ref DEMO_SILO_USERS_CREATE_URL: String =
-        format!(
-            "/system/silos/{}/identity-providers/local/users/create",
-            DEFAULT_SILO.identity().name,
-        );
-    pub static ref DEMO_SILO_USERS_LIST_URL: String =
-        format!(
-            "/system/silos/{}/identity-providers/local/users/all",
-            DEFAULT_SILO.identity().name,
-        );
-    pub static ref DEMO_SILO_USER_ID_URL: String = format!(
-        "/system/silos/{}/identity-providers/local/users/id/{{id}}",
+    pub static ref DEMO_SILO_USERS_CREATE_URL: String = format!(
+        "/system/silos/{}/identity-providers/local/users",
         DEFAULT_SILO.identity().name,
     );
-
+    pub static ref DEMO_SILO_USERS_LIST_URL: String = format!(
+        "/system/silos/{}/users/all",
+        DEFAULT_SILO.identity().name,
+    );
+    pub static ref DEMO_SILO_USER_ID_GET_URL: String = format!(
+        "/system/silos/{}/users/id/{{id}}",
+        DEFAULT_SILO.identity().name,
+    );
+    pub static ref DEMO_SILO_USER_ID_DELETE_URL: String = format!(
+        "/system/silos/{}/identity-providers/local/users/{{id}}",
+        DEFAULT_SILO.identity().name,
+    );
 
     // Organization used for testing
     pub static ref DEMO_ORG_NAME: Name = "demo-org".parse().unwrap();
@@ -762,11 +763,19 @@ lazy_static! {
         },
 
         VerifyEndpoint {
-            url: &*DEMO_SILO_USER_ID_URL,
+            url: &*DEMO_SILO_USER_ID_GET_URL,
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::ReadOnly,
             allowed_methods: vec![
                 AllowedMethod::Get,
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &*DEMO_SILO_USER_ID_DELETE_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::ReadOnly,
+            allowed_methods: vec![
                 AllowedMethod::Delete,
             ],
         },

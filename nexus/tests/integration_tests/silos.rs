@@ -12,7 +12,8 @@ use omicron_nexus::external_api::views::{
 };
 use omicron_nexus::external_api::{params, shared};
 use omicron_nexus::TestInterfaces as _;
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
+use std::fmt::Write;
 use std::str::FromStr;
 
 use http::method::Method;
@@ -29,6 +30,7 @@ use omicron_nexus::authz::{self, SiloRole};
 use uuid::Uuid;
 
 use httptest::{matchers::*, responders::*, Expectation, Server};
+use omicron_common::api::external::ObjectIdentity;
 use omicron_nexus::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
 use omicron_nexus::db::fixed_data::silo::SILO_ID;
 use omicron_nexus::db::identity::Asset;
@@ -1471,6 +1473,201 @@ async fn test_ensure_same_silo_group(cptestctx: &ControlPlaneTestContext) {
     // TODO-coverage were we intending to verify something here?
 }
 
+/// Tests the behavior of the per-Silo "list users" and "fetch user" endpoints.
+///
+/// We'll run the tests separately for both kinds of Silo.  The implementation
+/// should be the same, but that's why we're verifying it.
+#[nexus_test]
+async fn test_silo_user_views(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.apictx.nexus;
+
+    // We use fixed uuids for this test because the sort order is predictable
+    // and it makes it easier to debug repeated test failures.
+    let silo1_user1_id =
+        "1122f0b2-9a92-659b-da6b-93ad4955a3a3".parse().unwrap();
+    let silo1_user2_id =
+        "120600f5-f7f4-e026-e569-ef312c16a7fc".parse().unwrap();
+    let silo2_user1_id =
+        "214b47a9-fe53-41f4-9c08-f89cc9ac5d33".parse().unwrap();
+    let silo2_user2_id =
+        "22d8d84d-8959-cc32-847e-de69fa8ee944".parse().unwrap();
+
+    // Create the two Silos.
+    let silo1 =
+        create_silo(client, "silo1", false, shared::SiloIdentityMode::SamlJit)
+            .await;
+    let silo2 = create_silo(
+        client,
+        "silo2",
+        false,
+        shared::SiloIdentityMode::LocalOnly,
+    )
+    .await;
+
+    // Create two users in each Silo.  We need two so that we can verify that an
+    // ordinary user can see a user other than themselves in each Silo.
+    let silo1_user1: views::User = nexus
+        .silo_user_create(silo1.identity.id, silo1_user1_id, "user1".into())
+        .await
+        .unwrap()
+        .into();
+    let silo1_user2: views::User = nexus
+        .silo_user_create(silo1.identity.id, silo1_user2_id, "user2".into())
+        .await
+        .unwrap()
+        .into();
+    let silo1_expected_users = [silo1_user1.clone(), silo1_user2.clone()];
+    let silo2_user1: views::User = nexus
+        .silo_user_create(silo2.identity.id, silo2_user1_id, "user1".into())
+        .await
+        .unwrap()
+        .into();
+    let silo2_user2: views::User = nexus
+        .silo_user_create(silo2.identity.id, silo2_user2_id, "user2".into())
+        .await
+        .unwrap()
+        .into();
+    let silo2_expected_users = [silo2_user1.clone(), silo2_user2.clone()];
+
+    let users_by_id = {
+        let mut users_by_id: BTreeMap<Uuid, &views::User> = BTreeMap::new();
+        assert_eq!(users_by_id.insert(silo1_user1_id, &silo1_user1), None);
+        assert_eq!(users_by_id.insert(silo1_user2_id, &silo1_user2), None);
+        assert_eq!(users_by_id.insert(silo2_user1_id, &silo2_user1), None);
+        assert_eq!(users_by_id.insert(silo2_user2_id, &silo2_user2), None);
+        users_by_id
+    };
+
+    // We'll run through a battery of tests:
+    // - for each of our test silos
+    //   - for all *five* users ("test-privileged", plus the two users that we
+    //     created in each Silo)
+    //     - test the "list" endpoint
+    //     - for all five user ids
+    //       - test the "view user" endpoint for that user id
+    //
+    // This exercises a lot of different behaviors:
+    // - on success, the "list" and "view" endpoints always return the right
+    //   contents
+    // - on failure, the "list" and "view" endpoints always return the right
+    //   status code and message for the failure mode
+    // - that users can always list and fetch all users in their own Silo via
+    //   /system/silos (/users is tested elsewhere)
+    // - that users without privileges cannot list or fetch users in other Silos
+    // - that users with privileges on another Silo can list and fetch users in
+    //   that Silo
+    // - that a user with id "foo" in Silo1 cannot be accessed by that id in
+    //   Silo 2.  This case is easy to miss but would be very bad to get wrong!
+    let all_callers: Vec<AuthnMode> =
+        std::iter::once(AuthnMode::PrivilegedUser)
+            .chain(users_by_id.keys().map(|k| AuthnMode::SiloUser(*k)))
+            .collect();
+
+    struct TestSilo<'a> {
+        silo: &'a views::Silo,
+        expected_users: [views::User; 2],
+    }
+
+    let test_silo1 =
+        TestSilo { silo: &silo1, expected_users: silo1_expected_users };
+    let test_silo2 =
+        TestSilo { silo: &silo2, expected_users: silo2_expected_users };
+
+    let mut output = String::new();
+    for test_silo in [test_silo1, test_silo2] {
+        let silo_name = &test_silo.silo.identity().name;
+        let silo_users_url =
+            &format!("/system/silos/{}/users", test_silo.silo.identity().name);
+
+        write!(&mut output, "SILO: {}\n", silo_name).unwrap();
+
+        for calling_user in all_callers.iter() {
+            write!(&mut output, "    test user {:?}:\n", calling_user).unwrap();
+
+            // Test the "list" endpoint.
+            write!(&mut output, "        list = ").unwrap();
+            let test_response = NexusRequest::new(RequestBuilder::new(
+                client,
+                Method::GET,
+                &format!("{}/all", silo_users_url),
+            ))
+            .authn_as(calling_user.clone())
+            .execute()
+            .await
+            .unwrap();
+            write!(&mut output, "{}", test_response.status.as_str()).unwrap();
+
+            // If this succeeded, it must have returned the expected users for
+            // this Silo.
+            if test_response.status == http::StatusCode::OK {
+                let found_users = test_response
+                    .parsed_body::<dropshot::ResultsPage<views::User>>()
+                    .unwrap()
+                    .items;
+                assert_eq!(found_users, test_silo.expected_users);
+            } else {
+                let error = test_response
+                    .parsed_body::<dropshot::HttpErrorResponseBody>()
+                    .unwrap();
+                write!(&mut output, " (message = {:?})", error.message)
+                    .unwrap();
+            }
+
+            write!(&mut output, "\n").unwrap();
+
+            // Test the "view" endpoint for each user in this Silo.
+            for (user_id, user) in &users_by_id {
+                let label = if user.silo_id == silo1.identity.id {
+                    format!("silo 1 user {}", user.display_name)
+                } else {
+                    assert_eq!(user.silo_id, silo2.identity.id);
+                    format!("silo 2 user {}", user.display_name)
+                };
+                write!(&mut output, "        view {} ({}) = ", user_id, label,)
+                    .unwrap();
+                let test_response = NexusRequest::new(RequestBuilder::new(
+                    client,
+                    Method::GET,
+                    &format!("{}/id/{}", silo_users_url, user_id),
+                ))
+                .authn_as(calling_user.clone())
+                .execute()
+                .await
+                .unwrap();
+                write!(&mut output, "{}", test_response.status.as_str())
+                    .unwrap();
+                // If this succeeded, it must have returned the right user back.
+                if test_response.status == http::StatusCode::OK {
+                    let found_user =
+                        test_response.parsed_body::<views::User>().unwrap();
+                    assert_eq!(
+                        found_user.silo_id,
+                        test_silo.silo.identity().id
+                    );
+                    assert_eq!(found_user, **user);
+                } else {
+                    let error = test_response
+                        .parsed_body::<dropshot::HttpErrorResponseBody>()
+                        .unwrap();
+                    write!(&mut output, " (message = {:?})", error.message)
+                        .unwrap();
+                }
+
+                write!(&mut output, "\n").unwrap();
+            }
+
+            write!(&mut output, "\n").unwrap();
+        }
+    }
+
+    expectorate::assert_contents(
+        "tests/output/silo-user-views-output.txt",
+        &output,
+    );
+}
+
+/// Tests that LocalOnly-specific endpoints are not available in SamlJit Silos
 #[nexus_test]
 async fn test_jit_silo_constraints(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
@@ -1502,49 +1699,23 @@ async fn test_jit_silo_constraints(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
-    // They should not be able to create a local-only user in this JIT Silo.
-    let error: dropshot::HttpErrorResponseBody =
-        NexusRequest::expect_failure_with_body(
-            client,
-            StatusCode::NOT_FOUND,
-            Method::POST,
-            "/system/silos/jit/identity-providers/local/users/create",
-            &params::UserCreate {
-                external_id: params::UserId::from_str("dummy").unwrap(),
-            },
-        )
-        .authn_as(AuthnMode::SiloUser(new_silo_user_id))
-        .execute()
-        .await
-        .unwrap()
-        .parsed_body()
-        .unwrap();
-    assert_eq!(
-        error.message,
-        "not found: identity-provider with name \"local\""
-    );
-
-    // Suppose we do create a user (as via JIT).  They should not be able to
-    // view or delete them via the local identity provider.
-    let other_user_id = "57372ebb-ee76-4a2d-fa3e-e1875a8d11c0".parse().unwrap();
-    let _ = nexus
-        .silo_user_create(silo.identity.id, other_user_id, "other-user".into())
-        .await
-        .unwrap();
-    let other_user_url = format!(
-        "/system/silos/jit/identity-providers/local/users/id/{}",
-        other_user_id
-    );
-
-    for method in [Method::GET, Method::DELETE] {
+    // Neither the "test-privileged" user nor this newly-created admin user
+    // ought to be able to create a user via the Silo's local identity provider
+    // (because that provider does not exist).
+    for caller in
+        [AuthnMode::PrivilegedUser, AuthnMode::SiloUser(new_silo_user_id)]
+    {
         let error: dropshot::HttpErrorResponseBody =
-            NexusRequest::expect_failure(
+            NexusRequest::expect_failure_with_body(
                 client,
                 StatusCode::NOT_FOUND,
-                method,
-                &other_user_url,
+                Method::POST,
+                "/system/silos/jit/identity-providers/local/users",
+                &params::UserCreate {
+                    external_id: params::UserId::from_str("dummy").unwrap(),
+                },
             )
-            .authn_as(AuthnMode::SiloUser(new_silo_user_id))
+            .authn_as(caller)
             .execute()
             .await
             .unwrap()
@@ -1556,25 +1727,43 @@ async fn test_jit_silo_constraints(cptestctx: &ControlPlaneTestContext) {
         );
     }
 
-    // They should also not be able to list users via the "local" IdP endpoint.
-    let error: dropshot::HttpErrorResponseBody = NexusRequest::expect_failure(
-        client,
-        StatusCode::NOT_FOUND,
-        Method::GET,
-        "/system/silos/jit/identity-providers/local/users/all",
-    )
-    .authn_as(AuthnMode::SiloUser(new_silo_user_id))
-    .execute()
-    .await
-    .unwrap()
-    .parsed_body()
-    .unwrap();
-    assert_eq!(
-        error.message,
-        "not found: identity-provider with name \"local\""
+    // Now create another user, as might happen via JIT.
+    let other_user_id = "57372ebb-ee76-4a2d-fa3e-e1875a8d11c0".parse().unwrap();
+    let _ = nexus
+        .silo_user_create(silo.identity.id, other_user_id, "other-user".into())
+        .await
+        .unwrap();
+    let user_url_delete = format!(
+        "/system/silos/jit/identity-providers/local/users/{}",
+        other_user_id
     );
+
+    // Neither the "test-privileged" user nor the Silo Admin ought to be able to
+    // remove this user via the local identity provider.
+    for caller in
+        [AuthnMode::PrivilegedUser, AuthnMode::SiloUser(new_silo_user_id)]
+    {
+        let error: dropshot::HttpErrorResponseBody =
+            NexusRequest::expect_failure(
+                client,
+                StatusCode::NOT_FOUND,
+                Method::DELETE,
+                &user_url_delete,
+            )
+            .authn_as(caller)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
+        assert_eq!(
+            error.message,
+            "not found: identity-provider with name \"local\""
+        );
+    }
 }
 
+/// Tests that SamlJit-specific endpoints are not available in LocalOnly Silos
 #[nexus_test]
 async fn test_local_silo_constraints(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
@@ -1607,7 +1796,7 @@ async fn test_local_silo_constraints(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
-    // It's not allowed to create an identity provider in an ApiOnly Silo.
+    // It's not allowed to create an identity provider in a LocalOnly Silo.
     let error: dropshot::HttpErrorResponseBody =
         NexusRequest::expect_failure_with_body(
             client,
@@ -1720,95 +1909,6 @@ async fn test_local_silo_users(cptestctx: &ControlPlaneTestContext) {
         &[admin_user.clone()],
     )
     .await;
-
-    // Now create a second Silo and make sure that none of the per-user
-    // endpoints can be accessed using a user id from the first Silo.
-    // (Internally, it's possible to look up a user independent of the Silo
-    // they're in, so this check ensures that we do actually limit results to
-    // the appropriate Silo.)
-    let silo2 = create_silo(
-        &client,
-        "silo2",
-        true,
-        shared::SiloIdentityMode::LocalOnly,
-    )
-    .await;
-    let silo1_users_url = format!(
-        "/system/silos/{}/identity-providers/local/users",
-        silo1.identity.name,
-    );
-    let silo1_user_url = format!("{}/id/{}", silo1_users_url, new_silo_user_id);
-    let silo2_users_url = format!(
-        "/system/silos/{}/identity-providers/local/users",
-        silo2.identity.name,
-    );
-    let silo2_user_url = format!("{}/id/{}", silo2_users_url, new_silo_user_id);
-    // Double check that we have the right URL form in the first place.  We
-    // should be able to fetch the user in silo1.
-    let user = NexusRequest::object_get(client, &silo1_user_url)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .unwrap()
-        .parsed_body::<views::User>()
-        .unwrap();
-    assert_eq!(user.id, new_silo_user_id);
-
-    for method in [Method::GET, Method::DELETE] {
-        let error = NexusRequest::expect_failure(
-            client,
-            StatusCode::NOT_FOUND,
-            method,
-            &silo2_user_url,
-        )
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .unwrap()
-        .parsed_body::<dropshot::HttpErrorResponseBody>()
-        .unwrap();
-        let not_found_message =
-            format!("not found: silo-user with id \"{}\"", new_silo_user_id);
-        assert_eq!(error.message, not_found_message);
-    }
-
-    // Make sure that the list of users in each Silo are different, too.
-    let silo1_users =
-        NexusRequest::object_get(client, &format!("{}/all", silo1_users_url))
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .unwrap()
-            .parsed_body::<dropshot::ResultsPage<views::User>>()
-            .unwrap()
-            .items;
-    assert_eq!(silo1_users, &[admin_user.clone()]);
-
-    let silo2_users_list_url = format!("{}/all", silo2_users_url);
-    let silo2_users = NexusRequest::object_get(client, &silo2_users_list_url)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .unwrap()
-        .parsed_body::<dropshot::ResultsPage<views::User>>()
-        .unwrap()
-        .items;
-    assert!(silo2_users.is_empty());
-
-    // Make sure that the admin in Silo1 cannot list users in Silo2.
-    let error = NexusRequest::expect_failure(
-        client,
-        StatusCode::NOT_FOUND,
-        Method::GET,
-        &silo2_users_list_url,
-    )
-    .authn_as(AuthnMode::SiloUser(new_silo_user_id))
-    .execute()
-    .await
-    .unwrap()
-    .parsed_body::<dropshot::HttpErrorResponseBody>()
-    .unwrap();
-    assert_eq!(error.message, "not found: silo with name \"silo2\"");
 }
 
 /// Runs a sequence of tests for create, read, and delete of API-managed users
@@ -1818,12 +1918,13 @@ async fn run_user_tests(
     authn_mode: &AuthnMode,
     existing_users: &[views::User],
 ) {
+    let url_all_users =
+        format!("/system/silos/{}/users/all", silo.identity.name);
     let url_local_idp_users = format!(
         "/system/silos/{}/identity-providers/local/users",
         silo.identity.name
     );
-    let url_all_users = format!("{}/all", url_local_idp_users);
-    let url_user_create = format!("{}/create", url_local_idp_users);
+    let url_user_create = format!("{}", url_local_idp_users);
 
     // Fetch users and verify it matches what the caller expects.
     println!("run_user_tests: as {:?}: fetch all users", authn_mode);
@@ -1856,8 +1957,11 @@ async fn run_user_tests(
     println!("created user: {:?}", user_created);
 
     // Fetch the user we just created.
-    let user_url = format!("{}/id/{}", url_local_idp_users, user_created.id);
-    let user_found = NexusRequest::object_get(client, &user_url)
+    let user_url_get = format!(
+        "/system/silos/{}/users/id/{}",
+        silo.identity.name, user_created.id
+    );
+    let user_found = NexusRequest::object_get(client, &user_url_get)
         .authn_as(authn_mode.clone())
         .execute()
         .await
@@ -1883,7 +1987,11 @@ async fn run_user_tests(
     assert_eq!(new_users, &[&user_created]);
 
     // Delete the user that we created.
-    NexusRequest::object_delete(client, &user_url)
+    let user_url_delete = format!(
+        "/system/silos/{}/identity-providers/local/users/{}",
+        silo.identity.name, user_created.id
+    );
+    NexusRequest::object_delete(client, &user_url_delete)
         .authn_as(authn_mode.clone())
         .execute()
         .await
@@ -1891,11 +1999,16 @@ async fn run_user_tests(
 
     // We should not be able to fetch or delete the user again.
     for method in [Method::GET, Method::DELETE] {
+        let url = if method == Method::GET {
+            &user_url_get
+        } else {
+            &user_url_delete
+        };
         let error = NexusRequest::expect_failure(
             client,
             StatusCode::NOT_FOUND,
             method,
-            &user_url,
+            url,
         )
         .authn_as(authn_mode.clone())
         .execute()
