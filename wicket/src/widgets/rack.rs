@@ -488,7 +488,7 @@ impl RackState {
         sled.width = sled_width;
     }
 
-    // We tab from top to bottom, but number from bottom to top
+    // We tab bottom-to-top, left-to-right, same as component numbering
     fn init_tab_index(&mut self) {
         for i in 0..=MAX_TAB_INDEX as u8 {
             let tab_index = TabIndex::new(MAX_TAB_INDEX, i as u16);
