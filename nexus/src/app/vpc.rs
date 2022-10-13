@@ -521,60 +521,68 @@ impl super::Nexus {
 
         let mut instance_interfaces: NicMap = HashMap::new();
         for instance_name in &instances {
-            let (.., authz_instance) =
+            if let Ok((.., authz_instance)) =
                 LookupPath::new(opctx, &self.db_datastore)
                     .project_id(vpc.project_id)
                     .instance_name(instance_name)
                     .lookup_for(authz::Action::ListChildren)
-                    .await?;
-            for iface in self
-                .db_datastore
-                .derive_guest_network_interface_info(opctx, &authz_instance)
-                .await?
+                    .await
             {
-                instance_interfaces
-                    .entry(instance_name.0.clone())
-                    .or_insert_with(Vec::new)
-                    .push(iface);
+                for iface in self
+                    .db_datastore
+                    .derive_guest_network_interface_info(opctx, &authz_instance)
+                    .await?
+                {
+                    instance_interfaces
+                        .entry(instance_name.0.clone())
+                        .or_insert_with(Vec::new)
+                        .push(iface);
+                }
             }
         }
 
         let mut vpc_interfaces: NicMap = HashMap::new();
         for vpc_name in &vpcs {
-            let (.., authz_vpc) = LookupPath::new(opctx, &self.db_datastore)
-                .project_id(vpc.project_id)
-                .vpc_name(vpc_name)
-                .lookup_for(authz::Action::ListChildren)
-                .await?;
-            for iface in self
-                .db_datastore
-                .derive_vpc_network_interface_info(opctx, &authz_vpc)
-                .await?
+            if let Ok((.., authz_vpc)) =
+                LookupPath::new(opctx, &self.db_datastore)
+                    .project_id(vpc.project_id)
+                    .vpc_name(vpc_name)
+                    .lookup_for(authz::Action::ListChildren)
+                    .await
             {
-                vpc_interfaces
-                    .entry(vpc_name.0.clone())
-                    .or_insert_with(Vec::new)
-                    .push(iface);
+                for iface in self
+                    .db_datastore
+                    .derive_vpc_network_interface_info(opctx, &authz_vpc)
+                    .await?
+                {
+                    vpc_interfaces
+                        .entry(vpc_name.0.clone())
+                        .or_insert_with(Vec::new)
+                        .push(iface);
+                }
             }
         }
 
         let mut subnet_interfaces: NicMap = HashMap::new();
         for subnet_name in &subnets {
-            let (.., authz_subnet) = LookupPath::new(opctx, &self.db_datastore)
-                .project_id(vpc.project_id)
-                .vpc_name(&Name::from(vpc.name().clone()))
-                .vpc_subnet_name(subnet_name)
-                .lookup_for(authz::Action::ListChildren)
-                .await?;
-            for iface in self
-                .db_datastore
-                .derive_subnet_network_interface_info(opctx, &authz_subnet)
-                .await?
+            if let Ok((.., authz_subnet)) =
+                LookupPath::new(opctx, &self.db_datastore)
+                    .project_id(vpc.project_id)
+                    .vpc_name(&Name::from(vpc.name().clone()))
+                    .vpc_subnet_name(subnet_name)
+                    .lookup_for(authz::Action::ListChildren)
+                    .await
             {
-                subnet_interfaces
-                    .entry(subnet_name.0.clone())
-                    .or_insert_with(Vec::new)
-                    .push(iface);
+                for iface in self
+                    .db_datastore
+                    .derive_subnet_network_interface_info(opctx, &authz_subnet)
+                    .await?
+                {
+                    subnet_interfaces
+                        .entry(subnet_name.0.clone())
+                        .or_insert_with(Vec::new)
+                        .push(iface);
+                }
             }
         }
 
