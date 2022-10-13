@@ -6815,6 +6815,98 @@
         "x-dropshot-pagination": true
       }
     },
+    "/system/silos/{silo_name}/identity-providers/local/users": {
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Create a user",
+        "description": "Users can only be created in Silos with `provision_type` == `Fixed`. Otherwise, Silo users are just-in-time (JIT) provisioned when a user first logs in using an external Identity Provider.",
+        "operationId": "local_idp_user_create",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "silo_name",
+            "description": "The silo's unique name.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/system/silos/{silo_name}/identity-providers/local/users/{user_id}": {
+      "delete": {
+        "tags": [
+          "system"
+        ],
+        "operationId": "local_idp_user_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "silo_name",
+            "description": "The silo's unique name.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "user_id",
+            "description": "The user's internal id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/system/silos/{silo_name}/identity-providers/saml": {
       "post": {
         "tags": [
@@ -6986,6 +7078,125 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SiloRolePolicy"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/system/silos/{silo_name}/users/all": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "List users in a specific Silo",
+        "operationId": "silo_users_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "silo_name",
+            "description": "The silo's unique name.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      }
+    },
+    "/system/silos/{silo_name}/users/id/{user_id}": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "operationId": "silo_user_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "silo_name",
+            "description": "The silo's unique name.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "user_id",
+            "description": "The user's internal id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
                 }
               }
             }
@@ -11366,6 +11577,30 @@
         "required": [
           "items"
         ]
+      },
+      "UserCreate": {
+        "description": "Create-time parameters for a [`User`](crate::external_api::views::User)",
+        "type": "object",
+        "properties": {
+          "external_id": {
+            "description": "username used to log in",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UserId"
+              }
+            ]
+          }
+        },
+        "required": [
+          "external_id"
+        ]
+      },
+      "UserId": {
+        "title": "A name unique within the parent collection",
+        "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID though they may contain a UUID.",
+        "type": "string",
+        "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z][a-z0-9-]*[a-zA-Z0-9]$",
+        "maxLength": 63
       },
       "UserResultsPage": {
         "description": "A single page of results",
