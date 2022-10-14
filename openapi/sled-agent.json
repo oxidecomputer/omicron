@@ -352,6 +352,44 @@
           }
         }
       }
+    },
+    "/vpc/{vpc_id}/firewall/rules": {
+      "put": {
+        "operationId": "vpc_firewall_rules_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "vpc_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VpcFirewallRulesEnsureBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -914,6 +952,12 @@
               "format": "ip"
             }
           },
+          "firewall_rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VpcFirewallRule"
+            }
+          },
           "nics": {
             "type": "array",
             "items": {
@@ -930,6 +974,7 @@
         "required": [
           "disks",
           "external_ips",
+          "firewall_rules",
           "nics",
           "runtime",
           "source_nat"
@@ -1262,7 +1307,7 @@
         "title": "An IPv4 subnet",
         "description": "An IPv4 subnet, including prefix and subnet mask",
         "type": "string",
-        "pattern": "^(10\\.([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\.([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\.([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\/([8-9]|1[0-9]|2[0-9]|3[0-2])|172\\.(1[6-9]|2[0-9]|3[0-1])\\.([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\.([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\/(1[2-9]|2[0-9]|3[0-2])|192\\.168\\.([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\.([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\/(1[6-9]|2[0-9]|3[0-2]))$"
+        "pattern": "^(([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])/([8-9]|1[0-9]|2[0-9]|3[0-2])$"
       },
       "Ipv6Net": {
         "example": "fd12:3456::/64",
@@ -1270,6 +1315,15 @@
         "description": "An IPv6 subnet, including prefix and subnet mask",
         "type": "string",
         "pattern": "^([fF][dD])[0-9a-fA-F]{2}:(([0-9a-fA-F]{1,4}:){6}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,6}:)\\/([1-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$"
+      },
+      "L4PortRange": {
+        "example": "22",
+        "title": "A range of IP ports",
+        "description": "An inclusive-inclusive range of IP ports. The second port may be omitted to represent a single port",
+        "type": "string",
+        "pattern": "^[0-9]{1,5}(-[0-9]{1,5})?$",
+        "minLength": 1,
+        "maxLength": 11
       },
       "MacAddr": {
         "example": "ff:ff:ff:ff:ff:ff",
@@ -1680,6 +1734,105 @@
               "type"
             ]
           }
+        ]
+      },
+      "VpcFirewallRule": {
+        "description": "VPC firewall rule after object name resolution has been performed by Nexus",
+        "type": "object",
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/VpcFirewallRuleAction"
+          },
+          "direction": {
+            "$ref": "#/components/schemas/VpcFirewallRuleDirection"
+          },
+          "filter_hosts": {
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpNet"
+            }
+          },
+          "filter_ports": {
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/L4PortRange"
+            }
+          },
+          "filter_protocols": {
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VpcFirewallRuleProtocol"
+            }
+          },
+          "priority": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "status": {
+            "$ref": "#/components/schemas/VpcFirewallRuleStatus"
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NetworkInterface"
+            }
+          }
+        },
+        "required": [
+          "action",
+          "direction",
+          "priority",
+          "status",
+          "targets"
+        ]
+      },
+      "VpcFirewallRuleAction": {
+        "type": "string",
+        "enum": [
+          "allow",
+          "deny"
+        ]
+      },
+      "VpcFirewallRuleDirection": {
+        "type": "string",
+        "enum": [
+          "inbound",
+          "outbound"
+        ]
+      },
+      "VpcFirewallRuleProtocol": {
+        "description": "The protocols that may be specified in a firewall rule's filter",
+        "type": "string",
+        "enum": [
+          "TCP",
+          "UDP",
+          "ICMP"
+        ]
+      },
+      "VpcFirewallRuleStatus": {
+        "type": "string",
+        "enum": [
+          "disabled",
+          "enabled"
+        ]
+      },
+      "VpcFirewallRulesEnsureBody": {
+        "description": "Update firewall rules for a VPC",
+        "type": "object",
+        "properties": {
+          "rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VpcFirewallRule"
+            }
+          }
+        },
+        "required": [
+          "rules"
         ]
       }
     }

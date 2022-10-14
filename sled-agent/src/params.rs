@@ -40,6 +40,25 @@ pub struct SourceNatConfig {
     pub last_port: u16,
 }
 
+/// Update firewall rules for a VPC
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct VpcFirewallRulesEnsureBody {
+    pub rules: Vec<VpcFirewallRule>,
+}
+
+/// VPC firewall rule after object name resolution has been performed by Nexus
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct VpcFirewallRule {
+    pub status: external::VpcFirewallRuleStatus,
+    pub direction: external::VpcFirewallRuleDirection,
+    pub targets: Vec<NetworkInterface>,
+    pub filter_hosts: Option<Vec<external::IpNet>>,
+    pub filter_ports: Option<Vec<external::L4PortRange>>,
+    pub filter_protocols: Option<Vec<external::VpcFirewallRuleProtocol>>,
+    pub action: external::VpcFirewallRuleAction,
+    pub priority: external::VpcFirewallRulePriority,
+}
+
 /// Used to request a Disk state change
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "lowercase", tag = "state", content = "instance")]
@@ -82,6 +101,7 @@ pub struct InstanceHardware {
     /// Zero or more external IP addresses (either floating or ephemeral),
     /// provided to an instance to allow inbound connectivity.
     pub external_ips: Vec<IpAddr>,
+    pub firewall_rules: Vec<VpcFirewallRule>,
     pub disks: Vec<propolis_client::api::DiskRequest>,
     pub cloud_init_bytes: Option<String>,
 }

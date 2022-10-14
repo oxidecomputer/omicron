@@ -10,6 +10,7 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
+use crate::db::cte_utils::BoxedQuery;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
@@ -34,6 +35,39 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use sled_agent_client::types as sled_client_types;
+
+/// OPTE requires information that's currently split across the network
+/// interface and VPC subnet tables.
+#[derive(Debug, diesel::Queryable)]
+struct NicInfo {
+    name: db::model::Name,
+    ip: ipnetwork::IpNetwork,
+    mac: db::model::MacAddr,
+    ipv4_block: db::model::Ipv4Net,
+    ipv6_block: db::model::Ipv6Net,
+    vni: db::model::Vni,
+    primary: bool,
+    slot: i16,
+}
+
+impl From<NicInfo> for sled_client_types::NetworkInterface {
+    fn from(nic: NicInfo) -> sled_client_types::NetworkInterface {
+        let ip_subnet = if nic.ip.is_ipv4() {
+            external::IpNet::V4(nic.ipv4_block.0)
+        } else {
+            external::IpNet::V6(nic.ipv6_block.0)
+        };
+        sled_client_types::NetworkInterface {
+            name: sled_client_types::Name::from(&nic.name.0),
+            ip: nic.ip.ip(),
+            mac: sled_client_types::MacAddr::from(nic.mac.0),
+            subnet: sled_client_types::IpNet::from(ip_subnet),
+            vni: sled_client_types::Vni::from(nic.vni.0),
+            primary: nic.primary,
+            slot: u8::try_from(nic.slot).unwrap(),
+        }
+    }
+}
 
 impl DataStore {
     /// Create a network interface attached to the provided instance.
@@ -145,57 +179,20 @@ impl DataStore {
         Ok(())
     }
 
-    /// Return the information about an instance's network interfaces required
-    /// for the sled agent to instantiate them via OPTE.
-    ///
-    /// OPTE requires information that's currently split across the network
-    /// interface and VPC subnet tables. This query just joins those for each
-    /// NIC in the given instance.
-    pub(crate) async fn derive_guest_network_interface_info(
+    /// Return information about network interfaces required for the sled
+    /// agent to instantiate or modify them via OPTE. This function takes
+    /// a partially constructed query over the network interface table so
+    /// that we can use it for instances, VPCs, and subnets.
+    async fn derive_network_interface_info(
         &self,
         opctx: &OpContext,
-        authz_instance: &authz::Instance,
+        partial_query: BoxedQuery<db::schema::network_interface::table>,
     ) -> ListResultVec<sled_client_types::NetworkInterface> {
-        opctx.authorize(authz::Action::ListChildren, authz_instance).await?;
-
         use db::schema::network_interface;
         use db::schema::vpc;
         use db::schema::vpc_subnet;
 
-        // The record type for the results of the below JOIN query
-        #[derive(Debug, diesel::Queryable)]
-        struct NicInfo {
-            name: db::model::Name,
-            ip: ipnetwork::IpNetwork,
-            mac: db::model::MacAddr,
-            ipv4_block: db::model::Ipv4Net,
-            ipv6_block: db::model::Ipv6Net,
-            vni: db::model::Vni,
-            primary: bool,
-            slot: i16,
-        }
-
-        impl From<NicInfo> for sled_client_types::NetworkInterface {
-            fn from(nic: NicInfo) -> sled_client_types::NetworkInterface {
-                let ip_subnet = if nic.ip.is_ipv4() {
-                    external::IpNet::V4(nic.ipv4_block.0)
-                } else {
-                    external::IpNet::V6(nic.ipv6_block.0)
-                };
-                sled_client_types::NetworkInterface {
-                    name: sled_client_types::Name::from(&nic.name.0),
-                    ip: nic.ip.ip(),
-                    mac: sled_client_types::MacAddr::from(nic.mac.0),
-                    subnet: sled_client_types::IpNet::from(ip_subnet),
-                    vni: sled_client_types::Vni::from(nic.vni.0),
-                    primary: nic.primary,
-                    slot: u8::try_from(nic.slot).unwrap(),
-                }
-            }
-        }
-
-        let rows = network_interface::table
-            .filter(network_interface::instance_id.eq(authz_instance.id()))
+        let rows = partial_query
             .filter(network_interface::time_deleted.is_null())
             .inner_join(
                 vpc_subnet::table
@@ -225,6 +222,63 @@ impl DataStore {
             .into_iter()
             .map(sled_client_types::NetworkInterface::from)
             .collect())
+    }
+
+    /// Return the information about an instance's network interfaces required
+    /// for the sled agent to instantiate them via OPTE.
+    pub(crate) async fn derive_guest_network_interface_info(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+    ) -> ListResultVec<sled_client_types::NetworkInterface> {
+        opctx.authorize(authz::Action::ListChildren, authz_instance).await?;
+
+        use db::schema::network_interface;
+        self.derive_network_interface_info(
+            opctx,
+            network_interface::table
+                .filter(network_interface::instance_id.eq(authz_instance.id()))
+                .into_boxed(),
+        )
+        .await
+    }
+
+    /// Return information about all VNICs connected to a VPC required
+    /// for the sled agent to instantiate firewall rules via OPTE.
+    pub(crate) async fn derive_vpc_network_interface_info(
+        &self,
+        opctx: &OpContext,
+        authz_vpc: &authz::Vpc,
+    ) -> ListResultVec<sled_client_types::NetworkInterface> {
+        opctx.authorize(authz::Action::ListChildren, authz_vpc).await?;
+
+        use db::schema::network_interface;
+        self.derive_network_interface_info(
+            opctx,
+            network_interface::table
+                .filter(network_interface::vpc_id.eq(authz_vpc.id()))
+                .into_boxed(),
+        )
+        .await
+    }
+
+    /// Return information about all VNICs connected to a VpcSubnet required
+    /// for the sled agent to instantiate firewall rules via OPTE.
+    pub(crate) async fn derive_subnet_network_interface_info(
+        &self,
+        opctx: &OpContext,
+        authz_subnet: &authz::VpcSubnet,
+    ) -> ListResultVec<sled_client_types::NetworkInterface> {
+        opctx.authorize(authz::Action::ListChildren, authz_subnet).await?;
+
+        use db::schema::network_interface;
+        self.derive_network_interface_info(
+            opctx,
+            network_interface::table
+                .filter(network_interface::subnet_id.eq(authz_subnet.id()))
+                .into_boxed(),
+        )
+        .await
     }
 
     /// List network interfaces associated with a given instance.
