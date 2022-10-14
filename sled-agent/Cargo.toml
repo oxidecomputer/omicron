@@ -17,7 +17,6 @@ clap = { version = "4.0", features = ["derive"] }
 crucible-client-types = { git = "https://github.com/oxidecomputer/crucible", rev = "bacffd142fc38a01fe255407b0c8d5d0aacfe778" }
 crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "bacffd142fc38a01fe255407b0c8d5d0aacfe778" }
 ddm-admin-client = { path = "../ddm-admin-client" }
-diesel = { version = "2.0.2", features = ["sqlite", "chrono", "serde_json", "network-address", "uuid"] }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
 futures = "0.3.24"
 internal-dns-client = { path = "../internal-dns-client" }
@@ -43,12 +42,10 @@ sled-agent-client = { path = "../sled-agent-client" }
 slog = { version = "2.5", features = [ "max_level_trace", "release_max_level_debug" ] }
 slog-dtrace = "0.2"
 smf = "0.2"
-spdm = { git = "https://github.com/oxidecomputer/spdm", rev = "9742f6e" }
 sp-sim = { path = "../sp-sim" }
 sprockets-common = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
 sprockets-host = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
 socket2 = { version = "0.4", features = [ "all" ] }
-tar = "0.4"
 tempfile = "3.3"
 thiserror = "1.0"
 tokio = { version = "1.21", features = [ "full" ] }
