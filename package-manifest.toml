@@ -83,6 +83,15 @@ zone = true
 from = "smf/internal-dns"
 to = "/var/svc/manifest/site/internal-dns"
 
+[package.omicron-gateway]
+rust.binary_names = ["mgs"]
+rust.release = true
+service_name = "mgs"
+zone = true
+[[package.omicron-gateway.paths]]
+from = "smf/mgs"
+to = "/var/svc/manifest/site/mgs"
+
 # Packages not built within Omicron, but which must be imported.
 
 # Refer to

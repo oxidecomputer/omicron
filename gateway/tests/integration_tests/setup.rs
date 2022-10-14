@@ -8,6 +8,7 @@ use dropshot::test_util::ClientTestContext;
 use dropshot::test_util::LogContext;
 use gateway_messages::SpPort;
 use gateway_sp_comms::SpType;
+use omicron_gateway::MgsArguments;
 use omicron_test_utils::dev::poll;
 use omicron_test_utils::dev::poll::CondCheckError;
 use slog::o;
@@ -40,10 +41,9 @@ impl GatewayTestContext {
 
 pub fn load_test_config() -> (omicron_gateway::Config, sp_sim::Config) {
     let server_config_file_path = Path::new("tests/config.test.toml");
-    let mut server_config =
+    let server_config =
         omicron_gateway::Config::from_file(server_config_file_path)
             .expect("failed to load config.test.toml");
-    server_config.id = Uuid::new_v4();
 
     let sp_sim_config_file_path = Path::new("tests/sp_sim_config.test.toml");
     let sp_sim_config = sp_sim::Config::from_file(sp_sim_config_file_path)
@@ -120,10 +120,18 @@ pub async fn test_setup_with_config(
     // Start gateway server
     let rack_id = Uuid::parse_str(RACK_UUID).unwrap();
 
-    let server =
-        omicron_gateway::Server::start(server_config.clone(), rack_id, log)
-            .await
-            .unwrap();
+    let args = MgsArguments {
+        id: Uuid::new_v4(),
+        address: "[::1]:0".parse().unwrap(),
+    };
+    let server = omicron_gateway::Server::start(
+        server_config.clone(),
+        args,
+        rack_id,
+        log,
+    )
+    .await
+    .unwrap();
 
     // Build a list of all SPs defined in our config
     let mut all_sp_ids = Vec::new();
