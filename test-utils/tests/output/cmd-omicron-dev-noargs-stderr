@@ -1,16 +1,14 @@
-omicron-test-utils 0.1.0
 Manage a local CockroachDB database for Omicron development
 
-USAGE:
-    omicron-dev <SUBCOMMAND>
+Usage: omicron-dev <COMMAND>
 
-OPTIONS:
-    -h, --help       Print help information
-    -V, --version    Print version information
+Commands:
+  db-run       Start a CockroachDB cluster for development
+  db-populate  Populate an existing CockroachDB cluster with the Omicron schema
+  db-wipe      Wipe the Omicron schema (and all data) from an existing CockroachDB cluster
+  ch-run       Run a ClickHouse database server for development
+  help         Print this message or the help of the given subcommand(s)
 
-SUBCOMMANDS:
-    ch-run         Run a ClickHouse database server for development
-    db-populate    Populate an existing CockroachDB cluster with the Omicron schema
-    db-run         Start a CockroachDB cluster for development
-    db-wipe        Wipe the Omicron schema (and all data) from an existing CockroachDB cluster
-    help           Print this message or the help of the given subcommand(s)
+Options:
+  -h, --help     Print help information
+  -V, --version  Print version information

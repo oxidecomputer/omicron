@@ -6,7 +6,7 @@
 
 use crate::bootstrap::params::Gateway;
 use crate::config::ConfigError;
-use crate::params::{DatasetEnsureBody, ServiceRequest};
+use crate::params::{DatasetEnsureBody, ServiceZoneRequest};
 use omicron_common::address::{
     get_64_subnet, Ipv6Subnet, AZ_PREFIX, RACK_PREFIX, SLED_PREFIX,
 };
@@ -50,12 +50,12 @@ pub struct HardcodedSledRequest {
     pub datasets: Vec<DatasetEnsureBody>,
 
     /// Services to be instantiated.
-    #[serde(default, rename = "service")]
-    pub services: Vec<ServiceRequest>,
+    #[serde(default, rename = "service_zone")]
+    pub service_zones: Vec<ServiceZoneRequest>,
 
     /// DNS Services to be instantiated.
     #[serde(default, rename = "dns_service")]
-    pub dns_services: Vec<ServiceRequest>,
+    pub dns_services: Vec<ServiceZoneRequest>,
 }
 
 impl SetupServiceConfig {
@@ -63,9 +63,8 @@ impl SetupServiceConfig {
         let path = path.as_ref();
         let contents = std::fs::read_to_string(&path)
             .map_err(|err| ConfigError::Io { path: path.into(), err })?;
-        let config = toml::from_str(&contents)
-            .map_err(|err| ConfigError::Parse { path: path.into(), err })?;
-        Ok(config)
+        toml::from_str(&contents)
+            .map_err(|err| ConfigError::Parse { path: path.into(), err })
     }
 
     pub fn az_subnet(&self) -> Ipv6Subnet<AZ_PREFIX> {

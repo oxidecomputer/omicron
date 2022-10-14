@@ -8,7 +8,7 @@ use super::client as bootstrap_agent_client;
 use super::params::SledAgentRequest;
 use super::trust_quorum::ShareDistribution;
 use crate::rack_setup::config::SetupServiceConfig;
-use crate::rack_setup::service::Service;
+use crate::rack_setup::service::RackSetupService;
 use crate::sp::SpHandle;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
@@ -24,7 +24,7 @@ use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
 pub(super) struct RssHandle {
-    _rss: Service,
+    _rss: RackSetupService,
     task: JoinHandle<()>,
 }
 
@@ -50,7 +50,7 @@ impl RssHandle {
     ) -> Self {
         let (tx, rx) = rss_channel(our_bootstrap_address);
 
-        let rss = Service::new(
+        let rss = RackSetupService::new(
             log.new(o!("component" => "RSS")),
             config,
             tx,

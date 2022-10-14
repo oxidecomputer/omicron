@@ -7,6 +7,7 @@
 use crate::params::{
     DatasetEnsureBody, DiskEnsureBody, InstanceEnsureBody,
     InstanceSerialConsoleData, InstanceSerialConsoleRequest, ServiceEnsureBody,
+    VpcFirewallRulesEnsureBody,
 };
 use crate::serial::ByteOffset;
 use dropshot::{
@@ -39,6 +40,7 @@ pub fn api() -> SledApiDescription {
         api.register(instance_serial_get)?;
         api.register(instance_issue_disk_snapshot_request)?;
         api.register(issue_disk_snapshot_request)?;
+        api.register(vpc_firewall_rules_put)?;
 
         Ok(())
     }
@@ -289,4 +291,30 @@ async fn issue_disk_snapshot_request(
     Ok(HttpResponseOk(DiskSnapshotRequestResponse {
         snapshot_id: body.snapshot_id,
     }))
+}
+
+/// Path parameters for VPC requests (sled agent API)
+#[derive(Deserialize, JsonSchema)]
+struct VpcPathParam {
+    vpc_id: Uuid,
+}
+
+#[endpoint {
+    method = PUT,
+    path = "/vpc/{vpc_id}/firewall/rules",
+}]
+async fn vpc_firewall_rules_put(
+    rqctx: Arc<RequestContext<SledAgent>>,
+    path_params: Path<VpcPathParam>,
+    body: TypedBody<VpcFirewallRulesEnsureBody>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = rqctx.context();
+    let vpc_id = path_params.into_inner().vpc_id;
+    let body_args = body.into_inner();
+
+    sa.firewall_rules_ensure(vpc_id, &body_args.rules[..])
+        .await
+        .map_err(Error::from)?;
+
+    Ok(HttpResponseUpdatedNoContent())
 }

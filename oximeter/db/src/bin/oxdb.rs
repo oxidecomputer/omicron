@@ -119,7 +119,7 @@ enum Subcommand {
         timeseries_name: String,
 
         /// Filters applied to the timeseries's fields.
-        #[clap(required = true, min_values(1), action)]
+        #[clap(required = true, num_args(1..), action)]
         filters: Vec<String>,
 
         /// The start time to which the search is constrained, inclusive.

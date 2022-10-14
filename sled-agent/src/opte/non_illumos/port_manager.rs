@@ -12,6 +12,7 @@ use crate::opte::Port;
 use crate::opte::Vni;
 use crate::params::NetworkInterface;
 use crate::params::SourceNatConfig;
+use crate::params::VpcFirewallRule;
 use ipnetwork::IpNetwork;
 use macaddr::MacAddr6;
 use slog::debug;
@@ -111,6 +112,7 @@ impl PortManager {
         nic: &NetworkInterface,
         source_nat: Option<SourceNatConfig>,
         external_ips: Option<Vec<IpAddr>>,
+        _firewall_rules: &[VpcFirewallRule],
     ) -> Result<(Port, PortTicket), Error> {
         // TODO-completess: Remove IPv4 restrictions once OPTE supports virtual
         // IPv6 networks.
@@ -180,6 +182,14 @@ impl PortManager {
             "port" => ?&port,
         );
         Ok((port, ticket))
+    }
+
+    pub fn firewall_rules_ensure(
+        &self,
+        rules: &[VpcFirewallRule],
+    ) -> Result<(), Error> {
+        info!(self.inner.log, "Ignoring {} firewall rules", rules.len());
+        Ok(())
     }
 }
 

@@ -342,7 +342,8 @@ async fn test_session_me(cptestctx: &ControlPlaneTestContext) {
         priv_user,
         views::User {
             id: USER_TEST_PRIVILEGED.id(),
-            display_name: USER_TEST_PRIVILEGED.external_id.clone()
+            display_name: USER_TEST_PRIVILEGED.external_id.clone(),
+            silo_id: DEFAULT_SILO.id(),
         }
     );
 
@@ -359,7 +360,8 @@ async fn test_session_me(cptestctx: &ControlPlaneTestContext) {
         unpriv_user,
         views::User {
             id: USER_TEST_UNPRIVILEGED.id(),
-            display_name: USER_TEST_UNPRIVILEGED.external_id.clone()
+            display_name: USER_TEST_UNPRIVILEGED.external_id.clone(),
+            silo_id: DEFAULT_SILO.id(),
         }
     );
 }
@@ -398,7 +400,7 @@ fn get_header_value(resp: TestResponse, header_name: HeaderName) -> String {
 async fn log_in_and_extract_token(testctx: &ClientTestContext) -> String {
     let login = RequestBuilder::new(&testctx, Method::POST, "/login")
         .body(Some(&SpoofLoginBody { username: "unprivileged".to_string() }))
-        .expect_status(Some(StatusCode::SEE_OTHER))
+        .expect_status(Some(StatusCode::NO_CONTENT))
         .execute()
         .await
         .expect("failed to log in");

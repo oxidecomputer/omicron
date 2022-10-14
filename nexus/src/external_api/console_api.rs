@@ -36,7 +36,6 @@ use lazy_static::lazy_static;
 use mime_guess;
 use nexus_types::external_api::params;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::InternalContext;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_urlencoded;
@@ -61,7 +60,7 @@ pub struct SpoofLoginBody {
 pub async fn login_spoof(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     params: TypedBody<SpoofLoginBody>,
-) -> Result<HttpResponseSeeOther, HttpError> {
+) -> Result<HttpResponseHeaders<HttpResponseUpdatedNoContent>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
@@ -86,7 +85,8 @@ pub async fn login_spoof(
         let authn_opctx = nexus.opctx_external_authn();
         let session = nexus.session_create(&authn_opctx, user_id).await?;
 
-        let mut response = http_response_see_other(String::from("/"))?;
+        let mut response =
+            HttpResponseHeaders::new_unnamed(HttpResponseUpdatedNoContent());
         {
             let headers = response.headers_mut();
             headers.append(
@@ -629,12 +629,7 @@ pub async fn session_me(
         // as _somebody_. We could restrict this to session auth only, but it's
         // not clear what the advantage would be.
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let &actor = opctx
-            .authn
-            .actor_required()
-            .internal_context("loading current user")?;
-        let user =
-            nexus.silo_user_fetch_by_id(&opctx, &actor.actor_id()).await?;
+        let user = nexus.silo_user_fetch_self(&opctx).await?;
         Ok(HttpResponseOk(user.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
