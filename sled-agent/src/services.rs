@@ -463,7 +463,7 @@ impl ServiceManager {
             // packets may be multiplexed.  If the link isn't present, don't
             // bother trying to start the zone.
             match Dladm::verify_link(pkt_source) {
-                Ok(_) => Ok(Some(Vnic::wrap_physical(pkt_source.to_string()))),
+                Ok(_) => Ok(Some(Vnic::wrap_physical(pkt_source))),
                 Err(_) => {
                     Err(Error::MissingDevice { device: pkt_source.to_string() })
                 }
