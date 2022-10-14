@@ -24,11 +24,22 @@ pub struct Params {
 // Volume remove_read_only_parent saga: actions
 
 lazy_static! {
-    // We remove a read_only parent by:
-    // - Creating a temporary volume.
-    // - Remove the read_only_parent from our source volume and attach it
-    //   to the temporary volume.
-    // - Delete the temporary volume.
+    // A read-only parent is a structure in a volume that indicates that the
+    // volume is logically created from this parent. The initial data for the
+    // volume (implicitly) comes from the parent volume. In the background,
+    // we'll copy data from the parent into the physical storage allocated
+    // for this volume and, when that copy has completed, it will no longer
+    // be necessary to maintain this link to the read-only parent. At that
+    // point, we execute this saga.
+    // If this volume was the only one referencing that parent, then it's time
+    // to free the underlying storage resources of the parent as well. We can
+    // do this with the volume-delete saga, which takes care of correctly
+    // identifying whether other volumes are still referencing this parent.
+    // But we don't actually want to delete this volume. Instead, we create a
+    // temporary volume, move the read-only parent information from this volume
+    // to the temporary volume (so that this volume is now independent of the
+    // parent, and the temporary volume appears to depend on the parent), and
+    // then delete that temporary volume.
 
     // Create the empty data for the temp volume.
     static ref CREATE_TEMP_DATA: NexusAction = new_action_noop_undo(
