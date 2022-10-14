@@ -11,9 +11,11 @@ use slog::Logger;
 use std::fs;
 use std::path::Path;
 
+mod firewall_rules;
 mod port;
 mod port_manager;
 
+pub use firewall_rules::opte_firewall_rules;
 pub use port::Port;
 pub use port_manager::PortManager;
 pub use port_manager::PortTicket;

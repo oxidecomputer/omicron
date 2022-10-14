@@ -110,6 +110,7 @@ async fn make_silo(
     }
 
     builder.new_resource(authz::SiloIdentityProviderList::new(silo.clone()));
+    builder.new_resource(authz::SiloUserList::new(silo.clone()));
 
     let norganizations = if first_branch { 2 } else { 1 };
     for i in 0..norganizations {

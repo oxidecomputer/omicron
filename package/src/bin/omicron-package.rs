@@ -479,25 +479,29 @@ fn remove_all_except<P: AsRef<Path>>(
     Ok(())
 }
 
-async fn do_uninstall(
-    config: &Config,
-    artifact_dir: &Path,
-    install_dir: &Path,
-) -> Result<()> {
+async fn do_uninstall(config: &Config) -> Result<()> {
     info!(&config.log, "Removing all Omicron zones");
     uninstall_all_omicron_zones()?;
     info!(config.log, "Uninstalling all packages");
     uninstall_all_packages(config);
+    info!(config.log, "Removing networking resources");
+    cleanup_networking_resources(&config.log).await?;
+    Ok(())
+}
+
+async fn do_clean(
+    config: &Config,
+    artifact_dir: &Path,
+    install_dir: &Path,
+) -> Result<()> {
     info!(
         config.log,
-        "Removing artifacts in: {}",
+        "Removing artifacts from {}",
         artifact_dir.to_string_lossy()
     );
-
     const ARTIFACTS_TO_KEEP: &[&str] =
         &["clickhouse", "cockroachdb", "xde", "console-assets", "downloads"];
     remove_all_except(artifact_dir, ARTIFACTS_TO_KEEP, &config.log)?;
-
     info!(
         config.log,
         "Removing installed objects in: {}",
@@ -505,8 +509,6 @@ async fn do_uninstall(
     );
     const INSTALLED_OBJECTS_TO_KEEP: &[&str] = &["opte"];
     remove_all_except(install_dir, INSTALLED_OBJECTS_TO_KEEP, &config.log)?;
-
-    cleanup_networking_resources(&config.log).await?;
 
     Ok(())
 }
@@ -623,11 +625,15 @@ async fn main() -> Result<()> {
         }) => {
             do_install(&config, &artifact_dir, &install_dir)?;
         }
-        SubCommand::Deploy(DeployCommand::Uninstall {
+        SubCommand::Deploy(DeployCommand::Uninstall) => {
+            do_uninstall(&config).await?;
+        }
+        SubCommand::Deploy(DeployCommand::Clean {
             artifact_dir,
             install_dir,
         }) => {
-            do_uninstall(&config, &artifact_dir, &install_dir).await?;
+            do_uninstall(&config).await?;
+            do_clean(&config, &artifact_dir, &install_dir).await?;
         }
         SubCommand::Deploy(DeployCommand::Unpack {
             artifact_dir,
