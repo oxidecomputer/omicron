@@ -13,6 +13,7 @@ use crate::SimulatedSp;
 use anyhow::Result;
 use async_trait::async_trait;
 use futures::future;
+use gateway_messages::sp_impl::DeviceDescription;
 use gateway_messages::sp_impl::SpHandler;
 use gateway_messages::BulkIgnitionState;
 use gateway_messages::DiscoverResponse;
@@ -586,5 +587,13 @@ impl SpHandler for Handler {
             "port" => ?port,
         );
         Err(ResponseError::RequestUnsupportedForSp)
+    }
+
+    fn num_devices(&mut self, _: SocketAddrV6, _: SpPort) -> u32 {
+        0
+    }
+
+    fn device_description(&mut self, _: u32) -> DeviceDescription<'_> {
+        panic!("we have no devices");
     }
 }

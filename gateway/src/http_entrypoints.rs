@@ -149,8 +149,35 @@ struct UpdatePreparationProgress {
     total: u32,
 }
 
+/// List of components from a single SP.
 #[derive(Serialize, JsonSchema)]
-struct SpComponentInfo {}
+struct SpComponentList {
+    components: Vec<SpComponentInfo>,
+}
+
+/// Overview of a single SP component.
+#[derive(Serialize, JsonSchema)]
+struct SpComponentInfo {
+    component: String,
+    device: String,
+    serial_number: Option<String>,
+    description: String,
+    /// `capabilities` is a bitmask; interpret it via
+    /// [`gateway_messages::DeviceCapabilities`].
+    capabilities: u32,
+    presence: SpComponentPresence,
+}
+
+#[derive(Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+enum SpComponentPresence {
+    Present,
+    NotPresent,
+    Failed,
+    Unavailable,
+    Timeout,
+    Error,
+}
 
 #[derive(Deserialize, JsonSchema)]
 struct Timeout {
@@ -260,8 +287,6 @@ where
         StringOrU32::U32(n) => Ok(n),
     }
 }
-
-type TimeoutPaginationParams<T> = PaginationParams<Timeout, TimeoutSelector<T>>;
 
 #[derive(Deserialize, JsonSchema)]
 struct PathSp {
@@ -433,22 +458,22 @@ async fn sp_get(
 ///
 /// A component is a distinct entity under an SP's direct control. This lists
 /// all those components for a given SP.
-///
-/// As communication with SPs may be unreliable, consumers may optionally
-/// override the timeout. This interface may return a page of components prior
-/// to reaching either the timeout with the expectation that callers will keep
-/// calling this interface until the terminal page is reached. If the timeout
-/// is reached, the final call will result in an error.
 #[endpoint {
     method = GET,
     path = "/sp/{type}/{slot}/component",
 }]
 async fn sp_component_list(
-    _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    _path: Path<PathSp>,
-    _query: Query<TimeoutPaginationParams<PathSpComponent>>,
-) -> Result<HttpResponseOk<ResultsPage<SpComponentInfo>>, HttpError> {
-    todo!()
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path: Path<PathSp>,
+) -> Result<HttpResponseOk<SpComponentList>, HttpError> {
+    let apictx = rqctx.context();
+    let comms = &apictx.sp_comms;
+    let sp = path.into_inner().sp;
+
+    let inventory =
+        comms.inventory(sp.into()).await.map_err(http_err_from_comms_err)?;
+
+    Ok(HttpResponseOk(inventory.into()))
 }
 
 /// Get info for an SP component

@@ -276,7 +276,7 @@
     "/sp/{type}/{slot}/component": {
       "get": {
         "summary": "List components of an SP",
-        "description": "A component is a distinct entity under an SP's direct control. This lists all those components for a given SP.\nAs communication with SPs may be unreliable, consumers may optionally override the timeout. This interface may return a page of components prior to reaching either the timeout with the expectation that callers will keep calling this interface until the terminal page is reached. If the timeout is reached, the final call will result in an error.",
+        "description": "A component is a distinct entity under an SP's direct control. This lists all those components for a given SP.",
         "operationId": "sp_component_list",
         "parameters": [
           {
@@ -298,39 +298,6 @@
               "$ref": "#/components/schemas/SpType"
             },
             "style": "simple"
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            },
-            "style": "form"
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            },
-            "style": "form"
-          },
-          {
-            "in": "query",
-            "name": "timeout_millis",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 0
-            },
-            "style": "form"
           }
         ],
         "responses": {
@@ -339,7 +306,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SpComponentInfoResultsPage"
+                  "$ref": "#/components/schemas/SpComponentList"
                 }
               }
             }
@@ -350,8 +317,7 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        },
-        "x-dropshot-pagination": true
+        }
       }
     },
     "/sp/{type}/{slot}/component/{component}": {
@@ -976,27 +942,64 @@
         ]
       },
       "SpComponentInfo": {
-        "type": "object"
-      },
-      "SpComponentInfoResultsPage": {
-        "description": "A single page of results",
+        "description": "Overview of a single SP component.",
         "type": "object",
         "properties": {
-          "items": {
-            "description": "list of items on this page of results",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SpComponentInfo"
-            }
+          "capabilities": {
+            "description": "`capabilities` is a bitmask; interpret it via [`gateway_messages::DeviceCapabilities`].",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
           },
-          "next_page": {
+          "component": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "device": {
+            "type": "string"
+          },
+          "presence": {
+            "$ref": "#/components/schemas/SpComponentPresence"
+          },
+          "serial_number": {
             "nullable": true,
-            "description": "token used to fetch the next page of results (if any)",
             "type": "string"
           }
         },
         "required": [
-          "items"
+          "capabilities",
+          "component",
+          "description",
+          "device",
+          "presence"
+        ]
+      },
+      "SpComponentList": {
+        "description": "List of components from a single SP.",
+        "type": "object",
+        "properties": {
+          "components": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpComponentInfo"
+            }
+          }
+        },
+        "required": [
+          "components"
+        ]
+      },
+      "SpComponentPresence": {
+        "type": "string",
+        "enum": [
+          "present",
+          "not_present",
+          "failed",
+          "unavailable",
+          "timeout",
+          "error"
         ]
       },
       "SpIdentifier": {

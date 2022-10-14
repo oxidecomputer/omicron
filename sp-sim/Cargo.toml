@@ -18,8 +18,9 @@ thiserror = "1.0"
 toml = "0.5.9"
 
 [dependencies.gateway-messages]
-git = "https://github.com/oxidecomputer/management-gateway-service"
-rev = "90a4a944d35b7250b4ab468b31ae88deaf34ff78"
+#git = "https://github.com/oxidecomputer/management-gateway-service"
+#rev = "ebe45ba3b19aa8a25a138ed23e3eb3c76b4585cf"
+path = "../../management-gateway-service/gateway-messages"
 default-features = false
 features = ["std"]
 
