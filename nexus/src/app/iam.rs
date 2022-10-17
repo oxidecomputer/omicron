@@ -94,7 +94,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
     ) -> ListResultVec<db::model::SiloGroupMembership> {
-        Ok(self.db_datastore.silo_group_membership_for_self(opctx).await?)
+        self.db_datastore.silo_group_membership_for_self(opctx).await
     }
 
     // Silo groups
