@@ -175,7 +175,7 @@ async fn get_sha256_digest(path: &PathBuf) -> Result<Digest> {
     Ok(context.finish())
 }
 
-// Accesses a package which is contructed outside of Omicron.
+// Ensures a package exists, either by creating it or downloading it.
 async fn get_package(
     ui: &Arc<ProgressUI>,
     package_name: &String,

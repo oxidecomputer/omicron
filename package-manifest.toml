@@ -88,7 +88,7 @@ service_name = "crucible"
 #
 # 1. Build the zone image manually
 # 2. Copy the output zone image from crucible/out to omicron/out
-# 3. Use type = "manual" instead of the "prebuilt"
+# 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "crucible"
 source.commit = "1d67a53042f19ff7ca30dd20a04da94b7715ed7c"
@@ -135,7 +135,7 @@ only_for_targets.switch_variant = "stub"
 #   1b. cargo build --features=tofino_stub
 #   1c. cargo xtask dist -o
 # 2. Copy dendrite.tar.gz from dendrite/out to omicron/out
-# 3. Use type = "manual" instead of the "prebuilt"
+# 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "dendrite"
 source.commit = "09c8878be3f78f0a5d384e7f59b93ea66e02e7a4"
@@ -153,7 +153,7 @@ only_for_targets.switch_variant = "asic"
 #   1b. cargo build --features=<tofino_stub|tofino_asic|softnpu>
 #   1c. cargo xtask dist -o
 # 2. Copy the output zone image from dendrite/out to omicron/out
-# 3. Use type = "manual" instead of the "prebuilt"
+# 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "dendrite"
 source.commit = "09c8878be3f78f0a5d384e7f59b93ea66e02e7a4"
