@@ -232,6 +232,13 @@ struct VolumePathParam {
 }
 
 /// Request removal of a read_only_parent from a volume
+/// A volume can be created with the source data for that volume being another
+/// volume that attached as a "read_only_parent". In the background there
+/// exists a scrubber that will copy the data from the read_only_parent
+/// into the volume. When that scrubber has completed copying the data, this
+/// endpoint can be called to update the database that the read_only_parent
+/// is no longer needed for a volume and future attachments of this volume
+/// should not include that read_only_parent.
 #[endpoint {
      method = POST,
      path = "/volume/{volume_id}/remove-read-only-parent",
