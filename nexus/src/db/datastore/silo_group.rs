@@ -110,9 +110,9 @@ impl DataStore {
         &self,
         opctx: &OpContext,
     ) -> ListResultVec<SiloGroupMembership> {
-        // no authz check beyond pulling the current actor because current user
-        // can always list their own memberships
-
+        // Similar to session_hard_delete (see comment there), we do not do a
+        // typical authz check, instead effectively encoding the policy here
+        // that any user is allowed to fetch their own group memberships
         let &actor = opctx
             .authn
             .actor_required()
