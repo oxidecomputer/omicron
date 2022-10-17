@@ -542,6 +542,7 @@ impl super::Nexus {
         }
 
         let mut vpc_interfaces: NicMap = HashMap::new();
+        let mut vpc_subnets: NetMap = HashMap::new();
         for vpc_name in &vpcs {
             if let Ok((.., authz_vpc)) =
                 LookupPath::new(opctx, &self.db_datastore)
@@ -559,6 +560,17 @@ impl super::Nexus {
                         .entry(vpc_name.0.clone())
                         .or_insert_with(Vec::new)
                         .push(iface);
+                }
+
+                for (_name, mut networks) in self
+                    .db_datastore
+                    .resolve_vpc_subnets_to_ip_networks(vpc, vec![])
+                    .await?
+                {
+                    vpc_subnets
+                        .entry(vpc_name.0.clone())
+                        .or_insert_with(Vec::new)
+                        .append(&mut networks);
                 }
             }
         }
@@ -716,11 +728,11 @@ impl super::Nexus {
                                 host_addrs.push(IpNet::from(*net))
                             }
                             external::VpcFirewallRuleHostFilter::Vpc(name) => {
-                                for interface in vpc_interfaces
+                                for subnet in vpc_subnets
                                     .get(&name)
-                                    .unwrap_or(&no_interfaces)
+                                    .unwrap_or(&no_networks)
                                 {
-                                    host_addrs.push(IpNet::from(interface.ip))
+                                    host_addrs.push(IpNet::from(*subnet))
                                 }
                             }
                         }

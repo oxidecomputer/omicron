@@ -707,7 +707,9 @@ impl DataStore {
             })
     }
 
-    /// Identify all subnets in use by each VpcSubnet
+    /// Identify all subnets in use by each VpcSubnet.
+    /// If no subnet names are provided, resolve all subnets
+    /// on the given VPC.
     pub async fn resolve_vpc_subnets_to_ip_networks<
         T: IntoIterator<Item = Name>,
     >(
@@ -723,10 +725,17 @@ impl DataStore {
         }
 
         use db::schema::vpc_subnet;
-        let subnets = vpc_subnet::table
+        let mut query = vpc_subnet::table
             .filter(vpc_subnet::vpc_id.eq(vpc.id()))
-            .filter(vpc_subnet::name.eq_any(subnet_names))
             .filter(vpc_subnet::time_deleted.is_null())
+            .into_boxed();
+
+        let mut subnet_names = subnet_names.into_iter().peekable();
+        if subnet_names.peek().is_some() {
+            query = query.filter(vpc_subnet::name.eq_any(subnet_names));
+        }
+
+        let subnets = query
             .select((
                 vpc_subnet::name,
                 vpc_subnet::ipv4_block,
