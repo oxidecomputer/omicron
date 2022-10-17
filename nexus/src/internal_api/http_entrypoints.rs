@@ -234,7 +234,7 @@ struct VolumePathParam {
 /// Request removal of a read_only_parent from a volume
 #[endpoint {
      method = POST,
-     path = "/volume/remove-read-only-parent/{volume_id}",
+     path = "/volume/{volume_id}/remove-read-only-parent",
  }]
 async fn cpapi_volume_remove_read_only_parent(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,

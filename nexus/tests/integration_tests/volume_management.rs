@@ -1284,7 +1284,7 @@ async fn test_volume_remove_rop_saga(cptestctx: &ControlPlaneTestContext) {
     println!("Created this volume: {:?}", volume_id);
     // disk to volume id, to then remove ROP?
     let int_client = &cptestctx.internal_client;
-    let rop_url = format!("/volume/remove-read-only-parent/{}", volume_id);
+    let rop_url = format!("/volume/{}/remove-read-only-parent", volume_id);
 
     // Call the internal API endpoint for removal of the read only parent
     int_client
@@ -1341,7 +1341,7 @@ async fn test_volume_remove_rop_saga_twice(
     println!("Created this volume: {:?}", volume_id);
     // disk to volume id, to then remove ROP?
     let int_client = &cptestctx.internal_client;
-    let rop_url = format!("/volume/remove-read-only-parent/{}", volume_id);
+    let rop_url = format!("/volume/{}/remove-read-only-parent", volume_id);
 
     // Call the internal API endpoint for removal of the read only parent
     let res = int_client
@@ -1396,7 +1396,7 @@ async fn test_volume_remove_rop_saga_no_volume(
 
     println!("Non-existant volume: {:?}", volume_id);
     let int_client = &cptestctx.internal_client;
-    let rop_url = format!("/volume/remove-read-only-parent/{}", volume_id);
+    let rop_url = format!("/volume/{}/remove-read-only-parent", volume_id);
 
     // Call the internal API endpoint for removal of the read only parent
     int_client
@@ -1435,7 +1435,7 @@ async fn test_volume_remove_rop_saga_volume_not_volume(
 
     let int_client = &cptestctx.internal_client;
     // Call the saga on this volume
-    let rop_url = format!("/volume/remove-read-only-parent/{}", volume_id);
+    let rop_url = format!("/volume/{}/remove-read-only-parent", volume_id);
 
     // Call the internal API endpoint for removal of the read only parent
     int_client
@@ -1476,7 +1476,7 @@ async fn test_volume_remove_rop_saga_deleted_volume(
         .unwrap();
 
     let int_client = &cptestctx.internal_client;
-    let rop_url = format!("/volume/remove-read-only-parent/{}", volume_id);
+    let rop_url = format!("/volume/{}/remove-read-only-parent", volume_id);
 
     // Call the internal API endpoint for removal of the read only parent
     int_client

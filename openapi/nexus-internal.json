@@ -373,7 +373,7 @@
         }
       }
     },
-    "/volume/remove-read-only-parent/{volume_id}": {
+    "/volume/{volume_id}/remove-read-only-parent": {
       "post": {
         "summary": "Request removal of a read_only_parent from a volume",
         "operationId": "cpapi_volume_remove_read_only_parent",

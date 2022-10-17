@@ -487,8 +487,8 @@ impl DataStore {
             #[error("Serde error removing read only parent: {0}")]
             SerdeError(#[from] serde_json::Error),
 
-            #[error("Database in unexpected state")]
-            UnexpectedDatabaseState,
+            #[error("Updated {0} database rows, expected {1}")]
+            UnexpectedDatabaseUpdate(usize, usize),
         }
         type TxnError = TransactionError<RemoveReadOnlyParentError>;
 
@@ -596,7 +596,7 @@ impl DataStore {
                             // database.
                             if num_updated != 1 {
                                 return Err(TxnError::CustomError(
-                                    RemoveReadOnlyParentError::UnexpectedDatabaseState,
+                                    RemoveReadOnlyParentError::UnexpectedDatabaseUpdate(num_updated, 1),
                                 ));
                             }
 
@@ -630,13 +630,15 @@ impl DataStore {
                                     .execute(conn)?;
                             if num_updated != 1 {
                                 return Err(TxnError::CustomError(
-                                    RemoveReadOnlyParentError::UnexpectedDatabaseState,
+                                    RemoveReadOnlyParentError::UnexpectedDatabaseUpdate(num_updated, 1),
                                 ));
                             }
                             Ok(true)
                         }
                     }
-                    _ => {
+                    VolumeConstructionRequest::File { id: _, block_size: _, path: _ }
+                    | VolumeConstructionRequest::Region { block_size: _, opts: _, gen: _ }
+                    | VolumeConstructionRequest::Url { id: _, block_size: _, url: _ } => {
                         // Volume has a format that does not contain ROPs
                         Ok(false)
                     }
