@@ -69,13 +69,12 @@ source.paths = [ { from = "smf/internal-dns", to = "/var/svc/manifest/site/inter
 output.type = "zone"
 
 [package.omicron-gateway]
-rust.binary_names = ["mgs"]
-rust.release = true
 service_name = "mgs"
-zone = true
-[[package.omicron-gateway.paths]]
-from = "smf/mgs"
-to = "/var/svc/manifest/site/mgs"
+source.type = "local"
+source.rust.binary_names = ["mgs"]
+source.rust.release = true
+source.paths = [ { from = "smf/mgs", to = "/var/svc/manifest/site/mgs" } ]
+output.type = "zone"
 
 # Packages not built within Omicron, but which must be imported.
 
@@ -124,6 +123,7 @@ source.commit = "21fd8236c23dc38fea5d1e4c8196be685c251da2"
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/maghemite.sha256.txt
 source.sha256 = "039c9b3e97b0d61012850c1476574742c0cb9274ffa86cfeb15d619854ebacfa"
 output.type = "tarball"
+output.intermediate_only = true
 
 [package.dendrite-stub]
 service_name = "dendrite"
@@ -141,6 +141,7 @@ source.repo = "dendrite"
 source.commit = "09c8878be3f78f0a5d384e7f59b93ea66e02e7a4"
 source.sha256 = "e05d33dc5d3deafae7d618c45b019c87ddd97e7a1fff11fa3ffb7593a3e10eaf"
 output.type = "zone"
+output.intermediate_only = true
 
 [package.dendrite-asic]
 service_name = "dendrite"
@@ -156,5 +157,20 @@ only_for_targets.switch_variant = "asic"
 source.type = "prebuilt"
 source.repo = "dendrite"
 source.commit = "09c8878be3f78f0a5d384e7f59b93ea66e02e7a4"
-source.sha256 = "e05d33dc5d3deafae7d618c45b019c87ddd97e7a1fff11fa3ffb7593a3e10eaf"
+source.sha256 = "208ae10a61f834608378eb135e4b6e5993dc363019b8fba75465b6ea5506b635"
+output.type = "zone"
+output.intermediate_only = true
+
+[package.switch-asic]
+service_name = "switch"
+only_for_targets.switch_variant = "asic"
+source.type = "composite"
+source.packages = [ "omicron-gateway.tar.gz", "dendrite-asic.tar.gz" ]
+output.type = "zone"
+
+[package.switch-stub]
+service_name = "switch"
+only_for_targets.switch_variant = "stub"
+source.type = "composite"
+source.packages = [ "omicron-gateway.tar.gz", "dendrite-stub.tar.gz" ]
 output.type = "zone"
