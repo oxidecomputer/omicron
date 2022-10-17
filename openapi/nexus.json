@@ -5202,7 +5202,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/User"
+                  "$ref": "#/components/schemas/SessionMe"
                 }
               }
             }
@@ -11000,6 +11000,38 @@
           "slo_url",
           "sp_client_id",
           "technical_contact_email"
+        ]
+      },
+      "SessionMe": {
+        "description": "Client view of a [`User`] with some extra stuff that's useful to the console",
+        "type": "object",
+        "properties": {
+          "display_name": {
+            "description": "Human-readable name that can identify the user",
+            "type": "string"
+          },
+          "group_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "silo_id": {
+            "description": "Uuid of the silo to which this user belongs",
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "display_name",
+          "group_ids",
+          "id",
+          "silo_id"
         ]
       },
       "Silo": {

@@ -23,6 +23,7 @@ use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::UpdateResult;
@@ -99,6 +100,27 @@ impl DataStore {
         use db::schema::silo_group_membership::dsl;
         dsl::silo_group_membership
             .filter(dsl::silo_user_id.eq(silo_user_id))
+            .select(SiloGroupMembership::as_returning())
+            .get_results_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    pub async fn silo_group_membership_for_self(
+        &self,
+        opctx: &OpContext,
+    ) -> ListResultVec<SiloGroupMembership> {
+        // no authz check beyond pulling the current actor because current user
+        // can always list their own memberships
+
+        let &actor = opctx
+            .authn
+            .actor_required()
+            .internal_context("fetching current user's group memberships")?;
+
+        use db::schema::silo_group_membership::dsl;
+        dsl::silo_group_membership
+            .filter(dsl::silo_user_id.eq(actor.actor_id()))
             .select(SiloGroupMembership::as_returning())
             .get_results_async(self.pool_authorized(opctx).await?)
             .await

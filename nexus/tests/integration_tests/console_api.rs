@@ -335,33 +335,36 @@ async fn test_session_me(cptestctx: &ControlPlaneTestContext) {
         .execute()
         .await
         .expect("failed to get current user")
-        .parsed_body::<views::User>()
+        .parsed_body::<views::SessionMe>()
         .unwrap();
 
     assert_eq!(
         priv_user,
-        views::User {
+        views::SessionMe {
             id: USER_TEST_PRIVILEGED.id(),
             display_name: USER_TEST_PRIVILEGED.external_id.clone(),
             silo_id: DEFAULT_SILO.id(),
+            group_ids: vec![],
         }
     );
 
+    // TODO: fails bc user can't pull their own group memberships?
     // make sure it returns different things for different users
     let unpriv_user = NexusRequest::object_get(testctx, "/session/me")
         .authn_as(AuthnMode::UnprivilegedUser)
         .execute()
         .await
         .expect("failed to get current user")
-        .parsed_body::<views::User>()
+        .parsed_body::<views::SessionMe>()
         .unwrap();
 
     assert_eq!(
         unpriv_user,
-        views::User {
+        views::SessionMe {
             id: USER_TEST_UNPRIVILEGED.id(),
             display_name: USER_TEST_UNPRIVILEGED.external_id.clone(),
             silo_id: DEFAULT_SILO.id(),
+            group_ids: vec![],
         }
     );
 }
