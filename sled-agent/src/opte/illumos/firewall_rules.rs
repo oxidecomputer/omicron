@@ -61,16 +61,20 @@ impl FromVpcFirewallRule for VpcFirewallRule {
             |hosts| {
                 hosts
                     .iter()
-                    .map(|host| match host {
+                    // TODO: when OPTE firewalls support IPv6 addresses,
+                    // this should be `.map` instead of `.filter_map`.
+                    // See <https://github.com/oxidecomputer/opte/issues/282>
+                    // and <https://github.com/oxidecomputer/omicron/issues/1829>.
+                    .filter_map(|host| match host {
                         IpNet::V4(net) if net.prefix() == 32 => {
-                            Address::Ip(net.ip().into())
+                            Some(Address::Ip(net.ip().into()))
                         }
-                        IpNet::V4(net) => Address::Subnet(Ipv4Cidr::new(
+                        IpNet::V4(net) => Some(Address::Subnet(Ipv4Cidr::new(
                             net.ip().into(),
                             Ipv4PrefixLen::new(net.prefix()).unwrap(),
-                        )),
+                        ))),
                         IpNet::V6(_net) => {
-                            todo!("IPv6 host filters")
+                            None // ignore IPv6 host filters for now
                         }
                     })
                     .collect::<Vec<Address>>()
