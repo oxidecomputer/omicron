@@ -532,9 +532,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.0.14"
+version = "4.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ea54a38e4bce14ff6931c72e5b3c43da7051df056913d4e7e1fcdb1c03df69d"
+checksum = "6bf8832993da70a4c6d13c581f4463c2bdda27b9bf1c5498dc4365543abe6d6f"
 dependencies = [
  "atty",
  "bitflags",
@@ -920,9 +920,9 @@ dependencies = [
 
 [[package]]
 name = "cxx"
-version = "1.0.78"
+version = "1.0.79"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19f39818dcfc97d45b03953c1292efc4e80954e1583c4aa770bac1383e2310a4"
+checksum = "3f83d0ebf42c6eafb8d7c52f7e5f2d3003b89c7aa4fd2b79229209459a849af8"
 dependencies = [
  "cc",
  "cxxbridge-flags",
@@ -932,9 +932,9 @@ dependencies = [
 
 [[package]]
 name = "cxx-build"
-version = "1.0.78"
+version = "1.0.79"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e580d70777c116df50c390d1211993f62d40302881e54d4b79727acb83d0199"
+checksum = "07d050484b55975889284352b0ffc2ecbda25c0c55978017c132b29ba0818a86"
 dependencies = [
  "cc",
  "codespan-reporting",
@@ -947,15 +947,15 @@ dependencies = [
 
 [[package]]
 name = "cxxbridge-flags"
-version = "1.0.78"
+version = "1.0.79"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "56a46460b88d1cec95112c8c363f0e2c39afdb237f60583b0b36343bf627ea9c"
+checksum = "99d2199b00553eda8012dfec8d3b1c75fce747cf27c169a270b3b99e3448ab78"
 
 [[package]]
 name = "cxxbridge-macro"
-version = "1.0.78"
+version = "1.0.79"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "747b608fecf06b0d72d440f27acc99288207324b793be2c17991839f3d4995ea"
+checksum = "dcb67a6de1f602736dd7eaead0080cf3435df806c61b24b13328db128c58868f"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1231,7 +1231,7 @@ checksum = "1435fa1053d8b2fbbe9be7e97eca7f33d37b28409959813daefc1446a14247f1"
 [[package]]
 name = "dropshot"
 version = "0.8.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#1ced69b46160cbe08b952c356618a07659a2f928"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#cede51282bb18a4ddb4aa3595e1ece09021fed6f"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -1271,7 +1271,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.8.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#1ced69b46160cbe08b952c356618a07659a2f928"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#cede51282bb18a4ddb4aa3595e1ece09021fed6f"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1693,7 +1693,7 @@ name = "gateway-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.0.14",
+ "clap 4.0.15",
  "futures",
  "gateway-client",
  "libc",
@@ -2136,9 +2136,9 @@ dependencies = [
 
 [[package]]
 name = "iana-time-zone-haiku"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fde6edd6cef363e9359ed3c98ba64590ba9eecba2293eb5a723ab32aee8926aa"
+checksum = "0703ae284fc167426161c2e3f1da3ea71d94b21bedbcc9494e92b28e334e3dca"
 dependencies = [
  "cxx",
  "cxx-build",
@@ -2230,7 +2230,7 @@ name = "internal-dns"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.0.14",
+ "clap 4.0.15",
  "dropshot",
  "expectorate",
  "internal-dns-client",
@@ -2928,7 +2928,7 @@ name = "omicron-deploy"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.0.14",
+ "clap 4.0.15",
  "crossbeam",
  "omicron-package",
  "omicron-sled-agent",
@@ -2944,7 +2944,7 @@ dependencies = [
 name = "omicron-gateway"
 version = "0.1.0"
 dependencies = [
- "clap 4.0.14",
+ "clap 4.0.15",
  "dropshot",
  "expectorate",
  "futures",
@@ -2982,7 +2982,7 @@ dependencies = [
  "base64",
  "bb8",
  "chrono",
- "clap 4.0.14",
+ "clap 4.0.15",
  "cookie",
  "criterion",
  "crucible-agent-client",
@@ -3061,7 +3061,7 @@ name = "omicron-package"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.0.14",
+ "clap 4.0.15",
  "futures",
  "hex",
  "indicatif",
@@ -3099,7 +3099,7 @@ dependencies = [
  "bytes",
  "cfg-if 1.0.0",
  "chrono",
- "clap 4.0.14",
+ "clap 4.0.15",
  "crucible-agent-client",
  "crucible-client-types",
  "ddm-admin-client",
@@ -3161,7 +3161,7 @@ name = "omicron-test-utils"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.0.14",
+ "clap 4.0.15",
  "dropshot",
  "expectorate",
  "futures",
@@ -3336,9 +3336,9 @@ checksum = "9ff7415e9ae3fff1225851df9e0d9e4e5479f947619774677a63572e55e80eff"
 
 [[package]]
 name = "oso"
-version = "0.26.2"
+version = "0.26.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "736242f751b0f25d9361042fd856e1a54cc3fc37b033245cc4e9d69f751f87e6"
+checksum = "6797d3da6d3dfd431c845060285436443eccebb08f11b3e5f23adb7e21238c79"
 dependencies = [
  "impl-trait-for-tuples",
  "lazy_static",
@@ -3347,14 +3347,13 @@ dependencies = [
  "polar-core",
  "thiserror",
  "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
 name = "oso-derive"
-version = "0.26.2"
+version = "0.26.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47da8980dacacbc0cbbdd88ff252bacef5aafa368261d6703f35f8933bc45aca"
+checksum = "155e58bf10e15b9dadcf048995e0a18d135f31a747214b77f3cb2d3f02664ea4"
 dependencies = [
  "quote",
  "syn",
@@ -3419,7 +3418,7 @@ dependencies = [
 name = "oximeter-collector"
 version = "0.1.0"
 dependencies = [
- "clap 4.0.14",
+ "clap 4.0.15",
  "dropshot",
  "expectorate",
  "internal-dns-client",
@@ -3450,7 +3449,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "chrono",
- "clap 4.0.14",
+ "clap 4.0.15",
  "dropshot",
  "itertools",
  "omicron-test-utils",
@@ -3603,9 +3602,9 @@ checksum = "b1de2e551fb905ac83f73f7aedf2f0cb4a0da7e35efa24a202a936269f1f18e1"
 
 [[package]]
 name = "path-absolutize"
-version = "3.0.13"
+version = "3.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3de4b40bd9736640f14c438304c09538159802388febb02c8abaae0846c1f13"
+checksum = "0f1d4993b16f7325d90c18c3c6a3327db7808752db8d208cea0acee0abd52c52"
 dependencies = [
  "path-dedot",
 ]
@@ -3801,9 +3800,9 @@ dependencies = [
 
 [[package]]
 name = "polar-core"
-version = "0.26.2"
+version = "0.26.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a942921f9a8bd9753db813ebb5ea4ad25d0cad5de338ea987a32b2631a4f397a"
+checksum = "673b0f55fb5a6a02e40ea15084389146285217d138f12d732362ebc1416fdad7"
 dependencies = [
  "indoc",
  "js-sys",
@@ -3975,9 +3974,9 @@ dependencies = [
 
 [[package]]
 name = "proc-macro2"
-version = "1.0.46"
+version = "1.0.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "94e2ef8dbfc347b10c094890f778ee2e36ca9bb4262e86dc99cd217e35f3470b"
+checksum = "5ea3d908b0e36316caf9e9e2c4625cdde190a7e6f440d794667ed17a1855e725"
 dependencies = [
  "unicode-ident",
 ]
@@ -3988,7 +3987,7 @@ version = "0.2.1-dev"
 source = "git+https://github.com/oxidecomputer/progenitor#0f4a9f7a3795122d172acdb76798339bc24c832a"
 dependencies = [
  "anyhow",
- "clap 4.0.14",
+ "clap 4.0.15",
  "openapiv3",
  "progenitor-client",
  "progenitor-impl",
@@ -4977,15 +4976,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sharded-slab"
-version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "900fba806f70c630b0a382d0d825e17a0f19fcd059a2ade1ff237bcddf446b31"
-dependencies = [
- "lazy_static",
-]
-
-[[package]]
 name = "shlex"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5255,7 +5245,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "clap 4.0.14",
+ "clap 4.0.15",
  "dropshot",
  "futures",
  "gateway-messages",
@@ -5934,17 +5924,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "24eb03ba0eab1fd845050058ce5e616558e8f8d8fca633e6b163fe25c797213a"
 dependencies = [
  "once_cell",
-]
-
-[[package]]
-name = "tracing-subscriber"
-version = "0.3.16"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6176eae26dd70d0c919749377897b54a9276bd7061339665dd68777926b5a70"
-dependencies = [
- "sharded-slab",
- "thread_local",
- "tracing-core",
 ]
 
 [[package]]
