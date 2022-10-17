@@ -75,6 +75,7 @@ source.rust.binary_names = ["mgs"]
 source.rust.release = true
 source.paths = [ { from = "smf/mgs", to = "/var/svc/manifest/site/mgs" } ]
 output.type = "zone"
+output.intermediate_only = true
 
 # Packages not built within Omicron, but which must be imported.
 
@@ -123,7 +124,6 @@ source.commit = "21fd8236c23dc38fea5d1e4c8196be685c251da2"
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/maghemite.sha256.txt
 source.sha256 = "039c9b3e97b0d61012850c1476574742c0cb9274ffa86cfeb15d619854ebacfa"
 output.type = "tarball"
-output.intermediate_only = true
 
 [package.dendrite-stub]
 service_name = "dendrite"
