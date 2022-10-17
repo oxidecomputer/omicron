@@ -17,11 +17,19 @@ slog-dtrace = "0.2"
 thiserror = "1.0.37"
 tokio-tungstenite = "0.17"
 toml = "0.5.9"
-uuid = "1.1.0"
+uuid = "1.2.1"
 
-gateway-messages = { path = "../gateway-messages", features = ["std"] }
-gateway-sp-comms = { path = "../gateway-sp-comms" }
 omicron-common = { path = "../common" }
+
+[dependencies.gateway-messages]
+git = "https://github.com/oxidecomputer/management-gateway-service"
+rev = "90a4a944d35b7250b4ab468b31ae88deaf34ff78"
+default-features = false
+features = ["std"]
+
+[dependencies.gateway-sp-comms]
+git = "https://github.com/oxidecomputer/management-gateway-service"
+rev = "90a4a944d35b7250b4ab468b31ae88deaf34ff78"
 
 [dependencies.slog]
 version = "2.7"
@@ -41,3 +49,7 @@ serde_json = "1.0"
 sp-sim = { path = "../sp-sim" }
 subprocess = "0.2.9"
 tokio-tungstenite = "0.17"
+
+[[bin]]
+name = "mgs"
+doc = false

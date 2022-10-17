@@ -30,6 +30,7 @@ use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::UpdateResult;
+use omicron_common::api::external::Vni;
 use omicron_common::api::internal::nexus;
 use sled_agent_client::types::InstanceEnsureBody;
 use sled_agent_client::types::InstanceRuntimeStateMigrateParams;
@@ -557,6 +558,32 @@ impl super::Nexus {
         let source_nat =
             SourceNatConfig::from(snat_ip.into_iter().next().unwrap());
 
+        // Gather the firewall rules for the VPC this instance is in.
+        // The NIC info we gathered above doesn't have VPC information
+        // because the sled agent doesn't care about that directly,
+        // so we fetch it via the first interface's VNI. (It doesn't
+        // matter which one we use because all NICs must be in the
+        // same VPC; see the check in project_create_instance.)
+        let firewall_rules = if let Some(nic) = nics.first() {
+            let vni = Vni::try_from(nic.vni.0)?;
+            let vpc = self
+                .db_datastore
+                .resolve_vni_to_vpc(opctx, db::model::Vni(vni))
+                .await?;
+            let (.., authz_vpc) = LookupPath::new(opctx, &self.db_datastore)
+                .vpc_id(vpc.id())
+                .lookup_for(authz::Action::Read)
+                .await?;
+            let rules = self
+                .db_datastore
+                .vpc_list_firewall_rules(opctx, &authz_vpc)
+                .await?;
+            self.resolve_firewall_rules_for_sled_agent(opctx, &vpc, &rules)
+                .await?
+        } else {
+            vec![]
+        };
+
         // Gather the SSH public keys of the actor make the request so
         // that they may be injected into the new image via cloud-init.
         // TODO-security: this should be replaced with a lookup based on
@@ -597,6 +624,7 @@ impl super::Nexus {
             nics,
             source_nat,
             external_ips,
+            firewall_rules,
             disks: disk_reqs,
             cloud_init_bytes: Some(base64::encode(
                 db_instance.generate_cidata(&public_keys)?,

@@ -15,7 +15,7 @@ use serde::{
     de::{self, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
 };
-use std::net::IpAddr;
+use std::{net::IpAddr, str::FromStr};
 use uuid::Uuid;
 
 // Silos
@@ -38,6 +38,55 @@ pub struct SiloCreate {
     /// group_attribute_name must be set for users to be considered part of a
     /// group. See [`SamlIdentityProviderCreate`] for more information.
     pub admin_group_name: Option<String>,
+}
+
+/// Create-time parameters for a [`User`](crate::external_api::views::User)
+#[derive(Clone, Deserialize, Serialize, JsonSchema)]
+pub struct UserCreate {
+    /// username used to log in
+    pub external_id: UserId,
+}
+
+/// A username for a local-only user
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(try_from = "String")]
+pub struct UserId(String);
+
+impl AsRef<str> for UserId {
+    fn as_ref(&self) -> &str {
+        self.0.as_ref()
+    }
+}
+
+impl FromStr for UserId {
+    type Err = String;
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        UserId::try_from(String::from(value))
+    }
+}
+
+/// Used to impl `Deserialize`
+impl TryFrom<String> for UserId {
+    type Error = String;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        // Mostly, this validation exists to cap the input size.  The specific
+        // length is not critical here.  For convenience and consistency, we use
+        // the same rules as `Name`.
+        let _ = Name::try_from(value.clone())?;
+        Ok(UserId(value))
+    }
+}
+
+impl JsonSchema for UserId {
+    fn schema_name() -> String {
+        "UserId".to_string()
+    }
+
+    fn json_schema(
+        gen: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        Name::json_schema(gen)
+    }
 }
 
 // Silo identity providers

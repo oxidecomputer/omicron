@@ -134,6 +134,23 @@ resource: Silo "silo1": identity provider list
   silo1-org1-proj1-viewer          ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
+resource: Silo "silo1": user list
+
+  USER                             Q  R LC RP  M MP CC  D
+  fleet-admin                      ✘  ✘  ✔  ✘  ✘  ✘  ✔  ✘
+  fleet-collaborator               ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
+  fleet-viewer                     ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✘  ✔  ✘  ✘  ✘  ✔  ✘
+  silo1-collaborator               ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                     ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-admin                 ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-collaborator          ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-viewer                ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-proj1-admin           ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-proj1-collaborator    ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-proj1-viewer          ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !
+
 resource: Organization "silo1-org1"
 
   USER                             Q  R LC RP  M MP CC  D
@@ -543,6 +560,23 @@ resource: Silo "silo2"
   unauthenticated                  !  !  !  !  !  !  !  !
 
 resource: Silo "silo2": identity provider list
+
+  USER                             Q  R LC RP  M MP CC  D
+  fleet-admin                      ✘  ✘  ✔  ✘  ✘  ✘  ✔  ✘
+  fleet-collaborator               ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
+  fleet-viewer                     ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !
+
+resource: Silo "silo2": user list
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✘  ✔  ✘  ✘  ✘  ✔  ✘

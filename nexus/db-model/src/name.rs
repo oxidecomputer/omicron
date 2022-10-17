@@ -22,6 +22,7 @@ use serde::{Deserialize, Serialize};
     AsExpression,
     FromSqlRow,
     Eq,
+    Hash,
     PartialEq,
     Ord,
     PartialOrd,
