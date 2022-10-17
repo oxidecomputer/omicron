@@ -49,3 +49,7 @@ serde_json = "1.0"
 sp-sim = { path = "../sp-sim" }
 subprocess = "0.2.9"
 tokio-tungstenite = "0.17"
+
+[[bin]]
+name = "mgs"
+doc = false
