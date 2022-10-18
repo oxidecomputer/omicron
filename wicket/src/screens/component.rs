@@ -4,8 +4,10 @@
 
 //! Inventory and control of individual rack components: sled,switch,psc
 
-use super::colors::*;
 use super::Screen;
+use crate::defaults::colors::*;
+use crate::defaults::dimensions::MENUBAR_HEIGHT;
+use crate::defaults::style;
 use crate::widgets::Control;
 use crate::widgets::ControlId;
 use crate::widgets::HelpMenuState;
@@ -60,23 +62,44 @@ impl ComponentScreen {
         f.render_widget(block, f.size());
     }
 
-    fn draw_status_bar(&self, f: &mut Frame, state: &State) {
+    fn draw_menubar(&self, f: &mut Frame, state: &State) {
         let mut rect = f.size();
-        rect.height = 5;
+        rect.height = MENUBAR_HEIGHT;
 
-        let style = Style::default().bg(OX_GREEN_DARK).fg(OX_GRAY);
-        let selected_style = Style::default().fg(OX_GREEN_LIGHT);
-        let help_menu_style =
-            Style::default().fg(OX_OFF_WHITE).bg(OX_GREEN_DARK);
-        let help_menu_command_style =
-            Style::default().fg(OX_GREEN_LIGHT).bg(OX_GREEN_DARK);
-        let button_style = Style::default().fg(OX_OFF_WHITE).bg(OX_GREEN_DARK);
-        let hovered_style = Style::default().fg(OX_PINK).bg(OX_GREEN_DARK);
+        let bar_block = Block::default().style(style::menu_bar());
+        f.render_widget(bar_block, rect);
 
-        let status_bar_block = Block::default().style(style);
-        f.render_widget(status_bar_block, rect);
+        self.draw_component_list(f, state);
+        self.draw_power_state(f, state);
+        self.draw_help_menu(f, state);
+        self.draw_screen_selection_buttons(f, state);
+    }
 
+    fn draw_power_state(&self, f: &mut Frame, state: &State) {
         let current = state.rack_state.get_current_component_id();
+        let title = match state.inventory.get_power_state(&current) {
+            Some(s) => {
+                format!(
+                    "⌁ Power State: {}",
+                    s.description().to_ascii_uppercase()
+                )
+            }
+            None => "⌁ Power State: UNKNOWN".to_string(),
+        };
+
+        let mut rect = f.size();
+        rect.height = 1;
+        rect.y = 3;
+        let power_state_block = Block::default()
+            .style(style::menu_bar_selected())
+            .title(title)
+            .title_alignment(Alignment::Center);
+        f.render_widget(power_state_block, rect);
+    }
+
+    fn draw_component_list(&self, f: &mut Frame, state: &State) {
+        let current = state.rack_state.get_current_component_id();
+        let style = style::menu_bar();
 
         // Draw the components list
         // TODO: Some sliding style animation?
@@ -86,7 +109,7 @@ impl ComponentScreen {
                 style,
             ),
             Span::raw("   "),
-            Span::styled(current.name(), selected_style),
+            Span::styled(current.name(), style::menu_bar_selected()),
             Span::raw("   "),
             Span::styled(
                 state.rack_state.get_next_component_id().name(),
@@ -102,34 +125,16 @@ impl ComponentScreen {
             .title(title)
             .title_alignment(Alignment::Center);
         f.render_widget(title_block, rect);
+    }
 
-        // Draw the power state
-        let title = match state.inventory.get_power_state(&current) {
-            Some(s) => {
-                format!(
-                    "⌁ Power State: {}",
-                    s.description().to_ascii_uppercase()
-                )
-            }
-            None => "⌁ Power State: UNKNOWN".to_string(),
-        };
-
-        let mut rect = f.size();
-        rect.height = 1;
-        rect.y = 3;
-        let power_state_block = Block::default()
-            .style(selected_style)
-            .title(title)
-            .title_alignment(Alignment::Center);
-        f.render_widget(power_state_block, rect);
-
+    fn draw_help_menu(&self, f: &mut Frame, state: &State) {
         // Draw the help button if the help menu is closed, otherwise draw the
         // help menu
         if !self.help_menu_state.is_closed() {
             let menu = HelpMenu {
                 help: &self.help_data,
-                style: help_menu_style,
-                command_style: help_menu_command_style,
+                style: style::help_menu(),
+                command_style: style::help_menu_command(),
                 // Unwrap is safe because we check that the menu is open (and
                 // thus has an AnimationState).
                 state: self.help_menu_state.get_animation_state().unwrap(),
@@ -138,29 +143,31 @@ impl ComponentScreen {
         } else {
             let border_style =
                 if self.hovered == Some(self.help_button_state.id()) {
-                    hovered_style
+                    style::button_hovered()
                 } else {
-                    button_style
+                    style::button()
                 };
             let button = HelpButton::new(
                 &self.help_button_state,
-                button_style,
+                style::button(),
                 border_style,
             );
 
             f.render_widget(button, f.size());
         }
+    }
 
+    fn draw_screen_selection_buttons(&self, f: &mut Frame, state: &State) {
         // Draw the RackSreenButton
         let border_style =
             if self.hovered == Some(self.rack_screen_button_state.id()) {
-                hovered_style
+                style::button_hovered()
             } else {
-                button_style
+                style::button()
             };
         let button = ScreenButton::new(
             &self.rack_screen_button_state,
-            button_style,
+            style::button(),
             border_style,
         );
         f.render_widget(button, f.size());
@@ -168,17 +175,16 @@ impl ComponentScreen {
 
     fn draw_inventory(&self, f: &mut Frame, state: &State) {
         // Draw the header
-        let selected_style = Style::default().fg(OX_GREEN_LIGHT);
         let inventory_style = Style::default().fg(OX_YELLOW_DIM);
 
-        let mut header_style = selected_style;
+        let mut header_style = style::menu_bar_selected();
         header_style =
             header_style.add_modifier(Modifier::UNDERLINED | Modifier::BOLD);
 
         let text = Text::styled("INVENTORY\n\n", header_style);
         let mut rect = f.size();
-        rect.y = 6;
-        rect.height -= 6;
+        rect.y = MENUBAR_HEIGHT + 1;
+        rect.height -= rect.y;
         let center = (rect.width - text.width() as u16) / 2;
         rect.x += center;
         rect.width -= center;
@@ -197,8 +203,8 @@ impl ComponentScreen {
         };
 
         let mut rect = f.size();
-        rect.y = 9;
-        rect.height -= 9;
+        rect.y = MENUBAR_HEIGHT + 4;
+        rect.height -= rect.y;
 
         let center = (rect.width - text.width() as u16) / 2;
         rect.x += center;
@@ -308,7 +314,7 @@ impl Screen for ComponentScreen {
     ) -> anyhow::Result<()> {
         terminal.draw(|f| {
             self.draw_background(f);
-            self.draw_status_bar(f, state);
+            self.draw_menubar(f, state);
             self.draw_inventory(f, state);
         })?;
         Ok(())

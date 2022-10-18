@@ -28,6 +28,7 @@ use tui::backend::CrosstermBackend;
 use tui::layout::Rect;
 use tui::Terminal;
 
+pub(crate) mod defaults;
 pub(crate) mod inventory;
 mod mgs;
 mod screens;

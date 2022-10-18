@@ -6,8 +6,8 @@
 //!
 //! This is the first screen the user sees
 
-use super::colors::*;
 use super::{Screen, ScreenId};
+use crate::defaults::colors::*;
 use crate::widgets::{Logo, LogoState, LOGO_HEIGHT, LOGO_WIDTH};
 use crate::Action;
 use crate::Frame;
