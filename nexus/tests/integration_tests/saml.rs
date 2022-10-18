@@ -19,7 +19,9 @@ use nexus_test_utils::resource_helpers::{create_silo, object_create};
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 
+use dropshot::ResultsPage;
 use httptest::{matchers::*, responders::*, Expectation, Server};
+use uuid::Uuid;
 
 // Valid SAML IdP entity descriptor from https://en.wikipedia.org/wiki/SAML_metadata#Identity_provider_metadata
 // note: no signing keys
@@ -959,7 +961,7 @@ async fn test_post_saml_response(cptestctx: &ControlPlaneTestContext) {
 
             signing_keypair: None,
 
-            group_attribute_name: None,
+            group_attribute_name: Some("groups".into()),
         },
     )
     .await;
@@ -984,7 +986,7 @@ async fn test_post_saml_response(cptestctx: &ControlPlaneTestContext) {
         )
         .raw_body(Some(
             serde_urlencoded::to_string(SamlLoginPost {
-                saml_response: base64::encode(SAML_RESPONSE),
+                saml_response: base64::encode(SAML_RESPONSE_WITH_GROUPS),
                 relay_state: None,
             })
             .unwrap(),
@@ -1006,12 +1008,12 @@ async fn test_post_saml_response(cptestctx: &ControlPlaneTestContext) {
     .await
     .expect("expected success");
 
-    let _session_user: views::User = NexusRequest::new(
-        RequestBuilder::new(client, Method::GET, "/session/me")
-            .header(
-                http::header::COOKIE,
-                result.headers["Set-Cookie"].to_str().unwrap().to_string(),
-            )
+    let session_cookie_value =
+        result.headers["Set-Cookie"].to_str().unwrap().to_string();
+
+    let groups: ResultsPage<views::Group> = NexusRequest::new(
+        RequestBuilder::new(client, Method::GET, "/groups")
+            .header(http::header::COOKIE, session_cookie_value.clone())
             .expect_status(Some(StatusCode::OK)),
     )
     .execute()
@@ -1019,6 +1021,29 @@ async fn test_post_saml_response(cptestctx: &ControlPlaneTestContext) {
     .expect("expected success")
     .parsed_body()
     .unwrap();
+
+    let silo_group_names: Vec<&str> =
+        groups.items.iter().map(|g| g.display_name.as_str()).collect();
+    let silo_group_ids: Vec<Uuid> = groups.items.iter().map(|g| g.id).collect();
+
+    // use contains because order is not consistent
+    assert_eq!(silo_group_names.len(), 2);
+    assert!(silo_group_names.contains(&"SRE"));
+    assert!(silo_group_names.contains(&"Admins"));
+
+    let session_me: views::SessionMe = NexusRequest::new(
+        RequestBuilder::new(client, Method::GET, "/session/me")
+            .header(http::header::COOKIE, session_cookie_value)
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .execute()
+    .await
+    .expect("expected success")
+    .parsed_body()
+    .unwrap();
+
+    assert_eq!(session_me.display_name, "some@customer.com");
+    assert_eq!(session_me.group_ids, silo_group_ids); // user has all the groups
 }
 
 // Test correct SAML response with relay state
