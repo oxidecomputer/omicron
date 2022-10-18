@@ -348,8 +348,6 @@ async fn test_session_me(cptestctx: &ControlPlaneTestContext) {
         }
     );
 
-    // TODO: fails bc user can't pull their own group memberships?
-    // make sure it returns different things for different users
     let unpriv_user = NexusRequest::object_get(testctx, "/session/me")
         .authn_as(AuthnMode::UnprivilegedUser)
         .execute()

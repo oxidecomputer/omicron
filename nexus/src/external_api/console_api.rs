@@ -601,7 +601,7 @@ pub async fn session_me(
         // not clear what the advantage would be.
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let user = nexus.silo_user_fetch_self(&opctx).await?;
-        let groups = nexus.silo_user_fetch_groups(&opctx).await?;
+        let groups = nexus.silo_user_fetch_groups_for_self(&opctx).await?;
         Ok(HttpResponseOk(views::SessionMe {
             id: user.id(),
             display_name: user.external_id,
