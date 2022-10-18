@@ -150,27 +150,27 @@ struct UpdatePreparationProgress {
 }
 
 /// List of components from a single SP.
-#[derive(Serialize, JsonSchema)]
-struct SpComponentList {
-    components: Vec<SpComponentInfo>,
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SpComponentList {
+    pub components: Vec<SpComponentInfo>,
 }
 
 /// Overview of a single SP component.
-#[derive(Serialize, JsonSchema)]
-struct SpComponentInfo {
-    component: String,
-    device: String,
-    serial_number: Option<String>,
-    description: String,
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SpComponentInfo {
+    pub component: String,
+    pub device: String,
+    pub serial_number: Option<String>,
+    pub description: String,
     /// `capabilities` is a bitmask; interpret it via
     /// [`gateway_messages::DeviceCapabilities`].
-    capabilities: u32,
-    presence: SpComponentPresence,
+    pub capabilities: u32,
+    pub presence: SpComponentPresence,
 }
 
-#[derive(Serialize, JsonSchema)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-enum SpComponentPresence {
+pub enum SpComponentPresence {
     Present,
     NotPresent,
     Failed,

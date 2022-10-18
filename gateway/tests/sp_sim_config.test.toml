@@ -14,6 +14,20 @@ serial_number = "00000000000000000000000000000001"
 manufacturing_root_cert_seed = "01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de"
 device_id_cert_seed = "01de000000000000000000000000000000000000000000000000000000000000"
 
+[[simulated_sps.sidecar.components]]
+id = "dev-0"
+device = "fake-tmp-sensor"
+description = "FAKE temperature sensor 1"
+capabilities.bits = 0x2
+presence = "Present"
+
+[[simulated_sps.sidecar.components]]
+id = "dev-1"
+device = "fake-tmp-sensor"
+description = "FAKE temperature sensor 2"
+capabilities.bits = 0x2
+presence = "Failed"
+
 [[simulated_sps.sidecar]]
 multicast_addr = "::1"
 bind_addrs = ["[::1]:0", "[::1]:0"]
@@ -35,6 +49,13 @@ description = "FAKE host cpu"
 capabilities.bits = 0
 presence = "Present"
 serial_console = "[::1]:0"
+
+[[simulated_sps.gimlet.components]]
+id = "dev-0"
+device = "fake-tmp-sensor"
+description = "FAKE temperature sensor"
+capabilities.bits = 0x2
+presence = "Failed"
 
 [[simulated_sps.gimlet]]
 multicast_addr = "::1"

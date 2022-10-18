@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::config::GimletConfig;
+use crate::config::{GimletConfig, SpComponentConfig};
 use crate::rot::RotSprocketExt;
 use crate::server;
 use crate::server::UdpServer;
@@ -177,6 +177,7 @@ impl Gimlet {
                 [servers[0].local_addr(), servers[1].local_addr()];
             let inner = UdpTask::new(
                 servers,
+                gimlet.common.components.clone(),
                 attached_mgs,
                 gimlet.common.serial_number,
                 incoming_console_tx,
@@ -384,6 +385,7 @@ struct UdpTask {
 impl UdpTask {
     fn new(
         servers: [UdpServer; 2],
+        components: Vec<SpComponentConfig>,
         attached_mgs: Arc<Mutex<Option<(SpComponent, SpPort, SocketAddrV6)>>>,
         serial_number: SerialNumber,
         incoming_serial_console: HashMap<SpComponent, UnboundedSender<Vec<u8>>>,
@@ -399,6 +401,7 @@ impl UdpTask {
             udp1,
             handler: Handler {
                 log,
+                components,
                 attached_mgs,
                 serial_number,
                 incoming_serial_console,
@@ -459,6 +462,7 @@ impl UdpTask {
 struct Handler {
     log: Logger,
     serial_number: SerialNumber,
+    components: Vec<SpComponentConfig>,
     attached_mgs: Arc<Mutex<Option<(SpComponent, SpPort, SocketAddrV6)>>>,
     incoming_serial_console: HashMap<SpComponent, UnboundedSender<Vec<u8>>>,
 }
@@ -761,10 +765,17 @@ impl SpHandler for Handler {
     }
 
     fn num_devices(&mut self, _: SocketAddrV6, _: SpPort) -> u32 {
-        0
+        self.components.len().try_into().unwrap()
     }
 
-    fn device_description(&mut self, _: u32) -> DeviceDescription<'_> {
-        panic!("we have no devices");
+    fn device_description(&mut self, index: u32) -> DeviceDescription<'_> {
+        let c = &self.components[index as usize];
+        DeviceDescription {
+            component: SpComponent::try_from(c.id.as_str()).unwrap(),
+            device: &c.device,
+            description: &c.description,
+            capabilities: c.capabilities,
+            presence: c.presence,
+        }
     }
 }
