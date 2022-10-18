@@ -48,17 +48,11 @@ impl super::Nexus {
     ) -> DeleteResult {
         let saga_params = sagas::volume_remove_rop::Params { volume_id };
 
-        let saga_outputs = self
-            .execute_saga::<sagas::volume_remove_rop::SagaVolumeRemoveROP>(
-                saga_params,
-            )
-            .await?;
+        self.execute_saga::<sagas::volume_remove_rop::SagaVolumeRemoveROP>(
+            saga_params,
+        )
+        .await?;
 
-        let volume_res =
-            saga_outputs.lookup_node_output::<()>("final_no_result").map_err(
-                |e| Error::InternalError { internal_message: e.to_string() },
-            )?;
-
-        Ok(volume_res)
+        Ok(())
     }
 }
