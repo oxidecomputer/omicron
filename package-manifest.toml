@@ -150,8 +150,10 @@ switch_variant = "stub"
 # 3. Use type = "manual" instead of the "prebuilt"
 type = "prebuilt"
 repo = "dendrite"
-commit = "09c8878be3f78f0a5d384e7f59b93ea66e02e7a4"
-sha256 = "e05d33dc5d3deafae7d618c45b019c87ddd97e7a1fff11fa3ffb7593a3e10eaf"
+commit = "ffa5af4d6cbfc61c3a5ea196a4a17f0089199fed"
+# The SHA256 digest is automatically posted to:
+# https://buildomat.eng.oxide.computer/public/file/oxidecomputer/dendrite/image/<commit>/dendrite-stub.sha256.txt
+sha256 = "483dec5bee17c2feb183192b0caadbdb5e29d46464334ba00c29d2a032edf343"
 
 [external_package.dendrite-asic]
 service_name = "switch"
@@ -163,5 +165,6 @@ switch_variant = "asic"
 # but built with "--features=tofino_asic"
 type = "prebuilt"
 repo = "dendrite"
-commit = "09c8878be3f78f0a5d384e7f59b93ea66e02e7a4"
-sha256 = "208ae10a61f834608378eb135e4b6e5993dc363019b8fba75465b6ea5506b635"
+commit = "ffa5af4d6cbfc61c3a5ea196a4a17f0089199fed"
+# https://buildomat.eng.oxide.computer/public/file/oxidecomputer/dendrite/image/<commit>/dendrite-asic.sha256.txt
+sha256 = "9cf45f12e4f1d08e4c3f4e64a71e8850c7464471e90ffe0e919bf61edc98285b"

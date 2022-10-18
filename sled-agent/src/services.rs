@@ -7,8 +7,8 @@
 use crate::bootstrap::ddm_admin_client::{DdmAdminClient, DdmError};
 use crate::common::underlay;
 use crate::illumos::dladm::{Dladm, Etherstub, EtherstubVnic, PhysicalLink};
+use crate::illumos::link::{Link, VnicAllocator};
 use crate::illumos::running_zone::{InstalledZone, RunningZone};
-use crate::illumos::vnic::{Vnic, VnicAllocator};
 use crate::illumos::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use crate::illumos::zone::AddressRequest;
 use crate::params::{
@@ -337,7 +337,7 @@ impl ServiceManager {
     async fn launch_service_zone(
         &self,
         zone_name: &str,
-        physical_nic: Option<Vnic>,
+        link: Option<Link>,
         device_names: &[String],
         addresses: &[Ipv6Addr],
         gz_addresses: &[Ipv6Addr],
@@ -358,8 +358,8 @@ impl ServiceManager {
             &devices,
             // opte_ports=
             vec![],
-            // physical_nic=
-            physical_nic,
+            // link=
+            link,
         )
         .await?;
 
@@ -430,7 +430,7 @@ impl ServiceManager {
         // When running on a real sidecar, we need the /dev/tofino device
         // to talk to the tofino ASIC.
         // TODO: this really needs to be checked periodically rather
-        // than once at startup.  Since the sidecar is in a difference
+        // than once at startup.  Since the sidecar is in a different
         // chassis, it can be powered on and off independently of this
         // sled.
         let needed = match req.get_service(ServiceVariant::Dendrite) {
@@ -451,11 +451,11 @@ impl ServiceManager {
     }
 
     // Check the services intended to run in the zone to determine whether any
-    // links or vnics need to be mapped into the zone when it is created.
-    fn nic_needed(
+    // physical links or vnics need to be mapped into the zone when it is created.
+    fn link_needed(
         &self,
         req: &ServiceZoneRequest,
-    ) -> Result<Option<Vnic>, Error> {
+    ) -> Result<Option<Link>, Error> {
         if let Some(ServiceType::Tfport { pkt_source }) =
             req.get_service(ServiceVariant::Tfport)
         {
@@ -463,7 +463,7 @@ impl ServiceManager {
             // packets may be multiplexed.  If the link isn't present, don't
             // bother trying to start the zone.
             match Dladm::verify_link(pkt_source) {
-                Ok(_) => Ok(Some(Vnic::wrap_physical(pkt_source))),
+                Ok(_) => Ok(Some(Link::wrap_physical(pkt_source))),
                 Err(_) => {
                     Err(Error::MissingDevice { device: pkt_source.to_string() })
                 }
@@ -514,7 +514,7 @@ impl ServiceManager {
                 );
             }
 
-            let nic_needed = match self.nic_needed(req) {
+            let link_needed = match self.link_needed(req) {
                 Ok(n) => n,
                 Err(e) => {
                     info!(self.log, "skipping zone {}: {:?}", req.zone_name, e);
@@ -533,7 +533,7 @@ impl ServiceManager {
             let running_zone = self
                 .launch_service_zone(
                     &req.zone_name,
-                    nic_needed,
+                    link_needed,
                     &devices,
                     &req.addresses,
                     &req.gz_addresses,

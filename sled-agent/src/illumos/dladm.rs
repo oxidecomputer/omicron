@@ -5,7 +5,7 @@
 //! Utilities for poking at data links.
 
 use crate::common::vlan::VlanID;
-use crate::illumos::vnic::VnicKind;
+use crate::illumos::link::LinkKind;
 use crate::illumos::zone::IPADM;
 use crate::illumos::{execute, ExecutionError, PFEXEC};
 use omicron_common::api::external::MacAddr;
@@ -158,7 +158,7 @@ impl Dladm {
 
     /// Creates a VNIC on top of the etherstub.
     ///
-    /// This VNIC is not tracked like [`crate::illumos::vnic::Vnic`], because
+    /// This VNIC is not tracked like [`crate::illumos::link::Link`], because
     /// it is expected to exist for the lifetime of the sled.
     pub fn ensure_etherstub_vnic(
         source: &Etherstub,
@@ -337,7 +337,7 @@ impl Dladm {
             .filter_map(|name| {
                 // Ensure this is a kind of VNIC that the sled agent could be
                 // responsible for.
-                match VnicKind::from_name(name) {
+                match LinkKind::from_name(name) {
                     Some(_) => Some(name.to_owned()),
                     None => None,
                 }

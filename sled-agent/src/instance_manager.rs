@@ -5,7 +5,7 @@
 //! API for controlling multiple instances on a sled.
 
 use crate::illumos::dladm::Etherstub;
-use crate::illumos::vnic::VnicAllocator;
+use crate::illumos::link::VnicAllocator;
 use crate::nexus::LazyNexusClient;
 use crate::opte::PortManager;
 use crate::params::{

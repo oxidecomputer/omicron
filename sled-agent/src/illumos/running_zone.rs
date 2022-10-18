@@ -6,8 +6,8 @@
 
 use crate::illumos::addrobj::AddrObject;
 use crate::illumos::dladm::Etherstub;
+use crate::illumos::link::{Link, VnicAllocator};
 use crate::illumos::svc::wait_for_service;
-use crate::illumos::vnic::{Vnic, VnicAllocator};
 use crate::illumos::zone::{AddressRequest, ZONE_PREFIX};
 use crate::opte::Port;
 use ipnetwork::IpNetwork;
@@ -190,7 +190,7 @@ impl RunningZone {
     ) -> Result<IpNetwork, EnsureAddressError> {
         info!(self.inner.log, "Adding address: {:?}", addrtype);
         let addrobj = AddrObject::new(
-                self.inner.physical_nic
+                self.inner.link
                     .as_ref()
                     .expect("Cannot allocate external address on zone without physical NIC")
                     .name(),
@@ -284,7 +284,7 @@ impl RunningZone {
             },
         )?;
 
-        let control_vnic = Vnic::wrap_existing(vnic_name)
+        let control_vnic = Link::wrap_existing(vnic_name)
             .expect("Failed to wrap valid control VNIC");
 
         Ok(Self {
@@ -296,7 +296,7 @@ impl RunningZone {
                 //
                 // Re-initialize guest_vnic state by inspecting the zone.
                 opte_ports: vec![],
-                physical_nic: None,
+                link: None,
             },
         })
     }
@@ -346,14 +346,13 @@ pub struct InstalledZone {
     name: String,
 
     // NIC used for control plane communication.
-    control_vnic: Vnic,
+    control_vnic: Link,
 
     // OPTE devices for the guest network interfaces
     opte_ports: Vec<Port>,
 
-    // Physical NIC possibly provisioned to the zone.
-    // TODO: Remove once Nexus traffic is transmitted over OPTE.
-    physical_nic: Option<Vnic>,
+    // Physical or virtual nic possibly provisioned to the zone.
+    link: Option<Link>,
 }
 
 impl InstalledZone {
@@ -384,7 +383,7 @@ impl InstalledZone {
         datasets: &[zone::Dataset],
         devices: &[zone::Device],
         opte_ports: Vec<Port>,
-        physical_nic: Option<Vnic>,
+        link: Option<Link>,
     ) -> Result<InstalledZone, InstallZoneError> {
         let control_vnic = vnic_allocator.new_control(None).map_err(|err| {
             InstallZoneError::CreateVnic { zone: zone_name.to_string(), err }
@@ -398,7 +397,7 @@ impl InstalledZone {
             .iter()
             .map(|port| port.vnic_name().to_string())
             .chain(std::iter::once(control_vnic.name().to_string()))
-            .chain(physical_nic.as_ref().map(|vnic| vnic.name().to_string()))
+            .chain(link.as_ref().map(|vnic| vnic.name().to_string()))
             .collect();
 
         Zones::install_omicron_zone(
@@ -420,7 +419,7 @@ impl InstalledZone {
             name: full_zone_name,
             control_vnic,
             opte_ports,
-            physical_nic,
+            link,
         })
     }
 }

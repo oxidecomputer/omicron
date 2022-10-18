@@ -6,7 +6,7 @@
 
 use crate::bootstrap::params::SledAgentRequest;
 use crate::config::Config;
-use crate::illumos::vnic::VnicKind;
+use crate::illumos::link::LinkKind;
 use crate::illumos::zfs::{
     Mountpoint, ZONE_ZFS_DATASET, ZONE_ZFS_DATASET_MOUNTPOINT,
 };
@@ -486,7 +486,7 @@ async fn delete_omicron_vnics(log: &Logger) -> Result<(), Error> {
                   log,
                   "Deleting existing VNIC";
                     "vnic_name" => &vnic,
-                    "vnic_kind" => ?VnicKind::from_name(&vnic).unwrap(),
+                    "vnic_kind" => ?LinkKind::from_name(&vnic).unwrap(),
                 );
                 Dladm::delete_vnic(&vnic)
             })

@@ -54,13 +54,13 @@ impl<DL: VnicSource + Clone> VnicAllocator<DL> {
     pub fn new_control(
         &self,
         mac: Option<MacAddr>,
-    ) -> Result<Vnic, CreateVnicError> {
+    ) -> Result<Link, CreateVnicError> {
         let allocator = self.new_superscope("Control");
         let name = allocator.next();
         debug_assert!(name.starts_with(VNIC_PREFIX));
         debug_assert!(name.starts_with(VNIC_PREFIX_CONTROL));
         Dladm::create_vnic(&self.data_link, &name, mac, None)?;
-        Ok(Vnic { name, deleted: false, kind: VnicKind::OxideControl })
+        Ok(Link { name, deleted: false, kind: LinkKind::OxideControlVnic })
     }
 
     fn new_superscope<S: AsRef<str>>(&self, scope: S) -> Self {
@@ -85,20 +85,20 @@ impl<DL: VnicSource + Clone> VnicAllocator<DL> {
 /// Represents the kind of a VNIC, such as whether it's for guest networking or
 /// communicating with Oxide services.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum VnicKind {
+pub enum LinkKind {
     Physical,
-    OxideControl,
-    Guest,
+    OxideControlVnic,
+    GuestVnic,
 }
 
-impl VnicKind {
+impl LinkKind {
     /// Infer the kind from a VNIC's name, if this one the sled agent can
     /// manage, and `None` otherwise.
     pub fn from_name(name: &str) -> Option<Self> {
         if name.starts_with(VNIC_PREFIX) {
-            Some(VnicKind::OxideControl)
+            Some(LinkKind::OxideControlVnic)
         } else if name.starts_with(VNIC_PREFIX_GUEST) {
-            Some(VnicKind::Guest)
+            Some(LinkKind::GuestVnic)
         } else {
             None
         }
@@ -106,8 +106,8 @@ impl VnicKind {
 }
 
 #[derive(thiserror::Error, Debug)]
-#[error("VNIC with name '{0}' is not valid for sled agent management")]
-pub struct InvalidVnicKind(String);
+#[error("Link with name '{0}' is not valid for sled agent management")]
+pub struct InvalidLinkKind(String);
 
 /// Represents an allocated VNIC on the system.
 /// The VNIC is de-allocated when it goes out of scope.
@@ -116,39 +116,39 @@ pub struct InvalidVnicKind(String);
 /// another process in the global zone could also modify / destroy
 /// the VNIC while this object is alive.
 #[derive(Debug)]
-pub struct Vnic {
+pub struct Link {
     name: String,
     deleted: bool,
-    kind: VnicKind,
+    kind: LinkKind,
 }
 
-impl Vnic {
-    /// Takes ownership of an existing VNIC.
+impl Link {
+    /// Takes ownership of an existing Link.
     pub fn wrap_existing<S: AsRef<str>>(
         name: S,
-    ) -> Result<Self, InvalidVnicKind> {
-        match VnicKind::from_name(name.as_ref()) {
-            Some(kind) => Ok(Vnic {
+    ) -> Result<Self, InvalidLinkKind> {
+        match LinkKind::from_name(name.as_ref()) {
+            Some(kind) => Ok(Link {
                 name: name.as_ref().to_owned(),
                 deleted: false,
                 kind,
             }),
-            None => Err(InvalidVnicKind(name.as_ref().to_owned())),
+            None => Err(InvalidLinkKind(name.as_ref().to_owned())),
         }
     }
 
-    /// Wraps a physical nic in a Vnic structure
+    /// Wraps a physical nic in a Link structure
     pub fn wrap_physical<S: AsRef<str>>(name: S) -> Self {
-        Vnic {
+        Link {
             name: name.as_ref().to_owned(),
             deleted: false,
-            kind: VnicKind::Physical,
+            kind: LinkKind::Physical,
         }
     }
 
-    /// Deletes a NIC (if it has not already been deleted).
+    /// Deletes a VNIC (if it has not already been deleted).
     pub fn delete(&mut self) -> Result<(), DeleteVnicError> {
-        if self.deleted || self.kind == VnicKind::Physical {
+        if self.deleted || self.kind == LinkKind::Physical {
             Ok(())
         } else {
             self.deleted = true;
@@ -160,16 +160,16 @@ impl Vnic {
         &self.name
     }
 
-    pub fn kind(&self) -> VnicKind {
+    pub fn kind(&self) -> LinkKind {
         self.kind
     }
 }
 
-impl Drop for Vnic {
+impl Drop for Link {
     fn drop(&mut self) {
         let r = self.delete();
         if let Err(e) = r {
-            eprintln!("Failed to delete VNIC: {}", e);
+            eprintln!("Failed to delete link: {}", e);
         }
     }
 }
