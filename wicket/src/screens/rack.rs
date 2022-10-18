@@ -4,10 +4,10 @@
 
 //! The Rack presentation [`Screen`]
 
-use super::colors::*;
 use super::Screen;
 use super::ScreenId;
 use super::{Height, Width};
+use crate::defaults::colors::*;
 use crate::widgets::Control;
 use crate::widgets::ControlId;
 use crate::widgets::HelpMenuState;
