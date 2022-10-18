@@ -120,10 +120,10 @@ impl Gimlet {
             .await?;
             let servers = [servers.0, servers.1];
 
-            for component_config in &gimlet.components {
-                let name = component_config.name.as_str();
-                let component = SpComponent::try_from(name)
-                    .map_err(|_| anyhow!("component id {:?} too long", name))?;
+            for component_config in &gimlet.common.components {
+                let id = component_config.id.as_str();
+                let component = SpComponent::try_from(id)
+                    .map_err(|_| anyhow!("component id {:?} too long", id))?;
 
                 if let Some(addr) = component_config.serial_console {
                     let listener =
@@ -166,7 +166,7 @@ impl Gimlet {
                             Arc::clone(servers[1].socket()),
                         ],
                         Arc::clone(&attached_mgs),
-                        log.new(slog::o!("serial-console" => name.to_string())),
+                        log.new(slog::o!("serial-console" => id.to_string())),
                     );
                     inner_tasks.push(task::spawn(async move {
                         serial_console.run().await

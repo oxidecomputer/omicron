@@ -29,7 +29,11 @@ manufacturing_root_cert_seed = "01de01de01de01de01de01de01de01de01de01de01de01de
 device_id_cert_seed = "01de000000000000000000000000000000000000000000000000000000000002"
 
 [[simulated_sps.gimlet.components]]
-name = "sp3"
+id = "sp3-host-cpu"
+device = "sp3-host-cpu"
+description = "FAKE host cpu"
+capabilities.bits = 0
+presence = "Present"
 serial_console = "[::1]:0"
 
 [[simulated_sps.gimlet]]
@@ -40,7 +44,11 @@ manufacturing_root_cert_seed = "01de01de01de01de01de01de01de01de01de01de01de01de
 device_id_cert_seed = "01de000000000000000000000000000000000000000000000000000000000003"
 
 [[simulated_sps.gimlet.components]]
-name = "sp3"
+id = "sp3-host-cpu"
+device = "sp3-host-cpu"
+description = "FAKE host cpu"
+capabilities.bits = 0
+presence = "Present"
 serial_console = "[::1]:0"
 
 #
