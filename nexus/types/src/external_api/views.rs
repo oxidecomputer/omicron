@@ -322,7 +322,7 @@ pub struct User {
     pub silo_id: Uuid,
 }
 
-/// Client view of a [`User`] with some extra stuff that's useful to the console
+/// Client view of a [`User`] and their groups
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct SessionMe {
     pub id: Uuid,

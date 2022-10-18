@@ -11003,7 +11003,7 @@
         ]
       },
       "SessionMe": {
-        "description": "Client view of a [`User`] with some extra stuff that's useful to the console",
+        "description": "Client view of a [`User`] and their groups",
         "type": "object",
         "properties": {
           "display_name": {
