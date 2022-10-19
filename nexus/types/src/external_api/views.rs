@@ -336,12 +336,6 @@ pub struct Group {
     pub silo_id: Uuid,
 }
 
-/// Client view of a [`Group`]
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-pub struct SiloGroupMembership {
-    pub silo_group_id: Uuid,
-}
-
 // BUILT-IN USERS
 
 /// Client view of a [`UserBuiltin`]

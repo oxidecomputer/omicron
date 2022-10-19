@@ -94,8 +94,8 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<db::model::SiloGroupMembership> {
-        self.db_datastore.silo_group_membership_for_self(opctx, pagparams).await
+    ) -> ListResultVec<db::model::SiloGroup> {
+        self.db_datastore.silo_groups_for_self(opctx, pagparams).await
     }
 
     // Silo groups

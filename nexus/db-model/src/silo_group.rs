@@ -41,12 +41,6 @@ impl SiloGroupMembership {
     }
 }
 
-impl From<SiloGroupMembership> for views::SiloGroupMembership {
-    fn from(gm: SiloGroupMembership) -> Self {
-        Self { silo_group_id: gm.silo_group_id }
-    }
-}
-
 impl From<SiloGroup> for views::Group {
     fn from(group: SiloGroup) -> Self {
         Self {

@@ -622,8 +622,7 @@ pub async fn session_me(
 pub async fn session_me_groups(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     query_params: Query<PaginatedById>,
-) -> Result<HttpResponseOk<ResultsPage<views::SiloGroupMembership>>, HttpError>
-{
+) -> Result<HttpResponseOk<ResultsPage<views::Group>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let query = query_params.into_inner();
@@ -632,7 +631,7 @@ pub async fn session_me_groups(
         // as _somebody_. We could restrict this to session auth only, but it's
         // not clear what the advantage would be.
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        let group_memberships = nexus
+        let groups = nexus
             .silo_user_fetch_groups_for_self(
                 &opctx,
                 &data_page_params_for(&rqctx, &query)?,
@@ -643,8 +642,8 @@ pub async fn session_me_groups(
             .collect();
         Ok(HttpResponseOk(ScanById::results_page(
             &query,
-            group_memberships,
-            &|_, group: &views::SiloGroupMembership| group.silo_group_id,
+            groups,
+            &|_, group: &views::Group| group.id,
         )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

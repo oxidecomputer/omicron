@@ -5261,7 +5261,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SiloGroupMembershipResultsPage"
+                  "$ref": "#/components/schemas/GroupResultsPage"
                 }
               }
             }
@@ -11143,40 +11143,6 @@
           "discoverable",
           "identity_mode",
           "name"
-        ]
-      },
-      "SiloGroupMembership": {
-        "description": "Client view of a [`Group`]",
-        "type": "object",
-        "properties": {
-          "silo_group_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "silo_group_id"
-        ]
-      },
-      "SiloGroupMembershipResultsPage": {
-        "description": "A single page of results",
-        "type": "object",
-        "properties": {
-          "items": {
-            "description": "list of items on this page of results",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SiloGroupMembership"
-            }
-          },
-          "next_page": {
-            "nullable": true,
-            "description": "token used to fetch the next page of results (if any)",
-            "type": "string"
-          }
-        },
-        "required": [
-          "items"
         ]
       },
       "SiloIdentityMode": {

@@ -1043,20 +1043,19 @@ async fn test_post_saml_response(cptestctx: &ControlPlaneTestContext) {
 
     assert_eq!(session_me.display_name, "some@customer.com");
 
-    let session_me: ResultsPage<views::SiloGroupMembership> =
-        NexusRequest::new(
-            RequestBuilder::new(client, Method::GET, "/session/me/groups")
-                .header(http::header::COOKIE, session_cookie_value)
-                .expect_status(Some(StatusCode::OK)),
-        )
-        .execute()
-        .await
-        .expect("expected success")
-        .parsed_body()
-        .unwrap();
+    let session_me: ResultsPage<views::Group> = NexusRequest::new(
+        RequestBuilder::new(client, Method::GET, "/session/me/groups")
+            .header(http::header::COOKIE, session_cookie_value)
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .execute()
+    .await
+    .expect("expected success")
+    .parsed_body()
+    .unwrap();
 
     let session_me_group_ids =
-        session_me.items.iter().map(|g| g.silo_group_id).collect::<Vec<_>>();
+        session_me.items.iter().map(|g| g.id).collect::<Vec<_>>();
 
     assert_same_items(session_me_group_ids, silo_group_ids);
 }

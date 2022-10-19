@@ -384,7 +384,7 @@ async fn test_session_me_groups(cptestctx: &ControlPlaneTestContext) {
             .execute()
             .await
             .expect("failed to get current user")
-            .parsed_body::<ResultsPage<views::SiloGroupMembership>>()
+            .parsed_body::<ResultsPage<views::Group>>()
             .unwrap();
 
     assert_eq!(priv_user_groups.items, vec![]);
@@ -395,7 +395,7 @@ async fn test_session_me_groups(cptestctx: &ControlPlaneTestContext) {
             .execute()
             .await
             .expect("failed to get current user")
-            .parsed_body::<ResultsPage<views::SiloGroupMembership>>()
+            .parsed_body::<ResultsPage<views::Group>>()
             .unwrap();
 
     assert_eq!(unpriv_user_groups.items, vec![]);
