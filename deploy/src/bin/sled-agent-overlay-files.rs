@@ -40,8 +40,8 @@ fn overlay_sp_configs(server_dirs: &[PathBuf]) -> Result<()> {
                     serial_number: [0; 16],
                     manufacturing_root_cert_seed: [0; 32],
                     device_id_cert_seed: [0; 32],
+                    components: Vec::new(),
                 },
-                components: Vec::new(),
             };
             let len = config.common.serial_number.len();
             config.common.serial_number[len - 4..].copy_from_slice(&id);
