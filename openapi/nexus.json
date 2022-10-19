@@ -5221,7 +5221,7 @@
         "tags": [
           "hidden"
         ],
-        "summary": "Fetch the silo groups of which the current user is a member",
+        "summary": "Fetch the silo groups the current user belongs to",
         "operationId": "session_me_groups",
         "parameters": [
           {

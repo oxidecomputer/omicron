@@ -613,7 +613,7 @@ pub async fn session_me(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch the silo groups of which the current user is a member
+/// Fetch the silo groups the current user belongs to
 #[endpoint {
     method = GET,
     path = "/session/me/groups",
