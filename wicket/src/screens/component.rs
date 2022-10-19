@@ -6,6 +6,7 @@
 
 use super::Screen;
 use crate::defaults::colors::*;
+use crate::defaults::dimensions::RectExt;
 use crate::defaults::dimensions::MENUBAR_HEIGHT;
 use crate::defaults::style;
 use crate::widgets::Control;
@@ -182,12 +183,8 @@ impl ComponentScreen {
             header_style.add_modifier(Modifier::UNDERLINED | Modifier::BOLD);
 
         let text = Text::styled("INVENTORY\n\n", header_style);
-        let mut rect = f.size();
-        rect.y = MENUBAR_HEIGHT + 1;
-        rect.height -= rect.y;
-        let center = (rect.width - text.width() as u16) / 2;
-        rect.x += center;
-        rect.width -= center;
+        let rect =
+            f.size().set_y(MENUBAR_HEIGHT + 1).center_x(text.width() as u16);
         let header = Paragraph::new(text);
         f.render_widget(header, rect);
 
@@ -202,13 +199,8 @@ impl ComponentScreen {
             None => Text::styled("UNKNOWN", inventory_style),
         };
 
-        let mut rect = f.size();
-        rect.y = MENUBAR_HEIGHT + 4;
-        rect.height -= rect.y;
-
-        let center = (rect.width - text.width() as u16) / 2;
-        rect.x += center;
-        rect.width -= center;
+        let rect =
+            f.size().set_y(MENUBAR_HEIGHT + 4).center_x(text.width() as u16);
 
         let inventory = Paragraph::new(text);
         f.render_widget(inventory, rect);
