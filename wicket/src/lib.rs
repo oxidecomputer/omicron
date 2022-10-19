@@ -162,6 +162,7 @@ impl Wizard {
     }
 
     fn mainloop(&mut self) -> anyhow::Result<()> {
+        let rect = self.terminal.get_frame().size();
         // Size the rack for the initial draw
         self.state
             .rack_state
@@ -169,6 +170,7 @@ impl Wizard {
 
         // Draw the initial screen
         let screen = self.screens.get_mut(self.active_screen);
+        screen.resize(&mut self.state, rect.width, rect.height);
         screen.draw(&self.state, &mut self.terminal)?;
 
         loop {
@@ -194,6 +196,7 @@ impl Wizard {
                 Event::Term(TermEvent::Resize(width, height)) => {
                     let rect = Rect { x: 0, y: 0, width, height };
                     self.state.rack_state.resize(&rect, &MARGIN);
+                    screen.resize(&mut self.state, width, height);
                     screen.draw(&self.state, &mut self.terminal)?;
                 }
                 Event::Term(TermEvent::Mouse(mouse_event)) => {
@@ -247,6 +250,10 @@ impl Wizard {
                 Action::SwitchScreen(id) => {
                     self.active_screen = id;
                     let screen = self.screens.get_mut(id);
+                    let rect = self.terminal.get_frame().size();
+
+                    screen.resize(&mut self.state, rect.width, rect.height);
+
                     // Simulate a mouse movement for the current position
                     // because the mouse may be in a different position when transitioning
                     // between screens.

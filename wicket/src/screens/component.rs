@@ -50,12 +50,7 @@ impl ComponentScreen {
             help_data,
             help_button_state: HelpButtonState::new(1, 0),
             help_menu_state: HelpMenuState::default(),
-            rack_screen_button_state: ScreenButtonState::new(
-                ScreenId::Rack,
-                // This get's reset on every draw
-                u16::MAX,
-                0,
-            ),
+            rack_screen_button_state: ScreenButtonState::new(ScreenId::Rack),
         }
     }
 
@@ -240,6 +235,11 @@ impl ComponentScreen {
         vec![Action::Redraw]
     }
 
+    fn resize(&mut self, width: u16, _height: u16) {
+        self.rack_screen_button_state.rect.x =
+            width - ScreenButtonState::width();
+    }
+
     fn handle_mouse_event(
         &mut self,
         state: &mut State,
@@ -302,13 +302,11 @@ impl ComponentScreen {
 
 impl Screen for ComponentScreen {
     fn draw(
-        &mut self,
+        &self,
         state: &State,
         terminal: &mut crate::Term,
     ) -> anyhow::Result<()> {
         terminal.draw(|f| {
-            self.rack_screen_button_state.rect.x =
-                f.size().width - ScreenButtonState::width();
             self.draw_background(f);
             self.draw_status_bar(f, state);
             self.draw_inventory(f, state);
@@ -323,6 +321,11 @@ impl Screen for ComponentScreen {
             }
             ScreenEvent::Term(TermEvent::Mouse(mouse_event)) => {
                 self.handle_mouse_event(state, mouse_event)
+            }
+            ScreenEvent::Term(TermEvent::Resize(width, height)) => {
+                self.resize(width, height);
+                // A redraw always occurs in the wizard
+                vec![]
             }
             ScreenEvent::Tick => {
                 if !self.help_menu_state.is_closed() {
