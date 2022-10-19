@@ -604,11 +604,7 @@ pub async fn session_me(
         // not clear what the advantage would be.
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let user = nexus.silo_user_fetch_self(&opctx).await?;
-        Ok(HttpResponseOk(views::User {
-            id: user.id(),
-            display_name: user.external_id,
-            silo_id: user.silo_id,
-        }))
+        Ok(HttpResponseOk(user.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
