@@ -183,8 +183,10 @@ impl ComponentScreen {
             header_style.add_modifier(Modifier::UNDERLINED | Modifier::BOLD);
 
         let text = Text::styled("INVENTORY\n\n", header_style);
-        let rect =
-            f.size().set_y(MENUBAR_HEIGHT + 1).center_x(text.width() as u16);
+        let rect = f
+            .size()
+            .move_down_within_bounds(MENUBAR_HEIGHT + 1)
+            .center_horizontally(text.width() as u16);
         let header = Paragraph::new(text);
         f.render_widget(header, rect);
 
@@ -199,8 +201,10 @@ impl ComponentScreen {
             None => Text::styled("UNKNOWN", inventory_style),
         };
 
-        let rect =
-            f.size().set_y(MENUBAR_HEIGHT + 4).center_x(text.width() as u16);
+        let rect = f
+            .size()
+            .move_down_within_bounds(MENUBAR_HEIGHT + 4)
+            .center_horizontally(text.width() as u16);
 
         let inventory = Paragraph::new(text);
         f.render_widget(inventory, rect);

@@ -10,45 +10,44 @@ pub const MENUBAR_HEIGHT: u16 = 5;
 
 // Extension trait for Rects that provide centering and placement capabilities
 pub trait RectExt {
-    /// Center a given Rect horizontally and size it to match widget_width
-    fn center_x(self, widget_width: u16) -> Self;
+    /// Create a new `Rect` with the given width centered horizontally within
+    /// `self`.
+    /// Panics if `width > self.width`.
+    fn center_horizontally(self, width: u16) -> Self;
 
-    /// Center a given Rect vertically and size it to match widget_height
-    fn center_y(self, widget_height: u16) -> Self;
+    /// Create a new `Rect` with the given height centered vertically within
+    /// `self`.
+    ///
+    /// Panics if `height > self.height`.
+    fn center_vertically(self, height: u16) -> Self;
 
-    /// Place a rect at a given horizontal position and size it so it doesn't
-    /// overflow its container.
-    fn set_x(self, x: u16) -> Self;
-
-    /// Place a rect at a given vertical position and size it so it doesn't
-    /// overflow its container.
-    fn set_y(self, y: u16) -> Self;
+    /// Create a new maximally sized `Rect` that is bounded by `self`, and
+    /// shifted down by `y` columns. In order to maintain the bounding, the
+    /// new `Rect` is originally sized to `self` and then shrunk by the same
+    /// amount it is shifted downwards: namely `y` columns.
+    ///
+    /// Panics if `y > self.height`.
+    fn move_down_within_bounds(self, y: u16) -> Self;
 }
 
 impl RectExt for Rect {
-    fn center_x(mut self, widget_width: u16) -> Self {
-        let center = (self.width - widget_width) / 2;
+    fn center_horizontally(mut self, width: u16) -> Self {
+        let center = (self.width - width) / 2;
         self.x += center;
-        self.width = widget_width;
+        self.width = width;
         self
     }
 
-    fn center_y(mut self, widget_height: u16) -> Self {
-        let center = (self.height - widget_height) / 2;
+    fn center_vertically(mut self, height: u16) -> Self {
+        let center = (self.height - height) / 2;
         self.y += center;
-        self.height = widget_height;
+        self.height = height;
         self
     }
 
-    fn set_x(mut self, x: u16) -> Self {
-        self.x = x;
-        self.width -= self.x;
-        self
-    }
-
-    fn set_y(mut self, y: u16) -> Self {
-        self.y = y;
-        self.height -= self.y;
+    fn move_down_within_bounds(mut self, y: u16) -> Self {
+        self.y = self.y + y;
+        self.height -= y;
         self
     }
 }

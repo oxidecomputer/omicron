@@ -43,7 +43,10 @@ impl SplashScreen {
     // the x painted green.
     fn animate_logo(&self, f: &mut Frame) {
         // Center the banner
-        let rect = f.size().center_x(LOGO_WIDTH).center_y(LOGO_HEIGHT);
+        let rect = f
+            .size()
+            .center_horizontally(LOGO_WIDTH)
+            .center_vertically(LOGO_HEIGHT);
 
         let stale_style = Style::default().fg(OX_GREEN_DARKEST);
         let style = Style::default().fg(OX_OFF_WHITE);
