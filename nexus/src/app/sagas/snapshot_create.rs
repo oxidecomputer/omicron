@@ -87,7 +87,7 @@ use super::{
 };
 use crate::app::sagas::NexusAction;
 use crate::context::OpContext;
-use crate::db::identity::Asset;
+use crate::db::identity::{Asset, Resource};
 use crate::db::lookup::LookupPath;
 use crate::external_api::params;
 use crate::{authn, authz, db};
@@ -537,11 +537,23 @@ async fn ssc_send_snapshot_request(
                 .await
                 .map_err(ActionError::action_failed)?;
 
-            let body = InstanceIssueDiskSnapshotRequestBody { snapshot_id };
-            osagactx
+            let sled_agent_client = osagactx
                 .nexus()
-                .disk_snapshot_instance_sled_agent(&instance, disk.id(), &body)
+                .instance_sled(&instance)
                 .await
+                .map_err(ActionError::action_failed)?;
+
+            info!(log, "instance {} sled agent created ok", instance_id);
+
+            // Send a snapshot request to propolis through sled agent
+            sled_agent_client
+                .instance_issue_disk_snapshot_request(
+                    &instance.id(),
+                    &disk.id(),
+                    &InstanceIssueDiskSnapshotRequestBody { snapshot_id },
+                )
+                .await
+                .map_err(|e| e.to_string())
                 .map_err(ActionError::action_failed)?;
         }
 
@@ -571,16 +583,26 @@ async fn ssc_send_snapshot_request(
                 })?;
 
             // Send the snapshot request to a random sled agent
-            let body = DiskSnapshotRequestBody {
-                volume_construction_request: disk_volume_construction_request
-                    .clone(),
-                snapshot_id,
-            };
-
-            osagactx
-                .nexus()
-                .disk_snapshot_random_sled_agent(disk.id(), &body)
+            let sled_agent_client = osagactx
+                .random_sled_client()
                 .await
+                .map_err(ActionError::action_failed)?
+                .ok_or_else(|| {
+                    "no sled found when looking for random sled?!".to_string()
+                })
+                .map_err(ActionError::action_failed)?;
+
+            sled_agent_client
+                .issue_disk_snapshot_request(
+                    &disk.id(),
+                    &DiskSnapshotRequestBody {
+                        volume_construction_request:
+                            disk_volume_construction_request.clone(),
+                        snapshot_id,
+                    },
+                )
+                .await
+                .map_err(|e| e.to_string())
                 .map_err(ActionError::action_failed)?;
         }
     }

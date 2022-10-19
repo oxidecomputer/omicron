@@ -12,7 +12,6 @@ use crate::db;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
 use crate::external_api::params;
-use nexus_types::identity::Resource;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -518,45 +517,6 @@ impl super::Nexus {
             self.volume_delete(volume_id).await?;
         }
 
-        Ok(())
-    }
-
-    pub(crate) async fn disk_snapshot_instance_sled_agent(
-        &self,
-        instance: &db::model::Instance,
-        disk_id: Uuid,
-        body: &sled_agent_client::types::InstanceIssueDiskSnapshotRequestBody,
-    ) -> Result<(), Error> {
-        let sled_agent_client = self.instance_sled(&instance).await?;
-
-        // Send a snapshot request to propolis through sled agent
-        sled_agent_client
-            .instance_issue_disk_snapshot_request(
-                &instance.id(),
-                &disk_id,
-                body,
-            )
-            .await
-            .map_err(|e| Error::internal_error(&e.to_string()))?;
-        Ok(())
-    }
-
-    pub(crate) async fn disk_snapshot_random_sled_agent(
-        &self,
-        disk_id: Uuid,
-        body: &sled_agent_client::types::DiskSnapshotRequestBody,
-    ) -> Result<(), Error> {
-        let sled_id = self.random_sled_id().await?.ok_or_else(|| {
-            Error::internal_error(
-                "no sled found when looking for random sled?!",
-            )
-        })?;
-
-        self.sled_client(&sled_id)
-            .await?
-            .issue_disk_snapshot_request(&disk_id, &body)
-            .await
-            .map_err(|e| Error::internal_error(&e.to_string()))?;
         Ok(())
     }
 }
