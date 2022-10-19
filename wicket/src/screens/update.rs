@@ -5,6 +5,7 @@
 //! The rack update screen
 
 use super::Screen;
+use crate::defaults::style;
 use crate::widgets::{Control, ControlId};
 use crate::widgets::{HelpButton, HelpButtonState};
 use crate::widgets::{HelpMenu, HelpMenuState};
@@ -15,6 +16,8 @@ use crate::ScreenEvent;
 use crate::ScreenId;
 use crate::State;
 use crate::Term;
+use tui::style::Color;
+use tui::widgets::Block;
 
 use crossterm::event::Event as TermEvent;
 use crossterm::event::{
@@ -52,14 +55,43 @@ impl UpdateScreen {
             ),
         }
     }
+
+    fn draw_background(&self, f: &mut Frame) {
+        let block = Block::default().style(style::screen_background());
+        f.render_widget(block, f.size());
+    }
 }
 
 impl Screen for UpdateScreen {
     fn draw(&self, state: &State, terminal: &mut Term) -> anyhow::Result<()> {
+        terminal.draw(|f| {
+            self.draw_background(f);
+        })?;
         Ok(())
     }
 
     fn on(&mut self, state: &mut State, event: ScreenEvent) -> Vec<Action> {
-        vec![]
+        match event {
+            /*            ScreenEvent::Term(TermEvent::Key(key_event)) => {
+                    self.handle_key_event(state, key_event)
+                }
+                ScreenEvent::Term(TermEvent::Mouse(mouse_event)) => {
+                    self.handle_mouse_event(state, mouse_event)
+                }
+            */
+            ScreenEvent::Term(TermEvent::Resize(width, height)) => {
+                // A redraw always occurs in the wizard
+                vec![]
+            }
+            ScreenEvent::Tick => {
+                if !self.help_menu_state.is_closed() {
+                    self.help_menu_state.step();
+                    vec![Action::Redraw]
+                } else {
+                    vec![]
+                }
+            }
+            _ => vec![],
+        }
     }
 }
