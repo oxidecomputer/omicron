@@ -29,14 +29,14 @@ impl RectExt for Rect {
     fn center_x(mut self, widget_width: u16) -> Self {
         let center = (self.width - widget_width) / 2;
         self.x += center;
-        self.width -= center;
+        self.width = widget_width;
         self
     }
 
     fn center_y(mut self, widget_height: u16) -> Self {
         let center = (self.height - widget_height) / 2;
         self.y += center;
-        self.height -= center;
+        self.height = widget_height;
         self
     }
 
