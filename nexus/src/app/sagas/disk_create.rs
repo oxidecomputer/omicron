@@ -3,8 +3,11 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{
-    common_storage::ensure_all_datasets_and_regions, ActionRegistry,
-    NexusActionContext, NexusSaga, SagaInitError, ACTION_GENERATE_ID,
+    common_storage::{
+        delete_crucible_regions, ensure_all_datasets_and_regions,
+    },
+    ActionRegistry, NexusActionContext, NexusSaga, SagaInitError,
+    ACTION_GENERATE_ID,
 };
 use crate::app::sagas::NexusAction;
 use crate::context::OpContext;
@@ -42,10 +45,16 @@ lazy_static! {
         sdc_create_disk_record,
         sdc_create_disk_record_undo
     );
-    static ref REGIONS_ALLOC: NexusAction =
-        new_action_noop_undo("disk-create.regions-alloc", sdc_alloc_regions,);
-    static ref REGIONS_ENSURE: NexusAction =
-        new_action_noop_undo("disk-create.regions-ensure", sdc_regions_ensure,);
+    static ref REGIONS_ALLOC: NexusAction = ActionFunc::new_action(
+        "disk-create.regions-alloc",
+        sdc_alloc_regions,
+        sdc_alloc_regions_undo,
+    );
+    static ref REGIONS_ENSURE: NexusAction = ActionFunc::new_action(
+        "disk-create.regions-ensure",
+        sdc_regions_ensure,
+        sdc_regions_ensure_undo,
+    );
     static ref CREATE_VOLUME_RECORD: NexusAction = ActionFunc::new_action(
         "disk-create.create-volume-record",
         sdc_create_volume_record,
@@ -242,6 +251,23 @@ async fn sdc_alloc_regions(
     Ok(datasets_and_regions)
 }
 
+async fn sdc_alloc_regions_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+
+    let region_ids = sagactx
+        .lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
+            "datasets_and_regions",
+        )?
+        .into_iter()
+        .map(|(_, region)| region.id())
+        .collect::<Vec<Uuid>>();
+
+    osagactx.datastore().regions_hard_delete(region_ids).await?;
+    Ok(())
+}
+
 /// Call out to Crucible agent and perform region creation.
 async fn sdc_regions_ensure(
     sagactx: NexusActionContext,
@@ -262,7 +288,6 @@ async fn sdc_regions_ensure(
     // If a disk source was requested, set the read-only parent of this disk.
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let log = osagactx.log();
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
 
     let mut read_only_parent: Option<Box<VolumeConstructionRequest>> =
@@ -432,6 +457,21 @@ async fn sdc_regions_ensure(
     Ok(volume_data)
 }
 
+async fn sdc_regions_ensure_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let log = sagactx.user_data().log();
+    warn!(log, "regions_ensure_undo: Deleting crucible regions");
+    delete_crucible_regions(
+        sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
+            "datasets_and_regions",
+        )?,
+    )
+    .await?;
+    info!(log, "regions_ensure_undo: Deleted crucible regions");
+    Ok(())
+}
+
 async fn sdc_create_volume_record(
     sagactx: NexusActionContext,
 ) -> Result<db::model::Volume, ActionError> {
@@ -457,7 +497,7 @@ async fn sdc_create_volume_record_undo(
     let osagactx = sagactx.user_data();
 
     let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
-    osagactx.nexus().clone().volume_delete(volume_id).await?;
+    osagactx.nexus().volume_delete(volume_id).await?;
     Ok(())
 }
 
@@ -560,189 +600,40 @@ fn randomize_volume_construction_request_ids(
 
 #[cfg(test)]
 mod test {
-    use super::*;
-    use crate::db::datastore::datastore_test;
-    use crate::saga_interface::SagaContext;
-    use nexus_test_utils::db::test_setup_database;
+    use async_bb8_diesel::{AsyncRunQueryDsl, OptionalExtension};
+    use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
+    use dropshot::test_util::ClientTestContext;
+    use nexus_test_utils::nexus::{
+        app::saga::create_saga_dag, app::sagas::disk_create::Params,
+        app::sagas::disk_create::SagaDiskCreate, authn::saga::Serialized,
+        context::OpContext, db::datastore::DataStore, external_api::params,
+    };
+    use nexus_test_utils::resource_helpers::create_ip_pool;
+    use nexus_test_utils::resource_helpers::create_organization;
+    use nexus_test_utils::resource_helpers::create_project;
+    use nexus_test_utils::resource_helpers::DiskTest;
+    use nexus_test_utils::ControlPlaneTestContext;
+    use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external::ByteCount;
-    use omicron_common::api::external::DeleteResult;
     use omicron_common::api::external::IdentityMetadataCreateParams;
-    use omicron_common::api::external::UpdateResult;
-    use omicron_common::api::internal::nexus;
-    use omicron_test_utils::dev;
-    use steno::DagBuilder;
-    use steno::InMemorySecStore;
-    use steno::SagaDag;
-    use steno::SagaName;
-    use steno::SecClient;
+    use omicron_sled_agent::sim::SledAgent;
+    use uuid::Uuid;
 
-    fn new_sec(log: &slog::Logger) -> SecClient {
-        steno::sec(log.new(slog::o!()), Arc::new(InMemorySecStore::new()))
+    const ORG_NAME: &str = "test-org";
+    const PROJECT_NAME: &str = "springfield-squidport-disks";
+
+    async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
+        create_ip_pool(&client, "p0", None, None).await;
+        create_organization(&client, ORG_NAME).await;
+        let project = create_project(client, ORG_NAME, PROJECT_NAME).await;
+        project.identity.id
     }
 
-    fn create_saga_dag<N: NexusSaga>(params: N::Params) -> SagaDag {
-        let builder = DagBuilder::new(SagaName::new(N::NAME));
-        let dag = N::make_saga_dag(&params, builder)
-            .expect("Failed to build saga DAG");
-        let params = serde_json::to_value(&params)
-            .expect("Failed to serialize parameters");
-        SagaDag::new(dag, params)
-    }
-
-    async fn create_org_and_project(
-        opctx: &OpContext,
-        datastore: &db::DataStore,
-    ) -> crate::authz::Project {
-        let organization = params::OrganizationCreate {
-            identity: IdentityMetadataCreateParams {
-                name: "org".parse().unwrap(),
-                description: "desc".to_string(),
-            },
-        };
-
-        let organization = datastore
-            .organization_create(&opctx, &organization)
-            .await
-            .expect("Failed to create org");
-
-        let project = db::model::Project::new(
-            organization.id(),
-            params::ProjectCreate {
-                identity: IdentityMetadataCreateParams {
-                    name: "project"
-                        .parse()
-                        .expect("Failed to parse project name"),
-                    description: "desc".to_string(),
-                },
-            },
-        );
-        let project_id = project.id();
-        let (.., authz_org) = LookupPath::new(&opctx, &datastore)
-            .organization_id(organization.id())
-            .lookup_for(authz::Action::CreateChild)
-            .await
-            .expect("Cannot lookup org to create a child project");
-        datastore
-            .project_create(&opctx, &authz_org, project)
-            .await
-            .expect("Failed to create project");
-        let (.., authz_project, _project) = LookupPath::new(&opctx, &datastore)
-            .project_id(project_id)
-            .fetch()
-            .await
-            .expect("Cannot lookup project we just created");
-        authz_project
-    }
-
-    // TODO: This - and frankly a lot of this test - could probably be shared
-    // between sagas.
-    struct StubNexus {
-        datastore: Arc<db::DataStore>,
-    }
-    #[async_trait::async_trait]
-    impl crate::saga_interface::NexusForSagas for StubNexus {
-        fn datastore(&self) -> &Arc<db::DataStore> {
-            &self.datastore
-        }
-
-        async fn random_sled_id(&self) -> Result<Option<Uuid>, Error> {
-            todo!();
-        }
-
-        async fn volume_delete(
-            self: Arc<Self>,
-            volume_id: Uuid,
-        ) -> DeleteResult {
-            // TODO!
-            todo!();
-        }
-
-        async fn instance_sled_agent_set_runtime(
-            &self,
-            sled_id: Uuid,
-            body: &sled_agent_client::types::InstanceEnsureBody,
-            instance_id: Uuid,
-        ) -> Result<nexus::InstanceRuntimeState, Error> {
-            todo!();
-        }
-
-        async fn disk_snapshot_instance_sled_agent(
-            &self,
-            instance: &db::model::Instance,
-            disk_id: Uuid,
-            body: &sled_agent_client::types::InstanceIssueDiskSnapshotRequestBody,
-        ) -> Result<(), Error> {
-            todo!();
-        }
-
-        async fn disk_snapshot_random_sled_agent(
-            &self,
-            disk_id: Uuid,
-            body: &sled_agent_client::types::DiskSnapshotRequestBody,
-        ) -> Result<(), Error> {
-            todo!();
-        }
-
-        // TODO: This one could be implemented purely in the DB?
-        async fn instance_attach_disk(
-            &self,
-            opctx: &OpContext,
-            organization_name: &db::model::Name,
-            project_name: &db::model::Name,
-            instance_name: &db::model::Name,
-            disk_name: &db::model::Name,
-        ) -> UpdateResult<db::model::Disk> {
-            todo!();
-        }
-
-        // TODO: This one could be implemented purely in the DB?
-        async fn instance_detach_disk(
-            &self,
-            opctx: &OpContext,
-            organization_name: &db::model::Name,
-            project_name: &db::model::Name,
-            instance_name: &db::model::Name,
-            disk_name: &db::model::Name,
-        ) -> UpdateResult<db::model::Disk> {
-            todo!();
-        }
-
-        // TODO: This is half in the DB, half to the sled agent.
-        async fn instance_set_runtime(
-            &self,
-            opctx: &OpContext,
-            authz_instance: &authz::Instance,
-            db_instance: &db::model::Instance,
-            requested: sled_agent_client::types::InstanceRuntimeStateRequested,
-        ) -> Result<(), Error> {
-            todo!();
-        }
-
-        // TODO: This calls instance_set_runtime, so, all the problems
-        // that one has too
-        async fn instance_start_migrate(
-            &self,
-            opctx: &OpContext,
-            instance_id: Uuid,
-            migration_id: Uuid,
-            dst_propolis_id: Uuid,
-        ) -> UpdateResult<db::model::Instance> {
-            todo!();
-        }
-    }
-
-    #[tokio::test]
-    async fn test_todotodotodo() {
-        let logctx = dev::test_setup_log("test_TODOTODTODO");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
-
-        let authz_project = create_org_and_project(&opctx, &datastore).await;
-
-        // Build the saga DAG with the provided test parameters
-        let params = Params {
-            serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
-            project_id: authz_project.id(),
+    // Helper for creating disk create parameters
+    fn new_test_params(opctx: &OpContext, project_id: Uuid) -> Params {
+        Params {
+            serialized_authn: Serialized::for_opctx(opctx),
+            project_id,
             create_params: params::DiskCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "my-disk".parse().expect("Invalid disk name"),
@@ -753,32 +644,147 @@ mod test {
                 },
                 size: ByteCount::from_gibibytes_u32(1),
             },
-        };
-        let dag = create_saga_dag::<SagaDiskCreate>(params);
+        }
+    }
 
-        // Create a Saga Executor which can run the saga
-        let sec = new_sec(&logctx.log);
-        let saga_id = steno::SagaId(Uuid::new_v4());
+    #[nexus_test]
+    async fn test_saga_basic_usage_succeeds(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        DiskTest::new(cptestctx).await;
 
-        let nexus = StubNexus { datastore: datastore.clone() };
-        let saga_context = Arc::new(Arc::new(SagaContext::new(
-            Arc::new(nexus),
-            logctx.log.clone(),
-            Arc::new(authz::Authz::new(&logctx.log)),
-        )));
-        let fut = sec
-            .saga_create(
-                saga_id,
-                Arc::clone(&saga_context),
-                Arc::new(dag),
-                crate::app::sagas::ACTION_REGISTRY.clone(),
+        let client = &cptestctx.external_client;
+        let nexus = &cptestctx.server.apictx.nexus;
+        let project_id = create_org_and_project(&client).await;
+
+        // Build the saga DAG with the provided test parameters
+        let opctx = cptestctx.test_opctx();
+        let params = new_test_params(&opctx, project_id);
+        let dag = create_saga_dag::<SagaDiskCreate>(params).unwrap();
+        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
+
+        // Actually run the saga
+        let output = nexus.run_saga(runnable_saga).await.unwrap();
+
+        let disk = output
+            .lookup_node_output::<crate::db::model::Disk>("created_disk")
+            .unwrap();
+        assert_eq!(disk.project_id, project_id);
+    }
+
+    async fn no_disk_records_exist(
+        datastore: &DataStore,
+        opctx: &OpContext,
+    ) -> bool {
+        use crate::db::model::Disk;
+        use crate::db::schema::disk::dsl;
+
+        dsl::disk
+            .filter(dsl::time_deleted.is_null())
+            .select(Disk::as_select())
+            .first_async::<Disk>(
+                datastore.pool_authorized(opctx).await.unwrap(),
             )
             .await
-            .expect("failed to create saga");
-        sec.saga_start(saga_id).await.expect("failed to start saga");
-        fut.await;
-
-        db.cleanup().await.unwrap();
-        logctx.cleanup_successful();
+            .optional()
+            .unwrap()
+            .is_none()
     }
+
+    async fn no_region_allocations_exist(
+        datastore: &DataStore,
+        test: &DiskTest,
+    ) -> bool {
+        for zpool in &test.zpools {
+            for dataset in &zpool.datasets {
+                if datastore
+                    .regions_total_occupied_size(dataset.id)
+                    .await
+                    .unwrap()
+                    != 0
+                {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    async fn no_regions_ensured(
+        sled_agent: &SledAgent,
+        test: &DiskTest,
+    ) -> bool {
+        for zpool in &test.zpools {
+            for dataset in &zpool.datasets {
+                let crucible_dataset =
+                    sled_agent.get_crucible_dataset(zpool.id, dataset.id).await;
+                if !crucible_dataset.is_empty().await {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    #[nexus_test]
+    async fn test_action_failure_can_unwind(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let test = DiskTest::new(cptestctx).await;
+        let log = &cptestctx.logctx.log;
+
+        let client = &cptestctx.external_client;
+        let nexus = &cptestctx.server.apictx.nexus;
+        let project_id = create_org_and_project(&client).await;
+
+        // Build the saga DAG with the provided test parameters
+        let opctx = cptestctx.test_opctx();
+
+        let nodes_to_fail = [
+            "disk_id",
+            "volume_id",
+            "created_disk",
+            "datasets_and_regions",
+            "regions_ensure",
+            "created_volume",
+            "disk_runtime",
+        ];
+
+        for failing_node in &nodes_to_fail {
+            // Create a new saga for this node.
+            info!(log, "Creating new saga which will fail at {failing_node}");
+            let params = new_test_params(&opctx, project_id);
+            let dag = create_saga_dag::<SagaDiskCreate>(params).unwrap();
+            let node_id = dag.get_index(failing_node).unwrap();
+            let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
+
+            // Inject an error instead of running the node.
+            //
+            // This should cause the saga to unwind.
+            nexus
+                .sec()
+                .saga_inject_error(runnable_saga.id(), node_id)
+                .await
+                .unwrap();
+            nexus
+                .run_saga(runnable_saga)
+                .await
+                .expect_err("Saga should have failed");
+
+            let datastore = nexus.datastore();
+
+            // Check that no partial artifacts of disk creation exist:
+            assert!(no_disk_records_exist(datastore, &opctx).await);
+            assert!(no_region_allocations_exist(datastore, &test).await);
+            assert!(
+                no_regions_ensured(&cptestctx.sled_agent.sled_agent, &test)
+                    .await
+            );
+        }
+    }
+
+    // TODO: We still need to test:
+    // - Can we repeat each action safely, without failing / leaving detritus?
+    // - Can we repeat each undo action safely?
+    // - Is each node atomic? (This seems harder to test)
 }

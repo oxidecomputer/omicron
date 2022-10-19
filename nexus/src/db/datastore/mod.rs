@@ -122,7 +122,7 @@ impl DataStore {
         self.pool.pool()
     }
 
-    pub(super) async fn pool_authorized(
+    pub async fn pool_authorized(
         &self,
         opctx: &OpContext,
     ) -> Result<&bb8::Pool<ConnectionManager<DbConnection>>, Error> {

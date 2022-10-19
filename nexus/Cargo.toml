@@ -121,6 +121,7 @@ itertools = "0.10.5"
 nexus-test-utils-macros = { path = "test-utils-macros" }
 nexus-test-utils = { path = "test-utils" }
 omicron-test-utils = { path = "../test-utils" }
+omicron-sled-agent = { path = "../sled-agent" }
 openapiv3 = "1.0"
 regex = "1.6.0"
 subprocess = "0.2.9"

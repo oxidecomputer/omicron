@@ -417,7 +417,7 @@ async fn ssc_create_destination_volume_record_undo(
 
     let destination_volume_id =
         sagactx.lookup::<Uuid>("destination_volume_id")?;
-    osagactx.nexus().clone().volume_delete(destination_volume_id).await?;
+    osagactx.nexus().volume_delete(destination_volume_id).await?;
 
     Ok(())
 }
@@ -764,7 +764,7 @@ async fn ssc_create_volume_record_undo(
     let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
 
     info!(log, "deleting volume {}", volume_id);
-    osagactx.nexus().clone().volume_delete(volume_id).await?;
+    osagactx.nexus().volume_delete(volume_id).await?;
 
     Ok(())
 }

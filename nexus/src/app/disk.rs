@@ -513,9 +513,9 @@ impl super::Nexus {
             .await?;
 
         // Kick off volume deletion saga(s)
-        self.clone().volume_delete(db_snapshot.volume_id).await?;
+        self.volume_delete(db_snapshot.volume_id).await?;
         if let Some(volume_id) = db_snapshot.destination_volume_id {
-            self.clone().volume_delete(volume_id).await?;
+            self.volume_delete(volume_id).await?;
         }
 
         Ok(())

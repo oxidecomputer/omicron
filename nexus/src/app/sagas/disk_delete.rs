@@ -92,7 +92,6 @@ async fn sdd_delete_volume(
     let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
     osagactx
         .nexus()
-        .clone()
         .volume_delete(volume_id)
         .await
         .map_err(ActionError::action_failed)?;

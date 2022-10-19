@@ -2993,6 +2993,7 @@ dependencies = [
  "num-integer",
  "omicron-common",
  "omicron-rpaths",
+ "omicron-sled-agent",
  "omicron-test-utils",
  "openapi-lint",
  "openapiv3",

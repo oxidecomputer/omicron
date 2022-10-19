@@ -23,7 +23,7 @@ impl super::Nexus {
     /// of a "disk" or "snapshot" could free up a *lot* of Crucible resources
     /// and the user's query shouldn't wait on those DELETE calls.
     pub async fn volume_delete(
-        self: Arc<Self>,
+        self: &Arc<Self>,
         volume_id: Uuid,
     ) -> DeleteResult {
         let saga_params = sagas::volume_delete::Params { volume_id };

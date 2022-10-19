@@ -23,6 +23,9 @@ use std::path::Path;
 use std::time::Duration;
 use uuid::Uuid;
 
+// Expose the version of Nexus used by the test utils.
+pub use omicron_nexus as nexus;
+
 pub mod db;
 pub mod http_testing;
 pub mod resource_helpers;
@@ -45,6 +48,13 @@ pub struct ControlPlaneTestContext {
 }
 
 impl ControlPlaneTestContext {
+    pub fn test_opctx(&self) -> omicron_nexus::context::OpContext {
+        omicron_nexus::context::OpContext::for_tests(
+            self.logctx.log.new(o!()),
+            self.server.apictx.nexus.datastore().clone(),
+        )
+    }
+
     pub async fn teardown(mut self) {
         for server in self.server.http_servers_external {
             server.close().await.unwrap();
