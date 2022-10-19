@@ -10,6 +10,7 @@ use crate::Action;
 use crate::ScreenEvent;
 use crate::State;
 use crate::Term;
+use crate::TermEvent;
 use slog::Logger;
 
 use component::ComponentScreen;
@@ -22,7 +23,6 @@ pub enum ScreenId {
     Splash,
     Rack,
     Component,
-    Update,
 }
 
 impl ScreenId {
@@ -31,7 +31,6 @@ impl ScreenId {
             ScreenId::Splash => "splash",
             ScreenId::Rack => "rack",
             ScreenId::Component => "component",
-            ScreenId::Update => "update",
         }
     }
 
@@ -58,15 +57,21 @@ pub fn make_even(val: u16) -> u16 {
 
 pub trait Screen {
     /// Draw the [`Screen`]
-    fn draw(
-        &mut self,
-        state: &State,
-        terminal: &mut Term,
-    ) -> anyhow::Result<()>;
+    fn draw(&self, state: &State, terminal: &mut Term) -> anyhow::Result<()>;
 
     /// Handle a [`ScreenEvent`] to update internal display state and output
     /// any necessary actions for the system to take.
     fn on(&mut self, state: &mut State, event: ScreenEvent) -> Vec<Action>;
+
+    /// Resize the screen via delivering a `Resize` event
+    fn resize(
+        &mut self,
+        state: &mut State,
+        width: u16,
+        height: u16,
+    ) -> Vec<Action> {
+        self.on(state, ScreenEvent::Term(TermEvent::Resize(width, height)))
+    }
 }
 
 /// All [`Screen`]s for wicket
@@ -90,7 +95,6 @@ impl Screens {
             ScreenId::Splash => &mut self.splash,
             ScreenId::Rack => &mut self.rack,
             ScreenId::Component => &mut self.component,
-            _ => unimplemented!(),
         }
     }
 }

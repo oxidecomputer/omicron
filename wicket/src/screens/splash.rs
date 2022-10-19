@@ -40,7 +40,7 @@ impl SplashScreen {
 
     // Sweep left to right, painting the banner white, with
     // the x painted green.
-    fn animate_logo(&mut self, f: &mut Frame) {
+    fn animate_logo(&self, f: &mut Frame) {
         // Center the banner
         let mut rect = f.size();
         rect.x = rect.width / 2 - LOGO_WIDTH / 2;
@@ -62,7 +62,7 @@ impl SplashScreen {
 
 impl Screen for SplashScreen {
     fn draw(
-        &mut self,
+        &self,
         _state: &crate::State,
         terminal: &mut crate::Term,
     ) -> anyhow::Result<()> {
