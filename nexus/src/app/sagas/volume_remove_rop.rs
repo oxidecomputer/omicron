@@ -7,11 +7,12 @@ use crate::app::sagas;
 use crate::app::sagas::NexusAction;
 use crate::db;
 use lazy_static::lazy_static;
+use omicron_common::api::external::Error;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_client::types::VolumeConstructionRequest;
 use std::sync::Arc;
-use steno::ActionError;
-use steno::{new_action_noop_undo, Node};
+use steno::{new_action_noop_undo, ActionError, Node};
 use uuid::Uuid;
 
 // Volume remove read only parent saga: input parameters
@@ -41,11 +42,7 @@ lazy_static! {
     // parent, and the temporary volume appears to depend on the parent), and
     // then delete that temporary volume.
 
-    // Create the empty data for the temp volume.
-    static ref CREATE_TEMP_DATA: NexusAction = new_action_noop_undo(
-        "volume-remove-rop.create-temp-data",
-        svr_create_temp_data
-    );
+    // Create the temporary volume
     static ref CREATE_TEMP_VOLUME: NexusAction = new_action_noop_undo(
         "volume-remove-rop.create-temp-volume",
         svr_create_temp_volume
@@ -67,7 +64,6 @@ impl NexusSaga for SagaVolumeRemoveROP {
     type Params = Params;
 
     fn register_actions(registry: &mut ActionRegistry) {
-        registry.register(Arc::clone(&*CREATE_TEMP_DATA));
         registry.register(Arc::clone(&*CREATE_TEMP_VOLUME));
         registry.register(Arc::clone(&*REMOVE_READ_ONLY_PARENT));
     }
@@ -97,13 +93,6 @@ impl NexusSaga for SagaVolumeRemoveROP {
             serde_json::to_value(&temp_volume_id).map_err(|e| {
                 SagaInitError::SerializeError(String::from("temp_volume_id"), e)
             })?,
-        ));
-
-        // Create the temporary volume data
-        builder.append(Node::action(
-            "temp_volume_data",
-            "CreateTempData",
-            CREATE_TEMP_DATA.as_ref(),
         ));
 
         // Create the temporary volume
@@ -144,31 +133,28 @@ impl NexusSaga for SagaVolumeRemoveROP {
 
 // volume remove read only parent saga: action implementations
 
-// To create a volume, we need a crucible volume construction request.
-// We create that data here.
-async fn svr_create_temp_data(
-    sagactx: NexusActionContext,
-) -> Result<String, ActionError> {
-    let osagactx = sagactx.user_data();
-
-    let temp_volume_id = sagactx.lookup::<Uuid>("temp_volume_id")?;
-
-    let volume_created = osagactx
-        .datastore()
-        .volume_create_empty_data(temp_volume_id)
-        .await
-        .map_err(ActionError::action_failed)?;
-
-    Ok(volume_created)
-}
-
 async fn svr_create_temp_volume(
     sagactx: NexusActionContext,
 ) -> Result<db::model::Volume, ActionError> {
     let osagactx = sagactx.user_data();
 
     let temp_volume_id = sagactx.lookup::<Uuid>("temp_volume_id")?;
-    let temp_volume_data = sagactx.lookup::<String>("temp_volume_data")?;
+
+    // Create the crucible VolumeConstructionRequest which we use
+    // for the temporary volume.
+    let volume_construction_request = VolumeConstructionRequest::Volume {
+        id: temp_volume_id,
+        block_size: 512,
+        sub_volumes: vec![],
+        read_only_parent: None,
+    };
+    let temp_volume_data = serde_json::to_string(&volume_construction_request)
+        .map_err(|e| {
+            ActionError::action_failed(Error::internal_error(&format!(
+                "failed to deserialize volume data: {}",
+                e,
+            )))
+        })?;
 
     let volume = db::model::Volume::new(temp_volume_id, temp_volume_data);
     let volume_created = osagactx

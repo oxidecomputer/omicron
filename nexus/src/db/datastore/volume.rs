@@ -29,29 +29,9 @@ use omicron_common::api::external::ResourceType;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::types::VolumeConstructionRequest;
-use steno::ActionError;
 use uuid::Uuid;
 
 impl DataStore {
-    // Create an empty VolumeConstructionRequest and convert it to a string.
-    pub async fn volume_create_empty_data(
-        &self,
-        volume_id: Uuid,
-    ) -> Result<String, ActionError> {
-        // Manufacture an empty volume construction request.
-        let volume_construction_request = VolumeConstructionRequest::Volume {
-            id: volume_id,
-            block_size: 512,
-            sub_volumes: vec![],
-            read_only_parent: None,
-        };
-        let volume_data = serde_json::to_string(&volume_construction_request)
-            .map_err(|e| {
-            ActionError::action_failed(Error::internal_error(&e.to_string()))
-        })?;
-        Ok(volume_data)
-    }
-
     pub async fn volume_create(&self, volume: Volume) -> CreateResult<Volume> {
         use db::schema::volume::dsl;
 
