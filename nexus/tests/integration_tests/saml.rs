@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::fmt::Debug;
-
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_nexus::authn::silos::{
@@ -21,9 +19,7 @@ use nexus_test_utils::resource_helpers::{create_silo, object_create};
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 
-use dropshot::ResultsPage;
 use httptest::{matchers::*, responders::*, Expectation, Server};
-use uuid::Uuid;
 
 // Valid SAML IdP entity descriptor from https://en.wikipedia.org/wiki/SAML_metadata#Identity_provider_metadata
 // note: no signing keys
@@ -963,7 +959,7 @@ async fn test_post_saml_response(cptestctx: &ControlPlaneTestContext) {
 
             signing_keypair: None,
 
-            group_attribute_name: Some("groups".into()),
+            group_attribute_name: None,
         },
     )
     .await;
@@ -988,7 +984,7 @@ async fn test_post_saml_response(cptestctx: &ControlPlaneTestContext) {
         )
         .raw_body(Some(
             serde_urlencoded::to_string(SamlLoginPost {
-                saml_response: base64::encode(SAML_RESPONSE_WITH_GROUPS),
+                saml_response: base64::encode(SAML_RESPONSE),
                 relay_state: None,
             })
             .unwrap(),
@@ -1013,24 +1009,7 @@ async fn test_post_saml_response(cptestctx: &ControlPlaneTestContext) {
     let session_cookie_value =
         result.headers["Set-Cookie"].to_str().unwrap().to_string();
 
-    let groups: ResultsPage<views::Group> = NexusRequest::new(
-        RequestBuilder::new(client, Method::GET, "/groups")
-            .header(http::header::COOKIE, session_cookie_value.clone())
-            .expect_status(Some(StatusCode::OK)),
-    )
-    .execute()
-    .await
-    .expect("expected success")
-    .parsed_body()
-    .unwrap();
-
-    let silo_group_names: Vec<&str> =
-        groups.items.iter().map(|g| g.display_name.as_str()).collect();
-    let silo_group_ids: Vec<Uuid> = groups.items.iter().map(|g| g.id).collect();
-
-    assert_same_items(silo_group_names, vec!["SRE", "Admins"]);
-
-    let session_me: views::SessionMe = NexusRequest::new(
+    let session_me: views::User = NexusRequest::new(
         RequestBuilder::new(client, Method::GET, "/session/me")
             .header(http::header::COOKIE, session_cookie_value)
             .expect_status(Some(StatusCode::OK)),
@@ -1042,15 +1021,6 @@ async fn test_post_saml_response(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
 
     assert_eq!(session_me.display_name, "some@customer.com");
-    assert_same_items(session_me.group_ids, silo_group_ids);
-}
-
-/// Order-agnostic vec equality
-fn assert_same_items<T: PartialEq + Debug>(v1: Vec<T>, v2: Vec<T>) {
-    assert_eq!(v1.len(), v2.len(), "{:?} and {:?} don't match", v1, v2);
-    for item in v1.iter() {
-        assert!(v2.contains(item), "{:?} and {:?} don't match", v1, v2);
-    }
 }
 
 // Test correct SAML response with relay state

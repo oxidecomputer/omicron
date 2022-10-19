@@ -28,12 +28,15 @@ use dropshot::{
     endpoint, http_response_found, http_response_see_other, HttpError,
     HttpResponseFound, HttpResponseHeaders, HttpResponseOk,
     HttpResponseSeeOther, HttpResponseUpdatedNoContent, Path, Query,
-    RequestContext, TypedBody,
+    RequestContext, ResultsPage, TypedBody,
 };
 use http::{header, Response, StatusCode};
 use hyper::Body;
 use lazy_static::lazy_static;
 use mime_guess;
+use omicron_common::api::external::http_pagination::{
+    data_page_params_for, PaginatedById, ScanById, ScanParams,
+};
 use omicron_common::api::external::Error;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -592,7 +595,7 @@ pub async fn login_begin(
 }]
 pub async fn session_me(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-) -> Result<HttpResponseOk<views::SessionMe>, HttpError> {
+) -> Result<HttpResponseOk<views::User>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let handler = async {
@@ -601,13 +604,48 @@ pub async fn session_me(
         // not clear what the advantage would be.
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let user = nexus.silo_user_fetch_self(&opctx).await?;
-        let groups = nexus.silo_user_fetch_groups_for_self(&opctx).await?;
-        Ok(HttpResponseOk(views::SessionMe {
+        Ok(HttpResponseOk(views::User {
             id: user.id(),
             display_name: user.external_id,
             silo_id: user.silo_id,
-            group_ids: groups.iter().map(|g| g.silo_group_id).collect(),
         }))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch the silo groups of which the current user is a member
+#[endpoint {
+    method = GET,
+    path = "/session/me/groups",
+    tags = ["hidden"],
+ }]
+pub async fn session_me_groups(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<views::SiloGroupMembership>>, HttpError>
+{
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let handler = async {
+        // We don't care about authentication method, as long as they are authed
+        // as _somebody_. We could restrict this to session auth only, but it's
+        // not clear what the advantage would be.
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let group_memberships = nexus
+            .silo_user_fetch_groups_for_self(
+                &opctx,
+                &data_page_params_for(&rqctx, &query)?,
+            )
+            .await?
+            .into_iter()
+            .map(|d| d.into())
+            .collect();
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            group_memberships,
+            &|_, group: &views::SiloGroupMembership| group.silo_group_id,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

@@ -93,8 +93,9 @@ impl super::Nexus {
     pub async fn silo_user_fetch_groups_for_self(
         &self,
         opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::SiloGroupMembership> {
-        self.db_datastore.silo_group_membership_for_self(opctx).await
+        self.db_datastore.silo_group_membership_for_self(opctx, pagparams).await
     }
 
     // Silo groups

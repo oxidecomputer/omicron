@@ -322,19 +322,6 @@ pub struct User {
     pub silo_id: Uuid,
 }
 
-/// Client view of a [`User`] and their groups
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-pub struct SessionMe {
-    pub id: Uuid,
-    /** Human-readable name that can identify the user */
-    pub display_name: String,
-
-    /** Uuid of the silo to which this user belongs */
-    pub silo_id: Uuid,
-
-    pub group_ids: Vec<Uuid>,
-}
-
 // SILO GROUPS
 
 /// Client view of a [`Group`]
@@ -347,6 +334,12 @@ pub struct Group {
 
     /** Uuid of the silo to which this group belongs */
     pub silo_id: Uuid,
+}
+
+/// Client view of a [`Group`]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+pub struct SiloGroupMembership {
+    pub silo_group_id: Uuid,
 }
 
 // BUILT-IN USERS

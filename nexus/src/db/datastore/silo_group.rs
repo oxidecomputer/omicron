@@ -109,6 +109,7 @@ impl DataStore {
     pub async fn silo_group_membership_for_self(
         &self,
         opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<SiloGroupMembership> {
         // Similar to session_hard_delete (see comment there), we do not do a
         // typical authz check, instead effectively encoding the policy here
@@ -119,7 +120,7 @@ impl DataStore {
             .internal_context("fetching current user's group memberships")?;
 
         use db::schema::silo_group_membership::dsl;
-        dsl::silo_group_membership
+        paginated(dsl::silo_group_membership, dsl::silo_group_id, pagparams)
             .filter(dsl::silo_user_id.eq(actor.actor_id()))
             .select(SiloGroupMembership::as_returning())
             .get_results_async(self.pool_authorized(opctx).await?)
