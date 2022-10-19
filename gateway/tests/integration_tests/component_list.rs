@@ -102,4 +102,6 @@ async fn component_list() {
             },
         ]
     );
+
+    testctx.teardown().await;
 }
