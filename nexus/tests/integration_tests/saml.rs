@@ -2,6 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::fmt::Debug;
+
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_nexus::authn::silos::{
@@ -1026,10 +1028,7 @@ async fn test_post_saml_response(cptestctx: &ControlPlaneTestContext) {
         groups.items.iter().map(|g| g.display_name.as_str()).collect();
     let silo_group_ids: Vec<Uuid> = groups.items.iter().map(|g| g.id).collect();
 
-    // use contains because order is not consistent
-    assert_eq!(silo_group_names.len(), 2);
-    assert!(silo_group_names.contains(&"SRE"));
-    assert!(silo_group_names.contains(&"Admins"));
+    assert_same_items(silo_group_names, vec!["SRE", "Admins"]);
 
     let session_me: views::SessionMe = NexusRequest::new(
         RequestBuilder::new(client, Method::GET, "/session/me")
@@ -1043,7 +1042,15 @@ async fn test_post_saml_response(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
 
     assert_eq!(session_me.display_name, "some@customer.com");
-    assert_eq!(session_me.group_ids, silo_group_ids); // user has all the groups
+    assert_same_items(session_me.group_ids, silo_group_ids);
+}
+
+/// Order-agnostic vec equality
+fn assert_same_items<T: PartialEq + Debug>(v1: Vec<T>, v2: Vec<T>) {
+    assert_eq!(v1.len(), v2.len(), "{:?} and {:?} don't match", v1, v2);
+    for item in v1.iter() {
+        assert!(v2.contains(item), "{:?} and {:?} don't match", v1, v2);
+    }
 }
 
 // Test correct SAML response with relay state
