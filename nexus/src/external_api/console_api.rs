@@ -592,7 +592,7 @@ pub async fn login_begin(
 }]
 pub async fn session_me(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-) -> Result<HttpResponseOk<views::User>, HttpError> {
+) -> Result<HttpResponseOk<views::SessionMe>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let handler = async {
@@ -601,7 +601,13 @@ pub async fn session_me(
         // not clear what the advantage would be.
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let user = nexus.silo_user_fetch_self(&opctx).await?;
-        Ok(HttpResponseOk(user.into()))
+        let groups = nexus.silo_user_fetch_groups_for_self(&opctx).await?;
+        Ok(HttpResponseOk(views::SessionMe {
+            id: user.id(),
+            display_name: user.external_id,
+            silo_id: user.silo_id,
+            group_ids: groups.iter().map(|g| g.silo_group_id).collect(),
+        }))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
