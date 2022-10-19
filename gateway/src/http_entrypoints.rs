@@ -158,24 +158,41 @@ pub struct SpComponentList {
 /// Overview of a single SP component.
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SpComponentInfo {
+    /// The unique identifier for this component.
     pub component: String,
+    /// The name of the physical device.
     pub device: String,
+    /// The component's serial number, if it has one.
     pub serial_number: Option<String>,
+    /// A human-readable description of the component.
     pub description: String,
     /// `capabilities` is a bitmask; interpret it via
     /// [`gateway_messages::DeviceCapabilities`].
     pub capabilities: u32,
+    /// Whether or not the component is present, to the best of the SP's ability
+    /// to judge.
     pub presence: SpComponentPresence,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
+/// Description of the presence or absence of a component.
+///
+/// The presence of some components may vary based on the power state of the
+/// sled (e.g., components that time out or appear unavailable if the sled is in
+/// A2 may become present when the sled moves to A0).
 pub enum SpComponentPresence {
+    /// The component is present.
     Present,
+    /// The component is not present.
     NotPresent,
+    /// The component is present but in a failed or faulty state.
     Failed,
+    /// The SP is unable to determine the presence of the component.
     Unavailable,
+    /// The SP's attempt to determine the presence of the component timed out.
     Timeout,
+    /// The SP's attempt to determine the presence of the component failed.
     Error,
 }
 

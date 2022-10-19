@@ -43,7 +43,8 @@ pub struct SpCommonConfig {
 /// Configuration of a simulated SP component
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct SpComponentConfig {
-    /// Must be at most [`SpComponent::MAX_ID_LENGTH`] bytes long.
+    /// Must be at most [`gateway_messages::SpComponent::MAX_ID_LENGTH`] bytes
+    /// long.
     pub id: String,
     pub device: String,
     pub description: String,

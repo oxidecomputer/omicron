@@ -952,19 +952,28 @@
             "minimum": 0
           },
           "component": {
+            "description": "The unique identifier for this component.",
             "type": "string"
           },
           "description": {
+            "description": "A human-readable description of the component.",
             "type": "string"
           },
           "device": {
+            "description": "The name of the physical device.",
             "type": "string"
           },
           "presence": {
-            "$ref": "#/components/schemas/SpComponentPresence"
+            "description": "Whether or not the component is present, to the best of the SP's ability to judge.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpComponentPresence"
+              }
+            ]
           },
           "serial_number": {
             "nullable": true,
+            "description": "The component's serial number, if it has one.",
             "type": "string"
           }
         },
@@ -992,14 +1001,50 @@
         ]
       },
       "SpComponentPresence": {
-        "type": "string",
-        "enum": [
-          "present",
-          "not_present",
-          "failed",
-          "unavailable",
-          "timeout",
-          "error"
+        "description": "Description of the presence or absence of a component.\n\nThe presence of some components may vary based on the power state of the sled (e.g., components that time out or appear unavailable if the sled is in A2 may become present when the sled moves to A0).",
+        "oneOf": [
+          {
+            "description": "The component is present.",
+            "type": "string",
+            "enum": [
+              "present"
+            ]
+          },
+          {
+            "description": "The component is not present.",
+            "type": "string",
+            "enum": [
+              "not_present"
+            ]
+          },
+          {
+            "description": "The component is present but in a failed or faulty state.",
+            "type": "string",
+            "enum": [
+              "failed"
+            ]
+          },
+          {
+            "description": "The SP is unable to determine the presence of the component.",
+            "type": "string",
+            "enum": [
+              "unavailable"
+            ]
+          },
+          {
+            "description": "The SP's attempt to determine the presence of the component timed out.",
+            "type": "string",
+            "enum": [
+              "timeout"
+            ]
+          },
+          {
+            "description": "The SP's attempt to determine the presence of the component failed.",
+            "type": "string",
+            "enum": [
+              "error"
+            ]
+          }
         ]
       },
       "SpIdentifier": {
