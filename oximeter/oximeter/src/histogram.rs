@@ -654,7 +654,7 @@ mod tests {
 
     #[test]
     fn test_histogram() {
-        let mut hist = Histogram::new(&vec![0, 10, 20]).unwrap();
+        let mut hist = Histogram::new(&[0, 10, 20]).unwrap();
         assert_eq!(
             hist.n_bins(),
             4,
@@ -782,7 +782,7 @@ mod tests {
     #[test]
     fn test_histogram_unsorted_bins() {
         assert!(
-            Histogram::new(&vec![0, -10, 1]).is_err(),
+            Histogram::new(&[0, -10, 1]).is_err(),
             "Expected an Err when building a histogram with unsorted bins"
         );
 
@@ -794,7 +794,7 @@ mod tests {
 
     #[test]
     fn test_histogram_unbounded_samples() {
-        let mut hist = Histogram::new(&vec![0.0, 1.0]).unwrap();
+        let mut hist = Histogram::new(&[0.0, 1.0]).unwrap();
         assert!(
             hist.sample(f64::NAN).is_err(),
             "Expected an Err when sampling NaN into a histogram"

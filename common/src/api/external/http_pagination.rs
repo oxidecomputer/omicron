@@ -643,6 +643,9 @@ mod test {
             .collect()
     }
 
+    type StdPaginationParams<S> =
+        PaginationParams<S, PageSelector<S, <S as ScanParams>::MarkerValue>>;
+
     /// Function for running a bunch of tests on a ScanParams type.
     fn test_scan_param_common<F, S>(
         list: &Vec<MyThing>,
@@ -652,10 +655,7 @@ mod test {
         itemlast_marker: &S::MarkerValue,
         scan_default: &S,
         marker_for_item: &F,
-    ) -> (
-        PaginationParams<S, PageSelector<S, S::MarkerValue>>,
-        PaginationParams<S, PageSelector<S, S::MarkerValue>>,
-    )
+    ) -> (StdPaginationParams<S>, StdPaginationParams<S>)
     where
         S: ScanParams,
         F: Fn(&S, &MyThing) -> S::MarkerValue,

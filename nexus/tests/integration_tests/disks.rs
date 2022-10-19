@@ -145,7 +145,7 @@ async fn set_instance_state(
 
 async fn instance_simulate(nexus: &Arc<Nexus>, id: &Uuid) {
     let sa = nexus.instance_sled_by_id(id).await.unwrap();
-    sa.instance_finish_transition(id.clone()).await;
+    sa.instance_finish_transition(*id).await;
 }
 
 #[nexus_test]
@@ -226,13 +226,13 @@ async fn test_disk_create_attach_detach_delete(
     let instance_id = &instance.identity.id;
     assert_eq!(attached_disk.identity.name, disk.identity.name);
     assert_eq!(attached_disk.identity.id, disk.identity.id);
-    assert_eq!(attached_disk.state, DiskState::Attached(instance_id.clone()));
+    assert_eq!(attached_disk.state, DiskState::Attached(*instance_id));
 
     // Attach the disk to the same instance.  This should complete immediately
     // with no state change.
     let disk =
         disk_post(client, &url_instance_attach_disk, disk.identity.name).await;
-    assert_eq!(disk.state, DiskState::Attached(instance_id.clone()));
+    assert_eq!(disk.state, DiskState::Attached(*instance_id));
 
     // Begin detaching the disk.
     let disk = disk_post(
@@ -378,13 +378,13 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     let instance_id = &instance.identity.id;
     assert_eq!(attached_disk.identity.name, disk.identity.name);
     assert_eq!(attached_disk.identity.id, disk.identity.id);
-    assert_eq!(attached_disk.state, DiskState::Attached(instance_id.clone()));
+    assert_eq!(attached_disk.state, DiskState::Attached(*instance_id));
 
     // Attach the disk to the same instance.  This should complete immediately
     // with no state change.
     let disk =
         disk_post(client, &url_instance_attach_disk, disk.identity.name).await;
-    assert_eq!(disk.state, DiskState::Attached(instance_id.clone()));
+    assert_eq!(disk.state, DiskState::Attached(*instance_id));
 
     // Create a second instance and try to attach the disk to that.  This should
     // fail and the disk should remain attached to the first instance.
@@ -425,7 +425,7 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     );
 
     let attached_disk = disk_get(&client, &disk_url).await;
-    assert_eq!(attached_disk.state, DiskState::Attached(instance_id.clone()));
+    assert_eq!(attached_disk.state, DiskState::Attached(*instance_id));
 
     // Begin detaching the disk.
     let disk =
@@ -455,7 +455,7 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     let instance2_id = &instance2.identity.id;
     assert_eq!(attached_disk.identity.name, disk.identity.name);
     assert_eq!(attached_disk.identity.id, disk.identity.id);
-    assert_eq!(attached_disk.state, DiskState::Attached(instance2_id.clone()));
+    assert_eq!(attached_disk.state, DiskState::Attached(*instance2_id));
 
     // At this point, it's not legal to attempt to attach it to a different
     // instance (the first one).
@@ -487,7 +487,7 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
         disk.identity.name.clone(),
     )
     .await;
-    assert_eq!(disk.state, DiskState::Attached(instance2_id.clone()));
+    assert_eq!(disk.state, DiskState::Attached(*instance2_id));
 
     // It's not allowed to delete a disk that's attached.
     let error = NexusRequest::expect_failure(

@@ -1961,10 +1961,8 @@ async fn test_attach_eight_disks_to_instance(
             .map(|i| {
                 params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
-                        name: Name::try_from(
-                            format!("probablydata{}", i).to_string(),
-                        )
-                        .unwrap(),
+                        name: Name::try_from(format!("probablydata{}", i))
+                            .unwrap(),
                     },
                 )
             })
@@ -2069,10 +2067,8 @@ async fn test_cannot_attach_nine_disks_to_instance(
             .map(|i| {
                 params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
-                        name: Name::try_from(
-                            format!("probablydata{}", i).to_string(),
-                        )
-                        .unwrap(),
+                        name: Name::try_from(format!("probablydata{}", i))
+                            .unwrap(),
                     },
                 )
             })
@@ -2201,10 +2197,8 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
             .map(|i| {
                 params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
-                        name: Name::try_from(
-                            format!("probablydata{}", i).to_string(),
-                        )
-                        .unwrap(),
+                        name: Name::try_from(format!("probablydata{}", i))
+                            .unwrap(),
                     },
                 )
             })
@@ -2317,10 +2311,8 @@ async fn test_disks_detached_when_instance_destroyed(
             .map(|i| {
                 params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
-                        name: Name::try_from(
-                            format!("probablydata{}", i).to_string(),
-                        )
-                        .unwrap(),
+                        name: Name::try_from(format!("probablydata{}", i))
+                            .unwrap(),
                     },
                 )
             })
@@ -2769,5 +2761,5 @@ fn instances_eq(instance1: &Instance, instance2: &Instance) {
 /// going on.
 pub async fn instance_simulate(nexus: &Arc<Nexus>, id: &Uuid) {
     let sa = nexus.instance_sled_by_id(id).await.unwrap();
-    sa.instance_finish_transition(id.clone()).await;
+    sa.instance_finish_transition(*id).await;
 }

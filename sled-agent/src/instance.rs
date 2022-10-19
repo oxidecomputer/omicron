@@ -926,10 +926,8 @@ mod test {
     async fn transition_before_start() {
         let logctx = test_setup_log("transition_before_start");
         let log = &logctx.log;
-        let vnic_allocator = VnicAllocator::new(
-            "Test".to_string(),
-            Etherstub("mylink".to_string()),
-        );
+        let vnic_allocator =
+            VnicAllocator::new("Test", Etherstub("mylink".to_string()));
         let underlay_ip = std::net::Ipv6Addr::new(
             0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
         );

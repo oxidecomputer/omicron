@@ -254,56 +254,44 @@ mod tests {
 
     #[test]
     fn test_target() {
-        let out = target_impl(
-            quote! {
-                #[derive(Target)]
-                struct MyTarget {
-                    name: String,
-                    is_cool: bool,
-                    addr: std::net::IpAddr,
-                }
+        let out = target_impl(quote! {
+            #[derive(Target)]
+            struct MyTarget {
+                name: String,
+                is_cool: bool,
+                addr: std::net::IpAddr,
             }
-            .into(),
-        );
+        });
         assert!(out.is_ok());
     }
 
     #[test]
     fn test_target_unit_struct() {
-        let out = target_impl(
-            quote! {
-                #[derive(Target)]
-                struct MyTarget;
-            }
-            .into(),
-        );
+        let out = target_impl(quote! {
+            #[derive(Target)]
+            struct MyTarget;
+        });
         assert!(out.is_ok());
     }
 
     #[test]
     fn test_target_empty_struct() {
-        let out = target_impl(
-            quote! {
-                #[derive(Target)]
-                struct MyTarget {}
-            }
-            .into(),
-        );
+        let out = target_impl(quote! {
+            #[derive(Target)]
+            struct MyTarget {}
+        });
         assert!(out.is_ok());
     }
 
     #[test]
     fn test_target_enum() {
-        let out = target_impl(
-            quote! {
-                #[derive(Target)]
-                enum MyTarget {
-                    Bad,
-                    NoGood,
-                };
-            }
-            .into(),
-        );
+        let out = target_impl(quote! {
+            #[derive(Target)]
+            enum MyTarget {
+                Bad,
+                NoGood,
+            };
+        });
         assert!(out.is_err());
     }
 

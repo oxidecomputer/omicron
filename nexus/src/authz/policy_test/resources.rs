@@ -58,16 +58,16 @@ use uuid::Uuid;
 //   argument that says whether to create users and how many child hierarchies
 //   to create.
 pub async fn make_resources<'a>(
-    mut builder: ResourceBuilder<'a>,
+    mut builder: ResourceBuilder<'_>,
     main_silo_id: Uuid,
 ) -> ResourceSet {
     // Global resources
-    builder.new_resource(authz::DATABASE.clone());
-    builder.new_resource_with_users(authz::FLEET.clone()).await;
-    builder.new_resource(authz::CONSOLE_SESSION_LIST.clone());
-    builder.new_resource(authz::DEVICE_AUTH_REQUEST_LIST.clone());
-    builder.new_resource(authz::GLOBAL_IMAGE_LIST.clone());
-    builder.new_resource(authz::IP_POOL_LIST.clone());
+    builder.new_resource(authz::DATABASE);
+    builder.new_resource_with_users(authz::FLEET).await;
+    builder.new_resource(authz::CONSOLE_SESSION_LIST);
+    builder.new_resource(authz::DEVICE_AUTH_REQUEST_LIST);
+    builder.new_resource(authz::GLOBAL_IMAGE_LIST);
+    builder.new_resource(authz::IP_POOL_LIST);
 
     // Silo/organization/project hierarchy
     make_silo(&mut builder, "silo1", main_silo_id, true).await;
@@ -76,14 +76,14 @@ pub async fn make_resources<'a>(
     // Various other resources
     let rack_id = "c037e882-8b6d-c8b5-bef4-97e848eb0a50".parse().unwrap();
     builder.new_resource(authz::Rack::new(
-        authz::FLEET.clone(),
+        authz::FLEET,
         Uuid::new_v4(),
         LookupType::ById(rack_id),
     ));
 
     let sled_id = "8a785566-adaf-c8d8-e886-bee7f9b73ca7".parse().unwrap();
     builder.new_resource(authz::Sled::new(
-        authz::FLEET.clone(),
+        authz::FLEET,
         Uuid::new_v4(),
         LookupType::ById(sled_id),
     ));
@@ -263,6 +263,6 @@ pub fn exempted_authz_classes() -> BTreeSet<String> {
         authz::GlobalImage::get_polar_class(),
     ]
     .into_iter()
-    .map(|c| c.name.clone())
+    .map(|c| c.name)
     .collect()
 }

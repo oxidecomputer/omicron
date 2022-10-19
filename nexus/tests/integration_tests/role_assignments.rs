@@ -175,7 +175,7 @@ async fn test_role_assignments_silo(cptestctx: &ControlPlaneTestContext) {
         fn policy_url(&self) -> String {
             format!(
                 "/system/silos/{}/policy",
-                fixed_data::silo::DEFAULT_SILO.identity().name.to_string()
+                fixed_data::silo::DEFAULT_SILO.identity().name
             )
         }
 
