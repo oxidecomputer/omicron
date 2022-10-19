@@ -12,7 +12,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::types::VolumeConstructionRequest;
 use std::sync::Arc;
-use steno::{new_action_noop_undo, ActionError, Node};
+use steno::{new_action_noop_undo, ActionError, ActionFunc, Node};
 use uuid::Uuid;
 
 // Volume remove read only parent saga: input parameters
@@ -43,9 +43,10 @@ lazy_static! {
     // then delete that temporary volume.
 
     // Create the temporary volume
-    static ref CREATE_TEMP_VOLUME: NexusAction = new_action_noop_undo(
+    static ref CREATE_TEMP_VOLUME: NexusAction = ActionFunc::new_action(
         "volume-remove-rop.create-temp-volume",
-        svr_create_temp_volume
+        svr_create_temp_volume,
+        svr_create_temp_volume_undo
     );
 
     // remove the read_only_parent,  attach it to the temp volume.
@@ -164,6 +165,21 @@ async fn svr_create_temp_volume(
         .map_err(ActionError::action_failed)?;
 
     Ok(volume_created)
+}
+
+async fn svr_create_temp_volume_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+
+    let temp_volume_id = sagactx.lookup::<Uuid>("temp_volume_id")?;
+
+    osagactx
+        .datastore()
+        .volume_hard_delete(temp_volume_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(())
 }
 
 async fn svr_remove_read_only_parent(
