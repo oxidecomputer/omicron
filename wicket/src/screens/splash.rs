@@ -8,6 +8,7 @@
 
 use super::{Screen, ScreenId};
 use crate::defaults::colors::*;
+use crate::defaults::dimensions::RectExt;
 use crate::widgets::{Logo, LogoState, LOGO_HEIGHT, LOGO_WIDTH};
 use crate::Action;
 use crate::Frame;
@@ -42,11 +43,10 @@ impl SplashScreen {
     // the x painted green.
     fn animate_logo(&self, f: &mut Frame) {
         // Center the banner
-        let mut rect = f.size();
-        rect.x = rect.width / 2 - LOGO_WIDTH / 2;
-        rect.y = rect.height / 2 - LOGO_HEIGHT / 2;
-        rect.height = LOGO_HEIGHT;
-        rect.width = LOGO_WIDTH;
+        let rect = f
+            .size()
+            .center_horizontally(LOGO_WIDTH)
+            .center_vertically(LOGO_HEIGHT);
 
         let stale_style = Style::default().fg(OX_GREEN_DARKEST);
         let style = Style::default().fg(OX_OFF_WHITE);
