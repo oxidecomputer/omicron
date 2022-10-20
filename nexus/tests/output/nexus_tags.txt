@@ -15,6 +15,7 @@ device_auth_request                      /device/auth
 login_spoof                              /login
 logout                                   /logout
 session_me                               /session/me
+session_me_groups                        /session/me/groups
 
 API operations found with tag "images"
 OPERATION ID                             URL PATH

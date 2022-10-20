@@ -33,6 +33,7 @@ members = [
     "oximeter/oximeter-macro-impl",
     "oximeter-client",
     "test-utils",
+    "wicket",
 ]
 
 default-members = [
