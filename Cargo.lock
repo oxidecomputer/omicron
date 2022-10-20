@@ -3007,6 +3007,7 @@ dependencies = [
  "oximeter-instruments",
  "oximeter-producer",
  "parse-display",
+ "petgraph",
  "pq-sys",
  "rand 0.8.5",
  "ref-cast",
@@ -5384,9 +5385,8 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "steno"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f695d04f2d9e08f3ed0c72acfa21cddc20eb76698a2ff0961a6758d3566454c2"
+version = "0.2.1-dev"
+source = "git+https://github.com/oxidecomputer/steno?branch=node-access#19cdbd6c26b3f0ebcb1948cd95558d5857a66097"
 dependencies = [
  "anyhow",
  "async-trait",

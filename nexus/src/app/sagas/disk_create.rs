@@ -620,7 +620,7 @@ mod test {
     use uuid::Uuid;
 
     const ORG_NAME: &str = "test-org";
-    const PROJECT_NAME: &str = "springfield-squidport-disks";
+    const PROJECT_NAME: &str = "springfield-squidport";
 
     async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
         create_ip_pool(&client, "p0", None, None).await;

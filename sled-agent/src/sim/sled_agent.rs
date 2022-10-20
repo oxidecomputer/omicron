@@ -250,6 +250,14 @@ impl SledAgent {
         self.disks.sim_ensure(&disk_id, initial_state, target).await
     }
 
+    pub async fn instance_count(&self) -> usize {
+        self.instances.size().await
+    }
+
+    pub async fn disk_count(&self) -> usize {
+        self.disks.size().await
+    }
+
     pub async fn instance_poke(&self, id: Uuid) {
         self.instances.sim_poke(id).await;
     }
