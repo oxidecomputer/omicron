@@ -395,7 +395,7 @@ pub async fn login_saml(
 }
 
 #[derive(Deserialize, JsonSchema)]
-pub struct LoginToSiloPathParam {
+pub struct LoginPathParam {
     pub silo_name: crate::db::model::Name,
 }
 
@@ -407,7 +407,7 @@ pub struct LoginToSiloPathParam {
 }]
 pub async fn login_local(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<LoginToSiloPathParam>,
+    path_params: Path<LoginPathParam>,
     credentials: dropshot::TypedBody<params::UsernamePasswordCredentials>,
 ) -> Result<HttpResponseSeeOther, HttpError> {
     let apictx = rqctx.context();

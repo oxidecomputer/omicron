@@ -100,7 +100,6 @@ session_sshkey_view                      /session/me/sshkeys/{ssh_key_name}
 API operations found with tag "silos"
 OPERATION ID                             URL PATH
 group_list                               /groups
-local_idp_user_set_password              /system/silos/{silo_name}/identity-providers/local/users/{user_id}/set-password
 policy_update                            /policy
 policy_view                              /policy
 user_list                                /users
@@ -130,6 +129,7 @@ ip_pool_view                             /system/ip-pools/{pool_name}
 ip_pool_view_by_id                       /system/by-id/ip-pools/{id}
 local_idp_user_create                    /system/silos/{silo_name}/identity-providers/local/users
 local_idp_user_delete                    /system/silos/{silo_name}/identity-providers/local/users/{user_id}
+local_idp_user_set_password              /system/silos/{silo_name}/identity-providers/local/users/{user_id}/set-password
 rack_list                                /system/hardware/racks
 rack_view                                /system/hardware/racks/{rack_id}
 saga_list                                /system/sagas

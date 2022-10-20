@@ -878,7 +878,7 @@ async fn local_idp_user_delete(
 #[endpoint {
     method = POST,
     path = "/system/silos/{silo_name}/identity-providers/local/users/{user_id}/set-password",
-    tags = ["silos"],
+    tags = ["system"],
 }]
 async fn local_idp_user_set_password(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,

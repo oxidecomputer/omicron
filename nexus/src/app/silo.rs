@@ -395,9 +395,9 @@ impl super::Nexus {
 
     /// Set or invalidate a Silo user's password
     ///
-    /// If `password` is `Some(...)`, the password is set to the requested
-    /// value.  Otherwise, any existing password is invalidated so that it
-    /// cannot be used for authentication any more.
+    /// If `password` is `UserPassword::Password`, the password is set to the
+    /// requested value.  Otherwise, any existing password is invalidated so
+    /// that it cannot be used for authentication any more.
     pub async fn local_idp_user_set_password(
         &self,
         opctx: &OpContext,
@@ -425,6 +425,10 @@ impl super::Nexus {
         .await
     }
 
+    /// Internal helper for setting a user's password
+    ///
+    /// The caller should have already verified that this is a `LocalOnly` Silo
+    /// and that the specified user is in that Silo.
     async fn silo_user_password_set_internal(
         &self,
         opctx: &OpContext,
@@ -461,6 +465,13 @@ impl super::Nexus {
     }
 
     /// Verify a Silo user's password
+    ///
+    /// To prevent timing attacks that would allow an attacker to learn the
+    /// identity of a valid user, it's important that password verification take
+    /// the same amount of time whether a user exists or not.  To achieve that,
+    /// callers are expected to invoke this function during authentication even
+    /// if they've found no user to match the requested credentials.  That's why
+    /// this function accepts `Option<SiloUser>` rather than just a `SiloUser`.
     pub async fn silo_user_password_verify(
         &self,
         opctx: &OpContext,

@@ -7020,7 +7020,7 @@
     "/system/silos/{silo_name}/identity-providers/local/users/{user_id}/set-password": {
       "post": {
         "tags": [
-          "silos"
+          "system"
         ],
         "summary": "Set or invalidate a user's password",
         "description": "Passwords can only be updated for users in Silos with identity mode `LocalOnly`.",

@@ -237,13 +237,9 @@ impl DataStore {
             );
         }
 
-        // Verify that this Silo supports setting local passwords on users.  A
-        // failure here is a user error.
-        if db_silo.user_provision_type != UserProvisionType::ApiOnly {
-            return Err(Error::invalid_request(
-                "cannot set password for users in this kind of Silo",
-            ));
-        }
+        // Verify that this Silo supports setting local passwords on users.
+        // The caller is supposed to have verified this already.
+        bail_unless!(db_silo.user_provision_type == UserProvisionType::ApiOnly);
 
         use db::schema::silo_user_password_hash::dsl;
 
