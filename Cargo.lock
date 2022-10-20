@@ -1811,7 +1811,7 @@ dependencies = [
 [[package]]
 name = "gateway-messages"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=90a4a944d35b7250b4ab468b31ae88deaf34ff78#90a4a944d35b7250b4ab468b31ae88deaf34ff78"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=c1484109c394f45e08018e0f35adc4a136cd207d#c1484109c394f45e08018e0f35adc4a136cd207d"
 dependencies = [
  "bitflags",
  "hubpack",
@@ -1821,12 +1821,13 @@ dependencies = [
  "smoltcp",
  "static_assertions",
  "uuid",
+ "zerocopy 0.6.1",
 ]
 
 [[package]]
 name = "gateway-sp-comms"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=90a4a944d35b7250b4ab468b31ae88deaf34ff78#90a4a944d35b7250b4ab468b31ae88deaf34ff78"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=c1484109c394f45e08018e0f35adc4a136cd207d#c1484109c394f45e08018e0f35adc4a136cd207d"
 dependencies = [
  "backoff",
  "futures",
