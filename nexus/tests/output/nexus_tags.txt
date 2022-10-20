@@ -50,6 +50,7 @@ instance_view_by_id                      /by-id/instances/{id}
 
 API operations found with tag "login"
 OPERATION ID                             URL PATH
+login_local                              /login/{silo_name}/local
 login_saml                               /login/{silo_name}/saml/{provider_name}
 login_saml_begin                         /login/{silo_name}/saml/{provider_name}
 
@@ -99,6 +100,7 @@ session_sshkey_view                      /session/me/sshkeys/{ssh_key_name}
 API operations found with tag "silos"
 OPERATION ID                             URL PATH
 group_list                               /groups
+local_idp_user_set_password              /system/silos/{silo_name}/identity-providers/local/users/{user_id}/set-password
 policy_update                            /policy
 policy_view                              /policy
 user_list                                /users

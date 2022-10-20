@@ -79,6 +79,10 @@ lazy_static! {
         "/system/silos/{}/identity-providers/local/users/{{id}}",
         DEFAULT_SILO.identity().name,
     );
+    pub static ref DEMO_SILO_USER_ID_SET_PASSWORD_URL: String = format!(
+        "/system/silos/{}/identity-providers/local/users/{{id}}/set-password",
+        DEFAULT_SILO.identity().name,
+    );
 
     // Organization used for testing
     pub static ref DEMO_ORG_NAME: Name = "demo-org".parse().unwrap();
@@ -212,7 +216,9 @@ lazy_static! {
             Utc::now(),
             Utc::now(),
         );
+}
 
+lazy_static! {
     // Instance used for testing
     pub static ref DEMO_INSTANCE_NAME: Name = "demo-instance".parse().unwrap();
     pub static ref DEMO_INSTANCE_URL: String =
@@ -778,6 +784,17 @@ lazy_static! {
             unprivileged_access: UnprivilegedAccess::ReadOnly,
             allowed_methods: vec![
                 AllowedMethod::Delete,
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &*DEMO_SILO_USER_ID_SET_PASSWORD_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::ReadOnly,
+            allowed_methods: vec![
+                AllowedMethod::Post(serde_json::to_value(
+                    params::UserPassword::InvalidPassword
+                ).unwrap()),
             ],
         },
 

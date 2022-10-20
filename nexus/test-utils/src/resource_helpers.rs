@@ -130,12 +130,15 @@ pub async fn create_silo(
 
 pub async fn create_local_user(
     client: &ClientTestContext,
+    silo_name: &str,
     username: &UserId,
     password: params::UserPassword,
 ) -> User {
+    let url =
+        format!("/system/silos/{}/identity-providers/local/users", silo_name);
     object_create(
         client,
-        "/users",
+        &url,
         &params::UserCreate { external_id: username.to_owned(), password },
     )
     .await

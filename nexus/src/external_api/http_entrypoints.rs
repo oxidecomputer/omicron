@@ -877,7 +877,7 @@ async fn local_idp_user_delete(
 /// `LocalOnly`.
 #[endpoint {
     method = POST,
-    path = "/system/silos/{silo_name}/identity-providers/local/users/{user_id}/set_password",
+    path = "/system/silos/{silo_name}/identity-providers/local/users/{user_id}/set-password",
     tags = ["silos"],
 }]
 async fn local_idp_user_set_password(

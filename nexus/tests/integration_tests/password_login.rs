@@ -6,30 +6,17 @@ use dropshot::test_util::ClientTestContext;
 use http::{header, method::Method, StatusCode};
 use nexus_passwords::MIN_EXPECTED_PASSWORD_VERIFY_TIME;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
-use nexus_test_utils::resource_helpers::create_local_user;
 use nexus_test_utils::resource_helpers::grant_iam;
+use nexus_test_utils::resource_helpers::{create_local_user, create_silo};
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::Name;
 use omicron_nexus::authz::SiloRole;
-use omicron_nexus::db::fixed_data::silo::DEFAULT_SILO;
-use omicron_nexus::db::identity::Resource;
 use omicron_nexus::external_api::params;
+use omicron_nexus::external_api::shared;
 use omicron_nexus::external_api::views;
 use std::str::FromStr;
 
-// XXX-dap When creating a "fixed" Silo, we need to accept a list of initial
-// users who will get "admin" rights on the Silo.
-// Details: These tests can only work today because they're in the default Silo.
-// We should make them create a separate Silo instead.  There's a
-// chicken-and-egg problem here: when we create the Silo, it has no users, so
-// there's nobody who's got the privileges to create a new user or grant them
-// admin rights.  Either we need to be able to create initial users _with
-// privileges_ in the initial "create Silo" request, or else it must be possible
-// for users (like "test-privileged") to create users in other Silos and grant
-// them privileges on the Silo.  In the real-world uses case of the recovery
-// Silo, there are no other users in existence, so we have to take the first
-// approach.  We may as well only implement that for now.
 // TODO-coverage verify that deleting a Silo deletes all the users and their
 // password hashes
 
@@ -44,8 +31,14 @@ use std::str::FromStr;
 async fn test_local_users(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    let silo_name = DEFAULT_SILO.identity().name;
-
+    let silo_name = Name::from_str("test-silo").unwrap();
+    create_silo(
+        client,
+        silo_name.as_str(),
+        true,
+        shared::SiloIdentityMode::LocalOnly,
+    )
+    .await;
     test_local_user_basic(client, &silo_name).await;
     test_local_user_with_no_initial_password(client, &silo_name).await;
 }
@@ -69,6 +62,7 @@ async fn test_local_user_basic(client: &ClientTestContext, silo_name: &Name) {
 
     let created_user = create_local_user(
         client,
+        silo_name.as_str(),
         &test_user,
         params::UserPassword::Password(test_password.clone()),
     )
@@ -98,7 +92,10 @@ async fn test_local_user_basic(client: &ClientTestContext, silo_name: &Name) {
     // While we're still logged in, change the password.
     let test_password2 =
         params::Password::from_str("as was the style at the time").unwrap();
-    let user_password_url = format!("/users/{}/set_password", created_user.id);
+    let user_password_url = format!(
+        "/system/silos/{}/identity-providers/local/users/{}/set-password",
+        silo_name, created_user.id
+    );
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &user_password_url)
             .expect_status(Some(StatusCode::NO_CONTENT))
@@ -155,14 +152,17 @@ async fn test_local_user_basic(client: &ClientTestContext, silo_name: &Name) {
     let admin_password = params::Password::from_str("toodle-ooh").unwrap();
     let admin_user_obj = create_local_user(
         client,
+        silo_name.as_str(),
         &admin_user,
         params::UserPassword::Password(admin_password.clone()),
     )
     .await;
-    let admin_password_url =
-        format!("/users/{}/set_password", admin_user_obj.id);
+    let admin_password_url = format!(
+        "/system/silos/{}/identity-providers/local/users/{}/set-password",
+        silo_name, admin_user_obj.id
+    );
 
-    let silo_url = format!("/silos/{}", silo_name);
+    let silo_url = format!("/system/silos/{}", silo_name);
     grant_iam(
         client,
         &silo_url,
@@ -262,14 +262,10 @@ async fn test_local_user_basic(client: &ClientTestContext, silo_name: &Name) {
     // But the ordinary user can neither set or invalidate the admin user's
     // password.  (i.e., users cannot reset each other's passwords unless
     // they're administrators).
-    //
-    // The response codes here are NOT_FOUND because ordinary users cannot read
-    // other users.  That should probably change, at which point these would
-    // change to FORBIDDEN.
     expect_session_valid(client, &session_token2).await;
     NexusRequest::expect_failure_with_body(
         client,
-        StatusCode::NOT_FOUND,
+        StatusCode::FORBIDDEN,
         Method::POST,
         &admin_password_url,
         &params::UserPassword::Password(test_password.clone()),
@@ -281,7 +277,7 @@ async fn test_local_user_basic(client: &ClientTestContext, silo_name: &Name) {
 
     NexusRequest::expect_failure_with_body(
         client,
-        StatusCode::NOT_FOUND,
+        StatusCode::FORBIDDEN,
         Method::POST,
         &admin_password_url,
         &params::UserPassword::InvalidPassword,
@@ -300,6 +296,7 @@ async fn test_local_user_with_no_initial_password(
     let test_user = params::UserId::from_str("steven-falken").unwrap();
     let created_user = create_local_user(
         client,
+        silo_name.as_str(),
         &test_user,
         params::UserPassword::InvalidPassword,
     )
@@ -316,7 +313,10 @@ async fn test_local_user_with_no_initial_password(
 
     // Now, set a password.
     let test_password2 = params::Password::from_str("joshua").unwrap();
-    let user_password_url = format!("/users/{}/set_password", created_user.id);
+    let user_password_url = format!(
+        "/system/silos/{}/identity-providers/local/users/{}/set-password",
+        silo_name, created_user.id
+    );
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &user_password_url)
             .expect_status(Some(StatusCode::NO_CONTENT))
@@ -379,7 +379,7 @@ async fn expect_login_failure(
     password: params::Password,
 ) {
     let start = std::time::Instant::now();
-    let login_url = format!("/login/{}", silo_name);
+    let login_url = format!("/login/{}/local", silo_name);
     let error: dropshot::HttpErrorResponseBody =
         NexusRequest::expect_failure_with_body(
             client,
@@ -419,10 +419,10 @@ async fn expect_login_success(
     password: params::Password,
 ) -> String {
     let start = std::time::Instant::now();
-    let login_url = format!("/login/{}", silo_name);
+    let login_url = format!("/login/{}/local", silo_name);
     let response = RequestBuilder::new(client, Method::POST, &login_url)
         .body(Some(&params::UsernamePasswordCredentials { username, password }))
-        .expect_status(Some(StatusCode::FOUND))
+        .expect_status(Some(StatusCode::SEE_OTHER))
         .execute()
         .await
         .expect("expected successful login, but it failed");

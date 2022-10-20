@@ -1732,7 +1732,7 @@ async fn test_jit_silo_constraints(cptestctx: &ControlPlaneTestContext) {
         other_user_id
     );
     let user_url_set_password = format!(
-        "/system/silos/jit/identity-providers/local/users/{}/set_password",
+        "/system/silos/jit/identity-providers/local/users/{}/set-password",
         other_user_id
     );
 
@@ -1898,10 +1898,7 @@ async fn test_local_silo_constraints(cptestctx: &ControlPlaneTestContext) {
     .unwrap()
     .parsed_body()
     .unwrap();
-    assert_eq!(
-        error.message,
-        "not found: saml-identity-provider with name \"foo\""
-    );
+    assert_eq!(error.message, "not found: identity-provider with name \"foo\"");
     let error: dropshot::HttpErrorResponseBody = NexusRequest::expect_failure(
         client,
         StatusCode::NOT_FOUND,
@@ -1913,10 +1910,7 @@ async fn test_local_silo_constraints(cptestctx: &ControlPlaneTestContext) {
     .unwrap()
     .parsed_body()
     .unwrap();
-    assert_eq!(
-        error.message,
-        "not found: saml-identity-provider with name \"foo\""
-    );
+    assert_eq!(error.message, "not found: identity-provider with name \"foo\"");
 }
 
 #[nexus_test]
