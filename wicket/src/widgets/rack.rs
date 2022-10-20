@@ -351,9 +351,9 @@ impl RackState {
     // don't sweat it.
     //
     // The calculations below follow from this logic
-    pub fn resize(&mut self, rect: &Rect, margin: &Height) {
+    pub fn resize(&mut self, width: u16, height: u16, margin: &Height) {
         // Give ourself room for a top margin
-        let max_height = rect.height - margin.0;
+        let max_height = height - margin.0;
 
         // Let's size our components
         let (rack_height, sled_height, other_height): (u16, u16, u16) =
@@ -379,15 +379,13 @@ impl RackState {
                 (component_height * 20, component_height, component_height)
             };
 
-        let mut rect = *rect;
-        rect.height = rack_height;
+        let mut rect = Rect { x: 0, y: 0, width, height: rack_height };
 
         // Center the rack vertically as much as possible
         let extra_margin = (max_height - rack_height) / 2;
         rect.y = margin.0 + extra_margin;
 
         // Scale proportionally and center the rack horizontally
-        let width = rect.width;
         rect.width = make_even(rack_height * 2 / 3);
         rect.x = width / 2 - rect.width / 2;
 
