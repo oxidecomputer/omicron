@@ -877,25 +877,24 @@ async fn local_idp_user_delete(
 /// `LocalOnly`.
 #[endpoint {
     method = POST,
-    path = "/system/silos/{silo_name}/identity-providers/local/users/{user_id}",
+    path = "/system/silos/{silo_name}/identity-providers/local/users/{user_id}/set_password",
     tags = ["silos"],
 }]
 async fn local_idp_user_set_password(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    user_path: Path<UserPathParam>,
+    path_params: Path<UserPathParam>,
     update: TypedBody<params::UserPassword>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
+    let path_params = path_params.into_inner();
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
-        // XXX-dap need to make this look like the other local IDP functions:
-        // pass silo name into this function, have that function accept
-        // silo_name and have it use the helper function to verify the Silo
         nexus
             .local_idp_user_set_password(
                 &opctx,
-                user_path.into_inner().user_id,
+                &path_params.silo_name,
+                path_params.user_id,
                 update.into_inner(),
             )
             .await?;

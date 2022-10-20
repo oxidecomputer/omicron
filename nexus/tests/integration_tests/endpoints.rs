@@ -411,6 +411,7 @@ lazy_static! {
     // Users
     pub static ref DEMO_USER_CREATE: params::UserCreate = params::UserCreate {
         external_id: params::UserId::from_str("dummy-user").unwrap(),
+        password: params::UserPassword::InvalidPassword,
     };
 }
 

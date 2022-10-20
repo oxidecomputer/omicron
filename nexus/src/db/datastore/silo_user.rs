@@ -10,7 +10,6 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::datastore::IdentityMetadataCreateParams;
-use crate::db::datastore::LookupType;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::model::Name;
@@ -240,7 +239,7 @@ impl DataStore {
 
         // Verify that this Silo supports setting local passwords on users.  A
         // failure here is a user error.
-        if db_silo.user_provision_type != UserProvisionType::Fixed {
+        if db_silo.user_provision_type != UserProvisionType::ApiOnly {
             return Err(Error::invalid_request(
                 "cannot set password for users in this kind of Silo",
             ));

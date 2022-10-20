@@ -16,13 +16,13 @@ use crate::external_api::shared;
 use crate::{authn, authz};
 use anyhow::Context;
 use nexus_db_model::UserProvisionType;
-use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::{CreateResult, LookupType};
+use omicron_common::api::external::{DataPageParams, ResourceType};
 use omicron_common::bail_unless;
 use std::str::FromStr;
 use uuid::Uuid;
@@ -239,7 +239,7 @@ impl super::Nexus {
         silo_name: &Name,
         new_user_params: params::UserCreate,
     ) -> CreateResult<db::model::SiloUser> {
-        let (authz_silo, _) =
+        let (authz_silo, db_silo) =
             self.local_idp_fetch_silo(opctx, silo_name).await?;
         let authz_silo_user_list = authz::SiloUserList::new(authz_silo.clone());
         // TODO-cleanup This authz check belongs in silo_user_create().
@@ -401,22 +401,20 @@ impl super::Nexus {
     pub async fn local_idp_user_set_password(
         &self,
         opctx: &OpContext,
-        user_id: Uuid,
+        silo_name: &Name,
+        silo_user_id: Uuid,
         password_value: params::UserPassword,
     ) -> UpdateResult<()> {
-        let datastore = self.datastore();
-        let authz_silo = opctx.authn.silo_required()?;
-        let (.., db_silo) = LookupPath::new(opctx, &datastore)
-            .silo_id(authz_silo.id())
-            .fetch()
+        let (authz_silo, db_silo) =
+            self.local_idp_fetch_silo(opctx, silo_name).await?;
+        let (authz_silo_user, db_silo_user) = self
+            .silo_user_lookup_by_id(
+                opctx,
+                &authz_silo,
+                silo_user_id,
+                authz::Action::Modify,
+            )
             .await?;
-
-        let (_, authz_silo_user, db_silo_user) =
-            LookupPath::new(opctx, &datastore)
-                .silo_user_id(user_id)
-                .fetch()
-                .await?;
-
         self.silo_user_password_set_internal(
             opctx,
             &db_silo,
@@ -507,16 +505,8 @@ impl super::Nexus {
         silo_name: &Name,
         credentials: params::UsernamePasswordCredentials,
     ) -> Result<Option<db::model::SiloUser>, Error> {
-        let datastore = self.datastore();
-        let (authz_silo, db_silo) = LookupPath::new(opctx, datastore)
-            .silo_name(silo_name)
-            .fetch()
-            .await?;
-        if db_silo.user_provision_type != UserProvisionType::Fixed {
-            return Err(Error::invalid_request(&format!(
-                "cannot login to this Silo with local credentials"
-            )));
-        }
+        let (authz_silo, _) =
+            self.local_idp_fetch_silo(opctx, silo_name).await?;
 
         // NOTE: It's very important that we not bail out early if we fail to
         // find a user with this external id.  See the note in
@@ -524,7 +514,8 @@ impl super::Nexus {
         // TODO-security There may still be some vulnerability to timing attack
         // here, in that we'll do one fewer database lookup if a user does not
         // exist.
-        let fetch_user = datastore
+        let fetch_user = self
+            .datastore()
             .silo_user_fetch_by_external_id(
                 opctx,
                 &authz_silo,
