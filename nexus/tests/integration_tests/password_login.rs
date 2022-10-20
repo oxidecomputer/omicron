@@ -41,6 +41,14 @@ async fn test_local_users(cptestctx: &ControlPlaneTestContext) {
     .await;
     test_local_user_basic(client, &silo_name).await;
     test_local_user_with_no_initial_password(client, &silo_name).await;
+    NexusRequest::object_delete(
+        client,
+        &format!("/system/silos/{}", silo_name),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
 }
 
 async fn test_local_user_basic(client: &ClientTestContext, silo_name: &Name) {

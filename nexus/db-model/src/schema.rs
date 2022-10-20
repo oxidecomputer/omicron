@@ -244,6 +244,7 @@ table! {
     }
 }
 
+allow_tables_to_appear_in_same_query!(silo_user, silo_user_password_hash);
 allow_tables_to_appear_in_same_query!(silo_group, silo_group_membership);
 allow_tables_to_appear_in_same_query!(role_assignment, silo_group_membership);
 
