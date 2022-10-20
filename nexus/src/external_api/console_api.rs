@@ -383,13 +383,8 @@ pub async fn login_saml(
             )
             .await?;
 
-        login_finish(
-            &opctx,
-            &*apictx,
-            user,
-            relay_state.map(|r| r.referer.map(|r| r.clone())).flatten(),
-        )
-        .await
+        login_finish(&opctx, apictx, user, relay_state.and_then(|r| r.referer))
+            .await
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -423,7 +418,7 @@ pub async fn login_local(
         let user = nexus
             .login_local(&opctx, &path_params.silo_name, credentials)
             .await?;
-        login_finish(&opctx, &*apictx, user, None).await
+        login_finish(&opctx, apictx, user, None).await
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -438,8 +433,8 @@ async fn login_finish(
 
     if user.is_none() {
         Err(Error::Unauthenticated {
-            internal_message: format!(
-                "no matching user found or credentials were not valid"
+            internal_message: String::from(
+                "no matching user found or credentials were not valid",
             ),
         })?;
     }
