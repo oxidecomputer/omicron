@@ -106,10 +106,11 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    pub async fn silo_group_membership_for_self(
+    pub async fn silo_groups_for_self(
         &self,
         opctx: &OpContext,
-    ) -> ListResultVec<SiloGroupMembership> {
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<SiloGroup> {
         // Similar to session_hard_delete (see comment there), we do not do a
         // typical authz check, instead effectively encoding the policy here
         // that any user is allowed to fetch their own group memberships
@@ -118,10 +119,12 @@ impl DataStore {
             .actor_required()
             .internal_context("fetching current user's group memberships")?;
 
-        use db::schema::silo_group_membership::dsl;
-        dsl::silo_group_membership
-            .filter(dsl::silo_user_id.eq(actor.actor_id()))
-            .select(SiloGroupMembership::as_returning())
+        use db::schema::{silo_group as sg, silo_group_membership as sgm};
+        paginated(sg::dsl::silo_group, sg::id, pagparams)
+            .inner_join(sgm::table.on(sgm::silo_group_id.eq(sg::id)))
+            .filter(sgm::silo_user_id.eq(actor.actor_id()))
+            .filter(sg::time_deleted.is_null())
+            .select(SiloGroup::as_returning())
             .get_results_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))

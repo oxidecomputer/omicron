@@ -5202,7 +5202,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SessionMe"
+                  "$ref": "#/components/schemas/User"
                 }
               }
             }
@@ -5214,6 +5214,66 @@
             "$ref": "#/components/responses/Error"
           }
         }
+      }
+    },
+    "/session/me/groups": {
+      "get": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "Fetch the silo groups the current user belongs to",
+        "operationId": "session_me_groups",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
       }
     },
     "/session/me/sshkeys": {
@@ -11000,38 +11060,6 @@
           "slo_url",
           "sp_client_id",
           "technical_contact_email"
-        ]
-      },
-      "SessionMe": {
-        "description": "Client view of a [`User`] and their groups",
-        "type": "object",
-        "properties": {
-          "display_name": {
-            "description": "Human-readable name that can identify the user",
-            "type": "string"
-          },
-          "group_ids": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "silo_id": {
-            "description": "Uuid of the silo to which this user belongs",
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "display_name",
-          "group_ids",
-          "id",
-          "silo_id"
         ]
       },
       "Silo": {
