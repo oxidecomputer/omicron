@@ -1480,8 +1480,7 @@ dependencies = [
 [[package]]
 name = "fatfs"
 version = "0.3.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e18f80a87439240dac45d927fd8f8081b6f1e34c03e97271189fa8a8c2e96c8f"
+source = "git+https://github.com/luqmana/rust-fatfs?branch=stable-0.3#af26bc712db9f770294fb87b52f202c88c2a89df"
 dependencies = [
  "bitflags",
  "byteorder",
