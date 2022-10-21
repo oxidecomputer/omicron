@@ -865,7 +865,7 @@ dependencies = [
 [[package]]
 name = "crucible-agent-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=bacffd142fc38a01fe255407b0c8d5d0aacfe778#bacffd142fc38a01fe255407b0c8d5d0aacfe778"
+source = "git+https://github.com/oxidecomputer/crucible?rev=144d8dafa41715e00b08a5929cc62140ff0eb561#144d8dafa41715e00b08a5929cc62140ff0eb561"
 dependencies = [
  "anyhow",
  "chrono",
@@ -880,7 +880,7 @@ dependencies = [
 [[package]]
 name = "crucible-client-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=bacffd142fc38a01fe255407b0c8d5d0aacfe778#bacffd142fc38a01fe255407b0c8d5d0aacfe778"
+source = "git+https://github.com/oxidecomputer/crucible?rev=144d8dafa41715e00b08a5929cc62140ff0eb561#144d8dafa41715e00b08a5929cc62140ff0eb561"
 dependencies = [
  "base64",
  "schemars",
@@ -4082,10 +4082,12 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=c0776be03bf0928651996eb00ad6f3665e99ebe7#c0776be03bf0928651996eb00ad6f3665e99ebe7"
+source = "git+https://github.com/oxidecomputer/propolis?rev=9da9cea30adfcce6d8185d7060a20f55df00a72a#9da9cea30adfcce6d8185d7060a20f55df00a72a"
 dependencies = [
+ "base64",
  "crucible-client-types",
  "propolis_types",
+ "rand 0.8.5",
  "reqwest",
  "ring",
  "schemars",
@@ -4099,7 +4101,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=c0776be03bf0928651996eb00ad6f3665e99ebe7#c0776be03bf0928651996eb00ad6f3665e99ebe7"
+source = "git+https://github.com/oxidecomputer/propolis?rev=9da9cea30adfcce6d8185d7060a20f55df00a72a#9da9cea30adfcce6d8185d7060a20f55df00a72a"
 dependencies = [
  "serde",
 ]
