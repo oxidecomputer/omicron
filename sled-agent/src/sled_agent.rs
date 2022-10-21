@@ -326,12 +326,22 @@ impl SledAgent {
     /// Ensures that particular services should be initialized.
     ///
     /// These services will be instantiated by this function, will be recorded
-    /// to a local file to ensure they start automatically on next boot.
+    /// to a local file to ensure they start automatically on next boot. After
+    /// being recorded to the filesystem, Nexus will be notified
     pub async fn services_ensure(
         &self,
         requested_services: ServiceEnsureBody,
     ) -> Result<(), Error> {
-        self.services.ensure(requested_services).await?;
+        self.services.ensure(requested_services.clone()).await?;
+
+        self.services
+            .notify_running_services(
+                self.id,
+                self.lazy_nexus_client.clone(),
+                requested_services,
+            )
+            .await?;
+
         Ok(())
     }
 

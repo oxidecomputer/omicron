@@ -40,6 +40,7 @@ pub fn internal_api() -> NexusApiDescription {
         api.register(rack_initialization_complete)?;
         api.register(zpool_put)?;
         api.register(dataset_put)?;
+        api.register(service_put)?;
         api.register(cpapi_instances_put)?;
         api.register(cpapi_disks_put)?;
         api.register(cpapi_producers_post)?;
@@ -167,6 +168,33 @@ async fn dataset_put(
         )
         .await?;
     Ok(HttpResponseOk(DatasetPutResponse { reservation: None, quota: None }))
+}
+
+/// Report that a service within a pool has come online.
+#[endpoint {
+     method = PUT,
+     path = "/service",
+ }]
+async fn service_put(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    service: TypedBody<ServicePutRequest>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let service = service.into_inner();
+    let opctx = OpContext::for_internal_api(&rqctx).await;
+
+    nexus
+        .upsert_service(
+            &opctx,
+            service.service_id,
+            service.sled_id,
+            service.address,
+            service.kind.into(),
+        )
+        .await?;
+
+    Ok(HttpResponseUpdatedNoContent())
 }
 
 /// Path parameters for Instance requests (internal API)

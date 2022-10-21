@@ -22,6 +22,7 @@ mod role_assignments;
 mod roles_builtin;
 mod router_routes;
 mod saml;
+mod services;
 mod silos;
 mod snapshots;
 mod ssh_keys;

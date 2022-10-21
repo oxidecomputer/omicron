@@ -278,6 +278,33 @@
         }
       }
     },
+    "/service": {
+      "put": {
+        "summary": "Report that a service within a pool has come online.",
+        "operationId": "service_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServicePutRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/sled-agents/{sled_id}": {
       "post": {
         "summary": "Report that the sled agent for the specified sled has come online.",

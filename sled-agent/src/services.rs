@@ -11,14 +11,17 @@ use crate::illumos::running_zone::{InstalledZone, RunningZone};
 use crate::illumos::vnic::VnicAllocator;
 use crate::illumos::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use crate::illumos::zone::AddressRequest;
+use crate::nexus::LazyNexusClient;
 use crate::params::{ServiceEnsureBody, ServiceRequest, ServiceType};
 use crate::zone::Zones;
+use internal_dns_client::multiclient::ResolveError;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
 use omicron_common::address::OXIMETER_PORT;
 use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
+use omicron_common::backoff;
 use omicron_common::nexus_config::{
     self, DeploymentConfig as NexusDeploymentConfig,
 };
@@ -89,6 +92,13 @@ pub enum Error {
 
     #[error("Services already configured for this Sled Agent")]
     ServicesAlreadyConfigured,
+
+    #[error("Error resolving DNS name: {0}")]
+    ResolveError(#[from] ResolveError),
+
+    // TODO: Remove this error; prefer to retry notifications.
+    #[error("Notifying Nexus failed: {0}")]
+    Notification(#[from] nexus_client::Error<nexus_client::types::Error>),
 }
 
 impl From<Error> for omicron_common::api::external::Error {
@@ -719,6 +729,56 @@ impl ServiceManager {
 
         Ok(())
     }
+
+    /// Notify Nexus of running services
+    pub async fn notify_running_services(
+        &self,
+        sled_agent_id: Uuid,
+        lazy_nexus_client: LazyNexusClient,
+        request: ServiceEnsureBody,
+    ) -> Result<(), Error> {
+        let log = self.log.clone();
+
+        tokio::spawn(async move {
+            for service in request.services.iter() {
+                backoff::retry_notify(
+                    backoff::internal_service_policy(),
+                    || async {
+                        let nexus_client = lazy_nexus_client.get().await
+                            .map_err(|e: ResolveError|
+                                backoff::BackoffError::transient(
+                                    Error::from(e)
+                                ))?;
+
+                        nexus_client.service_put(
+                            &nexus_client::types::ServicePutRequest {
+                                service_id: service.id,
+                                sled_id: sled_agent_id,
+                                address: *service.address().ip(),
+                                kind: service.service_type.clone().into(),
+                            },
+                        )
+                        .await
+                        .map_err(|e| backoff::BackoffError::transient(e.into()))
+                    },
+                    |err: Error, delay| {
+                        warn!(
+                            log,
+                            "Failed to notify Nexus of service {} (retrying in {:?}): {}",
+                            service.id,
+                            delay,
+                            err,
+                        );
+                    },
+                )
+                .await?;
+            }
+
+            Ok::<_, Error>(())
+        });
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -731,7 +791,6 @@ mod test {
     };
     use std::net::Ipv6Addr;
     use std::os::unix::process::ExitStatusExt;
-    use uuid::Uuid;
 
     const SVC_NAME: &str = "my_svc";
     const EXPECTED_ZONE_NAME: &str = "oxz_my_svc";
@@ -835,7 +894,7 @@ mod test {
         let delete_vnic_ctx = MockDladm::delete_vnic_context();
         delete_vnic_ctx.expect().returning(|_| Ok(()));
 
-        // Explicitly drop the servie manager
+        // Explicitly drop the service manager
         drop(mgr);
     }
 
@@ -870,6 +929,23 @@ mod test {
         }
     }
 
+    async fn make_test_service_manager(
+        log: Logger,
+        config: Config,
+    ) -> ServiceManager {
+        ServiceManager::new(
+            log,
+            Etherstub(ETHERSTUB_NAME.to_string()),
+            EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
+            Ipv6Addr::LOCALHOST,
+            config,
+            PhysicalLink("link".to_string()),
+            Uuid::new_v4(),
+        )
+        .await
+        .unwrap()
+    }
+
     #[tokio::test]
     #[serial_test::serial]
     async fn test_ensure_service() {
@@ -878,17 +954,8 @@ mod test {
         let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
 
-        let mgr = ServiceManager::new(
-            log,
-            Etherstub(ETHERSTUB_NAME.to_string()),
-            EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
-            Ipv6Addr::LOCALHOST,
-            test_config.make_config(),
-            PhysicalLink("link".to_string()),
-            Uuid::new_v4(),
-        )
-        .await
-        .unwrap();
+        let mgr =
+            make_test_service_manager(log, test_config.make_config()).await;
 
         let id = Uuid::new_v4();
         ensure_new_service(&mgr, id).await;
@@ -906,17 +973,8 @@ mod test {
         let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
 
-        let mgr = ServiceManager::new(
-            log,
-            Etherstub(ETHERSTUB_NAME.to_string()),
-            EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
-            Ipv6Addr::LOCALHOST,
-            test_config.make_config(),
-            PhysicalLink("link".to_string()),
-            Uuid::new_v4(),
-        )
-        .await
-        .unwrap();
+        let mgr =
+            make_test_service_manager(log, test_config.make_config()).await;
 
         let id = Uuid::new_v4();
         ensure_new_service(&mgr, id).await;
@@ -936,17 +994,11 @@ mod test {
 
         // First, spin up a ServiceManager, create a new service, and tear it
         // down.
-        let mgr = ServiceManager::new(
+        let mgr = make_test_service_manager(
             logctx.log.clone(),
-            Etherstub(ETHERSTUB_NAME.to_string()),
-            EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
-            Ipv6Addr::LOCALHOST,
             test_config.make_config(),
-            PhysicalLink("link".to_string()),
-            Uuid::new_v4(),
         )
-        .await
-        .unwrap();
+        .await;
 
         let id = Uuid::new_v4();
         ensure_new_service(&mgr, id).await;
@@ -955,17 +1007,11 @@ mod test {
         // Before we re-create the service manager - notably, using the same
         // config file! - expect that a service gets initialized.
         let _expectations = expect_new_service();
-        let mgr = ServiceManager::new(
+        let mgr = make_test_service_manager(
             logctx.log.clone(),
-            Etherstub(ETHERSTUB_NAME.to_string()),
-            EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
-            Ipv6Addr::LOCALHOST,
             test_config.make_config(),
-            PhysicalLink("link".to_string()),
-            Uuid::new_v4(),
         )
-        .await
-        .unwrap();
+        .await;
         drop_service_manager(mgr);
 
         logctx.cleanup_successful();
@@ -981,17 +1027,11 @@ mod test {
 
         // First, spin up a ServiceManager, create a new service, and tear it
         // down.
-        let mgr = ServiceManager::new(
+        let mgr = make_test_service_manager(
             logctx.log.clone(),
-            Etherstub(ETHERSTUB_NAME.to_string()),
-            EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
-            Ipv6Addr::LOCALHOST,
             test_config.make_config(),
-            PhysicalLink("link".to_string()),
-            Uuid::new_v4(),
         )
-        .await
-        .unwrap();
+        .await;
         let id = Uuid::new_v4();
         ensure_new_service(&mgr, id).await;
         drop_service_manager(mgr);
@@ -1002,17 +1042,7 @@ mod test {
         std::fs::remove_file(&config.all_svcs_config_path).unwrap();
 
         // Observe that the old service is not re-initialized.
-        let mgr = ServiceManager::new(
-            logctx.log.clone(),
-            Etherstub(ETHERSTUB_NAME.to_string()),
-            EtherstubVnic(ETHERSTUB_VNIC_NAME.to_string()),
-            Ipv6Addr::LOCALHOST,
-            config,
-            PhysicalLink("link".to_string()),
-            Uuid::new_v4(),
-        )
-        .await
-        .unwrap();
+        let mgr = make_test_service_manager(logctx.log.clone(), config).await;
         drop_service_manager(mgr);
 
         logctx.cleanup_successful();

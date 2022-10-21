@@ -445,6 +445,23 @@ impl From<ServiceRequest> for sled_agent_client::types::ServiceRequest {
     }
 }
 
+impl From<ServiceType> for nexus_client::types::ServiceKind {
+    fn from(s: ServiceType) -> Self {
+        match s {
+            ServiceType::InternalDns { .. } => {
+                nexus_client::types::ServiceKind::InternalDNS
+            }
+            ServiceType::Nexus { .. } => {
+                nexus_client::types::ServiceKind::Nexus
+            }
+            ServiceType::Oximeter => nexus_client::types::ServiceKind::Oximeter,
+            ServiceType::Dendrite { .. } => {
+                nexus_client::types::ServiceKind::Dendrite
+            }
+        }
+    }
+}
+
 /// Used to request that the Sled initialize certain services on initialization.
 ///
 /// This may be used to record that certain sleds are responsible for
