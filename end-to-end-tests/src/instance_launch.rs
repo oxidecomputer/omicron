@@ -10,7 +10,7 @@ use oxide_client::types::{
     InstanceDiskAttachment, InstanceNetworkInterfaceAttachment, SshKeyCreate,
 };
 use oxide_client::{
-    ClientDisksExt, ClientImagesGlobalExt, ClientInstancesExt, ClientSessionExt,
+    ClientDisksExt, ClientInstancesExt, ClientSessionExt, ClientSystemExt,
 };
 use std::sync::Arc;
 use std::time::Duration;
@@ -38,10 +38,10 @@ async fn instance_launch() -> Result<()> {
         .send()
         .await?;
 
-    eprintln!("create global image");
+    eprintln!("create system image");
     let image_id = ctx
         .client
-        .image_global_create()
+        .system_image_create()
         .body(GlobalImageCreate {
             name: generate_name("debian")?,
             description: String::new(),
@@ -93,6 +93,7 @@ async fn instance_launch() -> Result<()> {
             network_interfaces: InstanceNetworkInterfaceAttachment::Default,
             external_ips: vec![ExternalIpCreate::Ephemeral { pool_name: None }],
             user_data: String::new(),
+            start: true,
         })
         .send()
         .await?;

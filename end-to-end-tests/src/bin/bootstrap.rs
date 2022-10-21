@@ -5,7 +5,7 @@ use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use oxide_client::types::{
     ByteCount, DiskCreate, DiskSource, IpPoolCreate, IpRange, Ipv4Range,
 };
-use oxide_client::{ClientDisksExt, ClientIpPoolsExt, ClientOrganizationsExt};
+use oxide_client::{ClientDisksExt, ClientOrganizationsExt, ClientSystemExt};
 use std::net::IpAddr;
 use std::time::Duration;
 

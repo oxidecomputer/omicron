@@ -101,11 +101,12 @@ pub fn nexus_addr() -> SocketAddr {
     if rss_config_path.exists() {
         if let Ok(config) = SetupServiceConfig::from_file(rss_config_path) {
             for request in config.requests {
-                for service in request.services {
-                    if let ServiceType::Nexus { external_ip, .. } =
-                        service.service_type
-                    {
-                        return (external_ip, 80).into();
+                for zone in request.service_zones {
+                    for service in zone.services {
+                        if let ServiceType::Nexus { external_ip, .. } = service
+                        {
+                            return (external_ip, 80).into();
+                        }
                     }
                 }
             }
