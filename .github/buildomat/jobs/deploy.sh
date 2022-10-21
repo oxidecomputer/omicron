@@ -146,11 +146,11 @@ pfexec ipadm create-addr -T static -a 192.168.1.199/24 igb0/sidehatch
 # Modify config-rss.toml in the sled-agent zone to use our system's IP and MAC
 # address for upstream connectivity.
 #
-tar xf out/sled-agent.tar pkg/config-rss.toml
+tar xf out/omicron-sled-agent.tar pkg/config-rss.toml
 sed -e '/\[gateway\]/,/\[request\]/ s/^.*address =.*$/address = "192.168.1.199"/' \
 	-e "s/^mac =.*$/mac = \"$(dladm show-phys -m -p -o ADDRESS | head -n 1)\"/" \
 	-i pkg/config-rss.toml
-tar rf out/sled-agent.tar pkg/config-rss.toml
+tar rf out/omicron-sled-agent.tar pkg/config-rss.toml
 rm -rf pkg
 
 #
