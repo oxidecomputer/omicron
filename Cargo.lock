@@ -4770,6 +4770,9 @@ name = "semver"
 version = "1.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e25dfac463d778e353db5be2449d1cce89bd6fd23c9f1ea21310ce6e5a1b29c4"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "semver-parser"
@@ -6531,12 +6534,21 @@ name = "wicket"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "clap 4.0.18",
  "crossterm",
  "futures",
+ "hex",
+ "semver 1.0.14",
+ "serde",
+ "serde_json",
+ "sha3",
  "slog",
  "slog-async",
  "slog-term",
+ "tar",
+ "tempfile",
  "tokio",
+ "toml",
  "tui",
 ]
 
