@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Utility for creating an rack release update as a tarfile.
+//! Utility for creating a rack release update as a tarfile.
 
 use anyhow::Result;
 use clap::Parser;

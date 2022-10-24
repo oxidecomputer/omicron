@@ -220,7 +220,6 @@ mod tests {
             "This is not a real SP Image. Hell it's not even a tarball!"
         )
         .unwrap();
-        drop(file);
         let spec = RackUpdateSpec::new(
             Version::new(1, 0, 0),
             tmp_dir.path(),
