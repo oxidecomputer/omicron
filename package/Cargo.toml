@@ -13,7 +13,7 @@ hex = "0.4.3"
 indicatif = { version = "0.17.1", features = ["rayon"] }
 omicron-common = { path = "../common" }
 omicron-sled-agent = { path = "../sled-agent" }
-omicron-zone-package = "0.5.0"
+omicron-zone-package = "0.5.1"
 rayon = "1.5"
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"] }
 ring = "0.16"
