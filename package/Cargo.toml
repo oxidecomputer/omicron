@@ -8,7 +8,7 @@ license = "MPL-2.0"
 [dependencies]
 anyhow = "1.0"
 clap = { version = "4.0", features = ["derive"] }
-futures = "0.3.24"
+futures = "0.3.25"
 hex = "0.4.3"
 indicatif = { version = "0.17.1", features = ["rayon"] }
 omicron-common = { path = "../common" }

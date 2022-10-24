@@ -11,7 +11,7 @@ anyhow = "1.0.65"
 slog = { version = "2.7.0", features = [ "max_level_trace", "release_max_level_debug" ] }
 slog-term = "2.9.0"
 slog-async = "2.7.0"
-futures = "0.3.24"
+futures = "0.3.25"
 
 [[bin]]
 name = "wicket"
