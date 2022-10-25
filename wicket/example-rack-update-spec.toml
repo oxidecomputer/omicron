@@ -4,7 +4,6 @@
 # this spec into a tarball.
 
 version = "1.0.0"
-output_dir = "/tmp"
 
 [[artifacts]]
 filename = "test-data/sled-sp-img-1.0.0.tar.gz"

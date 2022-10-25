@@ -12,26 +12,8 @@ use std::fs::File;
 use std::io::prelude::*;
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone)]
-pub struct Sha3_256Digest([u8; 32]);
-
-impl Serialize for Sha3_256Digest {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        hex::serde::serialize(self.0, serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for Sha3_256Digest {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        Ok(Sha3_256Digest(hex::serde::deserialize(deserializer)?))
-    }
-}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Sha3_256Digest(#[serde(with = "hex::serde")] [u8; 32]);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ArtifactType {
