@@ -263,3 +263,20 @@ impl DynAuthorizedResource for authz::SiloIdentityProviderList {
         format!("{}: identity provider list", self.silo().resource_name())
     }
 }
+
+impl DynAuthorizedResource for authz::SiloUserList {
+    fn do_authorize<'a, 'b>(
+        &'a self,
+        opctx: &'b OpContext,
+        action: authz::Action,
+    ) -> BoxFuture<'a, Result<(), Error>>
+    where
+        'b: 'a,
+    {
+        opctx.authorize(action, self).boxed()
+    }
+
+    fn resource_name(&self) -> String {
+        format!("{}: user list", self.silo().resource_name())
+    }
+}

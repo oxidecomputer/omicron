@@ -988,7 +988,7 @@ mod test {
         let addr = Ipv6Addr::LOCALHOST;
         let kind = ServiceKind::Nexus;
 
-        let service = Service::new(service_id, sled_id, addr, kind);
+        let service = Service::new(service_id, sled_id, Some(addr), kind);
         let result =
             datastore.service_upsert(&opctx, service.clone()).await.unwrap();
         assert_eq!(service.id(), result.id());

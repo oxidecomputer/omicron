@@ -119,7 +119,7 @@ CREATE TABLE omicron.public.service (
     /* FK into the Sled table */
     sled_id UUID NOT NULL,
     /* The IP address of the service. */
-    ip INET NOT NULL,
+    ip INET,
     /* Indicates the type of service. */
     kind omicron.public.service_kind NOT NULL
 );
@@ -1419,6 +1419,11 @@ CREATE INDEX ON omicron.public.console_session (
     time_created
 );
 
+-- This index is used to remove sessions for a user that's being deleted.
+CREATE INDEX ON omicron.public.console_session (
+    silo_user_id
+);
+
 /*******************************************************************/
 
 CREATE TYPE omicron.public.update_artifact_kind AS ENUM (
@@ -1531,6 +1536,11 @@ CREATE TABLE omicron.public.device_access_token (
 -- one token is ever created for a given device authorization flow.
 CREATE UNIQUE INDEX ON omicron.public.device_access_token (
     client_id, device_code
+);
+
+-- This index is used to remove tokens for a user that's being deleted.
+CREATE INDEX ON omicron.public.device_access_token (
+    silo_user_id
 );
 
 /*

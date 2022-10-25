@@ -50,7 +50,9 @@ pub struct ZpoolPutRequest {
 pub struct ZpoolPutResponse {}
 
 /// Describes the purpose of the dataset.
-#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone, Copy, PartialEq)]
+#[derive(
+    Debug, Serialize, Deserialize, JsonSchema, Clone, Copy, PartialEq, Eq,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum DatasetKind {
     Crucible,
@@ -117,13 +119,16 @@ pub struct DatasetPutResponse {
 }
 
 /// Describes the purpose of the service.
-#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone, Copy, PartialEq)]
+#[derive(
+    Debug, Serialize, Deserialize, JsonSchema, Clone, Copy, PartialEq, Eq,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ServiceKind {
     InternalDNS,
     Nexus,
     Oximeter,
     Dendrite,
+    Tfport,
 }
 
 impl fmt::Display for ServiceKind {
@@ -134,6 +139,7 @@ impl fmt::Display for ServiceKind {
             Nexus => "nexus",
             Oximeter => "oximeter",
             Dendrite => "dendrite",
+            Tfport => "tfport",
         };
         write!(f, "{}", s)
     }
@@ -149,6 +155,7 @@ impl FromStr for ServiceKind {
             "oximeter" => Ok(Oximeter),
             "internal_dns" => Ok(InternalDNS),
             "dendrite" => Ok(Dendrite),
+            "tfport" => Ok(Tfport),
             _ => Err(Self::Err::InternalError {
                 internal_message: format!("Unknown service kind: {}", s),
             }),
@@ -163,7 +170,7 @@ pub struct ServicePutRequest {
     pub sled_id: Uuid,
 
     /// Address on which a service is responding to requests.
-    pub address: Ipv6Addr,
+    pub address: Option<Ipv6Addr>,
 
     /// Type of service being inserted.
     pub kind: ServiceKind,

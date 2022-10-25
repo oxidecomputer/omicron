@@ -17,7 +17,7 @@ pub struct Service {
     identity: ServiceIdentity,
 
     pub sled_id: Uuid,
-    pub ip: ipv6::Ipv6Addr,
+    pub ip: Option<ipv6::Ipv6Addr>,
     pub kind: ServiceKind,
 }
 
@@ -25,13 +25,13 @@ impl Service {
     pub fn new(
         id: Uuid,
         sled_id: Uuid,
-        addr: Ipv6Addr,
+        addr: Option<Ipv6Addr>,
         kind: ServiceKind,
     ) -> Self {
         Self {
             identity: ServiceIdentity::new(id),
             sled_id,
-            ip: addr.into(),
+            ip: addr.map(|x| x.into()),
             kind,
         }
     }

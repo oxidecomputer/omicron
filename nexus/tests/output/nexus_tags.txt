@@ -15,6 +15,7 @@ device_auth_request                      /device/auth
 login_spoof                              /login
 logout                                   /logout
 session_me                               /session/me
+session_me_groups                        /session/me/groups
 
 API operations found with tag "images"
 OPERATION ID                             URL PATH
@@ -125,6 +126,8 @@ ip_pool_service_view                     /system/ip-pools-service/{rack_id}
 ip_pool_update                           /system/ip-pools/{pool_name}
 ip_pool_view                             /system/ip-pools/{pool_name}
 ip_pool_view_by_id                       /system/by-id/ip-pools/{id}
+local_idp_user_create                    /system/silos/{silo_name}/identity-providers/local/users
+local_idp_user_delete                    /system/silos/{silo_name}/identity-providers/local/users/{user_id}
 rack_list                                /system/hardware/racks
 rack_view                                /system/hardware/racks/{rack_id}
 saga_list                                /system/sagas
@@ -137,6 +140,8 @@ silo_identity_provider_list              /system/silos/{silo_name}/identity-prov
 silo_list                                /system/silos
 silo_policy_update                       /system/silos/{silo_name}/policy
 silo_policy_view                         /system/silos/{silo_name}/policy
+silo_user_view                           /system/silos/{silo_name}/users/id/{user_id}
+silo_users_list                          /system/silos/{silo_name}/users/all
 silo_view                                /system/silos/{silo_name}
 silo_view_by_id                          /system/by-id/silos/{id}
 sled_list                                /system/hardware/sleds

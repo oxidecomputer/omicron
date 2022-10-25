@@ -400,6 +400,36 @@
         }
       }
     },
+    "/volume/{volume_id}/remove-read-only-parent": {
+      "post": {
+        "summary": "Request removal of a read_only_parent from a volume",
+        "description": "A volume can be created with the source data for that volume being another volume that attached as a \"read_only_parent\". In the background there exists a scrubber that will copy the data from the read_only_parent into the volume. When that scrubber has completed copying the data, this endpoint can be called to update the database that the read_only_parent is no longer needed for a volume and future attachments of this volume should not include that read_only_parent.",
+        "operationId": "cpapi_volume_remove_read_only_parent",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "volume_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/zpools/{zpool_id}/dataset/{dataset_id}": {
       "put": {
         "summary": "Report that a dataset within a pool has come online.",
@@ -1834,7 +1864,8 @@
           "internal_d_n_s",
           "nexus",
           "oximeter",
-          "dendrite"
+          "dendrite",
+          "tfport"
         ]
       },
       "ServicePutRequest": {
@@ -1842,6 +1873,7 @@
         "type": "object",
         "properties": {
           "address": {
+            "nullable": true,
             "description": "Address on which a service is responding to requests.",
             "type": "string",
             "format": "ipv6"
@@ -1864,7 +1896,6 @@
           }
         },
         "required": [
-          "address",
           "kind",
           "service_id",
           "sled_id"

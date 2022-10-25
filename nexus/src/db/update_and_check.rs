@@ -5,7 +5,7 @@
 //! CTE implementation for "UPDATE with extended return status".
 
 use super::pool::DbConnection;
-use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager, PoolError};
+use async_bb8_diesel::{AsyncRunQueryDsl, PoolError};
 use diesel::associations::HasTable;
 use diesel::pg::Pg;
 use diesel::prelude::*;
@@ -153,16 +153,19 @@ where
     /// - Ok(Row exists and was updated)
     /// - Ok(Row exists, but was not updated)
     /// - Error (row doesn't exist, or other diesel error)
-    pub async fn execute_and_check(
+    pub async fn execute_and_check<ConnErr>(
         self,
-        pool: &bb8::Pool<ConnectionManager<DbConnection>>,
+        conn: &(impl async_bb8_diesel::AsyncConnection<DbConnection, ConnErr>
+              + Sync),
     ) -> Result<UpdateAndQueryResult<Q>, PoolError>
     where
         // We require this bound to ensure that "Self" is runnable as query.
         Self: LoadQuery<'static, DbConnection, (Option<K>, Option<K>, Q)>,
+        ConnErr: From<diesel::result::Error> + Send + 'static,
+        PoolError: From<ConnErr>,
     {
         let (id0, id1, found) =
-            self.get_result_async::<(Option<K>, Option<K>, Q)>(pool).await?;
+            self.get_result_async::<(Option<K>, Option<K>, Q)>(conn).await?;
         let status = if id0 == id1 {
             UpdateStatus::Updated
         } else {

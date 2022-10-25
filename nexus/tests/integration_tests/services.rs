@@ -22,6 +22,7 @@ async fn test_service_put_success(cptestctx: &ControlPlaneTestContext) {
         ServiceKind::Nexus,
         ServiceKind::Oximeter,
         ServiceKind::Dendrite,
+        ServiceKind::Tfport,
     ];
 
     let mut rng = StdRng::from_entropy();
@@ -31,7 +32,11 @@ async fn test_service_put_success(cptestctx: &ControlPlaneTestContext) {
         let request = ServicePutRequest {
             service_id: Uuid::new_v4(),
             sled_id: SLED_AGENT_UUID.parse().unwrap(),
-            address: rand.into(),
+            address: if matches!(service_kind, ServiceKind::Tfport) {
+                None
+            } else {
+                Some(rand.into())
+            },
             kind: service_kind,
         };
         client

@@ -392,7 +392,7 @@ table! {
         time_modified -> Timestamptz,
 
         sled_id -> Uuid,
-        ip -> Inet,
+        ip -> Nullable<Inet>,
         kind -> crate::ServiceKindEnum,
     }
 }
