@@ -14,13 +14,17 @@ struct Args {
     /// Path of input toml file that gets parsed into a [`RackUpdateSpec`]
     #[arg(short, long)]
     spec: PathBuf,
+
+    /// Path of the release archive that gets created
+    #[arg(short, long)]
+    output_dir: PathBuf,
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
     let s = std::fs::read_to_string(&args.spec)?;
     let spec: RackUpdateSpec = toml::from_str(&s)?;
-    let path = spec.create_archive()?;
+    let path = spec.create_archive(args.output_dir)?;
     println!("Created Release Update: {}", path.display());
 
     Ok(())

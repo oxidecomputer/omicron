@@ -132,7 +132,6 @@ impl Manifest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RackUpdateSpec {
     version: Version,
-    output_dir: PathBuf,
     artifacts: Vec<ArtifactSpec>,
 }
 
@@ -141,16 +140,11 @@ impl RackUpdateSpec {
     ///
     /// Typically this will be created by reading from a `rack-update-
     /// spec.toml` file.
-    pub fn new<P: AsRef<Path>>(
+    pub fn new(
         version: Version,
-        output_dir: P,
         artifacts: Vec<ArtifactSpec>,
     ) -> RackUpdateSpec {
-        RackUpdateSpec {
-            version,
-            output_dir: output_dir.as_ref().to_owned(),
-            artifacts,
-        }
+        RackUpdateSpec { version, artifacts }
     }
 
     /// Return the name of the given release
@@ -165,9 +159,12 @@ impl RackUpdateSpec {
     ///
     /// This archive file can be loaded into a [`RackUpdate`] via
     /// [`RackUpdate::load`].
-    pub fn create_archive(self) -> std::io::Result<PathBuf> {
+    pub fn create_archive(
+        self,
+        output_dir: PathBuf,
+    ) -> std::io::Result<PathBuf> {
         let mut artifacts = vec![];
-        let mut filename = self.output_dir.clone();
+        let mut filename = output_dir.clone();
         filename.push(self.release_name());
         filename.set_extension("tar");
         let tarfile = File::create(&filename)?;
@@ -188,7 +185,7 @@ impl RackUpdateSpec {
             artifacts.push(artifact_spec.try_into()?);
         }
         let manifest = Manifest { version: self.version, artifacts };
-        let manifest_path = manifest.dump(self.output_dir)?;
+        let manifest_path = manifest.dump(output_dir)?;
         builder.append_path_with_name(
             &manifest_path,
             &manifest_path.file_name().unwrap(),
@@ -220,20 +217,17 @@ mod tests {
             "This is not a real SP Image. Hell it's not even a tarball!"
         )
         .unwrap();
-        let spec = RackUpdateSpec::new(
-            Version::new(1, 0, 0),
-            tmp_dir.path(),
-            vec![sled_sp],
-        );
+        let spec = RackUpdateSpec::new(Version::new(1, 0, 0), vec![sled_sp]);
 
         (tmp_dir, spec)
     }
 
     #[test]
     fn generate_update_archive_then_load_manifest() {
-        let (_input_dir, spec) = test_spec();
+        let (input_dir, spec) = test_spec();
         let output_dir = TempDir::new().unwrap();
-        let update_path = spec.create_archive().unwrap();
+        let update_path =
+            spec.create_archive(input_dir.path().to_owned()).unwrap();
         let manifest = Manifest::load(&update_path, output_dir.path()).unwrap();
         assert_eq!(manifest.artifacts.len(), 1);
         assert_eq!(manifest.version, Version::new(1, 0, 0));
