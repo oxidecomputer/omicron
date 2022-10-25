@@ -6545,6 +6545,7 @@ dependencies = [
  "slog",
  "slog-async",
  "slog-term",
+ "snafu",
  "tar",
  "tempfile",
  "tokio",

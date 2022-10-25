@@ -8,8 +8,19 @@ use semver::Version;
 use serde::{Deserialize, Serialize};
 use sha3::Digest;
 use sha3::Sha3_256;
+use snafu::prelude::*;
 use std::fs::File;
 use std::path::{Path, PathBuf};
+
+#[derive(Debug, Snafu)]
+pub enum UpdateError {
+    #[snafu(display("File access error: {}", path.display()))]
+    Io { source: std::io::Error, path: PathBuf },
+    #[snafu(display("serde_json error: {}", path.display()))]
+    Json { source: serde_json::Error, path: PathBuf },
+    #[snafu(display("Path must be relative: {}", path.display()))]
+    RelativePath { path: PathBuf },
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Sha3_256Digest(#[serde(with = "hex::serde")] [u8; 32]);
@@ -44,11 +55,13 @@ pub struct Artifact {
 /// Attempt to convert an ArtifactSpec to an Artifact
 /// by reading from the filesysetm and hashing.
 impl TryFrom<ArtifactSpec> for Artifact {
-    type Error = std::io::Error;
+    type Error = UpdateError;
     fn try_from(spec: ArtifactSpec) -> Result<Self, Self::Error> {
         let mut hasher = Sha3_256::new();
-        let mut file = File::open(&spec.filename)?;
-        let length = std::io::copy(&mut file, &mut hasher)?;
+        let mut file = File::open(&spec.filename)
+            .context(IoSnafu { path: &spec.filename })?;
+        let length = std::io::copy(&mut file, &mut hasher)
+            .context(IoSnafu { path: &spec.filename })?;
         let digest = Sha3_256Digest(*hasher.finalize().as_ref());
         Ok(Artifact {
             filename: spec.filename,
@@ -79,24 +92,30 @@ impl Manifest {
     pub fn dump<P: AsRef<Path>>(
         &self,
         path: P,
-    ) -> Result<PathBuf, std::io::Error> {
+    ) -> Result<PathBuf, UpdateError> {
         let path = path.as_ref().join("manifest.json");
-        let mut file = File::create(&path)?;
-        serde_json::to_writer(&mut file, self)?;
+        let mut file = File::create(&path).context(IoSnafu { path: &path })?;
+        serde_json::to_writer(&mut file, self)
+            .context(JsonSnafu { path: &path })?;
         Ok(path)
     }
 
     /// Unpack a Tar archive into `unpack_dir`, read the manifest, and return
     /// the manifest.
     pub fn load(
-        tarfile: impl AsRef<Path>,
+        tarfile_path: impl AsRef<Path>,
         unpack_dir: impl AsRef<Path>,
-    ) -> std::io::Result<Manifest> {
-        let tarfile = File::open(tarfile)?;
+    ) -> Result<Manifest, UpdateError> {
+        let tarfile = File::open(tarfile_path.as_ref())
+            .context(IoSnafu { path: tarfile_path.as_ref() })?;
         let mut archive = tar::Archive::new(tarfile);
-        archive.unpack(&unpack_dir)?;
-        let file = File::open(unpack_dir.as_ref().join("manifest.json"))?;
-        let manifest = serde_json::from_reader(file)?;
+        archive
+            .unpack(&unpack_dir)
+            .context(IoSnafu { path: tarfile_path.as_ref() })?;
+        let path = unpack_dir.as_ref().join("manifest.json");
+        let file = File::open(&path).context(IoSnafu { path: &path })?;
+        let manifest =
+            serde_json::from_reader(file).context(JsonSnafu { path: &path })?;
         Ok(manifest)
     }
 }
@@ -138,35 +157,36 @@ impl RackUpdateSpec {
     pub fn create_archive(
         self,
         output_dir: PathBuf,
-    ) -> std::io::Result<PathBuf> {
+    ) -> Result<PathBuf, UpdateError> {
         let mut artifacts = vec![];
         let mut filename = output_dir.clone();
         filename.push(self.release_name());
         filename.set_extension("tar");
-        let tarfile = File::create(&filename)?;
+        let tarfile = File::create(&filename)
+            .context(IoSnafu { path: filename.clone() })?;
         let mut builder = tar::Builder::new(tarfile);
         for artifact_spec in self.artifacts {
-            builder.append_path_with_name(
-                &artifact_spec.filename,
-                &artifact_spec.filename.file_name().ok_or(
-                    std::io::Error::new(
-                        std::io::ErrorKind::InvalidInput,
-                        format!(
-                            "Filename is invalid: {}",
-                            artifact_spec.filename.to_string_lossy()
-                        ),
-                    ),
-                )?,
-            )?;
+            builder
+                .append_path_with_name(
+                    &artifact_spec.filename,
+                    &artifact_spec.filename.file_name().ok_or(
+                        UpdateError::RelativePath {
+                            path: artifact_spec.filename.clone(),
+                        },
+                    )?,
+                )
+                .context(IoSnafu { path: &artifact_spec.filename })?;
             artifacts.push(artifact_spec.try_into()?);
         }
         let manifest = Manifest { version: self.version, artifacts };
         let manifest_path = manifest.dump(output_dir)?;
-        builder.append_path_with_name(
-            &manifest_path,
-            &manifest_path.file_name().unwrap(),
-        )?;
-        builder.finish()?;
+        builder
+            .append_path_with_name(
+                &manifest_path,
+                &manifest_path.file_name().unwrap(),
+            )
+            .context(IoSnafu { path: &manifest_path })?;
+        builder.finish().context(IoSnafu { path: &manifest_path })?;
         Ok(filename)
     }
 }

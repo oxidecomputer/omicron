@@ -18,6 +18,7 @@ sha3 = "0.10.5"
 slog = { version = "2.7.0", features = [ "max_level_trace", "release_max_level_debug" ] }
 slog-async = "2.7.0"
 slog-term = "2.9.0"
+snafu = "0.7.2"
 tar = "0.4"
 tokio = { version = "1.21.1", features = ["full"] }
 toml = "0.5.9"
