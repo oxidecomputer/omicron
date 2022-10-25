@@ -7,7 +7,7 @@ license = "MPL-2.0"
 [dependencies]
 clap = { version = "4.0", features = ["derive"] }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
-futures = "0.3.24"
+futures = "0.3.25"
 hex = "0.4"
 http = "0.2.7"
 hyper = "0.14.20"
@@ -17,11 +17,19 @@ slog-dtrace = "0.2"
 thiserror = "1.0.37"
 tokio-tungstenite = "0.17"
 toml = "0.5.9"
-uuid = "1.1.0"
+uuid = "1.2.1"
 
-gateway-messages = { path = "../gateway-messages", features = ["std"] }
-gateway-sp-comms = { path = "../gateway-sp-comms" }
 omicron-common = { path = "../common" }
+
+[dependencies.gateway-messages]
+git = "https://github.com/oxidecomputer/management-gateway-service"
+rev = "c1484109c394f45e08018e0f35adc4a136cd207d"
+default-features = false
+features = ["std"]
+
+[dependencies.gateway-sp-comms]
+git = "https://github.com/oxidecomputer/management-gateway-service"
+rev = "c1484109c394f45e08018e0f35adc4a136cd207d"
 
 [dependencies.slog]
 version = "2.7"
@@ -41,3 +49,7 @@ serde_json = "1.0"
 sp-sim = { path = "../sp-sim" }
 subprocess = "0.2.9"
 tokio-tungstenite = "0.17"
+
+[[bin]]
+name = "mgs"
+doc = false

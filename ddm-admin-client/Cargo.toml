@@ -11,7 +11,7 @@ slog = "2.7"
 
 [build-dependencies]
 anyhow = "1.0"
-omicron-zone-package = "0.3.1"
+omicron-zone-package = "0.5.1"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor" }
 quote = "1.0"
 serde_json = "1.0"

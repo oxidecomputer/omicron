@@ -7,8 +7,8 @@ license = "MPL-2.0"
 [dependencies]
 anyhow = "1.0"
 clap = { version = "4.0", features = ["derive"] }
-futures = "0.3.24"
-libc = "0.2.134"
+futures = "0.3.25"
+libc = "0.2.135"
 omicron-common = { path = "../common" }
 postgres-protocol = "0.6.4"
 signal-hook = "0.3"

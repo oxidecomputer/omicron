@@ -5,11 +5,8 @@ members = [
     "ddm-admin-client",
     "deploy",
     "gateway",
-    "gateway/faux-mgs",
     "gateway-cli",
     "gateway-client",
-    "gateway-messages",
-    "gateway-sp-comms",
     "internal-dns",
     "internal-dns-client",
     "nexus",
@@ -35,6 +32,7 @@ members = [
     "oximeter/oximeter-macro-impl",
     "oximeter-client",
     "test-utils",
+    "wicket",
 ]
 
 default-members = [
@@ -42,11 +40,8 @@ default-members = [
     "ddm-admin-client",
     "deploy",
     "gateway",
-    "gateway/faux-mgs",
     "gateway-cli",
     "gateway-client",
-    "gateway-messages",
-    "gateway-sp-comms",
     "internal-dns",
     "internal-dns-client",
     "nexus",

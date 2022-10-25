@@ -18,6 +18,7 @@ use crate::opte::PortManager;
 use crate::opte::PortTicket;
 use crate::params::NetworkInterface;
 use crate::params::SourceNatConfig;
+use crate::params::VpcFirewallRule;
 use crate::params::{
     InstanceHardware, InstanceMigrateParams, InstanceRuntimeStateRequested,
     InstanceSerialConsoleData,
@@ -225,6 +226,7 @@ struct InstanceInner {
     requested_nics: Vec<NetworkInterface>,
     source_nat: SourceNatConfig,
     external_ips: Vec<IpAddr>,
+    firewall_rules: Vec<VpcFirewallRule>,
 
     // Disk related properties
     requested_disks: Vec<DiskRequest>,
@@ -492,6 +494,7 @@ impl Instance {
             requested_nics: initial.nics,
             source_nat: initial.source_nat,
             external_ips: initial.external_ips,
+            firewall_rules: initial.firewall_rules,
             requested_disks: initial.disks,
             cloud_init_bytes: initial.cloud_init_bytes,
             state: InstanceStates::new(initial.runtime),
@@ -541,6 +544,7 @@ impl Instance {
                 nic,
                 snat,
                 external_ips,
+                &inner.firewall_rules,
             )?;
             opte_ports.push(port);
             port_tickets.push(port_ticket);
@@ -896,6 +900,7 @@ mod test {
                 last_port: 16_384,
             },
             external_ips: vec![],
+            firewall_rules: vec![],
             disks: vec![],
             cloud_init_bytes: None,
         }

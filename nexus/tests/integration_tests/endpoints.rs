@@ -27,12 +27,15 @@ use omicron_common::api::external::RouterRouteUpdateParams;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_nexus::authn;
 use omicron_nexus::authz;
+use omicron_nexus::db::fixed_data::silo::DEFAULT_SILO;
+use omicron_nexus::db::identity::Resource;
 use omicron_nexus::external_api::params;
 use omicron_nexus::external_api::shared;
 use omicron_nexus::external_api::shared::IpRange;
 use omicron_nexus::external_api::shared::Ipv4Range;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
+use std::str::FromStr;
 
 lazy_static! {
     pub static ref HARDWARE_RACK_URL: String =
@@ -59,6 +62,23 @@ lazy_static! {
             identity_mode: shared::SiloIdentityMode::SamlJit,
             admin_group_name: None,
         };
+    // Use the default Silo for testing the local IdP
+    pub static ref DEMO_SILO_USERS_CREATE_URL: String = format!(
+        "/system/silos/{}/identity-providers/local/users",
+        DEFAULT_SILO.identity().name,
+    );
+    pub static ref DEMO_SILO_USERS_LIST_URL: String = format!(
+        "/system/silos/{}/users/all",
+        DEFAULT_SILO.identity().name,
+    );
+    pub static ref DEMO_SILO_USER_ID_GET_URL: String = format!(
+        "/system/silos/{}/users/id/{{id}}",
+        DEFAULT_SILO.identity().name,
+    );
+    pub static ref DEMO_SILO_USER_ID_DELETE_URL: String = format!(
+        "/system/silos/{}/identity-providers/local/users/{{id}}",
+        DEFAULT_SILO.identity().name,
+    );
 
     // Organization used for testing
     pub static ref DEMO_ORG_NAME: Name = "demo-org".parse().unwrap();
@@ -262,7 +282,8 @@ lazy_static! {
     };
 }
 
-// Separate lazy_static! blocks to avoid hitting some recursion limit when compiling
+// Separate lazy_static! blocks to avoid hitting some recursion limit when
+// compiling
 lazy_static! {
     // Project Images
     pub static ref DEMO_IMAGE_NAME: Name = "demo-image".parse().unwrap();
@@ -386,6 +407,11 @@ lazy_static! {
 
             group_attribute_name: None,
         };
+
+    // Users
+    pub static ref DEMO_USER_CREATE: params::UserCreate = params::UserCreate {
+        external_id: params::UserId::from_str("dummy-user").unwrap(),
+    };
 }
 
 /// Describes an API endpoint to be verified by the "unauthorized" test
@@ -709,6 +735,53 @@ lazy_static! {
 
         VerifyEndpoint {
             url: "/users",
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::ReadOnly,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &*DEMO_SILO_USERS_LIST_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::ReadOnly,
+            allowed_methods: vec![ AllowedMethod::Get ],
+        },
+
+        VerifyEndpoint {
+            url: &*DEMO_SILO_USERS_CREATE_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::ReadOnly,
+            allowed_methods: vec![
+                AllowedMethod::Post(
+                    serde_json::to_value(
+                        &*DEMO_USER_CREATE
+                    ).unwrap()
+                ),
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &*DEMO_SILO_USER_ID_GET_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::ReadOnly,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &*DEMO_SILO_USER_ID_DELETE_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::ReadOnly,
+            allowed_methods: vec![
+                AllowedMethod::Delete,
+            ],
+        },
+
+        VerifyEndpoint {
+            url: "/groups",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::ReadOnly,
             allowed_methods: vec![
@@ -1463,6 +1536,14 @@ lazy_static! {
 
         VerifyEndpoint {
             url: "/session/me",
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::ReadOnly,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
+        VerifyEndpoint {
+            url: "/session/me/groups",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::ReadOnly,
             allowed_methods: vec![

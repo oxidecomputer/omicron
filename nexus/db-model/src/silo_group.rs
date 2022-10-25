@@ -4,6 +4,8 @@
 
 use crate::schema::{silo_group, silo_group_membership};
 use db_macros::Asset;
+use nexus_types::external_api::views;
+use nexus_types::identity::Asset;
 use uuid::Uuid;
 
 /// Describes a silo group within the database.
@@ -36,5 +38,16 @@ pub struct SiloGroupMembership {
 impl SiloGroupMembership {
     pub fn new(silo_group_id: Uuid, silo_user_id: Uuid) -> Self {
         Self { silo_group_id, silo_user_id }
+    }
+}
+
+impl From<SiloGroup> for views::Group {
+    fn from(group: SiloGroup) -> Self {
+        Self {
+            id: group.id(),
+            // TODO the use of external_id as display_name is temporary
+            display_name: group.external_id,
+            silo_id: group.silo_id,
+        }
     }
 }

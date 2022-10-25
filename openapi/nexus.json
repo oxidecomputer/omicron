@@ -530,6 +530,66 @@
         }
       }
     },
+    "/groups": {
+      "get": {
+        "tags": [
+          "silos"
+        ],
+        "summary": "List groups",
+        "operationId": "group_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      }
+    },
     "/login": {
       "post": {
         "tags": [
@@ -5156,6 +5216,66 @@
         }
       }
     },
+    "/session/me/groups": {
+      "get": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "Fetch the silo groups the current user belongs to",
+        "operationId": "session_me_groups",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      }
+    },
     "/session/me/sshkeys": {
       "get": {
         "tags": [
@@ -6755,6 +6875,98 @@
         "x-dropshot-pagination": true
       }
     },
+    "/system/silos/{silo_name}/identity-providers/local/users": {
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Create a user",
+        "description": "Users can only be created in Silos with `provision_type` == `Fixed`. Otherwise, Silo users are just-in-time (JIT) provisioned when a user first logs in using an external Identity Provider.",
+        "operationId": "local_idp_user_create",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "silo_name",
+            "description": "The silo's unique name.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/system/silos/{silo_name}/identity-providers/local/users/{user_id}": {
+      "delete": {
+        "tags": [
+          "system"
+        ],
+        "operationId": "local_idp_user_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "silo_name",
+            "description": "The silo's unique name.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "user_id",
+            "description": "The user's internal id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/system/silos/{silo_name}/identity-providers/saml": {
       "post": {
         "tags": [
@@ -6926,6 +7138,125 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SiloRolePolicy"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/system/silos/{silo_name}/users/all": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "List users in a specific Silo",
+        "operationId": "silo_users_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "silo_name",
+            "description": "The silo's unique name.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      }
+    },
+    "/system/silos/{silo_name}/users/id/{user_id}": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "operationId": "silo_user_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "silo_name",
+            "description": "The silo's unique name.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "user_id",
+            "description": "The user's internal id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
                 }
               }
             }
@@ -8383,6 +8714,51 @@
           "items"
         ]
       },
+      "Group": {
+        "description": "Client view of a [`Group`]",
+        "type": "object",
+        "properties": {
+          "display_name": {
+            "description": "Human-readable name that can identify the group",
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "silo_id": {
+            "description": "Uuid of the silo to which this group belongs",
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "display_name",
+          "id",
+          "silo_id"
+        ]
+      },
+      "GroupResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Group"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
       "Histogramdouble": {
         "description": "A simple type for managing a histogram metric.\n\nA histogram maintains the count of any number of samples, over a set of bins. Bins are specified on construction via their _left_ edges, inclusive. There can't be any \"gaps\" in the bins, and an additional bin may be added to the left, right, or both so that the bins extend to the entire range of the support.\n\nNote that any gaps, unsorted bins, or non-finite values will result in an error.\n\nExample ------- ```rust use oximeter::histogram::{BinRange, Histogram};\n\nlet edges = [0i64, 10, 20]; let mut hist = Histogram::new(&edges).unwrap(); assert_eq!(hist.n_bins(), 4); // One additional bin for the range (20..) assert_eq!(hist.n_samples(), 0); hist.sample(4); hist.sample(100); assert_eq!(hist.n_samples(), 2);\n\nlet data = hist.iter().collect::<Vec<_>>(); assert_eq!(data[0].range, BinRange::range(i64::MIN, 0)); // An additional bin for `..0` assert_eq!(data[0].count, 0); // Nothing is in this bin\n\nassert_eq!(data[1].range, BinRange::range(0, 10)); // The range `0..10` assert_eq!(data[1].count, 1); // 4 is sampled into this bin ```\n\nNotes -----\n\nHistograms may be constructed either from their left bin edges, or from a sequence of ranges. In either case, the left-most bin may be converted upon construction. In particular, if the left-most value is not equal to the minimum of the support, a new bin will be added from the minimum to that provided value. If the left-most value _is_ the support's minimum, because the provided bin was unbounded below, such as `(..0)`, then that bin will be converted into one bounded below, `(MIN..0)` in this case.\n\nThe short of this is that, most of the time, it shouldn't matter. If one specifies the extremes of the support as their bins, be aware that the left-most may be converted from a `BinRange::RangeTo` into a `BinRange::Range`. In other words, the first bin of a histogram is _always_ a `Bin::Range` or a `Bin::RangeFrom` after construction. In fact, every bin is one of those variants, the `BinRange::RangeTo` is only provided as a convenience during construction.",
         "type": "object",
@@ -9371,7 +9747,7 @@
         "title": "An IPv4 subnet",
         "description": "An IPv4 subnet, including prefix and subnet mask",
         "type": "string",
-        "pattern": "^(10\\.([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\.([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\.([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\/([8-9]|1[0-9]|2[0-9]|3[0-2])|172\\.(1[6-9]|2[0-9]|3[0-1])\\.([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\.([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\/(1[2-9]|2[0-9]|3[0-2])|192\\.168\\.([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\.([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\/(1[6-9]|2[0-9]|3[0-2]))$"
+        "pattern": "^(([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])/([8-9]|1[0-9]|2[0-9]|3[0-2])$"
       },
       "Ipv4Range": {
         "description": "A non-decreasing IPv4 address range, inclusive of both ends.\n\nThe first address must be less than or equal to the last address.",
@@ -11262,6 +11638,30 @@
           "items"
         ]
       },
+      "UserCreate": {
+        "description": "Create-time parameters for a [`User`](crate::external_api::views::User)",
+        "type": "object",
+        "properties": {
+          "external_id": {
+            "description": "username used to log in",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UserId"
+              }
+            ]
+          }
+        },
+        "required": [
+          "external_id"
+        ]
+      },
+      "UserId": {
+        "title": "A name unique within the parent collection",
+        "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID though they may contain a UUID.",
+        "type": "string",
+        "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z][a-z0-9-]*[a-zA-Z0-9]$",
+        "maxLength": 63
+      },
       "UserResultsPage": {
         "description": "A single page of results",
         "type": "object",
@@ -12140,6 +12540,18 @@
           }
         }
       },
+      "IdSortMode": {
+        "description": "Supported set of sort modes for scanning by id only.\n\nCurrently, we only support scanning in ascending order.",
+        "oneOf": [
+          {
+            "description": "sort in increasing order of \"id\"",
+            "type": "string",
+            "enum": [
+              "id_ascending"
+            ]
+          }
+        ]
+      },
       "NameOrIdSortMode": {
         "description": "Supported set of sort modes for scanning by name or id",
         "oneOf": [
@@ -12187,18 +12599,6 @@
           "read_bytes",
           "write",
           "write_bytes"
-        ]
-      },
-      "IdSortMode": {
-        "description": "Supported set of sort modes for scanning by id only.\n\nCurrently, we only support scanning in ascending order.",
-        "oneOf": [
-          {
-            "description": "sort in increasing order of \"id\"",
-            "type": "string",
-            "enum": [
-              "id_ascending"
-            ]
-          }
         ]
       }
     }

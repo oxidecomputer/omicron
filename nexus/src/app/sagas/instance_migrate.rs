@@ -221,12 +221,16 @@ async fn sim_instance_migrate(
     }
     let source_nat = SourceNatConfig::from(snat_ip.into_iter().next().unwrap());
 
+    // The TODOs below are tracked in
+    //   https://github.com/oxidecomputer/omicron/issues/1783
     let instance_hardware = InstanceHardware {
         runtime: runtime.into(),
         // TODO: populate NICs
         nics: vec![],
         source_nat,
         external_ips,
+        // TODO: populate firewall rules
+        firewall_rules: vec![],
         // TODO: populate disks
         disks: vec![],
         // TODO: populate cloud init bytes

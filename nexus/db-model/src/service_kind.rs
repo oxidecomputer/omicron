@@ -20,6 +20,7 @@ impl_enum_type!(
     Nexus => b"nexus"
     Oximeter => b"oximeter"
     Dendrite => b"dendrite"
+    Tfport => b"tfport"
 );
 
 impl From<internal_api::params::ServiceKind> for ServiceKind {
@@ -35,6 +36,7 @@ impl From<internal_api::params::ServiceKind> for ServiceKind {
             internal_api::params::ServiceKind::Dendrite => {
                 ServiceKind::Dendrite
             }
+            internal_api::params::ServiceKind::Tfport => ServiceKind::Tfport,
         }
     }
 }

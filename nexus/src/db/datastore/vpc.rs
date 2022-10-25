@@ -20,6 +20,8 @@ use crate::db::model::Name;
 use crate::db::model::NetworkInterface;
 use crate::db::model::RouterRoute;
 use crate::db::model::RouterRouteUpdate;
+use crate::db::model::Sled;
+use crate::db::model::Vni;
 use crate::db::model::Vpc;
 use crate::db::model::VpcFirewallRule;
 use crate::db::model::VpcRouter;
@@ -27,6 +29,7 @@ use crate::db::model::VpcRouterUpdate;
 use crate::db::model::VpcSubnet;
 use crate::db::model::VpcSubnetUpdate;
 use crate::db::model::VpcUpdate;
+use crate::db::model::{Ipv4Net, Ipv6Net};
 use crate::db::pagination::paginated;
 use crate::db::queries::vpc::InsertVpcQuery;
 use crate::db::queries::vpc_subnet::FilterConflictingVpcSubnetRangesQuery;
@@ -35,14 +38,17 @@ use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use ipnetwork::IpNetwork;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
+use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use std::collections::BTreeMap;
 use uuid::Uuid;
 
 impl DataStore {
@@ -316,6 +322,31 @@ impl DataStore {
                     ErrorHandler::NotFoundByResource(authz_vpc),
                 ),
             })
+    }
+
+    /// Return the list of `Sled`s hosting instances with network interfaces
+    /// on the provided VPC.
+    pub async fn vpc_resolve_to_sleds(
+        &self,
+        vpc_id: Uuid,
+    ) -> Result<Vec<Sled>, Error> {
+        // Resolve each VNIC in the VPC to the Sled it's on, so we know which
+        // Sleds to notify when firewall rules change.
+        use db::schema::{instance, network_interface, sled};
+        network_interface::table
+            .inner_join(
+                instance::table
+                    .on(instance::id.eq(network_interface::instance_id)),
+            )
+            .inner_join(sled::table.on(sled::id.eq(instance::active_server_id)))
+            .filter(network_interface::vpc_id.eq(vpc_id))
+            .filter(network_interface::time_deleted.is_null())
+            .filter(instance::time_deleted.is_null())
+            .select(Sled::as_select())
+            .distinct()
+            .get_results_async(self.pool())
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     pub async fn vpc_list_subnets(
@@ -672,6 +703,70 @@ impl DataStore {
                 public_error_from_diesel_pool(
                     e,
                     ErrorHandler::NotFoundByResource(authz_route),
+                )
+            })
+    }
+
+    /// Identify all subnets in use by each VpcSubnet
+    pub async fn resolve_vpc_subnets_to_ip_networks<
+        T: IntoIterator<Item = Name>,
+    >(
+        &self,
+        vpc: &Vpc,
+        subnet_names: T,
+    ) -> Result<BTreeMap<Name, Vec<IpNetwork>>, Error> {
+        #[derive(diesel::Queryable)]
+        struct SubnetIps {
+            name: Name,
+            ipv4_block: Ipv4Net,
+            ipv6_block: Ipv6Net,
+        }
+
+        use db::schema::vpc_subnet;
+        let subnets = vpc_subnet::table
+            .filter(vpc_subnet::vpc_id.eq(vpc.id()))
+            .filter(vpc_subnet::name.eq_any(subnet_names))
+            .filter(vpc_subnet::time_deleted.is_null())
+            .select((
+                vpc_subnet::name,
+                vpc_subnet::ipv4_block,
+                vpc_subnet::ipv6_block,
+            ))
+            .get_results_async::<SubnetIps>(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            })?;
+
+        let mut result = BTreeMap::new();
+        for subnet in subnets {
+            let entry = result.entry(subnet.name).or_insert_with(Vec::new);
+            entry.push(IpNetwork::V4(subnet.ipv4_block.0 .0));
+            entry.push(IpNetwork::V6(subnet.ipv6_block.0 .0));
+        }
+        Ok(result)
+    }
+
+    /// Look up a VPC by VNI.
+    pub async fn resolve_vni_to_vpc(
+        &self,
+        opctx: &OpContext,
+        vni: Vni,
+    ) -> LookupResult<Vpc> {
+        use db::schema::vpc::dsl;
+        dsl::vpc
+            .filter(dsl::vni.eq(vni))
+            .filter(dsl::time_deleted.is_null())
+            .select(Vpc::as_select())
+            .get_result_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Vpc,
+                        LookupType::ByCompositeId("VNI".to_string()),
+                    ),
                 )
             })
     }
