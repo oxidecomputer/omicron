@@ -709,7 +709,7 @@ async fn sic_allocate_instance_external_ip_undo(
 async fn sic_create_disks_for_instance(
     sagactx: NexusActionContext,
 ) -> Result<Option<String>, ActionError> {
-    let osagactx: &Arc<SagaContext> = sagactx.user_data();
+    let osagactx = sagactx.user_data();
     let disk_params = sagactx.saga_params::<DiskParams>()?;
     let saga_params = disk_params.saga_params;
     let disk_index = disk_params.which;
@@ -740,10 +740,11 @@ async fn sic_create_disks_for_instance(
                     &create_params,
                 )
                 .await
+                .map_err(ActionError::action_failed)?;
         }
 
-        _ => Ok(None),
-    }
+        _ => {}
+    };
 
     Ok(None)
 }
@@ -799,8 +800,8 @@ async fn ensure_instance_disk_attach_state(
         params::InstanceDiskAttachment::Create(create_params) => {
             db::model::Name(create_params.identity.name.clone())
         }
-        params::InstanceDiskAttachment::Existing { name } => {
-            db::model::Name(name.clone())
+        params::InstanceDiskAttachment::Attach(attach_params) => {
+            db::model::Name(attach_params.name.clone())
         }
     };
 
