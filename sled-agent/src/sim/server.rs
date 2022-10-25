@@ -7,13 +7,18 @@
 use super::config::Config;
 use super::http_entrypoints::api as http_api;
 use super::sled_agent::SledAgent;
+use super::storage::PantryServer;
 use crate::nexus::NexusClient;
 use crucible_agent_client::types::State as RegionState;
+use std::collections::HashMap;
+
+use internal_dns_client::names::{ServiceName, AAAA, SRV};
 
 use omicron_common::backoff::{
     internal_service_policy, retry_notify, BackoffError,
 };
 use slog::{Drain, Logger};
+use std::net::{SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 
 /// Packages up a [`SledAgent`], running the sled agent API under a Dropshot
@@ -23,6 +28,15 @@ pub struct Server {
     pub sled_agent: Arc<SledAgent>,
     /// dropshot server for the API
     pub http_server: dropshot::HttpServer<Arc<SledAgent>>,
+    /// simulated pantry server
+    pub pantry_server: PantryServer,
+    /// real internal dns server storage dir
+    pub dns_server_storage_dir: tempfile::TempDir,
+    /// real internal dns server
+    pub dns_server: internal_dns::dns_server::Server,
+    /// real internal dns dropshot server
+    pub dns_dropshot_server:
+        dropshot::HttpServer<Arc<internal_dns::dropshot_server::Context>>,
 }
 
 impl Server {
@@ -43,19 +57,19 @@ impl Server {
             "component" => "SledAgent",
             "server" => config.id.clone().to_string()
         ));
-        let sled_agent = Arc::new(SledAgent::new_simulated_with_id(
+        let sled_agent = SledAgent::new_simulated_with_id(
             &config,
             sa_log,
             config.nexus_address,
             Arc::clone(&nexus_client),
-        ));
+        )
+        .await;
 
-        let sa = Arc::clone(&sled_agent);
         let dropshot_log = log.new(o!("component" => "dropshot"));
         let http_server = dropshot::HttpServerStarter::new(
             &config.dropshot,
             http_api(),
-            sa,
+            sled_agent.clone(),
             &dropshot_log,
         )
         .map_err(|error| format!("initializing server: {}", error))?
@@ -111,7 +125,83 @@ impl Server {
                 .await;
         }
 
-        Ok(Server { sled_agent, http_server })
+        // Create the simulated Pantry
+        let pantry_server = PantryServer::new(
+            log.new(o!("kind" => "pantry")),
+            config.storage.ip,
+            sled_agent.clone(),
+        )
+        .await;
+
+        // Start the internal DNS server, insert the simulated Pantry DNS
+        // record
+        let dns_server_storage_dir =
+            tempfile::tempdir().map_err(|e| e.to_string())?;
+
+        let dns_server_config = internal_dns::Config {
+            log: dropshot::ConfigLogging::StderrTerminal {
+                level: dropshot::ConfigLoggingLevel::Trace,
+            },
+            dropshot: dropshot::ConfigDropshot {
+                bind_address: "[::1]:0".parse().unwrap(),
+                ..Default::default()
+            },
+            data: internal_dns::dns_data::Config {
+                nmax_messages: 16,
+                storage_path: dns_server_storage_dir
+                    .path()
+                    .to_string_lossy()
+                    .to_string(),
+            },
+        };
+        let dns_log = log.new(o!("kind" => "dns"));
+        let zone = "control-plane.oxide.internal".to_string();
+        let dns_address: SocketAddrV6 = "[::1]:0".parse().unwrap();
+
+        let (dns_server, dns_dropshot_server) = internal_dns::start(
+            dns_log,
+            dns_server_config,
+            zone,
+            dns_address.into(),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+
+        // Insert SRV and AAAA record for Crucible Pantry
+        let mut records: HashMap<_, Vec<(_, SocketAddrV6)>> = HashMap::new();
+        records
+            .entry(SRV::Service(ServiceName::CruciblePantry))
+            .or_insert_with(Vec::new)
+            .push((
+                AAAA::Zone(pantry_server.server.app_private().id),
+                match pantry_server.addr() {
+                    SocketAddr::V6(v6) => v6,
+
+                    SocketAddr::V4(_) => {
+                        panic!("pantry address must be IPv6");
+                    }
+                },
+            ));
+
+        let dns_client =
+            internal_dns_client::multiclient::Updater::new_from_addrs(
+                vec![dns_dropshot_server.local_addr()],
+                log.new(o!("kind" => "dns-client")),
+            );
+
+        dns_client
+            .insert_dns_records(&records)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        Ok(Server {
+            sled_agent,
+            http_server,
+            pantry_server,
+            dns_server_storage_dir,
+            dns_server,
+            dns_dropshot_server,
+        })
     }
 
     /// Wait for the given server to shut down

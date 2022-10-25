@@ -13,6 +13,7 @@ headers = "0.3.8"
 http = "0.2.7"
 hyper = "0.14"
 nexus-test-interface = { path = "../test-interface" }
+internal-dns-client = { path = "../../internal-dns-client" }
 omicron-common = { path = "../../common" }
 omicron-nexus = { path = ".." }
 omicron-sled-agent = { path = "../../sled-agent" }

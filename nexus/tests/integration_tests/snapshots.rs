@@ -4,6 +4,7 @@
 
 //! Tests basic snapshot support in the API
 
+use crate::integration_tests::instances::instance_simulate;
 use chrono::Utc;
 use dropshot::test_util::ClientTestContext;
 use http::method::Method;
@@ -138,7 +139,7 @@ async fn test_snapshot(cptestctx: &ControlPlaneTestContext) {
     );
     let instance_name = "base-instance";
 
-    let _instance: Instance = object_create(
+    let instance: Instance = object_create(
         client,
         &instances_url,
         &params::InstanceCreate {
@@ -162,6 +163,10 @@ async fn test_snapshot(cptestctx: &ControlPlaneTestContext) {
         },
     )
     .await;
+
+    // cannot snapshot attached disk for instance in state starting
+    let nexus = &cptestctx.server.apictx.nexus;
+    instance_simulate(nexus, &instance.identity.id).await;
 
     // Issue snapshot request
     let snapshots_url = format!(

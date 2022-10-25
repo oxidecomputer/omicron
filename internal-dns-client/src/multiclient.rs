@@ -10,6 +10,7 @@ use omicron_common::address::{
 use slog::{info, Logger};
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
+use trust_dns_proto::rr::record_type::RecordType;
 use trust_dns_resolver::config::{
     NameServerConfig, Protocol, ResolverConfig, ResolverOpts,
 };
@@ -65,7 +66,7 @@ impl Updater {
         Self::new_from_addrs(addrs, log)
     }
 
-    fn new_from_addrs(addrs: Vec<SocketAddr>, log: Logger) -> Self {
+    pub fn new_from_addrs(addrs: Vec<SocketAddr>, log: Logger) -> Self {
         let clients = addrs
             .into_iter()
             .map(|addr| {
@@ -170,6 +171,9 @@ pub enum ResolveError {
 
     #[error("Record not found for SRV key: {0}")]
     NotFound(crate::names::SRV),
+
+    #[error("Record not found for {0}")]
+    NotFoundByString(String),
 }
 
 /// A wrapper around a DNS resolver, providing a way to conveniently
@@ -186,7 +190,7 @@ impl Resolver {
         Self::new_from_addrs(dns_addrs)
     }
 
-    fn new_from_addrs(
+    pub fn new_from_addrs(
         dns_addrs: Vec<SocketAddr>,
     ) -> Result<Self, ResolveError> {
         let mut rc = ResolverConfig::new();
@@ -230,6 +234,39 @@ impl Resolver {
             .next()
             .ok_or_else(|| ResolveError::NotFound(srv))?;
         Ok(*address)
+    }
+
+    /// Looks up a single [`SocketAddrV6`] based on the SRV name
+    /// Returns an error if the record does not exist.
+    pub async fn lookup_socket_v6(
+        &self,
+        srv: crate::names::SRV,
+    ) -> Result<SocketAddrV6, ResolveError> {
+        let response =
+            self.inner.lookup(&srv.to_string(), RecordType::SRV).await?;
+
+        let rdata = response
+            .iter()
+            .next()
+            .ok_or_else(|| ResolveError::NotFound(srv))?;
+
+        Ok(match rdata {
+            trust_dns_proto::rr::record_data::RData::SRV(srv) => {
+                let name = srv.target();
+                let response =
+                    self.inner.ipv6_lookup(&name.to_string()).await?;
+
+                let address = response.iter().next().ok_or_else(|| {
+                    ResolveError::NotFoundByString(name.to_string())
+                })?;
+
+                SocketAddrV6::new(*address, srv.port(), 0, 0)
+            }
+
+            _ => {
+                panic!("SRV lookup didn't return SRV!");
+            }
+        })
     }
 
     pub async fn lookup_ip(

@@ -15,7 +15,8 @@ base64 = "0.13.1"
 bb8 = "0.8.0"
 clap = { version = "4.0", features = ["derive"] }
 cookie = "0.16"
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "144d8dafa41715e00b08a5929cc62140ff0eb561" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "00c1de9b165e8abff1eed6e26a5755465785fc07" }
+crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "00c1de9b165e8abff1eed6e26a5755465785fc07" }
 diesel = { version = "2.0.2", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 diesel-dtrace = { git = "https://github.com/oxidecomputer/diesel-dtrace", rev = "18748d9f76c94e1f4400fbec0859b3e77a221a8d" }
 # TODO(luqman): Update once merged & new release is cut
@@ -47,7 +48,7 @@ oximeter-db = { path = "../oximeter/db/" }
 parse-display = "0.6.0"
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "e58937fea67aca6bc2d37a3cc50a72291328ae0e", features = [ "generated" ] }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "c312e724b0400001bd4c0738f789ebdffe3d39b6", features = [ "generated" ] }
 rand = "0.8.5"
 ref-cast = "1.0"
 reqwest = { version = "0.11.12", features = [ "json" ] }

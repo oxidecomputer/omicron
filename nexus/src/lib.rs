@@ -181,6 +181,13 @@ impl nexus_test_interface::NexusServer for Server {
         self.http_server_internal.local_addr()
     }
 
+    async fn set_resolver(
+        &self,
+        resolver: internal_dns_client::multiclient::Resolver,
+    ) {
+        self.apictx.nexus.set_resolver(resolver).await
+    }
+
     async fn close(mut self) {
         for server in self.http_servers_external {
             server.close().await.unwrap();

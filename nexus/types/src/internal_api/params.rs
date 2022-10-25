@@ -129,6 +129,7 @@ pub enum ServiceKind {
     Oximeter,
     Dendrite,
     Tfport,
+    CruciblePantry,
 }
 
 impl fmt::Display for ServiceKind {
@@ -140,6 +141,7 @@ impl fmt::Display for ServiceKind {
             Oximeter => "oximeter",
             Dendrite => "dendrite",
             Tfport => "tfport",
+            CruciblePantry => "crucible_pantry",
         };
         write!(f, "{}", s)
     }
@@ -156,6 +158,7 @@ impl FromStr for ServiceKind {
             "internal_dns" => Ok(InternalDNS),
             "dendrite" => Ok(Dendrite),
             "tfport" => Ok(Tfport),
+            "crucible_pantry" => Ok(CruciblePantry),
             _ => Err(Self::Err::InternalError {
                 internal_message: format!("Unknown service kind: {}", s),
             }),

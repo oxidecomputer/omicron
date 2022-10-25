@@ -17,6 +17,7 @@ use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
@@ -404,20 +405,61 @@ impl super::Nexus {
         let _authz_org: authz::Organization;
         let authz_project: authz::Project;
         let authz_disk: authz::Disk;
+        let db_disk: db::model::Disk;
 
-        (authz_silo, _authz_org, authz_project, authz_disk) =
+        (authz_silo, _authz_org, authz_project, authz_disk, db_disk) =
             LookupPath::new(opctx, &self.db_datastore)
                 .organization_name(organization_name)
                 .project_name(project_name)
                 .disk_name(&db::model::Name(params.disk.clone()))
-                .lookup_for(authz::Action::Read)
+                .fetch_for(authz::Action::Read)
                 .await?;
+
+        // If there isn't a running propolis, Nexus needs to use the Crucible
+        // Pantry to make this snapshot
+        let use_the_pantry = if let Some(attach_instance_id) =
+            &db_disk.runtime_state.attach_instance_id
+        {
+            let (.., db_instance) = LookupPath::new(opctx, &self.db_datastore)
+                .instance_id(*attach_instance_id)
+                .fetch_for(authz::Action::Read)
+                .await?;
+
+            let instance_state: InstanceState = db_instance.runtime().state.0;
+
+            match instance_state {
+                // If there's a propolis running, use that
+                InstanceState::Running |
+                // Rebooting doesn't deactivate the volume
+                InstanceState::Rebooting
+                => false,
+
+                // If there's definitely no propolis running, then use the
+                // pantry
+                InstanceState::Stopped | InstanceState::Destroyed => true,
+
+                // If there *may* be a propolis running, then fail: we can't
+                // know if that propolis has activated the Volume or not, or if
+                // it's in the process of deactivating.
+                _ => {
+                    return Err(
+                        Error::invalid_request(
+                            &format!("cannot snapshot attached disk for instance in state {}", instance_state)
+                        )
+                    );
+                }
+            }
+        } else {
+            // This disk is not attached to an instance, use the pantry.
+            true
+        };
 
         let saga_params = sagas::snapshot_create::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             silo_id: authz_silo.id(),
             project_id: authz_project.id(),
             disk_id: authz_disk.id(),
+            use_the_pantry,
             create_params: params.clone(),
         };
 

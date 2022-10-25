@@ -4,7 +4,7 @@
 
 use internal_dns_client::names::{BackendName, ServiceName, AAAA, SRV};
 use omicron_common::address::{
-    DENDRITE_PORT, NEXUS_INTERNAL_PORT, OXIMETER_PORT,
+    CRUCIBLE_PANTRY_PORT, DENDRITE_PORT, NEXUS_INTERNAL_PORT, OXIMETER_PORT,
 };
 use omicron_common::api::external;
 use omicron_common::api::internal::nexus::{
@@ -374,6 +374,7 @@ pub enum ServiceType {
     Oximeter,
     Dendrite { asic: DendriteAsic },
     Tfport { pkt_source: String },
+    CruciblePantry,
 }
 
 impl std::fmt::Display for ServiceType {
@@ -384,6 +385,7 @@ impl std::fmt::Display for ServiceType {
             ServiceType::Oximeter => write!(f, "oximeter"),
             ServiceType::Dendrite { .. } => write!(f, "dendrite"),
             ServiceType::Tfport { .. } => write!(f, "tfport"),
+            ServiceType::CruciblePantry => write!(f, "crucible-pantry"),
         }
     }
 }
@@ -406,6 +408,7 @@ impl From<ServiceType> for sled_agent_client::types::ServiceType {
             St::Oximeter => AutoSt::Oximeter,
             St::Dendrite { asic } => AutoSt::Dendrite { asic: asic.into() },
             St::Tfport { pkt_source } => AutoSt::Tfport { pkt_source },
+            St::CruciblePantry => AutoSt::CruciblePantry,
         }
     }
 }
@@ -449,6 +452,9 @@ impl ServiceZoneRequest {
             ServiceType::Oximeter => SRV::Service(ServiceName::Oximeter),
             ServiceType::Dendrite { .. } => SRV::Service(ServiceName::Dendrite),
             ServiceType::Tfport { .. } => SRV::Service(ServiceName::Tfport),
+            ServiceType::CruciblePantry { .. } => {
+                SRV::Service(ServiceName::CruciblePantry)
+            }
         }
     }
 
@@ -467,6 +473,12 @@ impl ServiceZoneRequest {
                 Some(SocketAddrV6::new(self.addresses[0], DENDRITE_PORT, 0, 0))
             }
             ServiceType::Tfport { .. } => None,
+            ServiceType::CruciblePantry => Some(SocketAddrV6::new(
+                self.addresses[0],
+                CRUCIBLE_PANTRY_PORT,
+                0,
+                0,
+            )),
         }
     }
 }
@@ -484,6 +496,29 @@ impl From<ServiceZoneRequest> for sled_agent_client::types::ServiceZoneRequest {
             addresses: s.addresses,
             gz_addresses: s.gz_addresses,
             services,
+        }
+    }
+}
+
+impl From<ServiceType> for nexus_client::types::ServiceKind {
+    fn from(s: ServiceType) -> Self {
+        match s {
+            ServiceType::InternalDns { .. } => {
+                nexus_client::types::ServiceKind::InternalDNS
+            }
+            ServiceType::Nexus { .. } => {
+                nexus_client::types::ServiceKind::Nexus
+            }
+            ServiceType::Oximeter => nexus_client::types::ServiceKind::Oximeter,
+            ServiceType::Dendrite { .. } => {
+                nexus_client::types::ServiceKind::Dendrite
+            }
+            ServiceType::Tfport { .. } => {
+                nexus_client::types::ServiceKind::Tfport
+            }
+            ServiceType::CruciblePantry => {
+                nexus_client::types::ServiceKind::CruciblePantry
+            }
         }
     }
 }

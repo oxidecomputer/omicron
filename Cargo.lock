@@ -1045,7 +1045,7 @@ dependencies = [
 [[package]]
 name = "crucible-agent-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=144d8dafa41715e00b08a5929cc62140ff0eb561#144d8dafa41715e00b08a5929cc62140ff0eb561"
+source = "git+https://github.com/oxidecomputer/crucible?rev=00c1de9b165e8abff1eed6e26a5755465785fc07#00c1de9b165e8abff1eed6e26a5755465785fc07"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1060,9 +1060,37 @@ dependencies = [
 [[package]]
 name = "crucible-client-types"
 version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/crucible?rev=00c1de9b165e8abff1eed6e26a5755465785fc07#00c1de9b165e8abff1eed6e26a5755465785fc07"
+dependencies = [
+ "base64",
+ "schemars",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "crucible-client-types"
+version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/crucible?rev=144d8dafa41715e00b08a5929cc62140ff0eb561#144d8dafa41715e00b08a5929cc62140ff0eb561"
 dependencies = [
  "base64",
+ "schemars",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "crucible-pantry-client"
+version = "0.0.1"
+source = "git+https://github.com/oxidecomputer/crucible?rev=00c1de9b165e8abff1eed6e26a5755465785fc07#00c1de9b165e8abff1eed6e26a5755465785fc07"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "percent-encoding",
+ "progenitor 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor)",
+ "reqwest",
  "schemars",
  "serde",
  "serde_json",
@@ -3032,6 +3060,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "dropshot",
+ "internal-dns-client",
  "omicron-common",
  "slog",
 ]
@@ -3047,6 +3076,7 @@ dependencies = [
  "headers",
  "http",
  "hyper",
+ "internal-dns-client",
  "nexus-test-interface",
  "omicron-common",
  "omicron-nexus",
@@ -3330,6 +3360,7 @@ dependencies = [
  "cookie",
  "criterion",
  "crucible-agent-client",
+ "crucible-pantry-client",
  "db-macros",
  "diesel",
  "diesel-dtrace",
@@ -3444,18 +3475,20 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "base64",
  "bincode",
  "bytes",
  "cfg-if 1.0.0",
  "chrono",
  "clap 4.0.18",
  "crucible-agent-client",
- "crucible-client-types",
+ "crucible-client-types 0.1.0 (git+https://github.com/oxidecomputer/crucible?rev=00c1de9b165e8abff1eed6e26a5755465785fc07)",
  "ddm-admin-client",
  "dropshot",
  "expectorate",
  "futures",
  "http",
+ "internal-dns",
  "internal-dns-client",
  "ipnetwork",
  "libc",
@@ -4523,10 +4556,10 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=e58937fea67aca6bc2d37a3cc50a72291328ae0e#e58937fea67aca6bc2d37a3cc50a72291328ae0e"
+source = "git+https://github.com/oxidecomputer/propolis?rev=c312e724b0400001bd4c0738f789ebdffe3d39b6#c312e724b0400001bd4c0738f789ebdffe3d39b6"
 dependencies = [
  "base64",
- "crucible-client-types",
+ "crucible-client-types 0.1.0 (git+https://github.com/oxidecomputer/crucible?rev=144d8dafa41715e00b08a5929cc62140ff0eb561)",
  "progenitor 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor?branch=main)",
  "propolis_types",
  "rand 0.8.5",
@@ -4544,7 +4577,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=e58937fea67aca6bc2d37a3cc50a72291328ae0e#e58937fea67aca6bc2d37a3cc50a72291328ae0e"
+source = "git+https://github.com/oxidecomputer/propolis?rev=c312e724b0400001bd4c0738f789ebdffe3d39b6#c312e724b0400001bd4c0738f789ebdffe3d39b6"
 dependencies = [
  "serde",
 ]

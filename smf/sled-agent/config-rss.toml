@@ -99,3 +99,12 @@ asic = "tofino_stub"
 # to layer over.
 #type = "tfport"
 #pkt_source = "tfpkt0"
+
+[[request.service_zone]]
+id = "1fa25cf1-147b-4179-8f8b-c601333733bf"
+zone_name = "crucible-pantry"
+addresses = [ "fd00:1122:3344:0101::10" ]
+gz_addresses = []
+[[request.service_zone.services]]
+type = "crucible_pantry"
+

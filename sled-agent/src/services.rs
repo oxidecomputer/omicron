@@ -14,6 +14,7 @@ use crate::illumos::zone::AddressRequest;
 use crate::params::{ServiceEnsureBody, ServiceType, ServiceZoneRequest};
 use crate::zone::Zones;
 use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::CRUCIBLE_PANTRY_PORT;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
 use omicron_common::address::OXIMETER_PORT;
@@ -620,7 +621,7 @@ impl ServiceManager {
                         smfh.setprop("config/asic", asic)?;
                         smfh.setprop(
                             "config/address",
-                            &format!("[{}]:{}", address, DENDRITE_PORT,),
+                            &format!("[{}]:{}", address, DENDRITE_PORT),
                         )?;
                         smfh.refresh()?;
                     }
@@ -628,6 +629,16 @@ impl ServiceManager {
                         info!(self.log, "Setting up tfport service");
 
                         smfh.setprop("config/pkt_source", pkt_source)?;
+                        smfh.refresh()?;
+                    }
+                    ServiceType::CruciblePantry => {
+                        info!(self.log, "Setting up crucible-pantry service");
+
+                        let address = req.addresses[0];
+                        smfh.setprop(
+                            "config/listen",
+                            &format!("[{}]:{}", address, CRUCIBLE_PANTRY_PORT),
+                        )?;
                         smfh.refresh()?;
                     }
                 }

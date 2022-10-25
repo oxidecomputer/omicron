@@ -1838,7 +1838,8 @@
           "nexus",
           "oximeter",
           "dendrite",
-          "tfport"
+          "tfport",
+          "crucible_pantry"
         ]
       },
       "ServicePutRequest": {

@@ -42,5 +42,10 @@ pub trait NexusServer {
 
     fn get_http_servers_external(&self) -> Vec<SocketAddr>;
     fn get_http_server_internal(&self) -> SocketAddr;
+
+    async fn set_resolver(
+        &self,
+        resolver: internal_dns_client::multiclient::Resolver,
+    );
     async fn close(self);
 }

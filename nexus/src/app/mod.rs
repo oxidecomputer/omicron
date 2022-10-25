@@ -18,6 +18,7 @@ use anyhow::anyhow;
 use omicron_common::api::external::Error;
 use slog::Logger;
 use std::sync::Arc;
+use std::sync::Mutex;
 use uuid::Uuid;
 
 // The implementation of Nexus is large, and split into a number of submodules
@@ -79,7 +80,7 @@ pub struct Nexus {
     sec_client: Arc<steno::SecClient>,
 
     /// Task representing completion of recovered Sagas
-    recovery_task: std::sync::Mutex<Option<db::RecoveryTask>>,
+    recovery_task: Mutex<Option<db::RecoveryTask>>,
 
     /// Status of background task to populate database
     populate_status: tokio::sync::watch::Receiver<PopulateStatus>,
@@ -105,7 +106,10 @@ pub struct Nexus {
     // this amount of time is called "max issue delay" and we have to set that
     // in order for our integration tests that POST static SAML responses to
     // Nexus to not all fail.
-    samael_max_issue_delay: std::sync::Mutex<Option<chrono::Duration>>,
+    samael_max_issue_delay: Mutex<Option<chrono::Duration>>,
+
+    pub resolver:
+        Arc<tokio::sync::Mutex<internal_dns_client::multiclient::Resolver>>,
 }
 
 // TODO Is it possible to make some of these operations more generic?  A
@@ -121,7 +125,9 @@ impl Nexus {
     pub async fn new_with_id(
         rack_id: Uuid,
         log: Logger,
-        resolver: internal_dns_client::multiclient::Resolver,
+        resolver: Arc<
+            tokio::sync::Mutex<internal_dns_client::multiclient::Resolver>,
+        >,
         pool: db::Pool,
         config: &config::Config,
         authz: Arc<authz::Authz>,
@@ -144,13 +150,14 @@ impl Nexus {
 
         // Connect to clickhouse - but do so lazily.
         // Clickhouse may not be executing when Nexus starts.
-        let timeseries_client =
-            if let Some(address) = &config.pkg.timeseries_db.address {
-                // If an address was provided, use it instead of DNS.
-                LazyTimeseriesClient::new_from_address(log.clone(), *address)
-            } else {
-                LazyTimeseriesClient::new_from_dns(log.clone(), resolver)
-            };
+        let timeseries_client = if let Some(address) =
+            &config.pkg.timeseries_db.address
+        {
+            // If an address was provided, use it instead of DNS.
+            LazyTimeseriesClient::new_from_address(log.clone(), *address)
+        } else {
+            LazyTimeseriesClient::new_from_dns(log.clone(), resolver.clone())
+        };
 
         // TODO-cleanup We may want a first-class subsystem for managing startup
         // background tasks.  It could use a Future for each one, a status enum
@@ -177,7 +184,7 @@ impl Nexus {
             db_datastore: Arc::clone(&db_datastore),
             authz: Arc::clone(&authz),
             sec_client: Arc::clone(&sec_client),
-            recovery_task: std::sync::Mutex::new(None),
+            recovery_task: Mutex::new(None),
             populate_status,
             timeseries_client,
             updates_config: config.pkg.updates.clone(),
@@ -194,7 +201,8 @@ impl Nexus {
                 authn::Context::external_authn(),
                 Arc::clone(&db_datastore),
             ),
-            samael_max_issue_delay: std::sync::Mutex::new(None),
+            samael_max_issue_delay: Mutex::new(None),
+            resolver,
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
@@ -464,6 +472,20 @@ impl Nexus {
         opctx: &'a OpContext,
     ) -> db::lookup::LookupPath {
         db::lookup::LookupPath::new(opctx, &self.db_datastore)
+    }
+
+    pub async fn set_resolver(
+        &self,
+        resolver: internal_dns_client::multiclient::Resolver,
+    ) {
+        *self.resolver.lock().await = resolver;
+    }
+
+    pub async fn resolver(
+        &self,
+    ) -> tokio::sync::MutexGuard<'_, internal_dns_client::multiclient::Resolver>
+    {
+        self.resolver.lock().await
     }
 }
 

@@ -78,13 +78,22 @@
 //!
 //! # Taking a snapshot of a detached disk
 //!
-//! TODO this is currently unimplemented
+//! This process is mostly the same as the process of taking a snapshot of a
+//! disk that's attached to an instance, but if a disk is not currently attached
+//! to an instance, there's no Upstairs to send the snapshot request to. The
+//! Crucible Pantry is a service that will be launched on each Sled and will be
+//! used for these types of maintenance tasks. In this case this saga will
+//! attach the volume "to" a random Pantry by sending a volume construction
+//! request, then send a snapshot request, then detach "from" that random
+//! Pantry. Most of the rest of the saga is unchanged.
 //!
 
-use super::{
-    common_storage::ensure_all_datasets_and_regions, ActionRegistry,
-    NexusActionContext, NexusSaga, SagaInitError, ACTION_GENERATE_ID,
-};
+use super::common_storage::ensure_all_datasets_and_regions;
+use super::ActionRegistry;
+use super::NexusActionContext;
+use super::NexusSaga;
+use super::SagaInitError;
+use super::ACTION_GENERATE_ID;
 use crate::app::sagas::NexusAction;
 use crate::context::OpContext;
 use crate::db::identity::{Asset, Resource};
@@ -93,18 +102,21 @@ use crate::external_api::params;
 use crate::{authn, authz, db};
 use anyhow::anyhow;
 use crucible_agent_client::{types::RegionId, Client as CrucibleAgentClient};
+use internal_dns_client::names::ServiceName;
+use internal_dns_client::names::SRV;
 use lazy_static::lazy_static;
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
+use omicron_common::backoff;
 use rand::{rngs::StdRng, RngCore, SeedableRng};
 use serde::Deserialize;
 use serde::Serialize;
-use sled_agent_client::types::{
-    CrucibleOpts, DiskSnapshotRequestBody,
-    InstanceIssueDiskSnapshotRequestBody, VolumeConstructionRequest,
-};
+use sled_agent_client::types::CrucibleOpts;
+use sled_agent_client::types::InstanceIssueDiskSnapshotRequestBody;
+use sled_agent_client::types::VolumeConstructionRequest;
 use slog::info;
 use std::collections::BTreeMap;
+use std::net::SocketAddrV6;
 use std::sync::Arc;
 use steno::new_action_noop_undo;
 use steno::ActionError;
@@ -120,6 +132,7 @@ pub struct Params {
     pub silo_id: Uuid,
     pub project_id: Uuid,
     pub disk_id: Uuid,
+    pub use_the_pantry: bool,
     pub create_params: params::SnapshotCreate,
 }
 
@@ -145,9 +158,38 @@ lazy_static! {
         ssc_create_snapshot_record,
         ssc_create_snapshot_record_undo,
     );
-    static ref SEND_SNAPSHOT_REQUEST: NexusAction = new_action_noop_undo(
-        "snapshot-create.send-snapshot-request",
-        ssc_send_snapshot_request,
+    static ref SEND_SNAPSHOT_REQUEST_TO_SLED_AGENT: NexusAction =
+        new_action_noop_undo(
+            "snapshot-create.send-snapshot-request-to-sled-agent",
+            ssc_send_snapshot_request_to_sled_agent,
+        );
+    static ref ATTACH_DISK_TO_PANTRY: NexusAction = ActionFunc::new_action(
+        "snapshot-create.attach-disk-to-pantry",
+        ssc_attach_disk_to_pantry,
+        ssc_attach_disk_to_pantry_undo,
+    );
+    static ref GET_PANTRY_ADDRESS: NexusAction = new_action_noop_undo(
+        "snapshot-create.get-pantry-address",
+        ssc_get_pantry_address,
+    );
+    static ref CALL_PANTRY_ATTACH_FOR_DISK: NexusAction =
+        ActionFunc::new_action(
+            "snapshot-create.call-pantry-attach-for-disk",
+            ssc_call_pantry_attach_for_disk,
+            ssc_call_pantry_attach_for_disk_undo,
+        );
+    static ref CALL_PANTRY_SNAPSHOT_FOR_DISK: NexusAction =
+        new_action_noop_undo(
+            "snapshot-create.call-pantry-snapshot-for-disk",
+            ssc_call_pantry_snapshot_for_disk,
+        );
+    static ref CALL_PANTRY_DETACH_FOR_DISK: NexusAction = new_action_noop_undo(
+        "snapshot-create.call-pantry-detach-for-disk",
+        ssc_call_pantry_detach_for_disk,
+    );
+    static ref DETACH_DISK_FROM_PANTRY: NexusAction = new_action_noop_undo(
+        "snapshot-create.detach-disk-from-pantry",
+        ssc_detach_disk_from_pantry,
     );
     static ref START_RUNNING_SNAPSHOT: NexusAction = new_action_noop_undo(
         "snapshot-create.start-running-snapshot",
@@ -162,6 +204,8 @@ lazy_static! {
         "snapshot-create.finalize-snapshot-record",
         ssc_finalize_snapshot_record,
     );
+    static ref PANTRY_SENTINEL_ID: Uuid =
+        "00000000-0000-0000-0000-000000000000".parse().unwrap();
 }
 
 // snapshot create saga: definition
@@ -177,14 +221,20 @@ impl NexusSaga for SagaSnapshotCreate {
         registry.register(Arc::clone(&*REGIONS_ENSURE));
         registry.register(Arc::clone(&*CREATE_DESTINATION_VOLUME_RECORD));
         registry.register(Arc::clone(&*CREATE_SNAPSHOT_RECORD));
-        registry.register(Arc::clone(&*SEND_SNAPSHOT_REQUEST));
+        registry.register(Arc::clone(&*SEND_SNAPSHOT_REQUEST_TO_SLED_AGENT));
+        registry.register(Arc::clone(&*ATTACH_DISK_TO_PANTRY));
+        registry.register(Arc::clone(&*GET_PANTRY_ADDRESS));
+        registry.register(Arc::clone(&*CALL_PANTRY_ATTACH_FOR_DISK));
+        registry.register(Arc::clone(&*CALL_PANTRY_SNAPSHOT_FOR_DISK));
+        registry.register(Arc::clone(&*CALL_PANTRY_DETACH_FOR_DISK));
+        registry.register(Arc::clone(&*DETACH_DISK_FROM_PANTRY));
         registry.register(Arc::clone(&*START_RUNNING_SNAPSHOT));
         registry.register(Arc::clone(&*CREATE_VOLUME_RECORD));
         registry.register(Arc::clone(&*FINALIZE_SNAPSHOT_RECORD));
     }
 
     fn make_saga_dag(
-        _params: &Self::Params,
+        params: &Self::Params,
         mut builder: steno::DagBuilder,
     ) -> Result<steno::Dag, SagaInitError> {
         // Generate IDs
@@ -232,12 +282,58 @@ impl NexusSaga for SagaSnapshotCreate {
             CREATE_SNAPSHOT_RECORD.as_ref(),
         ));
 
-        // Send a snapshot request to a sled-agent
-        builder.append(Node::action(
-            "snapshot_request",
-            "SendSnapshotRequest",
-            SEND_SNAPSHOT_REQUEST.as_ref(),
-        ));
+        if !params.use_the_pantry {
+            // If the disk is attached to an instance, send a snapshot request
+            // to a sled-agent
+            builder.append(Node::action(
+                "snapshot_request_to_sled_agent",
+                "SendSnapshotRequestToSledAgent",
+                SEND_SNAPSHOT_REQUEST_TO_SLED_AGENT.as_ref(),
+            ));
+        } else {
+            // If the disk is _not_ attached to an instance:
+            // 1. "attach" the disk to the pantry
+            builder.append(Node::action(
+                "attach_disk_to_pantry",
+                "AttachDiskToPantry",
+                ATTACH_DISK_TO_PANTRY.as_ref(),
+            ));
+
+            // 2. record the address of a Pantry service
+            builder.append(Node::action(
+                "pantry_address",
+                "GetPantryAddress",
+                GET_PANTRY_ADDRESS.as_ref(),
+            ));
+
+            // 3. call the Pantry's /attach
+            builder.append(Node::action(
+                "call_pantry_attach_for_disk",
+                "CallPantryAttachForDisk",
+                CALL_PANTRY_ATTACH_FOR_DISK.as_ref(),
+            ));
+
+            // 4. call the Pantry's /snapshot
+            builder.append(Node::action(
+                "call_pantry_snapshot_for_disk",
+                "CallPantrySnapshotForDisk",
+                CALL_PANTRY_SNAPSHOT_FOR_DISK.as_ref(),
+            ));
+
+            // 5. call the Pantry's /detach
+            builder.append(Node::action(
+                "call_pantry_detach_for_disk",
+                "CallPantryDetachForDisk",
+                CALL_PANTRY_DETACH_FOR_DISK.as_ref(),
+            ));
+
+            // 6. clear attach_instance_id
+            builder.append(Node::action(
+                "detach_disk_from_pantry",
+                "DetachDiskFromPantry",
+                DETACH_DISK_FROM_PANTRY.as_ref(),
+            ));
+        }
 
         // Validate with crucible agent and start snapshot downstairs
         builder.append(Node::action(
@@ -509,7 +605,7 @@ async fn ssc_create_snapshot_record_undo(
     Ok(())
 }
 
-async fn ssc_send_snapshot_request(
+async fn ssc_send_snapshot_request_to_sled_agent(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let log = sagactx.user_data().log();
@@ -558,52 +654,374 @@ async fn ssc_send_snapshot_request(
         }
 
         None => {
-            info!(log, "disk {} not attached to an instance", disk.id());
+            // This branch shouldn't be seen unless there's a detach that occurs
+            // after the saga starts.
+            error!(log, "disk {} not attached to an instance!", disk.id());
 
-            // Grab volume construction request for the disk
-            let disk_volume = osagactx
-                .datastore()
-                .volume_get(disk.volume_id)
-                .await
-                .map_err(ActionError::action_failed)?;
+            return Err(ActionError::action_failed(
+                "disk detached after snapshot_create saga started!".to_string(),
+            ));
+        }
+    }
 
-            info!(
-                log,
-                "disk volume construction request {}",
-                disk_volume.data()
-            );
+    Ok(())
+}
 
-            let disk_volume_construction_request: VolumeConstructionRequest =
-                serde_json::from_str(&disk_volume.data()).map_err(|e| {
-                    ActionError::action_failed(Error::internal_error(&format!(
-                        "failed to deserialize disk {} volume data: {}",
-                        disk.id(),
+async fn ssc_attach_disk_to_pantry(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let log = sagactx.user_data().log();
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+
+    let (.., authz_disk, db_disk) =
+        LookupPath::new(&opctx, &osagactx.datastore())
+            .disk_id(params.disk_id)
+            .fetch_for(authz::Action::Modify)
+            .await
+            .map_err(ActionError::action_failed)?;
+
+    info!(
+        log,
+        "attaching disk {} to pantry with id {:?}",
+        params.disk_id,
+        PANTRY_SENTINEL_ID.to_string(),
+    );
+
+    osagactx
+        .datastore()
+        .disk_update_runtime(
+            &opctx,
+            &authz_disk,
+            &db_disk.runtime().attach(*PANTRY_SENTINEL_ID),
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    Ok(())
+}
+
+async fn ssc_attach_disk_to_pantry_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let log = sagactx.user_data().log();
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+
+    let (.., authz_disk, db_disk) =
+        LookupPath::new(&opctx, &osagactx.datastore())
+            .disk_id(params.disk_id)
+            .fetch_for(authz::Action::Modify)
+            .await
+            .map_err(ActionError::action_failed)?;
+
+    match db_disk.runtime().attach_instance_id {
+        Some(attach_instance_id) => {
+            if attach_instance_id == *PANTRY_SENTINEL_ID {
+                info!(
+                    log,
+                    "undo: detaching disk {} from the pantry", params.disk_id
+                );
+
+                osagactx
+                    .datastore()
+                    .disk_update_runtime(
+                        &opctx,
+                        &authz_disk,
+                        &db_disk.runtime().detach(),
+                    )
+                    .await
+                    .map_err(ActionError::action_failed)?;
+            } else {
+                info!(
+                    log,
+                    "undo: disk {} not attached to pantry, it's attached to {}!",
+                    params.disk_id,
+                    attach_instance_id,
+                );
+
+                // XXX what to do here?
+            }
+        }
+
+        None => {
+            info!(log, "undo: disk {} already detached", params.disk_id);
+        }
+    }
+
+    Ok(())
+}
+
+async fn ssc_get_pantry_address(
+    sagactx: NexusActionContext,
+) -> Result<SocketAddrV6, ActionError> {
+    let log = sagactx.user_data().log();
+    let osagactx = sagactx.user_data();
+
+    let pantry_address = osagactx
+        .nexus()
+        .resolver()
+        .await
+        .lookup_socket_v6(SRV::Service(ServiceName::CruciblePantry))
+        .await
+        .map_err(|e| e.to_string())
+        .map_err(ActionError::action_failed)?;
+
+    info!(log, "using pantry at {}", pantry_address);
+
+    Ok(pantry_address)
+}
+
+#[macro_export]
+macro_rules! retry_until_known_result {
+    ( $log:ident, $func:block ) => {
+        #[derive(Debug, thiserror::Error)]
+        enum InnerError {
+            #[error("Reqwest error: {0}")]
+            Reqwest(#[from] reqwest::Error),
+
+            #[error("Pantry client error: {0}")]
+            PantryClient(
+                #[from]
+                crucible_pantry_client::Error<
+                    crucible_pantry_client::types::Error,
+                >,
+            ),
+        }
+
+        backoff::retry_notify(
+            backoff::internal_service_policy(),
+            || async {
+                match ($func).await {
+                    Err(crucible_pantry_client::Error::CommunicationError(
                         e,
-                    )))
-                })?;
+                    )) => {
+                        warn!(
+                            $log,
+                            "saw transient communication error {}, retrying...",
+                            e,
+                        );
 
-            // Send the snapshot request to a random sled agent
-            let sled_agent_client = osagactx
-                .random_sled_client()
-                .await
-                .map_err(ActionError::action_failed)?
-                .ok_or_else(|| {
-                    "no sled found when looking for random sled?!".to_string()
-                })
-                .map_err(ActionError::action_failed)?;
+                        Err(backoff::BackoffError::<InnerError>::transient(
+                            e.into(),
+                        ))
+                    }
 
-            sled_agent_client
-                .issue_disk_snapshot_request(
-                    &disk.id(),
-                    &DiskSnapshotRequestBody {
-                        volume_construction_request:
-                            disk_volume_construction_request.clone(),
-                        snapshot_id,
-                    },
-                )
-                .await
-                .map_err(|e| e.to_string())
-                .map_err(ActionError::action_failed)?;
+                    Err(e) => {
+                        warn!($log, "saw permanent error {}, aborting", e,);
+
+                        Err(backoff::BackoffError::<InnerError>::Permanent(
+                            e.into(),
+                        ))
+                    }
+
+                    Ok(_) => Ok(()),
+                }
+            },
+            |error: InnerError, delay| {
+                warn!(
+                    $log,
+                    "failed external call ({:?}), will retry in {:?}",
+                    error,
+                    delay,
+                );
+            },
+        )
+        .await
+        .map_err(|e| {
+            ActionError::action_failed(format!(
+                "gave up on external call due to {:?}",
+                e
+            ))
+        })?;
+    };
+}
+
+async fn ssc_call_pantry_attach_for_disk(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let log = sagactx.user_data().log();
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+
+    let pantry_address = sagactx.lookup::<SocketAddrV6>("pantry_address")?;
+
+    let endpoint = format!("http://{}", pantry_address);
+
+    let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
+        .disk_id(params.disk_id)
+        .fetch_for(authz::Action::Modify)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    let disk_volume = osagactx
+        .datastore()
+        .volume_get(disk.volume_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    info!(
+        log,
+        "sending attach for disk {} volume {} to endpoint {}",
+        params.disk_id,
+        disk.volume_id,
+        endpoint,
+    );
+
+    let volume_construction_request: crucible_pantry_client::types::VolumeConstructionRequest =
+        serde_json::from_str(&disk_volume.data()).map_err(|e| {
+            ActionError::action_failed(Error::internal_error(&format!(
+                "failed to deserialize disk {} volume data: {}",
+                disk.id(),
+                e,
+            )))
+        })?;
+
+    let client = crucible_pantry_client::Client::new(&endpoint);
+
+    let attach_request = crucible_pantry_client::types::AttachRequest {
+        volume_construction_request,
+    };
+
+    retry_until_known_result!(log, {
+        client.attach(&params.disk_id.to_string(), &attach_request)
+    });
+
+    Ok(())
+}
+
+async fn ssc_call_pantry_attach_for_disk_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let log = sagactx.user_data().log();
+    let params = sagactx.saga_params::<Params>()?;
+
+    let pantry_address = sagactx.lookup::<SocketAddrV6>("pantry_address")?;
+
+    let endpoint = format!("http://{}", pantry_address);
+
+    info!(
+        log,
+        "undo: sending detach for disk {} to endpoint {}",
+        params.disk_id,
+        endpoint,
+    );
+
+    let client = crucible_pantry_client::Client::new(&endpoint);
+
+    retry_until_known_result!(log, {
+        client.detach(&params.disk_id.to_string())
+    });
+
+    Ok(())
+}
+
+async fn ssc_call_pantry_snapshot_for_disk(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let log = sagactx.user_data().log();
+    let params = sagactx.saga_params::<Params>()?;
+
+    let pantry_address = sagactx.lookup::<SocketAddrV6>("pantry_address")?;
+    let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
+
+    let endpoint = format!("http://{}", pantry_address);
+
+    info!(
+        log,
+        "sending snapshot request with id {} for disk {} to pantry endpoint {}",
+        snapshot_id,
+        params.disk_id,
+        endpoint,
+    );
+
+    let client = crucible_pantry_client::Client::new(&endpoint);
+
+    client
+        .snapshot(
+            &params.disk_id.to_string(),
+            &crucible_pantry_client::types::SnapshotRequest {
+                snapshot_id: snapshot_id.to_string(),
+            },
+        )
+        .await
+        .map_err(|e| {
+            ActionError::action_failed(Error::internal_error(&e.to_string()))
+        })?;
+
+    Ok(())
+}
+
+async fn ssc_call_pantry_detach_for_disk(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let log = sagactx.user_data().log();
+    let params = sagactx.saga_params::<Params>()?;
+
+    let pantry_address = sagactx.lookup::<SocketAddrV6>("pantry_address")?;
+
+    let endpoint = format!("http://{}", pantry_address);
+
+    info!(
+        log,
+        "sending detach for disk {} to endpoint {}", params.disk_id, endpoint,
+    );
+
+    let client = crucible_pantry_client::Client::new(&endpoint);
+
+    retry_until_known_result!(log, {
+        client.detach(&params.disk_id.to_string())
+    });
+
+    Ok(())
+}
+
+async fn ssc_detach_disk_from_pantry(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let log = sagactx.user_data().log();
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+
+    let (.., authz_disk, db_disk) =
+        LookupPath::new(&opctx, &osagactx.datastore())
+            .disk_id(params.disk_id)
+            .fetch_for(authz::Action::Modify)
+            .await
+            .map_err(ActionError::action_failed)?;
+
+    match db_disk.runtime().attach_instance_id {
+        Some(attach_instance_id) => {
+            if attach_instance_id == *PANTRY_SENTINEL_ID {
+                info!(log, "detaching disk {} from the pantry", params.disk_id);
+
+                osagactx
+                    .datastore()
+                    .disk_update_runtime(
+                        &opctx,
+                        &authz_disk,
+                        &db_disk.runtime().detach(),
+                    )
+                    .await
+                    .map_err(ActionError::action_failed)?;
+            } else {
+                info!(
+                    log,
+                    "disk {} not attached to pantry, it's attached to {}!",
+                    params.disk_id,
+                    attach_instance_id,
+                );
+
+                // XXX what to do here?
+            }
+        }
+
+        None => {
+            info!(log, "disk {} already detached", params.disk_id);
         }
     }
 
