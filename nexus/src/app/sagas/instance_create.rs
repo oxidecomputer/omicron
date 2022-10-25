@@ -795,65 +795,39 @@ async fn ensure_instance_disk_attach_state(
         saga_params.organization_name.clone().into();
     let project_name: db::model::Name = saga_params.project_name.clone().into();
 
-    match disk {
+    let disk_name = match disk {
         params::InstanceDiskAttachment::Create(create_params) => {
-            let disk_name = db::model::Name(create_params.name.clone());
-
-            if attached {
-                osagactx
-                    .nexus()
-                    .instance_attach_disk(
-                        &opctx,
-                        &organization_name,
-                        &project_name,
-                        &instance_name,
-                        &disk_name,
-                    )
-                    .await
-            } else {
-                osagactx
-                    .nexus()
-                    .instance_detach_disk(
-                        &opctx,
-                        &organization_name,
-                        &project_name,
-                        &instance_name,
-                        &disk_name,
-                    )
-                    .await
-            }
-            .map_err(ActionError::action_failed)?;
+            db::model::Name(create_params.identity.name.clone())
         }
-        params::InstanceDiskAttachment::Attach(instance_disk_attach) => {
-            let disk_name: db::model::Name =
-                instance_disk_attach.name.clone().into();
-
-            if attached {
-                osagactx
-                    .nexus()
-                    .instance_attach_disk(
-                        &opctx,
-                        &organization_name,
-                        &project_name,
-                        &instance_name,
-                        &disk_name,
-                    )
-                    .await
-            } else {
-                osagactx
-                    .nexus()
-                    .instance_detach_disk(
-                        &opctx,
-                        &organization_name,
-                        &project_name,
-                        &instance_name,
-                        &disk_name,
-                    )
-                    .await
-            }
-            .map_err(ActionError::action_failed)?;
+        params::InstanceDiskAttachment::Existing { name } => {
+            db::model::Name(name.clone())
         }
+    };
+
+    if attached {
+        osagactx
+            .nexus()
+            .instance_attach_disk(
+                &opctx,
+                &organization_name,
+                &project_name,
+                &instance_name,
+                &disk_name,
+            )
+            .await
+    } else {
+        osagactx
+            .nexus()
+            .instance_detach_disk(
+                &opctx,
+                &organization_name,
+                &project_name,
+                &instance_name,
+                &disk_name,
+            )
+            .await
     }
+    .map_err(ActionError::action_failed)?;
 
     Ok(())
 }
