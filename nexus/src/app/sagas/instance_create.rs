@@ -796,11 +796,33 @@ async fn ensure_instance_disk_attach_state(
     let project_name: db::model::Name = saga_params.project_name.clone().into();
 
     match disk {
-        params::InstanceDiskAttachment::Create(_) => {
-            // TODO grab disks created in sic_create_disks_for_instance
-            return Err(ActionError::action_failed(Error::invalid_request(
-                "creating disks while creating an instance not supported",
-            )));
+        params::InstanceDiskAttachment::Create(create_params) => {
+            let disk_name = db::model::Name(create_params.name.clone());
+
+            if attached {
+                osagactx
+                    .nexus()
+                    .instance_attach_disk(
+                        &opctx,
+                        &organization_name,
+                        &project_name,
+                        &instance_name,
+                        &disk_name,
+                    )
+                    .await
+            } else {
+                osagactx
+                    .nexus()
+                    .instance_detach_disk(
+                        &opctx,
+                        &organization_name,
+                        &project_name,
+                        &instance_name,
+                        &disk_name,
+                    )
+                    .await
+            }
+            .map_err(ActionError::action_failed)?;
         }
         params::InstanceDiskAttachment::Attach(instance_disk_attach) => {
             let disk_name: db::model::Name =
