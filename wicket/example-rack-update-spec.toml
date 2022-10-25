@@ -6,6 +6,6 @@
 version = "1.0.0"
 
 [[artifacts]]
-filename = "test-data/sled-sp-img-1.0.0.tar.gz"
+filename = "test-data/fake-update-img-1.0.0.tar.gz"
 artifact_type = "SledSp"
 version = "1.0.0"
