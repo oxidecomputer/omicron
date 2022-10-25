@@ -709,10 +709,13 @@ async fn sic_allocate_instance_external_ip_undo(
 async fn sic_create_disks_for_instance(
     sagactx: NexusActionContext,
 ) -> Result<Option<String>, ActionError> {
+    let osagactx: &Arc<SagaContext> = sagactx.user_data();
     let disk_params = sagactx.saga_params::<DiskParams>()?;
     let saga_params = disk_params.saga_params;
     let disk_index = disk_params.which;
     let saga_disks = &saga_params.create_params.disks;
+    let opctx =
+        OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
 
     if disk_index >= saga_disks.len() {
         return Ok(None);
@@ -720,14 +723,26 @@ async fn sic_create_disks_for_instance(
 
     let disk = &saga_disks[disk_index];
 
+    // TODO-correctness TODO-security It's not correct to re-resolve the
+    // organization and project names now.  See oxidecomputer/omicron#1536.
+    let organization_name: db::model::Name =
+        saga_params.organization_name.clone().into();
+    let project_name: db::model::Name = saga_params.project_name.clone().into();
+
     match disk {
-        params::InstanceDiskAttachment::Create(_create_params) => {
-            return Err(ActionError::action_failed(
-                "Creating disk during instance create unsupported!".to_string(),
-            ));
+        params::InstanceDiskAttachment::Create(create_params) => {
+            osagactx
+                .nexus()
+                .project_create_disk(
+                    &opctx,
+                    &organization_name,
+                    &project_name,
+                    &create_params,
+                )
+                .await
         }
 
-        _ => {}
+        _ => Ok(None),
     }
 
     Ok(None)
