@@ -107,7 +107,8 @@ CREATE TYPE omicron.public.service_kind AS ENUM (
   'internal_dns',
   'nexus',
   'oximeter',
-  'dendrite'
+  'dendrite',
+  'tfport'
 );
 
 CREATE TABLE omicron.public.service (
