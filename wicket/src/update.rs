@@ -9,7 +9,6 @@ use serde::{Deserialize, Serialize};
 use sha3::Digest;
 use sha3::Sha3_256;
 use std::fs::File;
-use std::io::prelude::*;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,9 +49,7 @@ impl TryFrom<ArtifactSpec> for Artifact {
         let mut hasher = Sha3_256::new();
         let mut file = File::open(&spec.filename)?;
         let length = std::io::copy(&mut file, &mut hasher)?;
-        let mut digest = [0u8; 32];
-        digest.copy_from_slice(&hasher.finalize());
-        let digest = Sha3_256Digest(digest);
+        let digest = Sha3_256Digest(*hasher.finalize().as_ref());
         Ok(Artifact {
             filename: spec.filename,
             artifact_type: spec.artifact_type,
@@ -83,10 +80,9 @@ impl Manifest {
         &self,
         path: P,
     ) -> Result<PathBuf, std::io::Error> {
-        let json = serde_json::to_string(&self)?;
         let path = path.as_ref().join("manifest.json");
         let mut file = File::create(&path)?;
-        file.write_all(json.as_bytes())?;
+        serde_json::to_writer(&mut file, self)?;
         Ok(path)
     }
 
@@ -99,10 +95,8 @@ impl Manifest {
         let tarfile = File::open(tarfile)?;
         let mut archive = tar::Archive::new(tarfile);
         archive.unpack(&unpack_dir)?;
-        let json = std::fs::read_to_string(
-            &unpack_dir.as_ref().join("manifest.json"),
-        )?;
-        let manifest = serde_json::from_str(&json)?;
+        let file = File::open(unpack_dir.as_ref().join("manifest.json"))?;
+        let manifest = serde_json::from_reader(file)?;
         Ok(manifest)
     }
 }
