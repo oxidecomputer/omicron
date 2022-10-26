@@ -461,14 +461,14 @@ async fn sdc_regions_ensure_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let log = sagactx.user_data().log();
-    warn!(log, "regions_ensure_undo: Deleting crucible regions");
+    warn!(log, "sdc_regions_ensure_undo: Deleting crucible regions");
     delete_crucible_regions(
         sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
             "datasets_and_regions",
         )?,
     )
     .await?;
-    info!(log, "regions_ensure_undo: Deleted crucible regions");
+    info!(log, "sdc_regions_ensure_undo: Deleted crucible regions");
     Ok(())
 }
 
