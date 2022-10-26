@@ -4,6 +4,7 @@
 
 use crate::config::Config;
 use crate::config::SidecarConfig;
+use crate::config::SpComponentConfig;
 use crate::ignition_id;
 use crate::rot::RotSprocketExt;
 use crate::server;
@@ -13,6 +14,7 @@ use crate::SimulatedSp;
 use anyhow::Result;
 use async_trait::async_trait;
 use futures::future;
+use gateway_messages::sp_impl::DeviceDescription;
 use gateway_messages::sp_impl::SpHandler;
 use gateway_messages::BulkIgnitionState;
 use gateway_messages::DiscoverResponse;
@@ -145,6 +147,7 @@ impl Sidecar {
 
             let inner = Inner::new(
                 servers,
+                sidecar.common.components.clone(),
                 sidecar.common.serial_number,
                 ignition_targets,
                 commands_rx,
@@ -206,6 +209,7 @@ struct Inner {
 impl Inner {
     fn new(
         servers: [UdpServer; 2],
+        components: Vec<SpComponentConfig>,
         serial_number: SerialNumber,
         ignition_targets: Vec<IgnitionState>,
         commands: mpsc::UnboundedReceiver<(
@@ -216,7 +220,12 @@ impl Inner {
     ) -> Self {
         let [udp0, udp1] = servers;
         Self {
-            handler: Handler { log, serial_number, ignition_targets },
+            handler: Handler {
+                log,
+                components,
+                serial_number,
+                ignition_targets,
+            },
             udp0,
             udp1,
             commands,
@@ -279,6 +288,7 @@ impl Inner {
 
 struct Handler {
     log: Logger,
+    components: Vec<SpComponentConfig>,
     serial_number: SerialNumber,
     ignition_targets: Vec<IgnitionState>,
 }
@@ -586,5 +596,20 @@ impl SpHandler for Handler {
             "port" => ?port,
         );
         Err(ResponseError::RequestUnsupportedForSp)
+    }
+
+    fn num_devices(&mut self, _: SocketAddrV6, _: SpPort) -> u32 {
+        self.components.len().try_into().unwrap()
+    }
+
+    fn device_description(&mut self, index: u32) -> DeviceDescription<'_> {
+        let c = &self.components[index as usize];
+        DeviceDescription {
+            component: SpComponent::try_from(c.id.as_str()).unwrap(),
+            device: &c.device,
+            description: &c.description,
+            capabilities: c.capabilities,
+            presence: c.presence,
+        }
     }
 }

@@ -6,6 +6,8 @@
 //! configuration
 
 use dropshot::ConfigLogging;
+use gateway_messages::DeviceCapabilities;
+use gateway_messages::DevicePresence;
 use gateway_messages::SerialNumber;
 use serde::Deserialize;
 use serde::Serialize;
@@ -33,6 +35,25 @@ pub struct SpCommonConfig {
     /// 32-byte seed to create a Device ID certificate.
     #[serde(with = "hex")]
     pub device_id_cert_seed: [u8; 32],
+    /// Fake components.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub components: Vec<SpComponentConfig>,
+}
+
+/// Configuration of a simulated SP component
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct SpComponentConfig {
+    /// Must be at most [`gateway_messages::SpComponent::MAX_ID_LENGTH`] bytes
+    /// long.
+    pub id: String,
+    pub device: String,
+    pub description: String,
+    pub capabilities: DeviceCapabilities,
+    pub presence: DevicePresence,
+    /// Socket address to emulate a serial console.
+    ///
+    /// Only supported for components inside a [`GimletConfig`].
+    pub serial_console: Option<SocketAddrV6>,
 }
 
 /// Configuration of a simulated sidecar SP
@@ -47,19 +68,6 @@ pub struct SidecarConfig {
 pub struct GimletConfig {
     #[serde(flatten)]
     pub common: SpCommonConfig,
-    /// Attached components
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub components: Vec<SpComponentConfig>,
-}
-
-/// Configuration of a simulated gimlet SP
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct SpComponentConfig {
-    /// Name of the component
-    pub name: String,
-    /// Socket address we'll use to expose this component's serial console
-    /// via TCP.
-    pub serial_console: Option<SocketAddrV6>,
 }
 
 /// Configuration of a set of simulated SPs

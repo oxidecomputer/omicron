@@ -60,12 +60,18 @@ fn build_vfat(meta_data: &[u8], user_data: &[u8]) -> io::Result<Vec<u8>> {
     // Additionally, fatfs refuses to format a disk that is smaller than 42
     // sectors.
     let sectors = 42.max(file_sectors + 37);
+    // Some tools also require that the number of sectors is a multiple of the
+    // sectors-per-track. fatfs uses a default of 32 which won't evenly divide
+    // sectors as we compute above generally. To fix that we simply set it to
+    // match the number of sectors to make it trivially true.
+    let sectors_per_track = sectors.try_into().unwrap();
 
     let mut disk = Cursor::new(vec![0; sectors * 512]);
     fatfs::format_volume(
         &mut disk,
         FormatVolumeOptions::new()
             .bytes_per_cluster(512)
+            .sectors_per_track(sectors_per_track)
             .fat_type(FatType::Fat12)
             .volume_label(*b"cidata     "),
     )?;
