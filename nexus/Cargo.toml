@@ -27,10 +27,12 @@ hyper = "0.14"
 internal-dns-client = { path = "../internal-dns-client" }
 ipnetwork = "0.20"
 lazy_static = "1.4.0"
-libc = "0.2.135"
 macaddr = { version = "1.0.1", features = [ "serde_std" ]}
 mime_guess = "2.0.4"
 newtype_derive = "0.1.6"
+# Not under "dev-dependencies"; these also need to be implemented for
+# integration tests.
+nexus-test-interface = { path = "test-interface" }
 num-integer = "0.1.45"
 # must match samael's crate!
 openssl = "0.10"

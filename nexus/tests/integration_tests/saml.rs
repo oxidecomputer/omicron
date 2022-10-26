@@ -16,10 +16,12 @@ use http::method::Method;
 use http::StatusCode;
 use nexus_test_utils::resource_helpers::{create_silo, object_create};
 
-use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 
 use httptest::{matchers::*, responders::*, Expectation, Server};
+
+type ControlPlaneTestContext =
+    nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
 // Valid SAML IdP entity descriptor from https://en.wikipedia.org/wiki/SAML_metadata#Identity_provider_metadata
 // note: no signing keys

@@ -1,6 +1,37 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, ItemFn};
+use std::collections::HashSet as Set;
+use syn::parse::{Parse, ParseStream, Result};
+use syn::punctuated::Punctuated;
+use syn::{parse_macro_input, ItemFn, Token};
+
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub(crate) struct NameValue {
+    name: syn::Path,
+    _eq_token: syn::token::Eq,
+    value: syn::Path,
+}
+
+impl syn::parse::Parse for NameValue {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        Ok(Self {
+            name: input.parse()?,
+            _eq_token: input.parse()?,
+            value: input.parse()?,
+        })
+    }
+}
+
+struct Args {
+    vars: Set<NameValue>,
+}
+
+impl Parse for Args {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let vars = Punctuated::<NameValue, Token![,]>::parse_terminated(input)?;
+        Ok(Args { vars: vars.into_iter().collect() })
+    }
+}
 
 /// Attribute for wrapping a test function to handle automatically
 /// creating and destroying a ControlPlaneTestContext. If the wrapped test
@@ -10,6 +41,8 @@ use syn::{parse_macro_input, ItemFn};
 /// Example usage:
 ///
 /// ```ignore
+/// use ControlPlaneTestContext =
+///     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 /// #[nexus_test]
 /// async fn test_my_test_case(cptestctx: &ControlPlaneTestContext) {
 ///   assert!(true);
@@ -20,7 +53,7 @@ use syn::{parse_macro_input, ItemFn};
 /// we want the teardown to only happen when the test doesn't fail (which causes
 /// a panic and unwind).
 #[proc_macro_attribute]
-pub fn nexus_test(_metadata: TokenStream, input: TokenStream) -> TokenStream {
+pub fn nexus_test(attrs: TokenStream, input: TokenStream) -> TokenStream {
     let input_func = parse_macro_input!(input as ItemFn);
 
     let mut correct_signature = true;
@@ -30,6 +63,25 @@ pub fn nexus_test(_metadata: TokenStream, input: TokenStream) -> TokenStream {
     {
         correct_signature = false;
     }
+
+    // By default, import "omicron_nexus::Server" as the server under test.
+    //
+    // However, a caller can supply their own implementation of the server
+    // using:
+    //
+    // #[nexus_test(server = <CUSTOM SERVER>)]
+    //
+    // This mechanism allows Nexus unit test to be tested using the `nexus_test`
+    // macro without a circular dependency on nexus-test-utils.
+    let attrs = parse_macro_input!(attrs as Args);
+    let which_nexus = attrs
+        .vars
+        .iter()
+        .find(|nv| nv.name.is_ident("server"))
+        .map(|nv| nv.value.clone())
+        .unwrap_or_else(|| {
+            syn::parse_str::<syn::Path>("::omicron_nexus::Server").unwrap()
+        });
 
     // Verify we're returning an empty tuple
     correct_signature &= match input_func.sig.output {
@@ -52,7 +104,7 @@ pub fn nexus_test(_metadata: TokenStream, input: TokenStream) -> TokenStream {
         {
             #input_func
 
-            let ctx = ::nexus_test_utils::test_setup(#func_ident_string).await;
+            let ctx = ::nexus_test_utils::test_setup::<#which_nexus>(#func_ident_string).await;
             #func_ident(&ctx).await;
             ctx.teardown().await;
         }

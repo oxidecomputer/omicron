@@ -12,7 +12,6 @@ use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::create_organization;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::DiskTest;
-use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 
 use omicron_common::api::external::{ByteCount, IdentityMetadataCreateParams};
@@ -20,6 +19,9 @@ use omicron_nexus::external_api::params;
 use omicron_nexus::external_api::views::GlobalImage;
 
 use httptest::{matchers::*, responders::*, Expectation, ServerBuilder};
+
+type ControlPlaneTestContext =
+    nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
 #[nexus_test]
 async fn test_global_image_create(cptestctx: &ControlPlaneTestContext) {

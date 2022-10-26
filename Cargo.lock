@@ -2697,6 +2697,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-test-interface"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "dropshot",
+ "omicron-common",
+ "slog",
+]
+
+[[package]]
 name = "nexus-test-utils"
 version = "0.1.0"
 dependencies = [
@@ -2707,6 +2717,7 @@ dependencies = [
  "headers",
  "http",
  "hyper",
+ "nexus-test-interface",
  "omicron-common",
  "omicron-nexus",
  "omicron-sled-agent",
@@ -2728,6 +2739,7 @@ dependencies = [
 name = "nexus-test-utils-macros"
 version = "0.1.0"
 dependencies = [
+ "proc-macro2",
  "quote",
  "syn",
 ]
@@ -2880,6 +2892,7 @@ dependencies = [
  "http",
  "hyper",
  "ipnetwork",
+ "libc",
  "macaddr",
  "parse-display",
  "progenitor",
@@ -2981,12 +2994,12 @@ dependencies = [
  "ipnetwork",
  "itertools",
  "lazy_static",
- "libc",
  "macaddr",
  "mime_guess",
  "newtype_derive",
  "nexus-db-model",
  "nexus-defaults",
+ "nexus-test-interface",
  "nexus-test-utils",
  "nexus-test-utils-macros",
  "nexus-types",
