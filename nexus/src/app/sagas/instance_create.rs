@@ -1017,27 +1017,29 @@ async fn sic_instance_ensure(
 
 #[cfg(test)]
 mod test {
-    use async_bb8_diesel::{AsyncRunQueryDsl, OptionalExtension};
-    use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
-    use dropshot::test_util::ClientTestContext;
-    use nexus_test_utils::nexus::{
+    use crate::{
         app::saga::create_saga_dag, app::sagas::instance_create::Params,
         app::sagas::instance_create::SagaInstanceCreate,
         authn::saga::Serialized, context::OpContext, db::datastore::DataStore,
         external_api::params,
     };
+    use async_bb8_diesel::{AsyncRunQueryDsl, OptionalExtension};
+    use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
+    use dropshot::test_util::ClientTestContext;
     use nexus_test_utils::resource_helpers::create_disk;
     use nexus_test_utils::resource_helpers::create_ip_pool;
     use nexus_test_utils::resource_helpers::create_organization;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils::resource_helpers::DiskTest;
-    use nexus_test_utils::ControlPlaneTestContext;
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external::{
         ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
     };
     use omicron_sled_agent::sim::SledAgent;
     use uuid::Uuid;
+
+    type ControlPlaneTestContext =
+        nexus_test_utils::ControlPlaneTestContext<crate::Server>;
 
     const ORG_NAME: &str = "test-org";
     const PROJECT_NAME: &str = "springfield-squidport";
@@ -1082,7 +1084,14 @@ mod test {
         }
     }
 
-    #[nexus_test]
+    pub fn test_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
+        OpContext::for_tests(
+            cptestctx.logctx.log.new(o!()),
+            cptestctx.server.apictx.nexus.datastore().clone(),
+        )
+    }
+
+    #[nexus_test(server = crate::Server)]
     async fn test_saga_basic_usage_succeeds(
         cptestctx: &ControlPlaneTestContext,
     ) {
@@ -1092,7 +1101,7 @@ mod test {
         let project_id = create_org_project_and_disk(&client).await;
 
         // Build the saga DAG with the provided test parameters
-        let opctx = cptestctx.test_opctx();
+        let opctx = test_opctx(&cptestctx);
         let params = new_test_params(&opctx, project_id);
         let dag = create_saga_dag::<SagaInstanceCreate>(params).unwrap();
         let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
@@ -1101,29 +1110,21 @@ mod test {
         nexus.run_saga(runnable_saga).await.unwrap();
     }
 
-    async fn no_instance_records_exist(
-        datastore: &DataStore,
-        opctx: &OpContext,
-    ) -> bool {
+    async fn no_instance_records_exist(datastore: &DataStore) -> bool {
         use crate::db::model::Instance;
         use crate::db::schema::instance::dsl;
 
         dsl::instance
             .filter(dsl::time_deleted.is_null())
             .select(Instance::as_select())
-            .first_async::<Instance>(
-                datastore.pool_authorized(opctx).await.unwrap(),
-            )
+            .first_async::<Instance>(datastore.pool_for_tests().await.unwrap())
             .await
             .optional()
             .unwrap()
             .is_none()
     }
 
-    async fn no_network_interface_records_exist(
-        datastore: &DataStore,
-        opctx: &OpContext,
-    ) -> bool {
+    async fn no_network_interface_records_exist(datastore: &DataStore) -> bool {
         use crate::db::model::NetworkInterface;
         use crate::db::schema::network_interface::dsl;
 
@@ -1131,7 +1132,7 @@ mod test {
             .filter(dsl::time_deleted.is_null())
             .select(NetworkInterface::as_select())
             .first_async::<NetworkInterface>(
-                datastore.pool_authorized(opctx).await.unwrap(),
+                datastore.pool_for_tests().await.unwrap(),
             )
             .await
             .optional()
@@ -1139,10 +1140,7 @@ mod test {
             .is_none()
     }
 
-    async fn no_external_ip_records_exist(
-        datastore: &DataStore,
-        opctx: &OpContext,
-    ) -> bool {
+    async fn no_external_ip_records_exist(datastore: &DataStore) -> bool {
         use crate::db::model::ExternalIp;
         use crate::db::schema::external_ip::dsl;
 
@@ -1150,7 +1148,7 @@ mod test {
             .filter(dsl::time_deleted.is_null())
             .select(ExternalIp::as_select())
             .first_async::<ExternalIp>(
-                datastore.pool_authorized(opctx).await.unwrap(),
+                datastore.pool_for_tests().await.unwrap(),
             )
             .await
             .optional()
@@ -1158,10 +1156,7 @@ mod test {
             .is_none()
     }
 
-    async fn disk_is_detached(
-        datastore: &DataStore,
-        opctx: &OpContext,
-    ) -> bool {
+    async fn disk_is_detached(datastore: &DataStore) -> bool {
         use crate::db::model::Disk;
         use crate::db::schema::disk::dsl;
 
@@ -1169,9 +1164,7 @@ mod test {
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::name.eq(DISK_NAME))
             .select(Disk::as_select())
-            .first_async::<Disk>(
-                datastore.pool_authorized(opctx).await.unwrap(),
-            )
+            .first_async::<Disk>(datastore.pool_for_tests().await.unwrap())
             .await
             .unwrap()
             .runtime_state
@@ -1184,7 +1177,7 @@ mod test {
             && sled_agent.disk_count().await == 0
     }
 
-    #[nexus_test]
+    #[nexus_test(server = crate::Server)]
     async fn test_action_failure_can_unwind(
         cptestctx: &ControlPlaneTestContext,
     ) {
@@ -1196,7 +1189,7 @@ mod test {
         let project_id = create_org_project_and_disk(&client).await;
 
         // Build the saga DAG with the provided test parameters
-        let opctx = cptestctx.test_opctx();
+        let opctx = test_opctx(&cptestctx);
 
         let params = new_test_params(&opctx, project_id);
         let dag = create_saga_dag::<SagaInstanceCreate>(params).unwrap();
@@ -1232,12 +1225,10 @@ mod test {
             let datastore = nexus.datastore();
 
             // Check that no partial artifacts of instance creation exist
-            assert!(no_instance_records_exist(datastore, &opctx).await);
-            assert!(
-                no_network_interface_records_exist(datastore, &opctx).await
-            );
-            assert!(no_external_ip_records_exist(datastore, &opctx).await);
-            assert!(disk_is_detached(datastore, &opctx).await);
+            assert!(no_instance_records_exist(datastore).await);
+            assert!(no_network_interface_records_exist(datastore).await);
+            assert!(no_external_ip_records_exist(datastore).await);
+            assert!(disk_is_detached(datastore).await);
             assert!(
                 no_instances_or_disks_on_sled(&cptestctx.sled_agent.sled_agent)
                     .await
