@@ -5,13 +5,13 @@
 //! Implementation of queries for provisioning services.
 
 use crate::db::alias::ExpressionAlias;
+use crate::db::model::queries::service_provision::{
+    candidate_services, candidate_sleds, inserted_services, new_internal_ips,
+    new_service_count, old_service_count, previously_allocated_services,
+    sled_allocation_pool,
+};
 use crate::db::model::Service;
 use crate::db::model::ServiceKind;
-use crate::db::model::queries::service_provision::{
-    sled_allocation_pool, previously_allocated_services, old_service_count,
-    new_service_count, candidate_sleds, new_internal_ips, candidate_services,
-    inserted_services,
-};
 use crate::db::pool::DbConnection;
 use crate::db::schema;
 use crate::db::subquery::{AsQuerySource, Cte, CteBuilder, CteQuery};
@@ -94,7 +94,8 @@ impl OldServiceCount {
     ) -> Self {
         Self {
             query: Box::new(
-                previously_allocated_services.query_source()
+                previously_allocated_services
+                    .query_source()
                     .select((diesel::dsl::count_star(),)),
             ),
         }
@@ -119,14 +120,12 @@ impl NewServiceCount {
             .single_value()
             .assume_not_null();
         Self {
-            query: Box::new(diesel::select(
-                ExpressionAlias::new::<new_service_count::dsl::count>((
-                    greatest(
-                        (redundancy as i64).into_sql::<sql_types::BigInt>(),
-                        old_count,
-                    ) - old_count,
-                ),)
-            )),
+            query: Box::new(diesel::select(ExpressionAlias::new::<
+                new_service_count::dsl::count,
+            >((greatest(
+                (redundancy as i64).into_sql::<sql_types::BigInt>(),
+                old_count,
+            ) - old_count,)))),
         }
     }
 }
@@ -231,22 +230,35 @@ impl CandidateServices {
 
         let kind = kind.into_sql::<crate::db::model::ServiceKindEnum>();
         Self {
-            query: Box::new(
-                candidate_sleds.query_source().inner_join(
-                    new_internal_ips.query_source().on(
-                        candidate_sleds_dsl::id.eq(new_internal_ips_dsl::id)
-                    )
-                ).select(
-                    (
-                        ExpressionAlias::new::<service_dsl::id>(gen_random_uuid()),
-                        ExpressionAlias::new::<service_dsl::time_created>(now()),
-                        ExpressionAlias::new::<service_dsl::time_modified>(now()),
-                        ExpressionAlias::new::<service_dsl::sled_id>(candidate_sleds_dsl::id),
-                        ExpressionAlias::new::<service_dsl::ip>(new_internal_ips_dsl::last_used_address),
-                        ExpressionAlias::new::<service_dsl::kind>(kind),
-                    ),
-                )
-            )
+            query:
+                Box::new(
+                    candidate_sleds
+                        .query_source()
+                        .inner_join(
+                            new_internal_ips
+                                .query_source()
+                                .on(candidate_sleds_dsl::id
+                                    .eq(new_internal_ips_dsl::id)),
+                        )
+                        .select((
+                            ExpressionAlias::new::<service_dsl::id>(
+                                gen_random_uuid(),
+                            ),
+                            ExpressionAlias::new::<service_dsl::time_created>(
+                                now(),
+                            ),
+                            ExpressionAlias::new::<service_dsl::time_modified>(
+                                now(),
+                            ),
+                            ExpressionAlias::new::<service_dsl::sled_id>(
+                                candidate_sleds_dsl::id,
+                            ),
+                            ExpressionAlias::new::<service_dsl::ip>(
+                                new_internal_ips_dsl::last_used_address,
+                            ),
+                            ExpressionAlias::new::<service_dsl::kind>(kind),
+                        )),
+                ),
         }
     }
 }
@@ -284,7 +296,11 @@ pub struct ServiceProvision {
 }
 
 impl ServiceProvision {
-    pub fn new(redundancy: i32, rack_id: uuid::Uuid, kind: ServiceKind) -> Self {
+    pub fn new(
+        redundancy: i32,
+        rack_id: uuid::Uuid,
+        kind: ServiceKind,
+    ) -> Self {
         let now = Utc::now();
         let sled_allocation_pool = SledAllocationPool::new(rack_id);
         let previously_allocated_services =
@@ -412,10 +428,10 @@ mod tests {
         let query = ServiceProvision::new(
             redundancy,
             Uuid::parse_str(RACK_UUID).unwrap(),
-            crate::db::model::ServiceKind::Nexus
+            crate::db::model::ServiceKind::Nexus,
         );
 
-       pretty_assertions::assert_eq!(
+        pretty_assertions::assert_eq!(
             diesel::debug_query::<Pg, _>(&query).to_string(),
             format!(
             "WITH \

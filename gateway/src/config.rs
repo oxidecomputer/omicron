@@ -5,7 +5,7 @@
 //! Interfaces for parsing configuration files and working with a gateway server
 //! configuration
 
-use dropshot::{ConfigDropshot, ConfigLogging};
+use dropshot::ConfigLogging;
 use gateway_sp_comms::SwitchConfig;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -36,12 +36,8 @@ pub struct Timeouts {
 /// Configuration for a gateway server
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Config {
-    /// Identifier for this instance of MGS
-    pub id: uuid::Uuid,
     /// Various timeouts
     pub timeouts: Timeouts,
-    /// Dropshot configuration for API server
-    pub dropshot: ConfigDropshot,
     /// Configuration of the management switch.
     pub switch: SwitchConfig,
     /// Server-wide logging configuration.

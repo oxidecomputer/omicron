@@ -8,12 +8,14 @@ use crate::illumos::dladm::Dladm;
 use crate::illumos::dladm::PhysicalLink;
 use crate::illumos::dladm::VnicSource;
 use crate::opte::default_boundary_services;
+use crate::opte::opte_firewall_rules;
 use crate::opte::Error;
 use crate::opte::Gateway;
 use crate::opte::Port;
 use crate::opte::Vni;
 use crate::params::NetworkInterface;
 use crate::params::SourceNatConfig;
+use crate::params::VpcFirewallRule;
 use ipnetwork::IpNetwork;
 use macaddr::MacAddr6;
 use opte_ioctl::OpteHdl;
@@ -26,6 +28,7 @@ use oxide_vpc::api::Ipv4PrefixLen;
 use oxide_vpc::api::MacAddr;
 use oxide_vpc::api::RouterTarget;
 use oxide_vpc::api::SNat4Cfg;
+use oxide_vpc::api::SetFwRulesReq;
 use oxide_vpc::api::VpcCfg;
 use slog::debug;
 use slog::info;
@@ -176,6 +179,7 @@ impl PortManager {
         nic: &NetworkInterface,
         source_nat: Option<SourceNatConfig>,
         external_ips: Option<Vec<IpAddr>>,
+        firewall_rules: &[VpcFirewallRule],
     ) -> Result<(Port, PortTicket), Error> {
         // TODO-completess: Remove IPv4 restrictions once OPTE supports virtual
         // IPv6 networks.
@@ -296,6 +300,19 @@ impl PortManager {
             "Created xde device for guest port";
             "port_name" => &port_name,
         );
+
+        // Initialize firewall rules for the new port.
+        let rules = opte_firewall_rules(firewall_rules, &vni, &mac);
+        debug!(
+            self.inner.log,
+            "Setting firewall rules";
+            "port_name" => &port_name,
+            "rules" => ?&rules,
+        );
+        hdl.set_fw_rules(&SetFwRulesReq {
+            port_name: port_name.clone(),
+            rules,
+        })?;
 
         // Create a VNIC on top of this device, to hook Viona into.
         //
@@ -446,6 +463,25 @@ impl PortManager {
             "port" => ?&port,
         );
         Ok((port, ticket))
+    }
+
+    pub fn firewall_rules_ensure(
+        &self,
+        rules: &[VpcFirewallRule],
+    ) -> Result<(), Error> {
+        let hdl = OpteHdl::open(OpteHdl::DLD_CTL)?;
+        for ((_, port_name), port) in self.inner.ports.lock().unwrap().iter() {
+            let rules = opte_firewall_rules(rules, port.vni(), port.mac());
+            let port_name = port_name.clone();
+            info!(
+                self.inner.log,
+                "Setting OPTE firewall rules";
+                "port" => ?&port_name,
+                "rules" => ?&rules,
+            );
+            hdl.set_fw_rules(&SetFwRulesReq { port_name, rules })?;
+        }
+        Ok(())
     }
 }
 

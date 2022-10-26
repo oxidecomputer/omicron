@@ -369,6 +369,36 @@
         }
       }
     },
+    "/volume/{volume_id}/remove-read-only-parent": {
+      "post": {
+        "summary": "Request removal of a read_only_parent from a volume",
+        "description": "A volume can be created with the source data for that volume being another volume that attached as a \"read_only_parent\". In the background there exists a scrubber that will copy the data from the read_only_parent into the volume. When that scrubber has completed copying the data, this endpoint can be called to update the database that the read_only_parent is no longer needed for a volume and future attachments of this volume should not include that read_only_parent.",
+        "operationId": "cpapi_volume_remove_read_only_parent",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "volume_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/zpools/{zpool_id}/dataset/{dataset_id}": {
       "put": {
         "summary": "Report that a dataset within a pool has come online.",
@@ -1517,18 +1547,77 @@
       },
       "InstanceState": {
         "description": "Running state of an Instance (primarily: booted or stopped)\n\nThis typically reflects whether it's starting, running, stopping, or stopped, but also includes states related to the Instance's lifecycle",
-        "type": "string",
-        "enum": [
-          "creating",
-          "starting",
-          "running",
-          "stopping",
-          "stopped",
-          "rebooting",
-          "migrating",
-          "repairing",
-          "failed",
-          "destroyed"
+        "oneOf": [
+          {
+            "description": "The instance is being created.",
+            "type": "string",
+            "enum": [
+              "creating"
+            ]
+          },
+          {
+            "description": "The instance is currently starting up.",
+            "type": "string",
+            "enum": [
+              "starting"
+            ]
+          },
+          {
+            "description": "The instance is currently running.",
+            "type": "string",
+            "enum": [
+              "running"
+            ]
+          },
+          {
+            "description": "The instance has been requested to stop and a transition to \"Stopped\" is imminent.",
+            "type": "string",
+            "enum": [
+              "stopping"
+            ]
+          },
+          {
+            "description": "The instance is currently stopped.",
+            "type": "string",
+            "enum": [
+              "stopped"
+            ]
+          },
+          {
+            "description": "The instance is in the process of rebooting - it will remain in the \"rebooting\" state until the VM is starting once more.",
+            "type": "string",
+            "enum": [
+              "rebooting"
+            ]
+          },
+          {
+            "description": "The instance is in the process of migrating - it will remain in the \"migrating\" state until the migration process is complete and the destination propolis is ready to continue execution.",
+            "type": "string",
+            "enum": [
+              "migrating"
+            ]
+          },
+          {
+            "description": "The instance is attempting to recover from a failure.",
+            "type": "string",
+            "enum": [
+              "repairing"
+            ]
+          },
+          {
+            "description": "The instance has encountered a failure.",
+            "type": "string",
+            "enum": [
+              "failed"
+            ]
+          },
+          {
+            "description": "The instance has been deleted.",
+            "type": "string",
+            "enum": [
+              "destroyed"
+            ]
+          }
         ]
       },
       "Measurement": {
@@ -1850,6 +1939,20 @@
             "required": [
               "type"
             ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "tfport"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
           }
         ]
       },
@@ -1910,10 +2013,21 @@
       },
       "SledRole": {
         "description": "Describes the role of the sled within the rack.\n\nNote that this may change if the sled is physically moved within the rack.",
-        "type": "string",
-        "enum": [
-          "gimlet",
-          "scrimlet"
+        "oneOf": [
+          {
+            "description": "The sled is a general compute sled.",
+            "type": "string",
+            "enum": [
+              "gimlet"
+            ]
+          },
+          {
+            "description": "The sled is attached to the network switch, and has additional responsibilities.",
+            "type": "string",
+            "enum": [
+              "scrimlet"
+            ]
+          }
         ]
       },
       "ZpoolPutRequest": {

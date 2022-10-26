@@ -9,7 +9,7 @@ use crate::bootstrap::{
     ddm_admin_client::{DdmAdminClient, DdmError},
     rss_handle::BootstrapAgentHandle,
 };
-use crate::params::{DatasetEnsureBody, ServiceRequest, ServiceType};
+use crate::params::{DatasetEnsureBody, ServiceType, ServiceZoneRequest};
 use crate::rack_setup::plan::service::{
     Plan as ServicePlan, PlanError as ServicePlanError,
 };
@@ -85,11 +85,11 @@ pub enum SetupServiceError {
 }
 
 /// The interface to the Rack Setup Service.
-pub struct Service {
+pub struct RackSetupService {
     handle: tokio::task::JoinHandle<Result<(), SetupServiceError>>,
 }
 
-impl Service {
+impl RackSetupService {
     /// Creates a new rack setup service, which runs in a background task.
     ///
     /// Arguments:
@@ -127,7 +127,7 @@ impl Service {
             }
         });
 
-        Service { handle }
+        RackSetupService { handle }
     }
 
     /// Awaits the completion of the RSS service.
@@ -236,7 +236,7 @@ impl ServiceInner {
     async fn initialize_services(
         &self,
         sled_address: SocketAddrV6,
-        services: &Vec<ServiceRequest>,
+        services: &Vec<ServiceZoneRequest>,
     ) -> Result<(), SetupServiceError> {
         let dur = std::time::Duration::from_secs(60);
         let client = reqwest::ClientBuilder::new()
@@ -273,11 +273,15 @@ impl ServiceInner {
         // Insert DNS records, if the DNS servers have been initialized
         if let Some(dns_servers) = self.dns_servers.get() {
             let mut records = HashMap::new();
-            for service in services {
-                records
-                    .entry(service.srv())
-                    .or_insert_with(Vec::new)
-                    .push((service.aaaa(), service.address()));
+            for zone in services {
+                for service in &zone.services {
+                    if let Some(addr) = zone.address(&service) {
+                        records
+                            .entry(zone.srv(&service))
+                            .or_insert_with(Vec::new)
+                            .push((zone.aaaa(), addr));
+                    }
+                }
             }
             let records_put = || async {
                 dns_servers
@@ -405,33 +409,39 @@ impl ServiceInner {
                 .get(addr)
                 .expect("Sled address in service plan, but not sled plan");
 
-            for svc in service_request
+            for zone in service_request
                 .services
                 .iter()
                 .chain(service_request.dns_services.iter())
             {
-                let kind = match svc.service_type {
-                    ServiceType::Nexus { external_ip, internal_ip: _ } => {
-                        NexusTypes::ServiceKind::Nexus {
-                            external_address: external_ip,
+                for svc in &zone.services {
+                    let kind = match svc {
+                        ServiceType::Nexus { external_ip, internal_ip: _ } => {
+                            NexusTypes::ServiceKind::Nexus {
+                                external_address: *external_ip,
+                            }
                         }
-                    }
-                    ServiceType::InternalDns { .. } => {
-                        NexusTypes::ServiceKind::InternalDNS
-                    }
-                    ServiceType::Oximeter => NexusTypes::ServiceKind::Oximeter,
-                    ServiceType::Dendrite { .. } => {
-                        NexusTypes::ServiceKind::Dendrite
-                    }
-                };
+                        ServiceType::InternalDns { .. } => {
+                            NexusTypes::ServiceKind::InternalDNS
+                        }
+                        ServiceType::Oximeter => {
+                            NexusTypes::ServiceKind::Oximeter
+                        }
+                        ServiceType::Dendrite { .. } => {
+                            NexusTypes::ServiceKind::Dendrite
+                        }
+                        // TODO TODO TODO
+                        ServiceType::Tfport { .. } => todo!(),
+                    };
 
-                services.push(NexusTypes::ServicePutRequest {
-                    service_id: svc.id,
-                    sled_id,
-                    // TODO: Should this be a vec, or a single value?
-                    address: svc.addresses[0],
-                    kind,
-                })
+                    services.push(NexusTypes::ServicePutRequest {
+                        service_id: zone.id,
+                        sled_id,
+                        // TODO: Should this be a vec, or a single value?
+                        address: zone.addresses[0],
+                        kind,
+                    })
+                }
             }
 
             for dataset in service_request.datasets.iter() {

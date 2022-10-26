@@ -15,7 +15,7 @@ use serde::{
     de::{self, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
 };
-use std::net::IpAddr;
+use std::{net::IpAddr, str::FromStr};
 use uuid::Uuid;
 
 // Silos
@@ -28,7 +28,7 @@ pub struct SiloCreate {
 
     pub discoverable: bool,
 
-    pub user_provision_type: shared::UserProvisionType,
+    pub identity_mode: shared::SiloIdentityMode,
 
     /// If set, this group will be created during Silo creation and granted the
     /// "Silo Admin" role. Identity providers can assert that users belong to
@@ -38,6 +38,55 @@ pub struct SiloCreate {
     /// group_attribute_name must be set for users to be considered part of a
     /// group. See [`SamlIdentityProviderCreate`] for more information.
     pub admin_group_name: Option<String>,
+}
+
+/// Create-time parameters for a [`User`](crate::external_api::views::User)
+#[derive(Clone, Deserialize, Serialize, JsonSchema)]
+pub struct UserCreate {
+    /// username used to log in
+    pub external_id: UserId,
+}
+
+/// A username for a local-only user
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(try_from = "String")]
+pub struct UserId(String);
+
+impl AsRef<str> for UserId {
+    fn as_ref(&self) -> &str {
+        self.0.as_ref()
+    }
+}
+
+impl FromStr for UserId {
+    type Err = String;
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        UserId::try_from(String::from(value))
+    }
+}
+
+/// Used to impl `Deserialize`
+impl TryFrom<String> for UserId {
+    type Error = String;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        // Mostly, this validation exists to cap the input size.  The specific
+        // length is not critical here.  For convenience and consistency, we use
+        // the same rules as `Name`.
+        let _ = Name::try_from(value.clone())?;
+        Ok(UserId(value))
+    }
+}
+
+impl JsonSchema for UserId {
+    fn schema_name() -> String {
+        "UserId".to_string()
+    }
+
+    fn json_schema(
+        gen: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        Name::json_schema(gen)
+    }
 }
 
 // Silo identity providers
@@ -727,21 +776,6 @@ pub struct DiskCreate {
     pub size: ByteCount,
 }
 
-const EXTENT_SIZE: u32 = 64_u32 << 20; // 64 MiB
-
-impl DiskCreate {
-    pub fn extent_size(&self) -> i64 {
-        EXTENT_SIZE as i64
-    }
-
-    pub fn extent_count(&self) -> i64 {
-        let extent_size = EXTENT_SIZE as i64;
-        let size = self.size.to_bytes() as i64;
-        size / extent_size
-            + ((size % extent_size) + extent_size - 1) / extent_size
-    }
-}
-
 /// Parameters for the [`Disk`](omicron_common::api::external::Disk) to be
 /// attached or detached to an instance
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -868,72 +902,4 @@ pub struct ResourceMetrics {
     pub start_time: DateTime<Utc>,
     /// An exclusive end time of metrics.
     pub end_time: DateTime<Utc>,
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-    use std::convert::TryFrom;
-
-    const BLOCK_SIZE: u32 = 4096;
-
-    fn new_disk_create_params(size: ByteCount) -> DiskCreate {
-        DiskCreate {
-            identity: IdentityMetadataCreateParams {
-                name: Name::try_from("myobject".to_string()).unwrap(),
-                description: "desc".to_string(),
-            },
-            disk_source: DiskSource::Blank {
-                block_size: BlockSize(BLOCK_SIZE),
-            },
-            size,
-        }
-    }
-
-    #[test]
-    fn test_extent_count() {
-        let params = new_disk_create_params(ByteCount::try_from(0u64).unwrap());
-        assert_eq!(0, params.extent_count());
-
-        let params = new_disk_create_params(ByteCount::try_from(1u64).unwrap());
-        assert_eq!(1, params.extent_count());
-        let params = new_disk_create_params(
-            ByteCount::try_from(EXTENT_SIZE - 1).unwrap(),
-        );
-        assert_eq!(1, params.extent_count());
-        let params =
-            new_disk_create_params(ByteCount::try_from(EXTENT_SIZE).unwrap());
-        assert_eq!(1, params.extent_count());
-
-        let params = new_disk_create_params(
-            ByteCount::try_from(EXTENT_SIZE + 1).unwrap(),
-        );
-        assert_eq!(2, params.extent_count());
-
-        // Mostly just checking we don't blow up on an unwrap here.
-        let _params =
-            new_disk_create_params(ByteCount::try_from(i64::MAX).unwrap());
-
-        // Note that i64::MAX bytes is an invalid disk size as it's not
-        // divisible by 4096.
-        let max_disk_size = i64::MAX - (i64::MAX % (BLOCK_SIZE as i64));
-        let params =
-            new_disk_create_params(ByteCount::try_from(max_disk_size).unwrap());
-        let blocks_per_extent: u64 =
-            params.extent_size() as u64 / BLOCK_SIZE as u64;
-
-        // We should still be rounding up to the nearest extent size.
-        assert_eq!(
-            params.extent_count() as u128 * EXTENT_SIZE as u128,
-            i64::MAX as u128 + 1,
-        );
-
-        // Assert that the regions allocated will fit this disk
-        assert!(
-            params.size.to_bytes() as u64
-                <= (params.extent_count() as u64)
-                    * blocks_per_extent
-                    * BLOCK_SIZE as u64
-        );
-    }
 }

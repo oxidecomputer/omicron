@@ -10,7 +10,7 @@ path = "../../rpaths"
 [dependencies]
 anyhow = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
-diesel = { version = "2.0.0", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
+diesel = { version = "2.0.2", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 hex = "0.4.3"
 internal-dns-client = { path = "../../internal-dns-client" }
 ipnetwork = "0.20"
@@ -24,7 +24,7 @@ ref-cast = "1.0"
 schemars = { version = "0.8.10", features = ["chrono", "uuid1"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-uuid = { version = "1.1.0", features = ["serde", "v4"] }
+uuid = { version = "1.2.1", features = ["serde", "v4"] }
 
 steno = "0.2"
 

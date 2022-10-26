@@ -43,6 +43,7 @@ pub fn internal_api() -> NexusApiDescription {
         api.register(dataset_put)?;
         api.register(cpapi_instances_put)?;
         api.register(cpapi_disks_put)?;
+        api.register(cpapi_volume_remove_read_only_parent)?;
         api.register(cpapi_producers_post)?;
         api.register(cpapi_collectors_post)?;
         api.register(cpapi_metrics_collect)?;
@@ -220,6 +221,39 @@ async fn cpapi_disks_put(
     let handler = async {
         let opctx = OpContext::for_internal_api(&rqctx).await;
         nexus.notify_disk_updated(&opctx, path.disk_id, &new_state).await?;
+        Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Path parameters for Volume requests (internal API)
+#[derive(Deserialize, JsonSchema)]
+struct VolumePathParam {
+    volume_id: Uuid,
+}
+
+/// Request removal of a read_only_parent from a volume
+/// A volume can be created with the source data for that volume being another
+/// volume that attached as a "read_only_parent". In the background there
+/// exists a scrubber that will copy the data from the read_only_parent
+/// into the volume. When that scrubber has completed copying the data, this
+/// endpoint can be called to update the database that the read_only_parent
+/// is no longer needed for a volume and future attachments of this volume
+/// should not include that read_only_parent.
+#[endpoint {
+     method = POST,
+     path = "/volume/{volume_id}/remove-read-only-parent",
+ }]
+async fn cpapi_volume_remove_read_only_parent(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<VolumePathParam>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+
+    let handler = async {
+        nexus.volume_remove_read_only_parent(path.volume_id).await?;
         Ok(HttpResponseUpdatedNoContent())
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await

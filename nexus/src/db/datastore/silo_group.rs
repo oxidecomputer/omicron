@@ -14,13 +14,16 @@ use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
 use crate::db::model::SiloGroup;
 use crate::db::model::SiloGroupMembership;
+use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use async_bb8_diesel::{AsyncConnection, OptionalExtension};
 use chrono::Utc;
 use diesel::prelude::*;
 use omicron_common::api::external::CreateResult;
+use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::UpdateResult;
@@ -98,6 +101,30 @@ impl DataStore {
         dsl::silo_group_membership
             .filter(dsl::silo_user_id.eq(silo_user_id))
             .select(SiloGroupMembership::as_returning())
+            .get_results_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    pub async fn silo_groups_for_self(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<SiloGroup> {
+        // Similar to session_hard_delete (see comment there), we do not do a
+        // typical authz check, instead effectively encoding the policy here
+        // that any user is allowed to fetch their own group memberships
+        let &actor = opctx
+            .authn
+            .actor_required()
+            .internal_context("fetching current user's group memberships")?;
+
+        use db::schema::{silo_group as sg, silo_group_membership as sgm};
+        paginated(sg::dsl::silo_group, sg::id, pagparams)
+            .inner_join(sgm::table.on(sgm::silo_group_id.eq(sg::id)))
+            .filter(sgm::silo_user_id.eq(actor.actor_id()))
+            .filter(sg::time_deleted.is_null())
+            .select(SiloGroup::as_returning())
             .get_results_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
@@ -218,5 +245,23 @@ impl DataStore {
                     ErrorHandler::Server,
                 ),
             })
+    }
+
+    pub async fn silo_groups_list_by_id(
+        &self,
+        opctx: &OpContext,
+        authz_silo: &authz::Silo,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<SiloGroup> {
+        use db::schema::silo_group::dsl;
+
+        opctx.authorize(authz::Action::Read, authz_silo).await?;
+        paginated(dsl::silo_group, dsl::id, pagparams)
+            .filter(dsl::silo_id.eq(authz_silo.id()))
+            .filter(dsl::time_deleted.is_null())
+            .select(SiloGroup::as_select())
+            .load_async::<SiloGroup>(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 }

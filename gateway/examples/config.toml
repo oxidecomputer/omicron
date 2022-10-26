@@ -2,9 +2,6 @@
 # Oxide API: example configuration file
 #
 
-# Identifier for this instance of MGS
-id = "8afcb12d-f625-4df9-bdf2-f495c3bbd323"
-
 [switch]
 # which vsc port is connected to our local sidecar SP (i.e., the SP that acts as
 # our contact to the ignition controller)
@@ -78,11 +75,6 @@ bulk_request_default_millis = 5_000
 bulk_request_max_millis = 60_000
 bulk_request_page_millis = 1_000
 bulk_request_retain_grace_period_millis = 10_000
-
-[dropshot]
-# IP address and TCP port on which to listen for the external API
-bind_address = "127.0.0.1:12222"
-request_body_max_bytes = 134217728 # 128 MiB
 
 [log]
 # Show log messages of this level and more severe

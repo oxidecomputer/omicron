@@ -51,7 +51,9 @@ pub struct ZpoolPutRequest {
 pub struct ZpoolPutResponse {}
 
 /// Describes the purpose of the dataset.
-#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone, Copy, PartialEq)]
+#[derive(
+    Debug, Serialize, Deserialize, JsonSchema, Clone, Copy, PartialEq, Eq,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum DatasetKind {
     Crucible,
@@ -118,7 +120,9 @@ pub struct DatasetPutResponse {
 }
 
 /// Describes the purpose of the service.
-#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone, Copy, PartialEq)]
+#[derive(
+    Debug, Serialize, Deserialize, JsonSchema, Clone, Copy, PartialEq, Eq,
+)]
 #[serde(rename_all = "snake_case", tag = "type", content = "content")]
 pub enum ServiceKind {
     InternalDNS,
@@ -131,6 +135,7 @@ pub enum ServiceKind {
     },
     Oximeter,
     Dendrite,
+    Tfport,
 }
 
 impl fmt::Display for ServiceKind {
@@ -141,6 +146,7 @@ impl fmt::Display for ServiceKind {
             Nexus { .. } => "nexus",
             Oximeter => "oximeter",
             Dendrite => "dendrite",
+            Tfport => "tfport",
         };
         write!(f, "{}", s)
     }

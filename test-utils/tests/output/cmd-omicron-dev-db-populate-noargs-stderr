@@ -1,7 +1,6 @@
 error: The following required arguments were not provided:
-    --database-url <DATABASE_URL>
+  --database-url <DATABASE_URL>
 
-USAGE:
-    omicron-dev db-populate [OPTIONS] --database-url <DATABASE_URL>
+Usage: omicron-dev db-populate --database-url <DATABASE_URL>
 
-For more information try --help
+For more information try '--help'

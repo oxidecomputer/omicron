@@ -148,6 +148,8 @@ where
             ServiceKind::InternalDNS
             | ServiceKind::Oximeter
             | ServiceKind::Dendrite => Ok(None),
+            // TODO TODO TODO
+            ServiceKind::Tfport => todo!(),
         }
     }
 
@@ -199,12 +201,12 @@ where
                         _ => vec![],
                     };
 
-                    service_requests.push(SledAgentTypes::ServiceRequest {
+                    service_requests.push(SledAgentTypes::ServiceZoneRequest {
                         id: service.id(),
-                        name,
+                        zone_name: name,
                         addresses: vec![internal_address],
                         gz_addresses,
-                        service_type,
+                        services: vec![service_type],
                     });
                 }
 
@@ -276,6 +278,8 @@ where
                     asic: SledAgentTypes::DendriteAsic::TofinoStub,
                 },
             ),
+            // TODO TODO TODO
+            ServiceKind::Tfport => todo!(),
         }
     }
 
@@ -793,9 +797,9 @@ mod test {
             match requests.len() {
                 0 => (), // Ignore the sleds where nothing was provisioned
                 1 => {
-                    assert_eq!(requests[0].name, "oximeter");
+                    assert_eq!(requests[0].zone_name, "oximeter");
                     assert!(matches!(
-                        requests[0].service_type,
+                        requests[0].services[0],
                         SledAgentTypes::ServiceType::Oximeter
                     ));
                     assert!(requests[0].gz_addresses.is_empty());
@@ -853,8 +857,8 @@ mod test {
             match requests.len() {
                 0 => (), // Ignore the sleds where nothing was provisioned
                 1 => {
-                    assert_eq!(requests[0].name, "nexus");
-                    match &requests[0].service_type {
+                    assert_eq!(requests[0].zone_name, "nexus");
+                    match &requests[0].services[0] {
                         SledAgentTypes::ServiceType::Nexus {
                             internal_ip,
                             external_ip,
@@ -868,7 +872,7 @@ mod test {
                         }
                         _ => panic!(
                             "unexpected service type: {:?}",
-                            requests[0].service_type
+                            requests[0].services[0]
                         ),
                     }
                     assert!(requests[0].gz_addresses.is_empty());

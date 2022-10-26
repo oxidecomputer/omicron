@@ -7,6 +7,9 @@
 //! Conversions between externally-defined types and HTTP / JsonSchema types.
 
 use super::PowerState;
+use super::SpComponentInfo;
+use super::SpComponentList;
+use super::SpComponentPresence;
 use super::SpIdentifier;
 use super::SpIgnition;
 use super::SpState;
@@ -36,6 +39,13 @@ impl From<UpdateStatus> for SpUpdateStatus {
                 id: status.id.into(),
                 progress: status.progress.map(Into::into),
             },
+            UpdateStatus::SpUpdateAuxFlashChckScan {
+                id, total_size, ..
+            } => Self::InProgress {
+                id: id.into(),
+                bytes_received: 0,
+                total_bytes: total_size,
+            },
             UpdateStatus::InProgress(status) => Self::InProgress {
                 id: status.id.into(),
                 bytes_received: status.bytes_received,
@@ -43,6 +53,9 @@ impl From<UpdateStatus> for SpUpdateStatus {
             },
             UpdateStatus::Complete(id) => Self::Complete { id: id.into() },
             UpdateStatus::Aborted(id) => Self::Aborted { id: id.into() },
+            UpdateStatus::Failed { id, code } => {
+                Self::Failed { id: id.into(), code }
+            }
         }
     }
 }
@@ -136,5 +149,37 @@ impl From<gateway_sp_comms::SpIdentifier> for SpIdentifier {
             // not exceed u32::MAX
             slot: u32::try_from(id.slot).unwrap(),
         }
+    }
+}
+
+impl From<gateway_messages::DevicePresence> for SpComponentPresence {
+    fn from(p: gateway_messages::DevicePresence) -> Self {
+        match p {
+            gateway_messages::DevicePresence::Present => Self::Present,
+            gateway_messages::DevicePresence::NotPresent => Self::NotPresent,
+            gateway_messages::DevicePresence::Failed => Self::Failed,
+            gateway_messages::DevicePresence::Unavailable => Self::Unavailable,
+            gateway_messages::DevicePresence::Timeout => Self::Timeout,
+            gateway_messages::DevicePresence::Error => Self::Error,
+        }
+    }
+}
+
+impl From<gateway_sp_comms::SpDevice> for SpComponentInfo {
+    fn from(d: gateway_sp_comms::SpDevice) -> Self {
+        Self {
+            component: d.component.as_str().unwrap_or("???").to_string(),
+            device: d.device,
+            serial_number: None, // TODO populate when SP provides it
+            description: d.description,
+            capabilities: d.capabilities.bits(),
+            presence: d.presence.into(),
+        }
+    }
+}
+
+impl From<gateway_sp_comms::SpInventory> for SpComponentList {
+    fn from(inv: gateway_sp_comms::SpInventory) -> Self {
+        Self { components: inv.devices.into_iter().map(Into::into).collect() }
     }
 }

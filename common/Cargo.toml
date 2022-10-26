@@ -10,7 +10,7 @@ api_identity = { path = "../api_identity" }
 backoff = { version = "0.4.0", features = [ "tokio" ] }
 chrono = { version = "0.4", features = [ "serde" ] }
 dropshot = {  git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
-futures = "0.3.24"
+futures = "0.3.25"
 http = "0.2.7"
 hyper = "0.14"
 ipnetwork = "0.20"
@@ -30,7 +30,7 @@ thiserror = "1.0"
 tokio = { version = "1.21", features = [ "full" ] }
 tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1" ] }
 toml = "0.5.9"
-uuid = { version = "1.1.0", features = [ "serde", "v4" ] }
+uuid = { version = "1.2.1", features = [ "serde", "v4" ] }
 parse-display = "0.6.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor" }
 

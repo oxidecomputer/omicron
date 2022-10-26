@@ -2,10 +2,6 @@
 # Oxide API: example configuration file
 #
 
-# Identifier for this instance of MGS
-# NOTE: The test suite always overrides this.
-id = "8afcb12d-f625-4df9-bdf2-f495c3bbd323"
-
 [switch]
 # which vsc port is connected to our local sidecar SP (i.e., the SP that acts as
 # our contact to the ignition controller)
@@ -86,15 +82,6 @@ bulk_request_default_millis = 10_000
 bulk_request_max_millis = 40_000
 bulk_request_page_millis = 2_000
 bulk_request_retain_grace_period_millis = 10_000
-
-#
-# NOTE: for the test suite, the port MUST be 0 (in order to bind to any
-# available port) because the test suite will be running many servers
-# concurrently.
-#
-[dropshot]
-bind_address = "127.0.0.1:0"
-request_body_max_bytes = 1048576
 
 #
 # NOTE: for the test suite, if mode = "file", the file path MUST be the sentinel

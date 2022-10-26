@@ -323,9 +323,9 @@ impl Drop for RunningZone {
 /// Errors returned from [`InstalledZone::install`].
 #[derive(thiserror::Error, Debug)]
 pub enum InstallZoneError {
-    #[error("Cannot create '{service}': failed to create control VNIC: {err}")]
+    #[error("Cannot create '{zone}': failed to create control VNIC: {err}")]
     CreateVnic {
-        service: String,
+        zone: String,
         #[source]
         err: crate::illumos::dladm::CreateVnicError,
     },
@@ -357,21 +357,18 @@ pub struct InstalledZone {
 }
 
 impl InstalledZone {
-    /// Returns the name of a zone, based on the service name plus any unique
+    /// Returns the name of a zone, based on the base zone name plus any unique
     /// identifying info.
     ///
     /// The zone name is based on:
     /// - A unique Oxide prefix ("oxz_")
-    /// - The name of the service being hosted (e.g., "nexus")
-    /// - An optional, service-unique identifier (typically a UUID).
+    /// - The name of the zone type being hosted (e.g., "nexus")
+    /// - An optional, zone-unique identifier (typically a UUID).
     ///
     /// This results in a zone name which is distinct across different zpools,
     /// but stable and predictable across reboots.
-    pub fn get_zone_name(
-        service_name: &str,
-        unique_name: Option<&str>,
-    ) -> String {
-        let mut zone_name = format!("{}{}", ZONE_PREFIX, service_name);
+    pub fn get_zone_name(zone_name: &str, unique_name: Option<&str>) -> String {
+        let mut zone_name = format!("{}{}", ZONE_PREFIX, zone_name);
         if let Some(suffix) = unique_name {
             zone_name.push_str(&format!("_{}", suffix));
         }
@@ -382,7 +379,7 @@ impl InstalledZone {
     pub async fn install(
         log: &Logger,
         vnic_allocator: &VnicAllocator<Etherstub>,
-        service_name: &str,
+        zone_name: &str,
         unique_name: Option<&str>,
         datasets: &[zone::Dataset],
         devices: &[zone::Device],
@@ -390,15 +387,12 @@ impl InstalledZone {
         physical_nic: Option<Vnic>,
     ) -> Result<InstalledZone, InstallZoneError> {
         let control_vnic = vnic_allocator.new_control(None).map_err(|err| {
-            InstallZoneError::CreateVnic {
-                service: service_name.to_string(),
-                err,
-            }
+            InstallZoneError::CreateVnic { zone: zone_name.to_string(), err }
         })?;
 
-        let zone_name = Self::get_zone_name(service_name, unique_name);
+        let full_zone_name = Self::get_zone_name(zone_name, unique_name);
         let zone_image_path =
-            PathBuf::from(&format!("/opt/oxide/{}.tar.gz", service_name));
+            PathBuf::from(&format!("/opt/oxide/{}.tar.gz", zone_name));
 
         let net_device_names: Vec<String> = opte_ports
             .iter()
@@ -409,21 +403,21 @@ impl InstalledZone {
 
         Zones::install_omicron_zone(
             log,
-            &zone_name,
+            &full_zone_name,
             &zone_image_path,
             &datasets,
             &devices,
             net_device_names,
         )
         .map_err(|err| InstallZoneError::InstallZone {
-            zone: zone_name.to_string(),
+            zone: full_zone_name.to_string(),
             image_path: zone_image_path.clone(),
             err,
         })?;
 
         Ok(InstalledZone {
-            log: log.new(o!("zone" => zone_name.clone())),
-            name: zone_name,
+            log: log.new(o!("zone" => full_zone_name.clone())),
+            name: full_zone_name,
             control_vnic,
             opte_ports,
             physical_nic,

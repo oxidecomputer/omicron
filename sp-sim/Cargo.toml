@@ -7,16 +7,21 @@ license = "MPL-2.0"
 [dependencies]
 anyhow = "1.0"
 async-trait = "0.1.53"
-clap = { version = "3.2", features = ["derive"] }
+clap = { version = "4.0", features = ["derive"] }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
 futures = "0.3"
-gateway-messages = { path = "../gateway-messages", default-features = false, features = ["std"] }
 hex = { version = "0.4.3", features = ["serde"] }
 omicron-common = { path = "../common" }
 slog-dtrace = "0.2"
 sprockets-rot = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
 thiserror = "1.0"
 toml = "0.5.9"
+
+[dependencies.gateway-messages]
+git = "https://github.com/oxidecomputer/management-gateway-service"
+rev = "c1484109c394f45e08018e0f35adc4a136cd207d"
+default-features = false
+features = ["std"]
 
 [dependencies.serde]
 version = "1.0"

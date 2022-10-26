@@ -11,13 +11,13 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use omicron_package::{parse, BuildCommand, DeployCommand};
 use omicron_sled_agent::cleanup_networking_resources;
 use omicron_sled_agent::zone;
-use omicron_zone_package::config::Config;
-use omicron_zone_package::config::ExternalPackage;
-use omicron_zone_package::config::ExternalPackageSource;
-use omicron_zone_package::package::Package;
-use omicron_zone_package::package::Progress;
+use omicron_zone_package::config::Config as PackageConfig;
+use omicron_zone_package::package::{Package, PackageOutput, PackageSource};
+use omicron_zone_package::progress::Progress;
+use omicron_zone_package::target::Target;
 use rayon::prelude::*;
 use ring::digest::{Context as DigestContext, Digest, SHA256};
+use slog::debug;
 use slog::info;
 use slog::o;
 use slog::Drain;
@@ -38,6 +38,16 @@ enum SubCommand {
     Deploy(DeployCommand),
 }
 
+// Describes the default target.
+//
+// NOTE: This was mostly included so that the addition of the "--target"
+// flag does not break anyone's existing workflow. However, picking a default
+// here is an onerous prospect, and it may make more sense to require user
+// involvement. If we choose to remove it, having users pick one of a few
+// "build profiles" (in other words, a curated list of target strings)
+// seems like a promising alternative.
+const DEFAULT_TARGET: &str = "switch_variant=stub";
+
 #[derive(Debug, Parser)]
 #[clap(name = "packaging tool")]
 struct Args {
@@ -52,6 +62,14 @@ struct Args {
         action
     )]
     manifest: PathBuf,
+
+    #[clap(
+        short,
+        long,
+        help = "Key Value pairs (of the form 'KEY=VALUE') describing the package",
+        default_value = DEFAULT_TARGET,
+    )]
+    target: Target,
 
     #[clap(subcommand)]
     subcommand: SubCommand,
@@ -94,10 +112,14 @@ async fn do_for_all_rust_packages(
     // First, filter out all Rust packages from the configuration that should be
     // built, and partition them into "release" and "debug" categories.
     let (release_pkgs, debug_pkgs): (Vec<_>, _) = config
-        .packages
-        .iter()
-        .filter_map(|(name, pkg)| {
-            pkg.rust.as_ref().map(|rust_pkg| (name, rust_pkg.release))
+        .package_config
+        .packages_to_build(&config.target)
+        .into_iter()
+        .filter_map(|(name, pkg)| match &pkg.source {
+            PackageSource::Local { rust: Some(rust_pkg), .. } => {
+                Some((name, rust_pkg.release))
+            }
+            _ => None,
         })
         .partition(|(_, release)| *release);
 
@@ -153,19 +175,19 @@ async fn get_sha256_digest(path: &PathBuf) -> Result<Digest> {
     Ok(context.finish())
 }
 
-// Accesses a package which is contructed outside of Omicron.
-async fn get_external_package(
+// Ensures a package exists, either by creating it or downloading it.
+async fn get_package(
     ui: &Arc<ProgressUI>,
     package_name: &String,
-    external_package: &ExternalPackage,
+    package: &Package,
     output_directory: &Path,
 ) -> Result<()> {
-    let progress = ui.add_package(package_name.to_string(), 1);
-    match &external_package.source {
-        ExternalPackageSource::Prebuilt { repo, commit, sha256 } => {
+    let total_work = package.get_total_work();
+    let progress = ui.add_package(package_name.to_string(), total_work);
+    match &package.source {
+        PackageSource::Prebuilt { repo, commit, sha256 } => {
             let expected_digest = hex::decode(&sha256)?;
-            let path =
-                external_package.package.get_output_path(&output_directory);
+            let path = package.get_output_path(package_name, &output_directory);
 
             let should_download = if path.exists() {
                 // Re-download the package if the SHA doesn't match.
@@ -215,13 +237,12 @@ async fn get_external_package(
 
                 let digest = context.finish();
                 if digest.as_ref() != expected_digest {
-                    bail!("Digest mismatch downloading {}", package_name);
+                    bail!("Digest mismatch downloading {package_name}: Saw {}, expected {}", hex::encode(digest.as_ref()), hex::encode(expected_digest));
                 }
             }
         }
-        ExternalPackageSource::Manual => {
-            let path =
-                external_package.package.get_output_path(&output_directory);
+        PackageSource::Manual => {
+            let path = package.get_output_path(package_name, &output_directory);
             if !path.exists() {
                 bail!(
                     "The package for {} (expected at {}) does not exist.",
@@ -229,6 +250,20 @@ async fn get_external_package(
                     path.to_string_lossy(),
                 );
             }
+        }
+        PackageSource::Local { .. } | PackageSource::Composite { .. } => {
+            progress.set_message("bundle package".to_string());
+            package
+                .create_with_progress(&progress, package_name, &output_directory)
+                .await
+                .with_context(|| {
+                    let msg = format!("failed to create {package_name} in {output_directory:?}");
+                    if let Some(hint) = &package.setup_hint {
+                        format!("{msg}\nHint: {hint}")
+                    } else {
+                        msg
+                    }
+                })?;
         }
     }
     progress.finish();
@@ -243,57 +278,35 @@ async fn do_package(config: &Config, output_directory: &Path) -> Result<()> {
 
     do_build(&config).await?;
 
-    let ui_refs = vec![ui.clone(); config.external_packages.len()];
-    let external_pkg_stream = stream::iter(&config.external_packages)
-        // It's a pain to clone a value into closures - see
-        // https://github.com/rust-lang/rfcs/issues/2407 - so in the meantime,
-        // we explicitly create the references to the UI we need for each
-        // package.
-        .zip(stream::iter(ui_refs))
-        // We convert the stream type to operate on Results, so we may invoke
-        // "try_for_each_concurrent" more easily.
-        .map(Ok::<_, anyhow::Error>)
-        .try_for_each_concurrent(
-            None,
-            |((package_name, package), ui)| async move {
-                get_external_package(
-                    &ui,
-                    package_name,
-                    package,
-                    output_directory,
-                )
-                .await
-            },
-        );
+    // Assemble all the non-composite packages before the composite ones.
+    //
+    // Since there are not (yet) composite of composite packages, we can do
+    // this in a simple two-stage build.
+    let (base_pkgs, composite_pkgs): (Vec<_>, Vec<_>) = config
+        .package_config
+        .packages_to_build(&config.target)
+        .into_iter()
+        .partition(|(_, pkg)| {
+            !matches!(pkg.source, PackageSource::Composite { .. })
+        });
 
-    let ui_refs = vec![ui.clone(); config.packages.len()];
-    let internal_pkg_stream = stream::iter(&config.packages)
-        .zip(stream::iter(ui_refs))
-        .map(Ok::<_, anyhow::Error>)
-        .try_for_each_concurrent(
-            None,
-            |((package_name, package), ui)| async move {
-                let total_work = package.get_total_work();
-                let progress =
-                    ui.add_package(package_name.to_string(), total_work);
-                progress.set_message("bundle package".to_string());
-                package
-                    .create_with_progress(&progress, &output_directory)
-                    .await
-                    .with_context(|| {
-                        let msg = format!("failed to create {package_name} in {output_directory:?}");
-                        if let Some(hint) = &package.setup_hint {
-                            format!("{msg}\nHint: {hint}")
-                        } else {
-                            msg
-                        }
-                    })?;
-                progress.finish();
-                Ok(())
-            },
-        );
+    let groups = [base_pkgs, composite_pkgs];
 
-    tokio::try_join!(external_pkg_stream, internal_pkg_stream)?;
+    for packages in groups {
+        let ui_refs = vec![ui.clone(); packages.len()];
+        let pkg_stream = stream::iter(&packages)
+            .zip(stream::iter(ui_refs))
+            .map(Ok::<_, anyhow::Error>)
+            .try_for_each_concurrent(
+                None,
+                |((package_name, package), ui)| async move {
+                    get_package(&ui, package_name, package, output_directory)
+                        .await
+                },
+            );
+
+        pkg_stream.await?;
+    }
 
     Ok(())
 }
@@ -302,41 +315,30 @@ fn do_unpack(
     config: &Config,
     artifact_dir: &Path,
     install_dir: &Path,
-    log: &Logger,
 ) -> Result<()> {
     create_dir_all(&install_dir).map_err(|err| {
         anyhow!("Cannot create installation directory: {}", err)
     })?;
 
     // Copy all packages to the install location in parallel.
-    let packages: Vec<(&String, &Package)> = config
-        .packages
-        .iter()
-        .chain(
-            config
-                .external_packages
-                .iter()
-                .map(|(name, epkg)| (name, &epkg.package)),
-        )
-        .collect();
-    packages.into_par_iter().try_for_each(|(_, package)| -> Result<()> {
-        let tarfile = if package.zone {
-            artifact_dir.join(format!("{}.tar.gz", package.service_name))
-        } else {
-            artifact_dir.join(format!("{}.tar", package.service_name))
-        };
+    let packages = config.package_config.packages_to_deploy(&config.target);
 
-        let src = tarfile.as_path();
-        let dst = install_dir.join(src.strip_prefix(artifact_dir)?);
-        info!(
-            log,
-            "Installing service";
-            "src" => %src.to_string_lossy(),
-            "dst" => %dst.to_string_lossy(),
-        );
-        std::fs::copy(&src, &dst)?;
-        Ok(())
-    })?;
+    packages.par_iter().try_for_each(
+        |(package_name, package)| -> Result<()> {
+            let tarfile = package.get_output_path(&package_name, artifact_dir);
+            let src = tarfile.as_path();
+            let dst =
+                package.get_output_path(&package.service_name, install_dir);
+            info!(
+                &config.log,
+                "Installing service";
+                "src" => %src.to_string_lossy(),
+                "dst" => %dst.to_string_lossy(),
+            );
+            std::fs::copy(&src, &dst)?;
+            Ok(())
+        },
+    )?;
 
     if env::var("OMICRON_NO_UNINSTALL").is_err() {
         // Ensure we start from a clean slate - remove all zones & packages.
@@ -345,17 +347,17 @@ fn do_unpack(
     }
 
     // Extract all global zone services.
-    let global_zone_service_names = config
-        .packages
-        .values()
-        .chain(config.external_packages.values().map(|p| &p.package))
-        .filter_map(|p| if p.zone { None } else { Some(&p.service_name) });
+    let global_zone_service_names =
+        packages.into_iter().filter_map(|(_, p)| match p.output {
+            PackageOutput::Zone { .. } => None,
+            PackageOutput::Tarball => Some(&p.service_name),
+        });
 
     for service_name in global_zone_service_names {
         let tar_path = install_dir.join(format!("{}.tar", service_name));
         let service_path = install_dir.join(service_name);
         info!(
-            log,
+            &config.log,
             "Unpacking service tarball";
             "tar_path" => %tar_path.to_string_lossy(),
             "service_path" => %service_path.to_string_lossy(),
@@ -371,20 +373,18 @@ fn do_unpack(
     Ok(())
 }
 
-fn do_activate(
-    config: &Config,
-    install_dir: &Path,
-    log: &Logger,
-) -> Result<()> {
+fn do_activate(config: &Config, install_dir: &Path) -> Result<()> {
     // Install the bootstrap service, which itself extracts and
     // installs other services.
-    if let Some(package) = config.packages.get("omicron-sled-agent") {
+    if let Some(package) =
+        config.package_config.packages.get("omicron-sled-agent")
+    {
         let manifest_path = install_dir
             .join(&package.service_name)
             .join("pkg")
             .join("manifest.xml");
         info!(
-            log,
+            config.log,
             "Installing boostrap service from {}",
             manifest_path.to_string_lossy()
         );
@@ -399,10 +399,9 @@ fn do_install(
     config: &Config,
     artifact_dir: &Path,
     install_dir: &Path,
-    log: &Logger,
 ) -> Result<()> {
-    do_unpack(config, artifact_dir, install_dir, log)?;
-    do_activate(config, install_dir, log)
+    do_unpack(config, artifact_dir, install_dir)?;
+    do_activate(config, install_dir)
 }
 
 fn uninstall_all_omicron_zones() -> Result<()> {
@@ -415,11 +414,11 @@ fn uninstall_all_omicron_zones() -> Result<()> {
 
 // Attempts to both disable and delete all requested packages.
 fn uninstall_all_packages(config: &Config) {
-    for package in config
-        .packages
-        .values()
-        .chain(config.external_packages.values().map(|epkg| &epkg.package))
-        .filter(|package| !package.zone)
+    for (_, package) in config
+        .package_config
+        .packages_to_deploy(&config.target)
+        .into_iter()
+        .filter(|(_, package)| matches!(package.output, PackageOutput::Tarball))
     {
         let _ = smf::Adm::new()
             .disable()
@@ -480,31 +479,36 @@ fn remove_all_except<P: AsRef<Path>>(
     Ok(())
 }
 
-async fn do_uninstall(
+async fn do_uninstall(config: &Config) -> Result<()> {
+    info!(&config.log, "Removing all Omicron zones");
+    uninstall_all_omicron_zones()?;
+    info!(config.log, "Uninstalling all packages");
+    uninstall_all_packages(config);
+    info!(config.log, "Removing networking resources");
+    cleanup_networking_resources(&config.log).await?;
+    Ok(())
+}
+
+async fn do_clean(
     config: &Config,
     artifact_dir: &Path,
     install_dir: &Path,
-    log: &Logger,
 ) -> Result<()> {
-    info!(log, "Removing all Omicron zones");
-    uninstall_all_omicron_zones()?;
-    info!(log, "Uninstalling all packages");
-    uninstall_all_packages(config);
-    info!(log, "Removing artifacts in: {}", artifact_dir.to_string_lossy());
-
+    info!(
+        config.log,
+        "Removing artifacts from {}",
+        artifact_dir.to_string_lossy()
+    );
     const ARTIFACTS_TO_KEEP: &[&str] =
         &["clickhouse", "cockroachdb", "xde", "console-assets", "downloads"];
-    remove_all_except(artifact_dir, ARTIFACTS_TO_KEEP, log)?;
-
+    remove_all_except(artifact_dir, ARTIFACTS_TO_KEEP, &config.log)?;
     info!(
-        log,
+        config.log,
         "Removing installed objects in: {}",
         install_dir.to_string_lossy()
     );
     const INSTALLED_OBJECTS_TO_KEEP: &[&str] = &["opte"];
-    remove_all_except(install_dir, INSTALLED_OBJECTS_TO_KEEP, log)?;
-
-    cleanup_networking_resources(log).await?;
+    remove_all_except(install_dir, INSTALLED_OBJECTS_TO_KEEP, &config.log)?;
 
     Ok(())
 }
@@ -580,15 +584,28 @@ impl ProgressUI {
     }
 }
 
+struct Config {
+    log: Logger,
+    // Description of all possible packages.
+    package_config: PackageConfig,
+    // Description of the target we're trying to operate on.
+    target: Target,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::try_parse()?;
-    let config = parse::<_, Config>(&args.manifest)?;
+    let package_config = parse::<_, PackageConfig>(&args.manifest)?;
 
     let decorator = slog_term::TermDecorator::new().build();
     let drain = slog_term::CompactFormat::new(decorator).build().fuse();
     let drain = slog_async::Async::new(drain).build().fuse();
     let log = slog::Logger::root(drain, o!());
+
+    debug!(log, "target: {:?}", args.target);
+
+    let config =
+        Config { log: log.clone(), package_config, target: args.target };
 
     // Use a CWD that is the root of the Omicron repository.
     if let Ok(manifest) = env::var("CARGO_MANIFEST_DIR") {
@@ -606,22 +623,26 @@ async fn main() -> Result<()> {
             artifact_dir,
             install_dir,
         }) => {
-            do_install(&config, &artifact_dir, &install_dir, &log)?;
+            do_install(&config, &artifact_dir, &install_dir)?;
         }
-        SubCommand::Deploy(DeployCommand::Uninstall {
+        SubCommand::Deploy(DeployCommand::Uninstall) => {
+            do_uninstall(&config).await?;
+        }
+        SubCommand::Deploy(DeployCommand::Clean {
             artifact_dir,
             install_dir,
         }) => {
-            do_uninstall(&config, &artifact_dir, &install_dir, &log).await?;
+            do_uninstall(&config).await?;
+            do_clean(&config, &artifact_dir, &install_dir).await?;
         }
         SubCommand::Deploy(DeployCommand::Unpack {
             artifact_dir,
             install_dir,
         }) => {
-            do_unpack(&config, &artifact_dir, &install_dir, &log)?;
+            do_unpack(&config, &artifact_dir, &install_dir)?;
         }
         SubCommand::Deploy(DeployCommand::Activate { install_dir }) => {
-            do_activate(&config, &install_dir, &log)?;
+            do_activate(&config, &install_dir)?;
         }
     }
 

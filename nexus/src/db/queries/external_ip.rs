@@ -345,25 +345,39 @@ impl NextExternalIp {
         // need to allow inbound connections to that port. (It can't be
         // rewritten on the way in.)
         //
-        // In the first case the JOIN conditions look like:
-        //
-        // ```sql
-        // ON
-        //     (ip, first_port, time_deleted IS NULL) =
-        //     (candidate_ip, candidate_first_port, TRUE)
-        // ```
-        //
-        // I.e., we're considering records in the list of possibles to match
-        // when the IP and the first port both match an existing record.
-        //
-        // In the second case, the conditions are:
+        // The second case is much simpler, so let's start with that.
         //
         // ```sql
         // ON (ip, time_deleted IS NULL) = (candidate_ip, TRUE)
         // ```
         //
         // Here, we don't care what the port is. Any record in the table that
-        // has that IP should be considered a match.
+        // has that IP should be considered a match. This prevents creating
+        // Ephemeral or Floating IPs when there is any other record with the
+        // same address, even an SNAT IP only consuming a portion of the port
+        // range.
+        //
+        // Now for the first case, SNAT. Here, we need to prevent SNAT IPs from
+        // "carving out" any part of the port range of an IP if there is an
+        // Ephemeral or Floating IP with the same address. However, we want to
+        // _allow_ taking the next available chunk of ports when there is an
+        // existing SNAT IP with the same address.
+        //
+        // This is done by preventing _overlapping_ port ranges within the same
+        // IP. There's a clause in the JOIN condition:
+        //
+        // ```
+        // candidate_first_port >= first_port
+        // AND
+        // candidate_last_port <= last_port
+        // ```
+        //
+        // which, if `TRUE`, results in a match in the left outer join. That is,
+        // if there is any existing address whose port range contains the
+        // candidate port range, we return that as a match. That means we cannot
+        // double-allocate matching port ranges for an SNAT address, nor can we
+        // double-allocate a port range that's already been claimed by an
+        // Ephemeral or Floating address.
         //
         // In either case, we follow this with a filter `WHERE ip IS NULL`,
         // meaning we select the candidate address and first port that does not
@@ -371,13 +385,13 @@ impl NextExternalIp {
         if matches!(self.ip.kind(), &IpKind::SNat) {
             out.push_sql(" ON (");
             out.push_identifier(dsl::ip::NAME)?;
-            out.push_sql(", ");
+            out.push_sql(", candidate_first_port >= ");
             out.push_identifier(dsl::first_port::NAME)?;
+            out.push_sql(" AND candidate_last_port <= ");
+            out.push_identifier(dsl::last_port::NAME)?;
             out.push_sql(", ");
             out.push_identifier(dsl::time_deleted::NAME)?;
-            out.push_sql(
-                " IS NULL) = (candidate_ip, candidate_first_port, TRUE) ",
-            );
+            out.push_sql(" IS NULL) = (candidate_ip, TRUE, TRUE) ");
         } else {
             out.push_sql(" ON (");
             out.push_identifier(dsl::ip::NAME)?;
@@ -793,6 +807,90 @@ mod tests {
             );
         assert_eq!(
             err,
+            Error::InvalidRequest {
+                message: String::from("No external IP addresses available"),
+            }
+        );
+        context.success().await;
+    }
+
+    #[tokio::test]
+    async fn test_ephemeral_and_snat_ips_do_not_overlap() {
+        let context =
+            TestContext::new("test_ephemeral_and_snat_ips_do_not_overlap")
+                .await;
+        let range = IpRange::try_from((
+            Ipv4Addr::new(10, 0, 0, 1),
+            Ipv4Addr::new(10, 0, 0, 1),
+        ))
+        .unwrap();
+        context.create_ip_pool("p0", range, None).await;
+        let project_id = Uuid::new_v4();
+
+        // Allocate an Ephemeral IP, which should take the entire port range of
+        // the only address in the pool.
+        let instance_id = Uuid::new_v4();
+        let ephemeral_ip = context
+            .db_datastore
+            .allocate_instance_ephemeral_ip(
+                &context.opctx,
+                Uuid::new_v4(),
+                project_id,
+                instance_id,
+                /* pool_name = */ None,
+            )
+            .await
+            .expect("Failed to allocate Ephemeral IP when there is space");
+        assert_eq!(ephemeral_ip.ip.ip(), range.last_address());
+        assert_eq!(ephemeral_ip.first_port.0, 0);
+        assert_eq!(
+            ephemeral_ip.last_port.0,
+            u16::try_from(super::MAX_PORT).unwrap()
+        );
+
+        // At this point, we should be able to allocate neither a new Ephemeral
+        // nor any SNAT IPs.
+        let instance_id = Uuid::new_v4();
+        let res = context
+            .db_datastore
+            .allocate_instance_snat_ip(
+                &context.opctx,
+                Uuid::new_v4(),
+                project_id,
+                instance_id,
+            )
+            .await;
+        assert!(
+            res.is_err(),
+            "Expected an allocation of an SNAT IP to fail, \
+            but found {:#?}",
+            res.unwrap(),
+        );
+        assert_eq!(
+            res.unwrap_err(),
+            Error::InvalidRequest {
+                message: String::from("No external IP addresses available"),
+            }
+        );
+
+        let res = context
+            .db_datastore
+            .allocate_instance_ephemeral_ip(
+                &context.opctx,
+                Uuid::new_v4(),
+                project_id,
+                instance_id,
+                /* pool_name = */ None,
+            )
+            .await;
+        assert!(
+            res.is_err(),
+            "Expected an allocation of an Ephemeral IP to fail, \
+            but found {:#?}",
+            res.unwrap(),
+        );
+        assert_eq!(
+            res.unwrap_err(),
             Error::InvalidRequest {
                 message: String::from("No external IP addresses available"),
             }

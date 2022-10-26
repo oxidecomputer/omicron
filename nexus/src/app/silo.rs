@@ -4,6 +4,7 @@
 
 //! Silos, Users, and SSH Keys.
 
+use crate::authz::ApiResource;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::{Asset, Resource};
@@ -14,13 +15,15 @@ use crate::external_api::params;
 use crate::external_api::shared;
 use crate::{authn, authz};
 use anyhow::Context;
-use omicron_common::api::external::CreateResult;
+use nexus_db_model::UserProvisionType;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::UpdateResult;
+use omicron_common::api::external::{CreateResult, ResourceType};
+use std::str::FromStr;
 use uuid::Uuid;
 
 impl super::Nexus {
@@ -140,16 +143,136 @@ impl super::Nexus {
 
     // Users
 
+    /// Helper function for looking up a user in a Silo
+    ///
+    /// `LookupPath` lets you look up users directly, regardless of what Silo
+    /// they're in.  This helper validates that they're in the expected Silo.
+    async fn silo_user_lookup_by_id(
+        &self,
+        opctx: &OpContext,
+        authz_silo: &authz::Silo,
+        silo_user_id: Uuid,
+        action: authz::Action,
+    ) -> LookupResult<(authz::SiloUser, db::model::SiloUser)> {
+        let (_, authz_silo_user, db_silo_user) =
+            LookupPath::new(opctx, self.datastore())
+                .silo_user_id(silo_user_id)
+                .fetch_for(action)
+                .await?;
+        if db_silo_user.silo_id != authz_silo.id() {
+            return Err(authz_silo_user.not_found());
+        }
+
+        Ok((authz_silo_user, db_silo_user))
+    }
+
+    /// List the users in a Silo
+    pub async fn silo_list_users(
+        &self,
+        opctx: &OpContext,
+        silo_name: &Name,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<db::model::SiloUser> {
+        let (authz_silo,) = LookupPath::new(opctx, self.datastore())
+            .silo_name(silo_name)
+            .lookup_for(authz::Action::Read)
+            .await?;
+        let authz_silo_user_list = authz::SiloUserList::new(authz_silo);
+        self.db_datastore
+            .silo_users_list_by_id(opctx, &authz_silo_user_list, pagparams)
+            .await
+    }
+
+    /// Fetch a user in a Silo
     pub async fn silo_user_fetch(
         &self,
         opctx: &OpContext,
+        silo_name: &Name,
         silo_user_id: Uuid,
     ) -> LookupResult<db::model::SiloUser> {
-        let (.., db_silo_user) = LookupPath::new(opctx, &self.datastore())
-            .silo_user_id(silo_user_id)
-            .fetch()
+        let (authz_silo,) = LookupPath::new(opctx, self.datastore())
+            .silo_name(silo_name)
+            .lookup_for(authz::Action::Read)
+            .await?;
+        let (_, db_silo_user) = self
+            .silo_user_lookup_by_id(
+                opctx,
+                &authz_silo,
+                silo_user_id,
+                authz::Action::Read,
+            )
             .await?;
         Ok(db_silo_user)
+    }
+
+    // The "local" identity provider (available only in `LocalOnly` Silos)
+
+    /// Helper function for looking up a LocalOnly Silo by name
+    ///
+    /// This is called from contexts that are trying to access the "local"
+    /// identity provider.  On failure, it returns a 404 for that identity
+    /// provider.
+    async fn local_idp_fetch_silo(
+        &self,
+        opctx: &OpContext,
+        silo_name: &Name,
+    ) -> LookupResult<(authz::Silo, db::model::Silo)> {
+        let (authz_silo, db_silo) = LookupPath::new(opctx, &self.db_datastore)
+            .silo_name(silo_name)
+            .fetch()
+            .await?;
+        if db_silo.user_provision_type != UserProvisionType::ApiOnly {
+            return Err(Error::not_found_by_name(
+                ResourceType::IdentityProvider,
+                &omicron_common::api::external::Name::from_str("local")
+                    .unwrap(),
+            ));
+        }
+        Ok((authz_silo, db_silo))
+    }
+
+    /// Create a user in a Silo's local identity provider
+    pub async fn local_idp_create_user(
+        &self,
+        opctx: &OpContext,
+        silo_name: &Name,
+        new_user_params: params::UserCreate,
+    ) -> CreateResult<db::model::SiloUser> {
+        let (authz_silo, _) =
+            self.local_idp_fetch_silo(opctx, silo_name).await?;
+        let authz_silo_user_list = authz::SiloUserList::new(authz_silo.clone());
+        // TODO-cleanup This authz check belongs in silo_user_create().
+        opctx
+            .authorize(authz::Action::CreateChild, &authz_silo_user_list)
+            .await?;
+        let silo_user = db::model::SiloUser::new(
+            authz_silo.id(),
+            Uuid::new_v4(),
+            new_user_params.external_id.as_ref().to_owned(),
+        );
+        let (_, db_silo_user) =
+            self.datastore().silo_user_create(&authz_silo, silo_user).await?;
+        Ok(db_silo_user)
+    }
+
+    /// Delete a user in a Silo's local identity provider
+    pub async fn local_idp_delete_user(
+        &self,
+        opctx: &OpContext,
+        silo_name: &Name,
+        silo_user_id: Uuid,
+    ) -> DeleteResult {
+        let (authz_silo, _) =
+            self.local_idp_fetch_silo(opctx, silo_name).await?;
+        let (authz_silo_user, _) = self
+            .silo_user_lookup_by_id(
+                opctx,
+                &authz_silo,
+                silo_user_id,
+                authz::Action::Delete,
+            )
+            .await?;
+        self.db_datastore.silo_user_delete(opctx, &authz_silo_user).await
     }
 
     /// Based on an authenticated subject, fetch or create a silo user
@@ -181,9 +304,9 @@ impl super::Nexus {
                 // external id. The next action depends on the silo's user
                 // provision type.
                 match db_silo.user_provision_type {
-                    // If the user provision type is fixed, do not a new user if
-                    // one does not exist.
-                    db::model::UserProvisionType::Fixed => {
+                    // If the user provision type is ApiOnly, do not create a
+                    // new user if one does not exist.
+                    db::model::UserProvisionType::ApiOnly => {
                         return Ok(None);
                     }
 
@@ -212,7 +335,7 @@ impl super::Nexus {
 
         for group in &authenticated_subject.groups {
             let silo_group = match db_silo.user_provision_type {
-                db::model::UserProvisionType::Fixed => {
+                db::model::UserProvisionType::ApiOnly => {
                     self.db_datastore
                         .silo_group_optional_lookup(
                             opctx,
@@ -378,11 +501,30 @@ impl super::Nexus {
             .await?;
         let authz_idp_list = authz::SiloIdentityProviderList::new(authz_silo);
 
+        if db_silo.user_provision_type != UserProvisionType::Jit {
+            return Err(Error::invalid_request(
+                "cannot create identity providers in this kind of Silo",
+            ));
+        }
+
         // This check is not strictly necessary yet.  We'll check this
         // permission in the DataStore when we actually update the list.
         // But we check now to protect the code that fetches the descriptor from
         // an external source.
         opctx.authorize(authz::Action::CreateChild, &authz_idp_list).await?;
+
+        // The authentication mode is immutable so it's safe to check this here
+        // and bail out.
+        if db_silo.authentication_mode
+            != nexus_db_model::AuthenticationMode::Saml
+        {
+            return Err(Error::invalid_request(&format!(
+                "cannot create SAML identity provider for this Silo type \
+                (expected authentication mode {:?}, found {:?})",
+                nexus_db_model::AuthenticationMode::Saml,
+                &db_silo.authentication_mode,
+            )));
+        }
 
         let idp_metadata_document_string = match &params.idp_metadata_source {
             params::IdpMetadataSource::Url { url } => {

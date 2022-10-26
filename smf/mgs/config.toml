@@ -1,0 +1,82 @@
+#
+# Oxide API: example configuration file
+#
+
+[switch]
+# which vsc port is connected to our local sidecar SP (i.e., the SP that acts as
+# our contact to the ignition controller)
+local_ignition_controller_port = 0
+
+# when sending UDP RPC packets to an SP, how many total attempts do we make
+# before giving up?
+rpc_max_attempts = 15
+
+# sleep time between UDP RPC resends (up to `rpc_max_attempts`)
+rpc_per_attempt_timeout_millis = 2000
+
+[switch.location]
+# possible locations where MGS could be running; these names appear in logs and
+# are used in the remainder of the `[switch.*]` configuration to define port
+# mappings
+names = ["switch0", "switch1"]
+
+# `[[switch.location.determination]]` is a list of switch ports we should
+# contact in order to determine our location; each port defines a subset of
+# `[switch.location.names]` which are the possible location(s) of this MGS
+# instance if the message was received on the given SP port. When MGS starts, it
+# will send a discovery message on each port listed in this section, collect the
+# responses, and determine its location via the intersection of the names listed
+# below (for all ports which returned a successful response). This process can
+# fail if too few SPs respond (leaving us with 2 or more possible locations) or
+# if there is a miscabling that results in an unsolvable system (e.g.,
+# determination 0 reports "switch0" and determination 1 reports "switch1").
+[[switch.location.determination]]
+switch_port = 1
+sp_port_1 = ["switch0"]
+sp_port_2 = ["switch1"]
+
+[[switch.location.determination]]
+switch_port = 2
+sp_port_1 = ["switch0"]
+sp_port_2 = ["switch1"]
+
+# `[[switch.port.*]]` defines the local data link address (in RFD 250 terms, the
+# interface configured to use VLAN tag  assigned to the given port) and the
+# logical ID of the remote SP ("sled 7", "switch 1", etc.), which must have an
+# entry for each member of `[switch.location]` above.
+#
+# TODO This needs to be replaced with information relevant to real vlan
+# datalinks. For now we pick a bunch of arbitrary addresses and ports that don't
+# mean anything unless someone spins up simulated SPs on those ports.
+[switch.port.0]
+data_link_addr = "[::]:33200"
+multicast_addr = "[ff15:0:1de::0]:33300"
+[switch.port.0.location]
+switch0 = ["switch", 0]
+switch1 = ["switch", 1]
+
+[switch.port.1]
+data_link_addr = "[::]:33201"
+multicast_addr = "[ff15:0:1de::1]:33310"
+[switch.port.1.location]
+switch0 = ["sled", 0]
+switch1 = ["sled", 1]
+
+[switch.port.2]
+data_link_addr = "[::]:33202"
+multicast_addr = "[ff15:0:1de::2]:33320"
+[switch.port.2.location]
+switch0 = ["sled", 1]
+switch1 = ["sled", 0]
+
+[timeouts]
+bulk_request_default_millis = 5_000
+bulk_request_max_millis = 60_000
+bulk_request_page_millis = 1_000
+bulk_request_retain_grace_period_millis = 10_000
+
+[log]
+level = "info"
+mode = "file"
+path = "/dev/stdout"
+if_exists = "append"

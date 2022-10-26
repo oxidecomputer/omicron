@@ -9,9 +9,9 @@ use super::views::IpPoolRange;
 use super::{
     console_api, device_auth, params, views,
     views::{
-        GlobalImage, IdentityProvider, Image, Organization, Project, Rack,
-        Role, Silo, Sled, Snapshot, SshKey, User, UserBuiltin, Vpc, VpcRouter,
-        VpcSubnet,
+        GlobalImage, Group, IdentityProvider, Image, Organization, Project,
+        Rack, Role, Silo, Sled, Snapshot, SshKey, User, UserBuiltin, Vpc,
+        VpcRouter, VpcSubnet,
     },
 };
 use crate::authz;
@@ -232,8 +232,11 @@ pub fn external_api() -> NexusApiDescription {
         api.register(silo_policy_view)?;
         api.register(silo_policy_update)?;
 
-        api.register(silo_identity_provider_create)?;
-        api.register(silo_identity_provider_view)?;
+        api.register(saml_identity_provider_create)?;
+        api.register(saml_identity_provider_view)?;
+
+        api.register(local_idp_user_create)?;
+        api.register(local_idp_user_delete)?;
 
         api.register(system_image_list)?;
         api.register(system_image_create)?;
@@ -242,22 +245,27 @@ pub fn external_api() -> NexusApiDescription {
         api.register(system_image_delete)?;
 
         api.register(updates_refresh)?;
+
         api.register(user_list)?;
+        api.register(silo_users_list)?;
+        api.register(silo_user_view)?;
+        api.register(group_list)?;
 
         // Console API operations
-        api.register(console_api::spoof_login)?;
-        api.register(console_api::spoof_login_form)?;
-        api.register(console_api::login_redirect)?;
-        api.register(console_api::session_me)?;
+        api.register(console_api::login_begin)?;
+        api.register(console_api::login_spoof_begin)?;
+        api.register(console_api::login_spoof)?;
+        api.register(console_api::login_saml_begin)?;
+        api.register(console_api::login_saml)?;
         api.register(console_api::logout)?;
+
+        api.register(console_api::session_me)?;
+        api.register(console_api::session_me_groups)?;
         api.register(console_api::console_page)?;
         api.register(console_api::console_root)?;
         api.register(console_api::console_settings_page)?;
         api.register(console_api::console_system_page)?;
         api.register(console_api::asset)?;
-
-        api.register(console_api::login)?;
-        api.register(console_api::consume_credentials)?;
 
         api.register(device_auth::device_auth_request)?;
         api.register(device_auth::device_auth_verify)?;
@@ -460,8 +468,8 @@ async fn silo_list(
             }
         }
         .into_iter()
-        .map(|p| p.into())
-        .collect();
+        .map(|p| p.try_into())
+        .collect::<Result<Vec<_>, Error>>()?;
         Ok(HttpResponseOk(ScanByNameOrId::results_page(
             &query,
             silos,
@@ -487,7 +495,7 @@ async fn silo_create(
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let silo =
             nexus.silo_create(&opctx, new_silo_params.into_inner()).await?;
-        Ok(HttpResponseCreated(silo.into()))
+        Ok(HttpResponseCreated(silo.try_into()?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -518,7 +526,7 @@ async fn silo_view(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let silo = nexus.silo_fetch(&opctx, &silo_name).await?;
-        Ok(HttpResponseOk(silo.into()))
+        Ok(HttpResponseOk(silo.try_into()?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -540,7 +548,7 @@ async fn silo_view_by_id(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let silo = nexus.silo_fetch_by_id(&opctx, id).await?;
-        Ok(HttpResponseOk(silo.into()))
+        Ok(HttpResponseOk(silo.try_into()?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -623,6 +631,76 @@ async fn silo_policy_update(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+// Silo-specific user endpoints
+
+/// List users in a specific Silo
+#[endpoint {
+    method = GET,
+    path = "/system/silos/{silo_name}/users/all",
+    tags = ["system"],
+}]
+async fn silo_users_list(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<SiloPathParam>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<User>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let silo_name = path_params.into_inner().silo_name;
+    let query = query_params.into_inner();
+    let pagparams = data_page_params_for(&rqctx, &query)?;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let users = nexus
+            .silo_list_users(&opctx, &silo_name, &pagparams)
+            .await?
+            .into_iter()
+            .map(|i| i.into())
+            .collect();
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            users,
+            &|_, user: &User| user.id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Path parameters for Silo User requests
+#[derive(Deserialize, JsonSchema)]
+struct UserPathParam {
+    /// The silo's unique name.
+    silo_name: Name,
+    /// The user's internal id
+    user_id: Uuid,
+}
+
+#[endpoint {
+    method = GET,
+    path = "/system/silos/{silo_name}/users/id/{user_id}",
+    tags = ["system"],
+}]
+async fn silo_user_view(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<UserPathParam>,
+) -> Result<HttpResponseOk<User>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path_params = path_params.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let user = nexus
+            .silo_user_fetch(
+                &opctx,
+                &path_params.silo_name,
+                path_params.user_id,
+            )
+            .await?;
+        Ok(HttpResponseOk(user.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 // Silo identity providers
 
 /// List a silo's IDPs
@@ -665,10 +743,10 @@ async fn silo_identity_provider_list(
 /// Create a SAML IDP
 #[endpoint {
     method = POST,
-    path = "/system/silos/{silo_name}/saml-identity-providers",
+    path = "/system/silos/{silo_name}/identity-providers/saml",
     tags = ["system"],
 }]
-async fn silo_identity_provider_create(
+async fn saml_identity_provider_create(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<SiloPathParam>,
     new_provider: TypedBody<params::SamlIdentityProviderCreate>,
@@ -702,10 +780,10 @@ struct SiloSamlPathParam {
 /// Fetch a SAML IDP
 #[endpoint {
     method = GET,
-    path = "/system/silos/{silo_name}/saml-identity-providers/{provider_name}",
+    path = "/system/silos/{silo_name}/identity-providers/saml/{provider_name}",
     tags = ["system"],
 }]
-async fn silo_identity_provider_view(
+async fn saml_identity_provider_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<SiloSamlPathParam>,
 ) -> Result<HttpResponseOk<views::SamlIdentityProvider>, HttpError> {
@@ -730,6 +808,66 @@ async fn silo_identity_provider_view(
 }
 
 // TODO: no DELETE for identity providers?
+
+// "Local" Identity Provider
+
+/// Create a user
+///
+/// Users can only be created in Silos with `provision_type` == `Fixed`.
+/// Otherwise, Silo users are just-in-time (JIT) provisioned when a user first
+/// logs in using an external Identity Provider.
+#[endpoint {
+    method = POST,
+    path = "/system/silos/{silo_name}/identity-providers/local/users",
+    tags = ["system"],
+}]
+async fn local_idp_user_create(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<SiloPathParam>,
+    new_user_params: TypedBody<params::UserCreate>,
+) -> Result<HttpResponseCreated<User>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let silo_name = path_params.into_inner().silo_name;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let user = nexus
+            .local_idp_create_user(
+                &opctx,
+                &silo_name,
+                new_user_params.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseCreated(user.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+#[endpoint {
+    method = DELETE,
+    path = "/system/silos/{silo_name}/identity-providers/local/users/{user_id}",
+    tags = ["system"],
+}]
+async fn local_idp_user_delete(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path_params: Path<UserPathParam>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path_params = path_params.into_inner();
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        nexus
+            .local_idp_delete_user(
+                &opctx,
+                &path_params.silo_name,
+                path_params.user_id,
+            )
+            .await?;
+        Ok(HttpResponseDeleted())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
 
 /// List organizations
 #[endpoint {
@@ -4098,7 +4236,7 @@ async fn user_list(
     let handler = async {
         let opctx = OpContext::for_external_api(&rqctx).await?;
         let users = nexus
-            .silo_users_list(&opctx, &pagparams)
+            .silo_users_list_current(&opctx, &pagparams)
             .await?
             .into_iter()
             .map(|i| i.into())
@@ -4107,6 +4245,39 @@ async fn user_list(
             &query,
             users,
             &|_, user: &User| user.id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+// Silo groups
+
+/// List groups
+#[endpoint {
+    method = GET,
+    path = "/groups",
+    tags = ["silos"],
+}]
+async fn group_list(
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<Group>>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let query = query_params.into_inner();
+    let pagparams = data_page_params_for(&rqctx, &query)?;
+    let handler = async {
+        let opctx = OpContext::for_external_api(&rqctx).await?;
+        let groups = nexus
+            .silo_groups_list(&opctx, &pagparams)
+            .await?
+            .into_iter()
+            .map(|i| i.into())
+            .collect();
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            groups,
+            &|_, group: &Group| group.id,
         )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -4148,7 +4319,7 @@ async fn system_user_list(
 
 /// Path parameters for global (system) user requests
 #[derive(Deserialize, JsonSchema)]
-struct UserPathParam {
+struct BuiltinUserPathParam {
     /// The built-in user's unique name.
     user_name: Name,
 }
@@ -4161,7 +4332,7 @@ struct UserPathParam {
 }]
 async fn system_user_view(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    path_params: Path<UserPathParam>,
+    path_params: Path<BuiltinUserPathParam>,
 ) -> Result<HttpResponseOk<UserBuiltin>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;

@@ -46,6 +46,7 @@ impl SimulatedSp {
             let sp_addr = bind_addrs[0].ip();
             for addr in bind_addrs[1..].iter().copied().chain(
                 sp_config
+                    .common
                     .components
                     .iter()
                     .filter_map(|comp| comp.serial_console),

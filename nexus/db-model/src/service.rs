@@ -72,6 +72,7 @@ impl Service {
             ServiceKind::Nexus => SRV::Service(ServiceName::Nexus),
             ServiceKind::Oximeter => SRV::Service(ServiceName::Oximeter),
             ServiceKind::Dendrite => SRV::Service(ServiceName::Dendrite),
+            ServiceKind::Tfport => SRV::Service(ServiceName::Tfport),
         }
     }
 
@@ -81,6 +82,8 @@ impl Service {
             ServiceKind::Nexus => NEXUS_INTERNAL_PORT,
             ServiceKind::Oximeter => OXIMETER_PORT,
             ServiceKind::Dendrite => DENDRITE_PORT,
+            // TODO: Is this okay?
+            ServiceKind::Tfport => 0,
         };
         SocketAddrV6::new(Ipv6Addr::from(self.ip), port, 0, 0)
     }

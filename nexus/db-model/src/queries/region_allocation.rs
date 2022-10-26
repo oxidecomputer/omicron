@@ -143,10 +143,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     dataset,
 );
 
-diesel::allow_tables_to_appear_in_same_query!(
-    candidate_regions,
-    zpool,
-);
+diesel::allow_tables_to_appear_in_same_query!(candidate_regions, zpool,);
 
 diesel::allow_tables_to_appear_in_same_query!(
     do_insert,

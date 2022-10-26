@@ -15,6 +15,7 @@ pub struct SiloUser {
     #[diesel(embed)]
     identity: SiloUserIdentity,
 
+    pub time_deleted: Option<chrono::DateTime<chrono::Utc>>,
     pub silo_id: Uuid,
 
     /// The identity provider's ID for this user.
@@ -23,7 +24,12 @@ pub struct SiloUser {
 
 impl SiloUser {
     pub fn new(silo_id: Uuid, user_id: Uuid, external_id: String) -> Self {
-        Self { identity: SiloUserIdentity::new(user_id), silo_id, external_id }
+        Self {
+            identity: SiloUserIdentity::new(user_id),
+            time_deleted: None,
+            silo_id,
+            external_id,
+        }
     }
 }
 
@@ -33,6 +39,7 @@ impl From<SiloUser> for views::User {
             id: user.id(),
             // TODO the use of external_id as display_name is temporary
             display_name: user.external_id,
+            silo_id: user.silo_id,
         }
     }
 }

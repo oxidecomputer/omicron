@@ -46,7 +46,7 @@ impl FakeSledClient {
     }
 
     /// Returns the requests to create services on the sled.
-    pub fn service_requests(&self) -> Vec<SledAgentTypes::ServiceRequest> {
+    pub fn service_requests(&self) -> Vec<SledAgentTypes::ServiceZoneRequest> {
         self.inner
             .lock()
             .unwrap()

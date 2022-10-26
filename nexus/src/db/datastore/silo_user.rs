@@ -17,12 +17,16 @@ use crate::db::model::Name;
 use crate::db::model::SiloUser;
 use crate::db::model::UserBuiltin;
 use crate::db::pagination::paginated;
+use crate::db::update_and_check::UpdateAndCheck;
 use crate::external_api::params;
+use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use chrono::Utc;
 use diesel::prelude::*;
 use nexus_types::identity::Asset;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
+use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::ResourceType;
@@ -61,6 +65,84 @@ impl DataStore {
                     LookupType::ById(silo_user_id),
                 );
                 (authz_silo_user, db_silo_user)
+            })
+    }
+
+    /// Delete a Silo User
+    pub async fn silo_user_delete(
+        &self,
+        opctx: &OpContext,
+        authz_silo_user: &authz::SiloUser,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Delete, authz_silo_user).await?;
+
+        // Delete the user and everything associated with them.
+        // TODO-scalability Many of these should be done in batches.
+        // TODO-robustness We might consider the RFD 192 "rcgen" pattern as well
+        // so that people can't, say, login while we do this.
+        let authz_silo_user_id = authz_silo_user.id();
+        self.pool_authorized(opctx)
+            .await?
+            .transaction_async(|mut conn| async move {
+                // Delete the user record.
+                {
+                    use db::schema::silo_user::dsl;
+                    diesel::update(dsl::silo_user)
+                        .filter(dsl::id.eq(authz_silo_user_id))
+                        .filter(dsl::time_deleted.is_null())
+                        .set(dsl::time_deleted.eq(Utc::now()))
+                        .check_if_exists::<SiloUser>(authz_silo_user_id)
+                        .execute_and_check(&mut conn)
+                        .await?;
+                }
+
+                // Delete console sessions.
+                {
+                    use db::schema::console_session::dsl;
+                    diesel::delete(dsl::console_session)
+                        .filter(dsl::silo_user_id.eq(authz_silo_user_id))
+                        .execute_async(&mut conn)
+                        .await?;
+                }
+
+                // Delete device authentication tokens.
+                {
+                    use db::schema::device_access_token::dsl;
+                    diesel::delete(dsl::device_access_token)
+                        .filter(dsl::silo_user_id.eq(authz_silo_user_id))
+                        .execute_async(&mut conn)
+                        .await?;
+                }
+
+                // Delete group memberships.
+                {
+                    use db::schema::silo_group_membership::dsl;
+                    diesel::delete(dsl::silo_group_membership)
+                        .filter(dsl::silo_user_id.eq(authz_silo_user_id))
+                        .execute_async(&mut conn)
+                        .await?;
+                }
+
+                // Delete ssh keys.
+                {
+                    use db::schema::ssh_key::dsl;
+                    diesel::update(dsl::ssh_key)
+                        .filter(dsl::silo_user_id.eq(authz_silo_user_id))
+                        .filter(dsl::time_deleted.is_null())
+                        .set(dsl::time_deleted.eq(Utc::now()))
+                        .execute_async(&mut conn)
+                        .await?;
+                }
+
+                Ok(())
+            })
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_silo_user),
+                )
+                .internal_context("deleting silo user")
             })
     }
 
@@ -103,14 +185,16 @@ impl DataStore {
     pub async fn silo_users_list_by_id(
         &self,
         opctx: &OpContext,
-        authz_silo: &authz::Silo,
+        authz_silo_user_list: &authz::SiloUserList,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<SiloUser> {
         use db::schema::silo_user::dsl;
 
-        opctx.authorize(authz::Action::Read, authz_silo).await?;
+        opctx
+            .authorize(authz::Action::ListChildren, authz_silo_user_list)
+            .await?;
         paginated(dsl::silo_user, dsl::id, pagparams)
-            .filter(dsl::silo_id.eq(authz_silo.id()))
+            .filter(dsl::silo_id.eq(authz_silo_user_list.silo().id()))
             .filter(dsl::time_deleted.is_null())
             .select(SiloUser::as_select())
             .load_async::<SiloUser>(self.pool_authorized(opctx).await?)

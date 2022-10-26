@@ -2,6 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::fmt::Debug;
+
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_nexus::authn::silos::{
@@ -19,7 +21,9 @@ use nexus_test_utils::resource_helpers::{create_silo, object_create};
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 
+use dropshot::ResultsPage;
 use httptest::{matchers::*, responders::*, Expectation, Server};
+use uuid::Uuid;
 
 // Valid SAML IdP entity descriptor from https://en.wikipedia.org/wiki/SAML_metadata#Identity_provider_metadata
 // note: no signing keys
@@ -32,7 +36,7 @@ async fn test_create_a_saml_idp(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, shared::UserProvisionType::Fixed)
+    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlJit)
         .await;
     let silo: Silo = NexusRequest::object_get(
         &client,
@@ -55,7 +59,7 @@ async fn test_create_a_saml_idp(cptestctx: &ControlPlaneTestContext) {
 
     let silo_saml_idp: views::SamlIdentityProvider = object_create(
         client,
-        &format!("/system/silos/{}/saml-identity-providers", SILO_NAME),
+        &format!("/system/silos/{}/identity-providers/saml", SILO_NAME),
         &params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "some-totally-real-saml-provider"
@@ -124,7 +128,7 @@ async fn test_create_a_saml_idp(cptestctx: &ControlPlaneTestContext) {
             client,
             Method::GET,
             &format!(
-                "/login/{}/{}",
+                "/login/{}/saml/{}",
                 silo.identity.name, silo_saml_idp.identity.name
             ),
         )
@@ -151,7 +155,7 @@ async fn test_create_a_saml_idp_invalid_descriptor_truncated(
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, shared::UserProvisionType::Fixed)
+    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlJit)
         .await;
 
     let saml_idp_descriptor = {
@@ -170,7 +174,7 @@ async fn test_create_a_saml_idp_invalid_descriptor_truncated(
         RequestBuilder::new(
             client,
             Method::POST,
-            &format!("/system/silos/{}/saml-identity-providers", SILO_NAME),
+            &format!("/system/silos/{}/identity-providers/saml", SILO_NAME),
         )
         .body(Some(&params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
@@ -211,7 +215,7 @@ async fn test_create_a_saml_idp_invalid_descriptor_no_redirect_binding(
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, shared::UserProvisionType::Fixed)
+    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlJit)
         .await;
 
     let saml_idp_descriptor = {
@@ -241,7 +245,7 @@ async fn test_create_a_saml_idp_invalid_descriptor_no_redirect_binding(
         RequestBuilder::new(
             client,
             Method::POST,
-            &format!("/system/silos/{}/saml-identity-providers", SILO_NAME),
+            &format!("/system/silos/{}/identity-providers/saml", SILO_NAME),
         )
         .body(Some(&params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
@@ -281,7 +285,7 @@ async fn test_create_a_hidden_silo_saml_idp(
 ) {
     let client = &cptestctx.external_client;
 
-    create_silo(&client, "hidden", false, shared::UserProvisionType::Fixed)
+    create_silo(&client, "hidden", false, shared::SiloIdentityMode::SamlJit)
         .await;
 
     // Valid IdP descriptor
@@ -295,7 +299,7 @@ async fn test_create_a_hidden_silo_saml_idp(
 
     let silo_saml_idp: views::SamlIdentityProvider = object_create(
         client,
-        "/system/silos/hidden/saml-identity-providers",
+        "/system/silos/hidden/identity-providers/saml",
         &params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "some-totally-real-saml-provider"
@@ -327,7 +331,7 @@ async fn test_create_a_hidden_silo_saml_idp(
         RequestBuilder::new(
             client,
             Method::GET,
-            &format!("/login/hidden/{}", silo_saml_idp.identity.name),
+            &format!("/login/hidden/saml/{}", silo_saml_idp.identity.name),
         )
         .expect_status(Some(StatusCode::FOUND)),
     )
@@ -350,7 +354,7 @@ async fn test_saml_idp_metadata_url_404(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, shared::UserProvisionType::Fixed)
+    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlJit)
         .await;
 
     let server = Server::run();
@@ -363,7 +367,7 @@ async fn test_saml_idp_metadata_url_404(cptestctx: &ControlPlaneTestContext) {
         RequestBuilder::new(
             client,
             Method::POST,
-            &format!("/system/silos/{}/saml-identity-providers", SILO_NAME),
+            &format!("/system/silos/{}/identity-providers/saml", SILO_NAME),
         )
         .body(Some(&params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
@@ -404,14 +408,14 @@ async fn test_saml_idp_metadata_url_invalid(
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, shared::UserProvisionType::Fixed)
+    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlJit)
         .await;
 
     NexusRequest::new(
         RequestBuilder::new(
             client,
             Method::POST,
-            &format!("/system/silos/{}/saml-identity-providers", SILO_NAME),
+            &format!("/system/silos/{}/identity-providers/saml", SILO_NAME),
         )
         .body(Some(&params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
@@ -465,7 +469,7 @@ async fn test_saml_idp_reject_keypair(cptestctx: &ControlPlaneTestContext) {
     );
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, shared::UserProvisionType::Fixed)
+    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlJit)
         .await;
 
     let test_cases = vec![
@@ -510,7 +514,7 @@ async fn test_saml_idp_reject_keypair(cptestctx: &ControlPlaneTestContext) {
             RequestBuilder::new(
                 client,
                 Method::POST,
-                &format!("/system/silos/{}/saml-identity-providers", SILO_NAME),
+                &format!("/system/silos/{}/identity-providers/saml", SILO_NAME),
             )
             .body(Some(&params::SamlIdentityProviderCreate {
                 identity: IdentityMetadataCreateParams {
@@ -560,14 +564,14 @@ async fn test_saml_idp_rsa_keypair_ok(cptestctx: &ControlPlaneTestContext) {
     );
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, shared::UserProvisionType::Fixed)
+    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlJit)
         .await;
 
     NexusRequest::new(
         RequestBuilder::new(
             client,
             Method::POST,
-            &format!("/system/silos/{}/saml-identity-providers", SILO_NAME),
+            &format!("/system/silos/{}/identity-providers/saml", SILO_NAME),
         )
         .body(Some(&params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
@@ -932,11 +936,12 @@ async fn test_post_saml_response(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, shared::UserProvisionType::Jit).await;
+    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlJit)
+        .await;
 
     let _silo_saml_idp: views::SamlIdentityProvider = object_create(
         client,
-        &format!("/system/silos/{}/saml-identity-providers", SILO_NAME),
+        &format!("/system/silos/{}/identity-providers/saml", SILO_NAME),
         &params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "some-totally-real-saml-provider"
@@ -958,7 +963,7 @@ async fn test_post_saml_response(cptestctx: &ControlPlaneTestContext) {
 
             signing_keypair: None,
 
-            group_attribute_name: None,
+            group_attribute_name: Some("groups".into()),
         },
     )
     .await;
@@ -976,16 +981,19 @@ async fn test_post_saml_response(cptestctx: &ControlPlaneTestContext) {
         RequestBuilder::new(
             client,
             Method::POST,
-            &format!("/login/{}/some-totally-real-saml-provider", SILO_NAME),
+            &format!(
+                "/login/{}/saml/some-totally-real-saml-provider",
+                SILO_NAME
+            ),
         )
         .raw_body(Some(
             serde_urlencoded::to_string(SamlLoginPost {
-                saml_response: base64::encode(SAML_RESPONSE),
+                saml_response: base64::encode(SAML_RESPONSE_WITH_GROUPS),
                 relay_state: None,
             })
             .unwrap(),
         ))
-        .expect_status(Some(StatusCode::FOUND)),
+        .expect_status(Some(StatusCode::SEE_OTHER)),
     )
     .execute()
     .await
@@ -1002,12 +1010,12 @@ async fn test_post_saml_response(cptestctx: &ControlPlaneTestContext) {
     .await
     .expect("expected success");
 
-    let _session_user: views::User = NexusRequest::new(
-        RequestBuilder::new(client, Method::GET, "/session/me")
-            .header(
-                http::header::COOKIE,
-                result.headers["Set-Cookie"].to_str().unwrap().to_string(),
-            )
+    let session_cookie_value =
+        result.headers["Set-Cookie"].to_str().unwrap().to_string();
+
+    let groups: ResultsPage<views::Group> = NexusRequest::new(
+        RequestBuilder::new(client, Method::GET, "/groups")
+            .header(http::header::COOKIE, session_cookie_value.clone())
             .expect_status(Some(StatusCode::OK)),
     )
     .execute()
@@ -1015,6 +1023,49 @@ async fn test_post_saml_response(cptestctx: &ControlPlaneTestContext) {
     .expect("expected success")
     .parsed_body()
     .unwrap();
+
+    let silo_group_names: Vec<&str> =
+        groups.items.iter().map(|g| g.display_name.as_str()).collect();
+    let silo_group_ids: Vec<Uuid> = groups.items.iter().map(|g| g.id).collect();
+
+    assert_same_items(silo_group_names, vec!["SRE", "Admins"]);
+
+    let session_me: views::User = NexusRequest::new(
+        RequestBuilder::new(client, Method::GET, "/session/me")
+            .header(http::header::COOKIE, session_cookie_value.clone())
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .execute()
+    .await
+    .expect("expected success")
+    .parsed_body()
+    .unwrap();
+
+    assert_eq!(session_me.display_name, "some@customer.com");
+
+    let session_me: ResultsPage<views::Group> = NexusRequest::new(
+        RequestBuilder::new(client, Method::GET, "/session/me/groups")
+            .header(http::header::COOKIE, session_cookie_value)
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .execute()
+    .await
+    .expect("expected success")
+    .parsed_body()
+    .unwrap();
+
+    let session_me_group_ids =
+        session_me.items.iter().map(|g| g.id).collect::<Vec<_>>();
+
+    assert_same_items(session_me_group_ids, silo_group_ids);
+}
+
+/// Order-agnostic vec equality
+fn assert_same_items<T: PartialEq + Debug>(v1: Vec<T>, v2: Vec<T>) {
+    assert_eq!(v1.len(), v2.len(), "{:?} and {:?} don't match", v1, v2);
+    for item in v1.iter() {
+        assert!(v2.contains(item), "{:?} and {:?} don't match", v1, v2);
+    }
 }
 
 // Test correct SAML response with relay state
@@ -1025,11 +1076,12 @@ async fn test_post_saml_response_with_relay_state(
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, shared::UserProvisionType::Jit).await;
+    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlJit)
+        .await;
 
     let _silo_saml_idp: views::SamlIdentityProvider = object_create(
         client,
-        &format!("/system/silos/{}/saml-identity-providers", SILO_NAME),
+        &format!("/system/silos/{}/identity-providers/saml", SILO_NAME),
         &params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "some-totally-real-saml-provider"
@@ -1069,7 +1121,10 @@ async fn test_post_saml_response_with_relay_state(
         RequestBuilder::new(
             client,
             Method::POST,
-            &format!("/login/{}/some-totally-real-saml-provider", SILO_NAME),
+            &format!(
+                "/login/{}/saml/some-totally-real-saml-provider",
+                SILO_NAME
+            ),
         )
         .raw_body(Some(
             serde_urlencoded::to_string(SamlLoginPost {
@@ -1084,7 +1139,7 @@ async fn test_post_saml_response_with_relay_state(
             })
             .unwrap(),
         ))
-        .expect_status(Some(StatusCode::FOUND)),
+        .expect_status(Some(StatusCode::SEE_OTHER)),
     )
     .execute()
     .await

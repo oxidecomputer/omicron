@@ -9,3 +9,4 @@ tools/cockroach*
 /clickhouse/
 /cockroachdb/
 smf/nexus/root.json
+core

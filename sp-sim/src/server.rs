@@ -4,7 +4,6 @@
 
 use crate::config::Config;
 use crate::Responsiveness;
-use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Context;
 use anyhow::Result;
@@ -140,8 +139,7 @@ pub(crate) async fn handle_request<'a, H: SpHandler>(
     let (data, addr) =
         recv.with_context(|| format!("recv on {:?}", port_num))?;
 
-    let n = sp_impl::handle_message(addr, port_num, data, handler, out)
-        .map_err(|err| anyhow!("dispatching message failed: {:?}", err))?;
+    let n = sp_impl::handle_message(addr, port_num, data, handler, out);
 
     Ok(Some((&out[..n], addr)))
 }

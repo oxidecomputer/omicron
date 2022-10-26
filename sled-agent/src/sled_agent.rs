@@ -17,7 +17,7 @@ use crate::nexus::LazyNexusClient;
 use crate::params::{
     DatasetKind, DiskStateRequested, InstanceHardware, InstanceMigrateParams,
     InstanceRuntimeStateRequested, InstanceSerialConsoleData,
-    ServiceEnsureBody, Zpool,
+    ServiceEnsureBody, VpcFirewallRule, Zpool,
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::StorageManager;
@@ -434,6 +434,14 @@ impl SledAgent {
         // constructing a volume and performing a snapshot through some other
         // means. Currently unimplemented.
         todo!();
+    }
+
+    pub async fn firewall_rules_ensure(
+        &self,
+        _vpc_id: Uuid,
+        rules: &[VpcFirewallRule],
+    ) -> Result<(), Error> {
+        self.instances.firewall_rules_ensure(rules).await.map_err(Error::from)
     }
 }
 

@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::config::GimletConfig;
+use crate::config::{GimletConfig, SpComponentConfig};
 use crate::rot::RotSprocketExt;
 use crate::server;
 use crate::server::UdpServer;
@@ -10,6 +10,7 @@ use crate::{Responsiveness, SimulatedSp};
 use anyhow::{anyhow, bail, Context, Result};
 use async_trait::async_trait;
 use futures::future;
+use gateway_messages::sp_impl::DeviceDescription;
 use gateway_messages::sp_impl::SpHandler;
 use gateway_messages::version;
 use gateway_messages::DiscoverResponse;
@@ -119,10 +120,10 @@ impl Gimlet {
             .await?;
             let servers = [servers.0, servers.1];
 
-            for component_config in &gimlet.components {
-                let name = component_config.name.as_str();
-                let component = SpComponent::try_from(name)
-                    .map_err(|_| anyhow!("component id {:?} too long", name))?;
+            for component_config in &gimlet.common.components {
+                let id = component_config.id.as_str();
+                let component = SpComponent::try_from(id)
+                    .map_err(|_| anyhow!("component id {:?} too long", id))?;
 
                 if let Some(addr) = component_config.serial_console {
                     let listener =
@@ -165,7 +166,7 @@ impl Gimlet {
                             Arc::clone(servers[1].socket()),
                         ],
                         Arc::clone(&attached_mgs),
-                        log.new(slog::o!("serial-console" => name.to_string())),
+                        log.new(slog::o!("serial-console" => id.to_string())),
                     );
                     inner_tasks.push(task::spawn(async move {
                         serial_console.run().await
@@ -176,6 +177,7 @@ impl Gimlet {
                 [servers[0].local_addr(), servers[1].local_addr()];
             let inner = UdpTask::new(
                 servers,
+                gimlet.common.components.clone(),
                 attached_mgs,
                 gimlet.common.serial_number,
                 incoming_console_tx,
@@ -383,6 +385,7 @@ struct UdpTask {
 impl UdpTask {
     fn new(
         servers: [UdpServer; 2],
+        components: Vec<SpComponentConfig>,
         attached_mgs: Arc<Mutex<Option<(SpComponent, SpPort, SocketAddrV6)>>>,
         serial_number: SerialNumber,
         incoming_serial_console: HashMap<SpComponent, UnboundedSender<Vec<u8>>>,
@@ -398,6 +401,7 @@ impl UdpTask {
             udp1,
             handler: Handler {
                 log,
+                components,
                 attached_mgs,
                 serial_number,
                 incoming_serial_console,
@@ -458,6 +462,7 @@ impl UdpTask {
 struct Handler {
     log: Logger,
     serial_number: SerialNumber,
+    components: Vec<SpComponentConfig>,
     attached_mgs: Arc<Mutex<Option<(SpComponent, SpPort, SocketAddrV6)>>>,
     incoming_serial_console: HashMap<SpComponent, UnboundedSender<Vec<u8>>>,
 }
@@ -619,11 +624,27 @@ impl SpHandler for Handler {
         Ok(state)
     }
 
-    fn update_prepare(
+    fn sp_update_prepare(
         &mut self,
         sender: SocketAddrV6,
         port: SpPort,
-        update: gateway_messages::UpdatePrepare,
+        update: gateway_messages::SpUpdatePrepare,
+    ) -> Result<(), ResponseError> {
+        warn!(
+            &self.log,
+            "received update prepare request; not supported by simulated gimlet";
+            "sender" => %sender,
+            "port" => ?port,
+            "update" => ?update,
+        );
+        Err(ResponseError::RequestUnsupportedForSp)
+    }
+
+    fn component_update_prepare(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+        update: gateway_messages::ComponentUpdatePrepare,
     ) -> Result<(), ResponseError> {
         warn!(
             &self.log,
@@ -741,5 +762,20 @@ impl SpHandler for Handler {
             "port" => ?port,
         );
         Err(ResponseError::RequestUnsupportedForSp)
+    }
+
+    fn num_devices(&mut self, _: SocketAddrV6, _: SpPort) -> u32 {
+        self.components.len().try_into().unwrap()
+    }
+
+    fn device_description(&mut self, index: u32) -> DeviceDescription<'_> {
+        let c = &self.components[index as usize];
+        DeviceDescription {
+            component: SpComponent::try_from(c.id.as_str()).unwrap(),
+            device: &c.device,
+            description: &c.description,
+            capabilities: c.capabilities,
+            presence: c.presence,
+        }
     }
 }

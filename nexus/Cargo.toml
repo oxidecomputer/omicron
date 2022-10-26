@@ -11,15 +11,18 @@ path = "../rpaths"
 anyhow = "1.0"
 async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "7944dafc8a36dc6e20a1405eca59d04662de2bb7" }
 async-trait = "0.1.56"
-base64 = "0.13.0"
+base64 = "0.13.1"
 bb8 = "0.8.0"
-clap = { version = "3.2", features = ["derive"] }
+clap = { version = "4.0", features = ["derive"] }
 cookie = "0.16"
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "bacffd142fc38a01fe255407b0c8d5d0aacfe778" }
-diesel = { version = "2.0.0", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "144d8dafa41715e00b08a5929cc62140ff0eb561" }
+diesel = { version = "2.0.2", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 diesel-dtrace = { git = "https://github.com/oxidecomputer/diesel-dtrace", rev = "18748d9f76c94e1f4400fbec0859b3e77a221a8d" }
-fatfs = "0.3.5"
-futures = "0.3.24"
+# TODO(luqman): Update once merged & new release is cut
+# https://github.com/rafalh/rust-fatfs/pull/76
+fatfs = { git = "https://github.com/luqmana/rust-fatfs", branch = "stable-0.3" }
+#fatfs = "0.3.5"
+futures = "0.3.25"
 headers = "0.3.8"
 hex = "0.4.3"
 http = "0.2.7"
@@ -27,7 +30,7 @@ hyper = "0.14"
 internal-dns-client = { path = "../internal-dns-client" }
 ipnetwork = "0.20"
 lazy_static = "1.4.0"
-libc = "0.2.133"
+libc = "0.2.135"
 macaddr = { version = "1.0.1", features = [ "serde_std" ]}
 mime_guess = "2.0.4"
 newtype_derive = "0.1.6"
@@ -111,7 +114,7 @@ version = "0.7"
 features = [ "with-chrono-0_4", "with-serde_json-1", "with-uuid-1" ]
 
 [dependencies.uuid]
-version = "1.1.0"
+version = "1.2.1"
 features = [ "serde", "v4" ]
 
 [dev-dependencies]

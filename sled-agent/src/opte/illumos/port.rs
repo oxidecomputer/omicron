@@ -28,7 +28,7 @@ struct PortInner {
     // Emulated PCI slot for the guest NIC, passed to Propolis
     slot: u8,
     // Geneve VNI for the VPC
-    _vni: Vni,
+    vni: Vni,
     // IP address of the hosting sled
     _underlay_ip: Ipv6Addr,
     // The external IP address and port range provided for this port, to allow
@@ -122,7 +122,7 @@ impl Port {
                 _subnet: subnet,
                 mac,
                 slot,
-                _vni: vni,
+                vni: vni,
                 _underlay_ip: underlay_ip,
                 _source_nat: source_nat,
                 external_ips,
@@ -139,6 +139,10 @@ impl Port {
 
     pub fn mac(&self) -> &MacAddr6 {
         &self.inner.mac
+    }
+
+    pub fn vni(&self) -> &Vni {
+        &self.inner.vni
     }
 
     pub fn vnic_name(&self) -> &str {

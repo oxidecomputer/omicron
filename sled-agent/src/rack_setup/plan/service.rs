@@ -4,7 +4,7 @@
 
 //! Plan generation for "where should services be initialized".
 
-use crate::params::{DatasetEnsureBody, ServiceRequest, ServiceType};
+use crate::params::{DatasetEnsureBody, ServiceType, ServiceZoneRequest};
 use crate::rack_setup::config::SetupServiceConfig as Config;
 use omicron_common::address::{
     get_sled_address, ReservedRackSubnet, DNS_PORT, DNS_SERVER_PORT,
@@ -65,11 +65,11 @@ pub struct SledRequest {
 
     /// Services to be instantiated.
     #[serde(default, rename = "service")]
-    pub services: Vec<ServiceRequest>,
+    pub services: Vec<ServiceZoneRequest>,
 
     /// DNS Services to be instantiated.
     #[serde(default, rename = "dns_service")]
-    pub dns_services: Vec<ServiceRequest>,
+    pub dns_services: Vec<ServiceZoneRequest>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -181,15 +181,15 @@ impl Plan {
             // of hosting Nexus.
             if idx < NEXUS_COUNT {
                 let address = addr_alloc.next().expect("Not enough addrs");
-                request.services.push(ServiceRequest {
+                request.services.push(ServiceZoneRequest {
                     id: Uuid::new_v4(),
-                    name: "nexus".to_string(),
+                    zone_name: "nexus".to_string(),
                     addresses: vec![address],
                     gz_addresses: vec![],
-                    service_type: ServiceType::Nexus {
+                    services: vec![ServiceType::Nexus {
                         internal_ip: address,
                         external_ip: config.nexus_external_address,
-                    },
+                    }],
                 })
             }
 
@@ -220,12 +220,12 @@ impl Plan {
             if idx < dns_subnets.len() {
                 let dns_subnet = &dns_subnets[idx];
                 let dns_addr = dns_subnet.dns_address().ip();
-                request.dns_services.push(ServiceRequest {
+                request.dns_services.push(ServiceZoneRequest {
                     id: Uuid::new_v4(),
-                    name: "internal-dns".to_string(),
+                    zone_name: "internal-dns".to_string(),
                     addresses: vec![dns_addr],
                     gz_addresses: vec![dns_subnet.gz_address().ip()],
-                    service_type: ServiceType::InternalDns {
+                    services: vec![ServiceType::InternalDns {
                         server_address: SocketAddrV6::new(
                             dns_addr,
                             DNS_SERVER_PORT,
@@ -235,7 +235,7 @@ impl Plan {
                         dns_address: SocketAddrV6::new(
                             dns_addr, DNS_PORT, 0, 0,
                         ),
-                    },
+                    }],
                 });
             }
 

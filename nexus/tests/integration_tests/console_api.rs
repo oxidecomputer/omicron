@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use dropshot::test_util::ClientTestContext;
+use dropshot::ResultsPage;
 use http::header::HeaderName;
 use http::{header, method::Method, StatusCode};
 use std::env::current_dir;
@@ -342,11 +343,11 @@ async fn test_session_me(cptestctx: &ControlPlaneTestContext) {
         priv_user,
         views::User {
             id: USER_TEST_PRIVILEGED.id(),
-            display_name: USER_TEST_PRIVILEGED.external_id.clone()
+            display_name: USER_TEST_PRIVILEGED.external_id.clone(),
+            silo_id: DEFAULT_SILO.id(),
         }
     );
 
-    // make sure it returns different things for different users
     let unpriv_user = NexusRequest::object_get(testctx, "/session/me")
         .authn_as(AuthnMode::UnprivilegedUser)
         .execute()
@@ -359,9 +360,45 @@ async fn test_session_me(cptestctx: &ControlPlaneTestContext) {
         unpriv_user,
         views::User {
             id: USER_TEST_UNPRIVILEGED.id(),
-            display_name: USER_TEST_UNPRIVILEGED.external_id.clone()
+            display_name: USER_TEST_UNPRIVILEGED.external_id.clone(),
+            silo_id: DEFAULT_SILO.id(),
         }
     );
+}
+
+#[nexus_test]
+async fn test_session_me_groups(cptestctx: &ControlPlaneTestContext) {
+    let testctx = &cptestctx.external_client;
+
+    // hitting /session/me without being logged in is a 401
+    RequestBuilder::new(&testctx, Method::GET, "/session/me/groups")
+        .expect_status(Some(StatusCode::UNAUTHORIZED))
+        .execute()
+        .await
+        .expect("failed to 401 on unauthed request");
+
+    // now make same request with auth
+    let priv_user_groups =
+        NexusRequest::object_get(testctx, "/session/me/groups")
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .expect("failed to get current user")
+            .parsed_body::<ResultsPage<views::Group>>()
+            .unwrap();
+
+    assert_eq!(priv_user_groups.items, vec![]);
+
+    let unpriv_user_groups =
+        NexusRequest::object_get(testctx, "/session/me/groups")
+            .authn_as(AuthnMode::UnprivilegedUser)
+            .execute()
+            .await
+            .expect("failed to get current user")
+            .parsed_body::<ResultsPage<views::Group>>()
+            .unwrap();
+
+    assert_eq!(unpriv_user_groups.items, vec![]);
 }
 
 #[nexus_test]
@@ -398,7 +435,7 @@ fn get_header_value(resp: TestResponse, header_name: HeaderName) -> String {
 async fn log_in_and_extract_token(testctx: &ClientTestContext) -> String {
     let login = RequestBuilder::new(&testctx, Method::POST, "/login")
         .body(Some(&SpoofLoginBody { username: "unprivileged".to_string() }))
-        .expect_status(Some(StatusCode::OK))
+        .expect_status(Some(StatusCode::NO_CONTENT))
         .execute()
         .await
         .expect("failed to log in");

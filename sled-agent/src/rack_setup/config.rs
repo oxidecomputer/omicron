@@ -6,6 +6,7 @@
 
 use crate::bootstrap::params::Gateway;
 use crate::config::ConfigError;
+use crate::params::{DatasetEnsureBody, ServiceZoneRequest};
 use omicron_common::address::{
     get_64_subnet, Ipv6Subnet, AZ_PREFIX, RACK_PREFIX, SLED_PREFIX,
 };
@@ -48,9 +49,8 @@ impl SetupServiceConfig {
         let path = path.as_ref();
         let contents = std::fs::read_to_string(&path)
             .map_err(|err| ConfigError::Io { path: path.into(), err })?;
-        let config = toml::from_str(&contents)
-            .map_err(|err| ConfigError::Parse { path: path.into(), err })?;
-        Ok(config)
+        toml::from_str(&contents)
+            .map_err(|err| ConfigError::Parse { path: path.into(), err })
     }
 
     pub fn az_subnet(&self) -> Ipv6Subnet<AZ_PREFIX> {
