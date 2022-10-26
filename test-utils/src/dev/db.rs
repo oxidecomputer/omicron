@@ -12,7 +12,6 @@ use omicron_common::postgres_config::PostgresConfigWithUrl;
 use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::ops::Deref;
-use std::os::unix::ffi::OsStringExt;
 use std::os::unix::process::ExitStatusExt;
 use std::path::Path;
 use std::path::PathBuf;
@@ -380,9 +379,14 @@ pub enum CockroachStartError {
 
     #[error(
         "wrong version of CockroachDB installed. expected '{expected:}', \
-        found: '{found:?}"
+        found: '{found:?}\nstdout:\n{stdout:}\n\nstderr:\n{stderr:}\n"
     )]
-    BadVersion { expected: String, found: Result<String, anyhow::Error> },
+    BadVersion {
+        expected: String,
+        found: Result<String, anyhow::Error>,
+        stdout: String,
+        stderr: String,
+    },
 
     #[error(
         "cockroach exited unexpectedly with status {exit_code} \
@@ -568,6 +572,8 @@ pub async fn check_db_version() -> Result<(), CockroachStartError> {
     let output = cmd.output().await.map_err(|source| {
         CockroachStartError::BadCmd { cmd: COCKROACHDB_BIN.to_string(), source }
     })?;
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
     if !output.status.success() {
         return Err(CockroachStartError::BadVersion {
             expected: COCKROACHDB_VERSION.trim().to_string(),
@@ -575,16 +581,11 @@ pub async fn check_db_version() -> Result<(), CockroachStartError> {
                 "error {:?} when checking CockroachDB version",
                 output.status.code()
             )),
+            stdout,
+            stderr,
         });
     }
-    let version_str =
-        OsString::from_vec(output.stdout).into_string().map_err(|_| {
-            CockroachStartError::BadVersion {
-                expected: COCKROACHDB_VERSION.trim().to_string(),
-                found: Err(anyhow!("Error parsing CockroachDB version output")),
-            }
-        })?;
-    let version_str = version_str.trim();
+    let version_str = stdout.trim();
 
     // It's okay if the version found differs only by having the "-dirty"
     // suffix.  This check is really for catching major version mismatches.
@@ -598,6 +599,8 @@ pub async fn check_db_version() -> Result<(), CockroachStartError> {
         return Err(CockroachStartError::BadVersion {
             found: Ok(version_str.to_string()),
             expected: COCKROACHDB_VERSION.trim().to_string(),
+            stdout,
+            stderr,
         });
     }
 
