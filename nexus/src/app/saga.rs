@@ -29,6 +29,11 @@ use steno::SagaResult;
 use steno::SagaResultOk;
 use uuid::Uuid;
 
+/// Encapsulates a saga to be run before we actually start running it
+///
+/// At this point, we've built the DAG, loaded it into the SEC, etc. but haven't
+/// started it running.  This is a useful point to inject errors, inspect the
+/// DAG, etc.
 pub struct RunnableSaga {
     id: SagaId,
     fut: BoxFuture<'static, SagaResult>,

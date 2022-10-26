@@ -8,7 +8,6 @@ use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::identity_eq;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
-use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::{
     IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
@@ -21,6 +20,9 @@ use std::net::Ipv4Addr;
 use nexus_test_utils::resource_helpers::{
     create_organization, create_project, create_router, create_vpc,
 };
+
+type ControlPlaneTestContext =
+    nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
 #[nexus_test]
 async fn test_router_routes(cptestctx: &ControlPlaneTestContext) {

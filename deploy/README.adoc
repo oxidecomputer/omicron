@@ -87,7 +87,7 @@ README is probably a good idea.
 
 Currently rack setup is driven by a configuration file that lives at
 `smf/sled-agent/config-rss.toml` in the root of this repository. The committed
-configuration of that file contains a single `[[requests]]` entry (with many
+configuration of that file contains a single `requests` entry (with many
 services inside it), which means it will start services on only one sled. To
 start services (e.g., nexus) on multiple sleds, add additional entries to that
 configuration file before proceeding.
@@ -97,7 +97,7 @@ configuration file before proceeding.
 ==== sync
 Copy your source code to the builder.
 
-`cargo run --bin thing-flinger -- -c <CONFIG> sync`
+`+cargo run --bin thing-flinger -- -c <CONFIG> sync+`
 
 ==== Install Prerequisites
 Install necessary build and runtime dependencies (including downloading prebuilt
@@ -105,23 +105,23 @@ binaries like Clickhouse and CockroachDB) on the builder and all deployment
 targets. This step only needs to be performed once, absent any changes to the
 dependencies, but is idempotent so may be run multiple times.
 
-`cargo run --bin thing-flinger -- -c <CONFIG> install-prereqs`
+`+cargo run --bin thing-flinger -- -c <CONFIG> install-prereqs+`
 
 ==== check (optional)
 Run `cargo check` on the builder against the copy of `omicron` that was sync'd
 to it in the previous step.
 
-`cargo run --bin thing-flinger -- -c <CONFIG> build check`
+`+cargo run --bin thing-flinger -- -c <CONFIG> build check+`
 
 ==== package
 Build and package omicron using `omicron-package` on the builder.
 
-`cargo run --bin thing-flinger -- -c <CONFIG> build package`
+`+cargo run --bin thing-flinger -- -c <CONFIG> build package+`
 
 ==== overlay
 Create files that are unique to each deployment server.
 
-`cargo run --bin thing-flinger -- -c <CONFIG> overlay`
+`+cargo run --bin thing-flinger -- -c <CONFIG> overlay+`
 
 ==== install
 Install omicron to all machines, in parallel. This consists of copying the packaged omicron tarballs
@@ -129,12 +129,12 @@ along with overlay files, and omicron-package and its manifest to a `staging` di
 deployment server, and then running omicron-package, installing overlay files, and restarting
 services.
 
-`cargo run --bin thing-flinger -- -c <CONFIG> deploy install`
+`+cargo run --bin thing-flinger -- -c <CONFIG> deploy install+`
 
 ==== uninstall
 Uninstall omicron from all machines.
 
-`cargo run --bin thing-flinger -- -c <CONFIG> deploy uninstall`
+`+cargo run --bin thing-flinger -- -c <CONFIG> deploy uninstall+`
 
 === Current Limitations
 
@@ -165,7 +165,7 @@ document; for now this is a collection of rough notes.
 
 It's possible to use a Linux libvirt host running multiple helios VMs as the
 builder/deployment server targets, but it requires some additional setup beyond
-[`helios-engvm`](https://github.com/oxidecomputer/helios-engvm).
+`https://github.com/oxidecomputer/helios-engvm[helios-engvm]`.
 
 `thing-flinger` does not have any support for running the
 `tools/create_virtual_hardware.sh` script; this will need to be done by hand on

@@ -43,8 +43,10 @@ use nexus_test_utils::identity_eq;
 use nexus_test_utils::resource_helpers::{
     create_instance, create_organization, create_project,
 };
-use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
+
+type ControlPlaneTestContext =
+    nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
 static POOL_NAME: &str = "p0";
 static ORGANIZATION_NAME: &str = "test-org";

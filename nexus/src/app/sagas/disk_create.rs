@@ -461,14 +461,14 @@ async fn sdc_regions_ensure_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let log = sagactx.user_data().log();
-    warn!(log, "regions_ensure_undo: Deleting crucible regions");
+    warn!(log, "sdc_regions_ensure_undo: Deleting crucible regions");
     delete_crucible_regions(
         sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
             "datasets_and_regions",
         )?,
     )
     .await?;
-    info!(log, "regions_ensure_undo: Deleted crucible regions");
+    info!(log, "sdc_regions_ensure_undo: Deleted crucible regions");
     Ok(())
 }
 
@@ -600,24 +600,26 @@ fn randomize_volume_construction_request_ids(
 
 #[cfg(test)]
 mod test {
-    use async_bb8_diesel::{AsyncRunQueryDsl, OptionalExtension};
-    use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
-    use dropshot::test_util::ClientTestContext;
-    use nexus_test_utils::nexus::{
+    use crate::{
         app::saga::create_saga_dag, app::sagas::disk_create::Params,
         app::sagas::disk_create::SagaDiskCreate, authn::saga::Serialized,
         context::OpContext, db::datastore::DataStore, external_api::params,
     };
+    use async_bb8_diesel::{AsyncRunQueryDsl, OptionalExtension};
+    use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
+    use dropshot::test_util::ClientTestContext;
     use nexus_test_utils::resource_helpers::create_ip_pool;
     use nexus_test_utils::resource_helpers::create_organization;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils::resource_helpers::DiskTest;
-    use nexus_test_utils::ControlPlaneTestContext;
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_sled_agent::sim::SledAgent;
     use uuid::Uuid;
+
+    type ControlPlaneTestContext =
+        nexus_test_utils::ControlPlaneTestContext<crate::Server>;
 
     const ORG_NAME: &str = "test-org";
     const PROJECT_NAME: &str = "springfield-squidport";
@@ -647,7 +649,14 @@ mod test {
         }
     }
 
-    #[nexus_test]
+    pub fn test_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
+        OpContext::for_tests(
+            cptestctx.logctx.log.new(o!()),
+            cptestctx.server.apictx.nexus.datastore().clone(),
+        )
+    }
+
+    #[nexus_test(server = crate::Server)]
     async fn test_saga_basic_usage_succeeds(
         cptestctx: &ControlPlaneTestContext,
     ) {
@@ -658,7 +667,7 @@ mod test {
         let project_id = create_org_and_project(&client).await;
 
         // Build the saga DAG with the provided test parameters
-        let opctx = cptestctx.test_opctx();
+        let opctx = test_opctx(cptestctx);
         let params = new_test_params(&opctx, project_id);
         let dag = create_saga_dag::<SagaDiskCreate>(params).unwrap();
         let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
@@ -672,19 +681,14 @@ mod test {
         assert_eq!(disk.project_id, project_id);
     }
 
-    async fn no_disk_records_exist(
-        datastore: &DataStore,
-        opctx: &OpContext,
-    ) -> bool {
+    async fn no_disk_records_exist(datastore: &DataStore) -> bool {
         use crate::db::model::Disk;
         use crate::db::schema::disk::dsl;
 
         dsl::disk
             .filter(dsl::time_deleted.is_null())
             .select(Disk::as_select())
-            .first_async::<Disk>(
-                datastore.pool_authorized(opctx).await.unwrap(),
-            )
+            .first_async::<Disk>(datastore.pool_for_tests().await.unwrap())
             .await
             .optional()
             .unwrap()
@@ -726,7 +730,7 @@ mod test {
         true
     }
 
-    #[nexus_test]
+    #[nexus_test(server = crate::Server)]
     async fn test_action_failure_can_unwind(
         cptestctx: &ControlPlaneTestContext,
     ) {
@@ -738,7 +742,7 @@ mod test {
         let project_id = create_org_and_project(&client).await;
 
         // Build the saga DAG with the provided test parameters
-        let opctx = cptestctx.test_opctx();
+        let opctx = test_opctx(cptestctx);
 
         let nodes_to_fail = [
             "disk_id",
@@ -774,7 +778,7 @@ mod test {
             let datastore = nexus.datastore();
 
             // Check that no partial artifacts of disk creation exist:
-            assert!(no_disk_records_exist(datastore, &opctx).await);
+            assert!(no_disk_records_exist(datastore).await);
             assert!(no_region_allocations_exist(datastore, &test).await);
             assert!(
                 no_regions_ensured(&cptestctx.sled_agent.sled_agent, &test)

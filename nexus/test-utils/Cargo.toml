@@ -12,6 +12,7 @@ dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main",
 headers = "0.3.8"
 http = "0.2.7"
 hyper = "0.14"
+nexus-test-interface = { path = "../test-interface" }
 omicron-common = { path = "../../common" }
 omicron-nexus = { path = ".." }
 omicron-sled-agent = { path = "../../sled-agent" }

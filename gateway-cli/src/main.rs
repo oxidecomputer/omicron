@@ -128,8 +128,8 @@ struct Client {
 
 impl Client {
     fn new(server: IpAddr, port: u16, sled: u32, log: Logger) -> Self {
-        // We currently hardcode `sled` and `sp3`, as that is the only
-        // sptype+component pair that has a serial port.
+        // We currently hardcode `sled` and the SP3 host CPU component, as that
+        // is the only sptype+component pair that has a serial port.
         Self {
             inner: gateway_client::Client::new(
                 &format!("http://{}:{}", server, port),
@@ -139,7 +139,7 @@ impl Client {
             port,
             sled,
             sp_type: SpType::Sled,
-            component: "sp3",
+            component: "sp3-host-cpu",
         }
     }
 

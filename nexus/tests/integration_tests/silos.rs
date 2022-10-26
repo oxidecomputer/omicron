@@ -24,7 +24,6 @@ use nexus_test_utils::resource_helpers::{
 };
 
 use crate::integration_tests::saml::SAML_IDP_DESCRIPTOR;
-use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 use omicron_nexus::authz::{self, SiloRole};
 use uuid::Uuid;
@@ -34,6 +33,9 @@ use omicron_common::api::external::ObjectIdentity;
 use omicron_nexus::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
 use omicron_nexus::db::fixed_data::silo::SILO_ID;
 use omicron_nexus::db::identity::Asset;
+
+type ControlPlaneTestContext =
+    nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
 #[nexus_test]
 async fn test_silos(cptestctx: &ControlPlaneTestContext) {

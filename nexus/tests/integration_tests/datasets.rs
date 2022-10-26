@@ -11,8 +11,11 @@ use omicron_nexus::internal_api::params::{
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use uuid::Uuid;
 
-use nexus_test_utils::{ControlPlaneTestContext, SLED_AGENT_UUID};
+use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils_macros::nexus_test;
+
+type ControlPlaneTestContext =
+    nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
 // Tests the "normal" case of dataset_put: inserting a dataset within a known
 // zpool.

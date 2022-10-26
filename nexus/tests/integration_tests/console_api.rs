@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use dropshot::test_util::ClientTestContext;
+use dropshot::ResultsPage;
 use http::header::HeaderName;
 use http::{header, method::Method, StatusCode};
 use std::env::current_dir;
@@ -11,9 +12,7 @@ use nexus_test_utils::http_testing::{
     AuthnMode, NexusRequest, RequestBuilder, TestResponse,
 };
 use nexus_test_utils::resource_helpers::grant_iam;
-use nexus_test_utils::{
-    load_test_config, test_setup_with_config, ControlPlaneTestContext,
-};
+use nexus_test_utils::{load_test_config, test_setup_with_config};
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_nexus::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
@@ -23,6 +22,9 @@ use omicron_nexus::db::identity::{Asset, Resource};
 use omicron_nexus::external_api::console_api::SpoofLoginBody;
 use omicron_nexus::external_api::params::OrganizationCreate;
 use omicron_nexus::external_api::{shared, views};
+
+type ControlPlaneTestContext =
+    nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
 #[nexus_test]
 async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
@@ -303,8 +305,11 @@ async fn test_assets(cptestctx: &ControlPlaneTestContext) {
 async fn test_absolute_static_dir() {
     let mut config = load_test_config();
     config.pkg.console.static_dir = current_dir().unwrap().join("tests/static");
-    let cptestctx =
-        test_setup_with_config("test_absolute_static_dir", &mut config).await;
+    let cptestctx = test_setup_with_config::<omicron_nexus::Server>(
+        "test_absolute_static_dir",
+        &mut config,
+    )
+    .await;
     let testctx = &cptestctx.external_client;
 
     // existing file is returned
@@ -347,7 +352,6 @@ async fn test_session_me(cptestctx: &ControlPlaneTestContext) {
         }
     );
 
-    // make sure it returns different things for different users
     let unpriv_user = NexusRequest::object_get(testctx, "/session/me")
         .authn_as(AuthnMode::UnprivilegedUser)
         .execute()
@@ -364,6 +368,41 @@ async fn test_session_me(cptestctx: &ControlPlaneTestContext) {
             silo_id: DEFAULT_SILO.id(),
         }
     );
+}
+
+#[nexus_test]
+async fn test_session_me_groups(cptestctx: &ControlPlaneTestContext) {
+    let testctx = &cptestctx.external_client;
+
+    // hitting /session/me without being logged in is a 401
+    RequestBuilder::new(&testctx, Method::GET, "/session/me/groups")
+        .expect_status(Some(StatusCode::UNAUTHORIZED))
+        .execute()
+        .await
+        .expect("failed to 401 on unauthed request");
+
+    // now make same request with auth
+    let priv_user_groups =
+        NexusRequest::object_get(testctx, "/session/me/groups")
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .expect("failed to get current user")
+            .parsed_body::<ResultsPage<views::Group>>()
+            .unwrap();
+
+    assert_eq!(priv_user_groups.items, vec![]);
+
+    let unpriv_user_groups =
+        NexusRequest::object_get(testctx, "/session/me/groups")
+            .authn_as(AuthnMode::UnprivilegedUser)
+            .execute()
+            .await
+            .expect("failed to get current user")
+            .parsed_body::<ResultsPage<views::Group>>()
+            .unwrap();
+
+    assert_eq!(unpriv_user_groups.items, vec![]);
 }
 
 #[nexus_test]

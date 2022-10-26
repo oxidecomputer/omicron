@@ -40,4 +40,19 @@ impl super::Nexus {
 
         Ok(volume_deleted)
     }
+
+    /// Start a saga to remove a read only parent from a volume.
+    pub async fn volume_remove_read_only_parent(
+        self: &Arc<Self>,
+        volume_id: Uuid,
+    ) -> DeleteResult {
+        let saga_params = sagas::volume_remove_rop::Params { volume_id };
+
+        self.execute_saga::<sagas::volume_remove_rop::SagaVolumeRemoveROP>(
+            saga_params,
+        )
+        .await?;
+
+        Ok(())
+    }
 }

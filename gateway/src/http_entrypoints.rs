@@ -149,8 +149,52 @@ struct UpdatePreparationProgress {
     total: u32,
 }
 
-#[derive(Serialize, JsonSchema)]
-struct SpComponentInfo {}
+/// List of components from a single SP.
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SpComponentList {
+    pub components: Vec<SpComponentInfo>,
+}
+
+/// Overview of a single SP component.
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SpComponentInfo {
+    /// The unique identifier for this component.
+    pub component: String,
+    /// The name of the physical device.
+    pub device: String,
+    /// The component's serial number, if it has one.
+    pub serial_number: Option<String>,
+    /// A human-readable description of the component.
+    pub description: String,
+    /// `capabilities` is a bitmask; interpret it via
+    /// [`gateway_messages::DeviceCapabilities`].
+    pub capabilities: u32,
+    /// Whether or not the component is present, to the best of the SP's ability
+    /// to judge.
+    pub presence: SpComponentPresence,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+/// Description of the presence or absence of a component.
+///
+/// The presence of some components may vary based on the power state of the
+/// sled (e.g., components that time out or appear unavailable if the sled is in
+/// A2 may become present when the sled moves to A0).
+pub enum SpComponentPresence {
+    /// The component is present.
+    Present,
+    /// The component is not present.
+    NotPresent,
+    /// The component is present but in a failed or faulty state.
+    Failed,
+    /// The SP is unable to determine the presence of the component.
+    Unavailable,
+    /// The SP's attempt to determine the presence of the component timed out.
+    Timeout,
+    /// The SP's attempt to determine the presence of the component failed.
+    Error,
+}
 
 #[derive(Deserialize, JsonSchema)]
 struct Timeout {
@@ -260,8 +304,6 @@ where
         StringOrU32::U32(n) => Ok(n),
     }
 }
-
-type TimeoutPaginationParams<T> = PaginationParams<Timeout, TimeoutSelector<T>>;
 
 #[derive(Deserialize, JsonSchema)]
 struct PathSp {
@@ -433,22 +475,22 @@ async fn sp_get(
 ///
 /// A component is a distinct entity under an SP's direct control. This lists
 /// all those components for a given SP.
-///
-/// As communication with SPs may be unreliable, consumers may optionally
-/// override the timeout. This interface may return a page of components prior
-/// to reaching either the timeout with the expectation that callers will keep
-/// calling this interface until the terminal page is reached. If the timeout
-/// is reached, the final call will result in an error.
 #[endpoint {
     method = GET,
     path = "/sp/{type}/{slot}/component",
 }]
 async fn sp_component_list(
-    _rqctx: Arc<RequestContext<Arc<ServerContext>>>,
-    _path: Path<PathSp>,
-    _query: Query<TimeoutPaginationParams<PathSpComponent>>,
-) -> Result<HttpResponseOk<ResultsPage<SpComponentInfo>>, HttpError> {
-    todo!()
+    rqctx: Arc<RequestContext<Arc<ServerContext>>>,
+    path: Path<PathSp>,
+) -> Result<HttpResponseOk<SpComponentList>, HttpError> {
+    let apictx = rqctx.context();
+    let comms = &apictx.sp_comms;
+    let sp = path.into_inner().sp;
+
+    let inventory =
+        comms.inventory(sp.into()).await.map_err(http_err_from_comms_err)?;
+
+    Ok(HttpResponseOk(inventory.into()))
 }
 
 /// Get info for an SP component

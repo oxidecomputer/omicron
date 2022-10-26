@@ -122,11 +122,18 @@ impl DataStore {
         self.pool.pool()
     }
 
-    pub async fn pool_authorized(
+    pub(super) async fn pool_authorized(
         &self,
         opctx: &OpContext,
     ) -> Result<&bb8::Pool<ConnectionManager<DbConnection>>, Error> {
         opctx.authorize(authz::Action::Query, &authz::DATABASE).await?;
+        Ok(self.pool.pool())
+    }
+
+    #[cfg(test)]
+    pub async fn pool_for_tests(
+        &self,
+    ) -> Result<&bb8::Pool<ConnectionManager<DbConnection>>, Error> {
         Ok(self.pool.pool())
     }
 

@@ -1542,6 +1542,14 @@ lazy_static! {
                 AllowedMethod::Get,
             ],
         },
+        VerifyEndpoint {
+            url: "/session/me/groups",
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::ReadOnly,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
 
         /* SSH keys */
 
