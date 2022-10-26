@@ -23,6 +23,7 @@ pub mod disk_create;
 pub mod disk_delete;
 pub mod instance_create;
 pub mod instance_migrate;
+pub mod service_balance;
 pub mod snapshot_create;
 pub mod volume_delete;
 pub mod volume_remove_rop;
@@ -96,6 +97,9 @@ fn make_action_registry() -> ActionRegistry {
         &mut registry,
     );
     <instance_migrate::SagaInstanceMigrate as NexusSaga>::register_actions(
+        &mut registry,
+    );
+    <service_balance::SagaServiceBalance as NexusSaga>::register_actions(
         &mut registry,
     );
     <snapshot_create::SagaSnapshotCreate as NexusSaga>::register_actions(

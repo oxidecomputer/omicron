@@ -4,7 +4,6 @@
 
 //! Interface to a (simulated or real) SP / RoT.
 
-use crate::config::Config as SledConfig;
 use crate::config::ConfigError;
 use crate::illumos;
 use crate::illumos::dladm::CreateVnicError;
@@ -86,11 +85,10 @@ impl SpHandle {
     /// A return value of `Ok(None)` means no SP is available.
     pub async fn detect(
         sp_config: Option<&GimletConfig>,
-        sled_config: &SledConfig,
         log: &Logger,
     ) -> Result<Option<Self>, SpError> {
-        let inner = if let Some(config) = sp_config {
-            let sim_sp = SimulatedSp::start(config, sled_config, log).await?;
+        let inner = if let Some(config) = sp_config.as_ref() {
+            let sim_sp = SimulatedSp::start(config, log).await?;
             Some(Inner::SimulatedSp(sim_sp))
         } else {
             None

@@ -34,6 +34,8 @@ address = "[::1]:0"
 [tunables]
 # Allow small subnets, so we can test IP address exhaustion easily / quickly
 max_vpc_ipv4_subnet_prefix = 29
+# Disable background tests to help with test determinism
+enable_background_tasks = false
 
 [deployment]
 # Identifier for this instance of Nexus.

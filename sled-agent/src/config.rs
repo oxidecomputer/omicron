@@ -10,13 +10,10 @@ use crate::illumos::zpool::ZpoolName;
 use dropshot::ConfigLogging;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
-use uuid::Uuid;
 
 /// Configuration for a sled agent
 #[derive(Clone, Debug, Deserialize)]
 pub struct Config {
-    /// Unique id for the sled
-    pub id: Uuid,
     /// Configuration for the sled agent debug log
     pub log: ConfigLogging,
     /// Optional VLAN ID to be used for tagging guest VNICs.

@@ -111,14 +111,41 @@ pub async fn test_setup_with_config(
         .expect("Tests expect to set a port of Clickhouse")
         .set_port(clickhouse.port());
 
-    let server =
-        omicron_nexus::Server::start(&config, &logctx.log).await.unwrap();
-    server
+    // Start the Nexus internal API.
+    let internal_server =
+        omicron_nexus::InternalServer::start(&config, &logctx.log)
+            .await
+            .unwrap();
+    internal_server
         .apictx
         .nexus
         .wait_for_populate()
         .await
         .expect("Nexus never loaded users");
+
+    // Perform the "handoff from RSS".
+    //
+    // However, RSS isn't running, so we'll do the handoff ourselves.
+    let opctx = internal_server.apictx.nexus.opctx_for_service_balancer();
+    internal_server
+        .apictx
+        .nexus
+        .rack_initialize(
+            &opctx,
+            config.deployment.rack_id,
+            // NOTE: In the context of this test utility, we arguably do have an
+            // instance of CRDB and Nexus running. However, as this info isn't
+            // necessary for most tests, we pass no information here.
+            omicron_nexus::internal_api::params::RackInitializationRequest {
+                services: vec![],
+                datasets: vec![],
+            },
+        )
+        .await
+        .expect("Could not initialize rack");
+
+    // Start the Nexus external API.
+    let server = omicron_nexus::Server::start(internal_server).await.unwrap();
 
     let testctx_external = ClientTestContext::new(
         server.http_servers_external[0].local_addr(),

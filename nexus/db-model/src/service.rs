@@ -4,13 +4,20 @@
 
 use super::ServiceKind;
 use crate::ipv6;
+use crate::schema::nexus_certificate;
+use crate::schema::nexus_service;
 use crate::schema::service;
 use db_macros::Asset;
-use std::net::Ipv6Addr;
+use internal_dns_client::names::{ServiceName, AAAA, SRV};
+use nexus_types::identity::Asset;
+use omicron_common::address::{
+    DENDRITE_PORT, DNS_SERVER_PORT, NEXUS_INTERNAL_PORT, OXIMETER_PORT,
+};
+use std::net::{Ipv6Addr, SocketAddrV6};
 use uuid::Uuid;
 
 /// Representation of services which may run on Sleds.
-#[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
+#[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset, PartialEq)]
 #[diesel(table_name = service)]
 pub struct Service {
     #[diesel(embed)]
@@ -19,6 +26,25 @@ pub struct Service {
     pub sled_id: Uuid,
     pub ip: ipv6::Ipv6Addr,
     pub kind: ServiceKind,
+}
+
+#[derive(Queryable, Insertable, Debug, Clone, Selectable, PartialEq)]
+#[diesel(table_name = nexus_service)]
+pub struct NexusService {
+    id: Uuid,
+
+    service_id: Uuid,
+    external_ip_id: Uuid,
+    certificate_id: Uuid,
+}
+
+#[derive(Queryable, Insertable, Debug, Clone, Selectable, PartialEq)]
+#[diesel(table_name = nexus_certificate)]
+pub struct NexusCertificate {
+    id: Uuid,
+
+    public_cert: Vec<u8>,
+    private_key: Vec<u8>,
 }
 
 impl Service {
@@ -34,5 +60,31 @@ impl Service {
             ip: addr.into(),
             kind,
         }
+    }
+
+    pub fn aaaa(&self) -> AAAA {
+        AAAA::Zone(self.id())
+    }
+
+    pub fn srv(&self) -> SRV {
+        match self.kind {
+            ServiceKind::InternalDNS => SRV::Service(ServiceName::InternalDNS),
+            ServiceKind::Nexus => SRV::Service(ServiceName::Nexus),
+            ServiceKind::Oximeter => SRV::Service(ServiceName::Oximeter),
+            ServiceKind::Dendrite => SRV::Service(ServiceName::Dendrite),
+            ServiceKind::Tfport => SRV::Service(ServiceName::Tfport),
+        }
+    }
+
+    pub fn address(&self) -> SocketAddrV6 {
+        let port = match self.kind {
+            ServiceKind::InternalDNS => DNS_SERVER_PORT,
+            ServiceKind::Nexus => NEXUS_INTERNAL_PORT,
+            ServiceKind::Oximeter => OXIMETER_PORT,
+            ServiceKind::Dendrite => DENDRITE_PORT,
+            // TODO: Is this okay?
+            ServiceKind::Tfport => 0,
+        };
+        SocketAddrV6::new(Ipv6Addr::from(self.ip), port, 0, 0)
     }
 }

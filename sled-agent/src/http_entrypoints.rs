@@ -7,7 +7,7 @@
 use crate::params::{
     DatasetEnsureBody, DiskEnsureBody, InstanceEnsureBody,
     InstanceSerialConsoleData, InstanceSerialConsoleRequest, ServiceEnsureBody,
-    VpcFirewallRulesEnsureBody,
+    VpcFirewallRulesEnsureBody, Zpool,
 };
 use crate::serial::ByteOffset;
 use dropshot::{
@@ -33,6 +33,7 @@ type SledApiDescription = ApiDescription<SledAgent>;
 pub fn api() -> SledApiDescription {
     fn register_endpoints(api: &mut SledApiDescription) -> Result<(), String> {
         api.register(services_put)?;
+        api.register(zpools_get)?;
         api.register(filesystem_put)?;
         api.register(instance_put)?;
         api.register(disk_put)?;
@@ -64,6 +65,17 @@ async fn services_put(
     let body_args = body.into_inner();
     sa.services_ensure(body_args).await.map_err(|e| Error::from(e))?;
     Ok(HttpResponseUpdatedNoContent())
+}
+
+#[endpoint {
+    method = GET,
+    path = "/zpools",
+}]
+async fn zpools_get(
+    rqctx: Arc<RequestContext<SledAgent>>,
+) -> Result<HttpResponseOk<Vec<Zpool>>, HttpError> {
+    let sa = rqctx.context();
+    Ok(HttpResponseOk(sa.zpools_get().await.map_err(|e| Error::from(e))?))
 }
 
 #[endpoint {

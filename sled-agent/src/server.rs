@@ -37,6 +37,7 @@ impl Server {
     pub async fn start(
         config: &Config,
         log: Logger,
+        sled_id: Uuid,
         addr: SocketAddrV6,
         is_scrimlet: bool,
         request: SledAgentRequest,
@@ -52,6 +53,7 @@ impl Server {
             &config,
             log.clone(),
             lazy_nexus_client.clone(),
+            sled_id,
             addr,
             request,
         )
@@ -72,7 +74,6 @@ impl Server {
         .start();
 
         let sled_address = http_server.local_addr();
-        let sled_id = config.id;
         let nexus_notifier_handle = tokio::task::spawn(async move {
             // Notify the control plane that we're up, and continue trying this
             // until it succeeds. We retry with an randomized, capped exponential

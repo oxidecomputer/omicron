@@ -14,7 +14,7 @@ use uuid::Uuid;
 ///
 /// A zpool represents a ZFS storage pool, allocated on a single
 /// physical sled.
-#[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
+#[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset, PartialEq)]
 #[diesel(table_name = zpool)]
 pub struct Zpool {
     #[diesel(embed)]

@@ -17,7 +17,7 @@ use crate::nexus::LazyNexusClient;
 use crate::params::{
     DatasetKind, DiskStateRequested, InstanceHardware, InstanceMigrateParams,
     InstanceRuntimeStateRequested, InstanceSerialConsoleData,
-    ServiceEnsureBody, VpcFirewallRule,
+    ServiceEnsureBody, VpcFirewallRule, Zpool,
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::StorageManager;
@@ -169,11 +169,10 @@ impl SledAgent {
         config: &Config,
         log: Logger,
         lazy_nexus_client: LazyNexusClient,
+        id: Uuid,
         sled_address: SocketAddrV6,
         request: SledAgentRequest,
     ) -> Result<SledAgent, Error> {
-        let id = config.id;
-
         // Pass the "parent_log" to all subcomponents that want to set their own
         // "component" value.
         let parent_log = log.clone();
@@ -333,6 +332,11 @@ impl SledAgent {
     ) -> Result<(), Error> {
         self.services.ensure(requested_services).await?;
         Ok(())
+    }
+
+    pub async fn zpools_get(&self) -> Result<Vec<Zpool>, Error> {
+        let zpools = self.storage.get_zpools().await?;
+        Ok(zpools)
     }
 
     /// Ensures that a filesystem type exists within the zpool.

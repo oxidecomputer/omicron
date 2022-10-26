@@ -115,6 +115,19 @@ impl DataStore {
         self.allocate_external_ip(opctx, data).await
     }
 
+    pub async fn allocate_service_ip_on_connection(
+        conn: &async_bb8_diesel::Connection<crate::db::pool::DbConnection>,
+        ip_id: Uuid,
+        rack_id: Uuid,
+    ) -> CreateResult<ExternalIp> {
+        let (.., pool) =
+            Self::ip_pools_lookup_by_rack_id_on_connection(conn, rack_id)
+                .await?;
+
+        let data = IncompleteExternalIp::for_service(ip_id, pool.id());
+        Self::allocate_external_ip_on_connection(conn, data).await
+    }
+
     async fn allocate_external_ip(
         &self,
         opctx: &OpContext,
@@ -134,6 +147,25 @@ impl DataStore {
                     _ => public_error_from_diesel_pool(e, ErrorHandler::Server),
                 }
             })
+    }
+
+    async fn allocate_external_ip_on_connection(
+        conn: &async_bb8_diesel::Connection<crate::db::pool::DbConnection>,
+        data: IncompleteExternalIp,
+    ) -> CreateResult<ExternalIp> {
+        NextExternalIp::new(data).get_result_async(conn).await.map_err(|e| {
+            use async_bb8_diesel::ConnectionError::Query;
+            use diesel::result::Error::NotFound;
+            match e {
+                Query(NotFound) => {
+                    Error::invalid_request("No external IP addresses available")
+                }
+                _ => public_error_from_diesel_pool(
+                    e.into(),
+                    ErrorHandler::Server,
+                ),
+            }
+        })
     }
 
     /// Deallocate the external IP address with the provided ID.

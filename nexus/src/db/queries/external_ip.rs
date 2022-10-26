@@ -303,7 +303,6 @@ impl NextExternalIp {
                 out.push_bind_param::<sql_types::Nullable<sql_types::Uuid>, Option<Uuid>>(&None)?;
             }
         };
-
         out.push_sql(" AS ");
         out.push_identifier(dsl::project_id::NAME)?;
         out.push_sql(", ");

@@ -7,6 +7,7 @@ use omicron_common::api::external::ByteCount;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
@@ -93,7 +94,7 @@ impl FromStr for DatasetKind {
 pub struct DatasetPutRequest {
     /// Address on which a service is responding to requests for the
     /// dataset.
-    pub address: SocketAddr,
+    pub address: SocketAddrV6,
 
     /// Type of dataset being inserted.
     pub kind: DatasetKind,
@@ -122,10 +123,16 @@ pub struct DatasetPutResponse {
 #[derive(
     Debug, Serialize, Deserialize, JsonSchema, Clone, Copy, PartialEq, Eq,
 )]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "snake_case", tag = "type", content = "content")]
 pub enum ServiceKind {
     InternalDNS,
-    Nexus,
+    Nexus {
+        // TODO(https://github.com/oxidecomputer/omicron/issues/1530):
+        // While it's true that Nexus will only run with a single address,
+        // we want to convey information about the available pool of addresses
+        // when handing off from RSS -> Nexus.
+        external_address: IpAddr,
+    },
     Oximeter,
     Dendrite,
     Tfport,
@@ -136,30 +143,12 @@ impl fmt::Display for ServiceKind {
         use ServiceKind::*;
         let s = match self {
             InternalDNS => "internal_dns",
-            Nexus => "nexus",
+            Nexus { .. } => "nexus",
             Oximeter => "oximeter",
             Dendrite => "dendrite",
             Tfport => "tfport",
         };
         write!(f, "{}", s)
-    }
-}
-
-impl FromStr for ServiceKind {
-    type Err = omicron_common::api::external::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        use ServiceKind::*;
-        match s {
-            "nexus" => Ok(Nexus),
-            "oximeter" => Ok(Oximeter),
-            "internal_dns" => Ok(InternalDNS),
-            "dendrite" => Ok(Dendrite),
-            "tfport" => Ok(Tfport),
-            _ => Err(Self::Err::InternalError {
-                internal_message: format!("Unknown service kind: {}", s),
-            }),
-        }
     }
 }
 
@@ -174,6 +163,26 @@ pub struct ServicePutRequest {
 
     /// Type of service being inserted.
     pub kind: ServiceKind,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct DatasetCreateRequest {
+    pub zpool_id: Uuid,
+    pub dataset_id: Uuid,
+    pub request: DatasetPutRequest,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct RackInitializationRequest {
+    pub services: Vec<ServicePutRequest>,
+    pub datasets: Vec<DatasetCreateRequest>,
+    // TODO(https://github.com/oxidecomputer/omicron/issues/1530):
+    // While it's true that Nexus will only run with a single address,
+    // we want to convey information about the available pool of addresses
+    // when handing off from RSS -> Nexus.
+
+    // TODO(https://github.com/oxidecomputer/omicron/issues/1528):
+    // Support passing x509 cert info.
 }
 
 /// Message used to notify Nexus that this oximeter instance is up and running.

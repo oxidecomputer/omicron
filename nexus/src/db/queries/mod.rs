@@ -11,5 +11,6 @@ pub mod ip_pool;
 mod next_item;
 pub mod network_interface;
 pub mod region_allocation;
+pub mod service_provision;
 pub mod vpc;
 pub mod vpc_subnet;

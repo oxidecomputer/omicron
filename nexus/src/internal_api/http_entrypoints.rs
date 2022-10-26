@@ -7,8 +7,9 @@ use crate::context::OpContext;
 use crate::ServerContext;
 
 use super::params::{
-    DatasetPutRequest, DatasetPutResponse, OximeterInfo, ServicePutRequest,
-    SledAgentStartupInfo, ZpoolPutRequest, ZpoolPutResponse,
+    DatasetPutRequest, DatasetPutResponse, OximeterInfo,
+    RackInitializationRequest, SledAgentStartupInfo, ZpoolPutRequest,
+    ZpoolPutResponse,
 };
 use dropshot::endpoint;
 use dropshot::ApiDescription;
@@ -101,15 +102,15 @@ struct RackPathParam {
 async fn rack_initialization_complete(
     rqctx: Arc<RequestContext<Arc<ServerContext>>>,
     path_params: Path<RackPathParam>,
-    info: TypedBody<Vec<ServicePutRequest>>,
+    info: TypedBody<RackInitializationRequest>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let svcs = info.into_inner();
+    let request = info.into_inner();
     let opctx = OpContext::for_internal_api(&rqctx).await;
 
-    nexus.rack_initialize(&opctx, path.rack_id, svcs).await?;
+    nexus.rack_initialize(&opctx, path.rack_id, request).await?;
 
     Ok(HttpResponseUpdatedNoContent())
 }

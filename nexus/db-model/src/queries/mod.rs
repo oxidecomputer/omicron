@@ -5,3 +5,4 @@
 //! Subqueries used in CTEs.
 
 pub mod region_allocation;
+pub mod service_provision;

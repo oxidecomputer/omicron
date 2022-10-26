@@ -65,6 +65,49 @@ pub fn run_openapi_internal() -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// A partially-initialized Nexus server, which exposes an internal interface,
+/// but is not ready to receive external requests.
+pub struct InternalServer<'a> {
+    /// shared state used by API request handlers
+    pub apictx: Arc<ServerContext>,
+    /// dropshot server for internal API
+    pub http_server_internal: dropshot::HttpServer<Arc<ServerContext>>,
+
+    config: &'a Config,
+    log: Logger,
+}
+
+impl<'a> InternalServer<'a> {
+    /// Creates a Nexus instance with only the internal API exposed.
+    ///
+    /// This is often used as an argument when creating a [`Server`],
+    /// which also exposes the external API.
+    pub async fn start(
+        config: &'a Config,
+        log: &Logger,
+    ) -> Result<InternalServer<'a>, String> {
+        let log = log.new(o!("name" => config.deployment.id.to_string()));
+        info!(log, "setting up nexus server");
+
+        let ctxlog = log.new(o!("component" => "ServerContext"));
+
+        let apictx =
+            ServerContext::new(config.deployment.rack_id, ctxlog, &config)
+                .await?;
+
+        let http_server_starter_internal = dropshot::HttpServerStarter::new(
+            &config.deployment.dropshot_internal,
+            internal_api(),
+            Arc::clone(&apictx),
+            &log.new(o!("component" => "dropshot_internal")),
+        )
+        .map_err(|error| format!("initializing internal server: {}", error))?;
+        let http_server_internal = http_server_starter_internal.start();
+
+        Ok(Self { apictx, http_server_internal, config, log })
+    }
+}
+
 /// Packages up a [`Nexus`], running both external and internal HTTP API servers
 /// wired up to Nexus
 pub struct Server {
@@ -77,29 +120,21 @@ pub struct Server {
 }
 
 impl Server {
-    /// Start a nexus server.
-    pub async fn start(
-        config: &Config,
-        log: &Logger,
-    ) -> Result<Server, String> {
-        let log = log.new(o!("name" => config.deployment.id.to_string()));
-        info!(log, "setting up nexus server");
+    pub async fn start(internal: InternalServer<'_>) -> Result<Self, String> {
+        let apictx = internal.apictx;
+        let http_server_internal = internal.http_server_internal;
+        let log = internal.log;
+        let config = internal.config;
 
-        let ctxlog = log.new(o!("component" => "ServerContext"));
+        // Wait until RSS handoff completes.
+        let opctx = apictx.nexus.opctx_for_service_balancer();
+        apictx.nexus.await_rack_initialization(&opctx).await;
 
-        let apictx =
-            ServerContext::new(config.deployment.rack_id, ctxlog, &config)
-                .await?;
-
-        // Launch the internal server.
-        let server_starter_internal = dropshot::HttpServerStarter::new(
-            &config.deployment.dropshot_internal,
-            internal_api(),
-            Arc::clone(&apictx),
-            &log.new(o!("component" => "dropshot_internal")),
-        )
-        .map_err(|error| format!("initializing internal server: {}", error))?;
-        let http_server_internal = server_starter_internal.start();
+        // With the exception of integration tests environments,
+        // we expect background tasks to be enabled.
+        if config.pkg.tunables.enable_background_tasks {
+            apictx.nexus.start_background_tasks().map_err(|e| e.to_string())?;
+        }
 
         // Launch the external server(s).
         let http_servers_external = config
@@ -178,7 +213,8 @@ pub async fn run_server(config: &Config) -> Result<(), String> {
     } else {
         debug!(log, "registered DTrace probes");
     }
-    let server = Server::start(config, &log).await?;
+    let internal_server = InternalServer::start(config, &log).await?;
+    let server = Server::start(internal_server).await?;
     server.register_as_producer().await;
     server.wait_for_finish().await
 }

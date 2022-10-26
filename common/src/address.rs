@@ -20,12 +20,12 @@ pub const SLED_PREFIX: u8 = 64;
 /// The amount of redundancy for DNS servers.
 ///
 /// Must be less than MAX_DNS_REDUNDANCY.
-pub const DNS_REDUNDANCY: usize = 1;
+pub const DNS_REDUNDANCY: u32 = 1;
 /// The maximum amount of redundancy for DNS servers.
 ///
 /// This determines the number of addresses which are
 /// reserved for DNS servers.
-pub const MAX_DNS_REDUNDANCY: usize = 5;
+pub const MAX_DNS_REDUNDANCY: u32 = 5;
 
 pub const DNS_PORT: u16 = 53;
 pub const DNS_SERVER_PORT: u16 = 5353;
@@ -34,10 +34,12 @@ pub const SLED_AGENT_PORT: u16 = 12345;
 /// The port propolis-server listens on inside the propolis zone.
 pub const PROPOLIS_PORT: u16 = 12400;
 pub const COCKROACH_PORT: u16 = 32221;
+pub const CRUCIBLE_PORT: u16 = 32345;
 pub const CLICKHOUSE_PORT: u16 = 8123;
 pub const OXIMETER_PORT: u16 = 12223;
 pub const DENDRITE_PORT: u16 = 12224;
 
+pub const NEXUS_EXTERNAL_PORT: u16 = 12220;
 pub const NEXUS_INTERNAL_PORT: u16 = 12221;
 
 // Anycast is a mechanism in which a single IP address is shared by multiple
@@ -85,6 +87,11 @@ pub struct DnsSubnet {
 }
 
 impl DnsSubnet {
+    /// Creates a subnet, given an address for the DNS server itself.
+    pub fn from_dns_address(address: Ipv6Addr) -> Self {
+        Self { subnet: Ipv6Subnet::new(address) }
+    }
+
     /// Returns the DNS server address within the subnet.
     ///
     /// This is the first address within the subnet.
@@ -180,7 +187,7 @@ mod test {
 
         // Observe the first DNS subnet within this reserved rack subnet.
         let dns_subnets = rack_subnet.get_dns_subnets();
-        assert_eq!(DNS_REDUNDANCY, dns_subnets.len());
+        assert_eq!(DNS_REDUNDANCY, dns_subnets.len() as u32);
 
         // The DNS address and GZ address should be only differing by one.
         assert_eq!(

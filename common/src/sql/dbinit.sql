@@ -89,10 +89,11 @@ CREATE TABLE omicron.public.sled (
     last_used_address INET NOT NULL
 );
 
-/* Add an index which lets us look up sleds on a rack */
+/* Add an index which lets us look up the sleds on a rack */
 CREATE INDEX ON omicron.public.sled (
     rack_id
-) WHERE time_deleted IS NULL;
+) WHERE
+    time_deleted IS NULL;
 
 CREATE INDEX ON omicron.public.sled (
     id
@@ -125,7 +126,40 @@ CREATE TABLE omicron.public.service (
 
 /* Add an index which lets us look up the services on a sled */
 CREATE INDEX ON omicron.public.service (
-    sled_id
+    sled_id,
+    kind
+);
+
+/* Add an index which lets us look up services of a particular kind on a sled */
+CREATE INDEX ON omicron.public.service (
+    kind
+);
+
+/*
+ * Additional context for services of "kind = nexus"
+ * This table should be treated as an optional extension
+ * of the service table itself.
+ */
+CREATE TABLE omicron.public.nexus_service (
+    id UUID PRIMARY KEY,
+
+    /* FK to the service table */
+    service_id UUID NOT NULL,
+    /* FK to the instance_external_ip table */
+    external_ip_id UUID NOT NULL,
+    /* FK to the nexus_certificate table */
+    certificate_id UUID NOT NULL
+);
+
+/*
+ * Information about x509 certificates used to serve Nexus' external interface.
+ * These certificates may be used by multiple instantiations of the Nexus
+ * service simultaneously.
+ */
+CREATE TABLE omicron.public.nexus_certificate (
+    id UUID PRIMARY KEY,
+    public_cert BYTES NOT NULL,
+    private_key BYTES NOT NULL
 );
 
 /*
@@ -147,6 +181,11 @@ CREATE TABLE omicron.public.Zpool (
 
     total_size INT NOT NULL
 );
+
+/* Create an index which allows looking up all zpools on a sled */
+CREATE INDEX on omicron.public.Zpool (
+    sled_id
+) WHERE time_deleted IS NULL;
 
 CREATE TYPE omicron.public.dataset_kind AS ENUM (
   'crucible',
@@ -183,6 +222,11 @@ CREATE TABLE omicron.public.Dataset (
       (kind = 'crucible' AND size_used IS NOT NULL)
     )
 );
+
+/* Create an index which allows looking up all datasets in a pool */
+CREATE INDEX on omicron.public.Dataset (
+    pool_id
+) WHERE time_deleted IS NULL;
 
 /* Create an index on the size usage for Crucible's allocation */
 CREATE INDEX on omicron.public.Dataset (

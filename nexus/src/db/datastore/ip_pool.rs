@@ -125,6 +125,37 @@ impl DataStore {
         Ok((authz_pool, pool))
     }
 
+    pub async fn ip_pools_lookup_by_rack_id_on_connection(
+        conn: &async_bb8_diesel::Connection<crate::db::pool::DbConnection>,
+        rack_id: Uuid,
+    ) -> LookupResult<(authz::IpPool, IpPool)> {
+        use db::schema::ip_pool::dsl;
+
+        // Look up this IP pool by rack ID.
+        let (authz_pool, pool) = dsl::ip_pool
+            .filter(dsl::rack_id.eq(Some(rack_id)))
+            .filter(dsl::time_deleted.is_null())
+            .select(IpPool::as_select())
+            .get_result_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(e.into(), ErrorHandler::Server)
+            })
+            .map(|ip_pool| {
+                (
+                    authz::IpPool::new(
+                        authz::FLEET,
+                        ip_pool.id(),
+                        LookupType::ByCompositeId(format!(
+                            "Rack ID: {rack_id}"
+                        )),
+                    ),
+                    ip_pool,
+                )
+            })?;
+        Ok((authz_pool, pool))
+    }
+
     /// Creates a new IP pool.
     ///
     /// - If `rack_id` is provided, this IP pool is used for Oxide

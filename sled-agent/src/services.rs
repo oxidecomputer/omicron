@@ -22,13 +22,11 @@ use omicron_common::address::SLED_PREFIX;
 use omicron_common::nexus_config::{
     self, DeploymentConfig as NexusDeploymentConfig,
 };
-use omicron_common::postgres_config::PostgresConfigWithUrl;
 use slog::Logger;
 use std::collections::HashSet;
 use std::iter::FromIterator;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
-use std::str::FromStr;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -502,38 +500,45 @@ impl ServiceManager {
                         // Nexus takes a separate config file for parameters which
                         // cannot be known at packaging time.
                         let deployment_config = NexusDeploymentConfig {
-                        id: req.id,
-                        rack_id: self.rack_id,
+                            id: req.id,
+                            rack_id: self.rack_id,
 
-                        // Request two dropshot servers: One for HTTP (port 80),
-                        // one for HTTPS (port 443).
-                        dropshot_external: vec![
-                            dropshot::ConfigDropshot {
-                                bind_address: SocketAddr::new(*external_ip, 443),
-                                request_body_max_bytes: 1048576,
-                                tls: Some(dropshot::ConfigTls { cert_file, key_file }),
-                            },
-                            dropshot::ConfigDropshot {
-                                bind_address: SocketAddr::new(*external_ip, 80),
+                            // Request two dropshot servers: One for HTTP (port 80),
+                            // one for HTTPS (port 443).
+                            dropshot_external: vec![
+                                dropshot::ConfigDropshot {
+                                    bind_address: SocketAddr::new(
+                                        *external_ip,
+                                        443,
+                                    ),
+                                    request_body_max_bytes: 1048576,
+                                    tls: Some(dropshot::ConfigTls {
+                                        cert_file,
+                                        key_file,
+                                    }),
+                                },
+                                dropshot::ConfigDropshot {
+                                    bind_address: SocketAddr::new(
+                                        *external_ip,
+                                        80,
+                                    ),
+                                    request_body_max_bytes: 1048576,
+                                    ..Default::default()
+                                },
+                            ],
+                            dropshot_internal: dropshot::ConfigDropshot {
+                                bind_address: SocketAddr::new(
+                                    IpAddr::V6(*internal_ip),
+                                    NEXUS_INTERNAL_PORT,
+                                ),
                                 request_body_max_bytes: 1048576,
                                 ..Default::default()
                             },
-                        ],
-                        dropshot_internal: dropshot::ConfigDropshot {
-                            bind_address: SocketAddr::new(IpAddr::V6(*internal_ip), NEXUS_INTERNAL_PORT),
-                            request_body_max_bytes: 1048576,
-                            ..Default::default()
-                        },
-                        subnet: Ipv6Subnet::<RACK_PREFIX>::new(
-                            self.underlay_address,
-                        ),
-                        // TODO: Switch to inferring this URL by DNS.
-                        database: nexus_config::Database::FromUrl {
-                            url: PostgresConfigWithUrl::from_str(
-                                "postgresql://root@[fd00:1122:3344:0101::2]:32221/omicron?sslmode=disable"
-                            ).unwrap(),
-                        }
-                    };
+                            subnet: Ipv6Subnet::<RACK_PREFIX>::new(
+                                self.underlay_address,
+                            ),
+                            database: nexus_config::Database::FromDns,
+                        };
 
                         // Copy the partial config file to the expected location.
                         let config_dir = (self.config.get_svc_config_dir)(
