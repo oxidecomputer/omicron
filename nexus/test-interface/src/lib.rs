@@ -12,15 +12,12 @@
 //! `nexus-test-utils`.
 //!
 //! Without a separate test interface crate, this dependency looks like the
-//! following (note: "─►" means "depends on")
+//! following (note: "->" means "depends on")
 //!
-//!    ┌────────────┐
-//!    │            │
-//! ┌──▼──┐ ┌───────┴────────┐  ┌─────────────────┐
-//! │nexus├─►nexus-test-utils◄──┤integration tests│
-//! └──▲──┘ └────────────────┘  └─────────┬───────┘
-//!    │                                  │
-//!    └──────────────────────────────────┘
+//! - nexus -> nexus-test-utils
+//! - nexus-test-utils -> nexus
+//! - integration tests -> nexus
+//! - integration tests -> nexus-test-utils
 //!
 //! As we can see, this introduces a circular dependency between
 //! `nexus-test-utils` and `nexus`.
@@ -28,15 +25,11 @@
 //! However, by separating out the portion of `nexus` used by `nexus-test-utils`
 //! into a separate trait, we can break the circular dependency:
 //!
-//!     ┌────────────────────────────────────┐
-//!     │                                    │
-//!  ┌──▼──┐   ┌────────────────┐  ┌─────────┴───────┐
-//!  │nexus├───►nexus-test-utils◄──┤integration tests│
-//!  └──┬──┘   └──────┬─────────┘  └─────────────────┘
-//!     │             │
-//!     │    ┌────────▼───────────┐
-//!     └────►nexus-test-interface│
-//!          └────────────────────┘
+//! - nexus -> nexus-test-interface
+//! - nexus -> nexus-test-utils
+//! - nexus-test-utils -> nexus-test-interface
+//! - integration tests -> nexus
+//! - integration tests -> nexus-test-utils
 
 use async_trait::async_trait;
 use omicron_common::nexus_config::Config;
