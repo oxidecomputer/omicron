@@ -31,6 +31,7 @@ pub(crate) mod defaults;
 pub(crate) mod inventory;
 mod mgs;
 mod screens;
+pub mod update;
 mod widgets;
 
 use inventory::{Component, ComponentId, Inventory, PowerState};
