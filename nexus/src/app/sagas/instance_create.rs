@@ -735,25 +735,13 @@ async fn ensure_instance_disk_attach_state(
     let osagactx = sagactx.user_data();
     let disk_params = sagactx.saga_params::<DiskParams>()?;
     let saga_params = disk_params.saga_params;
-    let disk_index = disk_params.which;
+    let datastore = osagactx.datastore();
     let opctx =
         OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
+    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+    let project_id = saga_params.project_id;
 
-    let saga_disks = &saga_params.create_params.disks;
-    let instance_name =
-        db::model::Name(saga_params.create_params.identity.name);
-
-    if disk_index >= saga_disks.len() {
-        return Ok(());
-    }
-
-    let disk = &saga_disks[disk_index];
-
-    // TODO-correctness TODO-security It's not correct to re-resolve the
-    // organization and project names now.  See oxidecomputer/omicron#1536.
-    let organization_name: db::model::Name =
-        saga_params.organization_name.clone().into();
-    let project_name: db::model::Name = saga_params.project_name.clone().into();
+    let disk = &saga_params.create_params.disks[disk_params.which];
 
     let disk_name = match disk {
         params::InstanceDiskAttachment::Create(create_params) => {
@@ -764,30 +752,36 @@ async fn ensure_instance_disk_attach_state(
         }
     };
 
+    let (.., authz_instance, _db_instance) =
+        LookupPath::new(&opctx, &datastore)
+            .instance_id(instance_id)
+            .fetch()
+            .await
+            .map_err(ActionError::action_failed)?;
+
+    let (.., authz_disk, _db_disk) = LookupPath::new(&opctx, &datastore)
+        .project_id(project_id)
+        .disk_name(&disk_name)
+        .fetch()
+        .await
+        .map_err(ActionError::action_failed)?;
+
     if attached {
-        osagactx
-            .nexus()
+        datastore
             .instance_attach_disk(
                 &opctx,
-                &organization_name,
-                &project_name,
-                &instance_name,
-                &disk_name,
+                &authz_instance,
+                &authz_disk,
+                MAX_DISKS_PER_INSTANCE,
             )
             .await
+            .map_err(ActionError::action_failed)?;
     } else {
-        osagactx
-            .nexus()
-            .instance_detach_disk(
-                &opctx,
-                &organization_name,
-                &project_name,
-                &instance_name,
-                &disk_name,
-            )
+        datastore
+            .instance_detach_disk(&opctx, &authz_instance, &authz_disk)
             .await
+            .map_err(ActionError::action_failed)?;
     }
-    .map_err(ActionError::action_failed)?;
 
     Ok(())
 }
