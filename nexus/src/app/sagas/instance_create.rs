@@ -18,6 +18,7 @@ use crate::{authn, authz, db};
 use chrono::Utc;
 use lazy_static::lazy_static;
 use nexus_defaults::DEFAULT_PRIMARY_NIC_NAME;
+use nexus_types::external_api::params::InstanceDiskAttachment;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -60,14 +61,6 @@ struct NetParams {
     which: usize,
     instance_id: Uuid,
     new_id: Uuid,
-}
-
-// The disk-related nodes get a similar treatment, but the data they need are
-// different.
-#[derive(Debug, Deserialize, Serialize)]
-struct DiskParams {
-    saga_params: Params,
-    which: usize,
 }
 
 // instance create saga: actions
@@ -285,7 +278,7 @@ impl NexusSaga for SagaInstanceCreate {
 
         // Create any specified disks
         for (i, disk) in params.create_params.disks.iter().enumerate() {
-            if let params::InstanceDiskAttachment::Create(create_disk) = disk {
+            if let InstanceDiskAttachment::Create(create_disk) = disk {
                 let subsaga_name =
                     SagaName::new(&format!("instance-create-disk-{i}"));
                 let subsaga_builder = DagBuilder::new(subsaga_name);
@@ -308,25 +301,21 @@ impl NexusSaga for SagaInstanceCreate {
 
         // Attach any specified disks, including those previously created
         for (i, disk) in params.create_params.disks.iter().enumerate() {
-            if let params::InstanceDiskAttachment::Attach(_) = disk {
-                let disk_params =
-                    DiskParams { saga_params: params.clone(), which: i };
-                let subsaga_name =
-                    SagaName::new(&format!("instance-attach-disk-{i}"));
-                let mut subsaga_builder = DagBuilder::new(subsaga_name);
-                subsaga_builder.append(Node::action(
-                    "attach_disk_output",
-                    format!("AttachDisksToInstance-{i}").as_str(),
-                    ATTACH_DISKS_TO_INSTANCE.as_ref(),
-                ));
-                subsaga_append(
-                    "attach_disk",
-                    subsaga_builder.build()?,
-                    &mut builder,
-                    disk_params,
-                    i,
-                )?;
-            }
+            let subsaga_name =
+                SagaName::new(&format!("instance-attach-disk-{i}"));
+            let mut subsaga_builder = DagBuilder::new(subsaga_name);
+            subsaga_builder.append(Node::action(
+                "attach_disk_output",
+                format!("AttachDisksToInstance-{i}").as_str(),
+                ATTACH_DISKS_TO_INSTANCE.as_ref(),
+            ));
+            subsaga_append(
+                "attach_disk",
+                subsaga_builder.build()?,
+                &mut builder,
+                disk,
+                i,
+            )?;
         }
 
         builder.append(Node::action(
@@ -735,21 +724,18 @@ async fn ensure_instance_disk_attach_state(
     attached: bool,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
-    let disk_params = sagactx.saga_params::<DiskParams>()?;
-    let saga_params = disk_params.saga_params;
+    let disk_attachment = sagactx.saga_params::<InstanceDiskAttachment>()?;
+    let params = sagactx.saga_params::<Params>()?;
     let datastore = osagactx.datastore();
-    let opctx =
-        OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
+    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
-    let project_id = saga_params.project_id;
+    let project_id = params.project_id;
 
-    let disk = &saga_params.create_params.disks[disk_params.which];
-
-    let disk_name = match disk {
-        params::InstanceDiskAttachment::Create(create_params) => {
+    let disk_name = match disk_attachment {
+        InstanceDiskAttachment::Create(create_params) => {
             db::model::Name(create_params.identity.name.clone())
         }
-        params::InstanceDiskAttachment::Attach(attach_params) => {
+        InstanceDiskAttachment::Attach(attach_params) => {
             db::model::Name(attach_params.name.clone())
         }
     };
