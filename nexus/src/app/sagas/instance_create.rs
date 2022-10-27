@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{NexusActionContext, NexusSaga, SagaInitError, ACTION_GENERATE_ID};
+use crate::app::sagas::disk_create::{self, SagaDiskCreate};
 use crate::app::sagas::NexusAction;
 use crate::app::{
     MAX_DISKS_PER_INSTANCE, MAX_EXTERNAL_IPS_PER_INSTANCE,
@@ -103,11 +104,6 @@ lazy_static! {
         sic_allocate_instance_external_ip,
         sic_allocate_instance_external_ip_undo,
     );
-    static ref CREATE_DISKS_FOR_INSTANCE: NexusAction = ActionFunc::new_action(
-        "instance-create.create-disks-for-instance",
-        sic_create_disks_for_instance,
-        sic_create_disks_for_instance_undo,
-    );
     static ref ATTACH_DISKS_TO_INSTANCE: NexusAction = ActionFunc::new_action(
         "instance-create.attach-disks-to-instance",
         sic_attach_disks_to_instance,
@@ -134,7 +130,6 @@ impl NexusSaga for SagaInstanceCreate {
         registry.register(Arc::clone(&*CREATE_NETWORK_INTERFACE));
         registry.register(Arc::clone(&*CREATE_SNAT_IP));
         registry.register(Arc::clone(&*CREATE_EXTERNAL_IP));
-        registry.register(Arc::clone(&*CREATE_DISKS_FOR_INSTANCE));
         registry.register(Arc::clone(&*ATTACH_DISKS_TO_INSTANCE));
         registry.register(Arc::clone(&*INSTANCE_ENSURE));
     }
@@ -288,19 +283,36 @@ impl NexusSaga for SagaInstanceCreate {
             )?;
         }
 
+        for (i, disk) in params.create_params.disks.iter().enumerate() {
+            if let params::InstanceDiskAttachment::Create(create_disk) = disk {
+                let subsaga_name =
+                    SagaName::new(&format!("instance-create-disk-{i}"));
+                let subsaga_builder = DagBuilder::new(subsaga_name);
+                subsaga_append(
+                    "create-disk",
+                    SagaDiskCreate::make_saga_dag(
+                        &disk_create::Params {
+                            serialized_authn: params.serialized_authn.clone(),
+                            project_id: params.project_id.clone(),
+                            create_params: create_disk.clone(),
+                        },
+                        subsaga_builder,
+                    )?,
+                    &mut builder,
+                    create_disk,
+                    i,
+                )?;
+            }
+        }
+
         // See the comment above where we add nodes for creating NICs.  We use
         // the same pattern here.
         for i in 0..(MAX_DISKS_PER_INSTANCE as usize) {
             let disk_params =
                 DiskParams { saga_params: params.clone(), which: i };
             let subsaga_name =
-                SagaName::new(&format!("instance-create-disk{i}"));
+                SagaName::new(&format!("instance-attach-disk-{i}"));
             let mut subsaga_builder = DagBuilder::new(subsaga_name);
-            subsaga_builder.append(Node::action(
-                "create_disk_output",
-                format!("CreateDisksForInstance-{i}").as_str(),
-                CREATE_DISKS_FOR_INSTANCE.as_ref(),
-            ));
             subsaga_builder.append(Node::action(
                 "attach_disk_output",
                 format!("AttachDisksToInstance-{i}").as_str(),
@@ -701,94 +713,6 @@ async fn sic_allocate_instance_external_ip_undo(
         .deallocate_external_ip(&opctx, ip_id)
         .await
         .map_err(ActionError::action_failed)?;
-    Ok(())
-}
-
-/// Create disks during instance creation, and return a list of disk names
-async fn sic_create_disks_for_instance(
-    sagactx: NexusActionContext,
-) -> Result<Option<String>, ActionError> {
-    let osagactx = sagactx.user_data();
-    let disk_params = sagactx.saga_params::<DiskParams>()?;
-    let saga_params = disk_params.saga_params;
-    let disk_index = disk_params.which;
-    let saga_disks = &saga_params.create_params.disks;
-    let opctx =
-        OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
-
-    if disk_index >= saga_disks.len() {
-        return Ok(None);
-    }
-
-    let disk = &saga_disks[disk_index];
-
-    // TODO-correctness TODO-security It's not correct to re-resolve the
-    // organization and project names now.  See oxidecomputer/omicron#1536.
-    let organization_name: db::model::Name =
-        saga_params.organization_name.clone().into();
-    let project_name: db::model::Name = saga_params.project_name.clone().into();
-
-    match disk {
-        params::InstanceDiskAttachment::Create(create_params) => {
-            osagactx
-                .nexus()
-                .project_create_disk(
-                    &opctx,
-                    &organization_name,
-                    &project_name,
-                    &create_params,
-                )
-                .await
-                .map_err(ActionError::action_failed)?;
-        }
-
-        _ => {}
-    };
-
-    Ok(None)
-}
-
-/// Undo disks created during instance creation
-async fn sic_create_disks_for_instance_undo(
-    sagactx: NexusActionContext,
-) -> Result<(), anyhow::Error> {
-    let osagactx = sagactx.user_data();
-    let disk_params = sagactx.saga_params::<DiskParams>()?;
-    let saga_params = disk_params.saga_params;
-    let disk_index = disk_params.which;
-    let saga_disks = &saga_params.create_params.disks;
-    let opctx =
-        OpContext::for_saga_action(&sagactx, &saga_params.serialized_authn);
-
-    if disk_index >= saga_disks.len() {
-        return Ok(());
-    }
-
-    let disk = &saga_disks[disk_index];
-
-    // TODO-correctness TODO-security It's not correct to re-resolve the
-    // organization and project names now.  See oxidecomputer/omicron#1536.
-    let organization_name: db::model::Name =
-        saga_params.organization_name.clone().into();
-    let project_name: db::model::Name = saga_params.project_name.clone().into();
-
-    match disk {
-        params::InstanceDiskAttachment::Create(disk_create) => {
-            osagactx
-                .nexus()
-                .project_delete_disk(
-                    &opctx,
-                    &organization_name,
-                    &project_name,
-                    &disk_create.identity.name.clone().into(),
-                )
-                .await
-                .map_err(ActionError::action_failed)?;
-        }
-
-        _ => {}
-    };
-
     Ok(())
 }
 
