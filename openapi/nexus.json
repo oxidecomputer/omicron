@@ -2976,6 +2976,55 @@
         }
       }
     },
+    "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/serial-console/stream": {
+      "get": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "Connect to an instance's serial console",
+        "operationId": "instance_serial_console_stream",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "organization_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "project_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "x-dropshot-websocket": {}
+      }
+    },
     "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/start": {
       "post": {
         "tags": [

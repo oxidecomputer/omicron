@@ -45,6 +45,7 @@ oximeter-db = { path = "../oximeter/db/" }
 parse-display = "0.6.0"
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "da3cfc26e4a6239810e0c7904aefe68443627704", features = [ "generated" ] }
 rand = "0.8.5"
 ref-cast = "1.0"
 reqwest = { version = "0.11.12", features = [ "json" ] }
@@ -58,6 +59,7 @@ slog-dtrace = "0.2"
 steno = "0.2"
 tempfile = "3.3"
 thiserror = "1.0"
+tokio-tungstenite = "0.17.2"
 toml = "0.5.9"
 tough = { version = "0.12", features = [ "http" ] }
 usdt = "0.3.1"

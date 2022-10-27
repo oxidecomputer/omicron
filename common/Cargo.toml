@@ -16,7 +16,7 @@ hyper = "0.14"
 ipnetwork = "0.20"
 macaddr = { version = "1.0.1", features = [ "serde_std" ] }
 rand = "0.8.4"
-reqwest = { version = "0.11", default-features = false, features = ["rustls-tls", "stream"] }
+reqwest = { version = "0.11.12", default-features = false, features = ["rustls-tls", "stream"] }
 ring = "0.16"
 schemars = { version = "0.8.10", features = [ "chrono", "uuid1" ] }
 serde = { version = "1.0", features = [ "derive" ] }

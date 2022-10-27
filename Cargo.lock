@@ -870,7 +870,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "percent-encoding",
- "progenitor",
+ "progenitor 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor)",
  "reqwest",
  "schemars",
  "serde",
@@ -1066,8 +1066,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "omicron-zone-package",
- "progenitor",
- "progenitor-client",
+ "progenitor 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor)",
+ "progenitor-client 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor)",
  "quote",
  "reqwest",
  "serde",
@@ -1744,7 +1744,7 @@ dependencies = [
  "chrono",
  "futures",
  "omicron-common",
- "progenitor",
+ "progenitor 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor)",
  "reqwest",
  "serde",
  "serde_json",
@@ -2297,7 +2297,7 @@ dependencies = [
  "internal-dns",
  "omicron-common",
  "omicron-test-utils",
- "progenitor",
+ "progenitor 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor)",
  "reqwest",
  "serde",
  "serde_json",
@@ -2702,7 +2702,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "omicron-common",
- "progenitor",
+ "progenitor 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor)",
  "reqwest",
  "serde",
  "serde_json",
@@ -2935,7 +2935,7 @@ dependencies = [
  "ipnetwork",
  "macaddr",
  "parse-display",
- "progenitor",
+ "progenitor 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor)",
  "rand 0.8.5",
  "reqwest",
  "ring",
@@ -3060,6 +3060,7 @@ dependencies = [
  "oximeter-producer",
  "parse-display",
  "pq-sys",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=da3cfc26e4a6239810e0c7904aefe68443627704)",
  "rand 0.8.5",
  "ref-cast",
  "regex",
@@ -3082,6 +3083,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-postgres",
+ "tokio-tungstenite",
  "toml",
  "tough",
  "usdt",
@@ -3155,8 +3157,8 @@ dependencies = [
  "oximeter-producer",
  "p256",
  "percent-encoding",
- "progenitor",
- "propolis-client",
+ "progenitor 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=9da9cea30adfcce6d8185d7060a20f55df00a72a)",
  "rand 0.8.5",
  "reqwest",
  "schemars",
@@ -3395,13 +3397,16 @@ dependencies = [
 name = "oxide-client"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "chrono",
  "futures",
- "progenitor",
+ "progenitor 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor)",
+ "rand 0.8.5",
  "regress",
  "reqwest",
  "serde",
  "serde_json",
+ "tokio",
  "uuid",
 ]
 
@@ -3439,7 +3444,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "omicron-common",
- "progenitor",
+ "progenitor 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor)",
  "reqwest",
  "serde",
  "slog",
@@ -4016,16 +4021,45 @@ dependencies = [
 [[package]]
 name = "progenitor"
 version = "0.2.1-dev"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#f9708ef56c3a0b88dc88fc0a0fbf0d8885fdd3e8"
+dependencies = [
+ "anyhow",
+ "clap 4.0.18",
+ "openapiv3",
+ "progenitor-client 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor?branch=main)",
+ "progenitor-impl 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor?branch=main)",
+ "progenitor-macro 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor?branch=main)",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "progenitor"
+version = "0.2.1-dev"
 source = "git+https://github.com/oxidecomputer/progenitor#54382d83d0dec348a56849f4cf8cc55479ffcb48"
 dependencies = [
  "anyhow",
  "clap 4.0.18",
  "openapiv3",
- "progenitor-client",
- "progenitor-impl",
- "progenitor-macro",
+ "progenitor-client 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor)",
+ "progenitor-impl 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor)",
+ "progenitor-macro 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor)",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "progenitor-client"
+version = "0.2.1-dev"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#f9708ef56c3a0b88dc88fc0a0fbf0d8885fdd3e8"
+dependencies = [
+ "bytes",
+ "futures-core",
+ "percent-encoding",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "serde_urlencoded",
 ]
 
 [[package]]
@@ -4040,6 +4074,28 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_urlencoded",
+]
+
+[[package]]
+name = "progenitor-impl"
+version = "0.2.1-dev"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#f9708ef56c3a0b88dc88fc0a0fbf0d8885fdd3e8"
+dependencies = [
+ "getopts",
+ "heck 0.4.0",
+ "indexmap",
+ "openapiv3",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "rustfmt-wrapper",
+ "schemars",
+ "serde",
+ "serde_json",
+ "syn",
+ "thiserror",
+ "typify",
+ "unicode-ident",
 ]
 
 [[package]]
@@ -4067,11 +4123,26 @@ dependencies = [
 [[package]]
 name = "progenitor-macro"
 version = "0.2.1-dev"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#f9708ef56c3a0b88dc88fc0a0fbf0d8885fdd3e8"
+dependencies = [
+ "openapiv3",
+ "proc-macro2",
+ "progenitor-impl 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor?branch=main)",
+ "quote",
+ "serde",
+ "serde_json",
+ "serde_tokenstream",
+ "syn",
+]
+
+[[package]]
+name = "progenitor-macro"
+version = "0.2.1-dev"
 source = "git+https://github.com/oxidecomputer/progenitor#54382d83d0dec348a56849f4cf8cc55479ffcb48"
 dependencies = [
  "openapiv3",
  "proc-macro2",
- "progenitor-impl",
+ "progenitor-impl 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor)",
  "quote",
  "serde",
  "serde_json",
@@ -4086,7 +4157,8 @@ source = "git+https://github.com/oxidecomputer/propolis?rev=9da9cea30adfcce6d818
 dependencies = [
  "base64",
  "crucible-client-types",
- "propolis_types",
+ "progenitor 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor?branch=main)",
+ "propolis_types 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=9da9cea30adfcce6d8185d7060a20f55df00a72a)",
  "rand 0.8.5",
  "reqwest",
  "ring",
@@ -4095,6 +4167,28 @@ dependencies = [
  "serde_json",
  "slog",
  "thiserror",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "propolis-client"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/propolis?rev=da3cfc26e4a6239810e0c7904aefe68443627704#da3cfc26e4a6239810e0c7904aefe68443627704"
+dependencies = [
+ "base64",
+ "crucible-client-types",
+ "progenitor 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor?branch=main)",
+ "propolis_types 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=da3cfc26e4a6239810e0c7904aefe68443627704)",
+ "rand 0.8.5",
+ "reqwest",
+ "ring",
+ "schemars",
+ "serde",
+ "serde_json",
+ "slog",
+ "thiserror",
+ "tokio",
  "uuid",
 ]
 
@@ -4102,6 +4196,14 @@ dependencies = [
 name = "propolis_types"
 version = "0.0.0"
 source = "git+https://github.com/oxidecomputer/propolis?rev=9da9cea30adfcce6d8185d7060a20f55df00a72a#9da9cea30adfcce6d8185d7060a20f55df00a72a"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "propolis_types"
+version = "0.0.0"
+source = "git+https://github.com/oxidecomputer/propolis?rev=da3cfc26e4a6239810e0c7904aefe68443627704#da3cfc26e4a6239810e0c7904aefe68443627704"
 dependencies = [
  "serde",
 ]
@@ -5115,7 +5217,7 @@ dependencies = [
  "chrono",
  "ipnetwork",
  "omicron-common",
- "progenitor",
+ "progenitor 0.2.1-dev (git+https://github.com/oxidecomputer/progenitor)",
  "regress",
  "reqwest",
  "serde",
