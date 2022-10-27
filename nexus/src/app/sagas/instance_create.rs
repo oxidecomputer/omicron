@@ -276,31 +276,30 @@ impl NexusSaga for SagaInstanceCreate {
             )?;
         }
 
-        // Create any specified disks
+        // Appends the disk create saga as a subsaga directly to the instance create builder.
         for (i, disk) in params.create_params.disks.iter().enumerate() {
             if let InstanceDiskAttachment::Create(create_disk) = disk {
                 let subsaga_name =
                     SagaName::new(&format!("instance-create-disk-{i}"));
                 let subsaga_builder = DagBuilder::new(subsaga_name);
+                let params = &disk_create::Params {
+                    serialized_authn: params.serialized_authn.clone(),
+                    project_id: params.project_id,
+                    create_params: create_disk.clone(),
+                };
                 subsaga_append(
                     "create_disk",
-                    SagaDiskCreate::make_saga_dag(
-                        &disk_create::Params {
-                            serialized_authn: params.serialized_authn.clone(),
-                            project_id: params.project_id,
-                            create_params: create_disk.clone(),
-                        },
-                        subsaga_builder,
-                    )?,
+                    SagaDiskCreate::make_saga_dag(params, subsaga_builder)?,
                     &mut builder,
-                    create_disk,
+                    params,
                     i,
                 )?;
             }
         }
 
-        // Attach any specified disks, including those previously created
-        for (i, disk) in params.create_params.disks.iter().enumerate() {
+        // Attaches all disks included in the instance create request, including those which were previously created
+        // by the disk create subsagas.
+        for (i, disk_attach) in params.create_params.disks.iter().enumerate() {
             let subsaga_name =
                 SagaName::new(&format!("instance-attach-disk-{i}"));
             let mut subsaga_builder = DagBuilder::new(subsaga_name);
@@ -313,7 +312,7 @@ impl NexusSaga for SagaInstanceCreate {
                 "attach_disk",
                 subsaga_builder.build()?,
                 &mut builder,
-                disk,
+                disk_attach,
                 i,
             )?;
         }
