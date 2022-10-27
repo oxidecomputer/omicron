@@ -732,10 +732,10 @@ async fn ensure_instance_disk_attach_state(
 
     let disk_name = match disk_attachment {
         InstanceDiskAttachment::Create(create_params) => {
-            db::model::Name(create_params.identity.name.clone())
+            db::model::Name(create_params.identity.name)
         }
         InstanceDiskAttachment::Attach(attach_params) => {
-            db::model::Name(attach_params.name.clone())
+            db::model::Name(attach_params.name)
         }
     };
 
