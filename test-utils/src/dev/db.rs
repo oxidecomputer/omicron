@@ -595,6 +595,14 @@ pub async fn check_db_version() -> Result<(), CockroachStartError> {
         version_str
     };
 
+    // It's okay if the version found differs only by having the "-dirty"
+    // suffix.  This check is really for catching major version mismatches.
+    let version_str = if let Some(clean) = version_str.strip_suffix("-dirty") {
+        clean
+    } else {
+        version_str
+    };
+
     if version_str != COCKROACHDB_VERSION.trim() {
         return Err(CockroachStartError::BadVersion {
             found: Ok(version_str.to_string()),

@@ -31,7 +31,7 @@ use omicron_common::address::PROPOLIS_PORT;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::backoff;
-use propolis_client::api::DiskRequest;
+//use propolis_client::generated::DiskRequest;
 use propolis_client::Client as PropolisClient;
 use slog::Logger;
 use std::net::IpAddr;
@@ -54,7 +54,7 @@ pub enum Error {
     VnicCreation(#[from] crate::illumos::dladm::CreateVnicError),
 
     #[error("Failure from Propolis Client: {0}")]
-    Propolis(#[from] propolis_client::Error),
+    Propolis(#[from] propolis_client::Error<propolis_client::types::Error>),
 
     // TODO: Remove this error; prefer to retry notifications.
     #[error("Notifying Nexus failed: {0}")]
@@ -119,10 +119,10 @@ async fn wait_for_http_server(
             // This request is nonsensical - we don't expect an instance to
             // exist - but getting a response that isn't a connection-based
             // error informs us the HTTP server is alive.
-            match client.instance_get().await {
+            match client.instance_get().send().await {
                 Ok(_) => return Ok(()),
                 Err(value) => {
-                    if let propolis_client::Error::Status(_) = &value {
+                    if value.status().is_some() {
                         // This means the propolis server responded to our
                         // request, instead of a connection error.
                         return Ok(());
@@ -229,7 +229,8 @@ struct InstanceInner {
     firewall_rules: Vec<VpcFirewallRule>,
 
     // Disk related properties
-    requested_disks: Vec<DiskRequest>,
+    // TODO: replace `propolis_client::handmade::*` with properly-modeled local types
+    requested_disks: Vec<propolis_client::handmade::api::DiskRequest>,
     cloud_init_bytes: Option<String>,
 
     // Internal State management
@@ -297,7 +298,9 @@ impl InstanceInner {
             .as_ref()
             .expect("Propolis client should be initialized before usage")
             .client
-            .instance_state_put(request)
+            .instance_state_put()
+            .body(request)
+            .send()
             .await?;
         Ok(())
     }
@@ -329,7 +332,7 @@ impl InstanceInner {
                         Error::Migration(anyhow!("Missing Migration UUID"))
                     })?;
                 Some(propolis_client::api::InstanceMigrateInitiateRequest {
-                    src_addr: params.src_propolis_addr,
+                    src_addr: params.src_propolis_addr.to_string(),
                     src_uuid: params.src_propolis_id,
                     migration_id,
                 })
@@ -340,13 +343,18 @@ impl InstanceInner {
         let request = propolis_client::api::InstanceEnsureRequest {
             properties: self.properties.clone(),
             nics,
-            disks: self.requested_disks.clone(),
+            disks: self
+                .requested_disks
+                .iter()
+                .cloned()
+                .map(Into::into)
+                .collect(),
             migrate,
             cloud_init_bytes: self.cloud_init_bytes.clone(),
         };
 
         info!(self.log, "Sending ensure request to propolis: {:?}", request);
-        client.instance_ensure(&request).await?;
+        client.instance_ensure().body(request).send().await?;
 
         // Monitor propolis for state changes in the background.
         let monitor_task = Some(tokio::task::spawn(async move {
@@ -359,9 +367,10 @@ impl InstanceInner {
         }));
 
         if self.serial_tty_task.is_none() {
-            let ws_uri = client.instance_serial_console_ws_uri();
-            self.serial_tty_task =
-                Some(SerialConsoleBuffer::new(ws_uri, self.log.clone()));
+            self.serial_tty_task = Some(SerialConsoleBuffer::new(
+                Arc::downgrade(&client),
+                self.log.clone(),
+            ));
         }
 
         self.running_state = Some(RunningState {
@@ -686,10 +695,8 @@ impl Instance {
 
         inner.state.current_mut().propolis_addr = Some(server_addr);
 
-        let client = Arc::new(PropolisClient::new(
-            server_addr,
-            inner.log.new(o!("component" => "propolis-client")),
-        ));
+        let client =
+            Arc::new(PropolisClient::new(&format!("http://{}", server_addr)));
 
         // Although the instance is online, the HTTP server may not be running
         // yet. Wait for it to respond to requests, so users of the instance
@@ -767,7 +774,11 @@ impl Instance {
         loop {
             // State monitoring always returns the most recent state/gen pair
             // known to Propolis.
-            let response = client.instance_state_monitor(gen).await?;
+            let response = client
+                .instance_state_monitor()
+                .body(propolis_client::api::InstanceStateMonitorRequest { gen })
+                .send()
+                .await?;
             let reaction =
                 self.inner.lock().await.observe_state(response.state).await?;
 
@@ -839,7 +850,10 @@ impl Instance {
         if let Some(running_state) = &inner.running_state {
             running_state
                 .client
-                .instance_issue_crucible_snapshot_request(disk_id, snapshot_id)
+                .instance_issue_crucible_snapshot_request()
+                .id(disk_id)
+                .snapshot_id(snapshot_id)
+                .send()
                 .await?;
 
             Ok(())
