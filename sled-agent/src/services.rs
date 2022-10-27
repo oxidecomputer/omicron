@@ -635,7 +635,7 @@ impl ServiceManager {
                         smfh.setprop("config/asic", asic)?;
                         smfh.setprop(
                             "config/address",
-                            &format!("[{}]:{}", address, DENDRITE_PORT,),
+                            &format!("[{}]:{}", address, DENDRITE_PORT),
                         )?;
                         smfh.refresh()?;
                     }
@@ -745,13 +745,13 @@ impl ServiceManager {
                             .map_err(|e| backoff::BackoffError::transient(e.into()))?;
 
                         for service in &service_zone_request.services {
+                            let addr = service_zone_request.address(&service);
                             nexus_client.service_put(
                                 &nexus_client::types::ServicePutRequest {
                                     service_id: service_zone_request.id,
                                     sled_id: sled_agent_id,
-                                    address: service_zone_request.address(
-                                        &service
-                                    ).map(|x| *x.ip()),
+                                    address: addr.map(|x| *x.ip()),
+                                    port: addr.map(|x| x.port()),
                                     kind: (*service).clone().into(),
                                 },
                             )

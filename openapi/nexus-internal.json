@@ -1886,6 +1886,13 @@
               }
             ]
           },
+          "port": {
+            "nullable": true,
+            "description": "Port on whcih a service is listening.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
           "service_id": {
             "type": "string",
             "format": "uuid"

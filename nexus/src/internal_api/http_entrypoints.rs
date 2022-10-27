@@ -191,6 +191,7 @@ async fn service_put(
             service.service_id,
             service.sled_id,
             service.address,
+            service.port,
             service.kind.into(),
         )
         .await?;

@@ -45,6 +45,7 @@ impl DataStore {
                     dsl::time_modified.eq(Utc::now()),
                     dsl::sled_id.eq(excluded(dsl::sled_id)),
                     dsl::ip.eq(excluded(dsl::ip)),
+                    dsl::port.eq(excluded(dsl::port)),
                     dsl::kind.eq(excluded(dsl::kind)),
                 )),
         )

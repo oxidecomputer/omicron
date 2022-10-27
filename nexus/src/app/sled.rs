@@ -144,6 +144,7 @@ impl super::Nexus {
         id: Uuid,
         sled_id: Uuid,
         address: Option<Ipv6Addr>,
+        port: Option<u16>,
         kind: ServiceKind,
     ) -> Result<(), Error> {
         info!(
@@ -152,8 +153,9 @@ impl super::Nexus {
             "sled_id" => sled_id.to_string(),
             "service_id" => id.to_string(),
             "address" => address.map(|x| x.to_string()),
+            "port" => port.map(|x| x.to_string()),
         );
-        let service = db::model::Service::new(id, sled_id, address, kind);
+        let service = db::model::Service::new(id, sled_id, address, port, kind);
         self.db_datastore.service_upsert(opctx, service).await?;
         Ok(())
     }

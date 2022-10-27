@@ -69,6 +69,7 @@ impl super::Nexus {
                     svc.service_id,
                     svc.sled_id,
                     svc.address,
+                    svc.port,
                     svc.kind.into(),
                 )
             })

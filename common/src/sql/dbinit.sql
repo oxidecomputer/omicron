@@ -119,8 +119,9 @@ CREATE TABLE omicron.public.service (
 
     /* FK into the Sled table */
     sled_id UUID NOT NULL,
-    /* The IP address of the service. */
+    /* The IP address and port of the service. */
     ip INET,
+    port INT4 CHECK (port BETWEEN 0 AND 65535),
     /* Indicates the type of service. */
     kind omicron.public.service_kind NOT NULL
 );

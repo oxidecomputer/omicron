@@ -986,9 +986,11 @@ mod test {
         // Create a new service to exist on this sled.
         let service_id = Uuid::new_v4();
         let addr = Ipv6Addr::LOCALHOST;
+        let port = 4096;
         let kind = ServiceKind::Nexus;
 
-        let service = Service::new(service_id, sled_id, Some(addr), kind);
+        let service =
+            Service::new(service_id, sled_id, Some(addr), Some(port), kind);
         let result =
             datastore.service_upsert(&opctx, service.clone()).await.unwrap();
         assert_eq!(service.id(), result.id());

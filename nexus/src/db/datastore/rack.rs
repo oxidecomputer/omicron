@@ -128,6 +128,8 @@ impl DataStore {
                                 service_dsl::sled_id
                                     .eq(excluded(service_dsl::sled_id)),
                                 service_dsl::ip.eq(excluded(service_dsl::ip)),
+                                service_dsl::port
+                                    .eq(excluded(service_dsl::port)),
                                 service_dsl::kind
                                     .eq(excluded(service_dsl::kind)),
                             )),

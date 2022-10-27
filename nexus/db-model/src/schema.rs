@@ -393,6 +393,7 @@ table! {
 
         sled_id -> Uuid,
         ip -> Nullable<Inet>,
+        port -> Nullable<Int4>,
         kind -> crate::ServiceKindEnum,
     }
 }
