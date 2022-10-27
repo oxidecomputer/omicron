@@ -14,13 +14,16 @@ use crate::db::error::ErrorHandler;
 use crate::db::identity::Asset;
 use crate::db::model::Service;
 use crate::db::model::Sled;
+use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
+use uuid::Uuid;
 
 impl DataStore {
     /// Stores a new service in the database.
@@ -62,5 +65,19 @@ impl DataStore {
                 )
             }
         })
+    }
+
+    pub async fn sled_services(
+        &self,
+        opctx: &OpContext,
+        sled_id: Uuid,
+    ) -> ListResultVec<Service> {
+        use db::schema::service::dsl;
+        dsl::service
+            .filter(dsl::sled_id.eq(sled_id))
+            .select(Service::as_select())
+            .load_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 }
