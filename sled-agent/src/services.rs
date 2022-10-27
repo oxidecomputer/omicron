@@ -94,13 +94,6 @@ pub enum Error {
 
     #[error("Services already configured for this Sled Agent")]
     ServicesAlreadyConfigured,
-
-    #[error("Error resolving DNS name: {0}")]
-    ResolveError(#[from] ResolveError),
-
-    // TODO: Remove this error; prefer to retry notifications.
-    #[error("Notifying Nexus failed: {0}")]
-    Notification(#[from] nexus_client::Error<nexus_client::types::Error>),
 }
 
 impl From<Error> for omicron_common::api::external::Error {
@@ -109,6 +102,16 @@ impl From<Error> for omicron_common::api::external::Error {
             internal_message: err.to_string(),
         }
     }
+}
+
+// Separate errors for Nexus notification, both transient
+#[derive(thiserror::Error, Debug)]
+pub enum NotifyError {
+    #[error("Error resolving DNS name: {0}")]
+    DnsResolveError(#[from] ResolveError),
+
+    #[error("Notifying Nexus failed: {0}")]
+    NexusClient(#[from] nexus_client::Error<nexus_client::types::Error>),
 }
 
 /// The default path to service configuration, if one is not
@@ -736,11 +739,10 @@ impl ServiceManager {
                 backoff::retry_notify(
                     backoff::internal_service_policy(),
                     || async {
+                        // Note: both errors here are transient, meaning this
+                        // should retry indefinitely.
                         let nexus_client = lazy_nexus_client.get().await
-                            .map_err(|e: ResolveError|
-                                backoff::BackoffError::transient(
-                                    Error::from(e)
-                                ))?;
+                            .map_err(|e| backoff::BackoffError::transient(e.into()))?;
 
                         for service in &service_zone_request.services {
                             nexus_client.service_put(
@@ -759,7 +761,7 @@ impl ServiceManager {
 
                         Ok(())
                     },
-                    |err: Error, delay| {
+                    |err: NotifyError, delay| {
                         warn!(
                             log,
                             "Failed to notify Nexus of service {} (retrying in {:?}): {}",
@@ -772,7 +774,7 @@ impl ServiceManager {
                 .await?;
             }
 
-            Ok::<_, Error>(())
+            Ok::<_, NotifyError>(())
         });
 
         Ok(())
