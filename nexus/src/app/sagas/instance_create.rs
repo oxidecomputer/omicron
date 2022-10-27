@@ -63,6 +63,13 @@ struct NetParams {
     new_id: Uuid,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+struct DiskAttachParams {
+    serialized_authn: authn::saga::Serialized,
+    project_id: Uuid,
+    attach_params: InstanceDiskAttachment,
+}
+
 // instance create saga: actions
 
 lazy_static! {
@@ -308,11 +315,16 @@ impl NexusSaga for SagaInstanceCreate {
                 format!("AttachDisksToInstance-{i}").as_str(),
                 ATTACH_DISKS_TO_INSTANCE.as_ref(),
             ));
+            let params = DiskAttachParams {
+                serialized_authn: params.serialized_authn.clone(),
+                project_id: params.project_id,
+                attach_params: disk_attach.clone(),
+            };
             subsaga_append(
                 "attach_disk",
                 subsaga_builder.build()?,
                 &mut builder,
-                disk_attach,
+                params,
                 i,
             )?;
         }
@@ -723,14 +735,13 @@ async fn ensure_instance_disk_attach_state(
     attached: bool,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
-    let disk_attachment = sagactx.saga_params::<InstanceDiskAttachment>()?;
-    let params = sagactx.saga_params::<Params>()?;
+    let params = sagactx.saga_params::<DiskAttachParams>()?;
     let datastore = osagactx.datastore();
     let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
     let project_id = params.project_id;
 
-    let disk_name = match disk_attachment {
+    let disk_name = match params.attach_params {
         InstanceDiskAttachment::Create(create_params) => {
             db::model::Name(create_params.identity.name)
         }
